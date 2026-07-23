@@ -126,7 +126,8 @@ module Gcry
         note_explicit_free(payload)
         @live_objects -= 1 if @live_objects > 0
         LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
-        Platform.invalidate_static_root_cache
+        # Do not invalidate static-root cache: adjacency-BSS never caches large
+        # object VMAs. (Empty-chunk release still invalidates in collect.cr.)
         return
       end
 

@@ -165,7 +165,14 @@ module Gcry
          includes_name?(line + path, len - path, "libxml") ||
          includes_name?(line + path, len - path, "libyaml") ||
          includes_name?(line + path, len - path, "libgmp") ||
-         includes_name?(line + path, len - path, "libicu")
+         includes_name?(line + path, len - path, "libicu") ||
+         includes_name?(line + path, len - path, "libsqlite") ||
+         includes_name?(line + path, len - path, "libpq") ||
+         includes_name?(line + path, len - path, "libmysql") ||
+         includes_name?(line + path, len - path, "libz.so") ||
+         includes_name?(line + path, len - path, "liblzma") ||
+         includes_name?(line + path, len - path, "libstdc++") ||
+         includes_name?(line + path, len - path, "libgcc_s")
         @@parse_prev_file_rw = false
         return
       end

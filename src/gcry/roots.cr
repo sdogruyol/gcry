@@ -162,24 +162,28 @@ module Gcry
       end
     end
 
+    # Fiber/pthread stacks: at most a leading PROT_NONE guard, then contiguous
+    # readable memory. Probe only until the first readable page, then bulk-scan
+    # (per-page write/read was a major STW cost under many fibers).
     private def self.scan_range_safe(lo : UInt64, hi : UInt64, word : UInt64, & : Void* ->) : Nil
       ensure_probe_pipe
 
       page = lo & ~(PAGE_SIZE - 1)
-      while page < hi
-        page_hi = page + PAGE_SIZE
-        page_hi = hi if page_hi > hi
-
-        if page_readable?(page)
-          cursor = lo > page ? lo : page
-          cursor = (cursor + word - 1) & ~(word - 1)
-          while cursor < page_hi
-            yield Pointer(Void).new(Pointer(UInt64).new(cursor).value)
-            cursor += word
-          end
-        end
-
+      while page < hi && !page_readable?(page)
         page += PAGE_SIZE
+      end
+      return if page >= hi
+
+      start = lo > page ? lo : page
+      start = (start + word - 1) & ~(word - 1)
+      finish = hi & ~(word - 1)
+      return if start >= finish
+
+      cursor = Pointer(UInt64).new(start)
+      end_ptr = Pointer(UInt64).new(finish)
+      while cursor < end_ptr
+        yield Pointer(Void).new(cursor.value)
+        cursor += 1
       end
     end
 

@@ -154,6 +154,8 @@ module Gcry
 
     def push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
       raise "push_stack outside of collect" unless @collecting
+      # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
+      # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
         mark_candidate(candidate)
       end
@@ -502,11 +504,12 @@ module Gcry
         next if fiber == current
         next if fiber.running?
         # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
+        # After clamp the range is fully mapped — no per-page probe.
         stack = fiber.@stack
         top = fiber.@context.stack_top.address
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard if top < guard
-        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
+        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: false) do |candidate|
           mark_candidate(candidate)
         end
       end
@@ -529,17 +532,18 @@ module Gcry
 
         if fiber.name == "main"
           if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
-            Roots.scan_range(bounds[0], bounds[1], safe: true) do |candidate|
+            # pthread stacks have no PROT_NONE guard page.
+            Roots.scan_range(bounds[0], bounds[1], safe: false) do |candidate|
               mark_candidate(candidate)
             end
             next
           end
         end
 
-        # Skip PROT_NONE guard page on pooled fiber stacks.
+        # Skip PROT_NONE guard page on pooled fiber stacks; then bulk-scan.
         low = Pointer(Void).new(stack.pointer.address + Roots::PAGE_SIZE)
         next if low.address >= stack.bottom.address
-        Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
+        Roots.scan_range(low, stack.bottom, safe: false) do |candidate|
           mark_candidate(candidate)
         end
       end
@@ -923,7 +927,8 @@ module Gcry
       update_heap_bounds_after_unmap
       @live_objects -= 1 if @live_objects > 0
       LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
-      Platform.invalidate_static_root_cache
+      # Adjacency-BSS static roots never include large-object VMAs — no cache
+      # invalidate (avoids /proc/self/maps thrash under HTTP large alloc churn).
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil

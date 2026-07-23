@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mutator stack scan spills **all** GP registers (not only `setjmp` callee-saved) before scanning; marks every `Fiber` / `Thread` object.
 - Process GC `lock_read` / `lock_write` use a real `Crystal::RWLock` so collect does not race fiber `swapcontext`.
 - Allocate-black while `@collecting` (mid-collect allocations survive sweep).
-- **Static roots:** scan ELF BSS zero-fill only when anonymous RW is **contiguous with** the previous file-backed RW mapping (class vars like `Exception::CallStack::@@skip`), plus RELRO `r--p`. Blanket anon&lt;1MiB incorrectly cached gcry large-object VMAs; scanning them after `munmap` SIGSEGV’d mid-collect (often during ExceptionPage DWARF/`malloc_atomic`). Heap `munmap` now invalidates the maps cache; object mark clamps `header.size` to the mapped chunk.
-- **Safe stack scans:** `Roots.scan_range(..., safe: true)` probes each page with `write(2)`/EFAULT so PROT_NONE fiber guard pages no longer SIGSEGV mid-collect (`roots.cr` during `Array` realloc → GC).
+- **Static roots:** scan ELF BSS zero-fill only when anonymous RW is **contiguous with** the previous file-backed RW mapping (class vars like `Exception::CallStack::@@skip`), plus RELRO `r--p`. Blanket anon&lt;1MiB incorrectly cached gcry large-object VMAs; scanning them after `munmap` SIGSEGV’d mid-collect (often during ExceptionPage DWARF/`malloc_atomic`). Object mark clamps `header.size` to the mapped chunk. Large-object `munmap` no longer invalidates the maps cache (adjacency never caches those VMAs); empty-chunk release still does. Broader bulky-`.so` skip list for static scans.
+- **Safe stack scans:** skip leading PROT_NONE pages with one probe sequence, then bulk-scan; fiber scans that already clamp past the guard use `safe: false` (avoids per-page `write`/`read` STW cost).
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
 
 ## [0.5.0] - 2026-07-23

@@ -24,6 +24,30 @@ get "/" do
   "Hello World"
 end
 
+# GC pause / heap snapshot for wrk A/B (gcry builds only).
+{% if flag?(:gc_none) %}
+  get "/gc-stats" do |env|
+    env.response.content_type = "application/json"
+    h = Gcry.default_heap
+    p = Gcry.pause_stats
+    s = GC.stats
+    {
+      collections:       h.collections,
+      major_collections: h.major_collections,
+      heap_size:         s.heap_size,
+      free_bytes:        s.free_bytes,
+      bytes_since_gc:    s.bytes_since_gc,
+      unmapped_bytes:    s.unmapped_bytes,
+      pause_count:       p.count,
+      pause_last_ns:     p.last_ns,
+      pause_p50_ns:      p.p50_ns,
+      pause_p99_ns:      p.p99_ns,
+      pause_max_ns:      p.max_ns,
+      pause_total_ns:    p.total_ns,
+    }.to_json
+  end
+{% end %}
+
 # Alloc-heavy handler — closer to a real JSON API (nested objects, arrays, strings).
 # Avoids Time formatting on the hot path (extra allocator churn / formatter state).
 get "/json" do |env|
