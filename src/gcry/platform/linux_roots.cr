@@ -128,11 +128,15 @@ module Gcry
       return if includes_name?(line + path, len - path, "[vvar]")
       return if includes_name?(line + path, len - path, "[vdso]")
 
-      # Skip huge crypto/ssl data segments — they almost never hold Crystal
-      # object pointers and dominate static-root scan time under HTTP/TLS.
+      # Skip bulky library data segments — they almost never hold Crystal
+      # object pointers and dominate static-root scan time under HTTP.
       return if includes_name?(line + path, len - path, "libcrypto")
       return if includes_name?(line + path, len - path, "libssl")
       return if includes_name?(line + path, len - path, "libpcre")
+      return if includes_name?(line + path, len - path, "libxml")
+      return if includes_name?(line + path, len - path, "libyaml")
+      return if includes_name?(line + path, len - path, "libgmp")
+      return if includes_name?(line + path, len - path, "libicu")
 
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
     end

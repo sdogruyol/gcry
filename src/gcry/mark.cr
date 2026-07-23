@@ -3,7 +3,7 @@ require "./block"
 module Gcry
   # Growable mark stack backed by mmap (not the managed heap).
   class MarkStack
-    INITIAL_BYTES = 65536_u64 # 64 KiB
+    INITIAL_BYTES = 262144_u64 # 256 KiB — avoid grow under JSON mark storms
 
     @base : Void* = Pointer(Void).null
     @capacity : Int32 = 0

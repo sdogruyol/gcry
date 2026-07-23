@@ -108,6 +108,21 @@ module Gcry
         @links.size
       end
 
+      # Heap metadata (Registry/Array) may live on LibC bootstrap malloc while
+      # Array buffers sit on the gcry heap. Pin those buffers (and finalizer
+      # Proc closures) so empty-chunk munmap cannot reclaim them.
+      # Do **not** mark entry/link `object` fields — those must stay collectible.
+      def each_mark_root(& : Void* ->) : Nil
+        unless @entries.empty?
+          yield @entries.to_unsafe.as(Void*)
+          @entries.each do |entry|
+            data = entry.callback.closure_data
+            yield data unless data.null?
+          end
+        end
+        yield @links.to_unsafe.as(Void*) unless @links.empty?
+      end
+
       private def queue_pending(entry : Entry) : Nil
         node = LibC.malloc(sizeof(PendingNode)).as(PendingNode*)
         raise OutOfMemoryError.new("finalizer pending malloc failed") if node.null?

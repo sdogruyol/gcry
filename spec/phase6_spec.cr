@@ -105,4 +105,41 @@ describe "Gcry incremental mark" do
       heap.destroy
     end
   end
+
+  it "records pause percentiles over a ring of samples" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      heap.add_root(heap.malloc(16))
+
+      5.times do
+        200.times { heap.malloc(64) }
+        heap.collect(scan_stack: false)
+      end
+
+      heap.pause_count.should eq(5)
+      heap.pause_percentile_ns(50.0).should be > 0
+      heap.pause_percentile_ns(99.0).should be >= heap.pause_percentile_ns(50.0)
+      heap.pause_percentile_ns(99.0).should be <= heap.max_pause_ns
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "tracks reclaimed bytes for prof_stats" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      keep = heap.malloc(32)
+      heap.add_root(keep)
+      500.times { heap.malloc(64) }
+      heap.collect(scan_stack: false)
+      heap.bytes_reclaimed_since_gc.should be > 0
+      heap.bytes_before_gc.should be > 0
+    ensure
+      heap.destroy
+    end
+  end
 end

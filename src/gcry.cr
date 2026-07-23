@@ -14,8 +14,11 @@ module Gcry
     getter max_ns : UInt64
     getter total_ns : UInt64
     getter count : UInt64
+    getter p50_ns : UInt64
+    getter p99_ns : UInt64
 
-    def initialize(@last_ns : UInt64, @max_ns : UInt64, @total_ns : UInt64, @count : UInt64)
+    def initialize(@last_ns : UInt64, @max_ns : UInt64, @total_ns : UInt64, @count : UInt64,
+                   @p50_ns : UInt64 = 0_u64, @p99_ns : UInt64 = 0_u64)
     end
   end
 
@@ -66,7 +69,14 @@ module Gcry
 
   def self.pause_stats : PauseStats
     h = default_heap
-    PauseStats.new(h.last_pause_ns, h.max_pause_ns, h.total_pause_ns, h.pause_count)
+    PauseStats.new(
+      h.last_pause_ns,
+      h.max_pause_ns,
+      h.total_pause_ns,
+      h.pause_count,
+      h.pause_percentile_ns(50.0),
+      h.pause_percentile_ns(99.0),
+    )
   end
 
   def self.add_root(pointer : Void*) : Nil

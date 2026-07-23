@@ -25,6 +25,9 @@ module GC
     # Full STW majors by default (v0.4+). Incremental without write barriers is
     # unsound under heavy pointer mutation (e.g. Kemal /json).
     heap.incremental_auto = false
+    # Empty-chunk munmap stays opt-in: default-on regresses Kemal wrk ~35–40%.
+    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning (unreleased) makes it safe.
+    heap.release_empty_chunks = false
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -92,7 +95,11 @@ module GC
       heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
     end
 
-    if env_flag_one?("GCRY_RELEASE_CHUNKS")
+    # Empty-chunk release remains opt-in (default-on hurts Kemal throughput).
+    # GCRY_RELEASE_CHUNKS=1 enables; GCRY_KEEP_CHUNKS=1 forces off.
+    if env_flag_one?("GCRY_KEEP_CHUNKS")
+      heap.release_empty_chunks = false
+    elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
     end
   end
@@ -229,20 +236,38 @@ module GC
   end
 
   def self.prof_stats
-    ProfStats.new(
-      heap_size: stats.heap_size,
-      free_bytes: stats.free_bytes,
-      unmapped_bytes: @@gcry_ready ? Gcry.default_heap.unmapped_bytes : 0_u64,
-      bytes_since_gc: stats.bytes_since_gc,
-      bytes_before_gc: 0_u64,
-      non_gc_bytes: 0_u64,
-      gc_no: @@gcry_ready ? Gcry.default_heap.collections : 0_u64,
-      markers_m1: 0_u64,
-      bytes_reclaimed_since_gc: 0_u64,
-      reclaimed_bytes_before_gc: 0_u64,
-      expl_freed_bytes_since_gc: 0_u64,
-      obtained_from_os_bytes: @@gcry_ready ? Gcry.default_heap.heap_size : 0_u64,
-    )
+    if @@gcry_ready
+      h = Gcry.default_heap
+      ProfStats.new(
+        heap_size: h.heap_size,
+        free_bytes: h.free_bytes,
+        unmapped_bytes: h.unmapped_bytes,
+        bytes_since_gc: h.bytes_since_gc,
+        bytes_before_gc: h.bytes_before_gc,
+        non_gc_bytes: 0_u64,
+        gc_no: h.collections,
+        markers_m1: 0_u64,
+        bytes_reclaimed_since_gc: h.bytes_reclaimed_since_gc,
+        reclaimed_bytes_before_gc: h.reclaimed_bytes_before_gc,
+        expl_freed_bytes_since_gc: h.expl_freed_bytes_since_gc,
+        obtained_from_os_bytes: h.heap_size + h.unmapped_bytes,
+      )
+    else
+      ProfStats.new(
+        heap_size: 0_u64,
+        free_bytes: 0_u64,
+        unmapped_bytes: 0_u64,
+        bytes_since_gc: 0_u64,
+        bytes_before_gc: 0_u64,
+        non_gc_bytes: 0_u64,
+        gc_no: 0_u64,
+        markers_m1: 0_u64,
+        bytes_reclaimed_since_gc: 0_u64,
+        reclaimed_bytes_before_gc: 0_u64,
+        expl_freed_bytes_since_gc: 0_u64,
+        obtained_from_os_bytes: 0_u64,
+      )
+    end
   end
 
   {% if flag?(:win32) %}

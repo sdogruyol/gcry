@@ -19,6 +19,11 @@ module Gcry
     getter max_pause_ns : UInt64 = 0_u64
     getter total_pause_ns : UInt64 = 0_u64
     getter pause_count : UInt64 = 0_u64
+    # Boehm-shaped prof counters (updated around collections / free).
+    getter bytes_before_gc : UInt64 = 0_u64
+    getter bytes_reclaimed_since_gc : UInt64 = 0_u64
+    getter reclaimed_bytes_before_gc : UInt64 = 0_u64
+    getter expl_freed_bytes_since_gc : UInt64 = 0_u64
     getter? enabled : Bool = true
     property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
     # Library tests free manually — auto minor is opt-in (process GC enables it).
@@ -29,7 +34,7 @@ module Gcry
     # GCRY_INCREMENTAL=1 (experimental without write barriers).
     property incremental_auto : Bool = false
     # When true, fully free size-class chunks are munmap'd after major sweep.
-    # Opt-in for process GC via GCRY_RELEASE_CHUNKS=1 (still maturing under HTTP load).
+    # Library + process default false (HTTP cost); enable via GCRY_RELEASE_CHUNKS=1.
     property release_empty_chunks : Bool = false
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
@@ -179,6 +184,7 @@ module Gcry
           sweep(major: true)
           @bytes_since_gc = 0_u64
           @nursery_alloc_bytes = 0_u64
+          @expl_freed_bytes_since_gc = 0_u64
           @collections += 1
           @major_collections += 1
           if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
@@ -213,6 +219,40 @@ module Gcry
       @max_pause_ns = 0_u64
       @total_pause_ns = 0_u64
       @pause_count = 0_u64
+      @pause_ring_len = 0
+      @pause_ring_pos = 0
+      PAUSE_RING_SIZE.times { |i| @pause_ring[i] = 0_u64 }
+    end
+
+    # Approximate percentile over the last up to PAUSE_RING_SIZE pauses (ns).
+    # Safe to call outside collect (sorts a stack copy). Returns 0 if no samples.
+    def pause_percentile_ns(pct : Float64) : UInt64
+      n = @pause_ring_len
+      return 0_u64 if n <= 0
+
+      tmp = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
+      n.times { |i| tmp[i] = @pause_ring[i] }
+
+      # Insertion sort — n ≤ 64, allocation-free.
+      (1...n).each do |i|
+        key = tmp[i]
+        j = i - 1
+        while j >= 0 && tmp[j] > key
+          tmp[j + 1] = tmp[j]
+          j -= 1
+        end
+        tmp[j + 1] = key
+      end
+
+      # Nearest-rank: index = ceil(pct/100 * n) - 1
+      rank = ((pct / 100.0) * n).ceil.to_i32 - 1
+      rank = 0 if rank < 0
+      rank = n - 1 if rank >= n
+      tmp[rank]
+    end
+
+    def note_explicit_free(payload : UInt64) : Nil
+      @expl_freed_bytes_since_gc += payload
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
@@ -226,8 +266,7 @@ module Gcry
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
         return nil if BlockHeader.free?(header)
-        user = BlockHeader.user_from(header)
-        finish = user.address + header.value.size
+        finish = BlockHeader.user_from(header).address + header.value.size
         return header if addr >= header.address && addr < finish
         return nil
       end
@@ -235,21 +274,16 @@ module Gcry
       class_index = chunk.value.size_class.to_i32
       return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
-      payload = SizeClasses.payload(class_index)
-      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-      data_start = ChunkHeader.data_start(chunk).address
-      data_end = ChunkHeader.data_end(chunk).address
-      return nil if addr < data_start || addr >= data_end
+      block_bytes = @block_bytes[class_index]
+      data_start = chunk.address + ChunkHeader::SIZE
+      return nil if addr < data_start
 
       offset = addr - data_start
-      max_offset = ((data_end - data_start) // block_bytes) * block_bytes
-      return nil if offset >= max_offset
+      header_addr = data_start + (offset // block_bytes) * block_bytes
+      return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
 
-      block_index = offset // block_bytes
-      header_addr = data_start + block_index * block_bytes
       header = Pointer(BlockHeader).new(header_addr)
       return nil if BlockHeader.free?(header)
-
       header
     end
 
@@ -298,6 +332,10 @@ module Gcry
       @stack_bottom = Pointer(Void).null
       @nursery_alloc_bytes = 0_u64
       @unmapped_bytes = 0_u64
+      @bytes_before_gc = 0_u64
+      @bytes_reclaimed_since_gc = 0_u64
+      @reclaimed_bytes_before_gc = 0_u64
+      @expl_freed_bytes_since_gc = 0_u64
       reset_pause_stats
     end
 
@@ -321,6 +359,7 @@ module Gcry
       @collecting = true
       @minor_only = !major
       begin
+        note_collection_begin
         @mark_stack.clear
         if major
           clear_all_marks
@@ -331,6 +370,7 @@ module Gcry
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
+        mark_metadata_roots
 
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
@@ -357,6 +397,7 @@ module Gcry
         if major
           @bytes_since_gc = 0_u64
           @nursery_alloc_bytes = 0_u64
+          @expl_freed_bytes_since_gc = 0_u64
           @major_collections += 1
           if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
             Platform.invalidate_static_root_cache
@@ -381,6 +422,10 @@ module Gcry
       end
     end
 
+    private def mark_metadata_roots : Nil
+      @finalizers.each_mark_root { |ptr| mark_candidate(ptr) }
+    end
+
     private def monotonic_ns : UInt64
       ts = uninitialized LibC::Timespec
       LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
@@ -393,6 +438,15 @@ module Gcry
       @max_pause_ns = elapsed if elapsed > @max_pause_ns
       @total_pause_ns += elapsed
       @pause_count += 1
+      @pause_ring[@pause_ring_pos] = elapsed
+      @pause_ring_pos = (@pause_ring_pos + 1) % PAUSE_RING_SIZE
+      @pause_ring_len += 1 if @pause_ring_len < PAUSE_RING_SIZE
+    end
+
+    private def note_collection_begin : Nil
+      @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
+      @bytes_before_gc = @bytes_since_gc
+      @bytes_reclaimed_since_gc = 0_u64
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -401,11 +455,13 @@ module Gcry
       @inc_active = true
       @minor_only = false
       begin
+        note_collection_begin
         @mark_stack.clear
         clear_all_marks
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
+        mark_metadata_roots
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
@@ -432,42 +488,38 @@ module Gcry
       @mark_stack.clear
     end
 
-    # Emit [low, high) minus each mapped heap chunk. Uses per-chunk holes so
-    # fiber stacks / libc mappings that sit *between* chunks stay scannable.
-    # (A single heap_min..heap_max hole would hide those and drop live roots.)
+    # Emit [low, high) minus each mapped heap chunk via sorted chunk index merge.
     private def each_static_range_excluding_heap(low : Void*, high : Void*, & : Void*, Void* ->) : Nil
+      ensure_chunk_index
       lo = low.address
       hi = high.address
       return if hi <= lo
 
       cursor = lo
-      while cursor < hi
-        best_lo = 0_u64
-        best_hi = 0_u64
-        found = false
+      i = 0
+      n = @chunk_index_count
+      while i < n && cursor < hi
+        chunk = (@chunk_index + i).value
+        c_lo = chunk.address
+        c_hi = c_lo + chunk.value.mapped_bytes
 
-        each_chunk do |chunk|
-          c_lo = chunk.address
-          c_hi = c_lo + chunk.value.mapped_bytes
-          next if c_hi <= cursor || c_lo >= hi
+        if c_hi <= cursor
+          i += 1
+          next
+        end
+        break if c_lo >= hi
 
-          if !found || c_lo < best_lo
-            found = true
-            best_lo = c_lo
-            best_hi = c_hi
-          end
+        if c_lo > cursor
+          gap_hi = c_lo < hi ? c_lo : hi
+          yield Pointer(Void).new(cursor), Pointer(Void).new(gap_hi)
         end
 
-        unless found
-          yield Pointer(Void).new(cursor), Pointer(Void).new(hi)
-          return
-        end
+        cursor = c_hi if c_hi > cursor
+        i += 1
+      end
 
-        if best_lo > cursor
-          yield Pointer(Void).new(cursor), Pointer(Void).new(best_lo)
-        end
-
-        cursor = best_hi > cursor ? best_hi : (cursor + 1)
+      if cursor < hi
+        yield Pointer(Void).new(cursor), Pointer(Void).new(hi)
       end
     end
 
@@ -555,6 +607,7 @@ module Gcry
       end
     end
 
+    # Minor GC: reset nursery mark bits only.
     private def clear_nursery_marks : Nil
       each_chunk do |chunk|
         next unless ChunkHeader.nursery?(chunk)
@@ -633,6 +686,7 @@ module Gcry
       unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
+      @bytes_reclaimed_since_gc += mapped
       LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
       rebuild_size_class_freelist(class_index, nursery)
       update_heap_bounds_after_unmap
@@ -695,6 +749,7 @@ module Gcry
       end
 
       @free_bytes += payload.to_u64
+      @bytes_reclaimed_since_gc += payload.to_u64
       @live_objects -= 1 if @live_objects > 0
     end
 
@@ -703,9 +758,11 @@ module Gcry
       @finalizers.on_reclaim(user)
 
       mapped = chunk.value.mapped_bytes
+      payload = header.value.size.to_u64
       unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
+      @bytes_reclaimed_since_gc += payload
       update_heap_bounds_after_unmap
       @live_objects -= 1 if @live_objects > 0
       LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))

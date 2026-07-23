@@ -8,7 +8,8 @@ module Gcry
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES = 262144_u64 # 256 KiB — literal avoids runtime const init
+    SMALL_CHUNK_BYTES = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
+    PAUSE_RING_SIZE   =         64 # recent pause samples for p50/p99
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
@@ -19,17 +20,26 @@ module Gcry
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
     @nursery_alloc_bytes : UInt64 = 0_u64
-    # Sorted by chunk address for O(log n) pointer → chunk lookup during mark.
+    # Lazily rebuilt address-sorted index (mark / static exclusion).
     @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
     @chunk_index_count = 0
     @chunk_index_cap = 0
     @chunk_index_dirty = true
+    @pause_ring = uninitialized StaticArray(UInt64, PAUSE_RING_SIZE)
+    @pause_ring_len = 0
+    @pause_ring_pos = 0
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
+      @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+      SIZE_CLASS_COUNT.times do |i|
+        @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
+      end
     end
 
     def finalize
@@ -111,8 +121,10 @@ module Gcry
 
         unlink_chunk(chunk)
         @heap_size -= chunk.value.mapped_bytes
+        @unmapped_bytes += chunk.value.mapped_bytes
         update_heap_bounds_after_unmap
         @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+        note_explicit_free(payload)
         @live_objects -= 1 if @live_objects > 0
         LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
         return
@@ -129,6 +141,7 @@ module Gcry
 
       @free_bytes += payload
       @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+      note_explicit_free(payload)
       @live_objects -= 1 if @live_objects > 0
     end
 
@@ -186,10 +199,11 @@ module Gcry
       header = BlockHeader.from_user(user)
       next_free = header.value.next_free
       @nursery_freelists[index] = next_free
+      BlockHeader.set_used(header, payload, flags)
       # During incremental mark, allocate black so new objects survive the cycle.
-      alloc_flags = flags
-      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
-      BlockHeader.set_used(header, payload, alloc_flags)
+      if @incremental_marking
+        BlockHeader.set_mark(header)
+      end
 
       @free_bytes -= payload if @free_bytes >= payload
       @nursery_alloc_bytes += payload.to_u64
@@ -209,9 +223,8 @@ module Gcry
       header = BlockHeader.from_user(user)
       next_free = header.value.next_free
       @freelists[index] = next_free
-      alloc_flags = flags
-      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
-      BlockHeader.set_used(header, payload, alloc_flags)
+      BlockHeader.set_used(header, payload, flags)
+      BlockHeader.set_mark(header) if @incremental_marking
 
       @free_bytes -= payload if @free_bytes >= payload
       user
@@ -250,9 +263,8 @@ module Gcry
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
 
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-      alloc_flags = flags | BlockHeader::Flags::LARGE
-      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
-      BlockHeader.set_used(header, payload.to_u32!, alloc_flags)
+      BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+      BlockHeader.set_mark(header) if @incremental_marking
       BlockHeader.user_from(header)
     end
 
@@ -314,7 +326,7 @@ module Gcry
       end
     end
 
-    # Binary search over address-sorted chunk index (rebuilt lazily).
+    # Binary search over address-sorted chunk index (rebuilt lazily on collect/mark).
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       ensure_chunk_index
@@ -338,7 +350,8 @@ module Gcry
       nil
     end
 
-    private def ensure_chunk_index : Nil
+    # Rebuild sorted index once per collect (not on every mmap — that hurt /json).
+    protected def ensure_chunk_index : Nil
       return unless @chunk_index_dirty
 
       count = 0
@@ -360,7 +373,6 @@ module Gcry
       end
       @chunk_index_count = count
 
-      # Insertion sort — chunk counts stay modest vs mark work.
       i = 1
       while i < @chunk_index_count
         key = (@chunk_index + i).value

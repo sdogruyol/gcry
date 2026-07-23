@@ -28,4 +28,4 @@ GC.collect
 stats = GC.stats
 pause = Gcry.pause_stats
 puts "rounds=#{rounds} fibers_done=#{fibers_done} heap_size=#{stats.heap_size} total_bytes=#{stats.total_bytes} keep=#{keep.size}"
-puts "pause last_us=#{pause.last_ns // 1000} max_us=#{pause.max_ns // 1000} count=#{pause.count} majors=#{Gcry.default_heap.major_collections}"
+puts "pause last_us=#{pause.last_ns // 1000} p50_us=#{pause.p50_ns // 1000} p99_us=#{pause.p99_ns // 1000} max_us=#{pause.max_ns // 1000} count=#{pause.count} majors=#{Gcry.default_heap.major_collections}"
