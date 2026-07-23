@@ -106,12 +106,12 @@ module Gcry
     def self.spill_registers : Nil
       {% if flag?(:x86_64) %}
         asm("" ::: "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-          "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory")
+                   "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory")
       {% elsif flag?(:aarch64) %}
         asm("" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
-          "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
-          "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
-          "x24", "x25", "x26", "x27", "x28", "memory")
+                   "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+                   "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
+                   "x24", "x25", "x26", "x27", "x28", "memory")
       {% else %}
         env = uninitialized StaticArray(UInt8, 256)
         LibSetjmp.setjmp(env.to_unsafe.as(Void*))

@@ -21,7 +21,12 @@ module Gcry
     @@maps_generation = 0_u32
     @@cached_generation = UInt32::MAX
 
-    # Bump when dlopen/mmap of new libraries is expected; collect also bumps
+    # Adjacency state while parsing /proc/self/maps (address-ordered).
+    @@parse_prev_hi = 0_u64
+    @@parse_prev_file_rw = false
+
+    # Bump when dlopen/mmap of new libraries is expected; also after our own
+    # munmap so cached ranges never point at unmapped pages. Collect bumps
     # occasionally so caches do not go forever stale.
     def self.invalidate_static_root_cache : Nil
       @@maps_generation &+= 1
@@ -43,6 +48,8 @@ module Gcry
       return if @@cached_generation == @@maps_generation && @@range_count > 0
 
       @@range_count = 0
+      @@parse_prev_hi = 0_u64
+      @@parse_prev_file_rw = false
       scan_proc_maps do |low, high|
         push_range(low.address, high.address)
       end
@@ -128,32 +135,45 @@ module Gcry
       size = hi - lo
 
       if path < 0
-        # Anonymous RW: ELF BSS zero-fill pages after the file-backed .data page
-        # (e.g. Exception::CallStack::@@skip). Skip large anon regions — fiber
-        # stacks (8 MiB) and similar — those are covered by push_stack / STW.
-        return unless perms[1] == 'w'.ord.to_u8
-        return if size >= 1_u64 * 1024 * 1024
-        yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+        # ELF BSS zero-fill: anonymous RW pages contiguous with the previous
+        # file-backed RW mapping (typically after .data). Do NOT treat every
+        # small anonymous VMA as a root — gcry large objects are also anon
+        # <1 MiB; caching those and scanning after munmap is SIGSEGV.
+        if @@parse_prev_file_rw &&
+           lo == @@parse_prev_hi &&
+           perms[1] == 'w'.ord.to_u8 &&
+           size < 1_u64 * 1024 * 1024
+          yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+        end
+        @@parse_prev_file_rw = false
         return
       end
 
-      return if includes_name?(line + path, len - path, "[stack]")
-      return if includes_name?(line + path, len - path, "[heap]")
-      return if includes_name?(line + path, len - path, "[vvar]")
-      return if includes_name?(line + path, len - path, "[vdso]")
+      if includes_name?(line + path, len - path, "[stack]") ||
+         includes_name?(line + path, len - path, "[heap]") ||
+         includes_name?(line + path, len - path, "[vvar]") ||
+         includes_name?(line + path, len - path, "[vdso]")
+        @@parse_prev_file_rw = false
+        return
+      end
 
       # Skip bulky library data segments — they almost never hold Crystal
       # object pointers and dominate static-root scan time under HTTP.
-      return if includes_name?(line + path, len - path, "libcrypto")
-      return if includes_name?(line + path, len - path, "libssl")
-      return if includes_name?(line + path, len - path, "libpcre")
-      return if includes_name?(line + path, len - path, "libxml")
-      return if includes_name?(line + path, len - path, "libyaml")
-      return if includes_name?(line + path, len - path, "libgmp")
-      return if includes_name?(line + path, len - path, "libicu")
+      if includes_name?(line + path, len - path, "libcrypto") ||
+         includes_name?(line + path, len - path, "libssl") ||
+         includes_name?(line + path, len - path, "libpcre") ||
+         includes_name?(line + path, len - path, "libxml") ||
+         includes_name?(line + path, len - path, "libyaml") ||
+         includes_name?(line + path, len - path, "libgmp") ||
+         includes_name?(line + path, len - path, "libicu")
+        @@parse_prev_file_rw = false
+        return
+      end
 
       # File-backed: scan rw-p (BSS/.data) and r--p (RELRO).
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+      @@parse_prev_hi = hi
+      @@parse_prev_file_rw = perms[1] == 'w'.ord.to_u8
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32

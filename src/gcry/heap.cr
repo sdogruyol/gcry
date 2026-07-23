@@ -126,6 +126,7 @@ module Gcry
         note_explicit_free(payload)
         @live_objects -= 1 if @live_objects > 0
         LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+        Platform.invalidate_static_root_cache
         return
       end
 

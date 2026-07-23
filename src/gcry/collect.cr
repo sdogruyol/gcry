@@ -684,13 +684,32 @@ module Gcry
       return if BlockHeader.atomic?(header)
 
       user = BlockHeader.user_from(header).as(UInt8*)
-      size = header.value.size.to_u64
+      size = clamped_scan_size(header, user)
+      return if size == 0
+
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
         mark_candidate(Pointer(Void).new(cursor[i]))
       end
+    end
+
+    # Corrupted header.size must not walk past the mapped chunk (SIGSEGV).
+    private def clamped_scan_size(header : BlockHeader*, user : UInt8*) : UInt64
+      size = header.value.size.to_u64
+      chunk = chunk_containing(header.address)
+      return 0_u64 unless chunk
+
+      max = if ChunkHeader.large?(chunk)
+              end_addr = ChunkHeader.data_end(chunk).address
+              end_addr > user.address ? (end_addr - user.address) : 0_u64
+            else
+              class_index = chunk.value.size_class.to_i32
+              return 0_u64 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+              SizeClasses.payload(class_index).to_u64
+            end
+      size > max ? max : size
     end
 
     private def scan_old_for_nursery_pointers : Nil
@@ -712,7 +731,9 @@ module Gcry
     private def scan_object_for_nursery(header : BlockHeader*) : Nil
       return if BlockHeader.atomic?(header)
       user = BlockHeader.user_from(header).as(UInt8*)
-      size = header.value.size.to_u64
+      size = clamped_scan_size(header, user)
+      return if size == 0
+
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
@@ -814,6 +835,7 @@ module Gcry
       @unmapped_bytes += mapped
       @bytes_reclaimed_since_gc += mapped
       LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+      Platform.invalidate_static_root_cache
       rebuild_size_class_freelist(class_index, nursery)
       update_heap_bounds_after_unmap
     end
@@ -901,6 +923,7 @@ module Gcry
       update_heap_bounds_after_unmap
       @live_objects -= 1 if @live_objects > 0
       LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+      Platform.invalidate_static_root_cache
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
