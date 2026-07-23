@@ -58,6 +58,8 @@ module Gcry
     @incremental_marking = false
     @inc_active = false
     @world_stopped = false
+    # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
+    @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
@@ -71,26 +73,36 @@ module Gcry
     end
 
     def lock_read : Nil
+      return unless @stop_the_world
+      @gc_lock.read_lock
     end
 
     def unlock_read : Nil
+      return unless @stop_the_world
+      @gc_lock.read_unlock
     end
 
     def lock_write : Nil
+      return unless @stop_the_world
+      @gc_lock.write_lock
     end
 
     def unlock_write : Nil
+      return unless @stop_the_world
+      @gc_lock.write_unlock
     end
 
     # Match Crystal `gc/none` STW: signal-suspend every other OS thread.
     # Required for process GC because ExecutionContext's Monitor thread holds
     # live heap pointers that are not on Fiber.current's stack.
+    #
+    # Do not hold Thread.lock across suspend/mark — another thread may allocate
+    # while mutating the thread list and deadlock on @gc_lock.
     def stop_world : Nil
       return unless @stop_the_world
       return if @world_stopped
 
       current_thread = Thread.current
-      Thread.lock
       Thread.unsafe_each do |thread|
         thread.suspend unless thread == current_thread
       end
@@ -107,7 +119,6 @@ module Gcry
       Thread.unsafe_each do |thread|
         thread.resume unless thread == current_thread
       end
-      Thread.unlock
       @world_stopped = false
     end
 
@@ -212,6 +223,7 @@ module Gcry
       @incremental_marking = true
       finished = false
       begin
+        lock_write
         stop_world
         mark_loop_budget(work_units)
         if @mark_stack.empty?
@@ -230,6 +242,7 @@ module Gcry
         end
       ensure
         start_world
+        unlock_write
         @collecting = false
         unless @inc_active
           @mark_stack.clear
@@ -394,6 +407,8 @@ module Gcry
       @collecting = true
       @minor_only = !major
       begin
+        # Block fiber swaps, then suspend other OS threads.
+        lock_write
         stop_world
         note_collection_begin
         @mark_stack.clear
@@ -407,6 +422,9 @@ module Gcry
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
         mark_metadata_roots
+        # Full fiber stacks + Fiber objects (belt-and-suspenders vs push_gc_roots).
+        scan_all_fiber_roots if scan_stack
+        scan_thread_roots if scan_stack && @stop_the_world
 
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
@@ -442,6 +460,7 @@ module Gcry
         @collections += 1
       ensure
         start_world
+        unlock_write
         @collecting = false
         @minor_only = false
         @mark_stack.clear
@@ -456,12 +475,35 @@ module Gcry
       end
     end
 
-    # Spill callee-saved regs into a jmp_buf, then scan SP→bottom.
+    # Mark Thread objects and their current_fiber (TLS alone is not scanned).
+    private def scan_thread_roots : Nil
+      Thread.unsafe_each do |thread|
+        mark_candidate(Pointer(Void).new(thread.object_id))
+        mark_candidate(Pointer(Void).new(thread.current_fiber.object_id))
+      end
+    end
+
+    # Spill GP registers, then scan approx SP→bottom for the running fiber.
     private def scan_mutator_stack : Nil
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
       Roots.scan_mutator(bottom) do |candidate|
         mark_candidate(candidate)
+      end
+    end
+
+    # Mark every Fiber object; scan suspended fibers via saved stack_top
+    # (same as push_gc_roots). Running fibers on other threads are handled by
+    # scan_other_thread_stacks after STW.
+    private def scan_all_fiber_roots : Nil
+      current = Fiber.current
+      Fiber.unsafe_each do |fiber|
+        mark_candidate(Pointer(Void).new(fiber.object_id))
+        next if fiber == current
+        next if fiber.running?
+        Roots.scan_range(fiber.@context.stack_top, fiber.@stack.bottom) do |candidate|
+          mark_candidate(candidate)
+        end
       end
     end
 
@@ -485,15 +527,16 @@ module Gcry
             Roots.scan_range(bounds[0], bounds[1]) do |candidate|
               mark_candidate(candidate)
             end
+            next
           end
-        else
-          # Skip PROT_NONE guard page (see Crystal::System::Fiber.allocate_stack).
-          page = 4096_u64
-          low = Pointer(Void).new(stack.pointer.address + page)
-          next if low.address >= stack.bottom.address
-          Roots.scan_range(low, stack.bottom) do |candidate|
-            mark_candidate(candidate)
-          end
+        end
+
+        # Skip PROT_NONE guard page on pooled fiber stacks.
+        page = 4096_u64
+        low = Pointer(Void).new(stack.pointer.address + page)
+        next if low.address >= stack.bottom.address
+        Roots.scan_range(low, stack.bottom) do |candidate|
+          mark_candidate(candidate)
         end
       end
     end
@@ -531,6 +574,7 @@ module Gcry
       @inc_active = true
       @minor_only = false
       begin
+        lock_write
         stop_world
         note_collection_begin
         @mark_stack.clear
@@ -539,6 +583,8 @@ module Gcry
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
         mark_metadata_roots
+        scan_all_fiber_roots if scan_stack
+        scan_thread_roots if scan_stack && @stop_the_world
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
@@ -552,6 +598,7 @@ module Gcry
         end
       ensure
         start_world
+        unlock_write
         @collecting = false
       end
     end

@@ -205,8 +205,9 @@ module Gcry
       next_free = header.value.next_free
       @nursery_freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
-      # During incremental mark, allocate black so new objects survive the cycle.
-      if @incremental_marking
+      # Allocate black during any in-progress collection (STW or incremental)
+      # so mid-collect allocations are not swept.
+      if @incremental_marking || @collecting
         BlockHeader.set_mark(header)
       end
 
@@ -229,7 +230,7 @@ module Gcry
       next_free = header.value.next_free
       @freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
-      BlockHeader.set_mark(header) if @incremental_marking
+      BlockHeader.set_mark(header) if @incremental_marking || @collecting
 
       @free_bytes -= payload if @free_bytes >= payload
       user
@@ -269,7 +270,7 @@ module Gcry
 
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-      BlockHeader.set_mark(header) if @incremental_marking
+      BlockHeader.set_mark(header) if @incremental_marking || @collecting
       BlockHeader.user_from(header)
     end
 

@@ -85,6 +85,7 @@ module Gcry
     # Combined: spill regs + scan [approx SP, bottom), feeding each candidate
     # to *block*.
     def self.scan_mutator(bottom : Void*, & : Void* ->) : Nil
+      spill_registers
       env = uninitialized StaticArray(UInt8, 256)
       LibSetjmp.setjmp(env.to_unsafe.as(Void*))
       scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
@@ -96,6 +97,24 @@ module Gcry
       keep_alive(env.to_unsafe.as(Void*))
     end
 
+    # Force the compiler to spill any live pointer held in GP registers onto
+    # the stack before a conservative scan (setjmp alone only saves callee-saved).
+    def self.spill_registers : Nil
+      {% if flag?(:x86_64) %}
+        asm("" ::: "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+          "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory")
+      {% elsif flag?(:aarch64) %}
+        asm("" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+          "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+          "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
+          "x24", "x25", "x26", "x27", "x28", "memory")
+      {% else %}
+        env = uninitialized StaticArray(UInt8, 256)
+        LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+        keep_alive(env.to_unsafe.as(Void*))
+      {% end %}
+    end
+
     def self.keep_alive(ptr : Void*) : Nil
       asm("" :: "r"(ptr) : "memory")
     end
@@ -105,7 +124,7 @@ module Gcry
     #
     # Refuses absurd ranges (e.g. fiber SP vs stale main-stack bottom) that
     # would walk unmapped gaps and SIGSEGV.
-    MAX_SCAN_BYTES = 16_u64 * 1024 * 1024
+    MAX_SCAN_BYTES = 64_u64 * 1024 * 1024
 
     def self.scan_range(low : Void*, high : Void*, & : Void* ->) : Nil
       return if low.null? || high.null?
