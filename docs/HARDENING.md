@@ -61,6 +61,12 @@ after = GC.stats.heap_size
 
 `heap_size` may not shrink for small objects (chunks are retained); prefer `Gcry.default_heap.live_objects` in library tests or watch RSS over longer runs.
 
+## Process GC notes (HTTP / fibers)
+
+Crystal’s default **ExecutionContext** does not call `GC.set_stackbottom` on fiber swap. gcry refreshes the running fiber’s stack bottom at collect time from `Fiber.current.@stack.bottom`.
+
+Static roots scan **file-backed** RW segments only (binary / `.so` data). Large anonymous maps (fiber stacks, arenas) are covered by `push_stack` / the mutator stack scan.
+
 ## Sanitizers
 
 Crystal + ASan/Valgrind on a custom mmap GC is limited (false positives on intentional freelist reuse).

@@ -92,6 +92,7 @@ More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLIC
 make spec          # unit specs under Boehm
 make samples       # build -Dgc_none samples into bin/
 make bench         # library-heap churn bench
+make bench-kemal-wrk  # Kemal + wrk (-c 100 -d 30) under gcry
 make format-check
 ```
 
@@ -101,6 +102,9 @@ Or directly:
 crystal spec
 crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 crystal build bench/churn.cr -o bin/churn && ./bin/churn 2000
+cd bench/kemal && shards install
+crystal build -Dgc_none --release src/server.cr -o ../../bin/kemal-gcry
+PORT=3001 ../../bin/kemal-gcry   # then: wrk -c 100 -d 30 http://127.0.0.1:3001/
 ```
 
 Heap unit tests run under the default (Boehm) GC while `Gcry::*` is exercised as a standalone allocator. Process-GC samples need `-Dgc_none`.

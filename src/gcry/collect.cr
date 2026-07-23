@@ -291,8 +291,10 @@ module Gcry
           end
         end
 
-        if scan_stack && !@stack_bottom.null?
-          Roots.scan_range(Roots.stack_pointer, @stack_bottom) do |candidate|
+        if scan_stack
+          bottom = Fiber.current.@stack.bottom
+          @stack_bottom = bottom
+          Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
             mark_candidate(candidate)
           end
         end
@@ -344,8 +346,10 @@ module Gcry
             end
           end
         end
-        if scan_stack && !@stack_bottom.null?
-          Roots.scan_range(Roots.stack_pointer, @stack_bottom) do |candidate|
+        if scan_stack
+          bottom = Fiber.current.@stack.bottom
+          @stack_bottom = bottom
+          Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
             mark_candidate(candidate)
           end
         end
@@ -361,16 +365,42 @@ module Gcry
       @mark_stack.clear
     end
 
+    # Emit [low, high) minus each mapped heap chunk. Uses per-chunk holes so
+    # fiber stacks / libc mappings that sit *between* chunks stay scannable.
+    # (A single heap_min..heap_max hole would hide those and drop live roots.)
     private def each_static_range_excluding_heap(low : Void*, high : Void*, & : Void*, Void* ->) : Nil
       lo = low.address
       hi = high.address
       return if hi <= lo
 
-      if @heap_max > @heap_min && lo < @heap_max && hi > @heap_min
-        yield Pointer(Void).new(lo), Pointer(Void).new(@heap_min) if lo < @heap_min
-        yield Pointer(Void).new(@heap_max), Pointer(Void).new(hi) if hi > @heap_max
-      else
-        yield low, high
+      cursor = lo
+      while cursor < hi
+        best_lo = 0_u64
+        best_hi = 0_u64
+        found = false
+
+        each_chunk do |chunk|
+          c_lo = chunk.address
+          c_hi = c_lo + chunk.value.mapped_bytes
+          next if c_hi <= cursor || c_lo >= hi
+
+          if !found || c_lo < best_lo
+            found = true
+            best_lo = c_lo
+            best_hi = c_hi
+          end
+        end
+
+        unless found
+          yield Pointer(Void).new(cursor), Pointer(Void).new(hi)
+          return
+        end
+
+        if best_lo > cursor
+          yield Pointer(Void).new(cursor), Pointer(Void).new(best_lo)
+        end
+
+        cursor = best_hi > cursor ? best_hi : (cursor + 1)
       end
     end
 

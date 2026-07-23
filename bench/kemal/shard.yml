@@ -1,0 +1,14 @@
+name: gcry_kemal_bench
+version: 0.1.0
+
+crystal: '>= 1.21.0'
+
+dependencies:
+  kemal:
+    github: kemalcr/kemal
+  gcry:
+    path: ../..
+
+targets:
+  server:
+    main: src/server.cr

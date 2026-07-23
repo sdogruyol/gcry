@@ -78,6 +78,11 @@ module Gcry
 
     # Conservatively scan [low, high) word-aligned for heap pointers.
     # On x86_64 the stack grows down: pass SP as low, stack_bottom as high.
+    #
+    # Refuses absurd ranges (e.g. fiber SP vs stale main-stack bottom) that
+    # would walk unmapped gaps and SIGSEGV.
+    MAX_SCAN_BYTES = 16_u64 * 1024 * 1024
+
     def self.scan_range(low : Void*, high : Void*, & : Void* ->) : Nil
       return if low.null? || high.null?
       lo = low.address
@@ -85,6 +90,8 @@ module Gcry
       if lo > hi
         lo, hi = hi, lo
       end
+
+      return if (hi - lo) > MAX_SCAN_BYTES
 
       # Align to pointer size.
       word = sizeof(Void*).to_u64

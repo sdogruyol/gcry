@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Kemal HTTP bench** (`bench/kemal`) — realistic `require "gcry"` + `-Dgc_none` app; `make bench-kemal-wrk` runs `wrk -c 100 -d 30`.
 - **Phase 7 productization**
   - [docs/POLICY.md](docs/POLICY.md) — OOM (emergency collect + `OutOfMemoryError`), fork unsupported, not signal-safe.
   - [docs/COMPARISON.md](docs/COMPARISON.md) — checklist vs bdwgc.
@@ -37,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ExecutionContext: refresh stack bottom from `Fiber.current` on collect (Crystal no longer calls `GC.set_stackbottom` on swap).
+- Static roots: scan file-backed RW segments only; exclude heap chunks per-mapping (not one bounding box).
+- Finalizers: `on_reclaim` no longer allocates Crystal Arrays mid-sweep (nested GC / SIGSEGV under Kemal+wrk).
 - Avoid Crystal `ENV` during `GC.init` (Fiber/`once` deadlock); use `LibC.getenv`.
 - Suppress auto-collect while finalizers run.
 - Bootstrap: no `LibC::MAP_FAILED` / runtime size-class Array on malloc path.

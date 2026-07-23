@@ -67,9 +67,42 @@ module Gcry
       return if space_abs + 4 >= len
       perms = line + space_abs + 1
       return unless perms[0] == 'r'.ord.to_u8 && perms[1] == 'w'.ord.to_u8
-      return if includes_name?(line, len, "[stack]")
+
+      # Only file-backed RW segments (binary / .so .data/.bss). Skip:
+      # - anonymous maps (fiber stacks, gcry arenas, libc scratch)
+      # - [stack] / [heap] (stacks via push_stack; libc heap holds no Crystal objs after boot)
+      path = pathname_start(line, len)
+      return if path < 0
+      return if includes_name?(line + path, len - path, "[stack]")
+      return if includes_name?(line + path, len - path, "[heap]")
+      return if includes_name?(line + path, len - path, "[vvar]")
+      return if includes_name?(line + path, len - path, "[vdso]")
 
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+    end
+
+    # Returns byte offset of the mapping pathname, or -1 if anonymous.
+    private def self.pathname_start(line : UInt8*, len : Int32) : Int32
+      # maps format: addr-addr perms offset dev inode pathname
+      # pathname starts after inode field (5th whitespace-separated token after perms).
+      i = 0
+      fields = 0
+      while i < len
+        # skip spaces
+        while i < len && line[i] == 0x20_u8
+          i += 1
+        end
+        break if i >= len || line[i] == 0x0a_u8
+        fields += 1
+        # field 6 is pathname (1=addr, 2=perms, 3=offset, 4=dev, 5=inode, 6=path)
+        if fields == 6
+          return i
+        end
+        while i < len && line[i] != 0x20_u8 && line[i] != 0x0a_u8
+          i += 1
+        end
+      end
+      -1
     end
 
     private def self.index_of(ptr : UInt8*, len : Int32, byte : UInt8) : Int32?

@@ -25,10 +25,13 @@ module GC
     {% end %}
 
     # Suspended fibers: push their stacks before marking (Boehm-compatible hooks).
+    # Crystal's ExecutionContext (default since ~1.12) does not call
+    # GC.set_stackbottom on fiber swap — refresh from Fiber.current here.
     heap.before_collect do
       Fiber.unsafe_each do |fiber|
         fiber.push_gc_roots unless fiber.running?
       end
+      heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
 
     @@gcry_ready = true
