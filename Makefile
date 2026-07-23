@@ -4,16 +4,18 @@ KEMAL_DIR := bench/kemal
 WRK ?= wrk
 WRK_CONNECTIONS ?= 100
 WRK_DURATION ?= 30
-WRK_URL ?= http://127.0.0.1:3001/
+WRK_BASE_URL ?= http://127.0.0.1:3001
+WRK_PATHS ?= / /json
 PORT ?= 3001
 
-.PHONY: all spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk clean help
+.PHONY: all spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk clean"
-	@echo "wrk knobs: WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_URL=$(WRK_URL) PORT=$(PORT)"
+	@echo "Targets: spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record clean"
+	@echo "wrk knobs: WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_PATHS='$(WRK_PATHS)' PORT=$(PORT)"
+	@echo "record: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -46,16 +48,29 @@ bench-kemal-boehm: $(BIN)
 	cd $(KEMAL_DIR) && shards install
 	cd $(KEMAL_DIR) && $(CRYSTAL) build --release src/server.cr -o ../../$(BIN)/kemal-boehm
 
-# Start kemal-gcry and run wrk against /. Override duration/connections via env.
+# Start kemal-gcry and run wrk against / and /json (fresh process per path).
 bench-kemal-wrk: bench-kemal
 	@command -v $(WRK) >/dev/null || (echo "wrk not found; install wrk" && exit 1)
-	@PORT=$(PORT) $(BIN)/kemal-gcry & echo $$! > $(BIN)/kemal-gcry.pid; \
-	trap 'kill $$(cat $(BIN)/kemal-gcry.pid) 2>/dev/null || true; rm -f $(BIN)/kemal-gcry.pid' EXIT INT TERM; \
-	for i in 1 2 3 4 5 6 7 8 9 10; do \
-	  curl -sf -o /dev/null $(WRK_URL) && break; \
+	@for path in $(WRK_PATHS); do \
+	  echo "=== wrk $$path ==="; \
+	  PORT=$(PORT) $(BIN)/kemal-gcry & echo $$! > $(BIN)/kemal-gcry.pid; \
+	  for i in 1 2 3 4 5 6 7 8 9 10; do \
+	    curl -sf -o /dev/null $(WRK_BASE_URL)/ && break; \
+	    sleep 0.3; \
+	  done; \
+	  $(WRK) -c $(WRK_CONNECTIONS) -d $(WRK_DURATION) $(WRK_BASE_URL)$$path; \
+	  kill $$(cat $(BIN)/kemal-gcry.pid) 2>/dev/null || true; \
+	  wait $$(cat $(BIN)/kemal-gcry.pid) 2>/dev/null || true; \
+	  rm -f $(BIN)/kemal-gcry.pid; \
 	  sleep 0.3; \
-	done; \
-	$(WRK) -c $(WRK_CONNECTIONS) -d $(WRK_DURATION) $(WRK_URL)
+	done
+
+# A/B previous tag vs current tree for / and /json; prints docs/PERF.md History rows.
+# Example: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0
+bench-kemal-record:
+	@test -n "$(PREV)" || (echo "set PREV=vX.Y.Z" && exit 1)
+	@test -n "$(LABEL)" || (echo "set LABEL=A.B.C" && exit 1)
+	PREV=$(PREV) LABEL=$(LABEL) PORT=$(PORT) WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_BASE_URL=$(WRK_BASE_URL) WRK_PATHS="$(WRK_PATHS)" ./bench/record_kemal.sh
 
 clean:
 	rm -rf $(BIN)

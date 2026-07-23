@@ -1,0 +1,17 @@
+---
+description: Every new gcry version must record Kemal wrk Δ vs previous tag for / and /json in docs/PERF.md
+alwaysApply: true
+---
+
+# Version performance recording
+
+When preparing or cutting a **new version** (CHANGELOG / `shard.yml` / `Gcry::VERSION` bump):
+
+1. Run same-host A/B vs the previous tag for **both** paths:
+   `make bench-kemal-record PREV=vX.Y.Z LABEL=A.B.C`
+2. Append the printed rows to the matching tables in [docs/PERF.md](docs/PERF.md) (`GET /` and `GET /json`).
+3. Add CHANGELOG bullets with **Δ req/s** and **Δ lat.avg** for **both** paths, linking `docs/PERF.md`.
+4. Refresh the short summary table in README Performance from PERF.md (do not invent numbers).
+5. Prefer **`/json`** when summarizing “did GC get better?”; keep `/` as idle-path sanity.
+
+Fixed load: `wrk -c 100 -d 30`, **fresh server process per path**, `bench/kemal` release + `-Dgc_none`. See PERF.md methodology.
