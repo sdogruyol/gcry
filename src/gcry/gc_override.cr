@@ -20,6 +20,8 @@ module GC
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
+    # Spread majors across collect_a_little slices (v0.3).
+    heap.incremental_auto = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -59,6 +61,14 @@ module GC
       heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
+    end
+
+    if env_flag_one?("GCRY_DISABLE_INCREMENTAL")
+      heap.incremental_auto = false
+    end
+
+    if work = env_u64("GCRY_INCREMENTAL_WORK")
+      heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
     end
   end
 

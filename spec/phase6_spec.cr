@@ -79,6 +79,28 @@ describe "Gcry incremental mark" do
       finished.should be_true
       heap.major_collections.should be > 0
       heap.live?(root).should be_true
+      heap.pause_count.should be > 0
+      heap.max_pause_ns.should be > 0
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "auto-collects via incremental slices when enabled" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.incremental_auto = true
+      heap.incremental_work = 64
+      heap.gc_threshold = 2048
+      heap.add_root(heap.malloc(16))
+
+      500.times { heap.malloc(64) }
+
+      heap.major_collections.should be > 0
+      heap.pause_count.should be > 0
+      # Incremental should record more than one pause for a non-trivial cycle.
+      heap.pause_count.should be >= heap.major_collections
     ensure
       heap.destroy
     end

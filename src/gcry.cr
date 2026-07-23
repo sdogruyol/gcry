@@ -7,7 +7,17 @@
 require "./gcry/heap"
 
 module Gcry
-  VERSION = "0.2.0"
+  VERSION = "0.3.0"
+
+  struct PauseStats
+    getter last_ns : UInt64
+    getter max_ns : UInt64
+    getter total_ns : UInt64
+    getter count : UInt64
+
+    def initialize(@last_ns : UInt64, @max_ns : UInt64, @total_ns : UInt64, @count : UInt64)
+    end
+  end
 
   @@default_heap : Heap? = nil
 
@@ -52,6 +62,11 @@ module Gcry
 
   def self.collect_a_little(work_units : Int32 = Heap::DEFAULT_INCREMENTAL_WORK) : Bool
     default_heap.collect_a_little(work_units)
+  end
+
+  def self.pause_stats : PauseStats
+    h = default_heap
+    PauseStats.new(h.last_pause_ns, h.max_pause_ns, h.total_pause_ns, h.pause_count)
   end
 
   def self.add_root(pointer : Void*) : Nil

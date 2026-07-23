@@ -8,17 +8,25 @@ module Gcry
     DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
     PROCESS_GC_THRESHOLD         = 67108864_u64 # 64 MiB — process GC (fewer STW)
     DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
-    DEFAULT_INCREMENTAL_WORK     =          512
+    DEFAULT_INCREMENTAL_WORK     =         1024
+    MAX_AUTO_INCREMENTAL_SLICES  =            4 # slices per alloc when debt is high
     STATIC_ROOT_REFRESH_INTERVAL =       64_u64 # majors between /proc/self/maps refresh
 
     getter collections : UInt64 = 0_u64
     getter minor_collections : UInt64 = 0_u64
     getter major_collections : UInt64 = 0_u64
+    getter last_pause_ns : UInt64 = 0_u64
+    getter max_pause_ns : UInt64 = 0_u64
+    getter total_pause_ns : UInt64 = 0_u64
+    getter pause_count : UInt64 = 0_u64
     getter? enabled : Bool = true
     property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
     # Library tests free manually — auto minor is opt-in (process GC enables it).
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
+    # When true, auto major uses collect_a_little slices instead of full STW.
+    # Library default false (predictable tests); process GC enables it.
+    property incremental_auto : Bool = false
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
     property nursery_enabled : Bool = true
@@ -149,6 +157,7 @@ module Gcry
       return false if @collecting
       return false if @running_finalizers
 
+      started = monotonic_ns
       unless @inc_active
         begin_incremental(scan_stack: true, roots: nil)
       end
@@ -164,6 +173,9 @@ module Gcry
           @nursery_alloc_bytes = 0_u64
           @collections += 1
           @major_collections += 1
+          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+            Platform.invalidate_static_root_cache
+          end
           @inc_active = false
           @incremental_marking = false
           finished = true
@@ -174,6 +186,7 @@ module Gcry
           @mark_stack.clear
           @incremental_marking = false
         end
+        record_pause(started)
       end
 
       if finished
@@ -185,6 +198,13 @@ module Gcry
         end
       end
       finished
+    end
+
+    def reset_pause_stats : Nil
+      @last_pause_ns = 0_u64
+      @max_pause_ns = 0_u64
+      @total_pause_ns = 0_u64
+      @pause_count = 0_u64
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
@@ -235,7 +255,23 @@ module Gcry
         return
       end
 
-      if @bytes_since_gc >= @gc_threshold
+      # Keep draining an in-progress incremental cycle even if under threshold.
+      if @inc_active
+        collect_a_little(@incremental_work)
+        return
+      end
+
+      return if @bytes_since_gc < @gc_threshold
+
+      if @incremental_auto
+        slices = 0
+        while slices < MAX_AUTO_INCREMENTAL_SLICES
+          finished = collect_a_little(@incremental_work)
+          slices += 1
+          break if finished
+          break unless @inc_active
+        end
+      else
         collect
       end
     end
@@ -253,6 +289,7 @@ module Gcry
       @major_collections = 0_u64
       @stack_bottom = Pointer(Void).null
       @nursery_alloc_bytes = 0_u64
+      reset_pause_stats
     end
 
     protected def note_mapped(chunk : ChunkHeader*) : Nil
@@ -271,6 +308,7 @@ module Gcry
     end
 
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?) : Nil
+      started = monotonic_ns
       @collecting = true
       @minor_only = !major
       begin
@@ -323,6 +361,7 @@ module Gcry
         @collecting = false
         @minor_only = false
         @mark_stack.clear
+        record_pause(started)
       end
 
       @running_finalizers = true
@@ -331,6 +370,20 @@ module Gcry
       ensure
         @running_finalizers = false
       end
+    end
+
+    private def monotonic_ns : UInt64
+      ts = uninitialized LibC::Timespec
+      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
+      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+    end
+
+    private def record_pause(started_ns : UInt64) : Nil
+      elapsed = monotonic_ns - started_ns
+      @last_pause_ns = elapsed
+      @max_pause_ns = elapsed if elapsed > @max_pause_ns
+      @total_pause_ns += elapsed
+      @pause_count += 1
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
