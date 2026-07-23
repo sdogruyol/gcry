@@ -9,6 +9,8 @@
 module GC
   @@gcry_ready = false
   @@gcry_enabled = true
+  # Set via GC.note_fork_child; malloc/collect refuse to run (no atfork reinit yet).
+  @@after_fork_child = false
 
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
@@ -20,8 +22,9 @@ module GC
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
-    # Spread majors across collect_a_little slices (v0.3).
-    heap.incremental_auto = true
+    # Full STW majors by default (v0.4+). Incremental without write barriers is
+    # unsound under heavy pointer mutation (e.g. Kemal /json).
+    heap.incremental_auto = false
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -41,6 +44,18 @@ module GC
 
     @@gcry_ready = true
     apply_env_config(heap)
+  end
+
+  # Skeleton: refuse GC in a forked child. Full Boehm-style reinit is future work.
+  # :nodoc:
+  def self.note_fork_child : Nil
+    @@after_fork_child = true
+  end
+
+  private def self.check_fork_poison! : Nil
+    if @@after_fork_child
+      raise "gcry: GC after fork is unsupported (exec or stay on Boehm); see docs/POLICY.md"
+    end
   end
 
   # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
@@ -63,12 +78,22 @@ module GC
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
     end
 
+    if env_flag_one?("GCRY_INCREMENTAL")
+      # Experimental: sliced majors. Unsafe without write barriers if the mutator
+      # stores pointers into already-scanned objects (typical JSON/Hash workloads).
+      heap.incremental_auto = true
+    end
+
     if env_flag_one?("GCRY_DISABLE_INCREMENTAL")
       heap.incremental_auto = false
     end
 
     if work = env_u64("GCRY_INCREMENTAL_WORK")
       heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
+    end
+
+    if env_flag_one?("GCRY_RELEASE_CHUNKS")
+      heap.release_empty_chunks = true
     end
   end
 
@@ -96,6 +121,7 @@ module GC
 
   # :nodoc:
   def self.malloc(size : LibC::SizeT) : Void*
+    check_fork_poison!
     if @@gcry_ready
       Gcry.default_heap.malloc(size)
     else
@@ -105,6 +131,7 @@ module GC
 
   # :nodoc:
   def self.malloc_atomic(size : LibC::SizeT) : Void*
+    check_fork_poison!
     if @@gcry_ready
       Gcry.default_heap.malloc_atomic(size)
     else
@@ -114,6 +141,7 @@ module GC
 
   # :nodoc:
   def self.realloc(pointer : Void*, size : LibC::SizeT) : Void*
+    check_fork_poison!
     if @@gcry_ready
       # Pointers from the LibC bootstrap era are not on the gcry heap.
       if !pointer.null? && !Gcry.default_heap.is_heap_ptr(pointer)
@@ -127,6 +155,7 @@ module GC
 
   def self.collect
     return unless @@gcry_ready
+    check_fork_poison!
     Gcry.default_heap.collect
   end
 
@@ -190,7 +219,7 @@ module GC
       Stats.new(
         heap_size: h.heap_size,
         free_bytes: h.free_bytes,
-        unmapped_bytes: 0_u64,
+        unmapped_bytes: h.unmapped_bytes,
         bytes_since_gc: h.bytes_since_gc,
         total_bytes: h.total_bytes,
       )
@@ -203,7 +232,7 @@ module GC
     ProfStats.new(
       heap_size: stats.heap_size,
       free_bytes: stats.free_bytes,
-      unmapped_bytes: 0_u64,
+      unmapped_bytes: @@gcry_ready ? Gcry.default_heap.unmapped_bytes : 0_u64,
       bytes_since_gc: stats.bytes_since_gc,
       bytes_before_gc: 0_u64,
       non_gc_bytes: 0_u64,
@@ -294,6 +323,8 @@ module GC
   end
 
   # :nodoc:
+  # Parallel ExecutionContext STW is not implemented yet (v0.4 skeleton).
+  # Under parallelism 1 these remain no-ops — same as Crystal's gc/none.
   def self.stop_world : Nil
     Gcry.default_heap.stop_world if @@gcry_ready
   end

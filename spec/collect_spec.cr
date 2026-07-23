@@ -139,3 +139,26 @@ describe "Gcry::Heap collection" do
     end
   end
 end
+
+it "munmaps fully free size-class chunks on major" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = true
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    # Several 256 KiB chunks of garbage (~80 B/block → need >4k objects).
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    before.should be > Gcry::Heap::SMALL_CHUNK_BYTES
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.unmapped_bytes.should be > 0
+    heap.heap_size.should be < before
+  ensure
+    heap.destroy
+  end
+end

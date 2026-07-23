@@ -25,11 +25,17 @@ module Gcry
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
     # When true, auto major uses collect_a_little slices instead of full STW.
-    # Library default false (predictable tests); process GC enables it.
+    # Library default false (predictable tests); process GC leaves it off unless
+    # GCRY_INCREMENTAL=1 (experimental without write barriers).
     property incremental_auto : Bool = false
+    # When true, fully free size-class chunks are munmap'd after major sweep.
+    # Opt-in for process GC via GCRY_RELEASE_CHUNKS=1 (still maturing under HTTP load).
+    property release_empty_chunks : Bool = false
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
     property nursery_enabled : Bool = true
+
+    getter unmapped_bytes : UInt64 = 0_u64
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -66,9 +72,11 @@ module Gcry
     end
 
     def stop_world : Nil
+      # v0.4+: hook point for multi-thread STW. No-op while parallelism is 1.
     end
 
     def start_world : Nil
+      # v0.4+: hook point for multi-thread STW. No-op while parallelism is 1.
     end
 
     def add_root(pointer : Void*) : Nil
@@ -289,6 +297,7 @@ module Gcry
       @major_collections = 0_u64
       @stack_bottom = Pointer(Void).null
       @nursery_alloc_bytes = 0_u64
+      @unmapped_bytes = 0_u64
       reset_pause_stats
     end
 
@@ -592,11 +601,82 @@ module Gcry
                 reclaim_small(header)
               end
             end
+
+            # After a major, drop fully free size-class chunks back to the OS.
+            if major && @release_empty_chunks && chunk_fully_free?(chunk)
+              reclaim_empty_chunk(chunk)
+            end
           end
         end
 
         chunk = nxt
       end
+    end
+
+    private def chunk_fully_free?(chunk : ChunkHeader*) : Bool
+      each_block(chunk) do |header|
+        return false unless BlockHeader.free?(header)
+      end
+      true
+    end
+
+    # Remove a fully free size-class chunk from the heap and rebuild that
+    # class's freelist from remaining chunks (avoids dangling freelist links).
+    private def reclaim_empty_chunk(chunk : ChunkHeader*) : Nil
+      return if ChunkHeader.large?(chunk)
+
+      class_index = chunk.value.size_class.to_i32
+      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+
+      nursery = ChunkHeader.nursery?(chunk)
+      mapped = chunk.value.mapped_bytes
+      unlink_chunk(chunk)
+      @heap_size -= mapped if @heap_size >= mapped
+      @unmapped_bytes += mapped
+      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+      rebuild_size_class_freelist(class_index, nursery)
+      update_heap_bounds_after_unmap
+    end
+
+    private def rebuild_size_class_freelist(class_index : Int32, nursery : Bool) : Nil
+      payload = SizeClasses.payload(class_index)
+      head = Pointer(Void).null
+
+      each_chunk do |chunk|
+        next if ChunkHeader.large?(chunk)
+        next if chunk.value.size_class != class_index.to_u32
+        next if ChunkHeader.nursery?(chunk) != nursery
+
+        each_block(chunk) do |header|
+          next unless BlockHeader.free?(header)
+          user = BlockHeader.user_from(header)
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, head)
+          head = user
+        end
+      end
+
+      if nursery
+        @nursery_freelists[class_index] = head
+      else
+        @freelists[class_index] = head
+      end
+
+      recalc_free_bytes
+    end
+
+    private def recalc_free_bytes : Nil
+      total = 0_u64
+      each_chunk do |chunk|
+        if ChunkHeader.large?(chunk)
+          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          total += header.value.size.to_u64 if BlockHeader.free?(header)
+        else
+          each_block(chunk) do |header|
+            total += header.value.size.to_u64 if BlockHeader.free?(header)
+          end
+        end
+      end
+      @free_bytes = total
     end
 
     private def reclaim_small(header : BlockHeader*) : Nil
@@ -622,11 +702,13 @@ module Gcry
       user = BlockHeader.user_from(header)
       @finalizers.on_reclaim(user)
 
+      mapped = chunk.value.mapped_bytes
       unlink_chunk(chunk)
-      @heap_size -= chunk.value.mapped_bytes
+      @heap_size -= mapped if @heap_size >= mapped
+      @unmapped_bytes += mapped
       update_heap_bounds_after_unmap
       @live_objects -= 1 if @live_objects > 0
-      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
