@@ -244,10 +244,7 @@ module Gcry
         stop_world
         mark_loop_budget(work_units)
         if @mark_stack.empty?
-          @finalizers.enqueue_unreachable do |obj|
-            h = find_object(obj)
-            !h.nil? && !BlockHeader.free?(h.not_nil!) && !BlockHeader.marked?(h.not_nil!)
-          end
+          enqueue_unreachable_finalizers
           sweep(major: true)
           @bytes_since_gc = 0_u64
           @nursery_alloc_bytes = 0_u64
@@ -476,11 +473,8 @@ module Gcry
         mark_loop
         @last_phase_mark_ns = monotonic_ns - t0
 
-        # Finalizers / WeakRef: one pass over the registry (not per reclaim).
-        @finalizers.enqueue_unreachable do |obj|
-          h = find_object(obj)
-          !h.nil? && !BlockHeader.free?(h.not_nil!) && !BlockHeader.marked?(h.not_nil!)
-        end
+        # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
+        enqueue_unreachable_finalizers
 
         t0 = monotonic_ns
         sweep(major: major)
@@ -596,7 +590,20 @@ module Gcry
     end
 
     private def mark_metadata_roots : Nil
-      @finalizers.each_mark_root { |ptr| mark_candidate(ptr) }
+      # No Crystal Proc/closure — allocating mid-mark re-enters malloc.
+      n = @finalizers.entry_count
+      if n > 0
+        mark_candidate(@finalizers.entries_buffer)
+        i = 0
+        while i < n
+          data = @finalizers.entry_closure_data_at(i)
+          mark_candidate(data) unless data.null?
+          i += 1
+        end
+      end
+      if @finalizers.link_count > 0
+        mark_candidate(@finalizers.links_buffer)
+      end
     end
 
     private def monotonic_ns : UInt64
@@ -824,6 +831,35 @@ module Gcry
       else
         each_block(chunk) { |h| yield h }
       end
+    end
+
+    # After mark, before sweep. Allocation-free (no Crystal Proc/closure).
+    private def enqueue_unreachable_finalizers : Nil
+      i = 0
+      while i < @finalizers.entry_count
+        if unmarked_live_object?(@finalizers.entry_object_at(i))
+          @finalizers.queue_and_remove_entry_at(i)
+        else
+          i += 1
+        end
+      end
+
+      i = 0
+      while i < @finalizers.link_count
+        if unmarked_live_object?(@finalizers.link_object_at(i))
+          @finalizers.clear_and_remove_link_at(i)
+        else
+          i += 1
+        end
+      end
+    end
+
+    private def unmarked_live_object?(obj : Void*) : Bool
+      return false if obj.null?
+      header = find_object(obj)
+      return false unless header
+      return false if BlockHeader.free?(header)
+      !BlockHeader.marked?(header)
     end
 
     private def sweep(major : Bool) : Nil
