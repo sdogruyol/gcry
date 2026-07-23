@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Large-object freelist reuse is **exact mapped-size** only (no oversized VMA for a smaller need).
+- `GCRY_LARGE_CACHE` sets free large bytes retained after post-collect trim (default **32 MiB**).
+- Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
+
+### Performance
+
+- Same-host Kemal gate held: `/json` **~105%**, `/` **~113%** of Boehm req/s (host-noisy absolutes; not a PERF.md version row).
+- acikturkiye `/api/v1/` **~105%** of Boehm; RSS still ~4× — breakdown shows **`small_mapped` dominates** (~235 MiB vs `large_mapped` ~20 MiB) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+
 ## [0.6.0] - 2026-07-23
 
 ### Fixed

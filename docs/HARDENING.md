@@ -25,6 +25,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
 | `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (opt-in) |
 | `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (overrides release) |
+| `GCRY_LARGE_CACHE` | Free large-object bytes retained after post-collect trim (default `33554432` / 32 MiB) |
 
 Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Empty-chunk release stays **opt-in** (finalizer buffers pinned during mark so release is crash-safe; default-on costs too much vs Boehm). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
@@ -69,7 +70,7 @@ GC.collect
 after = GC.stats.heap_size
 ```
 
-`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;8 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache`). Prefer `Gcry.default_heap.live_objects` in library tests.
+`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;32 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); reuse is **exact mapped-size** only (no fat VMA for a smaller need). Excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache` / `GCRY_LARGE_CACHE`). Prefer `Gcry.default_heap.live_objects` in library tests.
 
 ## Process GC notes (HTTP / fibers)
 

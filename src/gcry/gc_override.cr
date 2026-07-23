@@ -103,6 +103,11 @@ module GC
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
     end
+
+    # Free large-object bytes to retain after post-collect trim (default 32 MiB).
+    if cache = env_u64("GCRY_LARGE_CACHE")
+      heap.large_cache_retain = cache
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool

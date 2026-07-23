@@ -111,13 +111,58 @@ describe Gcry::Heap do
       bytes[0] = 1_u8
       bytes[99_999] = 2_u8
       before = heap.heap_size
+      heap.large_mapped_bytes.should eq(before)
       heap.free(ptr)
       # Cached on large freelist (still a heap mapping until trim).
       heap.is_heap_ptr(ptr).should be_true
       heap.live_objects.should eq(0)
+      heap.large_free_bytes.should eq(before)
       heap.trim_large_cache(0)
       heap.is_heap_ptr(ptr).should be_false
       heap.heap_size.should be < before
+      heap.large_mapped_bytes.should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "does not reuse an oversized large mapping for a smaller need" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      fat = heap.malloc(512_000)
+      fat_mapped = heap.large_mapped_bytes
+      heap.free(fat)
+      heap.large_free_bytes.should eq(fat_mapped)
+
+      # Much smaller large alloc must mmap fresh (exact-fit only).
+      slim = heap.malloc(40_000)
+      slim.should_not eq(fat)
+      # Fat stays on freelist; slim is a new mapping.
+      heap.large_free_bytes.should eq(fat_mapped)
+      heap.large_mapped_bytes.should be > fat_mapped
+
+      heap.trim_large_cache(0)
+      heap.is_heap_ptr(fat).should be_false
+      heap.is_heap_ptr(slim).should be_true
+      heap.large_free_bytes.should eq(0)
+      heap.large_mapped_bytes.should be < fat_mapped
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "trims large cache down to large_cache_retain" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.large_cache_retain = 0
+      ptrs = [] of Void*
+      4.times { ptrs << heap.malloc(100_000) }
+      ptrs.each { |p| heap.free(p) }
+      # free() already trims to retain; with retain 0 cache should be empty.
+      heap.large_free_bytes.should eq(0)
+      heap.large_mapped_bytes.should eq(0)
     ensure
       heap.destroy
     end

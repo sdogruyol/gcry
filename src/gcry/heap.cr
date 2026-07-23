@@ -12,8 +12,10 @@ module Gcry
     PAUSE_RING_SIZE   =         64 # recent pause samples for p50/p99
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
-    # Cap cached free large bytes; trim outside STW when over this.
+    # Soft cap on cached free large bytes; trim retains at most half by default.
     LARGE_CACHE_LIMIT = 64_u64 * 1024 * 1024
+    # Bytes of free large mappings to keep after trim (process default; override via GCRY_LARGE_CACHE).
+    DEFAULT_LARGE_CACHE_RETAIN = LARGE_CACHE_LIMIT // 2
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
@@ -21,6 +23,10 @@ module Gcry
     getter bytes_since_gc : UInt64 = 0_u64
     getter live_objects : UInt64 = 0_u64
     getter large_free_bytes : UInt64 = 0_u64
+    # Sum of large-chunk mapped_bytes (live + free on freelist).
+    getter large_mapped_bytes : UInt64 = 0_u64
+    # Retain this many free large bytes after trim_large_cache (outside STW).
+    property large_cache_retain : UInt64 = DEFAULT_LARGE_CACHE_RETAIN
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
@@ -81,6 +87,7 @@ module Gcry
       @heap_size = 0_u64
       @free_bytes = 0_u64
       @large_free_bytes = 0_u64
+      @large_mapped_bytes = 0_u64
       @live_objects = 0_u64
       @nursery_alloc_bytes = 0_u64
       unless @chunk_index.null?
@@ -329,41 +336,39 @@ module Gcry
       @large_free_bytes += mapped
     end
 
+    # Exact mapped-size match only — never reuse a fatter VMA for a smaller need
+    # (that pinned live RSS for the oversized mapping until the object died).
     private def take_large_free(mapped_need : UInt64) : Void*?
-      start = self.class.large_bucket(mapped_need)
-      b = start
-      while b < LARGE_FREE_BUCKETS
-        prev = Pointer(Void).null
-        user = @large_freelists[b]
-        while user
-          header = BlockHeader.from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
-          nxt = header.value.next_free
-          if chunk.value.mapped_bytes >= mapped_need
-            if prev.null?
-              @large_freelists[b] = nxt
-            else
-              ph = BlockHeader.from_user(prev)
-              pv = ph.value
-              pv.next_free = nxt
-              ph.value = pv
-            end
-            mapped = chunk.value.mapped_bytes
-            @free_bytes -= mapped if @free_bytes >= mapped
-            @large_free_bytes -= mapped if @large_free_bytes >= mapped
-            return user
+      b = self.class.large_bucket(mapped_need)
+      prev = Pointer(Void).null
+      user = @large_freelists[b]
+      while user
+        header = BlockHeader.from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        nxt = header.value.next_free
+        if chunk.value.mapped_bytes == mapped_need
+          if prev.null?
+            @large_freelists[b] = nxt
+          else
+            ph = BlockHeader.from_user(prev)
+            pv = ph.value
+            pv.next_free = nxt
+            ph.value = pv
           end
-          prev = user
-          user = nxt
+          mapped = chunk.value.mapped_bytes
+          @free_bytes -= mapped if @free_bytes >= mapped
+          @large_free_bytes -= mapped if @large_free_bytes >= mapped
+          return user
         end
-        b += 1
+        prev = user
+        user = nxt
       end
       nil
     end
 
     # Munmap cached large objects until @large_free_bytes <= *limit*.
     # Call outside STW — munmap of many VMAs is slow on Linux.
-    def trim_large_cache(limit : UInt64 = LARGE_CACHE_LIMIT // 2) : Nil
+    def trim_large_cache(limit : UInt64 = @large_cache_retain) : Nil
       return if @large_free_bytes <= limit
 
       b = LARGE_FREE_BUCKETS - 1
@@ -379,6 +384,7 @@ module Gcry
           @heap_size -= mapped if @heap_size >= mapped
           @free_bytes -= mapped if @free_bytes >= mapped
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
+          @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
           @unmapped_bytes += mapped
           LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
           user = nxt
@@ -386,6 +392,16 @@ module Gcry
         b -= 1
       end
       update_heap_bounds_after_unmap
+    end
+
+    # Size-class mapped bytes (heap_size minus large VMAs).
+    def small_mapped_bytes : UInt64
+      @heap_size >= @large_mapped_bytes ? @heap_size - @large_mapped_bytes : 0_u64
+    end
+
+    # Freelist bytes in size-class chunks (excludes large freelist).
+    def small_free_bytes : UInt64
+      @free_bytes >= @large_free_bytes ? @free_bytes - @large_free_bytes : 0_u64
     end
 
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
@@ -403,6 +419,7 @@ module Gcry
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
       @chunks = chunk
       @heap_size += bytes
+      @large_mapped_bytes += bytes if size_class == UInt32::MAX
       index_insert(chunk)
       note_mapped(chunk)
       chunk

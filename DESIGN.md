@@ -263,6 +263,12 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Size-class ceiling **32 KiB**; `notice_reclaim` flag fast-path; incremental chunk index.
 - Same-host Kemal `/json` ~**100%** of Boehm; acikturkiye `/api/v1/` ~**101%** — see [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
+### Phase 10 — Large-object / RSS (in progress)
+
+- Large freelist reuse is **exact mapped-size** only (no fat VMA for a smaller need).
+- Heap breakdown: `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes`; `GCRY_LARGE_CACHE` retain limit.
+- Gate: Kemal `/json` must not regress vs Boehm; acikturkiye RSS + `/gc-stats` breakdown when available.
+
 ## MVP definition (v0.1)
 
 - Platform: Linux x86_64, Crystal `>= 1.21` default ExecutionContext (parallelism 1)

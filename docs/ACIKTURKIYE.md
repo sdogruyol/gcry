@@ -162,6 +162,28 @@ Same load as above (`wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, fresh `--release
 
 Takeaway: real-app throughput remains **≈ Boehm** after the stack/static-root hardening. RSS / `heap_size` still ~3–4× Boehm (conservative retention + large freelist); STW is not the limiter. Toy Kemal re-record the same evening: `/` ~105%, `/json` ~100% of Boehm — see [PERF.md](PERF.md).
 
+### After large exact-fit + RSS breakdown (WSL, same day)
+
+Large freelist reuse is **exact mapped-size** only; `/gc-stats` adds `large_mapped_bytes` / `small_mapped_*`.
+
+**Toy Kemal** (gate; absolute wrk host-noisy vs PERF.md):
+
+| GC | path | req/s | % Boehm | RSS | notes |
+|----|------|------:|--------:|----:|-------|
+| Boehm | `/json` | 35714 | 100% | 17 MiB | same session |
+| gcry | `/json` | 37592 | **~105%** | 92 MiB | `large_mapped` ≈ 0.3 MiB; `small_mapped` ≈ 95 MiB |
+| Boehm | `/` | 89781 | 100% | 16 MiB | |
+| gcry | `/` | 101565 | **~113%** | 98 MiB | no `/json` regression |
+
+**acikturkiye** `/api/v1/` (paired A/B, then instrumented re-run for breakdown):
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 139 | 100% | 44 MiB | 566 | same session |
+| gcry | 146 | **~105%** | 183 MiB | 515 | throughput OK |
+
+Instrumented gcry re-run after wrk: heap ≈ **254 MiB**; **`small_mapped` ≈ 235 MiB**, `large_mapped` ≈ 20 MiB (`large_free` ≈ 7 MiB); pause p50 ≈ 20ms; 15 majors. Takeaway: remaining RSS gap is **size-class / conservative retention**, not the large freelist (~7–15 MiB free). Exact-fit removes fat-VMA live waste; it does not close the 3–4× RSS gap alone.
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
@@ -173,6 +195,8 @@ Takeaway: real-app throughput remains **≈ Boehm** after the stack/static-root 
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
 8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
 9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; cut as **v0.6.0**).
+10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start) — `/gc-stats` exposes `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes` / `large_cache_retain` (`GCRY_LARGE_CACHE`).
+11. Next RSS lever: size-class retention / empty-chunk policy under load (or barriers); optional lower `GCRY_LARGE_CACHE` / `MADV_DONTNEED` only if free large cache grows again.
 
 ## Non-goals (still)
 
