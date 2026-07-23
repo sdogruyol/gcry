@@ -58,6 +58,7 @@ module Gcry
       # Called while reclaiming *object* (still before the block is reused).
       def on_reclaim(object : Void*) : Nil
         return if object.null?
+        return if @entries.empty? && @links.empty?
 
         i = 0
         while i < @entries.size
