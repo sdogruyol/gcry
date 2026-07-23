@@ -2,6 +2,7 @@ require "./mark"
 require "./roots"
 require "./finalizer"
 require "./platform/linux_roots"
+require "./platform/linux_stack"
 
 module Gcry
   class Heap
@@ -126,7 +127,13 @@ module Gcry
       @stack_bottom
     end
 
+    # Used when constructing a thread's main Fiber. Must return *this* OS
+    # thread's stack high address — a single global `@stack_bottom` is wrong
+    # for the Monitor (SYSMON) thread and makes other-thread scans no-ops.
     def current_thread_stack_bottom : {Void*, Void*}
+      if bounds = Platform.current_pthread_stack_bounds
+        return {Pointer(Void).null, bounds[1]}
+      end
       {Pointer(Void).null, @stack_bottom}
     end
 
@@ -410,11 +417,7 @@ module Gcry
         end
 
         if scan_stack
-          bottom = Fiber.current.@stack.bottom
-          @stack_bottom = bottom
-          Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
-            mark_candidate(candidate)
-          end
+          scan_mutator_stack
           scan_other_thread_stacks
         end
 
@@ -453,18 +456,44 @@ module Gcry
       end
     end
 
+    # Spill callee-saved regs into a jmp_buf, then scan SP→bottom.
+    private def scan_mutator_stack : Nil
+      bottom = Fiber.current.@stack.bottom
+      @stack_bottom = bottom
+      Roots.scan_mutator(bottom) do |candidate|
+        mark_candidate(candidate)
+      end
+    end
+
     # Running fibers on *other* OS threads are skipped by `push_gc_roots`
-    # (`fiber.running?` is true) and are not `Fiber.current`. After STW, scan
-    # their whole fiber stacks (exact SP needs ucontext; full stack is safe).
+    # (`fiber.running?` is true). After STW, scan their stacks.
+    #
+    # Main fibers use the pthread stack — always query pthread bounds (Fiber
+    # `@stack.bottom` was historically a single global and wrong for SYSMON).
+    # Pooled fiber stacks have a PROT_NONE guard page at `stack.pointer`.
     private def scan_other_thread_stacks : Nil
       return unless @stop_the_world
 
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        stack = thread.current_fiber.@stack
-        Roots.scan_range(stack.pointer, stack.bottom) do |candidate|
-          mark_candidate(candidate)
+        fiber = thread.current_fiber
+        stack = fiber.@stack
+
+        if fiber.name == "main"
+          if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
+            Roots.scan_range(bounds[0], bounds[1]) do |candidate|
+              mark_candidate(candidate)
+            end
+          end
+        else
+          # Skip PROT_NONE guard page (see Crystal::System::Fiber.allocate_stack).
+          page = 4096_u64
+          low = Pointer(Void).new(stack.pointer.address + page)
+          next if low.address >= stack.bottom.address
+          Roots.scan_range(low, stack.bottom) do |candidate|
+            mark_candidate(candidate)
+          end
         end
       end
     end
@@ -518,11 +547,7 @@ module Gcry
           end
         end
         if scan_stack
-          bottom = Fiber.current.@stack.bottom
-          @stack_bottom = bottom
-          Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
-            mark_candidate(candidate)
-          end
+          scan_mutator_stack
           scan_other_thread_stacks
         end
       ensure

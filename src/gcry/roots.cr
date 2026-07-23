@@ -1,6 +1,12 @@
 module Gcry
   # Explicit roots and conservative stack scanning helpers.
   module Roots
+    # setjmp is not in Crystal's LibC bindings; we only need it to spill
+    # callee-saved registers into a buffer we then scan as roots.
+    lib LibSetjmp
+      fun setjmp(env : Void*) : Int32
+    end
+
     # Linked list node allocated with libc malloc (immortal w.r.t. gcry heap).
     struct RootNode
       property next : RootNode*
@@ -74,6 +80,24 @@ module Gcry
     def self.stack_pointer : Void*
       local = 0
       pointerof(local).as(Void*)
+    end
+
+    # Combined: spill regs + scan [approx SP, bottom), feeding each candidate
+    # to *block*.
+    def self.scan_mutator(bottom : Void*, & : Void* ->) : Nil
+      env = uninitialized StaticArray(UInt8, 256)
+      LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+      scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
+        yield candidate
+      end
+      scan_range(stack_pointer, bottom) do |candidate|
+        yield candidate
+      end
+      keep_alive(env.to_unsafe.as(Void*))
+    end
+
+    def self.keep_alive(ptr : Void*) : Nil
+      asm("" :: "r"(ptr) : "memory")
     end
 
     # Conservatively scan [low, high) word-aligned for heap pointers.
