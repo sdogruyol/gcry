@@ -46,7 +46,7 @@ Process GC defaults (v0.5+): majors at 64 MiB full STW; nursery off; size-class 
 
 **Tuning note (Kemal `/json` wrk):** raising `GCRY_THRESHOLD` to 128–256 MiB cuts major count but pause p50 grows roughly with heap; total pause time over a fixed wrk window often stays similar, so req/s may not improve. Prefer measuring `GET /gc-stats` (`pause_p50_ns` / `pause_p99_ns` / `major_collections`) on the real app before changing the default.
 
-OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
+OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md). Real-app STW/sweep notes: [docs/ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 ## False retention
 

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sweep:** recycle large objects onto a size-bucket freelist instead of `munmap` during STW. Thousands of per-buffer VMAs made Linux `munmap` dominate pauses on HTTP apps; trim cache outside STW when over 64 MiB.
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
 
+### Performance
+
+- **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): gcry ~**51%** of Boehm req/s after STW/sweep/finalizer fixes; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+
 ## [0.5.0] - 2026-07-23
 
 ### Added
