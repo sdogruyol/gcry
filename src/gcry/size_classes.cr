@@ -3,7 +3,7 @@ module Gcry
   # (Crystal `once` consts like Array literals / sizeof-based values deadlock
   # during GC.init because Fiber is not up yet.)
   module SizeClasses
-    COUNT     = 32
+    COUNT     =       32
     THRESHOLD = 8192_u32
 
     def self.payload(index : Int32) : UInt32
@@ -47,38 +47,38 @@ module Gcry
 
     def self.index_of(payload : UInt32) : Int32
       case payload
-      when 16    then 0
-      when 32    then 1
-      when 48    then 2
-      when 64    then 3
-      when 80    then 4
-      when 96    then 5
-      when 112   then 6
-      when 128   then 7
-      when 160   then 8
-      when 192   then 9
-      when 224   then 10
-      when 256   then 11
-      when 320   then 12
-      when 384   then 13
-      when 448   then 14
-      when 512   then 15
-      when 640   then 16
-      when 768   then 17
-      when 896   then 18
-      when 1024  then 19
-      when 1280  then 20
-      when 1536  then 21
-      when 1792  then 22
-      when 2048  then 23
-      when 2560  then 24
-      when 3072  then 25
-      when 3584  then 26
-      when 4096  then 27
-      when 5120  then 28
-      when 6144  then 29
-      when 7168  then 30
-      when 8192  then 31
+      when   16 then 0
+      when   32 then 1
+      when   48 then 2
+      when   64 then 3
+      when   80 then 4
+      when   96 then 5
+      when  112 then 6
+      when  128 then 7
+      when  160 then 8
+      when  192 then 9
+      when  224 then 10
+      when  256 then 11
+      when  320 then 12
+      when  384 then 13
+      when  448 then 14
+      when  512 then 15
+      when  640 then 16
+      when  768 then 17
+      when  896 then 18
+      when 1024 then 19
+      when 1280 then 20
+      when 1536 then 21
+      when 1792 then 22
+      when 2048 then 23
+      when 2560 then 24
+      when 3072 then 25
+      when 3584 then 26
+      when 4096 then 27
+      when 5120 then 28
+      when 6144 then 29
+      when 7168 then 30
+      when 8192 then 31
       else
         raise ArgumentError.new("not a size-class payload: #{payload}")
       end
@@ -103,6 +103,6 @@ module Gcry
   end
 
   # Compatibility aliases (integer literals — safe during GC.init).
-  SIZE_CLASS_COUNT = 32
+  SIZE_CLASS_COUNT =       32
   LARGE_THRESHOLD  = 8192_u32
 end

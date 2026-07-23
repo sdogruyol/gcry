@@ -6,8 +6,8 @@ require "./platform/linux_roots"
 module Gcry
   class Heap
     DEFAULT_GC_THRESHOLD      = 4194304_u64 # 4 MiB major
-    DEFAULT_NURSERY_THRESHOLD = 524288_u64  # 512 KiB minor
-    DEFAULT_INCREMENTAL_WORK  = 512
+    DEFAULT_NURSERY_THRESHOLD =  524288_u64 # 512 KiB minor
+    DEFAULT_INCREMENTAL_WORK  =         512
 
     getter collections : UInt64 = 0_u64
     getter minor_collections : UInt64 = 0_u64

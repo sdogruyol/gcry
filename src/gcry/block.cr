@@ -16,10 +16,10 @@ module Gcry
     end
 
     module Flags
-      FREE    = 1_u32
-      ATOMIC  = 2_u32
-      MARK    = 4_u32
-      LARGE   = 8_u32
+      FREE    =  1_u32
+      ATOMIC  =  2_u32
+      MARK    =  4_u32
+      LARGE   =  8_u32
       NURSERY = 16_u32 # young generation (Phase 6)
     end
 

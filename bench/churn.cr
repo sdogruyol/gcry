@@ -4,7 +4,7 @@
 
 require "../src/gcry"
 
-def with_heap
+def with_heap(&)
   heap = Gcry::Heap.new
   heap.scan_static_roots = false
   heap.gc_threshold = UInt64::MAX
