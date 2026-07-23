@@ -18,8 +18,10 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (process default `67108864` / 64 MiB) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
-| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; sound under Kemal load but slow without soft-dirty) |
+| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; soft-dirty arms on WSL 6.18+, HTTP still too dirty for a win) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
+| `GCRY_SOFT_DIRTY_MAX` | Max dirty/total % for soft-dirty page scan (default `25`; `0` = never) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |

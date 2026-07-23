@@ -27,6 +27,39 @@ module Gcry
     # Returns false if pagemap cannot be read (caller should full-scan).
     # Allocation-free; uses a stack buffer for pagemap batches.
     def self.each_dirty_page(low : UInt64, high : UInt64, & : UInt64 ->) : Bool
+      walk_pagemap(low, high) do |addr, entry|
+        yield addr if (entry & PAGEMAP_SOFT_DIRTY) != 0
+      end
+    end
+
+    # Count soft-dirty pages in [low, high). Returns {dirty, total} or nil on error.
+    def self.count_soft_dirty_pages(low : UInt64, high : UInt64) : {UInt64, UInt64}?
+      dirty = 0_u64
+      total = 0_u64
+      ok = walk_pagemap(low, high) do |_addr, entry|
+        total += 1
+        dirty += 1 if (entry & PAGEMAP_SOFT_DIRTY) != 0
+      end
+      ok ? {dirty, total} : nil
+    end
+
+    # Soft-dirty helpers are only meaningful on Linux; keep a shared predicate.
+    def self.soft_dirty_supported? : Bool
+      {% if flag?(:linux) %}
+        fd = LibC.open("/proc/self/clear_refs", LibC::O_WRONLY)
+        return false if fd < 0
+        LibC.close(fd)
+        fd = LibC.open("/proc/self/pagemap", LibC::O_RDONLY)
+        return false if fd < 0
+        LibC.close(fd)
+        true
+      {% else %}
+        false
+      {% end %}
+    end
+
+    # Shared pagemap walk. Yields (page_addr, pagemap_entry). Returns false on I/O error.
+    private def self.walk_pagemap(low : UInt64, high : UInt64, & : UInt64, UInt64 ->) : Bool
       {% if flag?(:linux) %}
         return true if high <= low
 
@@ -35,7 +68,6 @@ module Gcry
 
         begin
           page_low = low & ~(PAGE_SIZE - 1)
-          # Round high up to page boundary exclusive.
           page_high = (high + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
 
           buf = uninitialized StaticArray(UInt64, PAGEMAP_BATCH)
@@ -54,9 +86,7 @@ module Gcry
 
             i = 0
             while i < count
-              if (buf.to_unsafe[i] & PAGEMAP_SOFT_DIRTY) != 0
-                yield addr + i.to_u64 * PAGE_SIZE
-              end
+              yield addr + i.to_u64 * PAGE_SIZE, buf.to_unsafe[i]
               i += 1
             end
             addr += count.to_u64 * PAGE_SIZE
@@ -65,21 +95,6 @@ module Gcry
         ensure
           LibC.close(fd)
         end
-      {% else %}
-        false
-      {% end %}
-    end
-
-    # Soft-dirty helpers are only meaningful on Linux; keep a shared predicate.
-    def self.soft_dirty_supported? : Bool
-      {% if flag?(:linux) %}
-        fd = LibC.open("/proc/self/clear_refs", LibC::O_WRONLY)
-        return false if fd < 0
-        LibC.close(fd)
-        fd = LibC.open("/proc/self/pagemap", LibC::O_RDONLY)
-        return false if fd < 0
-        LibC.close(fd)
-        true
       {% else %}
         false
       {% end %}

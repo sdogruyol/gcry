@@ -99,8 +99,10 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **64 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (default **off**); sound under HTTP but slow without soft-dirty |
+| `GCRY_NURSERY` | Opt-in nursery (default **off**); soft-dirty works on WSL 6.18+ but HTTP heaps stay too dirty for a win |
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
+| `GCRY_SOFT_DIRTY_MAX` | Dirty-page scan only if dirty/total ≤ this % (default **25**) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Never use soft-dirty page scan |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |

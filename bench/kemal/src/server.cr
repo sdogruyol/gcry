@@ -65,6 +65,11 @@ end
       chunk_fill_ge75:        h.chunk_fill_ge75,
       small_chunk_bytes:      h.small_chunk_bytes,
       soft_dirty_armed:       h.soft_dirty_armed?,
+      soft_dirty_page_scans:  h.soft_dirty_page_scans,
+      soft_dirty_fallbacks:   h.soft_dirty_fallbacks,
+      soft_dirty_last_dirty:  h.last_soft_dirty_pages,
+      soft_dirty_last_total:  h.last_soft_dirty_total,
+      soft_dirty_max_pct:     h.soft_dirty_max_pct,
       finalizer_entries:      h.finalizer_entry_count,
       weak_links:             h.finalizer_link_count,
     }.to_json

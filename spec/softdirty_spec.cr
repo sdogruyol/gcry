@@ -26,6 +26,10 @@ describe "Gcry::Platform soft-dirty" do
       Gcry::Platform.each_dirty_page(addr, addr + 4096) { dirty_before = true }.should be_true
       dirty_before.should be_false
 
+      counts = Gcry::Platform.count_soft_dirty_pages(addr, addr + 4096)
+      counts.should_not be_nil
+      counts.try { |d, t| d.should eq(0); t.should eq(1) }
+
       page.as(UInt8*).value = 1_u8
 
       dirty_after = false
@@ -33,6 +37,8 @@ describe "Gcry::Platform soft-dirty" do
       # Some kernels/WSL builds never set soft-dirty; treat as soft failure.
       if dirty_after
         dirty_after.should be_true
+        counts2 = Gcry::Platform.count_soft_dirty_pages(addr, addr + 4096)
+        counts2.try { |d, _t| d.should eq(1) }
       else
         pending! "kernel did not set soft-dirty bit after write"
       end

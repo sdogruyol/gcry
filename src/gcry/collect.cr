@@ -83,10 +83,19 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # After a successful clear_soft_dirty, minors scan dirty pages only.
+    # After a successful clear_soft_dirty, minors may scan dirty pages only.
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
+    # Skip dirty-page scan when dirty/total pages exceed this percent (0 = never use).
+    property soft_dirty_max_pct : Int32 = 25
+    getter soft_dirty_page_scans : UInt64 = 0_u64
+    getter soft_dirty_fallbacks : UInt64 = 0_u64
+    # Last minor: dirty and total heap pages seen by the fraction check (0 if unused).
+    getter last_soft_dirty_pages : UInt64 = 0_u64
+    getter last_soft_dirty_total : UInt64 = 0_u64
+    # After a high-dirty fallback, skip soft-dirty until the next major.
+    @soft_dirty_skip_until_major = false
 
     def enable : Nil
       @enabled = true
@@ -435,6 +444,11 @@ module Gcry
       @soft_dirty_armed = false
       @soft_dirty_probed = false
       @soft_dirty_works = false
+      @soft_dirty_page_scans = 0_u64
+      @soft_dirty_fallbacks = 0_u64
+      @last_soft_dirty_pages = 0_u64
+      @last_soft_dirty_total = 0_u64
+      @soft_dirty_skip_until_major = false
       reset_pause_stats
     end
 
@@ -527,6 +541,7 @@ module Gcry
             Platform.invalidate_static_root_cache
           end
           # Next minor starts a fresh soft-dirty window after a major.
+          @soft_dirty_skip_until_major = false
           arm_soft_dirty_after_collect if @nursery_enabled
         else
           @nursery_alloc_bytes = 0_u64
@@ -819,15 +834,54 @@ module Gcry
         # Soft-dirty is for process GC (old→young without full old scan).
         # Library heaps under Boehm keep the full scan (and some kernels/WSL
         # do not set soft-dirty bits reliably).
-        if @soft_dirty_armed && @scan_static_roots && @heap_max > @heap_min
-          ok = Platform.each_dirty_page(@heap_min, @heap_max) do |page|
-            scan_range_for_nursery_pointers(
-              Pointer(Void).new(page),
-              Pointer(Void).new(page + Platform::PAGE_SIZE),
-            )
+        # Walk mapped old chunks only — [heap_min, heap_max) is sparse and
+        # understates dirty fraction / wastes pagemap I/O on holes.
+        if @soft_dirty_armed && @scan_static_roots && @soft_dirty_max_pct > 0
+          dirty = 0_u64
+          total = 0_u64
+          pagemap_ok = true
+          each_chunk do |chunk|
+            low = chunk.address
+            high = chunk.address + chunk.value.mapped_bytes
+            counts = Platform.count_soft_dirty_pages(low, high)
+            unless counts
+              pagemap_ok = false
+              break
+            end
+            d, t = counts
+            dirty += d
+            total += t
           end
-          return if ok
-          # Pagemap failed — fall back to a full old-space scan.
+          @last_soft_dirty_pages = dirty
+          @last_soft_dirty_total = total
+
+          if pagemap_ok && total > 0 && dirty * 100 <= total * @soft_dirty_max_pct.to_u64
+            scan_ok = true
+            each_chunk do |chunk|
+              low = chunk.address
+              high = chunk.address + chunk.value.mapped_bytes
+              ok = Platform.each_dirty_page(low, high) do |page|
+                scan_range_for_nursery_pointers(
+                  Pointer(Void).new(page),
+                  Pointer(Void).new(page + Platform::PAGE_SIZE),
+                )
+              end
+              unless ok
+                scan_ok = false
+                break
+              end
+            end
+            if scan_ok
+              @soft_dirty_page_scans += 1
+              return
+            end
+          elsif pagemap_ok
+            @soft_dirty_fallbacks += 1
+            # Dirty-heavy mutator: stop paying pagemap/clear_refs every minor.
+            @soft_dirty_skip_until_major = true
+            @soft_dirty_armed = false
+          end
+          # Pagemap failed or too dirty — fall back to a full old-space scan.
         end
       {% end %}
 
@@ -864,6 +918,10 @@ module Gcry
       {% if flag?(:linux) %}
         # Only arm for process GC; library tests always full-scan old space.
         unless @scan_static_roots && @nursery_enabled
+          @soft_dirty_armed = false
+          return
+        end
+        if @soft_dirty_skip_until_major
           @soft_dirty_armed = false
           return
         end

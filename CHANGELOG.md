@@ -18,13 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
 - Empty size-class chunk `munmap` deferred **outside STW** (queued in sweep, flushed with `trim_large_cache`); occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
 - Size-class occupancy: `size_class_live_bytes` + fill histogram (`chunk_fill_lt25`…`ge75`); `GCRY_CHUNK_BYTES` (default **256 KiB**).
-- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; process minors can scan dirty old pages only when the kernel tracks writes (`soft_dirty_armed`). Falls back to full old→young scan otherwise. `GCRY_NURSERY` stays opt-in (off by default).
+- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; process minors can scan dirty old pages only when the kernel tracks writes (`soft_dirty_armed`). Chunk-scoped pagemap; if dirty fraction > `GCRY_SOFT_DIRTY_MAX` (default **25%**), full old→young scan and skip soft-dirty until next major. `GCRY_DISABLE_SOFT_DIRTY=1` forces object scan. `GCRY_NURSERY` stays opt-in (off by default).
 
 ### Performance
 
 - Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%**; `GCRY_CHUNK_BYTES=131072` **~98.5%** (RSS flat — Kemal waste is mostly retained empty chunks).
 - acikturkiye: live/small_mapped **~64%**, **~76%** of chunks ≥75% full → RSS is **conservative-live**, not sparse; 128 KiB chunks no RSS win — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Soft-dirty bits **unavailable on this WSL host** (probe pending). `GCRY_NURSERY=524288` Kemal `/json` **stays up** (~3.7k req/s vs ~39k default) — full old→young each minor; keep opt-in.
+- Soft-dirty on WSL **6.18.33.2**: chunk-scoped pagemap; dirty-fraction fallback (`GCRY_SOFT_DIRTY_MAX`, default 25%) then skip until major. Kemal nursery ~**4.5k** vs ~**41k** default; acikturkiye nursery **hurts** RSS (~175 vs ~114 MiB) and throughput — keep opt-in. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.6.0] - 2026-07-23
 

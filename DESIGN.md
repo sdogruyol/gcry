@@ -276,8 +276,9 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Linux soft-dirty platform (`clear_refs` / pagemap bit 55) for old→young edges without compiler barriers.
 - Process minors: dirty-page scan when `soft_dirty_armed`; else full old scan. Library heaps always full-scan.
 - **Fixed:** minor finalizers/WeakRef only for nursery objects (`minor_only` leaves old unmarked).
-- `GCRY_NURSERY` remains **opt-in**. WSL host: soft-dirty probe fails → full-scan fallback (Kemal nursery stays up but much slower than default).
-- Gate: default (nursery off) Kemal `/json` ≈ Boehm; soft-dirty RSS win needs a kernel that sets soft-dirty bits.
+- Chunk-scoped soft-dirty + dirty-fraction fallback (`soft_dirty_max_pct`); skip until major when too dirty.
+- `GCRY_NURSERY` remains **opt-in**. WSL **6.18.33.2**: soft-dirty arms; HTTP workloads too dirty for a win (Kemal ~10× slower; acikturkiye RSS worse).
+- Gate: default (nursery off) Kemal `/json` ≈ Boehm.
 
 ## MVP definition (v0.1)
 

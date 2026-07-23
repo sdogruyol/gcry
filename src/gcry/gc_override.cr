@@ -82,6 +82,14 @@ module GC
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
     end
 
+    # Soft-dirty page scan only when dirty/total ≤ this percent (default 25).
+    # GCRY_DISABLE_SOFT_DIRTY=1 forces full old→young object scan.
+    if env_flag_one?("GCRY_DISABLE_SOFT_DIRTY")
+      heap.soft_dirty_max_pct = 0
+    elsif max_pct = env_u64("GCRY_SOFT_DIRTY_MAX")
+      heap.soft_dirty_max_pct = max_pct.to_i32 if max_pct <= 100
+    end
+
     if env_flag_one?("GCRY_INCREMENTAL")
       # Experimental: sliced majors. Unsafe without write barriers if the mutator
       # stores pointers into already-scanned objects (typical JSON/Hash workloads).

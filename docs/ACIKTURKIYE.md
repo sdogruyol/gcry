@@ -228,25 +228,38 @@ Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 Mi
 
 Takeaway: acikturkiye heap is **densely occupied by conservative-live objects**, not sparse fragments. Smaller chunks do not close the ~4× RSS gap. Next real lever: **write barriers** (or better root precision) — not chunk sizing.
 
-### Soft-dirty nursery (Phase 11, WSL same day)
+### Soft-dirty nursery (Phase 11)
 
-Linux soft-dirty helpers land for process minors (`soft_dirty_armed` on `/gc-stats`). This host’s kernel/WSL **does not set soft-dirty bits** after writes (platform spec pending) → always full old→young scan when nursery is on.
+Linux soft-dirty helpers for process minors (`soft_dirty_armed` on `/gc-stats`).
 
-| Config | result |
-|--------|--------|
-| default (nursery off) | Kemal `/json` ~**39.6k** req/s, healthy |
-| `GCRY_NURSERY=524288` | **Stays up** under `wrk -c 100 -d 30` `/json` (~**3.7k** req/s) — sound after minor finalizer/WeakRef fix; slow without soft-dirty (full old→young each minor) |
+**Bug fixed earlier:** generational minors left old objects unmarked; finalizers/WeakRef treated them as dead under HTTP. Minors now only finalize/clear links for **nursery** objects.
 
-**Bug fixed:** generational minors left old objects unmarked; `enqueue_unreachable_finalizers` treated them as dead and ran live finalizers / cleared WeakRefs under HTTP (SIGSEGV). Minors now only finalize/clear links for **nursery** objects.
+#### Kernel 6.18.33.2-microsoft-standard-WSL2
 
-Takeaway: nursery is **opt-in and sound** for process HTTP; keep **off by default** until soft-dirty (or barriers) makes minors cheap. RSS experiment still wants a kernel with soft-dirty bits.
+Soft-dirty **works**. Dirty-page scan is scoped to **mapped chunks** (not sparse `[heap_min,heap_max)`). If dirty/total pages on those chunks exceed `GCRY_SOFT_DIRTY_MAX` (default **25%**), fall back to full old→young object scan and **skip soft-dirty until the next major** (avoids pagemap/`clear_refs` tax on dirty-heavy HTTP).
+
+**Toy Kemal** `/json` (`wrk -c 100 -d 20`):
+
+| Config | req/s | RSS | notes |
+|--------|------:|----:|-------|
+| default (nursery off) | ~**41k** | 93 MiB | majors only |
+| `GCRY_NURSERY=524288` | ~**4.5k** | 125 MiB | soft-dirty arms then falls back (~90% dirty); stays up |
+
+**acikturkiye** `/api/v1/` (`wrk -c 50 -d 15`, demo DB; directional):
+
+| Config | req/s | RSS | notes |
+|--------|------:|----:|-------|
+| default | ~**113** | 114 MiB | live ≈ 92 MiB / small_mapped 158 |
+| `GCRY_NURSERY=524288` | ~**52** | **175 MiB** | ~½ throughput; RSS **worse**; dirty ≈ 89%; fallbacks then skip |
+
+Takeaway: soft-dirty is correct on 6.18+, but HTTP heaps are too dirty for a win. Nursery stays **opt-in / off by default**. Real RSS lever remains write barriers / root precision — not soft-dirty nursery on this workload.
 
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
-4. ~~Fix process-GC **nursery under HTTP load**.~~ **Done** (finalizer/WeakRef minor filter). Re-measure soft-dirty RSS on a kernel with soft-dirty bits.
+4. ~~Fix process-GC **nursery under HTTP load**.~~ **Done** (finalizer/WeakRef minor filter).
 5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
@@ -255,7 +268,8 @@ Takeaway: nursery is **opt-in and sound** for process HTTP; keep **off by defaul
 10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start).
 11. ~~Empty-chunk munmap outside STW + occupancy counters; measure RELEASE_CHUNKS.~~ **Done.**
 12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
-13. ~~Soft-dirty platform + minor wiring.~~ **Done** (WSL no bits; nursery HTTP now sound but slow).
+13. ~~Soft-dirty platform + minor wiring.~~ **Done** — WSL 6.18 arms.
+14. ~~Dirty-fraction fallback + chunk-scoped pagemap; acikturkiye nursery RSS.~~ **Done** — no RSS win; nursery stays off.
 
 ## Non-goals (still)
 
