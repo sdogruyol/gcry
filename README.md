@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none` — no Crystal compiler or stdlib patch required.
 
-> **Status:** v0.4 — STW-default majors (sound), empty-chunk release opt-in, fork poison API. Phases 0–7 complete; Phase 8 / STW perf work on `main` (unreleased).
+> **Status:** v0.5 — STW majors, pause p50/p99, richer `prof_stats`, safe opt-in chunk release. Phases 0–8.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal `GC` / fiber notes
@@ -28,7 +28,7 @@ Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **
 
 Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
-## Supported platforms (v0.4)
+## Supported platforms (v0.5)
 
 | | |
 |--|--|
@@ -92,7 +92,7 @@ There is no separate application-level allocator API for normal programs: alloca
 
 More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md). Pause times: `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `total_ns` / `count`).
 
-## Performance (v0.4 + unreleased)
+## Performance (v0.5)
 
 Canonical: **[docs/PERF.md](docs/PERF.md)** (% of Boehm, same host).
 

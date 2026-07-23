@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-23
+
 ### Added
 
 - Pause percentiles: `Gcry.pause_stats` now includes `p50_ns` / `p99_ns` (ring of last 64 pauses).
@@ -23,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- Same-host vs **Boehm** (unreleased tree): `/` **~92%**, `/json` **~82%** of Boehm req/s — see [docs/PERF.md](docs/PERF.md).
-- Page-map + per-chunk mark bitmap tried; **reverted** (no `/json` ≥2 pp win; `/` regress). Remains open for a later approach — see [DESIGN.md](DESIGN.md) Phase 8.
+- Same-host vs **Boehm**: `/` **~92%**, `/json` **~82%** of Boehm req/s — see [docs/PERF.md](docs/PERF.md).
+- Page-map + per-chunk mark bitmap tried during 0.5 prep; **not shipped** (no `/json` win) — see [DESIGN.md](DESIGN.md) Phase 8.
 - `GCRY_RELEASE_CHUNKS=1` still ~**49%** of Boehm `/json` — remains opt-in.
 
 ## [0.4.0] - 2026-07-23
@@ -123,7 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sdogruyol/gcry/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sdogruyol/gcry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sdogruyol/gcry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sdogruyol/gcry/compare/v0.1.0...v0.2.0
