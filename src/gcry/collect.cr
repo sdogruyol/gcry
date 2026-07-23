@@ -154,7 +154,7 @@ module Gcry
 
     def push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
       raise "push_stack outside of collect" unless @collecting
-      Roots.scan_range(stack_top, stack_bottom) do |candidate|
+      Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
         mark_candidate(candidate)
       end
     end
@@ -501,7 +501,12 @@ module Gcry
         mark_candidate(Pointer(Void).new(fiber.object_id))
         next if fiber == current
         next if fiber.running?
-        Roots.scan_range(fiber.@context.stack_top, fiber.@stack.bottom) do |candidate|
+        # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
+        stack = fiber.@stack
+        top = fiber.@context.stack_top.address
+        guard = stack.pointer.address + Roots::PAGE_SIZE
+        top = guard if top < guard
+        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
           mark_candidate(candidate)
         end
       end
@@ -524,7 +529,7 @@ module Gcry
 
         if fiber.name == "main"
           if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
-            Roots.scan_range(bounds[0], bounds[1]) do |candidate|
+            Roots.scan_range(bounds[0], bounds[1], safe: true) do |candidate|
               mark_candidate(candidate)
             end
             next
@@ -532,10 +537,9 @@ module Gcry
         end
 
         # Skip PROT_NONE guard page on pooled fiber stacks.
-        page = 4096_u64
-        low = Pointer(Void).new(stack.pointer.address + page)
+        low = Pointer(Void).new(stack.pointer.address + Roots::PAGE_SIZE)
         next if low.address >= stack.bottom.address
-        Roots.scan_range(low, stack.bottom) do |candidate|
+        Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
           mark_candidate(candidate)
         end
       end

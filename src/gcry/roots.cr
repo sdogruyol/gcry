@@ -1,3 +1,6 @@
+require "c/unistd"
+require "c/fcntl"
+
 module Gcry
   # Explicit roots and conservative stack scanning helpers.
   module Roots
@@ -91,7 +94,8 @@ module Gcry
       scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
         yield candidate
       end
-      scan_range(stack_pointer, bottom) do |candidate|
+      # Stacks may include a PROT_NONE guard page if SP is stale — probe pages.
+      scan_range(stack_pointer, bottom, safe: true) do |candidate|
         yield candidate
       end
       keep_alive(env.to_unsafe.as(Void*))
@@ -122,11 +126,16 @@ module Gcry
     # Conservatively scan [low, high) word-aligned for heap pointers.
     # On x86_64 the stack grows down: pass SP as low, stack_bottom as high.
     #
-    # Refuses absurd ranges (e.g. fiber SP vs stale main-stack bottom) that
-    # would walk unmapped gaps and SIGSEGV.
+    # When *safe* is true, each page is probed via write(2)/EFAULT so PROT_NONE
+    # fiber guard pages and unmapped holes are skipped (no SIGSEGV). Use for
+    # fiber/thread stacks; leave false for /proc/self/maps static ranges.
     MAX_SCAN_BYTES = 64_u64 * 1024 * 1024
+    PAGE_SIZE      = 4096_u64
 
-    def self.scan_range(low : Void*, high : Void*, & : Void* ->) : Nil
+    @@probe_rd = -1
+    @@probe_wr = -1
+
+    def self.scan_range(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
       return if low.null? || high.null?
       lo = low.address
       hi = high.address
@@ -136,16 +145,64 @@ module Gcry
 
       return if (hi - lo) > MAX_SCAN_BYTES
 
-      # Align to pointer size.
       word = sizeof(Void*).to_u64
       lo = (lo + word - 1) & ~(word - 1)
       hi &= ~(word - 1)
+      return if lo >= hi
 
-      cursor = Pointer(UInt64).new(lo)
-      end_ptr = Pointer(UInt64).new(hi)
-      while cursor < end_ptr
-        yield Pointer(Void).new(cursor.value)
-        cursor += 1
+      if safe
+        scan_range_safe(lo, hi, word) { |c| yield c }
+      else
+        cursor = Pointer(UInt64).new(lo)
+        end_ptr = Pointer(UInt64).new(hi)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
+      end
+    end
+
+    private def self.scan_range_safe(lo : UInt64, hi : UInt64, word : UInt64, & : Void* ->) : Nil
+      ensure_probe_pipe
+
+      page = lo & ~(PAGE_SIZE - 1)
+      while page < hi
+        page_hi = page + PAGE_SIZE
+        page_hi = hi if page_hi > hi
+
+        if page_readable?(page)
+          cursor = lo > page ? lo : page
+          cursor = (cursor + word - 1) & ~(word - 1)
+          while cursor < page_hi
+            yield Pointer(Void).new(Pointer(UInt64).new(cursor).value)
+            cursor += word
+          end
+        end
+
+        page += PAGE_SIZE
+      end
+    end
+
+    private def self.ensure_probe_pipe : Nil
+      return if @@probe_wr >= 0
+      fds = StaticArray(Int32, 2).new(0)
+      return if LibC.pipe(fds) != 0
+      @@probe_rd = fds[0]
+      @@probe_wr = fds[1]
+      flags = LibC.fcntl(@@probe_rd, LibC::F_GETFL)
+      LibC.fcntl(@@probe_rd, LibC::F_SETFL, flags | LibC::O_NONBLOCK) if flags >= 0
+    end
+
+    # Kernel copies one byte from *page*; EFAULT ⇒ not readable (PROT_NONE / hole).
+    private def self.page_readable?(page : UInt64) : Bool
+      return false if @@probe_wr < 0
+      n = LibC.write(@@probe_wr, Pointer(Void).new(page), 1)
+      if n == 1
+        buf = uninitialized UInt8
+        LibC.read(@@probe_rd, pointerof(buf).as(Void*), 1)
+        true
+      else
+        false
       end
     end
   end

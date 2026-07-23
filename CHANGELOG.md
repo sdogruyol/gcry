@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Process GC `lock_read` / `lock_write` use a real `Crystal::RWLock` so collect does not race fiber `swapcontext`.
 - Allocate-black while `@collecting` (mid-collect allocations survive sweep).
 - **Static roots:** scan ELF BSS zero-fill anonymous pages (class vars like `Exception::CallStack::@@skip` live past the file-backed `.data` page) and RELRO `r--p` segments. Missing BSS roots caused null `@buffer` crashes while rendering Kemal 500 / ExceptionPage backtraces.
+- **Safe stack scans:** `Roots.scan_range(..., safe: true)` probes each page with `write(2)`/EFAULT so PROT_NONE fiber guard pages no longer SIGSEGV mid-collect (`roots.cr` during `Array` realloc → GC).
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
 
 ## [0.5.0] - 2026-07-23
