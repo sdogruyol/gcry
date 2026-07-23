@@ -12,7 +12,7 @@ module Gcry
   SIZE_CLASS_COUNT = 32
   LARGE_THRESHOLD  = 8192_u32
 
-  # mmap-backed allocator with size classes (no collection yet).
+  # mmap-backed allocator with size classes and conservative mark–sweep.
   #
   # The Heap *object* may live on Crystal's GC during unit tests. Mapped
   # chunks and freelist links live outside the managed heap so this can later
@@ -56,6 +56,7 @@ module Gcry
       @heap_size = 0_u64
       @free_bytes = 0_u64
       @live_objects = 0_u64
+      destroy_collector
     end
 
     def malloc(size : Int) : Void*
@@ -104,6 +105,7 @@ module Gcry
 
         unlink_chunk(chunk)
         @heap_size -= chunk.value.mapped_bytes
+        update_heap_bounds_after_unmap
         @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
         @live_objects -= 1 if @live_objects > 0
         LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
@@ -111,7 +113,7 @@ module Gcry
       end
 
       class_index = size_class_index(header.value.size)
-      BlockHeader.set_free(header, @freelists[class_index])
+      header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @freelists[class_index])
       @freelists[class_index] = pointer
 
       @free_bytes += payload
@@ -128,7 +130,6 @@ module Gcry
       false
     end
 
-    # Round a request up to a size-class payload (or leave as-is if large).
     def self.round_size(size : UInt64) : UInt64
       return SIZE_CLASSES[0].to_u64 if size == 0
       aligned = align_up(size, WORD_SIZE.to_u64)
@@ -149,6 +150,8 @@ module Gcry
 
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
+
+      maybe_collect
 
       rounded = self.class.round_size(size)
       flags = atomic ? BlockHeader::Flags::ATOMIC : 0_u32
@@ -232,10 +235,11 @@ module Gcry
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class)
       @chunks = chunk
       @heap_size += bytes
+      note_mapped(chunk)
       chunk
     end
 
-    private def unlink_chunk(target : ChunkHeader*) : Nil
+    protected def unlink_chunk(target : ChunkHeader*) : Nil
       if @chunks == target
         @chunks = target.value.next
         return
@@ -253,7 +257,7 @@ module Gcry
       end
     end
 
-    private def each_chunk(& : ChunkHeader* ->) : Nil
+    protected def each_chunk(& : ChunkHeader* ->) : Nil
       chunk = @chunks
       while chunk
         yield chunk
@@ -290,3 +294,5 @@ module Gcry
     end
   end
 end
+
+require "./collect"

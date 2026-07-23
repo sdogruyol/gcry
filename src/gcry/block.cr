@@ -18,7 +18,7 @@ module Gcry
     module Flags
       FREE   = 1_u32
       ATOMIC = 2_u32
-      MARK   = 4_u32 # reserved for Phase 2
+      MARK   = 4_u32
       LARGE  = 8_u32
     end
 

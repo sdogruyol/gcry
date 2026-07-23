@@ -196,12 +196,12 @@ DESIGN.md
 - Tests and simple fuzz (random alloc/free).
 - Deliverable: `Gcry::Heap` usable without collecting.
 
-### Phase 2 — Conservative mark–sweep MVP
+### Phase 2 — Conservative mark–sweep MVP ✅
 
 - Stack root scanning; mark bits; sweep to freelist.
 - Threshold-triggered and explicit `collect`.
 - Stats: heap size, free bytes, collection count.
-- Deliverable: correct single-threaded collector.
+- Deliverable: correct single-threaded collector (`Gcry::Heap#collect`).
 
 ### Phase 3 — Fibers & threads
 

@@ -1,0 +1,141 @@
+require "./spec_helper"
+
+describe "Gcry::Heap collection" do
+  it "keeps explicitly rooted objects alive" do
+    heap = Gcry::Heap.new
+    begin
+      keep = heap.malloc(64)
+      garbage = heap.malloc(64)
+      heap.add_root(keep)
+
+      before = heap.live_objects
+      heap.collect(scan_stack: false)
+      heap.collections.should eq(1)
+      heap.live?(keep).should be_true
+      heap.live?(garbage).should be_false
+      heap.live_objects.should eq(before - 1)
+      heap.bytes_since_gc.should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "traces pointers inside non-atomic objects" do
+    heap = Gcry::Heap.new
+    begin
+      child = heap.malloc(32)
+      parent = heap.malloc(16)
+      # Store child pointer in parent payload.
+      parent.as(Void**).value = child
+
+      heap.add_root(parent)
+      heap.collect(scan_stack: false)
+
+      heap.live?(parent).should be_true
+      heap.live?(child).should be_true
+      heap.live_objects.should eq(2)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "does not trace inside atomic objects" do
+    heap = Gcry::Heap.new
+    begin
+      child = heap.malloc(32)
+      parent = heap.malloc_atomic(16)
+      parent.as(Void**).value = child
+
+      heap.add_root(parent)
+      heap.collect(scan_stack: false)
+
+      heap.live?(parent).should be_true
+      heap.live?(child).should be_false
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "reclaims large unmarked objects" do
+    heap = Gcry::Heap.new
+    begin
+      keep = heap.malloc(100_000)
+      drop = heap.malloc(100_000)
+      heap.add_root(keep)
+      before = heap.heap_size
+
+      heap.collect(scan_stack: false)
+
+      heap.live?(keep).should be_true
+      heap.live?(drop).should be_false
+      heap.heap_size.should be < before
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "finds objects via interior pointers" do
+    heap = Gcry::Heap.new
+    begin
+      obj = heap.malloc(64)
+      interior = (obj.as(UInt8*) + 24).as(Void*)
+      header = heap.find_object(interior)
+      header.should_not be_nil
+      Gcry::BlockHeader.user_from(header.not_nil!).should eq(obj)
+
+      heap.add_root(interior)
+      heap.collect(scan_stack: false)
+      heap.live?(obj).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "accepts extra roots passed to collect" do
+    heap = Gcry::Heap.new
+    begin
+      a = heap.malloc(16)
+      b = heap.malloc(16)
+      heap.collect(scan_stack: false, roots: [a])
+      heap.live?(a).should be_true
+      heap.live?(b).should be_false
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "auto-collects when the threshold is crossed" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = 1024
+      heap.disable
+      40.times { heap.malloc(64) } # 40 * 64 = 2560 rounded sizes... each is 64
+      heap.bytes_since_gc.should be > 1024
+      heap.enable
+      # Next allocation triggers maybe_collect
+      heap.malloc(16)
+      heap.collections.should be > 0
+      heap.bytes_since_gc.should be < heap.gc_threshold
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "scans the stack when stack_bottom is set" do
+    heap = Gcry::Heap.new
+    begin
+      # Capture a high stack address as bottom, then allocate locals below it.
+      bottom = Pointer(Void).null
+      local = 0
+      bottom = (pointerof(local).as(UInt8*) + 4096).as(Void*)
+      heap.set_stackbottom(bottom)
+
+      keep = heap.malloc(32)
+      # keep is on this stack frame; collect with stack scan should retain it.
+      heap.collect(scan_stack: true)
+      heap.live?(keep).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+end

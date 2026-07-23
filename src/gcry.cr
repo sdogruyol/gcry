@@ -41,6 +41,26 @@ module Gcry
   def self.is_heap_ptr(pointer : Void*) : Bool
     default_heap.is_heap_ptr(pointer)
   end
+
+  def self.collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    default_heap.collect(scan_stack: scan_stack, roots: roots)
+  end
+
+  def self.add_root(pointer : Void*) : Nil
+    default_heap.add_root(pointer)
+  end
+
+  def self.enable : Nil
+    default_heap.enable
+  end
+
+  def self.disable : Nil
+    default_heap.disable
+  end
+
+  def self.live?(pointer : Void*) : Bool
+    default_heap.live?(pointer)
+  end
 end
 
 # Phase 4+: reopen ::GC here under flag?(:gc_none) and forward to Gcry::*.
