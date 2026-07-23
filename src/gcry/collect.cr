@@ -456,6 +456,10 @@ module Gcry
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?) : Nil
       started = monotonic_ns
       @collecting = true
+      # Generational mark skips old objects; old→young edges come from
+      # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
+      # old walk). Finalizers/WeakRef must not treat unmarked old as dead
+      # (see unmarked_live_object?).
       @minor_only = !major
       begin
         # Block fiber swaps, then suspend other OS threads.
@@ -975,6 +979,9 @@ module Gcry
       header = find_object(obj)
       return false unless header
       return false if BlockHeader.free?(header)
+      # During generational minor, old objects are intentionally unmarked.
+      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
+      return false if @minor_only && !BlockHeader.nursery?(header)
       !BlockHeader.marked?(header)
     end
 

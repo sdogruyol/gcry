@@ -234,17 +234,19 @@ Linux soft-dirty helpers land for process minors (`soft_dirty_armed` on `/gc-sta
 
 | Config | result |
 |--------|--------|
-| default (nursery off) | Kemal `/json` healthy (prior ~100% Boehm) |
-| `GCRY_NURSERY=524288` | Kemal under concurrent `/json` **dies** (silent process exit); `json_churn` short runs OK |
+| default (nursery off) | Kemal `/json` ~**39.6k** req/s, healthy |
+| `GCRY_NURSERY=524288` | **Stays up** under `wrk -c 100 -d 30` `/json` (~**3.7k** req/s) — sound after minor finalizer/WeakRef fix; slow without soft-dirty (full old→young each minor) |
 
-Takeaway: soft-dirty infrastructure is in place for kernels that support it; **nursery must stay off for process HTTP** until the process-GC minor path is made sound under load. RSS experiment blocked on that.
+**Bug fixed:** generational minors left old objects unmarked; `enqueue_unreachable_finalizers` treated them as dead and ran live finalizers / cleared WeakRefs under HTTP (SIGSEGV). Minors now only finalize/clear links for **nursery** objects.
+
+Takeaway: nursery is **opt-in and sound** for process HTTP; keep **off by default** until soft-dirty (or barriers) makes minors cheap. RSS experiment still wants a kernel with soft-dirty bits.
 
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
-4. Fix process-GC **nursery under HTTP load**, then re-measure soft-dirty RSS on a kernel with soft-dirty bits.
+4. ~~Fix process-GC **nursery under HTTP load**.~~ **Done** (finalizer/WeakRef minor filter). Re-measure soft-dirty RSS on a kernel with soft-dirty bits.
 5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
@@ -253,7 +255,7 @@ Takeaway: soft-dirty infrastructure is in place for kernels that support it; **n
 10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start).
 11. ~~Empty-chunk munmap outside STW + occupancy counters; measure RELEASE_CHUNKS.~~ **Done.**
 12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
-13. ~~Soft-dirty platform + minor wiring.~~ **Done** (WSL no bits; nursery HTTP unsafe).
+13. ~~Soft-dirty platform + minor wiring.~~ **Done** (WSL no bits; nursery HTTP now sound but slow).
 
 ## Non-goals (still)
 

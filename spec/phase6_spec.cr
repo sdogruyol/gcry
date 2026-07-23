@@ -44,6 +44,34 @@ describe "Gcry nursery (minor GC)" do
     end
   end
 
+  it "does not run finalizers for live old objects during minor" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = true
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_threshold = UInt64::MAX
+
+      old = heap.malloc(32)
+      heap.add_root(old)
+      # Promote out of the nursery.
+      heap.minor_collect(scan_stack: false)
+      Gcry::BlockHeader.nursery?(Gcry::BlockHeader.from_user(old)).should be_false
+
+      ran = false
+      heap.add_finalizer(old) { ran = true }
+
+      # Young garbage so a minor does real work.
+      20.times { heap.malloc(64) }
+      heap.minor_collect(scan_stack: false)
+
+      ran.should be_false
+      heap.live?(old).should be_true
+      heap.finalizer_entry_count.should eq(1)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "triggers minor collect when nursery threshold is crossed" do
     heap = Gcry::Heap.new
     begin

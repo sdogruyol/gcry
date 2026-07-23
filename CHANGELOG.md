@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nursery minors:** do not run finalizers / clear WeakRef links for unmarked **old** objects (`minor_only` leaves them unmarked by design). This crashed process GC under Kemal `GCRY_NURSERY` + concurrent `/json`.
+
 ### Changed
 
 - Large-object freelist reuse is **exact mapped-size** only (no oversized VMA for a smaller need).
@@ -14,13 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
 - Empty size-class chunk `munmap` deferred **outside STW** (queued in sweep, flushed with `trim_large_cache`); occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
 - Size-class occupancy: `size_class_live_bytes` + fill histogram (`chunk_fill_lt25`…`ge75`); `GCRY_CHUNK_BYTES` (default **256 KiB**).
-- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; process minors can scan dirty old pages only when the kernel tracks writes (`soft_dirty_armed`). Falls back to full old→young scan otherwise. `GCRY_NURSERY` stays opt-in.
+- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; process minors can scan dirty old pages only when the kernel tracks writes (`soft_dirty_armed`). Falls back to full old→young scan otherwise. `GCRY_NURSERY` stays opt-in (off by default).
 
 ### Performance
 
 - Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%**; `GCRY_CHUNK_BYTES=131072` **~98.5%** (RSS flat — Kemal waste is mostly retained empty chunks).
 - acikturkiye: live/small_mapped **~64%**, **~76%** of chunks ≥75% full → RSS is **conservative-live**, not sparse; 128 KiB chunks no RSS win — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Soft-dirty bits **unavailable on this WSL host** (probe pending); `GCRY_NURSERY` under Kemal process GC still **crashes under load** (pre-existing nursery+HTTP issue — keep opt-in / off by default).
+- Soft-dirty bits **unavailable on this WSL host** (probe pending). `GCRY_NURSERY=524288` Kemal `/json` **stays up** (~3.7k req/s vs ~39k default) — full old→young each minor; keep opt-in.
 
 ## [0.6.0] - 2026-07-23
 

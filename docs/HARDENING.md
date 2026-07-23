@@ -18,7 +18,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (process default `67108864` / 64 MiB) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
-| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; Kemal/`GCRY_NURSERY` still crashes under load) |
+| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; sound under Kemal load but slow without soft-dirty) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
 | `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
