@@ -14,7 +14,7 @@ Researched against **Crystal 1.21.0** stdlib (`/usr/share/crystal/src`). These n
 {% end %}
 ```
 
-Crystal has no built-in third backend. **gcry does not patch Crystal.** Instead it follows [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (immix):
+Crystal has no built-in third backend. **gcry does not patch Crystal.** Instead:
 
 1. Compile with **`-Dgc_none`** → Crystal loads stub `gc/none` (libc malloc, no collection, no libgc link).
 2. **`require "gcry"`** early → reopen `module GC` and replace stub methods with the real collector.
@@ -30,7 +30,7 @@ Crystal has no built-in third backend. **gcry does not patch Crystal.** Instead 
 crystal build -Dgc_none app.cr
 ```
 
-**Caveat:** `require "gcry"` must run before significant allocation that should live on the gcry heap. In practice, put it at the top of the entry file (immix does the same). `GC.init` still runs from `Crystal.main` after constants are initialized — the reopened `GC.init` must set up gcry (fiber callbacks, arenas).
+**Caveat:** `require "gcry"` must run before significant allocation that should live on the gcry heap. In practice, put it at the top of the entry file. `GC.init` still runs from `Crystal.main` after constants are initialized — the reopened `GC.init` must set up gcry (fiber callbacks, arenas).
 
 **Decision (Phase 0):** pure shard + `-Dgc_none`. No Crystal fork.
 
@@ -136,16 +136,14 @@ thread.gc_thread_handler, stack_bottom = GC.current_thread_stack_bottom
 5. **Fork safety:** boehm sets `GC_set_handle_fork(1)`. MVP: document as unsupported or call `pthread_atfork` stubs; Phase 5+.
 6. **Tracing:** optional `Crystal.trace :gc, ...` around malloc/collect when `flag?(:tracing)` — nice-to-have, not MVP.
 
-## How immix does it (precedent)
+## Shard facade pattern
 
-[ysbaddaden/gc](https://github.com/ysbaddaden/gc) `src/immix.cr`:
+gcry integrates without patching Crystal:
 
-- `require` reopens `module GC` and redefines `malloc`, `collect`, `push_stack`, …
-- `push_stack` → `GC_add_roots` for suspended fibers
-- `before_collect` registers a callback that walks `Fiber.unsafe_each` and calls `push_gc_roots`
-- Collector core is C (`immix.a`); Crystal is the `GC` facade
-
-gcry uses the **same facade pattern**, with the collector written in Crystal (`Gcry::*`) instead of C.
+- `require "gcry"` under `-Dgc_none` reopens `module GC` and redefines `malloc`, `collect`, `push_stack`, …
+- `before_collect` walks `Fiber.unsafe_each` and calls `push_gc_roots` for suspended fibers
+- `push_stack` conservatively scans those stack ranges into the mark queue
+- Collector core lives in Crystal (`Gcry::*`); `GC` is a thin facade
 
 ## Development strategy
 

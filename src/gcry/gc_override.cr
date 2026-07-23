@@ -1,5 +1,4 @@
 # Reopens Crystal's `GC` module under `-Dgc_none`, forwarding to Gcry.
-# Same integration pattern as ysbaddaden/gc (immix).
 
 {% if flag?(:linux) && flag?(:gnu) %}
   lib LibC
@@ -25,7 +24,7 @@ module GC
       heap.set_stackbottom(LibC.__libc_stack_end)
     {% end %}
 
-    # Suspended fibers: push their stacks before marking (Boehm / immix pattern).
+    # Suspended fibers: push their stacks before marking (Boehm-compatible hooks).
     heap.before_collect do
       Fiber.unsafe_each do |fiber|
         fiber.push_gc_roots unless fiber.running?
@@ -38,24 +37,32 @@ module GC
 
   # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
-    if flag = LibC.getenv("GCRY_DISABLE_AUTO")
-      unless flag.null?
-        if flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
-          heap.gc_threshold = UInt64::MAX
-          return
-        end
-      end
+    if env_flag_one?("GCRY_DISABLE_AUTO")
+      heap.gc_threshold = UInt64::MAX
+    elsif thr = env_u64("GCRY_THRESHOLD")
+      heap.gc_threshold = thr unless thr == 0
+    else
+      heap.gc_threshold = Gcry::Heap::DEFAULT_GC_THRESHOLD
     end
 
-    if thr = LibC.getenv("GCRY_THRESHOLD")
-      unless thr.null?
-        value = parse_u64_cstr(thr)
-        heap.gc_threshold = value unless value == 0
-        return
-      end
+    if env_flag_one?("GCRY_DISABLE_NURSERY")
+      heap.nursery_enabled = false
+      heap.nursery_threshold = UInt64::MAX
+    elsif nursery = env_u64("GCRY_NURSERY")
+      heap.nursery_threshold = nursery unless nursery == 0
     end
+  end
 
-    heap.gc_threshold = Gcry::Heap::DEFAULT_GC_THRESHOLD
+  private def self.env_flag_one?(name : String) : Bool
+    flag = LibC.getenv(name)
+    return false if flag.null?
+    flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+  end
+
+  private def self.env_u64(name : String) : UInt64?
+    ptr = LibC.getenv(name)
+    return nil if ptr.null?
+    parse_u64_cstr(ptr)
   end
 
   private def self.parse_u64_cstr(ptr : UInt8*) : UInt64

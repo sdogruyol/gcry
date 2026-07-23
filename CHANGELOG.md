@@ -3,12 +3,18 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
 ## [Unreleased]
 
 ### Added
 
+- **Phase 7 productization**
+  - [docs/POLICY.md](docs/POLICY.md) — OOM (emergency collect + `OutOfMemoryError`), fork unsupported, not signal-safe.
+  - [docs/COMPARISON.md](docs/COMPARISON.md) — checklist vs bdwgc.
+  - Env knobs: `GCRY_NURSERY`, `GCRY_DISABLE_NURSERY` (plus existing major-threshold knobs).
+  - `Makefile` for `spec` / `samples` / `bench` / format.
+  - `shard.yml` description + repository metadata.
 - **Phase 6 performance**
   - Nursery + `minor_collect` (old→young scan without write barriers; survivors promote).
   - Incremental mark via `collect_a_little` / `GC.collect_a_little` (black alloc during cycle).
@@ -24,15 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Phase 2** — conservative mark–sweep.
 - **Phase 1** — mmap size-class allocator.
 
+### Changed
+
+- CI: create `bin/` before sample builds; Crystal `1.21.0` + `latest` matrix; format check; `samples/min`, env-knob smoke, `bench/churn`.
+- README status → Phase 7 complete; development via `make`.
+
 ### Fixed
 
 - Avoid Crystal `ENV` during `GC.init` (Fiber/`once` deadlock); use `LibC.getenv`.
 - Suppress auto-collect while finalizers run.
 - Bootstrap: no `LibC::MAP_FAILED` / runtime size-class Array on malloc path.
+- OOM: one emergency collect + retry before raising on heap `mmap` failure.
 
 ### Notes
 
-- Phase 0–6 complete.
+- Phase 0–7 complete (v0.1 productization).
 - Default process auto-collect: 4 MiB major; 512 KiB nursery.
-- Concurrent mark / compacting / precise GC need compiler cooperation (post–Phase 6).
-- Next: Phase 7 — productization.
+- Concurrent mark / compacting / precise GC need compiler cooperation.
+- Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).

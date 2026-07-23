@@ -13,7 +13,7 @@ This document captures goals, non-goals, architecture, API surface, bootstrap co
 ## Goals
 
 1. Implement a working conservative mark–sweep GC in Crystal.
-2. Ship as a **shard** that reopens Crystal’s `GC` module (same pattern as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) / immix): `require "gcry"` + build with `-Dgc_none`.
+2. Ship as a **shard** that reopens Crystal’s `GC` module: `require "gcry"` + build with `-Dgc_none`.
 3. Support Crystal fibers (stack registration / `set_stackbottom`) and, later, multi-threading (`preview_mt`).
 4. Keep the collector core **allocation-free** with respect to the managed heap (no chicken-and-egg allocations during collect).
 5. Provide measurable stats and knobs for tuning and comparison against bdwgc.
@@ -72,9 +72,7 @@ gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry p
 | `stop_world` / `start_world` | Multi-thread STW (no-op stubs today) |
 | `pthread_*` GC registration | When threads must be tracked |
 
-### Integration decision (immix-style shard)
-
-Same approach as [ysbaddaden/gc](https://github.com/ysbaddaden/gc):
+### Integration decision (shard override)
 
 1. Build the program with **`-Dgc_none`** so Crystal loads the stub backend (no bdwgc link).
 2. Early in the program (or via a prelude require), **`require "gcry"`**.
@@ -242,13 +240,13 @@ Deferred (need codegen / barriers):
 
 Precise GC remains a **separate track**: Crystal stack maps and typed allocation, not only collector work.
 
-### Phase 7 — Productization
+### Phase 7 — Productization ✅
 
-- Polished shard UX (`shards` install, docs, samples).
-- Optional upstream Crystal backend later — not required for adoption.
-- Tuning knobs (heap growth, collect threshold, env vars).
-- OOM, fork-safety, and signal-safety policy.
-- bdwgc / immix comparison checklist for supported platforms.
+- Shard UX: polished README, `shard.yml` metadata, `Makefile` (`spec` / `samples` / `bench`).
+- Tuning: `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`, `GCRY_NURSERY`, `GCRY_DISABLE_NURSERY`.
+- Policies: [docs/POLICY.md](docs/POLICY.md) (OOM emergency collect + raise, fork unsupported, not signal-safe).
+- Comparison: [docs/COMPARISON.md](docs/COMPARISON.md) vs bdwgc.
+- Deliverable: adopt-able v0.1 shard without patching Crystal.
 
 ## MVP definition (v0.1)
 
@@ -281,24 +279,25 @@ Anything beyond that (MT, incremental, generational) is post-MVP.
 
 | Topic | Decision |
 |-------|----------|
-| Distribution | Pure shard; reopen `module GC` (immix pattern) |
+| Distribution | Pure shard; reopen `module GC` under `-Dgc_none` |
 | Activation | `require "gcry"` + compile with `-Dgc_none` |
 | Crystal patch | Not required |
 | Crystal version | `>= 1.21.0` (matches researched stdlib) |
 | `preview_mt` in v0.1 | No |
 | Early testing | `Gcry::*` under default Boehm; process GC via `-Dgc_none` once facade exists |
 
-## Open questions
+## Open questions (resolved for v0.1)
 
-1. Finalizer execution model: same thread vs dedicated finalizer fiber? (immix uses a collector fiber)
-2. How aggressively to return memory to the OS vs retain freelists?
-3. Should `add_root` only scan an internal list? (Boehm backend currently only appends to an Array.)
-4. When reopening `GC` under `-Dgc_none`, do we keep `none`’s `stop_world` / `start_world` or replace them immediately?
+1. **Finalizers:** run on the same thread after collect (not a dedicated finalizer fiber).
+2. **Return memory to OS:** `munmap` large objects on reclaim; keep size-class chunks mapped for freelist reuse.
+3. **`add_root`:** maintain and scan an internal root set (not Boehm’s unused Array-only quirk).
+4. **`stop_world` / `start_world`:** no-ops on the single-threaded path (same practical effect as `gc/none` until `preview_mt`).
 
 ## References
 
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 GC / fiber notes
-- [ysbaddaden/gc](https://github.com/ysbaddaden/gc) — Immix GC shard; `require` + `-Dgc_none` precedent
+- [docs/POLICY.md](docs/POLICY.md) — OOM / fork / signal policy
+- [docs/COMPARISON.md](docs/COMPARISON.md) — bdwgc comparison checklist
 - Crystal `src/gc.cr`, `src/gc/boehm.cr`, `src/gc/none.cr`
 - Crystal PR abstracting LibGC / enabling `gc_none` ([#5314](https://github.com/crystal-lang/crystal/pull/5314))
 - [bdwgc](https://github.com/ivmai/bdwgc)

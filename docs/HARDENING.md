@@ -18,8 +18,10 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (default `4194304`) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
+| `GCRY_NURSERY` | Young bytes before minor collect (default `524288` under process GC) |
+| `GCRY_DISABLE_NURSERY=1` | Disables nursery allocation / minor collections |
 
-Process GC also enables a **nursery** (default 512 KiB young alloc before `minor_collect`). Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
+Process GC enables a **nursery** by default. Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
 
 `collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons.
 
@@ -28,9 +30,13 @@ Example:
 ```sh
 GCRY_THRESHOLD=1048576 crystal build -Dgc_none samples/alloc.cr -o alloc && ./alloc
 GCRY_DISABLE_AUTO=1 crystal run -Dgc_none samples/hello.cr
+GCRY_NURSERY=262144 ./bin/alloc 1000
+GCRY_DISABLE_NURSERY=1 ./bin/stress 200
 ```
 
 Auto-collect is suppressed while finalizers run (avoids nested collect).
+
+OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
 
 ## False retention
 

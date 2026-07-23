@@ -1,6 +1,6 @@
 # gcry — a Crystal garbage collector
 #
-# Alternative to bdwgc. Integrate like ysbaddaden/gc (immix):
+# Alternative to bdwgc. Integrate with:
 #   require "gcry"  and  crystal build -Dgc_none
 #
 # See DESIGN.md and docs/INTEGRATION.md.

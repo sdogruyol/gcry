@@ -54,10 +54,12 @@ jobs:
           crystal build -Dgc_none samples/stress.cr -o bin/stress
           ./bin/stress 300
 
-      - name: Env knobs smoke (GCRY_DISABLE_AUTO)
+      - name: Env knobs smoke (GCRY_DISABLE_AUTO / GCRY_DISABLE_NURSERY)
         run: |
-          crystal build -Dgc_none samples/hello.cr -o bin/hello_noauto
-          GCRY_DISABLE_AUTO=1 ./bin/hello_noauto
+          crystal build -Dgc_none samples/hello.cr -o bin/hello_env
+          GCRY_DISABLE_AUTO=1 ./bin/hello_env
+          GCRY_DISABLE_NURSERY=1 ./bin/hello_env
+          GCRY_NURSERY=262144 ./bin/hello_env
 
       - name: Bench churn (library heap)
         run: |

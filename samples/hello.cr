@@ -1,5 +1,10 @@
 # Build: crystal build -Dgc_none samples/hello.cr -o hello
 # Run:   ./hello
+#
+# As a shard dependency (in your app):
+#   {% if flag?(:gc_none) %}
+#     require "gcry"
+#   {% end %}
 
 require "../src/gcry"
 

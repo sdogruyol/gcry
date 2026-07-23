@@ -7,3 +7,11 @@ authors:
 crystal: '>= 1.21.0'
 
 license: MIT
+
+description: |
+  Conservative mark–sweep garbage collector for Crystal.
+  Drop-in alternative to bdwgc via `require "gcry"` + `-Dgc_none`.
+
+repository: https://github.com/sdogruyol/gcry
+homepage: https://github.com/sdogruyol/gcry
+documentation: https://github.com/sdogruyol/gcry#readme

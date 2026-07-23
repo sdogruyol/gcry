@@ -249,14 +249,14 @@ module Gcry
     end
 
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
-      ptr = LibC.mmap(
-        Pointer(Void).null,
-        LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
-        -1,
-        0
-      )
+      ptr = mmap_anonymous(bytes)
+
+      # One emergency collect may free large objects (munmap) before failing hard.
+      if Gcry.mmap_failed?(ptr) && !@collecting && @enabled
+        collect(scan_stack: true)
+        ptr = mmap_anonymous(bytes)
+      end
+
       raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
 
       chunk = ptr.as(ChunkHeader*)
@@ -265,6 +265,17 @@ module Gcry
       @heap_size += bytes
       note_mapped(chunk)
       chunk
+    end
+
+    private def mmap_anonymous(bytes : UInt64) : Void*
+      LibC.mmap(
+        Pointer(Void).null,
+        LibC::SizeT.new(bytes),
+        LibC::PROT_READ | LibC::PROT_WRITE,
+        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        -1,
+        0
+      )
     end
 
     protected def unlink_chunk(target : ChunkHeader*) : Nil
