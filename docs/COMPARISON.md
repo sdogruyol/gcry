@@ -3,7 +3,7 @@
 Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (v0.4) | bdwgc (Crystal default) |
+| Area | gcry (v0.4 + main) | bdwgc (Crystal default) |
 |------|-------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
@@ -13,13 +13,14 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Fork safety | **Unsupported** (documented) | `GC_set_handle_fork` |
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |
-| Auto-collect knobs | `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`, `GCRY_NURSERY`, `GCRY_DISABLE_NURSERY` | LibGC env / APIs |
+| Auto-collect knobs | `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`, `GCRY_NURSERY`, `GCRY_KEEP_CHUNKS`, … | LibGC env / APIs |
 | Incremental | Opt-in `GCRY_INCREMENTAL=1` (experimental without barriers); default full STW | Yes (BDW) |
 | Generational | Nursery without write barriers | Optional BDW modes |
 | Compacting / moving | No | Mostly no (conservative) |
 | Precise roots | No (needs compiler) | No |
-| Platforms | Linux x86_64 first | Broad |
+| Platforms | Linux x86_64 first; aarch64 cross-compile CI | Broad |
 | Unit-test mode | `Gcry::Heap` under Boehm | N/A |
+| `prof_stats` | Heap / reclaim / explicit-free counters filled | Full LibGC fields |
 
 ## Smoke checklist (gcry)
 

@@ -248,6 +248,14 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Comparison: [docs/COMPARISON.md](docs/COMPARISON.md) vs bdwgc.
 - Deliverable: adopt-able v0.1 shard without patching Crystal.
 
+### Phase 8 — Production hardening + STW perf (in progress)
+
+- Empty-chunk release stays **opt-in** (`GCRY_RELEASE_CHUNKS=1`); default-on loses too much vs Boehm.
+- Pin finalizer Array buffers / Proc closures during mark (LibC-bootstrap metadata).
+- Pause p50/p99; richer `GC.prof_stats` reclaim counters; `samples/json_churn.cr`.
+- STW hot path: O(n) static-root×heap exclusion via sorted chunk index; `find_object` block-bytes cache; larger mark stack.
+- Mark-epoch (skip `clear_all_marks` walk) **not** shipped — caused Hash corruption under Kemal; keep bit marks for now.
+
 ## MVP definition (v0.1)
 
 - Platform: Linux x86_64, Crystal `>= 1.21` default ExecutionContext (parallelism 1)

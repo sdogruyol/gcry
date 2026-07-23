@@ -16,7 +16,7 @@ product decisions for Linux x86_64 under Crystal **1.21+** defaults
 Notes:
 
 - Auto-collect already runs before most allocations when thresholds are hit; the emergency path covers hard OS refusal after that.
-- Large objects are `munmap`'d on reclaim. Fully free size-class chunks may be `munmap`'d after a major when `GCRY_RELEASE_CHUNKS=1` (v0.4+; off by default while maturing under HTTP load).
+- Large objects are `munmap`'d on reclaim. Fully free size-class chunks may be `munmap`'d after a major when `GCRY_RELEASE_CHUNKS=1` (opt-in; unreleased tree pins finalizer buffers so this is crash-safe).
 - There is no soft heap limit or `malloc` null-return mode. Crystal codepaths expect exceptions (or abort) on OOM.
 
 ## Fork safety

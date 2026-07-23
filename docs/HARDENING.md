@@ -23,11 +23,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
-| `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (off by default; maturing) |
+| `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (opt-in) |
+| `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (overrides release) |
 
-Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Library `Gcry::Heap` leaves nursery off-threshold and `incremental_auto = false` unless you set them.
+Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Empty-chunk release stays **opt-in** (unreleased tree pins finalizer buffers so it is crash-safe; default-on costs too much vs Boehm). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
-Inspect pauses with `Gcry.pause_stats`. `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects (and empty chunks when release is enabled).
+Inspect pauses with `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `count`). `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects and empty chunks when release is enabled.
 
 Example:
 
@@ -38,6 +39,7 @@ GCRY_NURSERY=262144 ./bin/alloc 1000
 GCRY_DISABLE_NURSERY=1 ./bin/stress 200
 GCRY_INCREMENTAL=1 ./bin/stress 200
 GCRY_RELEASE_CHUNKS=1 ./bin/stress 200
+./bin/json_churn 1000
 ```
 
 Process GC defaults (v0.4+): majors at 64 MiB full STW; nursery off; size-class chunks retained unless `GCRY_RELEASE_CHUNKS=1`. Auto-collect is suppressed while finalizers run (avoids nested collect).
@@ -65,7 +67,7 @@ GC.collect
 after = GC.stats.heap_size
 ```
 
-`heap_size` may not shrink for small objects (chunks are retained); prefer `Gcry.default_heap.live_objects` in library tests or watch RSS over longer runs.
+`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Prefer `Gcry.default_heap.live_objects` in library tests.
 
 ## Process GC notes (HTTP / fibers)
 

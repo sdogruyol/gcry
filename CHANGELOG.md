@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pause percentiles: `Gcry.pause_stats` now includes `p50_ns` / `p99_ns` (ring of last 64 pauses).
+- Meaningful `GC.prof_stats`: `bytes_before_gc`, `bytes_reclaimed_since_gc`, `reclaimed_bytes_before_gc`, `expl_freed_bytes_since_gc`, `obtained_from_os_bytes`.
+- `samples/json_churn.cr` — Hash/JSON mutation dogfood under process GC.
+- CI: aarch64 cross-compile of hello/min/alloc on PR+push; `json_churn` + chunk env knobs on x86_64.
+
+### Changed
+
+- Empty-chunk release stays **opt-in** (`GCRY_RELEASE_CHUNKS=1`); `GCRY_KEEP_CHUNKS=1` forces off.
+- Finalizer Array buffers / Proc closures pinned during mark (safe opt-in chunk munmap).
+- STW hot path: O(n) static-root×heap exclusion (sorted chunk index merge); `find_object` size-class block-bytes cache; mark stack default 256 KiB.
+
+### Performance
+
+- Same-host vs **Boehm** (multi-run mean, unreleased tree): `/` **~89%**, `/json` **~81%** of Boehm req/s — see [docs/PERF.md](docs/PERF.md).
+- `GCRY_RELEASE_CHUNKS=1` still ~**49%** of Boehm `/json` — remains opt-in.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added
@@ -24,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- Kemal wrk vs **v0.3.0** (same host): `/` **−2.7%** req/s, **+0.5%** lat.avg; `/json` **−0.6%** req/s, **−0.4%** lat.avg — see [docs/PERF.md](docs/PERF.md). Throughput-neutral; prioritizes soundness (STW default).
+- Kemal wrk vs **v0.3.0** (same host): `/` **−2.7%** req/s, **+0.5%** lat.avg; `/json` **−0.6%** req/s, **−0.4%** lat.avg. Throughput-neutral; prioritizes soundness (STW default).
 
 ## [0.3.0] - 2026-07-23
 
@@ -32,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pause instrumentation: `last_pause_ns` / `max_pause_ns` / `total_pause_ns` / `pause_count` on `Gcry::Heap`; `Gcry.pause_stats`.
 - Env knobs: `GCRY_DISABLE_INCREMENTAL=1`, `GCRY_INCREMENTAL_WORK` (mark units per slice).
-- [docs/PERF.md](docs/PERF.md) — version-over-version Kemal wrk log (`/` + `/json`); `make bench-kemal-record`.
+- [docs/PERF.md](docs/PERF.md) — % of Boehm on Kemal wrk (`/` + `/json`).
 
 ### Changed
 
@@ -42,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- Kemal wrk vs **0.2.0** on `/` (same host): **+1.2%** req/s, **−33%** lat.avg — see [docs/PERF.md](docs/PERF.md).
+- Kemal wrk vs **0.2.0** on `/` (same host): **+1.2%** req/s, **−33%** lat.avg.
 - Bench app: enriched **`GET /json`** (nested JSON alloc stress); formal `/json` baseline **30112** req/s vs Boehm **41748** (~72%).
 
 ## [0.2.0] - 2026-07-23
