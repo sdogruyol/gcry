@@ -60,14 +60,13 @@ RSS / `heap_size` gap confirms retention + large-object VMAs; pause totals still
 6. **Sweep munmap storm** — each &gt;8KiB object is its own VMA; munmap during STW dominated `phase_sweep` (~8s). **Fix:** large-object freelist + trim outside STW.
 7. **Finalizer/WeakRef** — per-reclaim registry scan was O(reclaimed × entries); now one post-mark index pass. **Do not** pass a Crystal `Proc` into collect (malloc mid-STW → crash); use index APIs only.
 
-## Remaining gap (~2× vs Boehm)
+## Remaining gap (historical; throughput now ≈ Boehm)
 
-Not explained by pause totals (~1% of wall). Likely:
+Earlier ~2× req/s gap was **not** explained by pause totals (~1% of wall). Drivers that remain for RSS / locality (throughput already caught up after `notice_reclaim` + size-class work):
 
-- Mutator / allocator path cost vs Boehm
-- Conservative retention → larger `heap_size` / worse locality
+- Conservative retention → larger `heap_size` / worse locality vs Boehm
 - Large-object cache RSS trade-off
-- App/DB interaction under load (timeouts)
+- App/DB interaction under load (timeouts on both GCs)
 
 ### After size-class ceiling 16 KiB (WSL, same day)
 
@@ -152,20 +151,31 @@ Toy Kemal `/json`: ~39623 req/s (flat/noise vs prior).
 
 **acikturkiye** `/api/v1/`: **154 req/s** (flat vs ~159; still ≈ Boehm). Kemal `/json`: ~40629 req/s.
 
+### Re-record after STW / static-root / stack fixes (WSL, 2026-07-23 evening)
+
+Same load as above (`wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, fresh `--release` binaries against current `../gcry`). Includes prior size-class / `notice_reclaim` / chunk-index work plus CI SIGBUS fixes (`[anon:…]` static-root skip, hole-aware safe stack scans).
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 153 | 100% | 47 MiB | 476 | same session |
+| gcry | 154 | **~101%** | 172 MiB | 357 | heap ≈ 291 MiB; `large_free` ≈ 15 MiB; pause p50 ≈ 16ms; mark ≈ 12ms; 18 majors; pause_total ≈ 0.33s / 30s |
+
+Takeaway: real-app throughput remains **≈ Boehm** after the stack/static-root hardening. RSS / `heap_size` still ~3–4× Boehm (conservative retention + large freelist); STW is not the limiter. Toy Kemal re-record the same evening: `/` ~105%, `/json` ~100% of Boehm — see [PERF.md](PERF.md).
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
-4. Longer-term: write barriers + nursery / incremental for Boehm-like mutator behavior.
+4. Longer-term: write barriers + nursery / incremental for Boehm-like mutator behavior (RSS / locality).
 5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
 8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
-9. Re-record Kemal `docs/PERF.md` + consider version cut now that acikturkiye ≈ Boehm.
+9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; consider version cut).
 
 ## Non-goals (still)
 
 - `GCRY_INCREMENTAL=1` / nursery as process default without barriers (unsound on JSON/Hash).
-- `GCRY_RELEASE_CHUNKS=1` as default (Kemal wrk regression).
-- Tagged PERF.md row until same-host kemal + acikturkiye stabilize.
+- `GCRY_RELEASE_CHUNKS=1` as default (Kemal still slower with it; see [PERF.md](PERF.md)).
+- Chasing Boehm RSS parity without write barriers / better large-object policy.

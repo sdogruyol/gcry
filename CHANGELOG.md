@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): gcry ~**51%** of Boehm req/s after STW/sweep/finalizer fixes; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host Kemal vs **Boehm** (re-record): `/` **~105%**, `/json` **~100%** of Boehm req/s; `GCRY_RELEASE_CHUNKS=1` ~**92%** on both — see [docs/PERF.md](docs/PERF.md).
+- Same-host **acikturkiye** `/api/v1/` (re-record): gcry **~101%** of Boehm req/s (154 vs 153); RSS still ~3–4× — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): early post-STW was ~**51%** of Boehm; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Raise size-class ceiling **8→16 KiB** (`10240`…`16384`): medium buffers leave per-object mmap. Same-host WSL `/api/v1/`: ~**54%→~68%** of Boehm; `large_free` ~16→3 MiB — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Raise size-class ceiling **16→32 KiB** (`20480`…`32768`). Same-host WSL `/api/v1/`: ~**68%→~89%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Skip `malloc` clear while a size-class freelist (or fresh large mmap) is still MAP_ANONYMOUS-zeroed; `SizeClasses.fit` one-pass class lookup. Steady-state acikturkiye wrk unchanged (~88–89% of Boehm) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).

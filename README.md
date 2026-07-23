@@ -31,7 +31,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 
 - Not a drop-in for multi-threaded / parallel ExecutionContexts (stick to parallelism **1**)
 - Not fork-safe like Boehm’s fork handling
-- Not as battle-tested or as fast as Boehm on every workload (~**82%** of Boehm on a JSON-heavy HTTP path; see [docs/PERF.md](docs/PERF.md))
+- Not as battle-tested as Boehm on every workload (Kemal `/json` ~**100%** of Boehm on this host; see [docs/PERF.md](docs/PERF.md))
 
 ---
 
@@ -115,9 +115,9 @@ Same machine, vs Boehm (`wrk -c 100 -d 30`). Higher % = closer to Boehm. Prefer 
 
 | Workload | gcry vs Boehm |
 |----------|-------------:|
-| Idle HTTP (`/`) | **~92%** |
-| Alloc-heavy JSON (`/json`) | **~82%** |
-| `/json` + chunk release | **~49%** (RSS win, speed loss — stays opt-in) |
+| Idle HTTP (`/`) | **~105%** |
+| Alloc-heavy JSON (`/json`) | **~100%** |
+| `/json` + chunk release | **~92%** (still opt-in) |
 
 Details: [docs/PERF.md](docs/PERF.md). Microbench: `make bench`. HTTP: `make bench-kemal-wrk`.
 
