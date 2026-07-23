@@ -46,6 +46,13 @@ module Gcry
     property stop_the_world : Bool = false
 
     getter unmapped_bytes : UInt64 = 0_u64
+    # Last major STW phase timings (ns) — for /gc-stats and tuning.
+    getter last_phase_clear_ns : UInt64 = 0_u64
+    getter last_phase_roots_ns : UInt64 = 0_u64
+    getter last_phase_static_ns : UInt64 = 0_u64
+    getter last_phase_stacks_ns : UInt64 = 0_u64
+    getter last_phase_mark_ns : UInt64 = 0_u64
+    getter last_phase_sweep_ns : UInt64 = 0_u64
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -414,20 +421,26 @@ module Gcry
         stop_world
         note_collection_begin
         @mark_stack.clear
+
+        t0 = monotonic_ns
         if major
           clear_all_marks
         else
           clear_nursery_marks
         end
+        @last_phase_clear_ns = monotonic_ns - t0
 
+        t0 = monotonic_ns
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
         mark_metadata_roots
-        # Full fiber stacks + Fiber objects (belt-and-suspenders vs push_gc_roots).
+        # Fiber objects + suspended stacks (once; not also via push_gc_roots).
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
+        @last_phase_roots_ns = monotonic_ns - t0
 
+        t0 = monotonic_ns
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
@@ -435,17 +448,25 @@ module Gcry
             end
           end
         end
+        @last_phase_static_ns = monotonic_ns - t0
 
+        t0 = monotonic_ns
         if scan_stack
           scan_mutator_stack
           scan_other_thread_stacks
         end
+        @last_phase_stacks_ns = monotonic_ns - t0
 
         # Conservatively find nursery pointers from old objects (no write barrier).
         scan_old_for_nursery_pointers unless major
 
+        t0 = monotonic_ns
         mark_loop
+        @last_phase_mark_ns = monotonic_ns - t0
+
+        t0 = monotonic_ns
         sweep(major: major)
+        @last_phase_sweep_ns = monotonic_ns - t0
 
         if major
           @bytes_since_gc = 0_u64
@@ -540,8 +561,12 @@ module Gcry
           end
         end
 
-        # Skip PROT_NONE guard page on pooled fiber stacks; then bulk-scan.
-        low = Pointer(Void).new(stack.pointer.address + Roots::PAGE_SIZE)
+        # Skip PROT_NONE guard; prefer saved stack_top (used portion) when it
+        # sits above the guard — full 8 MiB scans kill STW under many fibers.
+        guard = stack.pointer.address + Roots::PAGE_SIZE
+        top = fiber.@context.stack_top.address
+        top = guard if top < guard
+        low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: false) do |candidate|
           mark_candidate(candidate)
@@ -656,6 +681,8 @@ module Gcry
     private def mark_candidate(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+      # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
+      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       header = find_object(pointer)
       return unless header

@@ -44,6 +44,12 @@ end
       pause_p99_ns:      p.p99_ns,
       pause_max_ns:      p.max_ns,
       pause_total_ns:    p.total_ns,
+      phase_clear_ns:    h.last_phase_clear_ns,
+      phase_roots_ns:    h.last_phase_roots_ns,
+      phase_static_ns:   h.last_phase_static_ns,
+      phase_stacks_ns:   h.last_phase_stacks_ns,
+      phase_mark_ns:     h.last_phase_mark_ns,
+      phase_sweep_ns:    h.last_phase_sweep_ns,
     }.to_json
   end
 {% end %}

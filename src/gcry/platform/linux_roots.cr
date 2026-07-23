@@ -157,8 +157,13 @@ module Gcry
         return
       end
 
-      # Skip bulky library data segments — they almost never hold Crystal
-      # object pointers and dominate static-root scan time under HTTP.
+      # Skip shared libraries — Crystal heap roots in class/global vars live in
+      # the main executable (+ adjacency BSS), not in libc/openssl/etc. data.
+      if includes_name?(line + path, len - path, ".so")
+        @@parse_prev_file_rw = false
+        return
+      end
+
       if includes_name?(line + path, len - path, "libcrypto") ||
          includes_name?(line + path, len - path, "libssl") ||
          includes_name?(line + path, len - path, "libpcre") ||
@@ -177,10 +182,19 @@ module Gcry
         return
       end
 
-      # File-backed: scan rw-p (BSS/.data) and r--p (RELRO).
+      writable = perms[1] == 'w'.ord.to_u8
+      # Always scan rw-p (.data). Skip large RELRO r--p on fat Crystal binaries
+      # (multi‑MiB word scans); class vars that hold heap refs are writable.
+      unless writable
+        if size >= 64_u64 * 1024
+          @@parse_prev_file_rw = false
+          return
+        end
+      end
+
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       @@parse_prev_hi = hi
-      @@parse_prev_file_rw = perms[1] == 'w'.ord.to_u8
+      @@parse_prev_file_rw = writable
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32

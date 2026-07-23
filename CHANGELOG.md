@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mutator stack scan spills **all** GP registers (not only `setjmp` callee-saved) before scanning; marks every `Fiber` / `Thread` object.
 - Process GC `lock_read` / `lock_write` use a real `Crystal::RWLock` so collect does not race fiber `swapcontext`.
 - Allocate-black while `@collecting` (mid-collect allocations survive sweep).
-- **Static roots:** scan ELF BSS zero-fill only when anonymous RW is **contiguous with** the previous file-backed RW mapping (class vars like `Exception::CallStack::@@skip`), plus RELRO `r--p`. Blanket anon&lt;1MiB incorrectly cached gcry large-object VMAs; scanning them after `munmap` SIGSEGV’d mid-collect (often during ExceptionPage DWARF/`malloc_atomic`). Object mark clamps `header.size` to the mapped chunk. Large-object `munmap` no longer invalidates the maps cache (adjacency never caches those VMAs); empty-chunk release still does. Broader bulky-`.so` skip list for static scans.
-- **Safe stack scans:** skip leading PROT_NONE pages with one probe sequence, then bulk-scan; fiber scans that already clamp past the guard use `safe: false` (avoids per-page `write`/`read` STW cost).
+- **Static roots:** scan ELF BSS zero-fill only when anonymous RW is **contiguous with** the previous file-backed RW mapping (class vars like `Exception::CallStack::@@skip`), plus main-executable `rw-p` (and small RELRO). Skip all `.so` data and large RELRO (≥64 KiB) — fat-binary STW was dominated by those word scans. Large-object `munmap` does not invalidate the maps cache; empty-chunk release still does. Object mark clamps `header.size` to the mapped chunk.
+- **Fiber roots:** process GC scans suspended stacks **once** via `scan_all_fiber_roots` (no duplicate `push_gc_roots` in `before_collect`).
+- **Safe stack scans:** skip leading PROT_NONE pages with one probe sequence, then bulk-scan; fiber scans that already clamp past the guard use `safe: false`.
+- STW phase timers (`last_phase_*_ns`) exposed for Kemal `GET /gc-stats`.
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
 
 ## [0.5.0] - 2026-07-23

@@ -77,7 +77,7 @@ Crystal **1.21+** defaults to `Fiber::ExecutionContext`, which does **not** call
 
 Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads (including the SYSMON Monitor) are signal-suspended, then their stacks are scanned (`pthread_getattr_np` for main fibers; guard page skipped for pooled fiber stacks). Mutator stack scan spills registers via `setjmp`. Without this, Monitor/register-only roots are swept and the heap corrupts under HTTP load.
 
-Static roots scan **file-backed** readable data segments (binary / `.so`, including RELRO `r--p`) plus **BSS zero-fill**: anonymous RW pages **contiguous with** the previous file-backed RW mapping (where class vars like `Exception::CallStack::@@skip` live). Blanket “all anon &lt; 1 MiB” is unsafe — gcry large objects are also small anonymous VMAs. Large-object `munmap` does **not** invalidate the maps cache (those VMAs are never cached); empty-chunk release (`GCRY_RELEASE_CHUNKS=1`) still does. Fiber stacks are covered by `push_stack` / mutator scan (guard page clamped or leading-probe-then-bulk), not static roots.
+Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
 
 Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
 
