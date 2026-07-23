@@ -67,4 +67,4 @@ crystal build -Dgc_none --debug samples/stress.cr -o bin/stress
 ./bin/stress 200
 ```
 
-CI runs specs + `-Dgc_none` samples on Linux x86_64 (see `.github/workflows/ci.yml`).
+CI runs format check, specs, `-Dgc_none` samples, env-knob smoke, and `bench/churn` on Linux x86_64 for Crystal `1.21.0` and `latest` (see `.github/workflows/ci.yml`).

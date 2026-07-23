@@ -11,14 +11,25 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            crystal: latest
+            arch_label: x86_64
+          - os: ubuntu-latest
+            crystal: "1.21.0"
             arch_label: x86_64
     runs-on: ${{ matrix.os }}
+    name: test (${{ matrix.arch_label }}, crystal ${{ matrix.crystal }})
     steps:
       - uses: actions/checkout@v4
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: ${{ matrix.crystal }}
+
+      - name: Create output dir
+        run: mkdir -p bin
+
+      - name: Check formatting
+        run: crystal tool format --check
 
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
@@ -27,6 +38,11 @@ jobs:
         run: |
           crystal build -Dgc_none samples/hello.cr -o bin/hello
           ./bin/hello
+
+      - name: Sample min (-Dgc_none)
+        run: |
+          crystal build -Dgc_none samples/min.cr -o bin/min
+          ./bin/min
 
       - name: Sample alloc (-Dgc_none)
         run: |
@@ -37,6 +53,16 @@ jobs:
         run: |
           crystal build -Dgc_none samples/stress.cr -o bin/stress
           ./bin/stress 300
+
+      - name: Env knobs smoke (GCRY_DISABLE_AUTO)
+        run: |
+          crystal build -Dgc_none samples/hello.cr -o bin/hello_noauto
+          GCRY_DISABLE_AUTO=1 ./bin/hello_noauto
+
+      - name: Bench churn (library heap)
+        run: |
+          crystal build bench/churn.cr -o bin/churn
+          ./bin/churn 500
 
   # Optional aarch64 via QEMU user emulation when runners allow it.
   # Kept as a separate job so x86_64 stays green if qemu setup drifts.
@@ -57,5 +83,6 @@ jobs:
 
       - name: Cross-build hello for aarch64
         run: |
-          crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o hello_aarch64
+          mkdir -p bin
+          crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o bin/hello_aarch64
         continue-on-error: true
