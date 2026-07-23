@@ -57,6 +57,12 @@ module Gcry
     getter size_class_chunk_count : UInt64 = 0_u64
     getter fully_free_chunk_bytes : UInt64 = 0_u64
     getter released_chunk_bytes : UInt64 = 0_u64
+    getter size_class_live_bytes : UInt64 = 0_u64
+    # Kept size-class chunk fill histogram (live_payload / usable_payload).
+    getter chunk_fill_lt25 : UInt64 = 0_u64
+    getter chunk_fill_lt50 : UInt64 = 0_u64
+    getter chunk_fill_lt75 : UInt64 = 0_u64
+    getter chunk_fill_ge75 : UInt64 = 0_u64
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -416,6 +422,11 @@ module Gcry
       @size_class_chunk_count = 0_u64
       @fully_free_chunk_bytes = 0_u64
       @released_chunk_bytes = 0_u64
+      @size_class_live_bytes = 0_u64
+      @chunk_fill_lt25 = 0_u64
+      @chunk_fill_lt50 = 0_u64
+      @chunk_fill_lt75 = 0_u64
+      @chunk_fill_ge75 = 0_u64
       reset_pause_stats
     end
 
@@ -894,6 +905,11 @@ module Gcry
         @size_class_chunk_count = 0_u64
         @fully_free_chunk_bytes = 0_u64
         @released_chunk_bytes = 0_u64
+        @size_class_live_bytes = 0_u64
+        @chunk_fill_lt25 = 0_u64
+        @chunk_fill_lt50 = 0_u64
+        @chunk_fill_lt75 = 0_u64
+        @chunk_fill_ge75 = 0_u64
       end
 
       chunk = @chunks
@@ -921,12 +937,15 @@ module Gcry
             # multi-million block heaps (dominated phase_sweep under HTTP).
             class_index = chunk.value.size_class.to_i32
             any_live = false
+            live_payload = 0_u64
+            usable_payload = 0_u64
             if class_index >= 0 && class_index < SIZE_CLASS_COUNT
               payload = SizeClasses.payload(class_index)
               block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
               cursor = ChunkHeader.data_start(chunk).as(UInt8*)
               limit = ChunkHeader.data_end(chunk).as(UInt8*)
               while (cursor + block_bytes) <= limit
+                usable_payload += payload.to_u64 if major
                 header = cursor.as(BlockHeader*)
                 unless BlockHeader.free?(header)
                   if major || BlockHeader.nursery?(header)
@@ -934,11 +953,13 @@ module Gcry
                       BlockHeader.clear_mark(header)
                       BlockHeader.promote(header) unless major
                       any_live = true
+                      live_payload += payload.to_u64 if major
                     else
                       reclaim_small(chunk, header, payload)
                     end
                   else
                     any_live = true
+                    live_payload += payload.to_u64 if major
                   end
                 end
                 cursor += block_bytes
@@ -948,6 +969,7 @@ module Gcry
             end
 
             if major
+              @size_class_live_bytes += live_payload
               unless any_live
                 mapped = chunk.value.mapped_bytes
                 @fully_free_chunk_bytes += mapped
@@ -969,7 +991,10 @@ module Gcry
                   end
                 end
               end
-              @size_class_chunk_count += 1 unless drop
+              unless drop
+                @size_class_chunk_count += 1
+                note_chunk_fill(live_payload, usable_payload)
+              end
             end
           end
         end
@@ -1022,6 +1047,19 @@ module Gcry
         @unmapped_bytes += mapped
         LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         chunk = nxt
+      end
+    end
+
+    # Classify a kept size-class chunk by live_payload / usable_payload.
+    private def note_chunk_fill(live_payload : UInt64, usable_payload : UInt64) : Nil
+      if usable_payload == 0 || live_payload * 4 < usable_payload
+        @chunk_fill_lt25 += 1
+      elsif live_payload * 2 < usable_payload
+        @chunk_fill_lt50 += 1
+      elsif live_payload * 4 < usable_payload * 3
+        @chunk_fill_lt75 += 1
+      else
+        @chunk_fill_ge75 += 1
       end
     end
 

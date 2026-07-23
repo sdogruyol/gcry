@@ -8,8 +8,9 @@ module Gcry
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
-    PAUSE_RING_SIZE   =         64 # recent pause samples for p50/p99
+    SMALL_CHUNK_BYTES     = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
+    MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
+    PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
     # Soft cap on cached free large bytes; trim retains at most half by default.
@@ -27,6 +28,8 @@ module Gcry
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).
     property large_cache_retain : UInt64 = DEFAULT_LARGE_CACHE_RETAIN
+    # Size-class chunk mmap size (process default 256 KiB; override via GCRY_CHUNK_BYTES).
+    property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
@@ -267,7 +270,7 @@ module Gcry
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
       chunk_flags = nursery ? ChunkHeader::Flags::NURSERY : 0_u32
-      chunk = map_chunk(SMALL_CHUNK_BYTES, index.to_u32, chunk_flags)
+      chunk = map_chunk(@small_chunk_bytes, index.to_u32, chunk_flags)
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
 

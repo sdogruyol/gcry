@@ -58,6 +58,12 @@ end
       size_class_chunk_count: h.size_class_chunk_count,
       fully_free_chunk_bytes: h.fully_free_chunk_bytes,
       released_chunk_bytes:   h.released_chunk_bytes,
+      size_class_live_bytes:  h.size_class_live_bytes,
+      chunk_fill_lt25:        h.chunk_fill_lt25,
+      chunk_fill_lt50:        h.chunk_fill_lt50,
+      chunk_fill_lt75:        h.chunk_fill_lt75,
+      chunk_fill_ge75:        h.chunk_fill_ge75,
+      small_chunk_bytes:      h.small_chunk_bytes,
       finalizer_entries:      h.finalizer_entry_count,
       weak_links:             h.finalizer_link_count,
     }.to_json

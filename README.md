@@ -107,6 +107,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_RELEASE_CHUNKS=1` | Return empty chunks to the OS (opt-in; ~92% of Boehm `/json`; little acikturkiye RSS win) |
 | `GCRY_KEEP_CHUNKS=1` | Force chunks retained |
 | `GCRY_LARGE_CACHE` | Free large-object bytes to retain after trim (default **32 MiB**) |
+| `GCRY_CHUNK_BYTES` | Size-class chunk mmap size (default **262144** / 256 KiB; min 64 KiB, page-aligned) |
 
 More: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `total_ns` / `count`).
 

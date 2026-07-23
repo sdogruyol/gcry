@@ -108,6 +108,13 @@ module GC
     if cache = env_u64("GCRY_LARGE_CACHE")
       heap.large_cache_retain = cache
     end
+
+    # Size-class chunk mmap size (default 256 KiB). Must be ≥64 KiB and page-aligned.
+    if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
+      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
+        heap.small_chunk_bytes = chunk_bytes
+      end
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool

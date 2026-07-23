@@ -268,7 +268,8 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Large freelist reuse is **exact mapped-size** only (no fat VMA for a smaller need).
 - Heap breakdown: `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes`; `GCRY_LARGE_CACHE` retain limit.
 - Empty-chunk `munmap` **outside STW**; occupancy `fully_free_chunk_bytes` / `released_chunk_bytes`.
-- Measured: Kemal `/json` default ≈ Boehm; `GCRY_RELEASE_CHUNKS=1` ≈92%. acikturkiye RSS unchanged with release (`fully_free` ≪ `small_mapped`) — sparse/conservative retention next.
+- `size_class_live_bytes` + fill histogram; `GCRY_CHUNK_BYTES` (default 256 KiB).
+- Measured: acikturkiye chunks are **dense live** (~64% live/mapped, ~76% ge75) — not sparse; 128 KiB trial no RSS win. Next: write barriers.
 - Gate: Kemal `/json` must not regress vs Boehm; acikturkiye RSS + `/gc-stats` breakdown when available.
 
 ## MVP definition (v0.1)

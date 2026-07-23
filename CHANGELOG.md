@@ -13,11 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GCRY_LARGE_CACHE` sets free large bytes retained after post-collect trim (default **32 MiB**).
 - Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
 - Empty size-class chunk `munmap` deferred **outside STW** (queued in sweep, flushed with `trim_large_cache`); occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
+- Size-class occupancy: `size_class_live_bytes` + fill histogram (`chunk_fill_lt25`…`ge75`); `GCRY_CHUNK_BYTES` (default **256 KiB**).
 
 ### Performance
 
-- Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%** (post-defer; same as 0.6.0 chunks row). Default retains ~**76 MiB** fully-free chunks (`fully_free_chunk_bytes`).
-- acikturkiye `/api/v1/`: default **~103%** of Boehm; chunks **~98%**; RSS still ~4× Boehm — `fully_free` only ~**24 MiB** of ~250 MiB `small_mapped` (release cannot close the gap) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%**; `GCRY_CHUNK_BYTES=131072` **~98.5%** (RSS flat — Kemal waste is mostly retained empty chunks).
+- acikturkiye: live/small_mapped **~64%**, **~76%** of chunks ≥75% full → RSS is **conservative-live**, not sparse; 128 KiB chunks no RSS win — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.6.0] - 2026-07-23
 
