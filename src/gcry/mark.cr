@@ -1,28 +1,9 @@
 require "./block"
 
 module Gcry
-  # Mark helpers on block headers.
-  struct BlockHeader
-    def self.marked?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::MARK) != 0
-    end
-
-    def self.set_mark(header : BlockHeader*) : Nil
-      h = header.value
-      h.flags |= Flags::MARK
-      header.value = h
-    end
-
-    def self.clear_mark(header : BlockHeader*) : Nil
-      h = header.value
-      h.flags &= ~Flags::MARK
-      header.value = h
-    end
-  end
-
   # Growable mark stack backed by mmap (not the managed heap).
   class MarkStack
-    INITIAL_BYTES = 64_u64 * 1024_u64 # 8k pointers on 64-bit
+    INITIAL_BYTES = 65536_u64 # 64 KiB
 
     @base : Void* = Pointer(Void).null
     @capacity : Int32 = 0

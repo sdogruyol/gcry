@@ -18,10 +18,13 @@ module Gcry
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @destroyed = false
+    @nursery_alloc_bytes : UInt64 = 0_u64
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
     end
 
     def finalize
@@ -42,9 +45,11 @@ module Gcry
 
       @chunks = Pointer(ChunkHeader).null
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @heap_size = 0_u64
       @free_bytes = 0_u64
       @live_objects = 0_u64
+      @nursery_alloc_bytes = 0_u64
       destroy_collector
     end
 
@@ -102,8 +107,13 @@ module Gcry
       end
 
       class_index = size_class_index(header.value.size)
-      header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @freelists[class_index])
-      @freelists[class_index] = pointer
+      if BlockHeader.nursery?(header)
+        header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+        @nursery_freelists[class_index] = pointer
+      else
+        header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @freelists[class_index])
+        @freelists[class_index] = pointer
+      end
 
       @free_bytes += payload
       @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
@@ -149,11 +159,41 @@ module Gcry
     end
 
     private def alloc_small(payload : UInt32, flags : UInt32) : Void*
+      if @nursery_enabled
+        return alloc_nursery(payload, flags | BlockHeader::Flags::NURSERY)
+      end
+      alloc_old_small(payload, flags)
+    end
+
+    private def alloc_nursery(payload : UInt32, flags : UInt32) : Void*
+      index = size_class_index(payload)
+      user = @nursery_freelists[index]
+
+      if user.null?
+        refill_size_class(index, payload, nursery: true)
+        user = @nursery_freelists[index]
+        raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
+      end
+
+      header = BlockHeader.from_user(user)
+      next_free = header.value.next_free
+      @nursery_freelists[index] = next_free
+      # During incremental mark, allocate black so new objects survive the cycle.
+      alloc_flags = flags
+      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
+      BlockHeader.set_used(header, payload, alloc_flags)
+
+      @free_bytes -= payload if @free_bytes >= payload
+      @nursery_alloc_bytes += payload.to_u64
+      user
+    end
+
+    private def alloc_old_small(payload : UInt32, flags : UInt32) : Void*
       index = size_class_index(payload)
       user = @freelists[index]
 
       if user.null?
-        refill_size_class(index, payload)
+        refill_size_class(index, payload, nursery: false)
         user = @freelists[index]
         raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
       end
@@ -161,15 +201,18 @@ module Gcry
       header = BlockHeader.from_user(user)
       next_free = header.value.next_free
       @freelists[index] = next_free
-      BlockHeader.set_used(header, payload, flags)
+      alloc_flags = flags
+      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
+      BlockHeader.set_used(header, payload, alloc_flags)
 
       @free_bytes -= payload if @free_bytes >= payload
       user
     end
 
-    private def refill_size_class(index : Int32, payload : UInt32) : Nil
+    private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-      chunk = map_chunk(SMALL_CHUNK_BYTES, index.to_u32)
+      chunk_flags = nursery ? ChunkHeader::Flags::NURSERY : 0_u32
+      chunk = map_chunk(SMALL_CHUNK_BYTES, index.to_u32, chunk_flags)
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
 
@@ -185,21 +228,27 @@ module Gcry
         added += payload
       end
 
-      @freelists[index] = free_head
+      if nursery
+        @nursery_freelists[index] = free_head
+      else
+        @freelists[index] = free_head
+      end
       @free_bytes += added
     end
 
     private def alloc_large(payload : UInt64, flags : UInt32) : Void*
       need = ChunkHeader::SIZE.to_u64 + BlockHeader::SIZE.to_u64 + payload
       mapped = align_up(need, 4096_u64)
-      chunk = map_chunk(mapped, UInt32::MAX)
+      chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
 
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-      BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+      alloc_flags = flags | BlockHeader::Flags::LARGE
+      alloc_flags |= BlockHeader::Flags::MARK if @incremental_marking
+      BlockHeader.set_used(header, payload.to_u32!, alloc_flags)
       BlockHeader.user_from(header)
     end
 
-    private def map_chunk(bytes : UInt64, size_class : UInt32) : ChunkHeader*
+    private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
       ptr = LibC.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(bytes),
@@ -211,7 +260,7 @@ module Gcry
       raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
 
       chunk = ptr.as(ChunkHeader*)
-      chunk.value = ChunkHeader.new(@chunks, bytes, size_class)
+      chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
       @chunks = chunk
       @heap_size += bytes
       note_mapped(chunk)

@@ -17,7 +17,8 @@ module GC
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
-    # Avoid mid-boot collections until the runtime is fully up.
+    heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD
+    # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
     {% if flag?(:linux) && flag?(:gnu) %}
@@ -101,6 +102,11 @@ module GC
   def self.collect
     return unless @@gcry_ready
     Gcry.default_heap.collect
+  end
+
+  def self.collect_a_little : Int
+    return 0 unless @@gcry_ready
+    Gcry.default_heap.collect_a_little ? 1 : 0
   end
 
   def self.enable

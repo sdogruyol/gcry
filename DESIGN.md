@@ -226,17 +226,21 @@ DESIGN.md
 - Notes: [docs/HARDENING.md](docs/HARDENING.md) (false retention, sanitizers).
 - Deliverable: reliability bar for RC-style use on Linux x86_64.
 
-### Phase 6 — Performance & advanced GC
+### Phase 6 — Performance & advanced GC ✅
 
-Suggested order:
+Shipped without compiler write barriers:
 
-1. Incremental marking (shorter pauses)
-2. Generational nursery (Crystal object churn)
-3. Write barriers + compiler cooperation (enables precise / concurrent paths)
-4. Concurrent mark
-5. Compacting / moving (requires precise roots)
+1. **Incremental marking** — `collect_a_little` / `GC.collect_a_little` (work-budget mark slices; black alloc while a cycle is active).
+2. **Nursery / minor GC** — young size-class freelists; `minor_collect`; old→young conservative scan (no barriers). Survivors promote to old space.
+3. Process defaults: nursery threshold 512 KiB (`DEFAULT_NURSERY_THRESHOLD`); library heap leaves nursery threshold at `UInt64::MAX` so unit tests stay major-only unless configured.
+4. Bench: `bench/churn.cr` (library heap major / incremental / nursery).
 
-Precise GC is a **separate track**: it needs Crystal codegen changes (stack maps, typed allocation), not only collector work.
+Deferred (need codegen / barriers):
+
+- Write barriers + concurrent mark
+- Compacting / moving / precise roots
+
+Precise GC remains a **separate track**: Crystal stack maps and typed allocation, not only collector work.
 
 ### Phase 7 — Productization
 

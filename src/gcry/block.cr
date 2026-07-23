@@ -16,10 +16,11 @@ module Gcry
     end
 
     module Flags
-      FREE   = 1_u32
-      ATOMIC = 2_u32
-      MARK   = 4_u32
-      LARGE  = 8_u32
+      FREE    = 1_u32
+      ATOMIC  = 2_u32
+      MARK    = 4_u32
+      LARGE   = 8_u32
+      NURSERY = 16_u32 # young generation (Phase 6)
     end
 
     def self.from_user(user : Void*) : BlockHeader*
@@ -42,6 +43,32 @@ module Gcry
       (header.value.flags & Flags::LARGE) != 0
     end
 
+    def self.nursery?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::NURSERY) != 0
+    end
+
+    def self.marked?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::MARK) != 0
+    end
+
+    def self.set_mark(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags |= Flags::MARK
+      header.value = h
+    end
+
+    def self.clear_mark(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags &= ~Flags::MARK
+      header.value = h
+    end
+
+    def self.promote(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags &= ~Flags::NURSERY
+      header.value = h
+    end
+
     def self.set_free(header : BlockHeader*, next_free : Void*) : Nil
       h = header.value
       h.flags |= Flags::FREE
@@ -61,10 +88,13 @@ module Gcry
     property next : ChunkHeader*
     property mapped_bytes : UInt64
     property size_class : UInt32 # index into SIZE_CLASSES, or UInt32::MAX for large
-    property unused : UInt32
+    property flags : UInt32
 
-    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32)
-      @unused = 0_u32
+    module Flags
+      NURSERY = 1_u32
+    end
+
+    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32, @flags : UInt32 = 0_u32)
     end
 
     def self.base(chunk : ChunkHeader*) : Void*
@@ -87,6 +117,10 @@ module Gcry
 
     def self.large?(chunk : ChunkHeader*) : Bool
       chunk.value.size_class == UInt32::MAX
+    end
+
+    def self.nursery?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::NURSERY) != 0
     end
   end
 

@@ -16,8 +16,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes allocated since last GC before auto-collect (default `4194304`) |
+| `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (default `4194304`) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
+
+Process GC also enables a **nursery** (default 512 KiB young alloc before `minor_collect`). Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
+
+`collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons.
 
 Example:
 
@@ -38,7 +42,7 @@ Typical sources of extra retention:
 - Integer / float bit patterns that alias pointers
 - `/proc/self/maps` RW scans of libraries (broader than ideal; skips the managed heap)
 
-Mitigations later: generational nursery, tighter static-root filters, precise stack maps (compiler work).
+Mitigations: nursery (young objects die faster), tighter static-root filters, precise stack maps (compiler work).
 
 Rough check in process mode:
 

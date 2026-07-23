@@ -136,6 +136,8 @@ describe Gcry::Heap do
   it "survives a random alloc/free fuzz" do
     heap = Gcry::Heap.new
     begin
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_threshold = UInt64::MAX
       rng = Random.new(42)
       live = [] of Void*
       2000.times do

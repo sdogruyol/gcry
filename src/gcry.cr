@@ -46,6 +46,14 @@ module Gcry
     default_heap.collect(scan_stack: scan_stack, roots: roots)
   end
 
+  def self.minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    default_heap.minor_collect(scan_stack: scan_stack, roots: roots)
+  end
+
+  def self.collect_a_little(work_units : Int32 = Heap::DEFAULT_INCREMENTAL_WORK) : Bool
+    default_heap.collect_a_little(work_units)
+  end
+
   def self.add_root(pointer : Void*) : Nil
     default_heap.add_root(pointer)
   end

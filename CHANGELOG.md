@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 6 performance**
+  - Nursery + `minor_collect` (old→young scan without write barriers; survivors promote).
+  - Incremental mark via `collect_a_little` / `GC.collect_a_little` (black alloc during cycle).
+  - Specs: `spec/phase6_spec.cr`; bench: `bench/churn.cr`.
+  - Process GC nursery threshold default: 512 KiB.
 - **Phase 5 hardening**
   - Stress specs (`spec/stress_spec.cr`) and process stress sample (`samples/stress.cr`).
   - CI workflow (`.github/workflows/ci.yml`): `crystal spec` + `-Dgc_none` hello/alloc/stress.
@@ -27,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 
-- Phase 0–5 complete.
-- Default process auto-collect threshold: 4 MiB (override with env).
-- Next: Phase 6 — incremental / generational performance work.
+- Phase 0–6 complete.
+- Default process auto-collect: 4 MiB major; 512 KiB nursery.
+- Concurrent mark / compacting / precise GC need compiler cooperation (post–Phase 6).
+- Next: Phase 7 — productization.
