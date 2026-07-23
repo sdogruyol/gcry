@@ -1,19 +1,24 @@
 # gcry
 
-A garbage collector written in Crystal, intended as an alternative to [bdwgc](https://github.com/ivmai/bdwgc) (Boehm GC) behind Crystal’s `GC` abstraction.
+A garbage collector written in Crystal, intended as an alternative to [bdwgc](https://github.com/ivmai/bdwgc) (Boehm GC).
 
-> **Status:** early design / scaffolding. The collector is not usable yet. See [DESIGN.md](DESIGN.md) for architecture, API targets, and roadmap.
+Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same integration style as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (Immix).
+
+> **Status:** Phase 0 complete (design + Crystal integration research). The collector is not usable yet.
+>
+> - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
+> - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
 
 ## Why
 
-Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **gcry** aims to be a third backend: a conservative mark–sweep collector implemented in Crystal, with a path toward fiber-aware collection and, later, incremental or generational features.
+Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **gcry** replaces the `gc_none` stubs at require-time with a conservative mark–sweep collector implemented in Crystal — no Crystal compiler/stdlib patch required.
 
 ## Goals
 
 - Match Crystal’s `GC` API (`malloc`, `malloc_atomic`, `collect`, fiber `set_stackbottom`, finalizers, stats, …)
 - Conservative stop-the-world mark–sweep MVP on Linux x86_64 (single-threaded + fibers first)
 - Allocation-free collector core (no managed-heap allocations during collect)
-- Integrate via a compile flag such as `-Dgc_gcry`
+- Activate via `require "gcry"` + `-Dgc_none`
 
 Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
@@ -23,7 +28,7 @@ Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
 ## Installation
 
-Once published, add it to your `shard.yml`:
+Add the dependency to your `shard.yml`:
 
 ```yaml
 dependencies:
@@ -35,15 +40,26 @@ dependencies:
 shards install
 ```
 
-Runtime integration with Crystal’s `GC` module will require a Crystal build that selects the gcry backend (planned: `-Dgc_gcry`). That hook is not available yet.
-
 ## Usage
 
+Require gcry when building with the null GC, then compile with `-Dgc_none`:
+
 ```crystal
-require "gcry"
+{% if flag?(:gc_none) %}
+  require "gcry"
+{% end %}
+
+puts "hello"
 ```
 
-There is no public collector API to call yet. When the MVP lands, programs will allocate through Crystal’s normal runtime (`GC.malloc` / language allocations); gcry will sit behind that facade rather than being used as a manual allocator in application code.
+```sh
+crystal build -Dgc_none app.cr
+# or: crystal run -Dgc_none app.cr
+```
+
+Without `-Dgc_none`, Crystal links Boehm; do not install gcry as the process GC in that mode.
+
+There is no separate application-level allocator API for normal programs: allocations go through Crystal’s runtime (`GC.malloc` / language allocations). The shard overrides `GC` underneath.
 
 ## Development
 
@@ -52,14 +68,17 @@ shards install
 crystal spec
 ```
 
-Design notes and milestones: [DESIGN.md](DESIGN.md).
+Heap unit tests can run under the default (Boehm) GC while `Gcry::*` is exercised as a standalone allocator.
+
+Design notes: [DESIGN.md](DESIGN.md). Runtime hookup: [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 Suggested order of work:
 
-1. Heap allocator (`mmap` arenas, size classes)
-2. Conservative mark–sweep
-3. Fiber / root registration
-4. Crystal `-Dgc_gcry` backend wiring
+1. ~~Research & API contract (Phase 0)~~
+2. Heap allocator (`mmap` arenas, size classes)
+3. Conservative mark–sweep
+4. Fiber / root registration
+5. `module GC` reopen + `-Dgc_none` samples
 
 ## Contributing
 

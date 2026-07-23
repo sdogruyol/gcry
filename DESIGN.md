@@ -13,13 +13,14 @@ This document captures goals, non-goals, architecture, API surface, bootstrap co
 ## Goals
 
 1. Implement a working conservative mark–sweep GC in Crystal.
-2. Match Crystal’s `GC` module API closely enough to compile and run programs with a flag such as `-Dgc_gcry`.
+2. Ship as a **shard** that reopens Crystal’s `GC` module (same pattern as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) / immix): `require "gcry"` + build with `-Dgc_none`.
 3. Support Crystal fibers (stack registration / `set_stackbottom`) and, later, multi-threading (`preview_mt`).
 4. Keep the collector core **allocation-free** with respect to the managed heap (no chicken-and-egg allocations during collect).
 5. Provide measurable stats and knobs for tuning and comparison against bdwgc.
 
 ## Non-goals (near term)
 
+- Patching or forking the Crystal compiler / stdlib to add a third built-in backend.
 - Replacing bdwgc in upstream Crystal as the default (that is a later adoption decision).
 - Precise / moving / compacting GC without compiler support for stack maps and write barriers.
 - Full concurrent collection in the first releases.
@@ -36,27 +37,66 @@ This document captures goals, non-goals, architecture, API surface, bootstrap co
 | STW before concurrent | Correctness and fiber roots first; concurrency later. |
 | Small, testable core | Heap, mark, sweep, and roots as separable modules with unit tests. |
 
-## Target Crystal `GC` API
+## Frozen API contract (Phase 0)
 
-gcry should implement (or wrap into) the same surface Crystal expects:
+Researched against Crystal **1.21.0**. Full notes: [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
+gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry points (`__crystal_malloc*`) keep calling `GC.*`; the shard **reopens** `module GC` and replaces the `gc_none` stubs.
+
+### Required for MVP (v0.1)
 
 | Method | Role |
 |--------|------|
-| `init` | Process-wide collector setup |
-| `malloc(size)` | Zeroed, pointer-bearing memory |
-| `malloc_atomic(size)` | Non-zeroed, pointer-free memory |
-| `realloc(pointer, size)` | Grow/shrink; preserve atomic vs pointerful constraints |
-| `free(pointer)` | Optional explicit free (bdwgc compatibility) |
-| `collect` | Trigger a collection cycle |
+| `init` | Process setup; register fiber root callback |
+| `malloc(size : LibC::SizeT) : Void*` | Zeroed; may contain pointers |
+| `malloc_atomic(size : LibC::SizeT) : Void*` | Non-zeroed; pointer-free |
+| `realloc(ptr, size) : Void*` | Grow/shrink; keep atomic constraints |
+| `free(pointer)` | Explicit free (zlib, GMP, …) |
+| `collect` | Full STW mark–sweep |
 | `enable` / `disable` | Pause automatic collection |
-| `add_root(object)` | Pin a reference as a root |
-| `add_finalizer(object)` | Register finalizer |
-| `register_disappearing_link(pointer)` | Weak / disappearing link support |
-| `set_stackbottom(...)` | Associate stack bottom with a thread (fibers) |
-| `is_heap_ptr(pointer)` | Query whether an address is in the managed heap |
-| `stats` / `prof_stats` | Heap and collector statistics |
+| `stats` | Meaningful `heap_size`, `free_bytes`, `bytes_since_gc`, `total_bytes` |
+| `is_heap_ptr(pointer)` | Address in managed heap? |
+| `set_stackbottom(stack_bottom : Void*)` | Single-thread fiber resume |
+| `push_stack(stack_top, stack_bottom)` | Scan suspended fiber stack |
+| `before_collect(&block)` or equivalent in `init` | Push non-running fiber roots |
+| `current_thread_stack_bottom` | Main fiber stack bounds |
+| `lock_read` / `unlock_read` / `lock_write` / `unlock_write` | No-ops acceptable for MVP |
 
-Internal Crystal entry points (`__crystal_malloc`, `__crystal_malloc_atomic`, and friends) should continue to call into `GC.*`; only the backend behind `GC` changes.
+### Required later (Phase 3+)
+
+| Method | Role |
+|--------|------|
+| `add_root` / `add_finalizer` / `register_disappearing_link` | Roots, finalizers, `WeakRef` |
+| `prof_stats` | Full Boehm-shaped profiling (zeros OK until then) |
+| MT `set_stackbottom` variants | `preview_mt` |
+| `stop_world` / `start_world` | Multi-thread STW |
+| `pthread_*` GC registration | When threads must be tracked |
+
+### Integration decision (immix-style shard)
+
+Same approach as [ysbaddaden/gc](https://github.com/ysbaddaden/gc):
+
+1. Build the program with **`-Dgc_none`** so Crystal loads the stub backend (no bdwgc link).
+2. Early in the program (or via a prelude require), **`require "gcry"`**.
+3. `src/gcry.cr` reopens `module GC` and overrides `malloc` / `collect` / fiber hooks / etc.
+
+```crystal
+# app.cr
+{% if flag?(:gc_none) %}
+  require "gcry"
+{% end %}
+
+puts "hello"
+```
+
+```sh
+crystal build -Dgc_none app.cr
+```
+
+- Collector implementation lives under `Gcry::*`; the `GC` reopen is a thin facade.
+- Unit tests of the heap can still run under default Boehm without installing gcry as process GC.
+- **No Crystal source patch.** Upstream `-Dgc_gcry` is optional later, not required.
+- **`preview_mt` is out of MVP.**
 
 ## Architecture
 
@@ -68,8 +108,8 @@ Internal Crystal entry points (`__crystal_malloc`, `__crystal_malloc_atomic`, an
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────┐
-│                      GC facade                          │
-│              (boehm | none | gcry)                      │
+│              GC facade (reopened by shard)              │
+│         boehm | none ← overwritten by gcry              │
 └───────────────────────────┬─────────────────────────────┘
                             │
                             ▼
@@ -143,11 +183,11 @@ DESIGN.md
 
 ## Phased roadmap
 
-### Phase 0 — Research & contract
+### Phase 0 — Research & contract ✅
 
-- Document Crystal’s `src/gc` (boehm / none) and fiber root registration.
-- Freeze the API table above and success criteria for MVP.
-- Deliverable: this design doc + short integration notes.
+- Documented Crystal’s `src/gc` (boehm / none) and fiber root registration.
+- Froze the API contract and MVP success criteria (this document).
+- Deliverable: [docs/INTEGRATION.md](docs/INTEGRATION.md) + this design doc.
 
 ### Phase 1 — Allocator (no collection)
 
@@ -170,11 +210,12 @@ DESIGN.md
 - Multi-thread STW (suspend / safepoint) when targeting `preview_mt`.
 - Deliverable: multi-fiber (then multi-thread) collect without corruption.
 
-### Phase 4 — Crystal runtime integration
+### Phase 4 — Shard `GC` override
 
-- `gc_gcry` backend behind Crystal’s `GC` module.
-- Build real programs with the flag; compare RSS, pause, throughput vs bdwgc.
-- Deliverable: demo Crystal apps running on gcry.
+- Reopen `module GC` in `src/gcry.cr` (override `gc_none` stubs).
+- Wire fiber roots in `init` / `before_collect` / `push_stack` like immix.
+- Samples: `crystal build -Dgc_none samples/hello.cr`; compare RSS / pause / throughput vs bdwgc.
+- Deliverable: real Crystal apps running on gcry via shard require only.
 
 ### Phase 5 — Hardening
 
@@ -197,10 +238,11 @@ Precise GC is a **separate track**: it needs Crystal codegen changes (stack maps
 
 ### Phase 7 — Productization
 
-- Upstream Crystal PR or officially supported `-Dgc_gcry`.
+- Polished shard UX (`shards` install, docs, samples).
+- Optional upstream Crystal backend later — not required for adoption.
 - Tuning knobs (heap growth, collect threshold, env vars).
 - OOM, fork-safety, and signal-safety policy.
-- bdwgc parity checklist for supported platforms.
+- bdwgc / immix comparison checklist for supported platforms.
 
 ## MVP definition (v0.1)
 
@@ -208,7 +250,7 @@ Precise GC is a **separate track**: it needs Crystal codegen changes (stack maps
 - Model: stop-the-world, conservative mark–sweep
 - Concurrency: single thread + Crystal fibers
 - API: at least `init`, `malloc`, `malloc_atomic`, `collect`, `set_stackbottom`, `stats`
-- Integration: Crystal program built with `-Dgc_gcry` runs hello-world and a small alloc/collect loop
+- Integration: `require "gcry"` + `crystal build -Dgc_none` runs hello-world and a small alloc/collect loop
 
 Anything beyond that (MT, incremental, generational) is post-MVP.
 
@@ -229,17 +271,29 @@ Anything beyond that (MT, incremental, generational) is post-MVP.
 - Performance: pause and RSS competitive with bdwgc on representative benches (parity first, then beat on targeted workloads).
 - Maintainability: collector logic readable in Crystal; clear module boundaries.
 
+## Decisions (Phase 0)
+
+| Topic | Decision |
+|-------|----------|
+| Distribution | Pure shard; reopen `module GC` (immix pattern) |
+| Activation | `require "gcry"` + compile with `-Dgc_none` |
+| Crystal patch | Not required |
+| Crystal version | `>= 1.21.0` (matches researched stdlib) |
+| `preview_mt` in v0.1 | No |
+| Early testing | `Gcry::*` under default Boehm; process GC via `-Dgc_none` once facade exists |
+
 ## Open questions
 
-1. Ship as a standalone shard that patches/overrides `GC`, or as a patch set against crystal-lang/crystal?
-2. Finalizer execution model: same thread vs dedicated finalizer fiber?
-3. How aggressively to return memory to the OS vs retain freelists?
-4. Minimum Crystal version and whether `preview_mt` is in-scope for v0.1 (lean: no).
-5. Naming of the compile flag (`gc_gcry` vs `gcry`) and module layout inside the compiler tree.
+1. Finalizer execution model: same thread vs dedicated finalizer fiber? (immix uses a collector fiber)
+2. How aggressively to return memory to the OS vs retain freelists?
+3. Should `add_root` only scan an internal list? (Boehm backend currently only appends to an Array.)
+4. When reopening `GC` under `-Dgc_none`, do we keep `none`’s `stop_world` / `start_world` or replace them immediately?
 
 ## References
 
-- Crystal `GC` module API
+- [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 GC / fiber notes
+- [ysbaddaden/gc](https://github.com/ysbaddaden/gc) — Immix GC shard; `require` + `-Dgc_none` precedent
+- Crystal `src/gc.cr`, `src/gc/boehm.cr`, `src/gc/none.cr`
 - Crystal PR abstracting LibGC / enabling `gc_none` ([#5314](https://github.com/crystal-lang/crystal/pull/5314))
 - [bdwgc](https://github.com/ivmai/bdwgc)
 - Crystal blog: [Garbage Collector](https://crystal-lang.org/2013/12/05/garbage-collector/) (historical context: Boehm as a starting point toward a custom GC)
