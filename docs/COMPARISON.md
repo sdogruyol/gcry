@@ -1,5 +1,7 @@
 # Comparison checklist — gcry vs bdwgc
 
+**One-liner:** both are *conservative mark–sweep* collectors. gcry is Crystal-native STW-by-default; Boehm is the C library Crystal ships with (more platforms, MT/fork polish).
+
 Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
@@ -7,7 +9,7 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 |------|-------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
-| Collection model | Conservative mark–sweep + nursery + incremental mark slices | Conservative (BDW) |
+| Collection model | Conservative STW mark–sweep (nursery / incremental opt-in only) | Conservative (BDW) |
 | Fibers / ExecutionContext | `before_collect` → `push_gc_roots` / `push_stack`; stack bottom from `Fiber.current` | Yes (LibGC + thread bottoms) |
 | Parallel fibers (multi OS thread) | No | Yes |
 | Fork safety | **Unsupported** (documented) | `GC_set_handle_fork` |

@@ -9,8 +9,8 @@ crystal: '>= 1.21.0'
 license: MIT
 
 description: |
-  Conservative mark–sweep garbage collector for Crystal.
-  Drop-in alternative to bdwgc via `require "gcry"` + `-Dgc_none`.
+  Crystal-native conservative mark–sweep GC (Boehm-class).
+  Drop-in via `require "gcry"` + `-Dgc_none` — no compiler patch.
 
 repository: https://github.com/sdogruyol/gcry
 homepage: https://github.com/sdogruyol/gcry
