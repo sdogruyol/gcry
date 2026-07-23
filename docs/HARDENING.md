@@ -16,12 +16,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (default `4194304`) |
+| `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (process default `67108864` / 64 MiB) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
-| `GCRY_NURSERY` | Young bytes before minor collect (default `524288` under process GC) |
-| `GCRY_DISABLE_NURSERY=1` | Disables nursery allocation / minor collections |
+| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set) |
+| `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
 
-Process GC enables a **nursery** by default. Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
+Process GC enables **majors only** by default (nursery is opt-in). Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
 
 `collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons.
 

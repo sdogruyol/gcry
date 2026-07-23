@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Process GC performance: nursery off by default (opt-in via `GCRY_NURSERY`); 64 MiB major threshold; cached static roots; skip bulky TLS/PCRE maps; O(log n) chunk index for marking.
+- README performance numbers: Kemal+wrk ~75–80k req/s under gcry (vs ~4k before).
+
+## [0.1.0] - 2026-07-23
+
 ### Added
 
 - **Kemal HTTP bench** (`bench/kemal`) — realistic `require "gcry"` + `-Dgc_none` app; `make bench-kemal-wrk` runs `wrk -c 100 -d 30`.
@@ -35,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI: create `bin/` before sample builds; Crystal `1.21.0` + `latest` matrix; format check; `samples/min`, env-knob smoke, `bench/churn`.
 - README status → Phase 7 complete; development via `make`.
+- Crystal 1.21 docs: default `Fiber::ExecutionContext` (parallelism 1); deprecated `-Dpreview_mt`.
 
 ### Fixed
 
@@ -52,3 +60,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Default process auto-collect: 4 MiB major; 512 KiB nursery.
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
+
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/sdogruyol/gcry/releases/tag/v0.1.0

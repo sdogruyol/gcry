@@ -5,9 +5,11 @@ require "./platform/linux_roots"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD      = 4194304_u64 # 4 MiB major
-    DEFAULT_NURSERY_THRESHOLD =  524288_u64 # 512 KiB minor
-    DEFAULT_INCREMENTAL_WORK  =         512
+    DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
+    PROCESS_GC_THRESHOLD         = 67108864_u64 # 64 MiB — process GC (fewer STW)
+    DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
+    DEFAULT_INCREMENTAL_WORK     =          512
+    STATIC_ROOT_REFRESH_INTERVAL =       64_u64 # majors between /proc/self/maps refresh
 
     getter collections : UInt64 = 0_u64
     getter minor_collections : UInt64 = 0_u64
@@ -309,6 +311,9 @@ module Gcry
           @bytes_since_gc = 0_u64
           @nursery_alloc_bytes = 0_u64
           @major_collections += 1
+          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+            Platform.invalidate_static_root_cache
+          end
         else
           @nursery_alloc_bytes = 0_u64
           @minor_collections += 1
@@ -405,6 +410,9 @@ module Gcry
     end
 
     private def mark_candidate(pointer : Void*) : Nil
+      addr = pointer.address
+      return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+
       header = find_object(pointer)
       return unless header
       return if BlockHeader.marked?(header)
@@ -583,15 +591,6 @@ module Gcry
         yield cursor.as(BlockHeader*)
         cursor += block_bytes
       end
-    end
-
-    private def chunk_containing(addr : UInt64) : ChunkHeader*?
-      each_chunk do |chunk|
-        base = chunk.address
-        finish = base + chunk.value.mapped_bytes
-        return chunk if addr >= base && addr < finish
-      end
-      nil
     end
   end
 end

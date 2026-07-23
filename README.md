@@ -79,30 +79,35 @@ There is no separate application-level allocator API for normal programs: alloca
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (default `4194304`) |
+| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **64 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
-| `GCRY_NURSERY` | Young bytes before minor collect (default `524288` in process GC) |
-| `GCRY_DISABLE_NURSERY=1` | Disable nursery / minor collections |
+| `GCRY_NURSERY` | Opt-in nursery; young bytes before minor (default off in process GC) |
+| `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
 
 More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md).
 
 ## Performance (v0.1)
 
-gcry is **correctness-first** right now. It runs real Crystal programs (including a Kemal HTTP server under `wrk`), but it is **not** competitive with Boehm on throughput or pause time yet.
+gcry is much closer to Boehm on throughput after process-GC tuning, but pauses are still longer when a major runs.
 
 Rough numbers on Linux x86_64, Crystal 1.21, release builds, same Kemal “Hello World” app (`bench/kemal`), `wrk -c 100 -d 30`:
 
 | GC | Approx. req/s | Notes |
 |----|---------------|--------|
 | Boehm (default) | ~110k | Baseline |
-| gcry (`-Dgc_none`) | ~4k | Stable under load; long STW pauses |
-| gcry + `GCRY_DISABLE_AUTO=1` `GCRY_DISABLE_NURSERY=1` | ~80k+ | Shows allocator path is fine when collection is off |
+| gcry (`-Dgc_none`) | ~75–80k | Stable; occasional multi‑ms–1s major pauses |
+| gcry + `GCRY_DISABLE_AUTO=1` | ~80k+ | Allocator path when collection is off |
 
-So the gap is mostly **collection cost**, not malloc: full stop-the-world mark–sweep, conservative stack/static scans, and nursery without write barriers. Expect multi‑ms to hundreds‑of‑ms pauses under allocation-heavy HTTP load.
+What moved the needle (process GC defaults):
 
-Library-heap microbench (no process static-root scan): `make bench` → `./bin/churn`. Process-GC load test: `make bench-kemal-wrk`.
+- Nursery **off** by default (opt-in via `GCRY_NURSERY`) — minors without write barriers were scanning all old objects
+- Major threshold **64 MiB** (`PROCESS_GC_THRESHOLD`; override with `GCRY_THRESHOLD`)
+- Cached `/proc/self/maps` static-root ranges; skip bulky `libcrypto` / `libssl` / `libpcre` segments
+- O(log n) chunk index for mark pointer lookup
 
-Treat v0.1 as usable for dogfooding and integration, not as a Boehm replacement for latency-sensitive production.
+Library-heap microbench: `make bench` → `./bin/churn`. Process-GC load test: `make bench-kemal-wrk`.
+
+Still not a drop-in Boehm replacement for the tightest latency SLOs — majors remain stop-the-world — but HTTP dogfooding throughput is in the same ballpark.
 
 ## Development
 

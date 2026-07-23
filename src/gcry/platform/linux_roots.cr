@@ -3,11 +3,64 @@ require "c/unistd"
 
 module Gcry
   # Non-allocating static root discovery for Linux.
+  #
+  # Ranges are cached in LibC memory after the first scan. Refresh is cheap to
+  # skip when maps are stable (typical for long-running servers).
   module Platform
+    struct RootRange
+      property low : UInt64
+      property high : UInt64
+
+      def initialize(@low : UInt64, @high : UInt64)
+      end
+    end
+
+    @@ranges : RootRange* = Pointer(RootRange).null
+    @@range_count = 0
+    @@range_cap = 0
+    @@maps_generation = 0_u32
+    @@cached_generation = UInt32::MAX
+
+    # Bump when dlopen/mmap of new libraries is expected; collect also bumps
+    # occasionally so caches do not go forever stale.
+    def self.invalidate_static_root_cache : Nil
+      @@maps_generation &+= 1
+    end
+
     def self.scan_static_roots(& : Void*, Void* ->) : Nil
       {% if flag?(:linux) %}
-        scan_proc_maps { |low, high| yield low, high }
+        ensure_static_root_cache
+        i = 0
+        while i < @@range_count
+          r = (@@ranges + i).value
+          yield Pointer(Void).new(r.low), Pointer(Void).new(r.high)
+          i += 1
+        end
       {% end %}
+    end
+
+    private def self.ensure_static_root_cache : Nil
+      return if @@cached_generation == @@maps_generation && @@range_count > 0
+
+      @@range_count = 0
+      scan_proc_maps do |low, high|
+        push_range(low.address, high.address)
+      end
+      @@cached_generation = @@maps_generation
+    end
+
+    private def self.push_range(lo : UInt64, hi : UInt64) : Nil
+      return if hi <= lo
+      if @@range_count >= @@range_cap
+        new_cap = @@range_cap == 0 ? 32 : @@range_cap * 2
+        bytes = (sizeof(RootRange) * new_cap).to_u64
+        ptr = LibC.realloc(@@ranges.as(Void*), LibC::SizeT.new(bytes)).as(RootRange*)
+        raise OutOfMemoryError.new("static root cache realloc failed") if ptr.null?
+        @@ranges = ptr
+        @@range_cap = new_cap
+      end
+      (@@ranges + @@range_count).value = RootRange.new(lo, hi)
+      @@range_count += 1
     end
 
     private def self.scan_proc_maps(& : Void*, Void* ->) : Nil
@@ -68,9 +121,6 @@ module Gcry
       perms = line + space_abs + 1
       return unless perms[0] == 'r'.ord.to_u8 && perms[1] == 'w'.ord.to_u8
 
-      # Only file-backed RW segments (binary / .so .data/.bss). Skip:
-      # - anonymous maps (fiber stacks, gcry arenas, libc scratch)
-      # - [stack] / [heap] (stacks via push_stack; libc heap holds no Crystal objs after boot)
       path = pathname_start(line, len)
       return if path < 0
       return if includes_name?(line + path, len - path, "[stack]")
@@ -78,23 +128,24 @@ module Gcry
       return if includes_name?(line + path, len - path, "[vvar]")
       return if includes_name?(line + path, len - path, "[vdso]")
 
+      # Skip huge crypto/ssl data segments — they almost never hold Crystal
+      # object pointers and dominate static-root scan time under HTTP/TLS.
+      return if includes_name?(line + path, len - path, "libcrypto")
+      return if includes_name?(line + path, len - path, "libssl")
+      return if includes_name?(line + path, len - path, "libpcre")
+
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
     end
 
-    # Returns byte offset of the mapping pathname, or -1 if anonymous.
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32
-      # maps format: addr-addr perms offset dev inode pathname
-      # pathname starts after inode field (5th whitespace-separated token after perms).
       i = 0
       fields = 0
       while i < len
-        # skip spaces
         while i < len && line[i] == 0x20_u8
           i += 1
         end
         break if i >= len || line[i] == 0x0a_u8
         fields += 1
-        # field 6 is pathname (1=addr, 2=perms, 3=offset, 4=dev, 5=inode, 6=path)
         if fields == 6
           return i
         end

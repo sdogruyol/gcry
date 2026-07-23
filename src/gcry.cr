@@ -7,7 +7,7 @@
 require "./gcry/heap"
 
 module Gcry
-  VERSION = "0.1.0"
+  VERSION = "0.2.0"
 
   @@default_heap : Heap? = nil
 

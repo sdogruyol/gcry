@@ -16,7 +16,10 @@ module GC
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
-    heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD
+    # Process GC: majors only by default. Nursery without write barriers must
+    # scan all old objects each minor — that dominates pause time under HTTP.
+    heap.nursery_enabled = false
+    heap.nursery_threshold = UInt64::MAX
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -45,14 +48,17 @@ module GC
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
     else
-      heap.gc_threshold = Gcry::Heap::DEFAULT_GC_THRESHOLD
+      heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
     end
 
     if env_flag_one?("GCRY_DISABLE_NURSERY")
       heap.nursery_enabled = false
       heap.nursery_threshold = UInt64::MAX
     elsif nursery = env_u64("GCRY_NURSERY")
+      # Opt-in: nursery without barriers is expensive (old→young full scan).
+      heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0
+      heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
     end
   end
 

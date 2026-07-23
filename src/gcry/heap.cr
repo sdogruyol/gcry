@@ -21,6 +21,11 @@ module Gcry
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @destroyed = false
     @nursery_alloc_bytes : UInt64 = 0_u64
+    # Sorted by chunk address for O(log n) pointer → chunk lookup during mark.
+    @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
+    @chunk_index_count = 0
+    @chunk_index_cap = 0
+    @chunk_index_dirty = true
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -50,6 +55,13 @@ module Gcry
       @free_bytes = 0_u64
       @live_objects = 0_u64
       @nursery_alloc_bytes = 0_u64
+      unless @chunk_index.null?
+        LibC.free(@chunk_index.as(Void*))
+        @chunk_index = Pointer(ChunkHeader*).null
+      end
+      @chunk_index_count = 0
+      @chunk_index_cap = 0
+      @chunk_index_dirty = true
       destroy_collector
     end
 
@@ -122,11 +134,7 @@ module Gcry
 
     def is_heap_ptr(pointer : Void*) : Bool
       return false if pointer.null?
-      addr = pointer.address
-      each_chunk do |chunk|
-        return true if ChunkHeader.contains?(chunk, addr)
-      end
-      false
+      !chunk_containing(pointer.address).nil?
     end
 
     def self.round_size(size : UInt64) : UInt64
@@ -263,6 +271,7 @@ module Gcry
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
       @chunks = chunk
       @heap_size += bytes
+      @chunk_index_dirty = true
       note_mapped(chunk)
       chunk
     end
@@ -279,6 +288,7 @@ module Gcry
     end
 
     protected def unlink_chunk(target : ChunkHeader*) : Nil
+      @chunk_index_dirty = true
       if @chunks == target
         @chunks = target.value.next
         return
@@ -304,12 +314,71 @@ module Gcry
       end
     end
 
-    private def chunk_for(user : Void*) : ChunkHeader*?
-      addr = user.address
-      each_chunk do |chunk|
-        return chunk if ChunkHeader.contains?(chunk, addr)
+    # Binary search over address-sorted chunk index (rebuilt lazily).
+    protected def chunk_containing(addr : UInt64) : ChunkHeader*?
+      return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+      ensure_chunk_index
+
+      lo = 0
+      hi = @chunk_index_count
+      while lo < hi
+        mid = lo + (hi - lo) // 2
+        chunk = (@chunk_index + mid).value
+        base = chunk.address
+        finish = base + chunk.value.mapped_bytes
+        if addr < base
+          hi = mid
+        elsif addr >= finish
+          lo = mid + 1
+        else
+          return chunk if ChunkHeader.contains?(chunk, addr)
+          return nil
+        end
       end
       nil
+    end
+
+    private def ensure_chunk_index : Nil
+      return unless @chunk_index_dirty
+
+      count = 0
+      each_chunk { count += 1 }
+
+      if count > @chunk_index_cap
+        new_cap = count < 16 ? 16 : count
+        bytes = (sizeof(ChunkHeader*) * new_cap).to_u64
+        ptr = LibC.realloc(@chunk_index.as(Void*), LibC::SizeT.new(bytes)).as(ChunkHeader**)
+        raise OutOfMemoryError.new("chunk index realloc failed") if ptr.null?
+        @chunk_index = ptr
+        @chunk_index_cap = new_cap
+      end
+
+      i = 0
+      each_chunk do |chunk|
+        (@chunk_index + i).value = chunk
+        i += 1
+      end
+      @chunk_index_count = count
+
+      # Insertion sort — chunk counts stay modest vs mark work.
+      i = 1
+      while i < @chunk_index_count
+        key = (@chunk_index + i).value
+        key_addr = key.address
+        j = i - 1
+        while j >= 0 && (@chunk_index + j).value.address > key_addr
+          (@chunk_index + (j + 1)).value = (@chunk_index + j).value
+          j -= 1
+        end
+        (@chunk_index + (j + 1)).value = key
+        i += 1
+      end
+
+      @chunk_index_dirty = false
+    end
+
+    private def chunk_for(user : Void*) : ChunkHeader*?
+      chunk_containing(user.address)
     end
 
     private def owns_user_pointer?(user : Void*, header : BlockHeader*) : Bool
