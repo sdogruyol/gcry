@@ -218,12 +218,13 @@ DESIGN.md
 - Samples: `samples/hello.cr`, `samples/alloc.cr` (`crystal build -Dgc_none …`).
 - Deliverable: Crystal programs run with gcry as process GC via shard require only.
 
-### Phase 5 — Hardening
+### Phase 5 — Hardening ✅
 
-- Stress tests (alloc storms, deep fiber recursion, finalizer + alloc loops).
-- Sanitizers where feasible; false-retention analysis.
-- CI matrix (Linux x86_64, then aarch64); later Windows / macOS.
-- Deliverable: release-candidate reliability bar.
+- Stress tests: `spec/stress_spec.cr` + `samples/stress.cr`.
+- Process tuning: `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`; finalizer nested-collect guard.
+- CI: `.github/workflows/ci.yml` (Linux x86_64 specs + `-Dgc_none` samples).
+- Notes: [docs/HARDENING.md](docs/HARDENING.md) (false retention, sanitizers).
+- Deliverable: reliability bar for RC-style use on Linux x86_64.
 
 ### Phase 6 — Performance & advanced GC
 

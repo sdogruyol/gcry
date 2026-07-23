@@ -4,10 +4,11 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same integration style as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (Immix).
 
-> **Status:** Phase 4 complete — use as process GC with `require "gcry"` + `-Dgc_none`.
+> **Status:** Phase 5 complete — stress suite + CI; process GC tunable via env.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
-> - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
+> - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal `GC` / fiber notes
+> - [docs/HARDENING.md](docs/HARDENING.md) — stress, tuning, false retention
 > - [CHANGELOG.md](CHANGELOG.md) — notable changes
 
 ## Why
@@ -67,11 +68,12 @@ There is no separate application-level allocator API for normal programs: alloca
 ```sh
 shards install
 crystal spec
+crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 ```
 
-Heap unit tests can run under the default (Boehm) GC while `Gcry::*` is exercised as a standalone allocator.
+Heap unit tests run under the default (Boehm) GC while `Gcry::*` is exercised as a standalone allocator. Process-GC samples need `-Dgc_none`.
 
-Design notes: [DESIGN.md](DESIGN.md). Runtime hookup: [docs/INTEGRATION.md](docs/INTEGRATION.md).
+Tuning: see [docs/HARDENING.md](docs/HARDENING.md) (`GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`).
 
 Suggested order of work:
 
@@ -80,7 +82,8 @@ Suggested order of work:
 3. ~~Conservative mark–sweep~~
 4. ~~Fiber / root registration~~
 5. ~~`module GC` reopen + `-Dgc_none` samples~~
-6. Hardening / CI / tune auto-collect
+6. ~~Hardening / CI / tune auto-collect~~
+7. Performance (incremental / generational)
 
 ## Contributing
 

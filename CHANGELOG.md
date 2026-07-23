@@ -9,27 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Phase 4 process GC:** `src/gcry/gc_override.cr` reopens `::GC` under `-Dgc_none`.
-  - LibC bootstrap before `GC.init` (avoids Fiber/`once` deadlock).
-  - Fiber roots via `before_collect` → `Fiber#push_gc_roots` → `push_stack`.
-  - Linux static roots from `/proc/self/maps` (skips managed heap ranges).
-  - Samples: `samples/hello.cr`, `samples/alloc.cr`, `samples/min.cr`.
-- **Phase 3:** `before_collect` / `push_stack`, finalizers, disappearing links.
-- **Phase 2:** conservative mark–sweep.
-- **Phase 1:** mmap size-class allocator.
-- Design docs: DESIGN.md, docs/INTEGRATION.md, README.md.
+- **Phase 5 hardening**
+  - Stress specs (`spec/stress_spec.cr`) and process stress sample (`samples/stress.cr`).
+  - CI workflow (`.github/workflows/ci.yml`): `crystal spec` + `-Dgc_none` hello/alloc/stress.
+  - Env knobs via `LibC.getenv`: `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO=1`.
+  - [docs/HARDENING.md](docs/HARDENING.md) — false retention, sanitizers, tuning.
+- **Phase 4 process GC** — `gc_override.cr`, static roots, samples.
+- **Phase 3** — fiber roots, finalizers, disappearing links.
+- **Phase 2** — conservative mark–sweep.
+- **Phase 1** — mmap size-class allocator.
 
 ### Fixed
 
-- Avoid `LibC::MAP_FAILED` and runtime Array/`sizeof` constants on the malloc path (they use Crystal `once` and deadlock during `GC.init` before Fiber exists).
-- Process `collect` retaining runtime globals via static mapping scans.
-
-### Changed
-
-- Integration: shard + `-Dgc_none` ([ysbaddaden/gc](https://github.com/ysbaddaden/gc) pattern).
+- Avoid Crystal `ENV` during `GC.init` (Fiber/`once` deadlock); use `LibC.getenv`.
+- Suppress auto-collect while finalizers run.
+- Bootstrap: no `LibC::MAP_FAILED` / runtime size-class Array on malloc path.
 
 ### Notes
 
-- Phase 0–4 complete.
-- Auto-collect threshold is `UInt64::MAX` in process mode for now (manual `GC.collect` OK).
-- Next: Phase 5 hardening (stress, CI, tune static roots / threshold).
+- Phase 0–5 complete.
+- Default process auto-collect threshold: 4 MiB (override with env).
+- Next: Phase 6 — incremental / generational performance work.

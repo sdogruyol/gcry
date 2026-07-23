@@ -20,6 +20,7 @@ module Gcry
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
     @collecting = false
+    @running_finalizers = false
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
 
@@ -163,7 +164,12 @@ module Gcry
       end
 
       # Finalizers run after the heap is consistent again (may allocate).
-      @finalizers.run_pending
+      @running_finalizers = true
+      begin
+        @finalizers.run_pending
+      ensure
+        @running_finalizers = false
+      end
     end
 
     # Resolve a conservative pointer to a live block header, if any.
@@ -208,6 +214,7 @@ module Gcry
     protected def maybe_collect : Nil
       return unless @enabled
       return if @collecting
+      return if @running_finalizers
       collect if @bytes_since_gc >= @gc_threshold
     end
 

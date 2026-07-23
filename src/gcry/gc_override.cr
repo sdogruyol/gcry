@@ -32,6 +32,39 @@ module GC
     end
 
     @@gcry_ready = true
+    apply_env_config(heap)
+  end
+
+  # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
+  private def self.apply_env_config(heap : Gcry::Heap) : Nil
+    if flag = LibC.getenv("GCRY_DISABLE_AUTO")
+      unless flag.null?
+        if flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+          heap.gc_threshold = UInt64::MAX
+          return
+        end
+      end
+    end
+
+    if thr = LibC.getenv("GCRY_THRESHOLD")
+      unless thr.null?
+        value = parse_u64_cstr(thr)
+        heap.gc_threshold = value unless value == 0
+        return
+      end
+    end
+
+    heap.gc_threshold = Gcry::Heap::DEFAULT_GC_THRESHOLD
+  end
+
+  private def self.parse_u64_cstr(ptr : UInt8*) : UInt64
+    value = 0_u64
+    while (c = ptr.value) != 0
+      break if c < '0'.ord.to_u8 || c > '9'.ord.to_u8
+      value = value * 10_u64 + (c - '0'.ord.to_u8).to_u64
+      ptr += 1
+    end
+    value
   end
 
   # :nodoc:
