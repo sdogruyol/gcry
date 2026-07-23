@@ -228,10 +228,10 @@ DESIGN.md
 
 Shipped without compiler write barriers:
 
-1. **Incremental marking** — `collect_a_little` / `GC.collect_a_little` (work-budget mark slices; black alloc while a cycle is active).
+1. **Incremental marking** — `collect_a_little` / `GC.collect_a_little` (work-budget mark slices; black alloc while a cycle is active). Process GC (v0.3+) auto-majors use slices by default (`incremental_auto`; `GCRY_DISABLE_INCREMENTAL=1` for full STW).
 2. **Nursery / minor GC** — young size-class freelists; `minor_collect`; old→young conservative scan (no barriers). Survivors promote to old space.
 3. Nursery threshold constant: 512 KiB (`DEFAULT_NURSERY_THRESHOLD`). Library heap leaves nursery at `UInt64::MAX` unless configured. Process GC (v0.2+): nursery **off** unless `GCRY_NURSERY`; majors at 64 MiB (`PROCESS_GC_THRESHOLD`).
-4. Bench: `bench/churn.cr` (library heap); `bench/kemal` + `make bench-kemal-wrk` (process GC).
+4. Bench: `bench/churn.cr` (library heap); `bench/kemal` + `make bench-kemal-wrk` (process GC). Pause counters: `Gcry.pause_stats`.
 
 Deferred (need codegen / barriers):
 

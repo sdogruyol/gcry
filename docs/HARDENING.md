@@ -20,10 +20,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
 | `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
+| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major on threshold (process default is sliced incremental) |
+| `GCRY_INCREMENTAL_WORK` | Objects marked per auto/`collect_a_little` slice (default `1024`) |
 
-Process GC enables **majors only** by default (nursery is opt-in). Library `Gcry::Heap` leaves the nursery threshold at `UInt64::MAX` unless you set it. Call `GC.collect_a_little` explicitly for incremental major slices; auto-collect still runs a full major when the threshold hits.
+Process GC enables **majors only** by default (nursery is opt-in). Auto-majors use **incremental** mark slices (`incremental_auto`); the first slice of a cycle still scans static roots. Library `Gcry::Heap` leaves nursery off-threshold and `incremental_auto = false` unless you set them.
 
-`collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons.
+`collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons. Inspect pauses with `Gcry.pause_stats`.
 
 Example:
 
@@ -32,9 +34,11 @@ GCRY_THRESHOLD=1048576 crystal build -Dgc_none samples/alloc.cr -o alloc && ./al
 GCRY_DISABLE_AUTO=1 crystal run -Dgc_none samples/hello.cr
 GCRY_NURSERY=262144 ./bin/alloc 1000
 GCRY_DISABLE_NURSERY=1 ./bin/stress 200
+GCRY_DISABLE_INCREMENTAL=1 ./bin/stress 200
+GCRY_INCREMENTAL_WORK=256 ./bin/stress 200
 ```
 
-Process GC defaults (v0.2+): majors at 64 MiB; nursery off unless `GCRY_NURSERY` is set. Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (v0.3+): majors at 64 MiB via incremental slices; nursery off unless `GCRY_NURSERY` is set. Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
 

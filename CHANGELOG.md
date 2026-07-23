@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-23
+
+### Added
+
+- Pause instrumentation: `last_pause_ns` / `max_pause_ns` / `total_pause_ns` / `pause_count` on `Gcry::Heap`; `Gcry.pause_stats`.
+- Env knobs: `GCRY_DISABLE_INCREMENTAL=1`, `GCRY_INCREMENTAL_WORK` (mark units per slice).
+- [docs/PERF.md](docs/PERF.md) — version-over-version Kemal wrk log (`/` + `/json`); `make bench-kemal-record`.
+
+### Changed
+
+- Process GC auto-major uses **incremental** `collect_a_little` slices (up to 4 per alloc) instead of full STW; opt out with `GCRY_DISABLE_INCREMENTAL=1`.
+- Default incremental work budget raised to 1024.
+- `maybe_collect` drains in-progress incremental cycles even when under the major threshold.
+
+### Performance
+
+- Kemal wrk vs **0.2.0** on `/` (same host): **+1.2%** req/s, **−33%** lat.avg — see [docs/PERF.md](docs/PERF.md).
+- Bench app: enriched **`GET /json`** (nested JSON alloc stress); formal `/json` baseline **30112** req/s vs Boehm **41748** (~72%).
+
 ## [0.2.0] - 2026-07-23
 
 ### Changed
@@ -65,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/sdogruyol/gcry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sdogruyol/gcry/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sdogruyol/gcry/releases/tag/v0.1.0

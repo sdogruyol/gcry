@@ -4,13 +4,14 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none` — no Crystal compiler or stdlib patch required.
 
-> **Status:** v0.2 — process GC tuned for HTTP throughput (nursery opt-in, 64 MiB majors). Phases 0–7 complete.
+> **Status:** v0.3 — incremental auto-majors, pause stats, alloc fast-path. Phases 0–7 complete.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal `GC` / fiber notes
 > - [docs/HARDENING.md](docs/HARDENING.md) — stress, tuning, false retention
 > - [docs/POLICY.md](docs/POLICY.md) — OOM, fork, signal safety
 > - [docs/COMPARISON.md](docs/COMPARISON.md) — bdwgc comparison checklist
+> - [docs/PERF.md](docs/PERF.md) — Kemal wrk version-over-version log
 > - [CHANGELOG.md](CHANGELOG.md) — notable changes
 
 ## Why
@@ -27,7 +28,7 @@ Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **
 
 Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
-## Supported platforms (v0.2)
+## Supported platforms (v0.3)
 
 | | |
 |--|--|
@@ -83,29 +84,35 @@ There is no separate application-level allocator API for normal programs: alloca
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
 | `GCRY_NURSERY` | Opt-in nursery; young bytes before minor (default off in process GC) |
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
+| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major on threshold (disable sliced auto-collect) |
+| `GCRY_INCREMENTAL_WORK` | Mark work units per `collect_a_little` slice (default `1024`) |
 
-More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md).
+More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md). Pause times: `Gcry.pause_stats` (`last_ns` / `max_ns` / `total_ns` / `count`).
 
-## Performance (v0.2)
+## Performance (v0.3)
 
-gcry is much closer to Boehm on throughput after process-GC tuning, but pauses are still longer when a major runs.
+Version-over-version Kemal wrk log: **[docs/PERF.md](docs/PERF.md)** (canonical). Measures **`/`** and **`/json`** (`wrk -c 100 -d 30`, fresh process per path).
 
-Rough numbers on Linux x86_64, Crystal 1.21, release builds, same Kemal “Hello World” app (`bench/kemal`), `wrk -c 100 -d 30`:
+Same-host snapshot (Crystal 1.21.0, WSL2 x86_64, 2026-07-23):
 
-| GC | Approx. req/s | Notes |
-|----|---------------|--------|
-| Boehm (default) | ~110k | Baseline |
-| gcry (`-Dgc_none`) | ~75–80k | Stable; occasional multi‑ms–1s major pauses |
-| gcry + `GCRY_DISABLE_AUTO=1` | ~80k+ | Allocator path when collection is off |
+| GC | Path | req/s | lat.avg | lat.max |
+|----|------|------:|--------:|--------:|
+| gcry 0.3.0 | `/` | 76227 | 24.08ms | 718ms |
+| gcry 0.3.0 | `/json` | **30112** | 20.33ms | 713ms |
+| Boehm | `/` | 107710 | 8.11ms | 695ms |
+| Boehm | `/json` | **41748** | 9.23ms | 668ms |
+
+Prior A/B **0.2.0 → 0.3.0** on `/` only: **+1.2%** req/s, **−33%** lat.avg (see PERF.md). `/json` is the primary stress path going forward (~72% of Boehm req/s here).
 
 What moved the needle (process GC defaults):
 
 - Nursery **off** by default (opt-in via `GCRY_NURSERY`) — minors without write barriers were scanning all old objects
 - Major threshold **64 MiB** (`PROCESS_GC_THRESHOLD`; override with `GCRY_THRESHOLD`)
+- **Incremental auto-majors** (v0.3) — threshold hits run `collect_a_little` slices instead of one long STW
 - Cached `/proc/self/maps` static-root ranges; skip bulky `libcrypto` / `libssl` / `libpcre` segments
 - O(log n) chunk index for mark pointer lookup
 
-Library-heap microbench: `make bench` → `./bin/churn`. Process-GC load test: `make bench-kemal-wrk`.
+Library-heap microbench: `make bench` → `./bin/churn`. Process-GC load test: `make bench-kemal-wrk` (runs `/` and `/json`). Record a release: `make bench-kemal-record PREV=v0.3.0 LABEL=0.4.0`.
 
 Still not a drop-in Boehm replacement for the tightest latency SLOs — majors remain stop-the-world — but HTTP dogfooding throughput is in the same ballpark.
 
@@ -115,7 +122,8 @@ Still not a drop-in Boehm replacement for the tightest latency SLOs — majors r
 make spec          # unit specs under Boehm
 make samples       # build -Dgc_none samples into bin/
 make bench         # library-heap churn bench
-make bench-kemal-wrk  # Kemal + wrk (-c 100 -d 30) under gcry
+make bench-kemal-wrk  # Kemal + wrk on / and /json (-c 100 -d 30)
+make bench-kemal-record PREV=v0.3.0 LABEL=0.4.0  # A/B both paths → PERF.md rows
 make format-check
 ```
 
@@ -127,7 +135,9 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 crystal build bench/churn.cr -o bin/churn && ./bin/churn 2000
 cd bench/kemal && shards install
 crystal build -Dgc_none --release src/server.cr -o ../../bin/kemal-gcry
-PORT=3001 ../../bin/kemal-gcry   # then: wrk -c 100 -d 30 http://127.0.0.1:3001/
+PORT=3001 ../../bin/kemal-gcry
+# then: wrk -c 100 -d 30 http://127.0.0.1:3001/
+#       wrk -c 100 -d 30 http://127.0.0.1:3001/json
 ```
 
 Heap unit tests run under the default (Boehm) GC while `Gcry::*` is exercised as a standalone allocator. Process-GC samples need `-Dgc_none`.
