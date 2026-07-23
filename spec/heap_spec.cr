@@ -7,7 +7,11 @@ describe Gcry::Heap do
     Gcry::Heap.round_size(16).should eq(16)
     Gcry::Heap.round_size(17).should eq(32)
     Gcry::Heap.round_size(8192).should eq(8192)
-    Gcry::Heap.round_size(8193).should eq(8200) # aligned up, large path
+    Gcry::Heap.round_size(8193).should eq(10240)
+    Gcry::Heap.round_size(16384).should eq(16384)
+    Gcry::Heap.round_size(16385).should eq(20480) # medium size class (≤32 KiB ceiling)
+    Gcry::Heap.round_size(32768).should eq(32768)
+    Gcry::Heap.round_size(32769).should eq(32776) # aligned up, large path
   end
 
   it "malloc returns zeroed memory" do
@@ -18,6 +22,35 @@ describe Gcry::Heap do
       32.times { |i| bytes[i].should eq(0) }
       heap.is_heap_ptr(ptr).should be_true
       heap.live_objects.should eq(1)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "malloc re-zeros freelist reuse after free" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(64)
+      64.times { |i| ptr.as(UInt8*)[i] = 0xCD_u8 }
+      heap.free(ptr)
+      again = heap.malloc(64)
+      again.should eq(ptr)
+      64.times { |i| again.as(UInt8*)[i].should eq(0) }
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "malloc re-zeros large objects taken from the cache" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(100_000)
+      ptr.as(UInt8*)[0] = 0xEF_u8
+      ptr.as(UInt8*)[99_999] = 0xFE_u8
+      heap.free(ptr)
+      again = heap.malloc(100_000)
+      again.as(UInt8*)[0].should eq(0)
+      again.as(UInt8*)[99_999].should eq(0)
     ensure
       heap.destroy
     end
@@ -79,9 +112,12 @@ describe Gcry::Heap do
       bytes[99_999] = 2_u8
       before = heap.heap_size
       heap.free(ptr)
+      # Cached on large freelist (still a heap mapping until trim).
+      heap.is_heap_ptr(ptr).should be_true
+      heap.live_objects.should eq(0)
+      heap.trim_large_cache(0)
       heap.is_heap_ptr(ptr).should be_false
       heap.heap_size.should be < before
-      heap.live_objects.should eq(0)
     ensure
       heap.destroy
     end

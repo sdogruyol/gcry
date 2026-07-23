@@ -3,8 +3,8 @@ module Gcry
   # (Crystal `once` consts like Array literals / sizeof-based values deadlock
   # during GC.init because Fiber is not up yet.)
   module SizeClasses
-    COUNT     =       32
-    THRESHOLD = 8192_u32
+    COUNT     =        40
+    THRESHOLD = 32768_u32
 
     def self.payload(index : Int32) : UInt32
       case index
@@ -40,6 +40,14 @@ module Gcry
       when 29 then 6144_u32
       when 30 then 7168_u32
       when 31 then 8192_u32
+      when 32 then 10240_u32
+      when 33 then 12288_u32
+      when 34 then 14336_u32
+      when 35 then 16384_u32
+      when 36 then 20480_u32
+      when 37 then 24576_u32
+      when 38 then 28672_u32
+      when 39 then 32768_u32
       else
         raise ArgumentError.new("bad size class index: #{index}")
       end
@@ -47,62 +55,85 @@ module Gcry
 
     def self.index_of(payload : UInt32) : Int32
       case payload
-      when   16 then 0
-      when   32 then 1
-      when   48 then 2
-      when   64 then 3
-      when   80 then 4
-      when   96 then 5
-      when  112 then 6
-      when  128 then 7
-      when  160 then 8
-      when  192 then 9
-      when  224 then 10
-      when  256 then 11
-      when  320 then 12
-      when  384 then 13
-      when  448 then 14
-      when  512 then 15
-      when  640 then 16
-      when  768 then 17
-      when  896 then 18
-      when 1024 then 19
-      when 1280 then 20
-      when 1536 then 21
-      when 1792 then 22
-      when 2048 then 23
-      when 2560 then 24
-      when 3072 then 25
-      when 3584 then 26
-      when 4096 then 27
-      when 5120 then 28
-      when 6144 then 29
-      when 7168 then 30
-      when 8192 then 31
+      when    16 then 0
+      when    32 then 1
+      when    48 then 2
+      when    64 then 3
+      when    80 then 4
+      when    96 then 5
+      when   112 then 6
+      when   128 then 7
+      when   160 then 8
+      when   192 then 9
+      when   224 then 10
+      when   256 then 11
+      when   320 then 12
+      when   384 then 13
+      when   448 then 14
+      when   512 then 15
+      when   640 then 16
+      when   768 then 17
+      when   896 then 18
+      when  1024 then 19
+      when  1280 then 20
+      when  1536 then 21
+      when  1792 then 22
+      when  2048 then 23
+      when  2560 then 24
+      when  3072 then 25
+      when  3584 then 26
+      when  4096 then 27
+      when  5120 then 28
+      when  6144 then 29
+      when  7168 then 30
+      when  8192 then 31
+      when 10240 then 32
+      when 12288 then 33
+      when 14336 then 34
+      when 16384 then 35
+      when 20480 then 36
+      when 24576 then 37
+      when 28672 then 38
+      when 32768 then 39
       else
         raise ArgumentError.new("not a size-class payload: #{payload}")
       end
     end
 
     def self.round(size : UInt64) : UInt64
-      return 16_u64 if size == 0
+      fit(size)[0]
+    end
+
+    # Returns {rounded_payload, class_index}. class_index is -1 for large.
+    def self.fit(size : UInt64) : {UInt64, Int32}
+      return {16_u64, 0} if size == 0
 
       word = sizeof(Void*).to_u64 # compile-time sizeof in expression
       aligned = (size + word - 1) & ~(word - 1)
-      return aligned if aligned > THRESHOLD
+      return {aligned, -1} if aligned > THRESHOLD
 
-      # Walk classes without touching a runtime Array constant.
+      # Coarse start — avoid scanning tiny classes for medium/large-small sizes.
       i = 0
+      if aligned > 8192
+        i = 32
+      elsif aligned > 2048
+        i = 23
+      elsif aligned > 512
+        i = 15
+      elsif aligned > 128
+        i = 7
+      end
+
       while i < COUNT
         klass = payload(i).to_u64
-        return klass if aligned <= klass
+        return {klass, i} if aligned <= klass
         i += 1
       end
-      aligned
+      {aligned, -1}
     end
   end
 
   # Compatibility aliases (integer literals — safe during GC.init).
-  SIZE_CLASS_COUNT =       32
-  LARGE_THRESHOLD  = 8192_u32
+  SIZE_CLASS_COUNT =        40
+  LARGE_THRESHOLD  = 32768_u32
 end

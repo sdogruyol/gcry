@@ -78,17 +78,39 @@ describe "Gcry::Heap finalizers" do
     end
   end
 
-  it "does not finalize live rooted objects" do
+  it "runs finalizers on explicit free" do
     heap = Gcry::Heap.new
     begin
       finalized = [] of Void*
       obj = heap.malloc(16)
       heap.add_finalizer(obj) { |ptr| finalized << ptr }
-      heap.add_root(obj)
-
+      heap.free(obj)
+      heap.finalizer_entry_count.should eq(0)
+      # Pending finalizers run at the next collect (same as GC path).
       heap.collect(scan_stack: false)
-      heap.live?(obj).should be_true
-      finalized.should be_empty
+      finalized.should eq([obj])
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "explicit free of a plain object does not drop unrelated finalizers" do
+    heap = Gcry::Heap.new
+    begin
+      keep = [] of Void*
+      64.times do
+        obj = heap.malloc(16)
+        heap.add_finalizer(obj) { }
+        heap.add_root(obj)
+        keep << obj
+      end
+      heap.finalizer_entry_count.should eq(64)
+
+      plain = heap.malloc(32)
+      32.times { |i| plain.as(UInt8*)[i] = 1_u8 }
+      heap.free(plain)
+
+      heap.finalizer_entry_count.should eq(64)
     ensure
       heap.destroy
     end

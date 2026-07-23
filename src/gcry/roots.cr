@@ -1,6 +1,15 @@
+require "c/unistd"
+require "c/fcntl"
+
 module Gcry
   # Explicit roots and conservative stack scanning helpers.
   module Roots
+    # setjmp is not in Crystal's LibC bindings; we only need it to spill
+    # callee-saved registers into a buffer we then scan as roots.
+    lib LibSetjmp
+      fun setjmp(env : Void*) : Int32
+    end
+
     # Linked list node allocated with libc malloc (immortal w.r.t. gcry heap).
     struct RootNode
       property next : RootNode*
@@ -76,14 +85,57 @@ module Gcry
       pointerof(local).as(Void*)
     end
 
+    # Combined: spill regs + scan [approx SP, bottom), feeding each candidate
+    # to *block*.
+    def self.scan_mutator(bottom : Void*, & : Void* ->) : Nil
+      spill_registers
+      env = uninitialized StaticArray(UInt8, 256)
+      LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+      scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
+        yield candidate
+      end
+      # Stacks may include a PROT_NONE guard page if SP is stale — probe pages.
+      scan_range(stack_pointer, bottom, safe: true) do |candidate|
+        yield candidate
+      end
+      keep_alive(env.to_unsafe.as(Void*))
+    end
+
+    # Force the compiler to spill any live pointer held in GP registers onto
+    # the stack before a conservative scan (setjmp alone only saves callee-saved).
+    def self.spill_registers : Nil
+      {% if flag?(:x86_64) %}
+        asm("" ::: "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+                   "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory")
+      {% elsif flag?(:aarch64) %}
+        asm("" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+                   "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+                   "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
+                   "x24", "x25", "x26", "x27", "x28", "memory")
+      {% else %}
+        env = uninitialized StaticArray(UInt8, 256)
+        LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+        keep_alive(env.to_unsafe.as(Void*))
+      {% end %}
+    end
+
+    def self.keep_alive(ptr : Void*) : Nil
+      asm("" :: "r"(ptr) : "memory")
+    end
+
     # Conservatively scan [low, high) word-aligned for heap pointers.
     # On x86_64 the stack grows down: pass SP as low, stack_bottom as high.
     #
-    # Refuses absurd ranges (e.g. fiber SP vs stale main-stack bottom) that
-    # would walk unmapped gaps and SIGSEGV.
-    MAX_SCAN_BYTES = 16_u64 * 1024 * 1024
+    # When *safe* is true, each page is probed via write(2)/EFAULT so PROT_NONE
+    # fiber guard pages and unmapped holes are skipped (no SIGSEGV). Use for
+    # fiber/thread stacks; leave false for /proc/self/maps static ranges.
+    MAX_SCAN_BYTES = 64_u64 * 1024 * 1024
+    PAGE_SIZE      = 4096_u64
 
-    def self.scan_range(low : Void*, high : Void*, & : Void* ->) : Nil
+    @@probe_rd = -1
+    @@probe_wr = -1
+
+    def self.scan_range(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
       return if low.null? || high.null?
       lo = low.address
       hi = high.address
@@ -93,16 +145,100 @@ module Gcry
 
       return if (hi - lo) > MAX_SCAN_BYTES
 
-      # Align to pointer size.
       word = sizeof(Void*).to_u64
       lo = (lo + word - 1) & ~(word - 1)
       hi &= ~(word - 1)
+      return if lo >= hi
 
-      cursor = Pointer(UInt64).new(lo)
-      end_ptr = Pointer(UInt64).new(hi)
-      while cursor < end_ptr
-        yield Pointer(Void).new(cursor.value)
-        cursor += 1
+      if safe
+        scan_range_safe(lo, hi, word) { |c| yield c }
+      else
+        cursor = Pointer(UInt64).new(lo)
+        end_ptr = Pointer(UInt64).new(hi)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
+      end
+    end
+
+    # Fiber/pthread stacks usually have a leading PROT_NONE guard then a
+    # contiguous readable body. Fast path: skip leading holes, confirm the last
+    # page, bulk-scan. Slow path: walk readable runs if the end is unmapped
+    # (glibc sometimes reports a range that includes a trailing guard).
+    private def self.scan_range_safe(lo : UInt64, hi : UInt64, word : UInt64, & : Void* ->) : Nil
+      ensure_probe_pipe
+
+      page = lo & ~(PAGE_SIZE - 1)
+      while page < hi && !page_readable?(page)
+        page += PAGE_SIZE
+      end
+      return if page >= hi
+
+      last_page = (hi - 1) & ~(PAGE_SIZE - 1)
+      if last_page == page || page_readable?(last_page)
+        start = lo > page ? lo : page
+        start = (start + word - 1) & ~(word - 1)
+        finish = hi & ~(word - 1)
+        return if start >= finish
+
+        cursor = Pointer(UInt64).new(start)
+        end_ptr = Pointer(UInt64).new(finish)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
+        return
+      end
+
+      # End not readable — scan contiguous readable runs only.
+      while page < hi
+        while page < hi && !page_readable?(page)
+          page += PAGE_SIZE
+        end
+        break if page >= hi
+
+        run_lo = page
+        while page < hi && page_readable?(page)
+          page += PAGE_SIZE
+        end
+        run_hi = page
+        run_hi = hi if run_hi > hi
+
+        start = lo > run_lo ? lo : run_lo
+        start = (start + word - 1) & ~(word - 1)
+        finish = (run_hi < hi ? run_hi : hi) & ~(word - 1)
+        next if start >= finish
+
+        cursor = Pointer(UInt64).new(start)
+        end_ptr = Pointer(UInt64).new(finish)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
+      end
+    end
+
+    private def self.ensure_probe_pipe : Nil
+      return if @@probe_wr >= 0
+      fds = StaticArray(Int32, 2).new(0)
+      return if LibC.pipe(fds) != 0
+      @@probe_rd = fds[0]
+      @@probe_wr = fds[1]
+      flags = LibC.fcntl(@@probe_rd, LibC::F_GETFL)
+      LibC.fcntl(@@probe_rd, LibC::F_SETFL, flags | LibC::O_NONBLOCK) if flags >= 0
+    end
+
+    # Kernel copies one byte from *page*; EFAULT ⇒ not readable (PROT_NONE / hole).
+    private def self.page_readable?(page : UInt64) : Bool
+      return false if @@probe_wr < 0
+      n = LibC.write(@@probe_wr, Pointer(Void).new(page), 1)
+      if n == 1
+        buf = uninitialized UInt8
+        LibC.read(@@probe_rd, pointerof(buf).as(Void*), 1)
+        true
+      else
+        false
       end
     end
   end

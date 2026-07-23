@@ -18,6 +18,8 @@ module GC
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
+    # Process GC must STW: ExecutionContext always has a Monitor OS thread.
+    heap.stop_the_world = true
     # Process GC: majors only by default. Nursery without write barriers must
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
@@ -26,7 +28,7 @@ module GC
     # unsound under heavy pointer mutation (e.g. Kemal /json).
     heap.incremental_auto = false
     # Empty-chunk munmap stays opt-in: default-on regresses Kemal wrk ~35–40%.
-    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning (unreleased) makes it safe.
+    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning makes it safe.
     heap.release_empty_chunks = false
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
@@ -35,13 +37,12 @@ module GC
       heap.set_stackbottom(LibC.__libc_stack_end)
     {% end %}
 
-    # Suspended fibers: push their stacks before marking (Boehm-compatible hooks).
-    # Crystal 1.21+ defaults to Fiber::ExecutionContext, which does not call
-    # GC.set_stackbottom on fiber swap — refresh from Fiber.current here.
+    # Suspended fiber stacks are scanned once inside Heap#scan_all_fiber_roots
+    # (with guard clamp). Do not also call push_gc_roots here — that doubled
+    # stack word walks under HTTP (many fibers) and dominated STW pauses.
+    # Crystal 1.21+ ExecutionContext does not call GC.set_stackbottom on swap —
+    # refresh the running fiber bottom each collect.
     heap.before_collect do
-      Fiber.unsafe_each do |fiber|
-        fiber.push_gc_roots unless fiber.running?
-      end
       heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
 
@@ -348,8 +349,7 @@ module GC
   end
 
   # :nodoc:
-  # Parallel ExecutionContext STW is not implemented yet (v0.4 skeleton).
-  # Under parallelism 1 these remain no-ops — same as Crystal's gc/none.
+  # Suspends other OS threads (Monitor / extra schedulers) for a safe mark–sweep.
   def self.stop_world : Nil
     Gcry.default_heap.stop_world if @@gcry_ready
   end

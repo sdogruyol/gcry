@@ -21,7 +21,12 @@ module Gcry
     @@maps_generation = 0_u32
     @@cached_generation = UInt32::MAX
 
-    # Bump when dlopen/mmap of new libraries is expected; collect also bumps
+    # Adjacency state while parsing /proc/self/maps (address-ordered).
+    @@parse_prev_hi = 0_u64
+    @@parse_prev_file_rw = false
+
+    # Bump when dlopen/mmap of new libraries is expected; also after our own
+    # munmap so cached ranges never point at unmapped pages. Collect bumps
     # occasionally so caches do not go forever stale.
     def self.invalidate_static_root_cache : Nil
       @@maps_generation &+= 1
@@ -43,6 +48,8 @@ module Gcry
       return if @@cached_generation == @@maps_generation && @@range_count > 0
 
       @@range_count = 0
+      @@parse_prev_hi = 0_u64
+      @@parse_prev_file_rw = false
       scan_proc_maps do |low, high|
         push_range(low.address, high.address)
       end
@@ -119,26 +126,80 @@ module Gcry
 
       return if space_abs + 4 >= len
       perms = line + space_abs + 1
-      return unless perms[0] == 'r'.ord.to_u8 && perms[1] == 'w'.ord.to_u8
+      # Need readable private data. Writable BSS holds class vars; RELRO .data.rel.ro
+      # is r-- after relocation and may still hold heap pointers.
+      return unless perms[0] == 'r'.ord.to_u8
+      return if perms[2] == 'x'.ord.to_u8 # skip code
 
       path = pathname_start(line, len)
-      return if path < 0
-      return if includes_name?(line + path, len - path, "[stack]")
-      return if includes_name?(line + path, len - path, "[heap]")
-      return if includes_name?(line + path, len - path, "[vvar]")
-      return if includes_name?(line + path, len - path, "[vdso]")
+      size = hi - lo
 
-      # Skip bulky library data segments — they almost never hold Crystal
-      # object pointers and dominate static-root scan time under HTTP.
-      return if includes_name?(line + path, len - path, "libcrypto")
-      return if includes_name?(line + path, len - path, "libssl")
-      return if includes_name?(line + path, len - path, "libpcre")
-      return if includes_name?(line + path, len - path, "libxml")
-      return if includes_name?(line + path, len - path, "libyaml")
-      return if includes_name?(line + path, len - path, "libgmp")
-      return if includes_name?(line + path, len - path, "libicu")
+      if path < 0
+        # ELF BSS zero-fill: anonymous RW pages contiguous with the previous
+        # file-backed RW mapping (typically after .data). Do NOT treat every
+        # small anonymous VMA as a root — gcry large objects are also anon
+        # <1 MiB; caching those and scanning after munmap is SIGSEGV.
+        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
+        return
+      end
+
+      # Kernel-named VMAs ([stack], [anon:...], [heap], …). Linux 6.x labels
+      # many anon regions; treating them as file-backed scanned whole arenas /
+      # stacks (SIGBUS on guard holes). Same path as pathname-less anon.
+      if line[path] == '['.ord.to_u8
+        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
+        return
+      end
+
+      # Skip shared libraries — Crystal heap roots in class/global vars live in
+      # the main executable (+ adjacency BSS), not in libc/openssl/etc. data.
+      if includes_name?(line + path, len - path, ".so")
+        @@parse_prev_file_rw = false
+        return
+      end
+
+      if includes_name?(line + path, len - path, "libcrypto") ||
+         includes_name?(line + path, len - path, "libssl") ||
+         includes_name?(line + path, len - path, "libpcre") ||
+         includes_name?(line + path, len - path, "libxml") ||
+         includes_name?(line + path, len - path, "libyaml") ||
+         includes_name?(line + path, len - path, "libgmp") ||
+         includes_name?(line + path, len - path, "libicu") ||
+         includes_name?(line + path, len - path, "libsqlite") ||
+         includes_name?(line + path, len - path, "libpq") ||
+         includes_name?(line + path, len - path, "libmysql") ||
+         includes_name?(line + path, len - path, "libz.so") ||
+         includes_name?(line + path, len - path, "liblzma") ||
+         includes_name?(line + path, len - path, "libstdc++") ||
+         includes_name?(line + path, len - path, "libgcc_s")
+        @@parse_prev_file_rw = false
+        return
+      end
+
+      writable = perms[1] == 'w'.ord.to_u8
+      # Always scan rw-p (.data). Skip large RELRO r--p on fat Crystal binaries
+      # (multi‑MiB word scans); class vars that hold heap refs are writable.
+      unless writable
+        if size >= 64_u64 * 1024
+          @@parse_prev_file_rw = false
+          return
+        end
+      end
 
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+      @@parse_prev_hi = hi
+      @@parse_prev_file_rw = writable
+    end
+
+    # Contiguous small RW anon after a file-backed RW .data (ELF BSS).
+    private def self.try_yield_adjacent_bss(lo : UInt64, hi : UInt64, perms : UInt8*, size : UInt64, & : Void*, Void* ->) : Nil
+      if @@parse_prev_file_rw &&
+         lo == @@parse_prev_hi &&
+         perms[1] == 'w'.ord.to_u8 &&
+         size < 1_u64 * 1024 * 1024
+        yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+      end
+      @@parse_prev_file_rw = false
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32

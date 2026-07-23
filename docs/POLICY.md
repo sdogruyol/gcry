@@ -16,7 +16,7 @@ product decisions for Linux x86_64 under Crystal **1.21+** defaults
 Notes:
 
 - Auto-collect already runs before most allocations when thresholds are hit; the emergency path covers hard OS refusal after that.
-- Large objects are `munmap`'d on reclaim. Fully free size-class chunks may be `munmap`'d after a major when `GCRY_RELEASE_CHUNKS=1` (opt-in; unreleased tree pins finalizer buffers so this is crash-safe).
+- Large objects are `munmap`'d on reclaim. Fully free size-class chunks may be `munmap`'d after a major when `GCRY_RELEASE_CHUNKS=1` (opt-in; finalizer buffers are pinned so this is crash-safe).
 - There is no soft heap limit or `malloc` null-return mode. Crystal codepaths expect exceptions (or abort) on OOM.
 
 ## Fork safety
@@ -43,12 +43,12 @@ v0.4 skeleton only **detects** post-fork GC; it does **not** reinitialize the he
 
 | Mode | Support |
 |------|---------|
-| Default `Fiber::ExecutionContext` (parallelism 1) | **Supported** — stack bottom refreshed from `Fiber.current` at collect |
-| Resizing default context / extra parallel contexts | **Unsupported** — `stop_world` / `start_world` are no-op stubs (v0.4 skeleton) |
+| Default `Fiber::ExecutionContext` (parallelism 1) | **Supported** — STW suspends the Monitor (SYSMON) thread; stack bottom refreshed from `Fiber.current`; other threads' current-fiber stacks scanned after STW |
+| Resizing default context / extra parallel contexts | **Experimental** — STW suspends all OS threads and scans each current fiber stack; not tuned for high parallelism |
 | Legacy `-Dpreview_mt` | **Unsupported** (deprecated in Crystal) |
 | Legacy `-Dwithout_mt` (`Crystal::Scheduler`) | Works for API shape; prefer the 1.21 default |
 
-Do not run fibers in parallel on multiple OS threads with gcry as process GC.
+Process GC sets `Heap#stop_the_world = true` (signal-suspend like `gc/none`). Library `Gcry::Heap` under Boehm leaves it off.
 
 ## Returning memory to the OS
 

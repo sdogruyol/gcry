@@ -26,9 +26,9 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (opt-in) |
 | `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (overrides release) |
 
-Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Empty-chunk release stays **opt-in** (unreleased tree pins finalizer buffers so it is crash-safe; default-on costs too much vs Boehm). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
+Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Empty-chunk release stays **opt-in** (finalizer buffers pinned during mark so release is crash-safe; default-on costs too much vs Boehm). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
-Inspect pauses with `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `count`). `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects and empty chunks when release is enabled.
+Inspect pauses with `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `count`). Kemal bench exposes `GET /gc-stats` under `-Dgc_none`. `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects and empty chunks when release is enabled.
 
 Example:
 
@@ -42,9 +42,11 @@ GCRY_RELEASE_CHUNKS=1 ./bin/stress 200
 ./bin/json_churn 1000
 ```
 
-Process GC defaults (v0.5+): majors at 64 MiB full STW; nursery off; size-class chunks retained unless `GCRY_RELEASE_CHUNKS=1`. Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (v0.6+): majors at 64 MiB full STW; nursery off; size-class ceiling 32 KiB; chunks retained unless `GCRY_RELEASE_CHUNKS=1`. Auto-collect is suppressed while finalizers run (avoids nested collect).
 
-OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
+**Tuning note (Kemal `/json` wrk):** raising `GCRY_THRESHOLD` to 128–256 MiB cuts major count but pause p50 grows roughly with heap; total pause time over a fixed wrk window often stays similar, so req/s may not improve. Prefer measuring `GET /gc-stats` (`pause_p50_ns` / `pause_p99_ns` / `major_collections`) on the real app before changing the default.
+
+OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md). Real-app STW/sweep notes: [docs/ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 ## False retention
 
@@ -67,15 +69,17 @@ GC.collect
 after = GC.stats.heap_size
 ```
 
-`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Prefer `Gcry.default_heap.live_objects` in library tests.
+`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;8 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache`). Prefer `Gcry.default_heap.live_objects` in library tests.
 
 ## Process GC notes (HTTP / fibers)
 
 Crystal **1.21+** defaults to `Fiber::ExecutionContext`, which does **not** call `GC.set_stackbottom` on fiber swap (only GC read locks). gcry refreshes the running fiber’s stack bottom at collect time from `Fiber.current.@stack.bottom`.
 
-Static roots scan **file-backed** RW segments only (binary / `.so` data). Large anonymous maps (fiber stacks, arenas) are covered by `push_stack` / the mutator stack scan.
+Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads (including the SYSMON Monitor) are signal-suspended, then their stacks are scanned (`pthread_getattr_np` for main fibers; guard page skipped for pooled fiber stacks). Mutator stack scan spills registers via `setjmp`. Without this, Monitor/register-only roots are swept and the heap corrupts under HTTP load.
 
-Parallel ExecutionContexts and deprecated `-Dpreview_mt` are unsupported — see [docs/POLICY.md](POLICY.md).
+Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
+
+Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
 
 ## Sanitizers
 

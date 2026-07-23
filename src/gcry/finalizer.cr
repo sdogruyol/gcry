@@ -2,9 +2,9 @@ module Gcry
   # Finalizers and disappearing links (WeakRef support).
   #
   # Long-lived entries stay in Crystal Arrays (reachable from Heap → marked).
-  # `on_reclaim` must not grow those Arrays or allocate temporary ones — that
-  # would recurse into GC mid-sweep. Pending work is queued on a LibC list and
-  # drained after collect (while nested auto-collect is suppressed).
+  # After mark, Heap walks the registry once via index APIs (no Crystal Proc —
+  # allocating a closure mid-collect re-enters malloc and crashes).
+  # Pending work is LibC-queued and drained after collect.
   module Finalizers
     alias Callback = Void* -> Nil
 
@@ -55,30 +55,68 @@ module Gcry
         @links << Link.new(link, object)
       end
 
-      # Called while reclaiming *object* (still before the block is reused).
-      def on_reclaim(object : Void*) : Nil
+      def entry_count : Int32
+        @entries.size
+      end
+
+      def link_count : Int32
+        @links.size
+      end
+
+      def entry_object_at(i : Int32) : Void*
+        @entries[i].object
+      end
+
+      def link_object_at(i : Int32) : Void*
+        @links[i].object
+      end
+
+      # Queue finalizer at *i* and swap-remove (does not allocate on GC heap).
+      def queue_and_remove_entry_at(i : Int32) : Nil
+        queue_pending(@entries[i])
+        swap_remove_entry(i)
+      end
+
+      # Clear disappearing link at *i* and swap-remove.
+      def clear_and_remove_link_at(i : Int32) : Nil
+        @links[i].link.value = Pointer(Void).null
+        swap_remove_link(i)
+      end
+
+      # Explicit free path: drop registry rows for one object.
+      # Common realloc/free of ordinary objects must not scan thousands of
+      # unrelated finalizer entries (perf: ~15%+ CPU on HTTP apps).
+      def notice_reclaim(object : Void*) : Nil
         return if object.null?
         return if @entries.empty? && @links.empty?
 
-        i = 0
-        while i < @entries.size
-          entry = @entries[i]
-          if entry.object == object
-            queue_pending(entry)
-            @entries.delete_at(i)
-          else
-            i += 1
+        header = BlockHeader.from_user(object)
+        flags = header.value.flags
+        scan_entries = !@entries.empty? && (flags & BlockHeader::Flags::FINALIZER) != 0
+        scan_links = !@links.empty? && (flags & BlockHeader::Flags::DISAPPEARING) != 0
+        return unless scan_entries || scan_links
+
+        if scan_entries
+          i = 0
+          while i < @entries.size
+            if @entries[i].object == object
+              queue_pending(@entries[i])
+              swap_remove_entry(i)
+            else
+              i += 1
+            end
           end
         end
 
-        i = 0
-        while i < @links.size
-          link = @links[i]
-          if link.object == object
-            link.link.value = Pointer(Void).null
-            @links.delete_at(i)
-          else
-            i += 1
+        if scan_links
+          i = 0
+          while i < @links.size
+            if @links[i].object == object
+              @links[i].link.value = Pointer(Void).null
+              swap_remove_link(i)
+            else
+              i += 1
+            end
           end
         end
       end
@@ -101,27 +139,28 @@ module Gcry
         @pending_count
       end
 
-      def entry_count : Int32
-        @entries.size
+      def entry_closure_data_at(i : Int32) : Void*
+        @entries[i].callback.closure_data
       end
 
-      def link_count : Int32
-        @links.size
+      def entries_buffer : Void*
+        @entries.to_unsafe.as(Void*)
       end
 
-      # Heap metadata (Registry/Array) may live on LibC bootstrap malloc while
-      # Array buffers sit on the gcry heap. Pin those buffers (and finalizer
-      # Proc closures) so empty-chunk munmap cannot reclaim them.
-      # Do **not** mark entry/link `object` fields — those must stay collectible.
-      def each_mark_root(& : Void* ->) : Nil
-        unless @entries.empty?
-          yield @entries.to_unsafe.as(Void*)
-          @entries.each do |entry|
-            data = entry.callback.closure_data
-            yield data unless data.null?
-          end
-        end
-        yield @links.to_unsafe.as(Void*) unless @links.empty?
+      def links_buffer : Void*
+        @links.to_unsafe.as(Void*)
+      end
+
+      private def swap_remove_entry(i : Int32) : Nil
+        last = @entries.size - 1
+        @entries.swap(i, last) if i != last
+        @entries.pop
+      end
+
+      private def swap_remove_link(i : Int32) : Nil
+        last = @links.size - 1
+        @links.swap(i, last) if i != last
+        @links.pop
       end
 
       private def queue_pending(entry : Entry) : Nil

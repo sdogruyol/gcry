@@ -68,6 +68,8 @@ describe "Gcry::Heap collection" do
 
       heap.live?(keep).should be_true
       heap.live?(drop).should be_false
+      # Large objects are cached (no munmap in STW); force trim to release RSS.
+      heap.trim_large_cache(0)
       heap.heap_size.should be < before
     ensure
       heap.destroy
