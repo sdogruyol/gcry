@@ -457,7 +457,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
             end
           end
         end
@@ -544,12 +544,12 @@ module Gcry
         next if fiber == current
         next if fiber.running?
         # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
-        # After clamp the range is fully mapped — no per-page probe.
+        # safe:true: reported ranges can still contain holes on some kernels.
         stack = fiber.@stack
         top = fiber.@context.stack_top.address
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard if top < guard
-        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: false) do |candidate|
+        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
           mark_candidate(candidate)
         end
       end
@@ -572,8 +572,8 @@ module Gcry
 
         if fiber.name == "main"
           if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
-            # pthread stacks have no PROT_NONE guard page.
-            Roots.scan_range(bounds[0], bounds[1], safe: false) do |candidate|
+            # glibc may include a guard page inside getattr bounds — probe.
+            Roots.scan_range(bounds[0], bounds[1], safe: true) do |candidate|
               mark_candidate(candidate)
             end
             next
@@ -587,7 +587,7 @@ module Gcry
         top = guard if top < guard
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
-        Roots.scan_range(low, stack.bottom, safe: false) do |candidate|
+        Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
           mark_candidate(candidate)
         end
       end
@@ -653,7 +653,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
             end
           end
         end

@@ -162,9 +162,10 @@ module Gcry
       end
     end
 
-    # Fiber/pthread stacks: at most a leading PROT_NONE guard, then contiguous
-    # readable memory. Probe only until the first readable page, then bulk-scan
-    # (per-page write/read was a major STW cost under many fibers).
+    # Fiber/pthread stacks usually have a leading PROT_NONE guard then a
+    # contiguous readable body. Fast path: skip leading holes, confirm the last
+    # page, bulk-scan. Slow path: walk readable runs if the end is unmapped
+    # (glibc sometimes reports a range that includes a trailing guard).
     private def self.scan_range_safe(lo : UInt64, hi : UInt64, word : UInt64, & : Void* ->) : Nil
       ensure_probe_pipe
 
@@ -174,16 +175,47 @@ module Gcry
       end
       return if page >= hi
 
-      start = lo > page ? lo : page
-      start = (start + word - 1) & ~(word - 1)
-      finish = hi & ~(word - 1)
-      return if start >= finish
+      last_page = (hi - 1) & ~(PAGE_SIZE - 1)
+      if last_page == page || page_readable?(last_page)
+        start = lo > page ? lo : page
+        start = (start + word - 1) & ~(word - 1)
+        finish = hi & ~(word - 1)
+        return if start >= finish
 
-      cursor = Pointer(UInt64).new(start)
-      end_ptr = Pointer(UInt64).new(finish)
-      while cursor < end_ptr
-        yield Pointer(Void).new(cursor.value)
-        cursor += 1
+        cursor = Pointer(UInt64).new(start)
+        end_ptr = Pointer(UInt64).new(finish)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
+        return
+      end
+
+      # End not readable — scan contiguous readable runs only.
+      while page < hi
+        while page < hi && !page_readable?(page)
+          page += PAGE_SIZE
+        end
+        break if page >= hi
+
+        run_lo = page
+        while page < hi && page_readable?(page)
+          page += PAGE_SIZE
+        end
+        run_hi = page
+        run_hi = hi if run_hi > hi
+
+        start = lo > run_lo ? lo : run_lo
+        start = (start + word - 1) & ~(word - 1)
+        finish = (run_hi < hi ? run_hi : hi) & ~(word - 1)
+        next if start >= finish
+
+        cursor = Pointer(UInt64).new(start)
+        end_ptr = Pointer(UInt64).new(finish)
+        while cursor < end_ptr
+          yield Pointer(Void).new(cursor.value)
+          cursor += 1
+        end
       end
     end
 

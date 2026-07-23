@@ -139,21 +139,15 @@ module Gcry
         # file-backed RW mapping (typically after .data). Do NOT treat every
         # small anonymous VMA as a root — gcry large objects are also anon
         # <1 MiB; caching those and scanning after munmap is SIGSEGV.
-        if @@parse_prev_file_rw &&
-           lo == @@parse_prev_hi &&
-           perms[1] == 'w'.ord.to_u8 &&
-           size < 1_u64 * 1024 * 1024
-          yield Pointer(Void).new(lo), Pointer(Void).new(hi)
-        end
-        @@parse_prev_file_rw = false
+        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
         return
       end
 
-      if includes_name?(line + path, len - path, "[stack]") ||
-         includes_name?(line + path, len - path, "[heap]") ||
-         includes_name?(line + path, len - path, "[vvar]") ||
-         includes_name?(line + path, len - path, "[vdso]")
-        @@parse_prev_file_rw = false
+      # Kernel-named VMAs ([stack], [anon:...], [heap], …). Linux 6.x labels
+      # many anon regions; treating them as file-backed scanned whole arenas /
+      # stacks (SIGBUS on guard holes). Same path as pathname-less anon.
+      if line[path] == '['.ord.to_u8
+        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
         return
       end
 
@@ -195,6 +189,17 @@ module Gcry
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       @@parse_prev_hi = hi
       @@parse_prev_file_rw = writable
+    end
+
+    # Contiguous small RW anon after a file-backed RW .data (ELF BSS).
+    private def self.try_yield_adjacent_bss(lo : UInt64, hi : UInt64, perms : UInt8*, size : UInt64, & : Void*, Void* ->) : Nil
+      if @@parse_prev_file_rw &&
+         lo == @@parse_prev_hi &&
+         perms[1] == 'w'.ord.to_u8 &&
+         size < 1_u64 * 1024 * 1024
+        yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+      end
+      @@parse_prev_file_rw = false
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32
