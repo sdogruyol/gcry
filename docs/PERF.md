@@ -9,8 +9,8 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | Version | `/` | `/json` | notes |
 |---------|----:|--------:|-------|
 | 0.4.0 | ~86% | ~83% | tagged; STW default |
-| main | **~92%** | **~82%** | STW hot-path |
-| main + `GCRY_RELEASE_CHUNKS=1` | ~56% | ~49% | opt-in only |
+| 0.5.0 | **~92%** | **~82%** | pause p50/p99, prof_stats, STW hot-path; chunk release opt-in |
+| 0.5.0 + `GCRY_RELEASE_CHUNKS=1` | ~56% | ~49% | opt-in only |
 
 ## How to record
 
