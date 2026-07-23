@@ -176,6 +176,14 @@ module Gcry
       add_finalizer(object, block)
     end
 
+    def finalizer_entry_count : Int32
+      @finalizers.entry_count
+    end
+
+    def finalizer_link_count : Int32
+      @finalizers.link_count
+    end
+
     def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
       referent = object
       if referent.null?
@@ -236,6 +244,10 @@ module Gcry
         stop_world
         mark_loop_budget(work_units)
         if @mark_stack.empty?
+          @finalizers.enqueue_unreachable do |obj|
+            h = find_object(obj)
+            !h.nil? && !BlockHeader.free?(h.not_nil!) && !BlockHeader.marked?(h.not_nil!)
+          end
           sweep(major: true)
           @bytes_since_gc = 0_u64
           @nursery_alloc_bytes = 0_u64
@@ -463,6 +475,12 @@ module Gcry
         t0 = monotonic_ns
         mark_loop
         @last_phase_mark_ns = monotonic_ns - t0
+
+        # Finalizers / WeakRef: one pass over the registry (not per reclaim).
+        @finalizers.enqueue_unreachable do |obj|
+          h = find_object(obj)
+          !h.nil? && !BlockHeader.free?(h.not_nil!) && !BlockHeader.marked?(h.not_nil!)
+        end
 
         t0 = monotonic_ns
         sweep(major: major)
@@ -841,15 +859,27 @@ module Gcry
               end
             end
           else
-            each_block(chunk) do |header|
-              next if BlockHeader.free?(header)
-              next if !major && !BlockHeader.nursery?(header)
-
-              if BlockHeader.marked?(header)
-                BlockHeader.clear_mark(header)
-                BlockHeader.promote(header) unless major
-              else
-                reclaim_small(chunk, header)
+            # Inline size-class sweep — avoid each_block yield overhead on
+            # multi-million block heaps (dominated phase_sweep under HTTP).
+            class_index = chunk.value.size_class.to_i32
+            if class_index >= 0 && class_index < SIZE_CLASS_COUNT
+              payload = SizeClasses.payload(class_index)
+              block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+              cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+              limit = ChunkHeader.data_end(chunk).as(UInt8*)
+              while (cursor + block_bytes) <= limit
+                header = cursor.as(BlockHeader*)
+                unless BlockHeader.free?(header)
+                  if major || BlockHeader.nursery?(header)
+                    if BlockHeader.marked?(header)
+                      BlockHeader.clear_mark(header)
+                      BlockHeader.promote(header) unless major
+                    else
+                      reclaim_small(chunk, header, payload)
+                    end
+                  end
+                end
+                cursor += block_bytes
               end
             end
 
@@ -974,14 +1004,12 @@ module Gcry
       @free_bytes = total
     end
 
-    private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      user = BlockHeader.user_from(header)
-      @finalizers.on_reclaim(user)
-
+    private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32 = 0_u32) : Nil
       class_index = chunk.value.size_class.to_i32
       return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
-      payload = SizeClasses.payload(class_index)
+      payload = SizeClasses.payload(class_index) if payload == 0
+      user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
       if was_nursery
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
@@ -998,9 +1026,6 @@ module Gcry
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.
     private def prepare_reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      user = BlockHeader.user_from(header)
-      @finalizers.on_reclaim(user)
-
       mapped = chunk.value.mapped_bytes
       payload = header.value.size.to_u64
       @heap_size -= mapped if @heap_size >= mapped

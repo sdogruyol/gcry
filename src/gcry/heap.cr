@@ -130,6 +130,7 @@ module Gcry
         @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
         note_explicit_free(payload)
         @live_objects -= 1 if @live_objects > 0
+        @finalizers.notice_reclaim(pointer)
         cache_large_chunk(chunk, header)
         trim_large_cache
         return
@@ -141,6 +142,8 @@ module Gcry
       class_index = chunk.value.size_class.to_i32
       raise ArgumentError.new("bad size class on chunk") if class_index < 0 || class_index >= SIZE_CLASS_COUNT
       payload = SizeClasses.payload(class_index)
+
+      @finalizers.notice_reclaim(pointer)
 
       if BlockHeader.nursery?(header)
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])

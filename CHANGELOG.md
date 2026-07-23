@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fiber roots:** process GC scans suspended stacks **once** via `scan_all_fiber_roots` (no duplicate `push_gc_roots` in `before_collect`).
 - **Safe stack scans:** skip leading PROT_NONE pages with one probe sequence, then bulk-scan; fiber scans that already clamp past the guard use `safe: false`.
 - STW phase timers (`last_phase_*_ns`) exposed for Kemal `GET /gc-stats`.
-- **Sweep:** recycle large objects onto a size-bucket freelist instead of `munmap` during STW. Thousands of per-buffer VMAs made Linux `munmap` dominate pauses on HTTP apps (`phase_sweep_ns` multi-second); trim cache outside STW when over 64 MiB. Also batch empty-chunk release; `reclaim_small` takes the chunk (no per-object index rebuild).
+- **Finalizers / WeakRef:** process unreachable entries once after mark (`enqueue_unreachable`, O(finalizers)), not `on_reclaim` per swept object (was O(reclaimed × WeakRefs) and multi-second under HTTP). Size-class sweep is inlined (no `each_block` yield).
+- **Sweep:** recycle large objects onto a size-bucket freelist instead of `munmap` during STW. Thousands of per-buffer VMAs made Linux `munmap` dominate pauses on HTTP apps; trim cache outside STW when over 64 MiB.
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
 
 ## [0.5.0] - 2026-07-23

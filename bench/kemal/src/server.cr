@@ -51,6 +51,8 @@ end
       phase_mark_ns:     h.last_phase_mark_ns,
       phase_sweep_ns:    h.last_phase_sweep_ns,
       large_free_bytes:  h.large_free_bytes,
+      finalizer_entries: h.finalizer_entry_count,
+      weak_links:        h.finalizer_link_count,
     }.to_json
   end
 {% end %}

@@ -2,9 +2,10 @@ module Gcry
   # Finalizers and disappearing links (WeakRef support).
   #
   # Long-lived entries stay in Crystal Arrays (reachable from Heap → marked).
-  # `on_reclaim` must not grow those Arrays or allocate temporary ones — that
-  # would recurse into GC mid-sweep. Pending work is queued on a LibC list and
-  # drained after collect (while nested auto-collect is suppressed).
+  # After mark, `enqueue_unreachable` walks the registry once (O(finalizers)),
+  # not once per reclaimed heap object (that was O(reclaimed × finalizers) and
+  # multi-second under HTTP + WeakRef). Pending work is LibC-queued and drained
+  # after collect (nested auto-collect suppressed).
   module Finalizers
     alias Callback = Void* -> Nil
 
@@ -55,17 +56,17 @@ module Gcry
         @links << Link.new(link, object)
       end
 
-      # Called while reclaiming *object* (still before the block is reused).
-      def on_reclaim(object : Void*) : Nil
-        return if object.null?
+      # After mark, before sweep: O(entries + links). *is_dead* is true when the
+      # referent is an unmarked (still-mapped) heap object.
+      def enqueue_unreachable(&is_dead : Void* -> Bool) : Nil
         return if @entries.empty? && @links.empty?
 
         i = 0
         while i < @entries.size
           entry = @entries[i]
-          if entry.object == object
+          if is_dead.call(entry.object)
             queue_pending(entry)
-            @entries.delete_at(i)
+            swap_remove_entry(i)
           else
             i += 1
           end
@@ -74,9 +75,35 @@ module Gcry
         i = 0
         while i < @links.size
           link = @links[i]
-          if link.object == object
+          if is_dead.call(link.object)
             link.link.value = Pointer(Void).null
-            @links.delete_at(i)
+            swap_remove_link(i)
+          else
+            i += 1
+          end
+        end
+      end
+
+      # Explicit free path (rare): drop registry rows for one object.
+      def notice_reclaim(object : Void*) : Nil
+        return if object.null?
+        return if @entries.empty? && @links.empty?
+
+        i = 0
+        while i < @entries.size
+          if @entries[i].object == object
+            queue_pending(@entries[i])
+            swap_remove_entry(i)
+          else
+            i += 1
+          end
+        end
+
+        i = 0
+        while i < @links.size
+          if @links[i].object == object
+            @links[i].link.value = Pointer(Void).null
+            swap_remove_link(i)
           else
             i += 1
           end
@@ -122,6 +149,18 @@ module Gcry
           end
         end
         yield @links.to_unsafe.as(Void*) unless @links.empty?
+      end
+
+      private def swap_remove_entry(i : Int32) : Nil
+        last = @entries.size - 1
+        @entries.swap(i, last) if i != last
+        @entries.pop
+      end
+
+      private def swap_remove_link(i : Int32) : Nil
+        last = @links.size - 1
+        @links.swap(i, last) if i != last
+        @links.pop
       end
 
       private def queue_pending(entry : Entry) : Nil
