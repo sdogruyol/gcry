@@ -184,6 +184,28 @@ Large freelist reuse is **exact mapped-size** only; `/gc-stats` adds `large_mapp
 
 Instrumented gcry re-run after wrk: heap ≈ **254 MiB**; **`small_mapped` ≈ 235 MiB**, `large_mapped` ≈ 20 MiB (`large_free` ≈ 7 MiB); pause p50 ≈ 20ms; 15 majors. Takeaway: remaining RSS gap is **size-class / conservative retention**, not the large freelist (~7–15 MiB free). Exact-fit removes fat-VMA live waste; it does not close the 3–4× RSS gap alone.
 
+### After deferred empty-chunk release + occupancy (WSL, same day)
+
+Empty-chunk `munmap` runs **outside STW** (queued in sweep). `/gc-stats` adds `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
+
+**Toy Kemal** `/json` (paired A/B):
+
+| GC | req/s | % Boehm | RSS | notes |
+|----|------:|--------:|----:|-------|
+| Boehm | 40938 | 100% | 16 MiB | same session |
+| gcry | 41069 | **~100%** | 92 MiB | `fully_free` ≈ **76 MiB** retained; 380 size-class chunks |
+| gcry + `GCRY_RELEASE_CHUNKS=1` | 37838 | **~92%** | (steady-state varies) | last major released ≈76 MiB; stays opt-in |
+
+**acikturkiye** `/api/v1/`:
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 159 | 100% | 42 MiB | 434 | same session |
+| gcry | 164 | **~103%** | 172 MiB | 508 | `fully_free` ≈ **24 MiB**; `small_mapped` ≈ 250 MiB |
+| gcry + chunks | 155 | **~98%** | 166 MiB | 331 | released ≈26 MiB; RSS almost flat; pause p50 rose (freelist rebuild) |
+
+Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 MiB `small_mapped` — **not** the RSS lever. Remaining mass is conservative-live / sparse chunks. Kemal shows large fully-free retention (~76 MiB) so release helps toy RSS more. Keep `GCRY_RELEASE_CHUNKS` opt-in.
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
@@ -195,11 +217,12 @@ Instrumented gcry re-run after wrk: heap ≈ **254 MiB**; **`small_mapped` ≈ 2
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
 8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
 9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; cut as **v0.6.0**).
-10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start) — `/gc-stats` exposes `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes` / `large_cache_retain` (`GCRY_LARGE_CACHE`).
-11. Next RSS lever: size-class retention / empty-chunk policy under load (or barriers); optional lower `GCRY_LARGE_CACHE` / `MADV_DONTNEED` only if free large cache grows again.
+10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start).
+11. ~~Empty-chunk munmap outside STW + occupancy counters; measure RELEASE_CHUNKS.~~ **Done** — acikturkiye RSS unchanged; next is sparse-chunk / barriers.
+12. Sparse size-class chunks (partially live) or write barriers — empty-chunk release is insufficient for acikturkiye RSS.
 
 ## Non-goals (still)
 
 - `GCRY_INCREMENTAL=1` / nursery as process default without barriers (unsound on JSON/Hash).
-- `GCRY_RELEASE_CHUNKS=1` as default (Kemal still slower with it; see [PERF.md](PERF.md)).
+- `GCRY_RELEASE_CHUNKS=1` as default (Kemal still ~92%; acikturkiye RSS win negligible).
 - Chasing Boehm RSS parity without write barriers / better large-object policy.

@@ -16,7 +16,7 @@ product decisions for Linux x86_64 under Crystal **1.21+** defaults
 Notes:
 
 - Auto-collect already runs before most allocations when thresholds are hit; the emergency path covers hard OS refusal after that.
-- Large objects are recycled onto a size-bucket freelist on reclaim (no `munmap` during STW). Excess free large mappings are trimmed outside STW (`trim_large_cache`; retain limit via `GCRY_LARGE_CACHE`, default 32 MiB). Fully free size-class chunks may be `munmap`'d after a major when `GCRY_RELEASE_CHUNKS=1` (opt-in; finalizer buffers are pinned so this is crash-safe).
+- Large objects are recycled onto a size-bucket freelist on reclaim (no `munmap` during STW). Excess free large mappings are trimmed outside STW (`trim_large_cache`; retain limit via `GCRY_LARGE_CACHE`, default 32 MiB). Fully free size-class chunks may be queued during major sweep and `munmap`'d **outside STW** when `GCRY_RELEASE_CHUNKS=1` (opt-in; finalizer buffers are pinned so this is crash-safe).
 - There is no soft heap limit or `malloc` null-return mode. Crystal codepaths expect exceptions (or abort) on OOM.
 
 ## Fork safety

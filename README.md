@@ -104,7 +104,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
-| `GCRY_RELEASE_CHUNKS=1` | Return empty chunks to the OS (opt-in; slower HTTP) |
+| `GCRY_RELEASE_CHUNKS=1` | Return empty chunks to the OS (opt-in; ~92% of Boehm `/json`; little acikturkiye RSS win) |
 | `GCRY_KEEP_CHUNKS=1` | Force chunks retained |
 | `GCRY_LARGE_CACHE` | Free large-object bytes to retain after trim (default **32 MiB**) |
 

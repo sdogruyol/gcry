@@ -53,6 +53,10 @@ module Gcry
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
     getter last_phase_sweep_ns : UInt64 = 0_u64
+    # Occupancy after last major (size-class chunks only).
+    getter size_class_chunk_count : UInt64 = 0_u64
+    getter fully_free_chunk_bytes : UInt64 = 0_u64
+    getter released_chunk_bytes : UInt64 = 0_u64
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -70,6 +74,8 @@ module Gcry
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
+    # Fully free size-class chunks queued in STW; munmap outside (like large trim).
+    @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
 
     def enable : Nil
       @enabled = true
@@ -389,6 +395,7 @@ module Gcry
     end
 
     protected def destroy_collector : Nil
+      flush_pending_empty_chunks
       abort_incremental
       @roots.clear
       @mark_stack.destroy
@@ -406,6 +413,9 @@ module Gcry
       @bytes_reclaimed_since_gc = 0_u64
       @reclaimed_bytes_before_gc = 0_u64
       @expl_freed_bytes_since_gc = 0_u64
+      @size_class_chunk_count = 0_u64
+      @fully_free_chunk_bytes = 0_u64
+      @released_chunk_bytes = 0_u64
       reset_pause_stats
     end
 
@@ -506,7 +516,8 @@ module Gcry
         record_pause(started)
       end
 
-      # Munmap excess cached large objects outside STW (reuse is the common case).
+      # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+      flush_pending_empty_chunks
       trim_large_cache
 
       @running_finalizers = true
@@ -872,11 +883,18 @@ module Gcry
       # then rebuilt/sorted the index (O(n²) insertion sort) — that made sweep
       # multi-second on HTTP apps with many large allocs (see unmapped_bytes).
       kept = Pointer(ChunkHeader).null
+      # Fully free size-class chunks: queue here, munmap after start_world.
       to_unmap = Pointer(ChunkHeader).null
-      any_unmap = false
+      any_drop = false
       # Opt-in empty-chunk release: defer freelist rebuilds per size-class.
       rebuild_mask = 0_u64
       rebuild_nursery_mask = 0_u64
+
+      if major
+        @size_class_chunk_count = 0_u64
+        @fully_free_chunk_bytes = 0_u64
+        @released_chunk_bytes = 0_u64
+      end
 
       chunk = @chunks
       while chunk
@@ -902,6 +920,7 @@ module Gcry
             # Inline size-class sweep — avoid each_block yield overhead on
             # multi-million block heaps (dominated phase_sweep under HTTP).
             class_index = chunk.value.size_class.to_i32
+            any_live = false
             if class_index >= 0 && class_index < SIZE_CLASS_COUNT
               payload = SizeClasses.payload(class_index)
               block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
@@ -914,35 +933,43 @@ module Gcry
                     if BlockHeader.marked?(header)
                       BlockHeader.clear_mark(header)
                       BlockHeader.promote(header) unless major
+                      any_live = true
                     else
                       reclaim_small(chunk, header, payload)
                     end
+                  else
+                    any_live = true
                   end
                 end
                 cursor += block_bytes
               end
+            else
+              any_live = true
             end
 
-            if major && @release_empty_chunks && chunk_fully_free?(chunk)
-              class_index = chunk.value.size_class.to_i32
-              if class_index >= 0 && class_index < SIZE_CLASS_COUNT
+            if major
+              unless any_live
                 mapped = chunk.value.mapped_bytes
-                nursery = ChunkHeader.nursery?(chunk)
-                @heap_size -= mapped if @heap_size >= mapped
-                @unmapped_bytes += mapped
-                @bytes_reclaimed_since_gc += mapped
-                index_remove(chunk)
-                chunk.value.next = to_unmap
-                to_unmap = chunk
-                drop = true
-                any_unmap = true
-                bit = 1_u64 << class_index
-                if nursery
-                  rebuild_nursery_mask |= bit
-                else
-                  rebuild_mask |= bit
+                @fully_free_chunk_bytes += mapped
+                if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
+                  nursery = ChunkHeader.nursery?(chunk)
+                  @heap_size -= mapped if @heap_size >= mapped
+                  @bytes_reclaimed_since_gc += mapped
+                  @released_chunk_bytes += mapped
+                  index_remove(chunk)
+                  chunk.value.next = to_unmap
+                  to_unmap = chunk
+                  drop = true
+                  any_drop = true
+                  bit = 1_u64 << class_index
+                  if nursery
+                    rebuild_nursery_mask |= bit
+                  else
+                    rebuild_mask |= bit
+                  end
                 end
               end
+              @size_class_chunk_count += 1 unless drop
             end
           end
         end
@@ -956,10 +983,15 @@ module Gcry
 
       @chunks = kept
 
-      while to_unmap
-        nxt = to_unmap.value.next
-        LibC.munmap(to_unmap.as(Void*), LibC::SizeT.new(to_unmap.value.mapped_bytes))
-        to_unmap = nxt
+      # Queue for post-STW munmap (do not munmap while world stopped).
+      if to_unmap
+        # Prepend onto any leftover pending (should be empty).
+        tail = to_unmap
+        while !tail.value.next.null?
+          tail = tail.value.next
+        end
+        tail.value.next = @pending_empty_chunks
+        @pending_empty_chunks = to_unmap
       end
 
       if rebuild_mask != 0 || rebuild_nursery_mask != 0
@@ -970,16 +1002,27 @@ module Gcry
         end
       end
 
-      if any_unmap
+      if any_drop
         update_heap_bounds_after_unmap
       end
     end
 
-    private def chunk_fully_free?(chunk : ChunkHeader*) : Bool
-      each_block(chunk) do |header|
-        return false unless BlockHeader.free?(header)
+    # Munmap size-class chunks queued during STW sweep. Call outside STW.
+    # Do not invalidate the static-root maps cache here (same as the former
+    # in-STW empty-chunk path): heap VMAs are excluded via the chunk index and
+    # static scans use safe probing. Full maps refresh stays on the major interval.
+    private def flush_pending_empty_chunks : Nil
+      chunk = @pending_empty_chunks
+      return if chunk.null?
+
+      @pending_empty_chunks = Pointer(ChunkHeader).null
+      while chunk
+        nxt = chunk.value.next
+        mapped = chunk.value.mapped_bytes
+        @unmapped_bytes += mapped
+        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        chunk = nxt
       end
-      true
     end
 
     # Remove a fully free size-class chunk from the heap and rebuild that

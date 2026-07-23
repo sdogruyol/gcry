@@ -159,7 +159,36 @@ it "munmaps fully free size-class chunks on major" do
     heap.collect(scan_stack: false)
     heap.live?(keep).should be_true
     heap.unmapped_bytes.should be > 0
+    heap.released_chunk_bytes.should eq(heap.unmapped_bytes)
+    heap.fully_free_chunk_bytes.should eq(heap.released_chunk_bytes)
     heap.heap_size.should be < before
+    # Freelist still works after rebuild from remaining chunks.
+    heap.malloc(64).should_not be_nil
+  ensure
+    heap.destroy
+  end
+end
+
+it "reports fully_free_chunk_bytes when empty chunks are retained" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = false
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.released_chunk_bytes.should eq(0)
+    heap.fully_free_chunk_bytes.should be > 0
+    heap.size_class_chunk_count.should be > 0
+    # Retained: heap_size does not drop by the fully-free amount.
+    heap.heap_size.should eq(before)
+    heap.unmapped_bytes.should eq(0)
   ensure
     heap.destroy
   end

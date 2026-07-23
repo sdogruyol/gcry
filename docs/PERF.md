@@ -13,6 +13,8 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.5.0 + `GCRY_RELEASE_CHUNKS=1` | ~56% | ~49% | opt-in only |
 | 0.6.0 | **~105%** | **~100%** | size-class 32 KiB, `notice_reclaim`, chunk index; STW/static-root/stack fixes |
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | opt-in only |
+| 0.7.0-dev | — | **~100%** | exact-fit large reuse; empty-chunk munmap outside STW; occupancy stats |
+| 0.7.0-dev + `GCRY_RELEASE_CHUNKS=1` | — | **~92%** | same-host `/json` 37838 vs Boehm 40938; default retains ~76 MiB fully-free chunks |
 
 Same-host raw (2026-07-23, Crystal 1.21, WSL2): Boehm `/` 102154 `/json` 40699 req/s; gcry `/` 107593 `/json` 40653; chunks `/` 94480 `/json` 37547.
 

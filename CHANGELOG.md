@@ -12,11 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Large-object freelist reuse is **exact mapped-size** only (no oversized VMA for a smaller need).
 - `GCRY_LARGE_CACHE` sets free large bytes retained after post-collect trim (default **32 MiB**).
 - Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
+- Empty size-class chunk `munmap` deferred **outside STW** (queued in sweep, flushed with `trim_large_cache`); occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
 
 ### Performance
 
-- Same-host Kemal gate held: `/json` **~105%**, `/` **~113%** of Boehm req/s (host-noisy absolutes; not a PERF.md version row).
-- acikturkiye `/api/v1/` **~105%** of Boehm; RSS still ~4× — breakdown shows **`small_mapped` dominates** (~235 MiB vs `large_mapped` ~20 MiB) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%** (post-defer; same as 0.6.0 chunks row). Default retains ~**76 MiB** fully-free chunks (`fully_free_chunk_bytes`).
+- acikturkiye `/api/v1/`: default **~103%** of Boehm; chunks **~98%**; RSS still ~4× Boehm — `fully_free` only ~**24 MiB** of ~250 MiB `small_mapped` (release cannot close the gap) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.6.0] - 2026-07-23
 
