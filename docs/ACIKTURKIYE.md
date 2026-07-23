@@ -107,14 +107,62 @@ Classes `20480…32768` added; `LARGE_THRESHOLD = 32768`.
 
 Takeaway: 32 KiB ceiling is a clear win on the real app (~68%→~89% of Boehm). Remaining gap is mostly mutator/allocator + retention, not VMA storm.
 
+### Mutator path: skip clear on zeroed freelist (WSL, same day)
+
+`malloc` used to `memset` every pointerful alloc. MAP_ANONYMOUS chunks and fresh large mmaps are already zero — skip clear until `free` / sweep reclaim dirties that size-class freelist (or a large-cache hit). Also `SizeClasses.fit` (one pass + coarse start) replaces round+index.
+
+**Toy Kemal:**
+
+| GC | path | req/s | % Boehm | notes |
+|----|------|------:|--------:|-------|
+| gcry | `/` | 100433 | ~95% | noise vs prior |
+| gcry | `/json` | 38409 | **~95%** | flat vs 32 KiB run |
+
+**acikturkiye** `/api/v1/`:
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| gcry | 135 | **~88%** | 152 MiB | 623 | flat vs 32 KiB (~136 / ~89%); heap ≈ 233 MiB; `large_free` ≈ 17 MiB |
+
+Takeaway: correct optimization, **no steady-state wrk win** — after the first major, reclaim dirties freelists so almost every `malloc` still clears. Remaining ~10–12% is elsewhere (allocator bookkeeping, locality/retention, DB/timeouts).
+
+### perf: `notice_reclaim` on every free/realloc (WSL, same day)
+
+`perf record -F 99 --call-graph dwarf` under wrk on `/api/v1/` (release+debug binary):
+
+- App JSON (`Char#===` / `to_json`) dominates overall samples (expected).
+- GC hotspot: `Finalizers::Registry#notice_reclaim` + `Array(Entry)#[]` ≈ **15%+** self time, stacked under `realloc` → `free`.
+- Cause: every explicit free scanned **all** ~5k finalizer entries (Crystal `File`/IO finalizers accumulate). Array growth realloc paid O(entries) each time.
+- Fix: `BlockHeader` flags `FINALIZER` / `DISAPPEARING`; `notice_reclaim` returns immediately unless the object has the matching flag.
+
+**acikturkiye** `/api/v1/` after fix (same-session Boehm re-run):
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 160 | 100% | 35 MiB | 577 | same session |
+| gcry | 159 | **~100%** | 166 MiB | 425 | was ~135 / ~88%; `notice_reclaim` gone from perf top; `ensure_chunk_index` (~3%) next |
+
+Toy Kemal `/json`: ~39623 req/s (flat/noise vs prior).
+
+### Incremental chunk index (WSL, same day)
+
+`map_chunk` / `unlink_chunk` / empty-chunk drop now maintain the address-sorted `@chunk_index` with O(log C) locate + O(C) shift. Full `ensure_chunk_index` rebuild only if `@chunk_index_dirty` (fallback). Also drop redundant `is_heap_ptr` inside `owns_user_pointer?` (was double binary search on every `free`/`realloc`).
+
+**perf:** `ensure_chunk_index` gone from top; `chunk_containing` ≈ 1.3% (steady binary search).
+
+**acikturkiye** `/api/v1/`: **154 req/s** (flat vs ~159; still ≈ Boehm). Kemal `/json`: ~40629 req/s.
+
 ### Next experiments
 
-1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done** (WSL baseline above).
+1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
 4. Longer-term: write barriers + nursery / incremental for Boehm-like mutator behavior.
-5. ~~Extend ceiling to **32 KiB**.~~ **Done** (~68%→~89% of Boehm on `/api/v1/`).
-6. Mutator-path profiling (allocator freelist / zeroing / `malloc` hot path) — next lever for the remaining ~10–15%.
+5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
+6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
+7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
+8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
+9. Re-record Kemal `docs/PERF.md` + consider version cut now that acikturkiye ≈ Boehm.
 
 ## Non-goals (still)
 

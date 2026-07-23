@@ -16,11 +16,13 @@ module Gcry
     end
 
     module Flags
-      FREE    =  1_u32
-      ATOMIC  =  2_u32
-      MARK    =  4_u32
-      LARGE   =  8_u32
-      NURSERY = 16_u32 # young generation (Phase 6)
+      FREE         =  1_u32
+      ATOMIC       =  2_u32
+      MARK         =  4_u32
+      LARGE        =  8_u32
+      NURSERY      = 16_u32 # young generation (Phase 6)
+      FINALIZER    = 32_u32 # has at least one finalizer entry
+      DISAPPEARING = 64_u32 # has at least one disappearing link (WeakRef)
     end
 
     def self.from_user(user : Void*) : BlockHeader*
@@ -49,6 +51,26 @@ module Gcry
 
     def self.marked?(header : BlockHeader*) : Bool
       (header.value.flags & Flags::MARK) != 0
+    end
+
+    def self.finalizer?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::FINALIZER) != 0
+    end
+
+    def self.disappearing?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::DISAPPEARING) != 0
+    end
+
+    def self.set_finalizer(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags |= Flags::FINALIZER
+      header.value = h
+    end
+
+    def self.set_disappearing(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags |= Flags::DISAPPEARING
+      header.value = h
     end
 
     def self.set_mark(header : BlockHeader*) : Nil

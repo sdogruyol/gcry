@@ -25,6 +25,9 @@ module Gcry
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    # True while freelist blocks are still MAP_ANONYMOUS-zeroed (skip malloc clear).
+    @freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
+    @nursery_freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
     @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
     @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
@@ -33,7 +36,9 @@ module Gcry
     @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
     @chunk_index_count = 0
     @chunk_index_cap = 0
-    @chunk_index_dirty = true
+    # When true, index is stale and must be rebuilt from @chunks (fallback).
+    # Normal map/unmap maintains the sorted index incrementally.
+    @chunk_index_dirty = false
     @pause_ring = uninitialized StaticArray(UInt64, PAUSE_RING_SIZE)
     @pause_ring_len = 0
     @pause_ring_pos = 0
@@ -41,6 +46,8 @@ module Gcry
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
+      @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
@@ -68,6 +75,8 @@ module Gcry
       @chunks = Pointer(ChunkHeader).null
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
+      @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @heap_size = 0_u64
       @free_bytes = 0_u64
@@ -80,7 +89,7 @@ module Gcry
       end
       @chunk_index_count = 0
       @chunk_index_cap = 0
-      @chunk_index_dirty = true
+      @chunk_index_dirty = false
       destroy_collector
     end
 
@@ -148,9 +157,11 @@ module Gcry
       if BlockHeader.nursery?(header)
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
+        @nursery_freelist_clean[class_index] = false
       else
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
         @freelists[class_index] = pointer
+        @freelist_clean[class_index] = false
       end
 
       @free_bytes += payload.to_u64
@@ -177,31 +188,33 @@ module Gcry
 
       maybe_collect
 
-      rounded = self.class.round_size(size)
+      rounded, class_index = SizeClasses.fit(size)
       flags = atomic ? BlockHeader::Flags::ATOMIC : 0_u32
 
-      user = if rounded > LARGE_THRESHOLD
-               alloc_large(rounded, flags)
-             else
-               alloc_small(rounded.to_u32, flags)
-             end
+      # Skip memset when memory is still MAP_ANONYMOUS-zeroed (fresh chunk /
+      # fresh large mmap). Freelist reuse / large-cache hits still clear.
+      # Check clean *after* alloc — refill may have just marked the freelist clean.
+      user = Pointer(Void).null
+      needs_clear = clear
+      if class_index < 0
+        user, from_cache = alloc_large(rounded, flags)
+        needs_clear = clear && from_cache
+      elsif @nursery_enabled
+        user = alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index)
+        needs_clear = clear && !@nursery_freelist_clean[class_index]
+      else
+        user = alloc_old_small(rounded.to_u32, flags, class_index)
+        needs_clear = clear && !@freelist_clean[class_index]
+      end
 
-      user.as(UInt8*).clear(rounded) if clear
+      user.as(UInt8*).clear(rounded) if needs_clear
       @total_bytes += rounded
       @bytes_since_gc += rounded
       @live_objects += 1
       user
     end
 
-    private def alloc_small(payload : UInt32, flags : UInt32) : Void*
-      if @nursery_enabled
-        return alloc_nursery(payload, flags | BlockHeader::Flags::NURSERY)
-      end
-      alloc_old_small(payload, flags)
-    end
-
-    private def alloc_nursery(payload : UInt32, flags : UInt32) : Void*
-      index = size_class_index(payload)
+    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32) : Void*
       user = @nursery_freelists[index]
 
       if user.null?
@@ -225,8 +238,7 @@ module Gcry
       user
     end
 
-    private def alloc_old_small(payload : UInt32, flags : UInt32) : Void*
-      index = size_class_index(payload)
+    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32) : Void*
       user = @freelists[index]
 
       if user.null?
@@ -266,13 +278,16 @@ module Gcry
 
       if nursery
         @nursery_freelists[index] = free_head
+        @nursery_freelist_clean[index] = true
       else
         @freelists[index] = free_head
+        @freelist_clean[index] = true
       end
       @free_bytes += added
     end
 
-    private def alloc_large(payload : UInt64, flags : UInt32) : Void*
+    # Returns {user, from_cache}. Fresh mmap pages are already zeroed.
+    private def alloc_large(payload : UInt64, flags : UInt32) : {Void*, Bool}
       need = ChunkHeader::SIZE.to_u64 + BlockHeader::SIZE.to_u64 + payload
       mapped = align_up(need, 4096_u64)
 
@@ -280,14 +295,14 @@ module Gcry
         header = BlockHeader.from_user(user)
         BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
         BlockHeader.set_mark(header) if @incremental_marking || @collecting
-        return user
+        return {user, true}
       end
 
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
       BlockHeader.set_mark(header) if @incremental_marking || @collecting
-      BlockHeader.user_from(header)
+      {BlockHeader.user_from(header), false}
     end
 
     # Bucket index for a mapped large-object size (powers of two from 8 KiB).
@@ -388,7 +403,7 @@ module Gcry
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
       @chunks = chunk
       @heap_size += bytes
-      @chunk_index_dirty = true
+      index_insert(chunk)
       note_mapped(chunk)
       chunk
     end
@@ -405,7 +420,7 @@ module Gcry
     end
 
     protected def unlink_chunk(target : ChunkHeader*) : Nil
-      @chunk_index_dirty = true
+      index_remove(target)
       if @chunks == target
         @chunks = target.value.next
         return
@@ -431,7 +446,7 @@ module Gcry
       end
     end
 
-    # Binary search over address-sorted chunk index (rebuilt lazily on collect/mark).
+    # Binary search over address-sorted chunk index.
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       ensure_chunk_index
@@ -455,21 +470,14 @@ module Gcry
       nil
     end
 
-    # Rebuild sorted index once per collect (not on every mmap — that hurt /json).
+    # Fallback full rebuild when the incremental index is marked dirty.
     protected def ensure_chunk_index : Nil
       return unless @chunk_index_dirty
 
       count = 0
       each_chunk { count += 1 }
 
-      if count > @chunk_index_cap
-        new_cap = count < 16 ? 16 : count
-        bytes = (sizeof(ChunkHeader*) * new_cap).to_u64
-        ptr = LibC.realloc(@chunk_index.as(Void*), LibC::SizeT.new(bytes)).as(ChunkHeader**)
-        raise OutOfMemoryError.new("chunk index realloc failed") if ptr.null?
-        @chunk_index = ptr
-        @chunk_index_cap = new_cap
-      end
+      index_ensure_cap(count)
 
       i = 0
       each_chunk do |chunk|
@@ -494,12 +502,71 @@ module Gcry
       @chunk_index_dirty = false
     end
 
+    private def index_ensure_cap(need : Int32) : Nil
+      return if need <= @chunk_index_cap
+      new_cap = @chunk_index_cap == 0 ? 16 : @chunk_index_cap
+      while new_cap < need
+        new_cap *= 2
+      end
+      bytes = (sizeof(ChunkHeader*) * new_cap).to_u64
+      ptr = LibC.realloc(@chunk_index.as(Void*), LibC::SizeT.new(bytes)).as(ChunkHeader**)
+      raise OutOfMemoryError.new("chunk index realloc failed") if ptr.null?
+      @chunk_index = ptr
+      @chunk_index_cap = new_cap
+    end
+
+    # First index i where chunk_index[i].address >= addr (or count).
+    private def index_lower_bound(addr : UInt64) : Int32
+      lo = 0
+      hi = @chunk_index_count
+      while lo < hi
+        mid = lo + (hi - lo) // 2
+        if (@chunk_index + mid).value.address < addr
+          lo = mid + 1
+        else
+          hi = mid
+        end
+      end
+      lo
+    end
+
+    private def index_insert(chunk : ChunkHeader*) : Nil
+      if @chunk_index_dirty
+        return
+      end
+      index_ensure_cap(@chunk_index_count + 1)
+      pos = index_lower_bound(chunk.address)
+      i = @chunk_index_count
+      while i > pos
+        (@chunk_index + i).value = (@chunk_index + (i - 1)).value
+        i -= 1
+      end
+      (@chunk_index + pos).value = chunk
+      @chunk_index_count += 1
+    end
+
+    private def index_remove(chunk : ChunkHeader*) : Nil
+      if @chunk_index_dirty
+        return
+      end
+      pos = index_lower_bound(chunk.address)
+      return if pos >= @chunk_index_count
+      return if (@chunk_index + pos).value != chunk
+
+      i = pos
+      last = @chunk_index_count - 1
+      while i < last
+        (@chunk_index + i).value = (@chunk_index + (i + 1)).value
+        i += 1
+      end
+      @chunk_index_count -= 1
+    end
+
     private def chunk_for(user : Void*) : ChunkHeader*?
       chunk_containing(user.address)
     end
 
     private def owns_user_pointer?(user : Void*, header : BlockHeader*) : Bool
-      return false unless is_heap_ptr(user)
       chunk = chunk_for(user)
       return false unless chunk
 

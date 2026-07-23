@@ -27,6 +27,35 @@ describe Gcry::Heap do
     end
   end
 
+  it "malloc re-zeros freelist reuse after free" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(64)
+      64.times { |i| ptr.as(UInt8*)[i] = 0xCD_u8 }
+      heap.free(ptr)
+      again = heap.malloc(64)
+      again.should eq(ptr)
+      64.times { |i| again.as(UInt8*)[i].should eq(0) }
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "malloc re-zeros large objects taken from the cache" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(100_000)
+      ptr.as(UInt8*)[0] = 0xEF_u8
+      ptr.as(UInt8*)[99_999] = 0xFE_u8
+      heap.free(ptr)
+      again = heap.malloc(100_000)
+      again.as(UInt8*)[0].should eq(0)
+      again.as(UInt8*)[99_999].should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "malloc_atomic does not clear memory" do
     heap = Gcry::Heap.new
     begin

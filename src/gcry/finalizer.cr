@@ -83,28 +83,40 @@ module Gcry
         swap_remove_link(i)
       end
 
-      # Explicit free path (rare): drop registry rows for one object.
+      # Explicit free path: drop registry rows for one object.
+      # Common realloc/free of ordinary objects must not scan thousands of
+      # unrelated finalizer entries (perf: ~15%+ CPU on HTTP apps).
       def notice_reclaim(object : Void*) : Nil
         return if object.null?
         return if @entries.empty? && @links.empty?
 
-        i = 0
-        while i < @entries.size
-          if @entries[i].object == object
-            queue_pending(@entries[i])
-            swap_remove_entry(i)
-          else
-            i += 1
+        header = BlockHeader.from_user(object)
+        flags = header.value.flags
+        scan_entries = !@entries.empty? && (flags & BlockHeader::Flags::FINALIZER) != 0
+        scan_links = !@links.empty? && (flags & BlockHeader::Flags::DISAPPEARING) != 0
+        return unless scan_entries || scan_links
+
+        if scan_entries
+          i = 0
+          while i < @entries.size
+            if @entries[i].object == object
+              queue_pending(@entries[i])
+              swap_remove_entry(i)
+            else
+              i += 1
+            end
           end
         end
 
-        i = 0
-        while i < @links.size
-          if @links[i].object == object
-            @links[i].link.value = Pointer(Void).null
-            swap_remove_link(i)
-          else
-            i += 1
+        if scan_links
+          i = 0
+          while i < @links.size
+            if @links[i].object == object
+              @links[i].link.value = Pointer(Void).null
+              swap_remove_link(i)
+            else
+              i += 1
+            end
           end
         end
       end

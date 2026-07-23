@@ -169,6 +169,9 @@ module Gcry
     end
 
     def add_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
+      return if object.null?
+      header = BlockHeader.from_user(object)
+      BlockHeader.set_finalizer(header)
       @finalizers.add(object, callback)
     end
 
@@ -193,6 +196,7 @@ module Gcry
 
       if header = find_object(referent)
         referent = BlockHeader.user_from(header)
+        BlockHeader.set_disappearing(header)
       end
       @finalizers.register_disappearing_link(link, referent)
     end
@@ -927,6 +931,7 @@ module Gcry
                 @heap_size -= mapped if @heap_size >= mapped
                 @unmapped_bytes += mapped
                 @bytes_reclaimed_since_gc += mapped
+                index_remove(chunk)
                 chunk.value.next = to_unmap
                 to_unmap = chunk
                 drop = true
@@ -967,7 +972,6 @@ module Gcry
 
       if any_unmap
         update_heap_bounds_after_unmap
-        @chunk_index_dirty = true
       end
     end
 
@@ -1018,8 +1022,10 @@ module Gcry
 
       if nursery
         @nursery_freelists[class_index] = head
+        @nursery_freelist_clean[class_index] = false
       else
         @freelists[class_index] = head
+        @freelist_clean[class_index] = false
       end
 
       recalc_free_bytes
@@ -1050,9 +1056,11 @@ module Gcry
       if was_nursery
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = user
+        @nursery_freelist_clean[class_index] = false
       else
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
         @freelists[class_index] = user
+        @freelist_clean[class_index] = false
       end
 
       @free_bytes += payload.to_u64

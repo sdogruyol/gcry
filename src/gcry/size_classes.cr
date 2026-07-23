@@ -3,7 +3,7 @@ module Gcry
   # (Crystal `once` consts like Array literals / sizeof-based values deadlock
   # during GC.init because Fiber is not up yet.)
   module SizeClasses
-    COUNT     =       40
+    COUNT     =        40
     THRESHOLD = 32768_u32
 
     def self.payload(index : Int32) : UInt32
@@ -101,24 +101,39 @@ module Gcry
     end
 
     def self.round(size : UInt64) : UInt64
-      return 16_u64 if size == 0
+      fit(size)[0]
+    end
+
+    # Returns {rounded_payload, class_index}. class_index is -1 for large.
+    def self.fit(size : UInt64) : {UInt64, Int32}
+      return {16_u64, 0} if size == 0
 
       word = sizeof(Void*).to_u64 # compile-time sizeof in expression
       aligned = (size + word - 1) & ~(word - 1)
-      return aligned if aligned > THRESHOLD
+      return {aligned, -1} if aligned > THRESHOLD
 
-      # Walk classes without touching a runtime Array constant.
+      # Coarse start — avoid scanning tiny classes for medium/large-small sizes.
       i = 0
+      if aligned > 8192
+        i = 32
+      elsif aligned > 2048
+        i = 23
+      elsif aligned > 512
+        i = 15
+      elsif aligned > 128
+        i = 7
+      end
+
       while i < COUNT
         klass = payload(i).to_u64
-        return klass if aligned <= klass
+        return {klass, i} if aligned <= klass
         i += 1
       end
-      aligned
+      {aligned, -1}
     end
   end
 
   # Compatibility aliases (integer literals — safe during GC.init).
-  SIZE_CLASS_COUNT =       40
+  SIZE_CLASS_COUNT =        40
   LARGE_THRESHOLD  = 32768_u32
 end

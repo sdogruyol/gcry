@@ -21,12 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Finalizers / WeakRef:** process unreachable entries once after mark via index APIs (O(finalizers), no Crystal `Proc` — a closure mid-collect re-entered `malloc` and crashed). Size-class sweep is inlined (no `each_block` yield).
 - **Sweep:** recycle large objects onto a size-bucket freelist instead of `munmap` during STW. Thousands of per-buffer VMAs made Linux `munmap` dominate pauses on HTTP apps; trim cache outside STW when over 64 MiB.
 - `free` / `reclaim_small` use chunk size-class (not possibly corrupted `header.size`); `owns_user_pointer?` requires block alignment.
+- **`notice_reclaim`:** skip registry scan on `free`/`realloc` unless the object has `FINALIZER` / `DISAPPEARING` header flags (was O(entries) per Array growth — ~15%+ CPU on acikturkiye).
+- **Chunk index:** keep address-sorted `@chunk_index` updated on map/unmap (no dirty full rebuild on every mmap); `owns_user_pointer?` no longer double-looks up via `is_heap_ptr`.
 
 ### Performance
 
 - **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): gcry ~**51%** of Boehm req/s after STW/sweep/finalizer fixes; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Raise size-class ceiling **8→16 KiB** (`10240`…`16384`): medium buffers leave per-object mmap. Same-host WSL `/api/v1/`: ~**54%→~68%** of Boehm; `large_free` ~16→3 MiB — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Raise size-class ceiling **16→32 KiB** (`20480`…`32768`). Same-host WSL `/api/v1/`: ~**68%→~89%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Skip `malloc` clear while a size-class freelist (or fresh large mmap) is still MAP_ANONYMOUS-zeroed; `SizeClasses.fit` one-pass class lookup. Steady-state acikturkiye wrk unchanged (~88–89% of Boehm) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- perf-driven `notice_reclaim` fast-path: same-host WSL `/api/v1/` ~**88%→~100%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Incremental chunk index (drop `ensure_chunk_index` hot rebuilds under realloc/`is_heap_ptr`) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.5.0] - 2026-07-23
 
