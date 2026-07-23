@@ -1,7 +1,8 @@
 # Runtime policy (Phase 7)
 
 How gcry behaves under failure and process lifecycle edges. These are intentional
-product decisions for v0.1 on Linux x86_64 (single-threaded + fibers).
+product decisions for v0.1 on Linux x86_64 under Crystal **1.21+** defaults
+(`Fiber::ExecutionContext`, parallelism 1).
 
 ## Out of memory (OOM)
 
@@ -38,9 +39,16 @@ If you need a forking server model, prefer `Process.exec` / prefork before signi
 - Collection is stop-the-world on the mutator thread and walks stacks / maps; it is not reentrant.
 - Crystal’s usual advice applies: signal handlers should only set flags / write to a pipe; allocate and collect on normal fibers.
 
-## Threads (`preview_mt`)
+## Threading / ExecutionContext (Crystal 1.21+)
 
-Out of scope for v0.1. Locks / `stop_world` / `start_world` are no-ops. Building with `-Dpreview_mt` is unsupported.
+| Mode | Support in gcry v0.1 |
+|------|----------------------|
+| Default `Fiber::ExecutionContext` (parallelism 1) | **Supported** — stack bottom refreshed from `Fiber.current` at collect |
+| Resizing default context / extra parallel contexts | **Unsupported** — no multi-thread STW |
+| Legacy `-Dpreview_mt` | **Unsupported** (deprecated in Crystal) |
+| Legacy `-Dwithout_mt` (`Crystal::Scheduler`) | Works for API shape; prefer the 1.21 default |
+
+Locks / `stop_world` / `start_world` remain no-ops. Do not run fibers in parallel on multiple OS threads with gcry as process GC.
 
 ## Returning memory to the OS
 

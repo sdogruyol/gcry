@@ -1,6 +1,6 @@
 # Comparison checklist — gcry vs bdwgc
 
-Scope: **Linux x86_64**, Crystal `>= 1.21`, single-threaded + fibers (no `preview_mt`).
+Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
 | Area | gcry (v0.1) | bdwgc (Crystal default) |
@@ -8,8 +8,8 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
 | Collection model | Conservative mark–sweep + nursery + incremental mark slices | Conservative (BDW) |
-| Fibers | `before_collect` → `push_gc_roots` / `push_stack` | Yes |
-| Multi-thread (`preview_mt`) | No | Yes |
+| Fibers / ExecutionContext | `before_collect` → `push_gc_roots` / `push_stack`; stack bottom from `Fiber.current` | Yes (LibGC + thread bottoms) |
+| Parallel fibers (multi OS thread) | No | Yes |
 | Fork safety | **Unsupported** (documented) | `GC_set_handle_fork` |
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |
@@ -33,11 +33,12 @@ Run before claiming app readiness:
 - [ ] RSS / pause acceptable vs Boehm on a representative workload (`bench/churn.cr` for library-heap; app bench for process GC)
 - [ ] No `fork` without `exec` after boot
 - [ ] No GC calls from signal handlers
-- [ ] Confirm `-Dpreview_mt` is **not** enabled
+- [ ] Do **not** resize ExecutionContext for parallelism / add parallel contexts
+- [ ] Avoid deprecated `-Dpreview_mt`
 
 ## When to stay on Boehm
 
-- Need `preview_mt` / multi-thread STW
+- Need parallel ExecutionContexts / multi-thread STW
 - Process forks and continues running Crystal in the child
 - Need battle-tested production defaults across OS targets
 - Hard dependency on Boehm-specific `prof_stats` fields
@@ -45,6 +46,6 @@ Run before claiming app readiness:
 ## When gcry is a fit
 
 - Want a Crystal-native collector to read, hack, and dogfood
-- Single-threaded (or fiber-only) Linux services
+- Default Crystal 1.21 runtime (ExecutionContext, parallelism 1) on Linux
 - Willing to tune `GCRY_*` and accept conservative false retention
 - Evaluating nursery / incremental mark without patching Crystal

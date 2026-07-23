@@ -14,7 +14,7 @@ This document captures goals, non-goals, architecture, API surface, bootstrap co
 
 1. Implement a working conservative mark–sweep GC in Crystal.
 2. Ship as a **shard** that reopens Crystal’s `GC` module: `require "gcry"` + build with `-Dgc_none`.
-3. Support Crystal fibers (stack registration / `set_stackbottom`) and, later, multi-threading (`preview_mt`).
+3. Support Crystal fibers under the 1.21+ `Fiber::ExecutionContext` default; later, parallel contexts / multi-thread STW.
 4. Keep the collector core **allocation-free** with respect to the managed heap (no chicken-and-egg allocations during collect).
 5. Provide measurable stats and knobs for tuning and comparison against bdwgc.
 
@@ -56,7 +56,7 @@ gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry p
 | `enable` / `disable` | Pause automatic collection |
 | `stats` | Meaningful `heap_size`, `free_bytes`, `bytes_since_gc`, `total_bytes` |
 | `is_heap_ptr(pointer)` | Address in managed heap? |
-| `set_stackbottom(stack_bottom : Void*)` | Single-thread fiber resume |
+| `set_stackbottom(...)` | Running fiber stack bottom (`Thread` form when `!without_mt`; `Void*` under `-Dwithout_mt`) |
 | `push_stack(stack_top, stack_bottom)` | Scan suspended fiber stack |
 | `before_collect(&block)` or equivalent in `init` | Push non-running fiber roots |
 | `current_thread_stack_bottom` | Main fiber stack bounds |
@@ -68,7 +68,7 @@ gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry p
 |--------|------|
 | `add_root` / `add_finalizer` / `register_disappearing_link` | Roots, finalizers, `WeakRef` ✅ Phase 3 |
 | `prof_stats` | Full Boehm-shaped profiling (zeros OK until then) |
-| MT `set_stackbottom` variants | `preview_mt` |
+| MT / parallel `set_stackbottom` + STW | Parallel ExecutionContexts |
 | `stop_world` / `start_world` | Multi-thread STW (no-op stubs today) |
 | `pthread_*` GC registration | When threads must be tracked |
 
@@ -94,7 +94,7 @@ crystal build -Dgc_none app.cr
 - Collector implementation lives under `Gcry::*`; the `GC` reopen is a thin facade.
 - Unit tests of the heap can still run under default Boehm without installing gcry as process GC.
 - **No Crystal source patch.** Upstream `-Dgc_gcry` is optional later, not required.
-- **`preview_mt` is out of MVP.**
+- **Parallel ExecutionContexts / multi-thread STW are out of MVP.** (Default context parallelism 1 is in scope.)
 
 ## Architecture
 
@@ -140,7 +140,7 @@ crystal build -Dgc_none app.cr
 
 ### Mark–sweep (MVP)
 
-1. Stop the world (single-threaded MVP: just run collect on the mutator thread).
+1. Stop the world (v0.1: run collect on the mutator; no parallel-context STW).
 2. Push roots; mark reachable blocks (worklist / mark stack allocated outside the GC heap).
 3. Sweep unmarked blocks into freelists; optionally return empty spans to the OS.
 4. Run finalizers after the mutator resumes (never allocate into a half-collected heap from finalizer registration paths without care).
@@ -199,13 +199,13 @@ DESIGN.md
 - Stack root scanning; mark bits; sweep to freelist.
 - Threshold-triggered and explicit `collect`.
 - Stats: heap size, free bytes, collection count.
-- Deliverable: correct single-threaded collector (`Gcry::Heap#collect`).
+- Deliverable: correct collector for default ExecutionContext (`Gcry::Heap#collect`).
 
 ### Phase 3 — Fibers & threads ✅
 
-- `set_stackbottom`, `push_stack`, and `before_collect` for suspended fiber stacks.
+- `set_stackbottom`, `push_stack`, and `before_collect` for suspended fiber stacks (ExecutionContext: refresh bottom from `Fiber.current` at collect).
 - `add_root`, disappearing links, finalizer queue (run after collect).
-- Single-thread locks / STW are no-ops; `preview_mt` deferred.
+- Locks / STW are no-ops; parallel contexts deferred.
 - Deliverable: multi-fiber-ready root API + finalizers / weak links (`spec/fiber_spec.cr`).
 
 ### Phase 4 — Shard `GC` override ✅
@@ -250,10 +250,10 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 
 ## MVP definition (v0.1)
 
-- Platform: Linux x86_64
+- Platform: Linux x86_64, Crystal `>= 1.21` default ExecutionContext (parallelism 1)
 - Model: stop-the-world, conservative mark–sweep
-- Concurrency: single thread + Crystal fibers
-- API: at least `init`, `malloc`, `malloc_atomic`, `collect`, `set_stackbottom`, `stats`
+- Concurrency: Crystal fibers on the default context — **not** parallel contexts
+- API: at least `init`, `malloc`, `malloc_atomic`, `collect`, stack-bottom / `push_stack`, `stats`
 - Integration: `require "gcry"` + `crystal build -Dgc_none` runs hello-world and a small alloc/collect loop
 
 Anything beyond that (MT, incremental, generational) is post-MVP.
@@ -283,7 +283,7 @@ Anything beyond that (MT, incremental, generational) is post-MVP.
 | Activation | `require "gcry"` + compile with `-Dgc_none` |
 | Crystal patch | Not required |
 | Crystal version | `>= 1.21.0` (matches researched stdlib) |
-| `preview_mt` in v0.1 | No |
+| `preview_mt` / parallel contexts in v0.1 | No — default ExecutionContext (parallelism 1) only |
 | Early testing | `Gcry::*` under default Boehm; process GC via `-Dgc_none` once facade exists |
 
 ## Open questions (resolved for v0.1)
@@ -291,7 +291,7 @@ Anything beyond that (MT, incremental, generational) is post-MVP.
 1. **Finalizers:** run on the same thread after collect (not a dedicated finalizer fiber).
 2. **Return memory to OS:** `munmap` large objects on reclaim; keep size-class chunks mapped for freelist reuse.
 3. **`add_root`:** maintain and scan an internal root set (not Boehm’s unused Array-only quirk).
-4. **`stop_world` / `start_world`:** no-ops on the single-threaded path (same practical effect as `gc/none` until `preview_mt`).
+4. **`stop_world` / `start_world`:** no-ops under default ExecutionContext parallelism 1 (same practical effect as `gc/none` until parallel STW exists).
 
 ## References
 

@@ -63,9 +63,11 @@ after = GC.stats.heap_size
 
 ## Process GC notes (HTTP / fibers)
 
-Crystal’s default **ExecutionContext** does not call `GC.set_stackbottom` on fiber swap. gcry refreshes the running fiber’s stack bottom at collect time from `Fiber.current.@stack.bottom`.
+Crystal **1.21+** defaults to `Fiber::ExecutionContext`, which does **not** call `GC.set_stackbottom` on fiber swap (only GC read locks). gcry refreshes the running fiber’s stack bottom at collect time from `Fiber.current.@stack.bottom`.
 
 Static roots scan **file-backed** RW segments only (binary / `.so` data). Large anonymous maps (fiber stacks, arenas) are covered by `push_stack` / the mutator stack scan.
+
+Parallel ExecutionContexts and deprecated `-Dpreview_mt` are unsupported — see [docs/POLICY.md](POLICY.md).
 
 ## Sanitizers
 

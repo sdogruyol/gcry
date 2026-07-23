@@ -78,21 +78,29 @@ Parity target is the **union** of what `gc/boehm.cr` and `gc/none.cr` expose, be
 
 ### Fiber / thread (nodoc — required)
 
+Crystal **1.21.0** runtime modes:
+
+| Flag / mode | Scheduler | Notes |
+|-------------|-----------|--------|
+| *(default)* | `Fiber::ExecutionContext` | Parallelism 1; MT-ready APIs; fibers may change OS thread on some blocking syscalls |
+| `-Dwithout_mt` | Legacy `Crystal::Scheduler` | Escape hatch; true single OS thread |
+| `-Dpreview_mt` | Legacy MT scheduler | **Deprecated** |
+
 | Method | Role |
 |--------|------|
 | `current_thread_stack_bottom : {Void*, Void*}` | Returns `{gc_thread_handler, stack_bottom}`; used when creating the main fiber |
-| `set_stackbottom(stack_bottom : Void*)` | **Single-thread** (`without_mt`): update current thread stack bottom on fiber resume |
-| `set_stackbottom(thread_handle : Void*, stack_bottom : Void*)` | **MT (boehm)** |
-| `set_stackbottom(thread : Thread, stack_bottom : Void*)` | **MT (none)** — signature differs! |
+| `set_stackbottom(stack_bottom : Void*)` | **`-Dwithout_mt` only** — legacy scheduler calls this on fiber resume |
+| `set_stackbottom(thread : Thread, stack_bottom : Void*)` | **`gc/none` when `!without_mt`** (ExecutionContext default) |
+| `set_stackbottom(thread_handle : Void*, stack_bottom : Void*)` | **`gc/boehm` when `!without_mt`** |
 | `push_stack(stack_top, stack_bottom)` | Mark/scan a suspended fiber stack range |
 | `before_collect(&block)` | Boehm: chains into `GC_set_push_other_roots` |
-| `lock_read` / `unlock_read` | Held around fiber resume under `preview_mt` |
+| `lock_read` / `unlock_read` | Held around fiber swap under ExecutionContext / legacy MT |
 | `lock_write` / `unlock_write` | Held from collect start until fiber roots pushed |
 | `stop_world` / `start_world` | External STW; `none` implements via `Thread.suspend` |
-| `pthread_create` / `join` / `detach` | Boehm wrappers; `none` uses libc. gcry can use libc until MT GC needs registration |
+| `pthread_create` / `join` / `detach` | Boehm wrappers; `none` uses libc |
 | `sig_suspend` / `sig_resume` | Unix + boehm only |
 
-**MVP decision:** implement the **single-threaded** signatures (`set_stackbottom(Void*)`, no-op or simple locks). Defer `preview_mt` API variants to Phase 3.
+**v0.1 decision:** support the Crystal **1.21 default** (ExecutionContext, parallelism 1). Match `gc/none`’s `set_stackbottom(Thread, Void*)` under `!without_mt`, and the single-arg form under `-Dwithout_mt`. Locks / STW stay no-ops. Parallel ExecutionContexts and deprecated `-Dpreview_mt` are out of scope.
 
 ## How Crystal discovers fiber roots (boehm)
 
@@ -102,21 +110,21 @@ On `GC.init`, boehm registers:
 2. **Push other roots** (`before_collect` → `GC_set_push_other_roots`):
    - `Fiber.unsafe_each` → for each fiber **not** `.running?`, call `fiber.push_gc_roots`
    - `push_gc_roots` → `GC.push_stack(@context.stack_top, @stack.bottom)`
-   - Under MT: for each thread, `GC.set_stackbottom(thread.gc_thread_handler, current_fiber.@stack.bottom)`
+   - When `!without_mt`: for each thread, `GC.set_stackbottom(thread.gc_thread_handler, current_fiber.@stack.bottom)`
    - Then `GC.unlock_write`
 
-The **running** fiber’s stack is scanned as the thread’s normal stack (stack bottom updated on context switch).
+The **running** fiber’s stack is scanned as the thread’s normal stack.
 
-### Fiber resume (single-thread)
+### Fiber resume (Crystal 1.21+)
 
-`Crystal::Scheduler#resume` (non-`preview_mt`):
+**Default — `Fiber::ExecutionContext`:** `swapcontext` takes `GC.lock_read` / `unlock_read` only. It does **not** call `GC.set_stackbottom`. gcry therefore refreshes the running fiber’s bottom inside `before_collect` from `Fiber.current.@stack.bottom`.
+
+**Legacy `-Dwithout_mt` — `Crystal::Scheduler#resume`:**
 
 ```crystal
 GC.set_stackbottom(fiber.@stack.bottom)
 # then Fiber.swapcontext(...)
 ```
-
-So every context switch retargets the collector’s notion of stack bottom to the fiber about to run.
 
 ### Main fiber construction
 
@@ -125,13 +133,13 @@ thread.gc_thread_handler, stack_bottom = GC.current_thread_stack_bottom
 @stack = Stack.new(stack, stack_bottom)
 ```
 
-`Thread#gc_thread_handler` stores the Boehm thread handle for later `set_stackbottom` under MT.
+`Thread#gc_thread_handler` stores the Boehm thread handle for `set_stackbottom` when `!without_mt`.
 
 ## Implications for gcry
 
-1. **Must support `push_stack` + `set_stackbottom` + a `before_collect`-equivalent** so suspended fiber stacks stay live. Without this, any non-trivial Crystal program frees live objects.
+1. **Must support `push_stack` + stack-bottom tracking + `before_collect`** so suspended fiber stacks stay live. Under ExecutionContext, bottom must be taken from `Fiber.current` at collect time.
 2. **Conservative scan** of `[stack_top, stack_bottom)` (ordering: boehm’s `GC_push_all_eager(bottom, top)` — verify which end is low address on Linux; Crystal passes `stack_top, stack_bottom` into `push_stack` which calls `push_all_eager(stack_top, stack_bottom)`).
-3. **RW locks** can be no-ops for MVP (`without_mt` / default single-thread builds).
+3. **RW locks** can be no-ops for v0.1 (default ExecutionContext with parallelism 1).
 4. **`add_root`** in boehm currently only grows an Array — it does not call `GC_add_roots`. gcry should still scan its own root list; consider also whether to fix/align with `LibGC.add_roots` semantics later.
 5. **Fork safety:** boehm sets `GC_set_handle_fork(1)`. MVP: document as unsupported or call `pthread_atfork` stubs; Phase 5+.
 6. **Tracing:** optional `Crystal.trace :gc, ...` around malloc/collect when `flag?(:tracing)` — nice-to-have, not MVP.
@@ -164,7 +172,7 @@ Phase 1–2 expose `Gcry.malloc` / `Gcry.collect` / … that the `GC` reopen for
 | `set_stackbottom` / `current_thread_stack_bottom` | Running fiber stack bounds |
 | `add_finalizer(object, callback)` | Run after object is reclaimed (post-collect) |
 | `register_disappearing_link(link, object?)` | Clear `*link` when referent is collected |
-| `lock_*` / `stop_world` / `start_world` | No-ops until `preview_mt` |
+| `lock_*` / `stop_world` / `start_world` | No-ops until parallel ExecutionContext STW |
 
 Phase 4 will reopen Crystal’s `GC` module and register:
 
@@ -181,9 +189,10 @@ end
 
 ### In scope (v0.1)
 
-- Linux x86_64, single-threaded Crystal (no `preview_mt`)
+- Linux x86_64, Crystal `>= 1.21` default `Fiber::ExecutionContext` (parallelism 1)
 - `init`, `malloc`, `malloc_atomic`, `realloc`, `free`, `collect`, `enable`/`disable`
-- `set_stackbottom(Void*)`, `push_stack`, `before_collect` (or internal equivalent wired in `init`)
+- `set_stackbottom` matching `gc/none` (`Thread` form when `!without_mt`; `Void*` under `-Dwithout_mt`)
+- `push_stack`, `before_collect` (wired in `init`; refresh running fiber bottom from `Fiber.current`)
 - `current_thread_stack_bottom`, no-op locks
 - `is_heap_ptr`, `stats` (meaningful fields)
 - Conservative STW mark–sweep
@@ -191,8 +200,9 @@ end
 
 ### Out of scope (v0.1)
 
-- `preview_mt` / execution contexts STW
-- Precise / moving / concurrent / generational GC
+- Parallel ExecutionContexts / multi-thread STW
+- Deprecated `-Dpreview_mt`
+- Precise / moving / concurrent GC (nursery without barriers is in scope)
 - Windows / macOS
 - Full `prof_stats` fidelity
 - Fork-safe collection
@@ -206,7 +216,8 @@ end
 | `src/gc/boehm.cr` | Full production backend; fiber hooks; LibGC FFI |
 | `src/gc/none.cr` | Minimal stub; reference for no-op methods + STW sketch |
 | `src/fiber.cr` | `push_gc_roots`, main fiber stack bottom |
-| `src/crystal/scheduler.cr` | `set_stackbottom` on resume |
+| `src/fiber/execution_context/` | Default scheduler (1.21+); swap takes GC locks, not `set_stackbottom` |
+| `src/crystal/scheduler.cr` | Legacy `-Dwithout_mt` / deprecated `-Dpreview_mt` resume path |
 | `src/crystal/main.cr` | `GC.init` order |
 | `src/crystal/system/thread.cr` | `gc_thread_handler` |
 | `src/weak_ref.cr` | `is_heap_ptr` + disappearing links |

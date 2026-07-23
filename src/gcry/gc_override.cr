@@ -25,7 +25,7 @@ module GC
     {% end %}
 
     # Suspended fibers: push their stacks before marking (Boehm-compatible hooks).
-    # Crystal's ExecutionContext (default since ~1.12) does not call
+    # Crystal 1.21+ defaults to Fiber::ExecutionContext, which does not call
     # GC.set_stackbottom on fiber swap — refresh from Fiber.current here.
     heap.before_collect do
       Fiber.unsafe_each do |fiber|
@@ -234,13 +234,11 @@ module GC
   end
 
   # :nodoc:
-  {% if flag?(:preview_mt) %}
+  # Crystal 1.21+: default is ExecutionContext (`!without_mt`). Only the legacy
+  # `-Dwithout_mt` scheduler uses the single-argument form. ExecutionContext
+  # itself does not call this on fiber swap — see `before_collect` above.
+  {% if !flag?(:without_mt) %}
     def self.set_stackbottom(thread : Thread, stack_bottom : Void*)
-      Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
-    end
-
-    # :nodoc:
-    def self.set_stackbottom(thread_handle : Void*, stack_bottom : Void*)
       Gcry.default_heap.set_stackbottom(stack_bottom) if @@gcry_ready
     end
   {% else %}

@@ -19,9 +19,9 @@ Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **
 
 ## Goals
 
-- Match Crystal’s `GC` API (`malloc`, `malloc_atomic`, `collect`, fiber `set_stackbottom`, finalizers, stats, …)
-- Conservative stop-the-world mark–sweep on Linux x86_64 (single-threaded + fibers)
-- Nursery + incremental mark slices (no write barriers / no `preview_mt` yet)
+- Match Crystal’s `GC` API (`malloc`, `malloc_atomic`, `collect`, fiber roots, finalizers, stats, …)
+- Conservative stop-the-world mark–sweep on Linux x86_64 under Crystal 1.21+ `Fiber::ExecutionContext` (parallelism 1)
+- Nursery + incremental mark slices (no write barriers / no parallel contexts yet)
 - Allocation-free collector core (no managed-heap allocations during collect)
 - Activate via `require "gcry"` + `-Dgc_none`
 
@@ -33,7 +33,7 @@ Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 |--|--|
 | OS / arch | Linux x86_64 (primary); aarch64 cross-build experimental in CI |
 | Crystal | `>= 1.21.0` |
-| Threading | Single-threaded + Crystal fibers — **not** `-Dpreview_mt` |
+| Runtime | Default `Fiber::ExecutionContext` (parallelism 1) — **not** parallel contexts / deprecated `-Dpreview_mt` |
 | Fork / signals | See [docs/POLICY.md](docs/POLICY.md) |
 
 ## Requirements
@@ -85,6 +85,24 @@ There is no separate application-level allocator API for normal programs: alloca
 | `GCRY_DISABLE_NURSERY=1` | Disable nursery / minor collections |
 
 More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md).
+
+## Performance (v0.1)
+
+gcry is **correctness-first** right now. It runs real Crystal programs (including a Kemal HTTP server under `wrk`), but it is **not** competitive with Boehm on throughput or pause time yet.
+
+Rough numbers on Linux x86_64, Crystal 1.21, release builds, same Kemal “Hello World” app (`bench/kemal`), `wrk -c 100 -d 30`:
+
+| GC | Approx. req/s | Notes |
+|----|---------------|--------|
+| Boehm (default) | ~110k | Baseline |
+| gcry (`-Dgc_none`) | ~4k | Stable under load; long STW pauses |
+| gcry + `GCRY_DISABLE_AUTO=1` `GCRY_DISABLE_NURSERY=1` | ~80k+ | Shows allocator path is fine when collection is off |
+
+So the gap is mostly **collection cost**, not malloc: full stop-the-world mark–sweep, conservative stack/static scans, and nursery without write barriers. Expect multi‑ms to hundreds‑of‑ms pauses under allocation-heavy HTTP load.
+
+Library-heap microbench (no process static-root scan): `make bench` → `./bin/churn`. Process-GC load test: `make bench-kemal-wrk`.
+
+Treat v0.1 as usable for dogfooding and integration, not as a Boehm replacement for latency-sensitive production.
 
 ## Development
 
