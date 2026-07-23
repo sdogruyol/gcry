@@ -172,7 +172,7 @@ Takeaway: real-app throughput remains **≈ Boehm** after the stack/static-root 
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
 8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
-9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; consider version cut).
+9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; cut as **v0.6.0**).
 
 ## Non-goals (still)
 

@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-23
+
 ### Fixed
 
-- Process GC **static roots:** treat kernel-named VMAs (`[anon:…]`, `[stack]`, …) like anonymous — do not scan them as file-backed (Linux 6.x CI SIGBUS). Stack scans use hole-aware `safe` probing again (glibc guard pages inside pthread bounds).
+- Process GC **static roots:** treat kernel-named VMAs (`[anon:…]`, `[stack]`, …) like anonymous — do not scan them as file-backed (Linux 6.x CI SIGBUS). Stack scans use hole-aware `safe` probing (glibc guard pages inside pthread bounds).
 - Process GC **stop-the-world** for Crystal 1.21+ `ExecutionContext` Monitor (SYSMON) thread: suspend other OS threads and scan their stacks. Missing roots caused live objects to be swept under load (`not a size-class payload: 0` / `END_OF_STACK` / Monitor SIGSEGV).
 - **Monitor stack bounds:** `GC.current_thread_stack_bottom` now returns this OS thread's pthread stack high address (was a single global `@stack_bottom`, so SYSMON scans were skipped or wrong). Other-thread main fibers use `pthread_getattr_np`.
 - Mutator stack scan spills **all** GP registers (not only `setjmp` callee-saved) before scanning; marks every `Fiber` / `Thread` object.
@@ -17,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allocate-black while `@collecting` (mid-collect allocations survive sweep).
 - **Static roots:** scan ELF BSS zero-fill only when anonymous RW is **contiguous with** the previous file-backed RW mapping (class vars like `Exception::CallStack::@@skip`), plus main-executable `rw-p` (and small RELRO). Skip all `.so` data and large RELRO (≥64 KiB) — fat-binary STW was dominated by those word scans. Large-object `munmap` does not invalidate the maps cache; empty-chunk release still does. Object mark clamps `header.size` to the mapped chunk.
 - **Fiber roots:** process GC scans suspended stacks **once** via `scan_all_fiber_roots` (no duplicate `push_gc_roots` in `before_collect`).
-- **Safe stack scans:** skip leading PROT_NONE pages with one probe sequence, then bulk-scan; fiber scans that already clamp past the guard use `safe: false`.
+- **Safe stack scans:** leading PROT_NONE probe, then bulk-scan when ends are readable; hole-aware fallback; fiber scans clamp past the guard.
 - STW phase timers (`last_phase_*_ns`) exposed for Kemal `GET /gc-stats`.
 - **Finalizers / WeakRef:** process unreachable entries once after mark via index APIs (O(finalizers), no Crystal `Proc` — a closure mid-collect re-entered `malloc` and crashed). Size-class sweep is inlined (no `each_block` yield).
 - **Sweep:** recycle large objects onto a size-bucket freelist instead of `munmap` during STW. Thousands of per-buffer VMAs made Linux `munmap` dominate pauses on HTTP apps; trim cache outside STW when over 64 MiB.
@@ -25,16 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`notice_reclaim`:** skip registry scan on `free`/`realloc` unless the object has `FINALIZER` / `DISAPPEARING` header flags (was O(entries) per Array growth — ~15%+ CPU on acikturkiye).
 - **Chunk index:** keep address-sorted `@chunk_index` updated on map/unmap (no dirty full rebuild on every mmap); `owns_user_pointer?` no longer double-looks up via `is_heap_ptr`.
 
+### Changed
+
+- Size-class ceiling **8→32 KiB** (`10240`…`32768`): medium buffers use chunk freelists instead of per-object mmap.
+- Skip `malloc` clear while a size-class freelist (or fresh large mmap) is still MAP_ANONYMOUS-zeroed; `SizeClasses.fit` one-pass class lookup.
+
 ### Performance
 
-- Same-host Kemal vs **Boehm** (re-record): `/` **~105%**, `/json` **~100%** of Boehm req/s; `GCRY_RELEASE_CHUNKS=1` ~**92%** on both — see [docs/PERF.md](docs/PERF.md).
-- Same-host **acikturkiye** `/api/v1/` (re-record): gcry **~101%** of Boehm req/s (154 vs 153); RSS still ~3–4× — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): early post-STW was ~**51%** of Boehm; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Raise size-class ceiling **8→16 KiB** (`10240`…`16384`): medium buffers leave per-object mmap. Same-host WSL `/api/v1/`: ~**54%→~68%** of Boehm; `large_free` ~16→3 MiB — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Raise size-class ceiling **16→32 KiB** (`20480`…`32768`). Same-host WSL `/api/v1/`: ~**68%→~89%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Skip `malloc` clear while a size-class freelist (or fresh large mmap) is still MAP_ANONYMOUS-zeroed; `SizeClasses.fit` one-pass class lookup. Steady-state acikturkiye wrk unchanged (~88–89% of Boehm) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- perf-driven `notice_reclaim` fast-path: same-host WSL `/api/v1/` ~**88%→~100%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Incremental chunk index (drop `ensure_chunk_index` hot rebuilds under realloc/`is_heap_ptr`) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host Kemal vs **Boehm**: `/` **~105%**, `/json` **~100%** of Boehm req/s; `GCRY_RELEASE_CHUNKS=1` ~**92%** on both — see [docs/PERF.md](docs/PERF.md).
+- Same-host **acikturkiye** `/api/v1/`: gcry **~101%** of Boehm req/s (154 vs 153); RSS still ~3–4× — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Path to parity (same doc): early post-STW ~51% → size-class 16/32 KiB → `notice_reclaim` fast-path → chunk index.
 
 ## [0.5.0] - 2026-07-23
 
@@ -154,7 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sdogruyol/gcry/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sdogruyol/gcry/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sdogruyol/gcry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sdogruyol/gcry/compare/v0.2.0...v0.3.0

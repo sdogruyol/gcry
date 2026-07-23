@@ -2,7 +2,7 @@
 
 **A garbage collector written in Crystal** — an alternative to the C [Boehm GC](https://github.com/ivmai/bdwgc) that Crystal normally uses.
 
-> **v0.5** · Linux x86_64 · Crystal ≥ 1.21 · one OS thread (fibers OK)
+> **v0.6** · Linux x86_64 · Crystal ≥ 1.21 · one OS thread (fibers OK)
 
 Install as a shard. No Crystal compiler patch. Flip one build flag and your program runs on gcry instead of Boehm.
 

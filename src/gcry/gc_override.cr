@@ -28,7 +28,7 @@ module GC
     # unsound under heavy pointer mutation (e.g. Kemal /json).
     heap.incremental_auto = false
     # Empty-chunk munmap stays opt-in: default-on regresses Kemal wrk ~35–40%.
-    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning (unreleased) makes it safe.
+    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning makes it safe.
     heap.release_empty_chunks = false
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
