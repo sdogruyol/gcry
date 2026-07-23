@@ -263,14 +263,20 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Size-class ceiling **32 KiB**; `notice_reclaim` flag fast-path; incremental chunk index.
 - Same-host Kemal `/json` ~**100%** of Boehm; acikturkiye `/api/v1/` ~**101%** — see [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
-### Phase 10 — Large-object / RSS (in progress)
+### Phase 10 — Large-object / RSS ✅ (diagnostics)
 
 - Large freelist reuse is **exact mapped-size** only (no fat VMA for a smaller need).
 - Heap breakdown: `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes`; `GCRY_LARGE_CACHE` retain limit.
 - Empty-chunk `munmap` **outside STW**; occupancy `fully_free_chunk_bytes` / `released_chunk_bytes`.
 - `size_class_live_bytes` + fill histogram; `GCRY_CHUNK_BYTES` (default 256 KiB).
-- Measured: acikturkiye chunks are **dense live** (~64% live/mapped, ~76% ge75) — not sparse; 128 KiB trial no RSS win. Next: write barriers.
-- Gate: Kemal `/json` must not regress vs Boehm; acikturkiye RSS + `/gc-stats` breakdown when available.
+- Measured: acikturkiye chunks are **dense live** (~64% live/mapped, ~76% ge75) — not sparse; 128 KiB trial no RSS win.
+
+### Phase 11 — Soft-dirty nursery (in progress)
+
+- Linux soft-dirty platform (`clear_refs` / pagemap bit 55) for old→young edges without compiler barriers.
+- Process minors: dirty-page scan when `soft_dirty_armed`; else full old scan. Library heaps always full-scan.
+- `GCRY_NURSERY` remains **opt-in**. WSL host: soft-dirty probe fails → full-scan fallback. Kemal+`GCRY_NURSERY` still unsafe under load (nursery+process GC bug) — do not enable for HTTP until fixed.
+- Gate: default (nursery off) Kemal `/json` ≈ Boehm; nursery RSS measure blocked on correctness.
 
 ## MVP definition (v0.1)
 

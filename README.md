@@ -99,7 +99,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **64 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (default **off**) |
+| `GCRY_NURSERY` | Opt-in nursery (default **off**); process HTTP unsafe until minor path is hardened |
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |

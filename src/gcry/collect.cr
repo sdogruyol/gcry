@@ -3,6 +3,7 @@ require "./roots"
 require "./finalizer"
 require "./platform/linux_roots"
 require "./platform/linux_stack"
+require "./platform/linux_softdirty"
 
 module Gcry
   class Heap
@@ -82,6 +83,10 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # After a successful clear_soft_dirty, minors scan dirty pages only.
+    getter? soft_dirty_armed : Bool = false
+    @soft_dirty_probed = false
+    @soft_dirty_works = false
 
     def enable : Nil
       @enabled = true
@@ -427,6 +432,9 @@ module Gcry
       @chunk_fill_lt50 = 0_u64
       @chunk_fill_lt75 = 0_u64
       @chunk_fill_ge75 = 0_u64
+      @soft_dirty_armed = false
+      @soft_dirty_probed = false
+      @soft_dirty_works = false
       reset_pause_stats
     end
 
@@ -491,7 +499,8 @@ module Gcry
         end
         @last_phase_stacks_ns = monotonic_ns - t0
 
-        # Conservatively find nursery pointers from old objects (no write barrier).
+        # Conservatively find nursery pointers from old objects.
+        # Soft-dirty (when armed) limits the scan to pages written since last minor.
         scan_old_for_nursery_pointers unless major
 
         t0 = monotonic_ns
@@ -513,9 +522,12 @@ module Gcry
           if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
             Platform.invalidate_static_root_cache
           end
+          # Next minor starts a fresh soft-dirty window after a major.
+          arm_soft_dirty_after_collect if @nursery_enabled
         else
           @nursery_alloc_bytes = 0_u64
           @minor_collections += 1
+          arm_soft_dirty_after_collect
         end
         @collections += 1
       ensure
@@ -799,6 +811,22 @@ module Gcry
     end
 
     private def scan_old_for_nursery_pointers : Nil
+      {% if flag?(:linux) %}
+        # Soft-dirty is for process GC (old→young without full old scan).
+        # Library heaps under Boehm keep the full scan (and some kernels/WSL
+        # do not set soft-dirty bits reliably).
+        if @soft_dirty_armed && @scan_static_roots && @heap_max > @heap_min
+          ok = Platform.each_dirty_page(@heap_min, @heap_max) do |page|
+            scan_range_for_nursery_pointers(
+              Pointer(Void).new(page),
+              Pointer(Void).new(page + Platform::PAGE_SIZE),
+            )
+          end
+          return if ok
+          # Pagemap failed — fall back to a full old-space scan.
+        end
+      {% end %}
+
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
@@ -811,6 +839,68 @@ module Gcry
             scan_object_for_nursery(header)
           end
         end
+      end
+    end
+
+    # Word-scan a mapped range for pointers into nursery objects (dirty pages).
+    private def scan_range_for_nursery_pointers(low : Void*, high : Void*) : Nil
+      word = sizeof(Void*).to_u64
+      addr = (low.address + word - 1) & ~(word - 1)
+      limit = high.address
+      while addr + word <= limit
+        cand = Pointer(Void).new(Pointer(UInt64).new(addr).value)
+        if (h = find_object(cand)) && BlockHeader.nursery?(h)
+          mark_candidate(cand)
+        end
+        addr += word
+      end
+    end
+
+    private def arm_soft_dirty_after_collect : Nil
+      {% if flag?(:linux) %}
+        # Only arm for process GC; library tests always full-scan old space.
+        unless @scan_static_roots && @nursery_enabled
+          @soft_dirty_armed = false
+          return
+        end
+        # Probe once: some kernels/WSL never set soft-dirty bits.
+        unless @soft_dirty_probed
+          @soft_dirty_works = Platform.clear_soft_dirty && soft_dirty_tracks_writes?
+          @soft_dirty_probed = true
+        end
+        if @soft_dirty_works
+          @soft_dirty_armed = Platform.clear_soft_dirty
+        else
+          @soft_dirty_armed = false
+        end
+      {% else %}
+        @soft_dirty_armed = false
+      {% end %}
+    end
+
+    # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
+    # Uses a dedicated anonymous page — never touch the managed heap.
+    private def soft_dirty_tracks_writes? : Bool
+      page = LibC.mmap(
+        Pointer(Void).null,
+        LibC::SizeT.new(Platform::PAGE_SIZE),
+        LibC::PROT_READ | LibC::PROT_WRITE,
+        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        -1,
+        0,
+      )
+      return false if Gcry.mmap_failed?(page)
+
+      begin
+        addr = page.address
+        page.as(UInt8*).value = 1_u8
+        dirty = false
+        ok = Platform.each_dirty_page(addr, addr + Platform::PAGE_SIZE) do |_|
+          dirty = true
+        end
+        ok && dirty
+      ensure
+        LibC.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
       end
     end
 

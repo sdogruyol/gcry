@@ -64,6 +64,7 @@ end
       chunk_fill_lt75:        h.chunk_fill_lt75,
       chunk_fill_ge75:        h.chunk_fill_ge75,
       small_chunk_bytes:      h.small_chunk_bytes,
+      soft_dirty_armed:       h.soft_dirty_armed?,
       finalizer_entries:      h.finalizer_entry_count,
       weak_links:             h.finalizer_link_count,
     }.to_json

@@ -228,12 +228,23 @@ Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 Mi
 
 Takeaway: acikturkiye heap is **densely occupied by conservative-live objects**, not sparse fragments. Smaller chunks do not close the ~4× RSS gap. Next real lever: **write barriers** (or better root precision) — not chunk sizing.
 
+### Soft-dirty nursery (Phase 11, WSL same day)
+
+Linux soft-dirty helpers land for process minors (`soft_dirty_armed` on `/gc-stats`). This host’s kernel/WSL **does not set soft-dirty bits** after writes (platform spec pending) → always full old→young scan when nursery is on.
+
+| Config | result |
+|--------|--------|
+| default (nursery off) | Kemal `/json` healthy (prior ~100% Boehm) |
+| `GCRY_NURSERY=524288` | Kemal under concurrent `/json` **dies** (silent process exit); `json_churn` short runs OK |
+
+Takeaway: soft-dirty infrastructure is in place for kernels that support it; **nursery must stay off for process HTTP** until the process-GC minor path is made sound under load. RSS experiment blocked on that.
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
-4. Write barriers + nursery / incremental for Boehm-like mutator behavior (RSS / locality) — **now the RSS path**.
+4. Fix process-GC **nursery under HTTP load**, then re-measure soft-dirty RSS on a kernel with soft-dirty bits.
 5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
@@ -242,6 +253,7 @@ Takeaway: acikturkiye heap is **densely occupied by conservative-live objects**,
 10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start).
 11. ~~Empty-chunk munmap outside STW + occupancy counters; measure RELEASE_CHUNKS.~~ **Done.**
 12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
+13. ~~Soft-dirty platform + minor wiring.~~ **Done** (WSL no bits; nursery HTTP unsafe).
 
 ## Non-goals (still)
 
