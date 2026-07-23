@@ -3,8 +3,8 @@ module Gcry
   # (Crystal `once` consts like Array literals / sizeof-based values deadlock
   # during GC.init because Fiber is not up yet.)
   module SizeClasses
-    COUNT     =        36
-    THRESHOLD = 16384_u32
+    COUNT     =       40
+    THRESHOLD = 32768_u32
 
     def self.payload(index : Int32) : UInt32
       case index
@@ -44,6 +44,10 @@ module Gcry
       when 33 then 12288_u32
       when 34 then 14336_u32
       when 35 then 16384_u32
+      when 36 then 20480_u32
+      when 37 then 24576_u32
+      when 38 then 28672_u32
+      when 39 then 32768_u32
       else
         raise ArgumentError.new("bad size class index: #{index}")
       end
@@ -87,6 +91,10 @@ module Gcry
       when 12288 then 33
       when 14336 then 34
       when 16384 then 35
+      when 20480 then 36
+      when 24576 then 37
+      when 28672 then 38
+      when 32768 then 39
       else
         raise ArgumentError.new("not a size-class payload: #{payload}")
       end
@@ -111,6 +119,6 @@ module Gcry
   end
 
   # Compatibility aliases (integer literals — safe during GC.init).
-  SIZE_CLASS_COUNT =        36
-  LARGE_THRESHOLD  = 16384_u32
+  SIZE_CLASS_COUNT =       40
+  LARGE_THRESHOLD  = 32768_u32
 end

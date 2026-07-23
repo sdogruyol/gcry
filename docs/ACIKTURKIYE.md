@@ -88,13 +88,33 @@ Medium payloads (8–16 KiB) now use size-class chunks instead of one mmap/VMA p
 
 Takeaway: ceiling bump cut large-object cache / VMA pressure and lifted real-app throughput; still ~1.5× behind Boehm. RSS did not regress badly.
 
+### After size-class ceiling 32 KiB (WSL, same day)
+
+Classes `20480…32768` added; `LARGE_THRESHOLD = 32768`.
+
+**Toy Kemal:**
+
+| GC | path | req/s | % Boehm | RSS | notes |
+|----|------|------:|--------:|----:|-------|
+| gcry | `/` | 103512 | ~98% | 98 MiB | noise |
+| gcry | `/json` | 37813 | **~93%** | 92 MiB | slightly below 16 KiB run |
+
+**acikturkiye** `/api/v1/`:
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| gcry | 136 | **~89%** | 156 MiB | 557 | was ~68% / 104 req/s at 16 KiB; heap ≈ 258 MiB; `large_free` ≈ 21 MiB; pause p50 ≈ 20ms |
+
+Takeaway: 32 KiB ceiling is a clear win on the real app (~68%→~89% of Boehm). Remaining gap is mostly mutator/allocator + retention, not VMA storm.
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done** (WSL baseline above).
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
-3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done** (~54%→~68% of Boehm on `/api/v1/`; `large_free` ↓).
+3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
 4. Longer-term: write barriers + nursery / incremental for Boehm-like mutator behavior.
-5. Follow-up: extend ceiling to **32 KiB** and/or mutator-path profiling (allocator freelist / clear).
+5. ~~Extend ceiling to **32 KiB**.~~ **Done** (~68%→~89% of Boehm on `/api/v1/`).
+6. Mutator-path profiling (allocator freelist / zeroing / `malloc` hot path) — next lever for the remaining ~10–15%.
 
 ## Non-goals (still)
 

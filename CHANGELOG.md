@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **acikturkiye** field notes (Kemal+PG `/api/v1`, release A/B): gcry ~**51%** of Boehm req/s after STW/sweep/finalizer fixes; pause p50 ~12ms — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Raise size-class ceiling **8→16 KiB** (`10240`…`16384`): medium buffers leave per-object mmap. Same-host WSL `/api/v1/`: ~**54%→~68%** of Boehm; `large_free` ~16→3 MiB — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Raise size-class ceiling **16→32 KiB** (`20480`…`32768`). Same-host WSL `/api/v1/`: ~**68%→~89%** of Boehm — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.5.0] - 2026-07-23
 
