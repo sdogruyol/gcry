@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch_label: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Unit specs (library heap under Boehm)
+        run: crystal spec --error-trace
+
+      - name: Sample hello (-Dgc_none)
+        run: |
+          crystal build -Dgc_none samples/hello.cr -o bin/hello
+          ./bin/hello
+
+      - name: Sample alloc (-Dgc_none)
+        run: |
+          crystal build -Dgc_none samples/alloc.cr -o bin/alloc
+          ./bin/alloc 500
+
+      - name: Sample stress (-Dgc_none)
+        run: |
+          crystal build -Dgc_none samples/stress.cr -o bin/stress
+          ./bin/stress 300
+
+  # Optional aarch64 via QEMU user emulation when runners allow it.
+  # Kept as a separate job so x86_64 stays green if qemu setup drifts.
+  test-aarch64:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install QEMU and Crystal deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Cross-build hello for aarch64
+        run: |
+          crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o hello_aarch64
+        continue-on-error: true
