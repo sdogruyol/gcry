@@ -98,8 +98,8 @@ Canonical: **[docs/PERF.md](docs/PERF.md)** (% of Boehm, same host).
 
 | Path | gcry / Boehm |
 |------|-------------:|
-| `/` | **~89%** |
-| `/json` | **~81%** |
+| `/` | **~92%** |
+| `/json` | **~82%** |
 | `/json` + `GCRY_RELEASE_CHUNKS=1` | **~49%** |
 
 Library-heap microbench: `make bench` → `./bin/churn`. Process-GC: `make bench-kemal-wrk`.

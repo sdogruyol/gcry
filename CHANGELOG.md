@@ -19,10 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Empty-chunk release stays **opt-in** (`GCRY_RELEASE_CHUNKS=1`); `GCRY_KEEP_CHUNKS=1` forces off.
 - Finalizer Array buffers / Proc closures pinned during mark (safe opt-in chunk munmap).
 - STW hot path: O(n) static-root×heap exclusion (sorted chunk index merge); `find_object` size-class block-bytes cache; mark stack default 256 KiB.
+- Empty finalizer registry skips `on_reclaim` work.
 
 ### Performance
 
-- Same-host vs **Boehm** (multi-run mean, unreleased tree): `/` **~89%**, `/json` **~81%** of Boehm req/s — see [docs/PERF.md](docs/PERF.md).
+- Same-host vs **Boehm** (unreleased tree): `/` **~92%**, `/json` **~82%** of Boehm req/s — see [docs/PERF.md](docs/PERF.md).
+- Page-map + per-chunk mark bitmap tried; **reverted** (no `/json` ≥2 pp win; `/` regress). Remains open for a later approach — see [DESIGN.md](DESIGN.md) Phase 8.
 - `GCRY_RELEASE_CHUNKS=1` still ~**49%** of Boehm `/json` — remains opt-in.
 
 ## [0.4.0] - 2026-07-23
