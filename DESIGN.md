@@ -254,7 +254,8 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Pin finalizer Array buffers / Proc closures during mark (LibC-bootstrap metadata).
 - Pause p50/p99; richer `GC.prof_stats` reclaim counters; `samples/json_churn.cr`.
 - STW hot path: O(n) static-root×heap exclusion via sorted chunk index; `find_object` block-bytes cache; larger mark stack.
-- Mark-epoch (skip `clear_all_marks` walk) **not** shipped — caused Hash corruption under Kemal; keep bit marks for now.
+- Page-map + out-of-line mark bitmap **tried and reverted** (no `/json` Boehm-% win under Kemal gate).
+- Mark-epoch (skip `clear_all_marks` walk) **not** shipped — caused Hash corruption under Kemal; keep header bit marks for now.
 
 ## MVP definition (v0.1)
 
