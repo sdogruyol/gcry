@@ -39,6 +39,10 @@ module Gcry
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
     property nursery_enabled : Bool = true
+    # Process GC: Crystal 1.21+ always has a Monitor (SYSMON) thread even at
+    # ExecutionContext parallelism 1. Without STW + scanning that thread's
+    # current fiber stack, live objects are swept → heap corruption under load.
+    property stop_the_world : Bool = false
 
     getter unmapped_bytes : UInt64 = 0_u64
 
@@ -52,6 +56,7 @@ module Gcry
     @running_finalizers = false
     @incremental_marking = false
     @inc_active = false
+    @world_stopped = false
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
@@ -76,12 +81,33 @@ module Gcry
     def unlock_write : Nil
     end
 
+    # Match Crystal `gc/none` STW: signal-suspend every other OS thread.
+    # Required for process GC because ExecutionContext's Monitor thread holds
+    # live heap pointers that are not on Fiber.current's stack.
     def stop_world : Nil
-      # v0.4+: hook point for multi-thread STW. No-op while parallelism is 1.
+      return unless @stop_the_world
+      return if @world_stopped
+
+      current_thread = Thread.current
+      Thread.lock
+      Thread.unsafe_each do |thread|
+        thread.suspend unless thread == current_thread
+      end
+      Thread.unsafe_each do |thread|
+        thread.wait_suspended unless thread == current_thread
+      end
+      @world_stopped = true
     end
 
     def start_world : Nil
-      # v0.4+: hook point for multi-thread STW. No-op while parallelism is 1.
+      return unless @world_stopped
+
+      current_thread = Thread.current
+      Thread.unsafe_each do |thread|
+        thread.resume unless thread == current_thread
+      end
+      Thread.unlock
+      @world_stopped = false
     end
 
     def add_root(pointer : Void*) : Nil
@@ -179,6 +205,7 @@ module Gcry
       @incremental_marking = true
       finished = false
       begin
+        stop_world
         mark_loop_budget(work_units)
         if @mark_stack.empty?
           sweep(major: true)
@@ -195,6 +222,7 @@ module Gcry
           finished = true
         end
       ensure
+        start_world
         @collecting = false
         unless @inc_active
           @mark_stack.clear
@@ -359,6 +387,7 @@ module Gcry
       @collecting = true
       @minor_only = !major
       begin
+        stop_world
         note_collection_begin
         @mark_stack.clear
         if major
@@ -386,6 +415,7 @@ module Gcry
           Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
             mark_candidate(candidate)
           end
+          scan_other_thread_stacks
         end
 
         # Conservatively find nursery pointers from old objects (no write barrier).
@@ -408,6 +438,7 @@ module Gcry
         end
         @collections += 1
       ensure
+        start_world
         @collecting = false
         @minor_only = false
         @mark_stack.clear
@@ -419,6 +450,22 @@ module Gcry
         @finalizers.run_pending
       ensure
         @running_finalizers = false
+      end
+    end
+
+    # Running fibers on *other* OS threads are skipped by `push_gc_roots`
+    # (`fiber.running?` is true) and are not `Fiber.current`. After STW, scan
+    # their whole fiber stacks (exact SP needs ucontext; full stack is safe).
+    private def scan_other_thread_stacks : Nil
+      return unless @stop_the_world
+
+      current = Thread.current
+      Thread.unsafe_each do |thread|
+        next if thread == current
+        stack = thread.current_fiber.@stack
+        Roots.scan_range(stack.pointer, stack.bottom) do |candidate|
+          mark_candidate(candidate)
+        end
       end
     end
 
@@ -455,6 +502,7 @@ module Gcry
       @inc_active = true
       @minor_only = false
       begin
+        stop_world
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
@@ -475,8 +523,10 @@ module Gcry
           Roots.scan_range(Roots.stack_pointer, bottom) do |candidate|
             mark_candidate(candidate)
           end
+          scan_other_thread_stacks
         end
       ensure
+        start_world
         @collecting = false
       end
     end
@@ -734,11 +784,20 @@ module Gcry
     end
 
     private def reclaim_small(header : BlockHeader*) : Nil
-      payload = header.value.size
       user = BlockHeader.user_from(header)
       @finalizers.on_reclaim(user)
 
-      class_index = size_class_index(payload)
+      # Prefer chunk size-class over header.size — corrupted/zero size must not
+      # raise mid-sweep (that cascades into END_OF_STACK while raising).
+      chunk = chunk_containing(header.address)
+      class_index = if chunk && !ChunkHeader.large?(chunk)
+                      chunk.value.size_class.to_i32
+                    else
+                      size_class_index(header.value.size)
+                    end
+      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+
+      payload = SizeClasses.payload(class_index)
       was_nursery = BlockHeader.nursery?(header)
       if was_nursery
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])

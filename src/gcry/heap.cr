@@ -113,9 +113,8 @@ module Gcry
       raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
       raise ArgumentError.new("double free") if BlockHeader.free?(header)
 
-      payload = header.value.size.to_u64
-
       if BlockHeader.large?(header)
+        payload = header.value.size.to_u64
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
 
@@ -130,18 +129,24 @@ module Gcry
         return
       end
 
-      class_index = size_class_index(header.value.size)
+      chunk = chunk_for(pointer)
+      raise ArgumentError.new("pointer is not a gcry allocation") unless chunk
+
+      class_index = chunk.value.size_class.to_i32
+      raise ArgumentError.new("bad size class on chunk") if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      payload = SizeClasses.payload(class_index)
+
       if BlockHeader.nursery?(header)
-        header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
       else
-        header.value = BlockHeader.new(header.value.size, BlockHeader::Flags::FREE, @freelists[class_index])
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
         @freelists[class_index] = pointer
       end
 
-      @free_bytes += payload
+      @free_bytes += payload.to_u64
       @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-      note_explicit_free(payload)
+      note_explicit_free(payload.to_u64)
       @live_objects -= 1 if @live_objects > 0
     end
 
@@ -397,8 +402,24 @@ module Gcry
       return false unless is_heap_ptr(user)
       chunk = chunk_for(user)
       return false unless chunk
-      header.address >= ChunkHeader.data_start(chunk).address &&
-        header.address < ChunkHeader.data_end(chunk).address
+
+      if ChunkHeader.large?(chunk)
+        expected_header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        return header == expected_header && BlockHeader.user_from(header) == user
+      end
+
+      class_index = chunk.value.size_class.to_i32
+      return false if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+
+      block_bytes = @block_bytes[class_index]
+      data_start = chunk.address + ChunkHeader::SIZE
+      return false if header.address < data_start
+
+      offset = header.address - data_start
+      return false if (offset % block_bytes) != 0
+      return false if header.address + block_bytes > chunk.address + chunk.value.mapped_bytes
+
+      BlockHeader.user_from(header) == user
     end
 
     private def size_class_index(payload : UInt32) : Int32

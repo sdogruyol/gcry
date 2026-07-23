@@ -18,6 +18,8 @@ module GC
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
+    # Process GC must STW: ExecutionContext always has a Monitor OS thread.
+    heap.stop_the_world = true
     # Process GC: majors only by default. Nursery without write barriers must
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
@@ -38,6 +40,7 @@ module GC
     # Suspended fibers: push their stacks before marking (Boehm-compatible hooks).
     # Crystal 1.21+ defaults to Fiber::ExecutionContext, which does not call
     # GC.set_stackbottom on fiber swap — refresh from Fiber.current here.
+    # Other OS threads' running fibers are scanned inside collect after STW.
     heap.before_collect do
       Fiber.unsafe_each do |fiber|
         fiber.push_gc_roots unless fiber.running?
@@ -348,8 +351,7 @@ module GC
   end
 
   # :nodoc:
-  # Parallel ExecutionContext STW is not implemented yet (v0.4 skeleton).
-  # Under parallelism 1 these remain no-ops — same as Crystal's gc/none.
+  # Suspends other OS threads (Monitor / extra schedulers) for a safe mark–sweep.
   def self.stop_world : Nil
     Gcry.default_heap.stop_world if @@gcry_ready
   end

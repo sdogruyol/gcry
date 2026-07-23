@@ -69,7 +69,7 @@ gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry p
 | `add_root` / `add_finalizer` / `register_disappearing_link` | Roots, finalizers, `WeakRef` ✅ Phase 3 |
 | `prof_stats` | Full Boehm-shaped profiling (zeros OK until then) |
 | MT / parallel `set_stackbottom` + STW | Parallel ExecutionContexts |
-| `stop_world` / `start_world` | Multi-thread STW (no-op stubs today) |
+| `stop_world` / `start_world` | Multi-thread STW (process GC enables; signal-suspend like `gc/none`) |
 | `pthread_*` GC registration | When threads must be tracked |
 
 ### Integration decision (shard override)
@@ -205,7 +205,7 @@ DESIGN.md
 
 - `set_stackbottom`, `push_stack`, and `before_collect` for suspended fiber stacks (ExecutionContext: refresh bottom from `Fiber.current` at collect).
 - `add_root`, disappearing links, finalizer queue (run after collect).
-- Locks / STW are no-ops; parallel contexts deferred.
+- Locks remain no-ops; process GC enables STW for the Monitor thread (and any other OS threads).
 - Deliverable: multi-fiber-ready root API + finalizers / weak links (`spec/fiber_spec.cr`).
 
 ### Phase 4 — Shard `GC` override ✅
@@ -300,7 +300,7 @@ Anything beyond that (MT, incremental, generational) is post-MVP.
 1. **Finalizers:** run on the same thread after collect (not a dedicated finalizer fiber).
 2. **Return memory to OS:** `munmap` large objects on reclaim; keep size-class chunks mapped for freelist reuse.
 3. **`add_root`:** maintain and scan an internal root set (not Boehm’s unused Array-only quirk).
-4. **`stop_world` / `start_world`:** no-ops under default ExecutionContext parallelism 1 (same practical effect as `gc/none` until parallel STW exists).
+4. **`stop_world` / `start_world`:** process GC enables signal-suspend STW and scans other threads' current-fiber stacks (Crystal 1.21 Monitor / SYSMON). Library `Gcry::Heap` leaves STW off.
 
 ## References
 

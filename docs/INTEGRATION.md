@@ -100,7 +100,7 @@ Crystal **1.21.0** runtime modes:
 | `pthread_create` / `join` / `detach` | Boehm wrappers; `none` uses libc |
 | `sig_suspend` / `sig_resume` | Unix + boehm only |
 
-**v0.1 decision:** support the Crystal **1.21 default** (ExecutionContext, parallelism 1). Match `gc/none`’s `set_stackbottom(Thread, Void*)` under `!without_mt`, and the single-arg form under `-Dwithout_mt`. Locks / STW stay no-ops. Parallel ExecutionContexts and deprecated `-Dpreview_mt` are out of scope.
+**v0.1 decision:** support the Crystal **1.21 default** (ExecutionContext, parallelism 1). Match `gc/none`’s `set_stackbottom(Thread, Void*)` under `!without_mt`, and the single-arg form under `-Dwithout_mt`. RW locks stay no-ops; process GC enables STW (`stop_world` / other-thread stack scan) because the Monitor thread always exists. Deprecated `-Dpreview_mt` is out of scope.
 
 ## How Crystal discovers fiber roots (boehm)
 
@@ -172,7 +172,7 @@ Phase 1–2 expose `Gcry.malloc` / `Gcry.collect` / … that the `GC` reopen for
 | `set_stackbottom` / `current_thread_stack_bottom` | Running fiber stack bounds |
 | `add_finalizer(object, callback)` | Run after object is reclaimed (post-collect) |
 | `register_disappearing_link(link, object?)` | Clear `*link` when referent is collected |
-| `lock_*` / `stop_world` / `start_world` | No-ops until parallel ExecutionContext STW |
+| `lock_*` / `stop_world` / `start_world` | Locks no-op; process GC STW suspends other OS threads |
 
 Phase 4 will reopen Crystal’s `GC` module and register:
 

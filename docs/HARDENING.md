@@ -73,9 +73,11 @@ after = GC.stats.heap_size
 
 Crystal **1.21+** defaults to `Fiber::ExecutionContext`, which does **not** call `GC.set_stackbottom` on fiber swap (only GC read locks). gcry refreshes the running fiber’s stack bottom at collect time from `Fiber.current.@stack.bottom`.
 
+Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads (including the SYSMON Monitor) are signal-suspended, then each thread’s current-fiber stack is scanned. Without this, Monitor-only roots are swept and the heap corrupts under load.
+
 Static roots scan **file-backed** RW segments only (binary / `.so` data). Large anonymous maps (fiber stacks, arenas) are covered by `push_stack` / the mutator stack scan.
 
-Parallel ExecutionContexts and deprecated `-Dpreview_mt` are unsupported — see [docs/POLICY.md](POLICY.md).
+Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
 
 ## Sanitizers
 
