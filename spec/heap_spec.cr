@@ -1,0 +1,180 @@
+require "./spec_helper"
+
+describe Gcry::Heap do
+  it "rounds sizes to size classes" do
+    Gcry::Heap.round_size(0).should eq(16)
+    Gcry::Heap.round_size(1).should eq(16)
+    Gcry::Heap.round_size(16).should eq(16)
+    Gcry::Heap.round_size(17).should eq(32)
+    Gcry::Heap.round_size(8192).should eq(8192)
+    Gcry::Heap.round_size(8193).should eq(8200) # aligned up, large path
+  end
+
+  it "malloc returns zeroed memory" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(32)
+      bytes = ptr.as(UInt8*)
+      32.times { |i| bytes[i].should eq(0) }
+      heap.is_heap_ptr(ptr).should be_true
+      heap.live_objects.should eq(1)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "malloc_atomic does not clear memory" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc_atomic(64)
+      bytes = ptr.as(UInt8*)
+      # Write then free then realloc from freelist — may see old data.
+      64.times { |i| bytes[i] = 0xAB_u8 }
+      heap.free(ptr)
+
+      again = heap.malloc_atomic(64)
+      # Same size class freelist reuse; contents need not be zero.
+      again.should eq(ptr)
+      again.as(UInt8*)[0].should eq(0xAB_u8)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "free returns small blocks to the freelist" do
+    heap = Gcry::Heap.new
+    begin
+      a = heap.malloc(16)
+      b = heap.malloc(16)
+      heap.free(a)
+      heap.free(b)
+      heap.live_objects.should eq(0)
+
+      c = heap.malloc(16)
+      # LIFO freelist
+      c.should eq(b)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "detects double free" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(16)
+      heap.free(ptr)
+      expect_raises(ArgumentError, /double free/) { heap.free(ptr) }
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "allocates and frees large objects" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(100_000)
+      bytes = ptr.as(UInt8*)
+      heap.is_heap_ptr(ptr).should be_true
+      bytes[0] = 1_u8
+      bytes[99_999] = 2_u8
+      before = heap.heap_size
+      heap.free(ptr)
+      heap.is_heap_ptr(ptr).should be_false
+      heap.heap_size.should be < before
+      heap.live_objects.should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "realloc grows and preserves contents" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(16)
+      bytes = ptr.as(UInt8*)
+      16.times { |i| bytes[i] = i.to_u8 }
+
+      grown = heap.realloc(ptr, 128)
+      grown_bytes = grown.as(UInt8*)
+      16.times { |i| grown_bytes[i].should eq(i.to_u8) }
+      # New tail is zeroed for non-atomic realloc growth via malloc.
+      grown_bytes[16].should eq(0)
+      heap.is_heap_ptr(grown).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "realloc shrinking keeps the same pointer" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(128)
+      same = heap.realloc(ptr, 32)
+      same.should eq(ptr)
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "is_heap_ptr is false for foreign pointers" do
+    heap = Gcry::Heap.new
+    begin
+      heap.is_heap_ptr(Pointer(Void).null).should be_false
+      stack = 0
+      heap.is_heap_ptr(pointerof(stack).as(Void*)).should be_false
+      libc = LibC.malloc(16)
+      begin
+        heap.is_heap_ptr(libc).should be_false
+      ensure
+        LibC.free(libc)
+      end
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "survives a random alloc/free fuzz" do
+    heap = Gcry::Heap.new
+    begin
+      rng = Random.new(42)
+      live = [] of Void*
+      2000.times do
+        if live.empty? || rng.next_bool
+          size = rng.rand(1..12_000)
+          atomic = rng.next_bool
+          ptr = atomic ? heap.malloc_atomic(size) : heap.malloc(size)
+          heap.is_heap_ptr(ptr).should be_true
+          live << ptr
+        else
+          idx = rng.rand(live.size)
+          ptr = live.delete_at(idx)
+          heap.free(ptr)
+        end
+      end
+      live.each { |ptr| heap.free(ptr) }
+      heap.live_objects.should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+end
+
+describe Gcry do
+  it "exposes module-level allocators on the default heap" do
+    heap = Gcry::Heap.new
+    Gcry.default_heap = heap
+    begin
+      ptr = Gcry.malloc(24)
+      bytes = ptr.as(UInt8*)
+      24.times { |i| bytes[i].should eq(0) }
+      Gcry.is_heap_ptr(ptr).should be_true
+      Gcry.free(ptr)
+    ensure
+      Gcry.default_heap = Gcry::Heap.new
+    end
+  end
+
+  it "reports a version" do
+    Gcry::VERSION.should_not be_nil
+  end
+end

@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same integration style as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (Immix).
 
-> **Status:** Phase 0 complete (design + Crystal integration research). The collector is not usable yet.
+> **Status:** Phase 1 complete — `Gcry::Heap` allocator works (no collection yet).
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
@@ -76,7 +76,7 @@ Design notes: [DESIGN.md](DESIGN.md). Runtime hookup: [docs/INTEGRATION.md](docs
 Suggested order of work:
 
 1. ~~Research & API contract (Phase 0)~~
-2. Heap allocator (`mmap` arenas, size classes)
+2. ~~Heap allocator (`mmap` arenas, size classes)~~
 3. Conservative mark–sweep
 4. Fiber / root registration
 5. `module GC` reopen + `-Dgc_none` samples

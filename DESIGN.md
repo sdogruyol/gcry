@@ -189,7 +189,7 @@ DESIGN.md
 - Froze the API contract and MVP success criteria (this document).
 - Deliverable: [docs/INTEGRATION.md](docs/INTEGRATION.md) + this design doc.
 
-### Phase 1 — Allocator (no collection)
+### Phase 1 — Allocator (no collection) ✅
 
 - Arena + size classes + `malloc` / `malloc_atomic` / `realloc` / `free`.
 - Metadata and `is_heap_ptr`.

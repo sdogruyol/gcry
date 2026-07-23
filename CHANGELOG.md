@@ -9,10 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Phase 1 allocator:** `Gcry::Heap` with `mmap` arenas, size classes (16B–8KB), large-object spans, intrusive freelists.
+- Block/chunk metadata (`Gcry::BlockHeader`, `Gcry::ChunkHeader`) including flags for free / atomic / large (mark bit reserved).
+- Module API: `Gcry.malloc`, `malloc_atomic`, `realloc`, `free`, `is_heap_ptr`, `default_heap`.
+- Specs: zeroing, freelist reuse, large alloc, realloc, double-free, foreign pointers, 2000-op fuzz (`spec/heap_spec.cr`).
+
 - Project scaffold (`shard.yml`, MIT license, empty `Gcry` module).
 - [DESIGN.md](DESIGN.md) — goals, architecture, phased roadmap, MVP definition.
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber research notes (boehm & none backends, root pushing, boot sequence).
 - [README.md](README.md) — project overview and shard usage outline.
+- [CHANGELOG.md](CHANGELOG.md) — this file.
 
 ### Changed
 
@@ -22,4 +28,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 
 - Phase 0 (research & contract) is complete.
-- Collector implementation has not started yet (Phase 1: allocator).
+- Phase 1 (allocator, no collection) is complete.
+- Next: Phase 2 — conservative mark–sweep.
