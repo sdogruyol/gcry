@@ -805,9 +805,21 @@ module Gcry
     end
 
     private def sweep(major : Bool) : Nil
+      # Rebuild the chunk list in one pass. Reclaiming large objects used to
+      # unlink + dirty the chunk index per object; every following reclaim_small
+      # then rebuilt/sorted the index (O(n²) insertion sort) — that made sweep
+      # multi-second on HTTP apps with many large allocs (see unmapped_bytes).
+      kept = Pointer(ChunkHeader).null
+      to_unmap = Pointer(ChunkHeader).null
+      any_unmap = false
+      # Opt-in empty-chunk release: defer freelist rebuilds per size-class.
+      rebuild_mask = 0_u64
+      rebuild_nursery_mask = 0_u64
+
       chunk = @chunks
       while chunk
         nxt = chunk.value.next
+        drop = false
 
         if major || ChunkHeader.nursery?(chunk)
           if ChunkHeader.large?(chunk)
@@ -815,32 +827,76 @@ module Gcry
             unless BlockHeader.free?(header)
               if BlockHeader.marked?(header)
                 BlockHeader.clear_mark(header)
-              else
-                reclaim_large(chunk, header) if major
+              elsif major
+                prepare_reclaim_large(chunk, header)
+                chunk.value.next = to_unmap
+                to_unmap = chunk
+                drop = true
+                any_unmap = true
               end
             end
           else
             each_block(chunk) do |header|
               next if BlockHeader.free?(header)
-              # Minor GC only reclaims/promotes nursery objects.
               next if !major && !BlockHeader.nursery?(header)
 
               if BlockHeader.marked?(header)
                 BlockHeader.clear_mark(header)
                 BlockHeader.promote(header) unless major
               else
-                reclaim_small(header)
+                reclaim_small(chunk, header)
               end
             end
 
-            # After a major, drop fully free size-class chunks back to the OS.
             if major && @release_empty_chunks && chunk_fully_free?(chunk)
-              reclaim_empty_chunk(chunk)
+              class_index = chunk.value.size_class.to_i32
+              if class_index >= 0 && class_index < SIZE_CLASS_COUNT
+                mapped = chunk.value.mapped_bytes
+                nursery = ChunkHeader.nursery?(chunk)
+                @heap_size -= mapped if @heap_size >= mapped
+                @unmapped_bytes += mapped
+                @bytes_reclaimed_since_gc += mapped
+                chunk.value.next = to_unmap
+                to_unmap = chunk
+                drop = true
+                any_unmap = true
+                bit = 1_u64 << class_index
+                if nursery
+                  rebuild_nursery_mask |= bit
+                else
+                  rebuild_mask |= bit
+                end
+              end
             end
           end
         end
 
+        unless drop
+          chunk.value.next = kept
+          kept = chunk
+        end
         chunk = nxt
+      end
+
+      @chunks = kept
+
+      while to_unmap
+        nxt = to_unmap.value.next
+        LibC.munmap(to_unmap.as(Void*), LibC::SizeT.new(to_unmap.value.mapped_bytes))
+        to_unmap = nxt
+      end
+
+      if rebuild_mask != 0 || rebuild_nursery_mask != 0
+        SIZE_CLASS_COUNT.times do |i|
+          bit = 1_u64 << i
+          rebuild_size_class_freelist(i, false) if (rebuild_mask & bit) != 0
+          rebuild_size_class_freelist(i, true) if (rebuild_nursery_mask & bit) != 0
+        end
+      end
+
+      if any_unmap
+        update_heap_bounds_after_unmap
+        @chunk_index_dirty = true
       end
     end
 
@@ -853,6 +909,7 @@ module Gcry
 
     # Remove a fully free size-class chunk from the heap and rebuild that
     # class's freelist from remaining chunks (avoids dangling freelist links).
+    # Used by explicit paths; major sweep batches empty-chunk release itself.
     private def reclaim_empty_chunk(chunk : ChunkHeader*) : Nil
       return if ChunkHeader.large?(chunk)
 
@@ -912,18 +969,11 @@ module Gcry
       @free_bytes = total
     end
 
-    private def reclaim_small(header : BlockHeader*) : Nil
+    private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       user = BlockHeader.user_from(header)
       @finalizers.on_reclaim(user)
 
-      # Prefer chunk size-class over header.size — corrupted/zero size must not
-      # raise mid-sweep (that cascades into END_OF_STACK while raising).
-      chunk = chunk_containing(header.address)
-      class_index = if chunk && !ChunkHeader.large?(chunk)
-                      chunk.value.size_class.to_i32
-                    else
-                      size_class_index(header.value.size)
-                    end
+      class_index = chunk.value.size_class.to_i32
       return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       payload = SizeClasses.payload(class_index)
@@ -941,21 +991,24 @@ module Gcry
       @live_objects -= 1 if @live_objects > 0
     end
 
-    private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+    # Accounting only — caller unmaps / drops the chunk from @chunks.
+    private def prepare_reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       user = BlockHeader.user_from(header)
       @finalizers.on_reclaim(user)
 
       mapped = chunk.value.mapped_bytes
       payload = header.value.size.to_u64
-      unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
       @bytes_reclaimed_since_gc += payload
-      update_heap_bounds_after_unmap
       @live_objects -= 1 if @live_objects > 0
-      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
-      # Adjacency-BSS static roots never include large-object VMAs — no cache
-      # invalidate (avoids /proc/self/maps thrash under HTTP large alloc churn).
+    end
+
+    private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      prepare_reclaim_large(chunk, header)
+      unlink_chunk(chunk)
+      update_heap_bounds_after_unmap
+      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
