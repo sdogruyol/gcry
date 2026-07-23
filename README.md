@@ -8,6 +8,7 @@ Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same int
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
+> - [CHANGELOG.md](CHANGELOG.md) — notable changes
 
 ## Why
 
