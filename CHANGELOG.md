@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
+### Added
+
+- Empty size-class chunks can be `munmap`'d after major (`release_empty_chunks`; enable with `GCRY_RELEASE_CHUNKS=1`).
+- `GC.stats.unmapped_bytes` / heap `unmapped_bytes` count returned mappings.
+- Fork skeleton: `GC.note_fork_child` poison — post-fork `malloc`/`collect` raise (no auto `pthread_atfork` / heap reinit yet).
+- `GCRY_INCREMENTAL=1` opt-in for experimental sliced auto-majors.
+
+### Changed
+
+- Process GC default majors are **full STW** again. Incremental auto without write barriers was unsound under pointer-mutating workloads (Kemal `/json` Hash overflow / double-free).
+- `stop_world` / `start_world` documented as v0.4 STW stubs (still no-ops at parallelism 1).
+- Docs: POLICY / HARDENING updated for chunk release, fork poison, incremental opt-in.
+
+### Performance
+
+- Kemal wrk vs **v0.3.0** (same host): `/` **−2.7%** req/s, **+0.5%** lat.avg; `/json` **−0.6%** req/s, **−0.4%** lat.avg — see [docs/PERF.md](docs/PERF.md). Throughput-neutral; prioritizes soundness (STW default).
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
@@ -84,7 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sdogruyol/gcry/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sdogruyol/gcry/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sdogruyol/gcry/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sdogruyol/gcry/releases/tag/v0.1.0

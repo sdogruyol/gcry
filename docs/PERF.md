@@ -39,6 +39,7 @@ Do **not** compare numbers taken on different days/hosts without noting it.
 | 0.2.0 | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **72101** | 31.19ms | 1.03s | **~+1700%** vs 0.1 (approx) | — | Nursery off; 64 MiB majors; static-root cache; chunk index. |
 | 0.3.0 | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **72993** | 20.86ms | 246ms | **+1.2%** | **−33%** | Incremental auto-majors (same-day A/B vs 0.2.0). |
 | 0.3.0 (recheck) | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **76227** | 24.08ms | 718ms | — | — | Fresh process; after `/json` handler enrichment (same binary). |
+| **0.4.0** | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **76254** | 21.64ms | 494ms | **−2.7%** | **+0.5%** | Same-day A/B vs v0.3.0; full STW majors default (soundness). |
 | Boehm (ref) | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **107710** | 8.11ms | 695ms | — | — | Same app/load; ceiling reference. |
 
 ## History — `GET /json`
@@ -48,7 +49,8 @@ Payload (current tree): nested object + `user` + 8 `items` with small string blo
 | Version | Date (UTC) | Crystal | Host | req/s | lat.avg | lat.max | Δ req/s vs prev | Δ lat.avg vs prev | Notes |
 |---------|------------|---------|------|------:|--------:|--------:|----------------:|------------------:|-------|
 | 0.3.0 | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **30112** | 20.33ms | 713ms | — (baseline) | — | First formal `/json` row; enriched payload. Fresh process. |
-| Boehm (ref) | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **41748** | 9.23ms | 668ms | — | — | Same payload/load; ~72% of Boehm req/s under gcry. |
+| **0.4.0** | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **32141** | 16.28ms | 480ms | **−0.6%** vs same-day v0.3.0 (32331) | **−0.4%** | A/B vs tag v0.3.0 same day; STW default. |
+| Boehm (ref) | 2026-07-23 | 1.21.0 | WSL2 x86_64 | **41748** | 9.23ms | 668ms | — | — | Same payload/load; ~77% of Boehm req/s under gcry 0.4. |
 
 ### Same-day detail (0.3.0 tree, both paths)
 

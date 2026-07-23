@@ -3,7 +3,7 @@
 Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (v0.3) | bdwgc (Crystal default) |
+| Area | gcry (v0.4) | bdwgc (Crystal default) |
 |------|-------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
@@ -14,7 +14,7 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |
 | Auto-collect knobs | `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`, `GCRY_NURSERY`, `GCRY_DISABLE_NURSERY` | LibGC env / APIs |
-| Incremental | Auto `collect_a_little` slices + explicit API | Yes (BDW) |
+| Incremental | Opt-in `GCRY_INCREMENTAL=1` (experimental without barriers); default full STW | Yes (BDW) |
 | Generational | Nursery without write barriers | Optional BDW modes |
 | Compacting / moving | No | Mostly no (conservative) |
 | Precise roots | No (needs compiler) | No |

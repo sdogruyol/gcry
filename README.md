@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none` — no Crystal compiler or stdlib patch required.
 
-> **Status:** v0.3 — incremental auto-majors, pause stats, alloc fast-path. Phases 0–7 complete.
+> **Status:** v0.4 — STW-default majors (sound), empty-chunk release opt-in, fork poison API. Phases 0–7 complete.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal `GC` / fiber notes
@@ -28,7 +28,7 @@ Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **
 
 Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
-## Supported platforms (v0.3)
+## Supported platforms (v0.4)
 
 | | |
 |--|--|
@@ -84,25 +84,25 @@ There is no separate application-level allocator API for normal programs: alloca
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
 | `GCRY_NURSERY` | Opt-in nursery; young bytes before minor (default off in process GC) |
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
-| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major on threshold (disable sliced auto-collect) |
+| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major on threshold (process **default** since v0.4) |
+| `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers) |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per `collect_a_little` slice (default `1024`) |
+| `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major |
 
 More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md). Pause times: `Gcry.pause_stats` (`last_ns` / `max_ns` / `total_ns` / `count`).
 
-## Performance (v0.3)
+## Performance (v0.4)
 
 Version-over-version Kemal wrk log: **[docs/PERF.md](docs/PERF.md)** (canonical). Measures **`/`** and **`/json`** (`wrk -c 100 -d 30`, fresh process per path).
 
-Same-host snapshot (Crystal 1.21.0, WSL2 x86_64, 2026-07-23):
+Same-host A/B **0.3.0 → 0.4.0** (Crystal 1.21.0, WSL2 x86_64, 2026-07-23):
 
-| GC | Path | req/s | lat.avg | lat.max |
-|----|------|------:|--------:|--------:|
-| gcry 0.3.0 | `/` | 76227 | 24.08ms | 718ms |
-| gcry 0.3.0 | `/json` | **30112** | 20.33ms | 713ms |
-| Boehm | `/` | 107710 | 8.11ms | 695ms |
-| Boehm | `/json` | **41748** | 9.23ms | 668ms |
+| Path | 0.3.0 req/s | 0.4.0 req/s | Δ req/s | Δ lat.avg |
+|------|------------:|------------:|--------:|----------:|
+| `/` | 78360 | **76254** | **−2.7%** | **+0.5%** |
+| `/json` | 32331 | **32141** | **−0.6%** | **−0.4%** |
 
-Prior A/B **0.2.0 → 0.3.0** on `/` only: **+1.2%** req/s, **−33%** lat.avg (see PERF.md). `/json` is the primary stress path going forward (~72% of Boehm req/s here).
+0.4.0 is throughput-neutral vs 0.3.0; defaults to **full STW** majors (incremental opt-in) for correctness under JSON/Hash mutation.
 
 What moved the needle (process GC defaults):
 

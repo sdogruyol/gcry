@@ -20,12 +20,14 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
 | `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
-| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major on threshold (process default is sliced incremental) |
-| `GCRY_INCREMENTAL_WORK` | Objects marked per auto/`collect_a_little` slice (default `1024`) |
+| `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
+| `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
+| `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
+| `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (off by default; maturing) |
 
-Process GC enables **majors only** by default (nursery is opt-in). Auto-majors use **incremental** mark slices (`incremental_auto`); the first slice of a cycle still scans static roots. Library `Gcry::Heap` leaves nursery off-threshold and `incremental_auto = false` unless you set them.
+Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Library `Gcry::Heap` leaves nursery off-threshold and `incremental_auto = false` unless you set them.
 
-`collect_a_little` under process GC pays a full static-root (`/proc/self/maps`) scan at the start of each incremental cycle — prefer library-heap benches (`bench/churn.cr`) for pause comparisons. Inspect pauses with `Gcry.pause_stats`.
+Inspect pauses with `Gcry.pause_stats`. `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects (and empty chunks when release is enabled).
 
 Example:
 
@@ -34,11 +36,11 @@ GCRY_THRESHOLD=1048576 crystal build -Dgc_none samples/alloc.cr -o alloc && ./al
 GCRY_DISABLE_AUTO=1 crystal run -Dgc_none samples/hello.cr
 GCRY_NURSERY=262144 ./bin/alloc 1000
 GCRY_DISABLE_NURSERY=1 ./bin/stress 200
-GCRY_DISABLE_INCREMENTAL=1 ./bin/stress 200
-GCRY_INCREMENTAL_WORK=256 ./bin/stress 200
+GCRY_INCREMENTAL=1 ./bin/stress 200
+GCRY_RELEASE_CHUNKS=1 ./bin/stress 200
 ```
 
-Process GC defaults (v0.3+): majors at 64 MiB via incremental slices; nursery off unless `GCRY_NURSERY` is set. Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (v0.4+): majors at 64 MiB full STW; nursery off; size-class chunks retained unless `GCRY_RELEASE_CHUNKS=1`. Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
 
