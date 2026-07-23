@@ -50,6 +50,7 @@ end
       phase_stacks_ns:   h.last_phase_stacks_ns,
       phase_mark_ns:     h.last_phase_mark_ns,
       phase_sweep_ns:    h.last_phase_sweep_ns,
+      large_free_bytes:  h.large_free_bytes,
     }.to_json
   end
 {% end %}

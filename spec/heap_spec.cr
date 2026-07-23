@@ -79,9 +79,12 @@ describe Gcry::Heap do
       bytes[99_999] = 2_u8
       before = heap.heap_size
       heap.free(ptr)
+      # Cached on large freelist (still a heap mapping until trim).
+      heap.is_heap_ptr(ptr).should be_true
+      heap.live_objects.should eq(0)
+      heap.trim_large_cache(0)
       heap.is_heap_ptr(ptr).should be_false
       heap.heap_size.should be < before
-      heap.live_objects.should eq(0)
     ensure
       heap.destroy
     end

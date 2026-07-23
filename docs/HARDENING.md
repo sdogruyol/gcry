@@ -69,7 +69,7 @@ GC.collect
 after = GC.stats.heap_size
 ```
 
-`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Prefer `Gcry.default_heap.live_objects` in library tests.
+`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;8 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache`). Prefer `Gcry.default_heap.live_objects` in library tests.
 
 ## Process GC notes (HTTP / fibers)
 

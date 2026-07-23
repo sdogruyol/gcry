@@ -490,6 +490,9 @@ module Gcry
         record_pause(started)
       end
 
+      # Munmap excess cached large objects outside STW (reuse is the common case).
+      trim_large_cache
+
       @running_finalizers = true
       begin
         @finalizers.run_pending
@@ -686,6 +689,7 @@ module Gcry
 
       header = find_object(pointer)
       return unless header
+      return if BlockHeader.free?(header)
       return if BlockHeader.marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
@@ -828,11 +832,12 @@ module Gcry
               if BlockHeader.marked?(header)
                 BlockHeader.clear_mark(header)
               elsif major
-                prepare_reclaim_large(chunk, header)
-                chunk.value.next = to_unmap
-                to_unmap = chunk
-                drop = true
-                any_unmap = true
+                # Recycle mapping — never munmap inside STW (Linux VMA munmap
+                # of thousands of large HTTP buffers dominated pause time).
+                mapped = chunk.value.mapped_bytes
+                cache_large_chunk(chunk, header)
+                @bytes_reclaimed_since_gc += mapped
+                @live_objects -= 1 if @live_objects > 0
               end
             end
           else

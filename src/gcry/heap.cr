@@ -10,16 +10,22 @@ module Gcry
   class Heap
     SMALL_CHUNK_BYTES = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
     PAUSE_RING_SIZE   =         64 # recent pause samples for p50/p99
+    # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
+    LARGE_FREE_BUCKETS = 20
+    # Cap cached free large bytes; trim outside STW when over this.
+    LARGE_CACHE_LIMIT  = 64_u64 * 1024 * 1024
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
     getter total_bytes : UInt64 = 0_u64
     getter bytes_since_gc : UInt64 = 0_u64
     getter live_objects : UInt64 = 0_u64
+    getter large_free_bytes : UInt64 = 0_u64
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
     @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
     @nursery_alloc_bytes : UInt64 = 0_u64
@@ -35,6 +41,7 @@ module Gcry
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
@@ -61,8 +68,10 @@ module Gcry
       @chunks = Pointer(ChunkHeader).null
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @heap_size = 0_u64
       @free_bytes = 0_u64
+      @large_free_bytes = 0_u64
       @live_objects = 0_u64
       @nursery_alloc_bytes = 0_u64
       unless @chunk_index.null?
@@ -118,16 +127,11 @@ module Gcry
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
 
-        unlink_chunk(chunk)
-        @heap_size -= chunk.value.mapped_bytes
-        @unmapped_bytes += chunk.value.mapped_bytes
-        update_heap_bounds_after_unmap
         @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
         note_explicit_free(payload)
         @live_objects -= 1 if @live_objects > 0
-        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
-        # Do not invalidate static-root cache: adjacency-BSS never caches large
-        # object VMAs. (Empty-chunk release still invalidates in collect.cr.)
+        cache_large_chunk(chunk, header)
+        trim_large_cache
         return
       end
 
@@ -268,12 +272,102 @@ module Gcry
     private def alloc_large(payload : UInt64, flags : UInt32) : Void*
       need = ChunkHeader::SIZE.to_u64 + BlockHeader::SIZE.to_u64 + payload
       mapped = align_up(need, 4096_u64)
-      chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
 
+      if user = take_large_free(mapped)
+        header = BlockHeader.from_user(user)
+        BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+        BlockHeader.set_mark(header) if @incremental_marking || @collecting
+        return user
+      end
+
+      chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
       BlockHeader.set_mark(header) if @incremental_marking || @collecting
       BlockHeader.user_from(header)
+    end
+
+    # Bucket index for a mapped large-object size (powers of two from 8 KiB).
+    protected def self.large_bucket(mapped : UInt64) : Int32
+      v = mapped >> 13 # 8 KiB units
+      v = 1_u64 if v == 0
+      i = 0
+      while v > 1 && i < LARGE_FREE_BUCKETS - 1
+        v >>= 1
+        i += 1
+      end
+      i
+    end
+
+    # Recycle a large chunk (stays mapped, stays on @chunks). No munmap.
+    protected def cache_large_chunk(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      mapped = chunk.value.mapped_bytes
+      payload = header.value.size
+      bucket = self.class.large_bucket(mapped)
+      user = BlockHeader.user_from(header)
+      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, @large_freelists[bucket])
+      @large_freelists[bucket] = user
+      @free_bytes += mapped
+      @large_free_bytes += mapped
+    end
+
+    private def take_large_free(mapped_need : UInt64) : Void*?
+      start = self.class.large_bucket(mapped_need)
+      b = start
+      while b < LARGE_FREE_BUCKETS
+        prev = Pointer(Void).null
+        user = @large_freelists[b]
+        while user
+          header = BlockHeader.from_user(user)
+          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          nxt = header.value.next_free
+          if chunk.value.mapped_bytes >= mapped_need
+            if prev.null?
+              @large_freelists[b] = nxt
+            else
+              ph = BlockHeader.from_user(prev)
+              pv = ph.value
+              pv.next_free = nxt
+              ph.value = pv
+            end
+            mapped = chunk.value.mapped_bytes
+            @free_bytes -= mapped if @free_bytes >= mapped
+            @large_free_bytes -= mapped if @large_free_bytes >= mapped
+            return user
+          end
+          prev = user
+          user = nxt
+        end
+        b += 1
+      end
+      nil
+    end
+
+    # Munmap cached large objects until @large_free_bytes <= *limit*.
+    # Call outside STW — munmap of many VMAs is slow on Linux.
+    def trim_large_cache(limit : UInt64 = LARGE_CACHE_LIMIT // 2) : Nil
+      return if @large_free_bytes <= limit
+
+      b = LARGE_FREE_BUCKETS - 1
+      while b >= 0 && @large_free_bytes > limit
+        user = @large_freelists[b]
+        while user && @large_free_bytes > limit
+          header = BlockHeader.from_user(user)
+          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          nxt = header.value.next_free
+          @large_freelists[b] = nxt
+          mapped = chunk.value.mapped_bytes
+          unlink_chunk(chunk)
+          @heap_size -= mapped if @heap_size >= mapped
+          @free_bytes -= mapped if @free_bytes >= mapped
+          @large_free_bytes -= mapped if @large_free_bytes >= mapped
+          @unmapped_bytes += mapped
+          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          user = nxt
+        end
+        b -= 1
+      end
+      update_heap_bounds_after_unmap
     end
 
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
