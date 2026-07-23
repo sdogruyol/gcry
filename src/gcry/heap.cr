@@ -13,7 +13,7 @@ module Gcry
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
     # Cap cached free large bytes; trim outside STW when over this.
-    LARGE_CACHE_LIMIT  = 64_u64 * 1024 * 1024
+    LARGE_CACHE_LIMIT = 64_u64 * 1024 * 1024
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64

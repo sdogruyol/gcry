@@ -7,7 +7,9 @@ describe Gcry::Heap do
     Gcry::Heap.round_size(16).should eq(16)
     Gcry::Heap.round_size(17).should eq(32)
     Gcry::Heap.round_size(8192).should eq(8192)
-    Gcry::Heap.round_size(8193).should eq(8200) # aligned up, large path
+    Gcry::Heap.round_size(8193).should eq(10240) # medium size class (≤16 KiB ceiling)
+    Gcry::Heap.round_size(16384).should eq(16384)
+    Gcry::Heap.round_size(16385).should eq(16392) # aligned up, large path
   end
 
   it "malloc returns zeroed memory" do
