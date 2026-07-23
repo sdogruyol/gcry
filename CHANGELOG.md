@@ -9,22 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Phase 3 fiber / weak / finalizer APIs:**
-  - `before_collect` + `push_stack` for suspended fiber stack ranges.
-  - `add_finalizer` (runs after collect); `register_disappearing_link` (WeakRef-style).
-  - `current_thread_stack_bottom`; no-op `lock_*` / `stop_world` / `start_world` (single-thread).
-  - Specs in `spec/fiber_spec.cr`.
-- **Phase 2 collector:** conservative mark–sweep on `Gcry::Heap`.
-  - Explicit roots, optional stack scan, mmap `MarkStack`, threshold auto-collect.
-  - Specs in `spec/collect_spec.cr`.
-- **Phase 1 allocator:** `mmap` arenas, size classes, large spans, freelists (`spec/heap_spec.cr`).
-- Design docs: [DESIGN.md](DESIGN.md), [docs/INTEGRATION.md](docs/INTEGRATION.md), [README.md](README.md).
+- **Phase 4 process GC:** `src/gcry/gc_override.cr` reopens `::GC` under `-Dgc_none`.
+  - LibC bootstrap before `GC.init` (avoids Fiber/`once` deadlock).
+  - Fiber roots via `before_collect` → `Fiber#push_gc_roots` → `push_stack`.
+  - Linux static roots from `/proc/self/maps` (skips managed heap ranges).
+  - Samples: `samples/hello.cr`, `samples/alloc.cr`, `samples/min.cr`.
+- **Phase 3:** `before_collect` / `push_stack`, finalizers, disappearing links.
+- **Phase 2:** conservative mark–sweep.
+- **Phase 1:** mmap size-class allocator.
+- Design docs: DESIGN.md, docs/INTEGRATION.md, README.md.
+
+### Fixed
+
+- Avoid `LibC::MAP_FAILED` and runtime Array/`sizeof` constants on the malloc path (they use Crystal `once` and deadlock during `GC.init` before Fiber exists).
+- Process `collect` retaining runtime globals via static mapping scans.
 
 ### Changed
 
-- Integration model: shard reopens `module GC` under `-Dgc_none` ([ysbaddaden/gc](https://github.com/ysbaddaden/gc) pattern); no Crystal patch.
+- Integration: shard + `-Dgc_none` ([ysbaddaden/gc](https://github.com/ysbaddaden/gc) pattern).
 
 ### Notes
 
-- Phase 0–3 complete.
-- Next: Phase 4 — reopen `::GC` under `-Dgc_none` and wire Crystal `Fiber` roots.
+- Phase 0–4 complete.
+- Auto-collect threshold is `UInt64::MAX` in process mode for now (manual `GC.collect` OK).
+- Next: Phase 5 hardening (stress, CI, tune static roots / threshold).

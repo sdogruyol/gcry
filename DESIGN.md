@@ -210,12 +210,13 @@ DESIGN.md
 - Single-thread locks / STW are no-ops; `preview_mt` deferred.
 - Deliverable: multi-fiber-ready root API + finalizers / weak links (`spec/fiber_spec.cr`).
 
-### Phase 4 — Shard `GC` override
+### Phase 4 — Shard `GC` override ✅
 
-- Reopen `module GC` in `src/gcry.cr` (override `gc_none` stubs).
-- Wire fiber roots in `init` / `before_collect` / `push_stack` like immix.
-- Samples: `crystal build -Dgc_none samples/hello.cr`; compare RSS / pause / throughput vs bdwgc.
-- Deliverable: real Crystal apps running on gcry via shard require only.
+- Reopen `module GC` under `-Dgc_none` (`src/gcry/gc_override.cr`).
+- LibC bootstrap until `GC.init` completes; Fiber `before_collect` / `push_stack` wired.
+- Linux static roots via `/proc/self/maps` (excluding the managed heap).
+- Samples: `samples/hello.cr`, `samples/alloc.cr` (`crystal build -Dgc_none …`).
+- Deliverable: Crystal programs run with gcry as process GC via shard require only.
 
 ### Phase 5 — Hardening
 

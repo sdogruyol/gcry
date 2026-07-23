@@ -107,4 +107,6 @@ module Gcry
   end
 end
 
-# Phase 4+: reopen ::GC here under flag?(:gc_none) and forward to Gcry::*.
+{% if flag?(:gc_none) %}
+  require "./gcry/gc_override"
+{% end %}

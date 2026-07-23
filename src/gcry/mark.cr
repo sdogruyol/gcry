@@ -81,7 +81,7 @@ module Gcry
         -1,
         0
       )
-      raise OutOfMemoryError.new("mark stack mmap failed") if ptr == LibC::MAP_FAILED || ptr.null?
+      raise OutOfMemoryError.new("mark stack mmap failed") if Gcry.mmap_failed?(ptr)
 
       new_capacity = (bytes // sizeof(Void*)).to_i32
       unless @base.null?

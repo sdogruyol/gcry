@@ -1,25 +1,14 @@
 require "./block"
+require "./size_classes"
 
 module Gcry
-  # Payload sizes (bytes). Requests are rounded up to the next class.
-  SIZE_CLASSES = [
-    16_u32, 32_u32, 48_u32, 64_u32, 80_u32, 96_u32, 112_u32, 128_u32,
-    160_u32, 192_u32, 224_u32, 256_u32, 320_u32, 384_u32, 448_u32, 512_u32,
-    640_u32, 768_u32, 896_u32, 1024_u32, 1280_u32, 1536_u32, 1792_u32, 2048_u32,
-    2560_u32, 3072_u32, 3584_u32, 4096_u32, 5120_u32, 6144_u32, 7168_u32, 8192_u32,
-  ]
-
-  SIZE_CLASS_COUNT = 32
-  LARGE_THRESHOLD  = 8192_u32
-
   # mmap-backed allocator with size classes and conservative mark–sweep.
   #
   # The Heap *object* may live on Crystal's GC during unit tests. Mapped
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES = 256_u64 * 1024_u64
-    WORD_SIZE         = sizeof(Void*).to_u32
+    SMALL_CHUNK_BYTES = 262144_u64 # 256 KiB — literal avoids runtime const init
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
@@ -131,21 +120,11 @@ module Gcry
     end
 
     def self.round_size(size : UInt64) : UInt64
-      return SIZE_CLASSES[0].to_u64 if size == 0
-      aligned = align_up(size, WORD_SIZE.to_u64)
-      return aligned if aligned > LARGE_THRESHOLD
-
-      SIZE_CLASSES.each do |klass|
-        return klass.to_u64 if aligned <= klass
-      end
-      aligned
+      SizeClasses.round(size)
     end
 
     def self.size_class_index(payload : UInt32) : Int32
-      SIZE_CLASSES.each_with_index do |klass, index|
-        return index if payload == klass
-      end
-      raise ArgumentError.new("not a size-class payload: #{payload}")
+      SizeClasses.index_of(payload)
     end
 
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
@@ -229,7 +208,7 @@ module Gcry
         -1,
         0
       )
-      raise OutOfMemoryError.new("mmap failed") if ptr == LibC::MAP_FAILED || ptr.null?
+      raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
 
       chunk = ptr.as(ChunkHeader*)
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class)

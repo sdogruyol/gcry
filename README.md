@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same integration style as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (Immix).
 
-> **Status:** Phase 3 complete — fiber `push_stack` / finalizers / disappearing links ready; `::GC` reopen is next.
+> **Status:** Phase 4 complete — use as process GC with `require "gcry"` + `-Dgc_none`.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
@@ -54,8 +54,8 @@ puts "hello"
 ```
 
 ```sh
-crystal build -Dgc_none app.cr
-# or: crystal run -Dgc_none app.cr
+crystal build -Dgc_none samples/hello.cr -o hello
+./hello
 ```
 
 Without `-Dgc_none`, Crystal links Boehm; do not install gcry as the process GC in that mode.
@@ -79,7 +79,8 @@ Suggested order of work:
 2. ~~Heap allocator (`mmap` arenas, size classes)~~
 3. ~~Conservative mark–sweep~~
 4. ~~Fiber / root registration~~
-5. `module GC` reopen + `-Dgc_none` samples
+5. ~~`module GC` reopen + `-Dgc_none` samples~~
+6. Hardening / CI / tune auto-collect
 
 ## Contributing
 

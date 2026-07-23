@@ -92,4 +92,10 @@ module Gcry
 
   class OutOfMemoryError < Exception
   end
+
+  # Avoid `LibC::MAP_FAILED`: its Crystal const initializer uses `once`, which
+  # needs Fiber, but `GC.init` (and thus our first mmap) runs before Fiber.init.
+  def self.mmap_failed?(ptr : Void*) : Bool
+    ptr.null? || ptr.address == UInt64::MAX
+  end
 end

@@ -1,14 +1,17 @@
 require "./mark"
 require "./roots"
 require "./finalizer"
+require "./platform/linux_roots"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD = 4_u64 * 1024_u64 * 1024_u64 # 4 MiB
+    DEFAULT_GC_THRESHOLD = 4194304_u64 # 4 MiB literal
 
     getter collections : UInt64 = 0_u64
     getter? enabled : Bool = true
     property gc_threshold : UInt64 = DEFAULT_GC_THRESHOLD
+    # When true, scan writable process mappings as roots (needed as process GC).
+    property scan_static_roots : Bool = false
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -136,6 +139,14 @@ module Gcry
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
 
+        if @scan_static_roots
+          Platform.scan_static_roots do |low, high|
+            each_static_range_excluding_heap(low, high) do |a, b|
+              Roots.scan_range(a, b) { |candidate| mark_candidate(candidate) }
+            end
+          end
+        end
+
         if scan_stack && !@stack_bottom.null?
           Roots.scan_range(Roots.stack_pointer, @stack_bottom) do |candidate|
             mark_candidate(candidate)
@@ -176,7 +187,7 @@ module Gcry
       class_index = chunk.value.size_class.to_i32
       return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
-      payload = SIZE_CLASSES[class_index]
+      payload = SizeClasses.payload(class_index)
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
       data_start = ChunkHeader.data_start(chunk).address
       data_end = ChunkHeader.data_end(chunk).address
@@ -223,6 +234,20 @@ module Gcry
       @heap_max = 0_u64
       each_chunk do |chunk|
         note_mapped(chunk)
+      end
+    end
+
+    private def each_static_range_excluding_heap(low : Void*, high : Void*, & : Void*, Void* ->) : Nil
+      lo = low.address
+      hi = high.address
+      return if hi <= lo
+
+      # Do not scan the managed heap itself as roots (would retain everything).
+      if @heap_max > @heap_min && lo < @heap_max && hi > @heap_min
+        yield Pointer(Void).new(lo), Pointer(Void).new(@heap_min) if lo < @heap_min
+        yield Pointer(Void).new(@heap_max), Pointer(Void).new(hi) if hi > @heap_max
+      else
+        yield low, high
       end
     end
 
@@ -323,7 +348,7 @@ module Gcry
       class_index = chunk.value.size_class.to_i32
       return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
-      payload = SIZE_CLASSES[class_index]
+      payload = SizeClasses.payload(class_index)
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
