@@ -119,10 +119,24 @@ module Gcry
 
       return if space_abs + 4 >= len
       perms = line + space_abs + 1
-      return unless perms[0] == 'r'.ord.to_u8 && perms[1] == 'w'.ord.to_u8
+      # Need readable private data. Writable BSS holds class vars; RELRO .data.rel.ro
+      # is r-- after relocation and may still hold heap pointers.
+      return unless perms[0] == 'r'.ord.to_u8
+      return if perms[2] == 'x'.ord.to_u8 # skip code
 
       path = pathname_start(line, len)
-      return if path < 0
+      size = hi - lo
+
+      if path < 0
+        # Anonymous RW: ELF BSS zero-fill pages after the file-backed .data page
+        # (e.g. Exception::CallStack::@@skip). Skip large anon regions — fiber
+        # stacks (8 MiB) and similar — those are covered by push_stack / STW.
+        return unless perms[1] == 'w'.ord.to_u8
+        return if size >= 1_u64 * 1024 * 1024
+        yield Pointer(Void).new(lo), Pointer(Void).new(hi)
+        return
+      end
+
       return if includes_name?(line + path, len - path, "[stack]")
       return if includes_name?(line + path, len - path, "[heap]")
       return if includes_name?(line + path, len - path, "[vvar]")
@@ -138,6 +152,7 @@ module Gcry
       return if includes_name?(line + path, len - path, "libgmp")
       return if includes_name?(line + path, len - path, "libicu")
 
+      # File-backed: scan rw-p (BSS/.data) and r--p (RELRO).
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
     end
 

@@ -75,7 +75,7 @@ Crystal **1.21+** defaults to `Fiber::ExecutionContext`, which does **not** call
 
 Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads (including the SYSMON Monitor) are signal-suspended, then their stacks are scanned (`pthread_getattr_np` for main fibers; guard page skipped for pooled fiber stacks). Mutator stack scan spills registers via `setjmp`. Without this, Monitor/register-only roots are swept and the heap corrupts under HTTP load.
 
-Static roots scan **file-backed** RW segments only (binary / `.so` data). Large anonymous maps (fiber stacks, arenas) are covered by `push_stack` / the mutator stack scan.
+Static roots scan **file-backed** readable data segments (binary / `.so`, including RELRO `r--p`) plus **small anonymous RW** pages (ELF BSS zero-fill after `.data` — where class vars like `Exception::CallStack::@@skip` live). Large anonymous maps (fiber stacks ≈ 8 MiB) are skipped here and covered by `push_stack` / the mutator stack scan instead.
 
 Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
 
