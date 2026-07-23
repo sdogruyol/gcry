@@ -157,9 +157,29 @@ gcry uses the **same facade pattern**, with the collector written in Crystal (`G
 
 Phase 1–2 expose `Gcry.malloc` / `Gcry.collect` / … that the `GC` reopen forwards to. That keeps heap specs runnable under Boehm.
 
-## Frozen MVP contract
+## Phase 3 APIs (fiber / weak / finalizer)
 
-See [DESIGN.md](../DESIGN.md#mvp-definition-v01) and [DESIGN.md](../DESIGN.md#frozen-api-contract-phase-0).
+| Method | Role |
+|--------|------|
+| `before_collect(&block)` | Invoked at collect start; call `push_stack` for suspended fibers |
+| `push_stack(top, bottom)` | Conservatively scan a fiber stack range into the mark queue |
+| `set_stackbottom` / `current_thread_stack_bottom` | Running fiber stack bounds |
+| `add_finalizer(object, callback)` | Run after object is reclaimed (post-collect) |
+| `register_disappearing_link(link, object?)` | Clear `*link` when referent is collected |
+| `lock_*` / `stop_world` / `start_world` | No-ops until `preview_mt` |
+
+Phase 4 will reopen Crystal’s `GC` module and register:
+
+```crystal
+Gcry.before_collect do
+  Fiber.unsafe_each do |fiber|
+    fiber.push_gc_roots unless fiber.running?
+  end
+end
+```
+
+(`Fiber#push_gc_roots` → `GC.push_stack` → `Gcry.push_stack`.)
+
 
 ### In scope (v0.1)
 

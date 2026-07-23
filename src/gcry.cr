@@ -61,6 +61,50 @@ module Gcry
   def self.live?(pointer : Void*) : Bool
     default_heap.live?(pointer)
   end
+
+  def self.push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
+    default_heap.push_stack(stack_top, stack_bottom)
+  end
+
+  def self.before_collect(&block : -> Nil) : Nil
+    default_heap.before_collect(&block)
+  end
+
+  def self.set_stackbottom(stack_bottom : Void*) : Nil
+    default_heap.set_stackbottom(stack_bottom)
+  end
+
+  def self.current_thread_stack_bottom : {Void*, Void*}
+    default_heap.current_thread_stack_bottom
+  end
+
+  def self.add_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
+    default_heap.add_finalizer(object, callback)
+  end
+
+  def self.add_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
+    default_heap.add_finalizer(object, &block)
+  end
+
+  def self.register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
+    default_heap.register_disappearing_link(link, object)
+  end
+
+  def self.lock_read : Nil
+    default_heap.lock_read
+  end
+
+  def self.unlock_read : Nil
+    default_heap.unlock_read
+  end
+
+  def self.lock_write : Nil
+    default_heap.lock_write
+  end
+
+  def self.unlock_write : Nil
+    default_heap.unlock_write
+  end
 end
 
 # Phase 4+: reopen ::GC here under flag?(:gc_none) and forward to Gcry::*.

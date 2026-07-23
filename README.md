@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none`, same integration style as [ysbaddaden/gc](https://github.com/ysbaddaden/gc) (Immix).
 
-> **Status:** Phase 2 complete — conservative mark–sweep works (single-threaded; fiber hooks next).
+> **Status:** Phase 3 complete — fiber `push_stack` / finalizers / disappearing links ready; `::GC` reopen is next.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21.0 `GC` / fiber notes
@@ -78,7 +78,7 @@ Suggested order of work:
 1. ~~Research & API contract (Phase 0)~~
 2. ~~Heap allocator (`mmap` arenas, size classes)~~
 3. ~~Conservative mark–sweep~~
-4. Fiber / root registration
+4. ~~Fiber / root registration~~
 5. `module GC` reopen + `-Dgc_none` samples
 
 ## Contributing

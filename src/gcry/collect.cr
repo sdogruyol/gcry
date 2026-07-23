@@ -1,5 +1,6 @@
 require "./mark"
 require "./roots"
+require "./finalizer"
 
 module Gcry
   class Heap
@@ -13,6 +14,8 @@ module Gcry
     @stack_bottom : Void* = Pointer(Void).null
     @roots = Roots::Set.new
     @mark_stack = MarkStack.new
+    @finalizers = Finalizers::Registry.new
+    @before_collect_callbacks = [] of -> Nil
     @collecting = false
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
@@ -23,6 +26,25 @@ module Gcry
 
     def disable : Nil
       @enabled = false
+    end
+
+    # No-op locks / STW for single-threaded MVP (`preview_mt` later).
+    def lock_read : Nil
+    end
+
+    def unlock_read : Nil
+    end
+
+    def lock_write : Nil
+    end
+
+    def unlock_write : Nil
+    end
+
+    def stop_world : Nil
+    end
+
+    def start_world : Nil
     end
 
     def add_root(pointer : Void*) : Nil
@@ -41,6 +63,50 @@ module Gcry
       @stack_bottom
     end
 
+    # Compatible with Crystal's `GC.current_thread_stack_bottom`.
+    def current_thread_stack_bottom : {Void*, Void*}
+      {Pointer(Void).null, @stack_bottom}
+    end
+
+    # Register a callback invoked at the start of each collection (fiber roots).
+    # Callbacks should call `#push_stack` for suspended fiber stacks.
+    def before_collect(&block : -> Nil) : Nil
+      @before_collect_callbacks << block
+    end
+
+    # Conservatively scan a suspended fiber (or other) stack range into the
+    # mark queue. Must be called from a `#before_collect` callback (or while
+    # `@collecting` is already true).
+    def push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
+      raise "push_stack outside of collect" unless @collecting
+      Roots.scan_range(stack_top, stack_bottom) do |candidate|
+        mark_candidate(candidate)
+      end
+    end
+
+    def add_finalizer(object : Void*, callback : Finalizers::Callback) : Nil
+      @finalizers.add(object, callback)
+    end
+
+    def add_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
+      add_finalizer(object, block)
+    end
+
+    # When *object* is collected, `*link` is set to null (Boehm / WeakRef semantics).
+    def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
+      referent = object
+      if referent.null?
+        referent = link.value
+      end
+      return if referent.null?
+
+      # Prefer the object's base user pointer when we can resolve it.
+      if header = find_object(referent)
+        referent = BlockHeader.user_from(header)
+      end
+      @finalizers.register_disappearing_link(link, referent)
+    end
+
     # True if *pointer* refers to a live (allocated, not free) object.
     def live?(pointer : Void*) : Bool
       return false if pointer.null?
@@ -53,7 +119,8 @@ module Gcry
     #
     # When `scan_stack` is true and `stack_bottom` is set, the C stack between
     # the current frame and `stack_bottom` is scanned. Explicit roots always
-    # participate. Extra *roots* are marked as well (handy for tests).
+    # participate. `#before_collect` callbacks run next (fiber `push_stack`).
+    # Extra *roots* are marked as well (handy for tests).
     def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
       return if @destroyed
       return if @collecting
@@ -62,6 +129,9 @@ module Gcry
       begin
         @mark_stack.clear
         clear_all_marks
+
+        # Fiber / custom roots first (may call push_stack).
+        @before_collect_callbacks.each(&.call)
 
         @roots.each { |ptr| mark_candidate(ptr) }
         roots.try &.each { |ptr| mark_candidate(ptr) }
@@ -80,6 +150,9 @@ module Gcry
         @collecting = false
         @mark_stack.clear
       end
+
+      # Finalizers run after the heap is consistent again (may allocate).
+      @finalizers.run_pending
     end
 
     # Resolve a conservative pointer to a live block header, if any.
@@ -130,9 +203,12 @@ module Gcry
     protected def destroy_collector : Nil
       @roots.clear
       @mark_stack.destroy
+      @finalizers.clear
+      @before_collect_callbacks.clear
       @heap_min = UInt64::MAX
       @heap_max = 0_u64
       @collections = 0_u64
+      @stack_bottom = Pointer(Void).null
     end
 
     protected def note_mapped(chunk : ChunkHeader*) : Nil
@@ -220,6 +296,8 @@ module Gcry
     private def reclaim_small(header : BlockHeader*) : Nil
       payload = header.value.size
       user = BlockHeader.user_from(header)
+      @finalizers.on_reclaim(user)
+
       class_index = size_class_index(payload)
       header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
       @freelists[class_index] = user
@@ -229,6 +307,9 @@ module Gcry
     end
 
     private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      user = BlockHeader.user_from(header)
+      @finalizers.on_reclaim(user)
+
       unlink_chunk(chunk)
       @heap_size -= chunk.value.mapped_bytes
       update_heap_bounds_after_unmap

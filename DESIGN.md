@@ -66,10 +66,10 @@ gcry implements the same surface as `gc/boehm.cr` / `gc/none.cr`. Stdlib entry p
 
 | Method | Role |
 |--------|------|
-| `add_root` / `add_finalizer` / `register_disappearing_link` | Roots, finalizers, `WeakRef` |
+| `add_root` / `add_finalizer` / `register_disappearing_link` | Roots, finalizers, `WeakRef` ✅ Phase 3 |
 | `prof_stats` | Full Boehm-shaped profiling (zeros OK until then) |
 | MT `set_stackbottom` variants | `preview_mt` |
-| `stop_world` / `start_world` | Multi-thread STW |
+| `stop_world` / `start_world` | Multi-thread STW (no-op stubs today) |
 | `pthread_*` GC registration | When threads must be tracked |
 
 ### Integration decision (immix-style shard)
@@ -203,12 +203,12 @@ DESIGN.md
 - Stats: heap size, free bytes, collection count.
 - Deliverable: correct single-threaded collector (`Gcry::Heap#collect`).
 
-### Phase 3 — Fibers & threads
+### Phase 3 — Fibers & threads ✅
 
-- `set_stackbottom` and fiber stack roots.
-- `add_root`, disappearing links, finalizer queue.
-- Multi-thread STW (suspend / safepoint) when targeting `preview_mt`.
-- Deliverable: multi-fiber (then multi-thread) collect without corruption.
+- `set_stackbottom`, `push_stack`, and `before_collect` for suspended fiber stacks.
+- `add_root`, disappearing links, finalizer queue (run after collect).
+- Single-thread locks / STW are no-ops; `preview_mt` deferred.
+- Deliverable: multi-fiber-ready root API + finalizers / weak links (`spec/fiber_spec.cr`).
 
 ### Phase 4 — Shard `GC` override
 
