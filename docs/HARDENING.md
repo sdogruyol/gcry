@@ -34,7 +34,7 @@ GCRY_NURSERY=262144 ./bin/alloc 1000
 GCRY_DISABLE_NURSERY=1 ./bin/stress 200
 ```
 
-Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (v0.2+): majors at 64 MiB; nursery off unless `GCRY_NURSERY` is set. Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 OOM / fork / signals: [docs/POLICY.md](POLICY.md). Comparison checklist: [docs/COMPARISON.md](COMPARISON.md).
 

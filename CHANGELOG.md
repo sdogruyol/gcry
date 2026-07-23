@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-23
+
 ### Changed
 
-- Process GC performance: nursery off by default (opt-in via `GCRY_NURSERY`); 64 MiB major threshold; cached static roots; skip bulky TLS/PCRE maps; O(log n) chunk index for marking.
-- README performance numbers: Kemal+wrk ~75–80k req/s under gcry (vs ~4k before).
+- Process GC performance: nursery **off** by default (opt-in via `GCRY_NURSERY`); major threshold **64 MiB**.
+- Cached `/proc/self/maps` static-root ranges; skip bulky `libcrypto` / `libssl` / `libpcre` segments.
+- O(log n) chunk index for mark pointer lookup.
+- README Kemal+wrk numbers: ~75–80k req/s under gcry (vs ~4k with prior defaults).
 
 ## [0.1.0] - 2026-07-23
 
@@ -61,5 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sdogruyol/gcry/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/sdogruyol/gcry/releases/tag/v0.1.0

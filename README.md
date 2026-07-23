@@ -4,7 +4,7 @@ A garbage collector written in Crystal, intended as an alternative to [bdwgc](ht
 
 Ships as a **shard**: reopen Crystal’s `GC` module under `-Dgc_none` — no Crystal compiler or stdlib patch required.
 
-> **Status:** Phase 7 complete — productized v0.1 (docs, policies, tuning, CI).
+> **Status:** v0.2 — process GC tuned for HTTP throughput (nursery opt-in, 64 MiB majors). Phases 0–7 complete.
 >
 > - [DESIGN.md](DESIGN.md) — architecture, frozen API, roadmap
 > - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal `GC` / fiber notes
@@ -27,7 +27,7 @@ Crystal ships with Boehm today (`boehm` backend) and also supports `gc_none`. **
 
 Details, non-goals, and phased roadmap live in [DESIGN.md](DESIGN.md).
 
-## Supported platforms (v0.1)
+## Supported platforms (v0.2)
 
 | | |
 |--|--|
@@ -86,7 +86,7 @@ There is no separate application-level allocator API for normal programs: alloca
 
 More detail: [docs/HARDENING.md](docs/HARDENING.md), [docs/POLICY.md](docs/POLICY.md).
 
-## Performance (v0.1)
+## Performance (v0.2)
 
 gcry is much closer to Boehm on throughput after process-GC tuning, but pauses are still longer when a major runs.
 
