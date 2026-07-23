@@ -54,37 +54,42 @@ jobs:
           crystal build -Dgc_none samples/stress.cr -o bin/stress
           ./bin/stress 300
 
-      - name: Env knobs smoke (GCRY_DISABLE_AUTO / GCRY_DISABLE_NURSERY)
+      - name: Sample json_churn (-Dgc_none)
+        run: |
+          crystal build -Dgc_none samples/json_churn.cr -o bin/json_churn
+          ./bin/json_churn 800
+
+      - name: Env knobs smoke (nursery / chunks / incremental)
         run: |
           crystal build -Dgc_none samples/hello.cr -o bin/hello_env
           GCRY_DISABLE_AUTO=1 ./bin/hello_env
           GCRY_DISABLE_NURSERY=1 ./bin/hello_env
           GCRY_NURSERY=262144 ./bin/hello_env
+          GCRY_KEEP_CHUNKS=1 ./bin/hello_env
+          GCRY_RELEASE_CHUNKS=1 ./bin/hello_env
 
       - name: Bench churn (library heap)
         run: |
           crystal build bench/churn.cr -o bin/churn
           ./bin/churn 500
 
-  # Optional aarch64 via QEMU user emulation when runners allow it.
-  # Kept as a separate job so x86_64 stays green if qemu setup drifts.
+  # aarch64 cross-compile smoke (object emit). Runs on PR + push.
   test-aarch64:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    name: test (aarch64 cross-compile)
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install QEMU and Crystal deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
 
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: latest
 
-      - name: Cross-build hello for aarch64
+      - name: Cross-compile samples for aarch64-linux-gnu
         run: |
           mkdir -p bin
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o bin/hello_aarch64
-        continue-on-error: true
+          crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/min.cr -o bin/min_aarch64
+          crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/alloc.cr -o bin/alloc_aarch64
+          test -f bin/hello_aarch64.o
+          test -f bin/min_aarch64.o
+          test -f bin/alloc_aarch64.o
