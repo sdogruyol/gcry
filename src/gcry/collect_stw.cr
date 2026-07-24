@@ -22,9 +22,8 @@ module Gcry
       @gc_lock.write_unlock
     end
 
-    # Match Crystal `gc/none` STW: signal-suspend every other OS thread.
-    # Required for process GC because ExecutionContext's Monitor thread holds
-    # live heap pointers that are not on Fiber.current's stack.
+    # Match Crystal `gc/none` STW on Linux (signal-suspend). Darwin uses Mach
+    # thread_suspend instead — SIGXFSZ never interrupts kevent waits under HTTP.
     #
     # Do not hold Thread.lock across suspend/mark — another thread may allocate
     # while mutating the thread list and deadlock on @gc_lock.
@@ -33,12 +32,16 @@ module Gcry
       return if @world_stopped
 
       current_thread = Thread.current
-      Thread.unsafe_each do |thread|
-        thread.suspend unless thread == current_thread
-      end
-      Thread.unsafe_each do |thread|
-        thread.wait_suspended unless thread == current_thread
-      end
+      {% if flag?(:darwin) %}
+        Platform.stop_world_threads(current_thread)
+      {% else %}
+        Thread.unsafe_each do |thread|
+          thread.suspend unless thread == current_thread
+        end
+        Thread.unsafe_each do |thread|
+          thread.wait_suspended unless thread == current_thread
+        end
+      {% end %}
       @world_stopped = true
     end
 
@@ -46,9 +49,13 @@ module Gcry
       return unless @world_stopped
 
       current_thread = Thread.current
-      Thread.unsafe_each do |thread|
-        thread.resume unless thread == current_thread
-      end
+      {% if flag?(:darwin) %}
+        Platform.start_world_threads(current_thread)
+      {% else %}
+        Thread.unsafe_each do |thread|
+          thread.resume unless thread == current_thread
+        end
+      {% end %}
       Platform.clear_thread_sps
       @world_stopped = false
     end

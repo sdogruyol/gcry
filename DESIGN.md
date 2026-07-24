@@ -155,7 +155,7 @@ Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack scrub | ✅ opt-in (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| macOS process GC | ✅ signal STW + dyld roots (Crystal ≥ 1.21); soft-dirty N/A |
+| macOS process GC | ✅ Mach `thread_suspend` + dyld roots (Crystal ≥ 1.21); soft-dirty N/A |
 | Compiler stack maps | ❌ later (RSS) |
 
 **Kemal (v0.9.0 cut):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md).
@@ -168,13 +168,13 @@ Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
 
 | Shipped | Deferred |
 |---------|----------|
-| Crystal signal STW + Darwin ucontext SP clamp (`SIGXFSZ` / `SIGXCPU`) | Soft-dirty (Linux-only) |
+| Crystal Mach `thread_suspend` / resume STW + `thread_get_state` SP clamp | Soft-dirty (Linux-only) |
 | `pthread_get_stackaddr_np` stack bounds | Full parity nursery / mprotect wins |
 | dyld main-image `__DATA` / `__DATA_CONST` static roots | Windows |
 | `GC.init` raise removed; hello / stress / `stw_sp_clamp` / fork | Stack maps / RSS epic |
 | CI: `macos-latest` native specs + samples | Version cut until CI green |
 
-Requires Crystal **≥ 1.21** (ExecutionContext Monitor). Platform files: `darwin_{stack,roots,stw}.cr`; soft-dirty/mprotect remain stubs.
+Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pairing).
 
 ## Frontier (after 0.10)
 

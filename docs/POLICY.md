@@ -67,5 +67,5 @@ Default majors = **full STW**. `GCRY_INCREMENTAL=1` is sounder with soft-dirty o
 |--|------------|
 | Linux x86_64 | **Supported** |
 | Linux aarch64 | **Supported** (CI) |
-| macOS arm64 / x86_64 | **Supported** (CI `macos-latest`) — signal STW + dyld roots; soft-dirty N/A |
+| macOS arm64 / x86_64 | **Supported** (CI `macos-latest`) — Mach STW + dyld roots; Crystal **≥ 1.21**; soft-dirty N/A |
 | musl | Best-effort — verify SP clamp |
