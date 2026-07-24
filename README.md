@@ -44,8 +44,21 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 | [docs/HARDENING.md](docs/HARDENING.md) | Tuning & stress |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm checklist |
+| [docs/API.md](docs/API.md) | Public API + `/metrics` helpers |
+| [docs/ANNOUNCE.md](docs/ANNOUNCE.md) | Release / forum announcement draft |
 | [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (%) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed per version |
+
+## gcry or Boehm?
+
+| Choose **gcry** when… | Stay on **Boehm** when… |
+|----------------------|-------------------------|
+| You want a Crystal-readable collector to hack / dogfood | You need macOS / Windows process GC today |
+| Linux x86_64 or aarch64, Crystal ≥ 1.21, parallelism **1** | Parallel ExecutionContexts in production |
+| Kemal-class HTTP thr ~90% of Boehm is acceptable | You need `Process.fork` under ExecutionContext |
+| You’re OK with STW + conservative retention | You need Boehm’s battle-tested defaults everywhere |
+
+See [docs/COMPARISON.md](docs/COMPARISON.md) for the full checklist.
 
 ## Why gcry exists
 
