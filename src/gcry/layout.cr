@@ -390,7 +390,8 @@ module Gcry
         {% for t in Reference.all_subclasses %}
           {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
           {% for tv in t.type_vars %}
-            {% if tv.is_a?(MacroId) %}
+            # Only concrete TypeNode args are instantiable (skip MacroId, Int, 256, …).
+            {% unless tv.is_a?(TypeNode) && !tv.abstract? %}
               {% skip = true %}
             {% end %}
           {% end %}
