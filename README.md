@@ -143,8 +143,8 @@ Same machine, vs Boehm (`wrk -c 100 -d 30`). Higher % = closer to Boehm. Prefer 
 
 | Workload | gcry vs Boehm |
 |----------|-------------:|
-| Alloc-heavy JSON (`/json`) thr | **~90%** (median of 3) |
-| Idle `/` thr | **~92%** |
+| Alloc-heavy JSON (`/json`) thr | **~89%** (median of 3) |
+| Idle `/` thr | **~91%** |
 | `/json` post-GC RSS | **~0.93×** |
 | `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 

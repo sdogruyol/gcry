@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-24
+
 ### Added
 
 - **Page-dirty write barriers:** soft-dirty is the official nursery/incremental remembered set; `mprotect`+SEGV is the process-GC fallback (`GCRY_MPROTECT_BARRIER=1` to force, `GCRY_DISABLE_MPROTECT=1` to forbid). See `Gcry::Heap#barrier_backend_name`, `barrier_dirty_rescans`.
@@ -32,10 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`register_layouts`:** skip non-concrete type args (`Array(Int)`, `Runnables(256)`, unbound generics) so fat apps (e.g. acikturkiye) compile even when the method is present but unused.
 
-### Measured (2026-07-24, median of 3, see [docs/PERF.md](docs/PERF.md) / [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md))
+### Performance
 
-- Kemal: `/` **~91%** Boehm, `/json` **~89%**, post-GC RSS **~0.93×**.
-- acikturkiye `/api/v1/`: thr **~95%** Boehm, post-GC RSS **~3.2×** (RSS gate still fail; dense conservative-live).
+- Same-host Kemal (0.8.0 cut, median of 3): `/` **~91%** of Boehm; `/json` **~89%**; post-GC RSS **~0.93×** — see [docs/PERF.md](docs/PERF.md).
+- Same-host acikturkiye `/api/v1/` (median of 3): thr **~95%**; post-GC RSS **~3.2×** (RSS gate still fail; dense conservative-live) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.7.0] - 2026-07-24
 
@@ -212,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sdogruyol/gcry/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sdogruyol/gcry/compare/v0.4.0...v0.5.0

@@ -334,9 +334,9 @@ Same-host A/B (`wrk -c 100 -d 30` `/api/v1/`, post-`GC.collect` RSS, median of 3
 
 **Takeaway:** clamp is **correct** (Monitor SP recorded) but does **not** move acikturkiye RSS. False retention is on mutator/fiber stacks already bounded by SP / `stack_top`, not the unused Monitor pthread range. **Shard-only RSS levers for this app are exhausted** — further parity needs compiler stack maps or write barriers.
 
-### 0.8.0-dev re-measure (2026-07-24 evening)
+### 0.8.0 cut (2026-07-24 evening)
 
-Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs current Unreleased tree (builtins layout; `GCRY_AUTO_LAYOUTS` off).
+Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs 0.8.0 tree (builtins layout; `GCRY_AUTO_LAYOUTS` off).
 
 | Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
 |------:|------------:|--------------:|-----------------:|--------------------:|
