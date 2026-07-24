@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Performance
 
 - Same-host Kemal `/json` (Phase 12 default, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×** Boehm — see [docs/PERF.md](docs/PERF.md). (`GCRY_KEEP_CHUNKS=1` ≈ **95%** thr @ ~**3×** RSS.)
+- Same-host acikturkiye `/api/v1/` (Phase 12, median of 3): thr **~96%**; **post-GC RSS ~2.55×** — empty release ~noop; dense conservative-live — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Earlier 0.7.0-dev (chunks retained): `/json` ~**100%**; opt-in release ~**92%**; `GCRY_CHUNK_BYTES=131072` ~**98.5%** (RSS flat).
-- acikturkiye: live/small_mapped **~64%**, dense chunks — RSS is **conservative-live**, not empty-chunk waste; Phase 12 Kemal RSS win does not automatically close acikturkiye — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - Soft-dirty on WSL **6.18.33.2**: HTTP nursery still too dirty — keep opt-in.
 
 ## [0.6.0] - 2026-07-23

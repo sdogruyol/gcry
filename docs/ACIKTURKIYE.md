@@ -270,7 +270,23 @@ Takeaway: soft-dirty is correct on 6.18+, but HTTP heaps are too dirty for a win
 12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
 13. ~~Soft-dirty platform + minor wiring.~~ **Done** — WSL 6.18 arms.
 14. ~~Dirty-fraction fallback + chunk-scoped pagemap; acikturkiye nursery RSS.~~ **Done** — no RSS win; nursery stays off.
-15. **Phase 12 (Kemal):** empty release default-on + base-ptr — post-GC RSS ~**0.93×** Boehm, thr ~**93%** ([PERF.md](PERF.md)). acikturkiye re-measure under new defaults: **pending**.
+15. **Phase 12 (Kemal):** empty release default-on + base-ptr — post-GC RSS ~**0.93×** Boehm, thr ~**93%** ([PERF.md](PERF.md)).
+16. **Phase 12 (acikturkiye A/B, 2026-07-24):** see below.
+
+### Phase 12 defaults — acikturkiye `/api/v1/` (2026-07-24)
+
+Same host, `wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials (DB timeouts on both sides — thr noisy).
+
+| Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
+|------:|------------:|--------------:|-----------------:|--------------------:|
+| 1 | 93.3% | 2.64× | 121 / 129 | 381 / 275 |
+| 2 | 98.4% | 2.55× | 117 / 119 | 528 / 407 |
+| 3 | 95.8% | 2.53× | 119 / 124 | 364 / 463 |
+| **median** | **95.8%** | **2.55×** | — | — |
+
+Last gcry `/gc-stats` after wrk: `heap_size` ≈ **225 MiB**, `size_class_live` ≈ **165 MiB**, `small_mapped` ≈ **207 MiB**, `released_chunk` ≈ **1.8 MiB**, `chunk_fill_ge75` ≈ **748**.
+
+**Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~2.55×). Empty-chunk release returns almost nothing here — RSS is **conservative-live / dense chunks**, not mapped waste. Layout tables / stricter mark filters are the remaining lever (still shard-only limits).
 
 ## Non-goals (still)
 

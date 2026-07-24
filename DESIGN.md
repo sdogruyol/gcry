@@ -286,7 +286,7 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Mark: **base-pointer-only** (`GCRY_INTERIOR=1`); `GCRY_TYPE_ID_GATE` / `GCRY_PAGE_DONTNEED` opt-in.
 - Process major threshold **32 MiB**; large-cache retain default **8 MiB**.
 - Kemal `/json` (2026-07-24, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×**. Thr gate (≥95%) still open — see [docs/PERF.md](docs/PERF.md).
-- acikturkiye A/B under Phase 12 defaults: **pending** (dense live; empty release alone was never the lever).
+- acikturkiye `/api/v1/` (2026-07-24, median of 3): thr **~96%**; **post-GC RSS ~2.55×** (FAIL ≤1.5×). Released empty chunks ~**2 MiB** vs live ~**165 MiB** — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## MVP definition (v0.1)
 
