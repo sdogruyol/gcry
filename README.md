@@ -111,6 +111,8 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
 | `GCRY_PARALLEL_MARK=N` | Request N mark workers (serial until STW-exempt helpers exist) |
+| `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
+| `GCRY_AUTO_LAYOUTS=1` | Run `Gcry.register_layouts` at init (opt-in; measure thr first) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |

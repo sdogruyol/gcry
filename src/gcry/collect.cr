@@ -499,6 +499,7 @@ module Gcry
       @barrier_backend = Platform::BarrierBackend::None
       @barrier_dirty_rescans = 0_u64
       @barrier_full_fallbacks = 0_u64
+      destroy_blacklist
       reset_pause_stats
     end
 
@@ -873,6 +874,7 @@ module Gcry
 
       if gate_type_id && !type_id_plausible?(header)
         @type_id_root_rejects += 1
+        note_false_root(addr)
         return
       end
 
@@ -1705,3 +1707,4 @@ module Gcry
 end
 
 require "./barrier"
+require "./blacklist"

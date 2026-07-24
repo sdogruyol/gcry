@@ -38,6 +38,7 @@ module GC
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
+    heap.blacklist_enabled = true
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -64,6 +65,12 @@ module GC
       Gcry::Layout.enabled = false
     else
       Gcry::Layout.register_builtins
+      # Whole-program auto layouts are opt-in: some nested/stdlib types get
+      # unsound precise offsets and tank HTTP thr. Call Gcry.register_layouts
+      # or set GCRY_AUTO_LAYOUTS=1 after measuring.
+      if env_flag_one?("GCRY_AUTO_LAYOUTS")
+        Gcry.register_layouts
+      end
     end
 
     @@gcry_ready = true
@@ -164,6 +171,13 @@ module GC
 
     if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
       heap.type_id_gate = false
+    end
+
+    if env_flag_one?("GCRY_BLACKLIST")
+      heap.blacklist_enabled = true
+    end
+    if env_flag_one?("GCRY_DISABLE_BLACKLIST")
+      heap.blacklist_enabled = false
     end
 
     if env_flag_one?("GCRY_DISABLE_LAYOUT")

@@ -106,3 +106,14 @@ it "register_hash installs KIND_HASH with noscan entries/indices" do
 ensure
   Gcry::Layout.clear
 end
+
+it "register_layouts indexes concrete Reference subclasses" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry.register_layouts
+  Gcry::Layout.size.should be > 0
+  entry = Gcry::Layout.entry_for(Array(String).crystal_instance_type_id)
+  entry.should_not be_nil
+ensure
+  Gcry::Layout.clear
+end

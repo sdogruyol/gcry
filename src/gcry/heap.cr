@@ -272,9 +272,20 @@ module Gcry
         raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
       end
 
+      if @blacklist_enabled
+        taken = take_non_blacklisted(user, index, true)
+        if taken.null?
+          header = BlockHeader.from_user(user)
+          @nursery_freelists[index] = header.value.next_free
+        else
+          user = taken
+        end
+      else
+        header = BlockHeader.from_user(user)
+        @nursery_freelists[index] = header.value.next_free
+      end
+
       header = BlockHeader.from_user(user)
-      next_free = header.value.next_free
-      @nursery_freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
       # Allocate black during any in-progress collection (STW or incremental)
       # so mid-collect allocations are not swept.
@@ -296,9 +307,20 @@ module Gcry
         raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
       end
 
+      if @blacklist_enabled
+        taken = take_non_blacklisted(user, index, false)
+        if taken.null?
+          header = BlockHeader.from_user(user)
+          @freelists[index] = header.value.next_free
+        else
+          user = taken
+        end
+      else
+        header = BlockHeader.from_user(user)
+        @freelists[index] = header.value.next_free
+      end
+
       header = BlockHeader.from_user(user)
-      next_free = header.value.next_free
-      @freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
       BlockHeader.set_mark(header) if @incremental_marking || @collecting
 

@@ -11,9 +11,12 @@
 
 module Gcry
   module Layout
-    MAX_ENTRIES  =  512
-    MAX_OFFSETS  =   16
-    OFFSET_SLOTS = 8192 # MAX_ENTRIES * MAX_OFFSETS
+    MAX_ENTRIES  = 4096
+    MAX_OFFSETS  =   32
+    OFFSET_SLOTS = MAX_ENTRIES * MAX_OFFSETS
+    # Open-addressing index (entry index + 1; 0 = empty). Power of two.
+    INDEX_SIZE = 8192
+    INDEX_MASK = INDEX_SIZE - 1
 
     KIND_PLAIN = 0_u8
     KIND_HASH  = 1_u8
@@ -37,6 +40,7 @@ module Gcry
     @@hash_value_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_value_mode = uninitialized StaticArray(UInt8, MAX_ENTRIES)
     @@hash_value_bytes = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    @@index = uninitialized StaticArray(Int32, INDEX_SIZE) # 0 = empty; else entry_index + 1
     @@count = uninitialized Int32
     @@enabled = uninitialized Bool
     @@booted = uninitialized Bool
@@ -45,6 +49,7 @@ module Gcry
       return if @@booted
       @@count = 0
       @@enabled = true
+      INDEX_SIZE.times { |i| @@index[i] = 0 }
       @@booted = true
     end
 
@@ -88,6 +93,7 @@ module Gcry
     def self.clear : Nil
       ensure_booted
       @@count = 0
+      INDEX_SIZE.times { |i| @@index[i] = 0 }
     end
 
     def self.size : Int32
@@ -95,17 +101,46 @@ module Gcry
       @@count
     end
 
+    private def self.index_slot(type_id : Int32) : Int32
+      # Multiplicative hash → open-address slot (wrapping; avoid Int32 overflow).
+      ((type_id.to_i64! * -1640531527_i64) & INDEX_MASK).to_i32
+    end
+
+    private def self.find_entry_index(type_id : Int32) : Int32
+      i = index_slot(type_id)
+      probes = 0
+      while probes < INDEX_SIZE
+        slot = @@index[i]
+        return -1 if slot == 0
+        ei = slot - 1
+        return ei if @@type_ids[ei] == type_id
+        i = (i + 1) & INDEX_MASK
+        probes += 1
+      end
+      -1
+    end
+
+    private def self.index_insert(type_id : Int32, entry_index : Int32) : Nil
+      i = index_slot(type_id)
+      probes = 0
+      while probes < INDEX_SIZE
+        slot = @@index[i]
+        if slot == 0 || @@type_ids[slot - 1] == type_id
+          @@index[i] = entry_index + 1
+          return
+        end
+        i = (i + 1) & INDEX_MASK
+        probes += 1
+      end
+      raise "Gcry::Layout index full"
+    end
+
     def self.entry_for(type_id : Int32) : Entry?
       ensure_booted
       return nil unless @@enabled
-      i = 0
-      while i < @@count
-        if @@type_ids[i] == type_id
-          return entry_at(i)
-        end
-        i += 1
-      end
-      nil
+      ei = find_entry_index(type_id)
+      return nil if ei < 0
+      entry_at(ei)
     end
 
     private def self.entry_at(i : Int32) : Entry
@@ -153,13 +188,11 @@ module Gcry
       raise "Gcry::Layout full (#{MAX_ENTRIES})" if @@count >= MAX_ENTRIES
       raise "Gcry::Layout too many offsets (#{total} > #{MAX_OFFSETS})" if total > MAX_OFFSETS
 
-      i = 0
-      while i < @@count
-        break if @@type_ids[i] == type_id
-        i += 1
-      end
-      if i == @@count
+      i = find_entry_index(type_id)
+      if i < 0
+        i = @@count
         @@count += 1
+        index_insert(type_id, i)
       end
 
       @@type_ids[i] = type_id
@@ -192,6 +225,9 @@ module Gcry
     # Register pointer ivars of *type* using compile-time layout.
     # Pointer(T) to a non-Reference T → noscan (value buffer).
     def self.register(type : T.class) forall T
+      {% if T.private? %}
+        # Skip — cannot reference private constants from this shard.
+      {% else %}
       {% unless T < Reference %}
         {% raise "Gcry.register_layout requires a Reference class, got #{T}" %}
       {% end %}
@@ -261,6 +297,7 @@ module Gcry
             rounded.to_u32, KIND_PLAIN,
             0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
         {% end %}
+      {% end %}
       {% end %}
     end
 
@@ -344,6 +381,31 @@ module Gcry
       register(Deque(String))
       register(Deque(Int32))
     end
+
+    # Auto-register precise layouts for every concrete Reference subclass in the
+    # program. Must be a method (instance_vars are unavailable at top-level macro).
+    # Hash instantiations use register_hash; unbound generics are skipped.
+    def self.register_all_from_reference_subclasses : Nil
+      {% begin %}
+        {% for t in Reference.all_subclasses %}
+          {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
+          {% for tv in t.type_vars %}
+            {% if tv.is_a?(MacroId) %}
+              {% skip = true %}
+            {% end %}
+          {% end %}
+          {% unless skip %}
+            {% if t <= Hash %}
+              {% if t.type_vars.size == 2 %}
+                register_hash({{t.type_vars[0]}}, {{t.type_vars[1]}})
+              {% end %}
+            {% else %}
+              register({{t}})
+            {% end %}
+          {% end %}
+        {% end %}
+      {% end %}
+    end
   end
 
   def self.register_layout(type : T.class) forall T
@@ -355,5 +417,10 @@ module Gcry
 
   def self.register_hash(key_type : K.class, value_type : V.class) forall K, V
     Layout.register_hash(key_type, value_type)
+  end
+
+  # Register layouts for all concrete Reference subclasses visible to the compiler.
+  def self.register_layouts : Nil
+    Layout.register_all_from_reference_subclasses
   end
 end

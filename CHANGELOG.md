@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parallel mark knob:** `GCRY_PARALLEL_MARK=N` (API + metrics); true multi-thread mark under Crystal STW awaits STW-exempt workers — today N>1 still marks serially and increments `parallel_mark_runs`.
 - STW SP table: CAS bitmask claim (safe under concurrent suspend; `@@stw_claimed` is `uninitialized Atomic` so GC.init does not trip Crystal.once before Fiber exists).
 - Specs: `spec/mt_spec.cr`.
+- **Page blacklisting:** process GC records type_id-gate false roots and prefers non-blacklisted freelist pages (`blacklist_hits` / `blacklist_skips`; `GCRY_DISABLE_BLACKLIST=1`).
+- **`Gcry.register_layouts`:** auto-registers precise layouts for concrete `Reference` subclasses (skips private / nested generics). Opt-in via `GCRY_AUTO_LAYOUTS=1` or an explicit call — not process-default (unsound offsets on some stdlib types regress HTTP thr).
+- Layout table: **4096** entries, **32** offsets, open-addressing `entry_for` (was 512 + linear scan).
+- Specs: `spec/blacklist_spec.cr`.
 
 ## [0.7.0] - 2026-07-24
 

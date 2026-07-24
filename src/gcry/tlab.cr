@@ -116,6 +116,24 @@ module Gcry
         end
 
         src = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+        if @blacklist_enabled && !src.null?
+          taken = take_non_blacklisted(src, class_index, nursery)
+          unless taken.null?
+            # Put the good node back as freelist head so the batch steal below
+            # starts on a non-blacklisted page.
+            th = BlockHeader.from_user(taken)
+            tv = th.value
+            tv.next_free = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+            th.value = tv
+            if nursery
+              @nursery_freelists[class_index] = taken
+            else
+              @freelists[class_index] = taken
+            end
+            src = taken
+          end
+        end
+
         unless src.null?
           head = src
           tail = src
