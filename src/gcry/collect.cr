@@ -49,9 +49,13 @@ module Gcry
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false
-    # Reject candidates whose payload type_id word looks like a pointer.
-    # Process GC enables; library tests use raw malloc graphs without type_ids.
+    # Reject candidates whose payload type_id word looks absurd (opt-in; unsafe for
+    # raw GC.malloc pointer buffers — keep off unless calibrated).
     property type_id_gate : Bool = false
+    # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
+    property layout_precise : Bool = true
+    getter layout_precise_scans : UInt64 = 0_u64
+    getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
     property nursery_enabled : Bool = true
@@ -698,6 +702,8 @@ module Gcry
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
       @bytes_before_gc = @bytes_since_gc
       @bytes_reclaimed_since_gc = 0_u64
+      @layout_precise_scans = 0_u64
+      @layout_conservative_scans = 0_u64
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -805,6 +811,28 @@ module Gcry
       @mark_stack.push(header)
     end
 
+    # Keep allocation alive without scanning its payload (integer / index buffers).
+    private def mark_noscan(pointer : Void*) : Nil
+      addr = pointer.address
+      return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+
+      header = find_object(pointer)
+      return unless header
+      return if BlockHeader.free?(header)
+
+      unless @allow_interior_pointers
+        return if addr != BlockHeader.user_from(header).address
+      end
+
+      return if BlockHeader.marked?(header)
+      if @minor_only && !BlockHeader.nursery?(header)
+        return
+      end
+
+      BlockHeader.set_mark(header)
+    end
+
     # Crystal Reference payloads start with type_id (Int32). Reject if that
     # 32-bit word looks like the high half of a pointer / absurd id.
     private def type_id_plausible?(header : BlockHeader*) : Bool
@@ -842,11 +870,97 @@ module Gcry
       size = clamped_scan_size(header, user)
       return if size == 0
 
+      if @layout_precise && size >= 4
+        tid = user.as(Int32*).value
+        if (entry = Layout.entry_for(tid))
+          if entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+            @layout_precise_scans += 1
+            if entry.hash?
+              scan_hash_object(user, size, entry)
+            else
+              entry.scan_offsets.each do |off|
+                next if off.to_u64 + sizeof(Void*).to_u64 > size
+                slot = Pointer(Void*).new(user.address + off.to_u64)
+                mark_candidate(slot.value)
+              end
+              entry.noscan_offsets.each do |off|
+                next if off.to_u64 + sizeof(Void*).to_u64 > size
+                slot = Pointer(Void*).new(user.address + off.to_u64)
+                mark_noscan(slot.value)
+              end
+            end
+            return
+          end
+        end
+      end
+
+      @layout_conservative_scans += 1
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
         mark_candidate(Pointer(Void).new(cursor[i]))
+      end
+    end
+
+    # Precise Hash: keep @indices/@entries blobs alive without scanning them as
+    # pointer arrays; walk Entry slots and mark key/value only.
+    private def scan_hash_object(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
+      entry.scan_offsets.each do |off|
+        next if off.to_u64 + sizeof(Void*).to_u64 > size
+        slot = Pointer(Void*).new(user.address + off.to_u64)
+        mark_candidate(slot.value)
+      end
+
+      entry.noscan_offsets.each do |off|
+        next if off.to_u64 + sizeof(Void*).to_u64 > size
+        slot = Pointer(Void*).new(user.address + off.to_u64)
+        mark_noscan(slot.value)
+      end
+
+      entries_off = entry.hash_entries_off.to_u64
+      pow2_off = entry.hash_pow2_off.to_u64
+      stride = entry.hash_entry_stride.to_u64
+      return if stride == 0
+      return if entries_off + sizeof(Void*).to_u64 > size
+      return if pow2_off + 1 > size
+
+      entries = Pointer(Void*).new(user.address + entries_off).value
+      return if entries.null?
+
+      pow2 = Pointer(UInt8).new(user.address + pow2_off).value
+      # Crystal: indices_size = 1 << pow2; entries_size = indices_size // 2
+      return if pow2 >= 63
+      entries_size = (1_u64 << pow2) // 2
+      return if entries_size == 0 || entries_size > 1_000_000_u64
+
+      key_off = entry.hash_key_off.to_u64
+      value_off = entry.hash_value_off.to_u64
+      value_mode = entry.hash_value_mode
+      value_bytes = entry.hash_value_bytes.to_u64
+      base = entries.as(UInt8*)
+
+      i = 0_u64
+      while i < entries_size
+        slot = base + (i * stride)
+        # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
+        hash_word = slot.as(UInt32*).value
+        if hash_word != 0_u32
+          if key_off != 0
+            mark_candidate(Pointer(Void*).new(slot.address + key_off).value)
+          end
+          case value_mode
+          when Layout::VALUE_MODE_REF
+            mark_candidate(Pointer(Void*).new(slot.address + value_off).value)
+          when Layout::VALUE_MODE_WORDS
+            w = 0_u64
+            while w + sizeof(Void*).to_u64 <= value_bytes
+              mark_candidate(Pointer(Void*).new(slot.address + value_off + w).value)
+              w += sizeof(Void*).to_u64
+            end
+          end
+        end
+        i += 1
       end
     end
 

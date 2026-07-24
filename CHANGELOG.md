@@ -20,11 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Size-class occupancy: `size_class_live_bytes` + fill histogram (`chunk_fill_lt25`…`ge75`); `GCRY_CHUNK_BYTES` (default **256 KiB**).
 - **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; chunk-scoped pagemap; dirty-fraction fallback (`GCRY_SOFT_DIRTY_MAX`, default **25%**). `GCRY_NURSERY` stays opt-in (off by default).
 - **Phase 12 (shard-only RSS):** process GC **empty-chunk release default-on** (`empty_chunk_retain` default **0** → munmap; `GCRY_EMPTY_CHUNK_RETAIN` / dormant DONTNEED; `GCRY_KEEP_CHUNKS=1` escape). Freelist **range-unlink** on release (no full size-class rebuild). Process majors at **32 MiB**. Mark roots **base-pointer-only** by default (`GCRY_INTERIOR=1` restores interiors). `GCRY_TYPE_ID_GATE=1` / `GCRY_PAGE_DONTNEED=1` opt-in. Bench: `GET /gc-collect`.
+- **Layout-precise scan (false retention):** `Gcry::Layout` type_id → pointer offsets (StaticArray, boot-safe); size-class gate; noscan buffers; `Gcry.register_hash` entry walk. `GCRY_DISABLE_LAYOUT=1`. Does **not** close acikturkiye RSS (still ~2.8×) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ### Performance
 
 - Same-host Kemal `/json` (Phase 12 default, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×** Boehm — see [docs/PERF.md](docs/PERF.md). (`GCRY_KEEP_CHUNKS=1` ≈ **95%** thr @ ~**3×** RSS.)
 - Same-host acikturkiye `/api/v1/` (Phase 12, median of 3): thr **~96%**; **post-GC RSS ~2.55×** — empty release ~noop; dense conservative-live — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host acikturkiye + layout/hash-precise (median of 3): thr **~89%** (noisy); **post-GC RSS ~2.80×** — layout hit rate low vs conservative scans; RSS gate still FAIL.
 - Earlier 0.7.0-dev (chunks retained): `/json` ~**100%**; opt-in release ~**92%**; `GCRY_CHUNK_BYTES=131072` ~**98.5%** (RSS flat).
 - Soft-dirty on WSL **6.18.33.2**: HTTP nursery still too dirty — keep opt-in.
 

@@ -35,6 +35,7 @@ module GC
     # (rejecting live objects caused Kemal SIGSEGV under load).
     heap.type_id_gate = false
     heap.allow_interior_pointers = false
+    heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -49,6 +50,16 @@ module GC
     # refresh the running fiber bottom each collect.
     heap.before_collect do
       heap.set_stackbottom(Fiber.current.@stack.bottom)
+    end
+
+    # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
+    # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.
+    # GCRY_DISABLE_LAYOUT is applied here and again in apply_env_config.
+    if env_flag_one?("GCRY_DISABLE_LAYOUT")
+      heap.layout_precise = false
+      Gcry::Layout.enabled = false
+    else
+      Gcry::Layout.register_builtins
     end
 
     @@gcry_ready = true
@@ -138,6 +149,11 @@ module GC
 
     if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
       heap.type_id_gate = false
+    end
+
+    if env_flag_one?("GCRY_DISABLE_LAYOUT")
+      heap.layout_precise = false
+      Gcry::Layout.enabled = false
     end
 
     # Free large-object bytes to retain after post-collect trim (default 8 MiB).

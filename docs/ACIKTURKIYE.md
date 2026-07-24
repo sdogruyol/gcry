@@ -286,7 +286,28 @@ Same host, `wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, th
 
 Last gcry `/gc-stats` after wrk: `heap_size` ≈ **225 MiB**, `size_class_live` ≈ **165 MiB**, `small_mapped` ≈ **207 MiB**, `released_chunk` ≈ **1.8 MiB**, `chunk_fill_ge75` ≈ **748**.
 
-**Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~2.55×). Empty-chunk release returns almost nothing here — RSS is **conservative-live / dense chunks**, not mapped waste. Layout tables / stricter mark filters are the remaining lever (still shard-only limits).
+**Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~2.55×). Empty-chunk release returns almost nothing here — RSS is **conservative-live / dense chunks**, not mapped waste.
+
+### False-retention: layout tables (2026-07-24)
+
+Shard-only precise scan via `Gcry::Layout` / `Gcry.register_layout` / `Gcry.register_hash`:
+
+- StaticArray registry (boot-safe; Hash/Array class vars SIGSEGV in `GC.init`).
+- Size-class gate (reject raw buffers whose first word equals a `type_id`).
+- **Noscan** pointer ivars: keep alive, do not scan (`Array(value)` `@buffer`, Hash `@indices` / entry blob).
+- **Hash entry walk:** mark key/value only; skip `Entry.@hash` and index bytes (`VALUE_MODE_WORDS` for `JSON::Any`).
+- Escape: `GCRY_DISABLE_LAYOUT=1`. acikturkiye registers `Hash(String, JSON::Any)` + `Array(JSON::Any)`.
+
+Same-host A/B after hash-precise (median of 3, post-`GC.collect`):
+
+| Metric | Phase 12 baseline | + layout / hash-precise |
+|--------|------------------:|------------------------:|
+| thr % Boehm | **95.8%** | **~89%** (noisy; 89–97%) |
+| post-GC RSS × | **2.55×** | **~2.80×** |
+| `layout_precise_scans` / cons | — | ~400–560 / ~8k–12k |
+| `size_class_live` | ~165 MiB | ~194–201 MiB |
+
+**Takeaway:** layout plumbing is correct (Hash survival smoke OK) but **does not close** the acikturkiye RSS gate. Only a few hundred objects per major match registered layouts; the dense live set is still mostly conservative (stacks / unregistered types). Next shard-only levers are diminishing; Boehm-class RSS here likely needs better roots / barriers.
 
 ## Non-goals (still)
 

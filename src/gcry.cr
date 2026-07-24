@@ -5,6 +5,7 @@
 #
 # See DESIGN.md and docs/INTEGRATION.md.
 require "./gcry/heap"
+require "./gcry/layout"
 
 module Gcry
   VERSION = "0.6.0"

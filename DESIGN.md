@@ -287,6 +287,7 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Process major threshold **32 MiB**; large-cache retain default **8 MiB**.
 - Kemal `/json` (2026-07-24, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×**. Thr gate (≥95%) still open — see [docs/PERF.md](docs/PERF.md).
 - acikturkiye `/api/v1/` (2026-07-24, median of 3): thr **~96%**; **post-GC RSS ~2.55×** (FAIL ≤1.5×). Released empty chunks ~**2 MiB** vs live ~**165 MiB** — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Layout-precise mark** (`Gcry::Layout` / `register_hash`): boot-safe StaticArray registry, size gate, noscan value/index buffers, Hash entry walk. acikturkiye + layout (2026-07-24): RSS still **~2.8×**, precise-scan hit rate low — dense live remains mostly conservative (stacks / unregistered types). `GCRY_DISABLE_LAYOUT=1`.
 
 ## MVP definition (v0.1)
 
