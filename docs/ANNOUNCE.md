@@ -10,7 +10,7 @@ Boehm-class collector you can read and change in Crystal; Linux x86_64 + aarch64
 
 Same-host Kemal `wrk -c 100 -d 30` vs Boehm — cite [docs/PERF.md](PERF.md) only (do not invent). Prefer **`/json`**.
 
-As of v0.8.0 cut: `/` ~**91%**, `/json` ~**89%**, post-GC RSS ~**0.93×** Boehm.
+As of v0.9.0 cut: `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
 
 ## When to try gcry
 

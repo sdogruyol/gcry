@@ -5,7 +5,7 @@
 Scope: **Linux x86_64 + aarch64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (0.8.0) | bdwgc (Crystal default) |
+| Area | gcry (0.9.0) | bdwgc (Crystal default) |
 |------|-----------------------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |

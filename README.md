@@ -2,7 +2,7 @@
 
 **A garbage collector written in Crystal** — an alternative to the C [Boehm GC](https://github.com/ivmai/bdwgc) that Crystal normally uses.
 
-> **v0.7** · Linux x86_64 · Crystal ≥ 1.21 · one OS thread (fibers OK)
+> **v0.9** · Linux x86_64 + aarch64 · Crystal ≥ 1.21 · one OS thread (fibers OK)
 
 Install as a shard. No Crystal compiler patch. Flip one build flag and your program runs on gcry instead of Boehm.
 
@@ -55,7 +55,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 |----------------------|-------------------------|
 | You want a Crystal-readable collector to hack / dogfood | You need macOS / Windows process GC today |
 | Linux x86_64 or aarch64, Crystal ≥ 1.21, parallelism **1** | Parallel ExecutionContexts in production |
-| Kemal-class HTTP thr ~90% of Boehm is acceptable | You need `Process.fork` under ExecutionContext |
+| Kemal-class HTTP thr ~92% of Boehm is acceptable | You need `Process.fork` under ExecutionContext |
 | You’re OK with STW + conservative retention | You need Boehm’s battle-tested defaults everywhere |
 
 See [docs/COMPARISON.md](docs/COMPARISON.md) for the full checklist.

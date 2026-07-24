@@ -352,9 +352,9 @@ Last gcry `/gc-stats` after trial 3: `heap_size` ≈ **256 MiB**, `size_class_li
 
 **Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~3.20×) — same story as Phase 12 / SP-clamp notes (dense conservative-live).
 
-### Unreleased tree (2026-07-24 night)
+### 0.9.0 cut (2026-07-24 night)
 
-Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs current tree (scrub env **off**; `GCRY_AUTO_LAYOUTS` off). Script: `gcry/bench/median_acikturkiye_boehm.sh`.
+Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs 0.9.0 tree (scrub env **off**; `GCRY_AUTO_LAYOUTS` off). Script: `gcry/bench/median_acikturkiye_boehm.sh`.
 
 | Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
 |------:|------------:|--------------:|-----------------:|--------------------:|
