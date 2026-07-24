@@ -43,7 +43,7 @@ describe "Gcry page blacklist" do
       # Allocate a block and poison its type_id so ambient mark rejects it.
       obj = heap.malloc(64)
       obj.as(Int32*).value = -1 # implausible type_id
-      heap.add_root(obj) # explicit root uses mark_candidate (no gate)
+      heap.add_root(obj)        # explicit root uses mark_candidate (no gate)
 
       # Simulate ambient reject path via public blacklist_address after a reject count path:
       # Directly exercise note through a collect with a stack-like root scan is hard in

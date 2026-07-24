@@ -16,12 +16,13 @@ it "Platform SP table records and looks up by pthread id" do
   end
 end
 
-it "rsp_from_ucontext reads REG_RSP at glibc offset" do
-  {% if flag?(:x86_64) %}
-    buf = StaticArray(UInt8, 256).new(0_u8)
+it "sp_from_ucontext reads saved SP at glibc offset" do
+  {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+    buf = StaticArray(UInt8, 512).new(0_u8)
     expected = 0x00007fffffffdc00_u64
-    (buf.to_unsafe + Gcry::Platform::UCONTEXT_RSP_OFFSET).as(UInt64*).value = expected
+    (buf.to_unsafe + Gcry::Platform::UCONTEXT_SP_OFFSET).as(UInt64*).value = expected
+    Gcry::Platform.sp_from_ucontext(buf.to_unsafe.as(Void*)).should eq expected
     Gcry::Platform.rsp_from_ucontext(buf.to_unsafe.as(Void*)).should eq expected
-    Gcry::Platform.rsp_from_ucontext(Pointer(Void).null).should eq 0_u64
+    Gcry::Platform.sp_from_ucontext(Pointer(Void).null).should eq 0_u64
   {% end %}
 end

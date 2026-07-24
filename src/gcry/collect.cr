@@ -1,10 +1,15 @@
 require "./mark"
 require "./roots"
 require "./finalizer"
-require "./platform/linux_roots"
-require "./platform/linux_stack"
-require "./platform/linux_softdirty"
-require "./platform/linux_stw"
+{% if flag?(:linux) %}
+  require "./platform/linux_roots"
+  require "./platform/linux_stack"
+  require "./platform/linux_softdirty"
+  require "./platform/linux_stw"
+  require "./platform/linux_fork"
+{% elsif flag?(:darwin) %}
+  require "./platform/darwin_stubs"
+{% end %}
 
 module Gcry
   class Heap
@@ -181,6 +186,31 @@ module Gcry
       end
       Platform.clear_thread_sps
       @world_stopped = false
+    end
+
+    # Child after fork: only this OS thread survives. Reset locks / STW / caches
+    # so GC can run again (heap mappings are inherited).
+    def after_fork_child_reinit : Nil
+      @world_stopped = false
+      @collecting = false
+      @running_finalizers = false
+      @incremental_marking = false
+      @inc_active = false
+      @gc_lock = Crystal::RWLock.new
+      @alloc_lock = Crystal::SpinLock.new
+      @tlabs_booted = false
+      @soft_dirty_armed = false
+      @soft_dirty_probed = false
+      @soft_dirty_works = false
+      @soft_dirty_skip_until_major = false
+      disarm_mprotect_barrier if @barrier_backend.mprotect?
+      @barrier_backend = Platform::BarrierBackend::None
+      Platform.reset_stw_after_fork
+      Platform.invalidate_static_root_cache
+      begin
+        set_stackbottom(Fiber.current.@stack.bottom)
+      rescue
+      end
     end
 
     def add_root(pointer : Void*) : Nil

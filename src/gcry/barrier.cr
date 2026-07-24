@@ -1,8 +1,10 @@
 # Official page-granularity write-barrier layer for nursery / incremental mark.
 # Soft-dirty is preferred; mprotect+SEGV is the opt-in / process-GC fallback.
 
-require "./platform/linux_softdirty"
-require "./platform/linux_mprotect"
+{% if flag?(:linux) %}
+  require "./platform/linux_softdirty"
+  require "./platform/linux_mprotect"
+{% end %}
 
 module Gcry
   class Heap

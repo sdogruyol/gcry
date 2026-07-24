@@ -30,7 +30,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 ### What it is *not* (yet)
 
 - Parallel ExecutionContexts: experimental (`GCRY_TLAB=1`); stick to parallelism **1** for production
-- Not fork-safe like Boehm’s fork handling
+- Not a drop-in Boehm replacement on macOS / Windows yet
 - Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**90%** of Boehm, post-GC RSS ~**0.93×**; see [docs/PERF.md](docs/PERF.md))
 
 ---
@@ -88,7 +88,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 
 | | |
 |--|--|
-| OS / arch | Linux x86_64 (primary); aarch64 cross-compile smoke in CI |
+| OS / arch | Linux x86_64 + aarch64 (process GC); macOS stubs only (no `-Dgc_none` yet) |
 | Crystal | `>= 1.21.0` |
 | Runtime | Default `Fiber::ExecutionContext`, **parallelism 1** |
 | Fork / signals | See [docs/POLICY.md](docs/POLICY.md) |
@@ -113,6 +113,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_PARALLEL_MARK=N` | Request N mark workers (serial until STW-exempt helpers exist) |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
 | `GCRY_AUTO_LAYOUTS=1` | Run `Gcry.register_layouts` at init (opt-in; measure thr first) |
+| `GCRY_DISABLE_ATFORK=1` | Do not register `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |

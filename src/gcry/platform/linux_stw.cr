@@ -1,8 +1,11 @@
-# Capture RSP at STW suspend so other-thread stack scans can skip unused
+# Capture SP at STW suspend so other-thread stack scans can skip unused
 # below-SP words (classic conservative false retention).
 #
 # Replaces Crystal's SIG_SUSPEND handler after init_suspend_resume: same
-# suspended-flag + sigsuspend(SIG_RESUME) dance, plus ucontext RSP → table.
+# suspended-flag + sigsuspend(SIG_RESUME) dance, plus ucontext SP → table.
+#
+# Linux gnu: x86_64 and aarch64. Fixed glibc offsets avoid Crystal StackT /
+# SigsetT padding mismatches when reading through typed ucontext_t.
 
 require "c/signal"
 require "c/pthread"
@@ -21,8 +24,20 @@ module Gcry
                         LibC::SIGXCPU
                       {% end %}
 
-    # glibc x86_64 ucontext_t: uc_mcontext @ 40, gregs[REG_RSP=15] @ +120 → 160.
-    UCONTEXT_RSP_OFFSET = 160
+    # Byte offset of the saved stack pointer inside glibc ucontext_t.
+    # x86_64: uc_mcontext.gregs[REG_RSP] (see linux_stw history / samples).
+    # aarch64: uc_mcontext.sp — uc_mcontext @ 176 (16-aligned after sigset),
+    #          sp @ +256 within mcontext (fault_address + regs[31]).
+    {% if flag?(:x86_64) %}
+      UCONTEXT_SP_OFFSET = 160
+    {% elsif flag?(:aarch64) %}
+      UCONTEXT_SP_OFFSET = 432
+    {% else %}
+      UCONTEXT_SP_OFFSET = 0
+    {% end %}
+
+    # Back-compat alias used by specs / samples.
+    UCONTEXT_RSP_OFFSET = UCONTEXT_SP_OFFSET
 
     MAX_STW_SP_SLOTS = 64
 
@@ -113,19 +128,35 @@ module Gcry
       end
     end
 
-    def self.rsp_from_ucontext(uctx : Void*) : UInt64
+    # Reset SP table after fork (child inherits parent bits / pthread ids).
+    def self.reset_stw_after_fork : Nil
+      @@stw_installed = false
+      ensure_stw_table
+      @@stw_claimed.set(0_u64, :release)
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        @@stw_sps[i] = 0
+        i += 1
+      end
+    end
+
+    def self.sp_from_ucontext(uctx : Void*) : UInt64
       return 0_u64 if uctx.null?
-      {% if flag?(:x86_64) %}
-        # Fixed glibc layout — avoid Crystal StackT padding mismatches.
-        (uctx + UCONTEXT_RSP_OFFSET).as(UInt64*).value
+      {% if (flag?(:x86_64) || flag?(:aarch64)) && flag?(:linux) %}
+        (uctx + UCONTEXT_SP_OFFSET).as(UInt64*).value
       {% else %}
         0_u64
       {% end %}
     end
 
+    # Back-compat name.
+    def self.rsp_from_ucontext(uctx : Void*) : UInt64
+      sp_from_ucontext(uctx)
+    end
+
     # Install after Crystal::System::Thread.init_suspend_resume.
     def self.install_stw_sp_capture : Nil
-      {% unless flag?(:linux) && flag?(:x86_64) %}
+      {% unless flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
         return
       {% end %}
       return if @@stw_installed
@@ -134,7 +165,7 @@ module Gcry
       action = LibC::Sigaction.new
       action.sa_flags = LibC::SA_SIGINFO
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, _info, uctx|
-        sp = Platform.rsp_from_ucontext(uctx)
+        sp = Platform.sp_from_ucontext(uctx)
         Platform.record_thread_sp(LibC.pthread_self, sp) if sp != 0
 
         # Mirror Crystal::System::Thread suspend handler.

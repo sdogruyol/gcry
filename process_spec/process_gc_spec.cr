@@ -111,4 +111,8 @@ describe "process GC (-Dgc_none)" do
     h.parallel_mark_workers.should eq(1)
     h.tlab_refills.should eq(0)
   end
+
+  it "registers pthread_atfork by default" do
+    Gcry::Platform.atfork_installed?.should be_true
+  end
 end

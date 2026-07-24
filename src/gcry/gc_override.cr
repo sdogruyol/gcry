@@ -9,15 +9,21 @@
 module GC
   @@gcry_ready = false
   @@gcry_enabled = true
-  # Set via GC.note_fork_child; malloc/collect refuse to run (no atfork reinit yet).
+  # Set when fork child cannot reinit (GCRY_DISABLE_ATFORK=1 or install failed).
   @@after_fork_child = false
+  @@handle_fork = true
 
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
-    # Capture RSP in the suspend handler so other-thread scans skip below-SP.
+    # Capture SP in the suspend handler so other-thread scans skip below-SP.
     unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
       Gcry::Platform.install_stw_sp_capture
     end
+
+    {% if flag?(:darwin) && flag?(:gc_none) %}
+      # Process GC on Darwin is stubbed; refuse boot rather than silently corrupt.
+      raise "gcry: process GC (-Dgc_none) is not supported on macOS yet (Mach STW / dyld roots); see docs/POLICY.md"
+    {% end %}
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -75,17 +81,57 @@ module GC
 
     @@gcry_ready = true
     apply_env_config(heap)
+
+    # Fork: reinit locks/STW in the child (opt out with GCRY_DISABLE_ATFORK=1).
+    unless env_flag_one?("GCRY_DISABLE_ATFORK")
+      @@handle_fork = true
+      Gcry::Platform.set_atfork_handlers(
+        -> { GC.fork_prepare },
+        -> { GC.fork_parent },
+        -> { GC.fork_child },
+      )
+      Gcry::Platform.install_atfork
+    else
+      @@handle_fork = false
+    end
   end
 
-  # Skeleton: refuse GC in a forked child. Full Boehm-style reinit is future work.
+  # Manual integrator hook: mark child poisoned when atfork reinit is disabled.
   # :nodoc:
   def self.note_fork_child : Nil
-    @@after_fork_child = true
+    if @@handle_fork && @@gcry_ready
+      fork_child
+    else
+      @@after_fork_child = true
+    end
+  end
+
+  # :nodoc:
+  def self.fork_prepare : Nil
+    # Avoid holding GC write lock across fork (deadlock if parent owned it).
+  end
+
+  # :nodoc:
+  def self.fork_parent : Nil
+  end
+
+  # :nodoc:
+  def self.fork_child : Nil
+    return unless @@gcry_ready
+    if @@handle_fork
+      Gcry.default_heap.after_fork_child_reinit
+      @@after_fork_child = false
+      unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+        Gcry::Platform.install_stw_sp_capture
+      end
+    else
+      @@after_fork_child = true
+    end
   end
 
   private def self.check_fork_poison! : Nil
     if @@after_fork_child
-      raise "gcry: GC after fork is unsupported (exec or stay on Boehm); see docs/POLICY.md"
+      raise "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md"
     end
   end
 

@@ -1,8 +1,9 @@
 # Runtime policy (Phase 7+)
 
 How gcry behaves under failure and process lifecycle edges. These are intentional
-product decisions for Linux x86_64 under Crystal **1.21+** defaults
-(`Fiber::ExecutionContext`, parallelism 1).
+product decisions for **Linux** (x86_64 and aarch64) under Crystal **1.21+** defaults
+(`Fiber::ExecutionContext`, parallelism 1). macOS process GC is not supported yet
+(Mach STW / dyld roots stubbed; see below).
 
 ## Out of memory (OOM)
 
@@ -21,15 +22,16 @@ Notes:
 
 ## Fork safety
 
-**Unsupported for continued Crystal execution in the child.**
-
 | Concern | Policy |
 |---------|--------|
-| Child inherits heap / freelist / mark state | Undefined if GC runs |
-| `pthread_atfork` | Not auto-registered; `GC.note_fork_child` poison API exists for integrators |
-| Recommended pattern | `fork` + immediate `exec`, or avoid forking after `GC.init` |
+| Child inherits heap mappings | OK — single surviving OS thread |
+| `pthread_atfork` | **Registered by default** on process GC; child resets locks, STW SP table, maps cache, barriers |
+| `GCRY_DISABLE_ATFORK=1` | Skip registration; post-fork GC raises (poison) |
+| Recommended patterns | Prefer `fork` + `exec`, or single-threaded child that keeps allocating under gcry after reinit |
 
-v0.4 skeleton only **detects** post-fork GC; it does **not** reinitialize the heap (unlike bdwgc’s `GC_set_handle_fork`). Prefer Boehm if you need a live forking server.
+`GC.note_fork_child` still exists for integrators; with atfork enabled it runs the same reinit path.
+
+**Crystal note:** default `Fiber::ExecutionContext` does not support `Process.fork`. Use `LibC.fork` only with `-Dwithout_mt`, or `fork`+`exec`. atfork still resets gcry locks when a C-level fork occurs.
 
 ## Signal safety
 
@@ -74,3 +76,12 @@ Default is **full STW majors**. With page-dirty barriers (soft-dirty / mprotect)
 | Linux soft-dirty | Preferred remembered-set for nursery old→young and incremental dirty re-scan |
 | `mprotect` + SEGV | Fallback card table when soft-dirty is unavailable (`GCRY_MPROTECT_BARRIER=1` to force) |
 | `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (or mprotect if enabled) |
+
+## Platforms
+
+| Platform | Process GC (`-Dgc_none`) | Notes |
+|----------|--------------------------|-------|
+| Linux x86_64 | **Supported** | Primary; STW SP clamp, soft-dirty, atfork |
+| Linux aarch64 | **Supported** | STW SP via `uc_mcontext.sp` (glibc offset); CI native runner |
+| macOS (Darwin) | **Not yet** | Platform stubs compile; `-Dgc_none` raises at `GC.init` until Mach STW + dyld roots |
+| musl / Alpine | Best-effort | Prefer gnu; verify SP offset if enabling SP clamp |
