@@ -12,6 +12,7 @@ Field notes from dogfooding gcry as process GC on **acikturkiye** (Kemal + Postg
 - Toy Kemal `make bench-kemal-wrk` understates fat-binary / many-fiber / large-buffer costs.
 - Mobile API needs `X-API-KEY` / `X-API-SECRET` from `.env.demo`.
 - `GCRY_PARALLEL_MARK=N` is experimental — same-host wrk thr **regressed** vs serial; keep default `N=1` unless measuring.
+- **RSS without Crystal patch:** optional `GCRY_CLEAR_STACK=1` / `GCRY_SCRUB_FIBERS=1` (Boehm-style wipe below SP / capped parked-fiber wipe). Not stack maps. Same-host spot checks: can cut `size_class_live_bytes` some, but thr often drops when clears help GC run more; full-stack fiber scrub was wrong (faults pages in — fixed to a capped window). Keep off unless measuring; prefer `/gc-stats` live bytes over shell-wrapper RSS.
 
 ## Release A/B (same host, wrk `-c 100 -d 30` `/api/v1`)
 
@@ -350,6 +351,21 @@ Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.colle
 Last gcry `/gc-stats` after trial 3: `heap_size` ≈ **256 MiB**, `size_class_live` ≈ **186 MiB**, `small_mapped` ≈ **238 MiB**, `released_chunk` ≈ **6.8 MiB**, `chunk_fill_ge75` ≈ **842**, `layout_precise_scans` ≈ **646** / cons ≈ **9.4k**.
 
 **Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~3.20×) — same story as Phase 12 / SP-clamp notes (dense conservative-live).
+
+### Unreleased tree (2026-07-24 night)
+
+Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs current tree (scrub env **off**; `GCRY_AUTO_LAYOUTS` off). Script: `gcry/bench/median_acikturkiye_boehm.sh`.
+
+| Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
+|------:|------------:|--------------:|-----------------:|--------------------:|
+| 1 | 96.1% | 2.60× | 127 / 132 | 272 / 206 |
+| 2 | 93.3% | 2.84× | 124 / 133 | 191 / 334 |
+| 3 | 90.9% | 3.25× | 128 / 141 | 288 / 302 |
+| **median** | **93.3%** | **2.84×** | — | — |
+
+(Median thr % = median of per-trial ratios; median RSS × likewise. Ratio of median req/s ≈ **95.3%**.)
+
+**vs 0.8.0 cut:** thr median **93.3%** (was **95.2%**); post-GC RSS **2.84×** (was **3.20×**) — RSS improved, thr slightly softer. Gate thr ≥95% **FAIL** on trial-median; RSS ≤1.5× still **FAIL**.
 
 ## Non-goals (still)
 

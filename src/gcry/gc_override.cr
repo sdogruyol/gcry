@@ -260,6 +260,22 @@ module GC
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
+
+    # Boehm-style stack hygiene (no compiler maps). Opt-in; measure RSS/thr.
+    if env_flag_one?("GCRY_CLEAR_STACK")
+      heap.clear_stack_enabled = true
+      # Every-alloc wipe tanks HTTP thr; default to every 16 unless overridden.
+      heap.clear_stack_every = 16
+    end
+    if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
+      heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
+    end
+    if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
+      heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
+    end
+    if env_flag_one?("GCRY_SCRUB_FIBERS")
+      heap.scrub_fibers_enabled = true
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool
@@ -322,6 +338,12 @@ module GC
     return unless @@gcry_ready
     check_fork_poison!
     Gcry.default_heap.collect
+  end
+
+  # Boehm-compatible: clear unused stack near SP (also GCRY_CLEAR_STACK on alloc).
+  def self.clear_stack
+    return unless @@gcry_ready
+    Gcry.clear_stack
   end
 
   def self.collect_a_little : Int

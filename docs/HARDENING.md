@@ -41,6 +41,10 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not record/skip pages from type_id-gate false roots |
 | `GCRY_TLAB=1` | Thread-local freelist buffers for parallel ExecutionContexts |
+| `GCRY_CLEAR_STACK=1` | **Experimental RSS:** wipe below SP−red-zone on alloc (no Fiber API; Boehm-style; not stack maps) |
+| `GCRY_CLEAR_STACK_BYTES` | Bytes to clear (default **4096**; fiber stacks cap smaller) |
+| `GCRY_CLEAR_STACK_EVERY` | Clear every N allocs (env default **16** when `CLEAR_STACK=1`; API default 1) |
+| `GCRY_SCRUB_FIBERS=1` | **Experimental RSS:** before mark, zero capped window below parked fiber SP (not full unused span) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** (default **1**). Process: STW-exempt `pthread`s; library: `Crystal::Thread`. Measure thr before enabling — HTTP workloads (Kemal `/json`, acikturkiye) have **regressed** vs serial mark. |
 | `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` on dormant/sparse pages |
 
@@ -76,7 +80,7 @@ Typical sources of extra retention:
 - Integer / float bit patterns that alias pointers
 - `/proc/self/maps` RW scans of libraries (broader than ideal; skips the managed heap)
 
-Mitigations: nursery (young objects die faster), tighter static-root filters, precise stack maps (compiler work).
+Mitigations: nursery (young objects die faster), tighter static-root filters, precise stack maps (compiler work), or **runtime scrubbing** (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) which only wipes unused stack regions (Boehm-style; not a substitute for stack maps).
 
 Rough check in process mode:
 

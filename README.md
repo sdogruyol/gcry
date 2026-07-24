@@ -31,7 +31,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 
 - Parallel ExecutionContexts: experimental (`GCRY_TLAB=1`); stick to parallelism **1** for production
 - Not a drop-in Boehm replacement on macOS / Windows yet
-- Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**90%** of Boehm, post-GC RSS ~**0.93×**; see [docs/PERF.md](docs/PERF.md))
+- Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**92%** of Boehm, post-GC RSS ~**0.97×**; see [docs/PERF.md](docs/PERF.md))
 
 ---
 
@@ -123,6 +123,8 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
 | `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
+| `GCRY_CLEAR_STACK=1` | Wipe below SP (skip red zone; every 16 allocs); RSS experiment |
+| `GCRY_SCRUB_FIBERS=1` | Capped wipe below parked fiber SP before mark; RSS experiment |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers 1–16 (default **1**). Process: STW-exempt pthreads; library: `Crystal::Thread`. **Measure first** — Kemal `/json` and acikturkiye `/api/v1/` saw thr **regress** (spinlock / wake cost ≫ mark win). |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only type_id filter (process default **on**) |
@@ -147,9 +149,9 @@ Same machine, vs Boehm (`wrk -c 100 -d 30`). Higher % = closer to Boehm. Prefer 
 
 | Workload | gcry vs Boehm |
 |----------|-------------:|
-| Alloc-heavy JSON (`/json`) thr | **~89%** (median of 3) |
-| Idle `/` thr | **~91%** |
-| `/json` post-GC RSS | **~0.93×** |
+| Alloc-heavy JSON (`/json`) thr | **~92%** (median of 3) |
+| Idle `/` thr | **~89%** |
+| `/json` post-GC RSS | **~0.97×** |
 | `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 
 Details: [docs/PERF.md](docs/PERF.md). Microbench: `make bench`. HTTP: `make bench-kemal-wrk`.

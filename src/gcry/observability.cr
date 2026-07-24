@@ -77,6 +77,10 @@ module Gcry
         parallel_mark_workers:     heap.parallel_mark_workers,
         parallel_mark_runs:        heap.parallel_mark_runs,
         parallel_mark_stolen:      heap.parallel_mark_stolen,
+        clear_stack_calls:         heap.clear_stack_calls,
+        clear_stack_bytes_total:   heap.clear_stack_bytes_total,
+        fiber_scrub_runs:          heap.fiber_scrub_runs,
+        fiber_scrub_bytes_total:   heap.fiber_scrub_bytes_total,
         barrier_backend:           heap.barrier_backend_name,
         barrier_dirty_rescans:     heap.barrier_dirty_rescans,
       }.to_json

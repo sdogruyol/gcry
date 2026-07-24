@@ -21,6 +21,16 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.7.0-dev Phase 12 | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
 | **0.7.0** | **~92%** | **~90%** | Phase 12 defaults + layout / root type_id / STW SP clamp; post-GC RSS **~0.93×** (median of 3) |
 | **0.8.0** | **~91%** | **~89%** | Barriers/TLAB/blacklist/layouts/atfork/aarch64/metrics; post-GC RSS **~0.93×** (median of 3) |
+| **unreleased** | **~89%** | **~92%** | Stack scrub (opt-in) + parallel-mark + observability; post-GC RSS **~0.97×** (median of 3) |
+
+Same-host **unreleased** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path, fresh release binaries; scrub env **off**.
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|-------:|--------------:|
+| `/` | 92922 | 82494 | **88.8%** | **0.97×** |
+| `/json` | 40162 | 36878 | **91.8%** | **0.97×** |
+
+Raw: `bench/median_kemal_boehm.sh` → `/tmp/gcry-median-kemal-unreleased.tsv`.
 
 Same-host **0.8.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path, fresh release binaries.
 
@@ -61,4 +71,6 @@ Same-day gcry + Boehm on both paths → append a row (and refresh README). Do no
 ```sh
 make bench-kemal-wrk   # gcry; Boehm: same binary without -Dgc_none
 # RSS: after wrk, curl /gc-collect then read VmRSS
+# Median-of-3 vs Boehm (both paths): ./bench/median_kemal_boehm.sh
+# Dogfood acikturkiye: ./bench/median_acikturkiye_boehm.sh
 ```

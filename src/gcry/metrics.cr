@@ -38,6 +38,10 @@ module Gcry
     getter size_class_live_bytes : UInt64
     getter small_mapped_bytes : UInt64
     getter released_chunk_bytes : UInt64
+    getter clear_stack_calls : UInt64
+    getter clear_stack_bytes_total : UInt64
+    getter fiber_scrub_runs : UInt64
+    getter fiber_scrub_bytes_total : UInt64
 
     def initialize(
       @collections : UInt64, @major_collections : UInt64, @minor_collections : UInt64,
@@ -53,6 +57,8 @@ module Gcry
       @layout_entries : Int32, @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
+      @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
+      @fiber_scrub_runs : UInt64, @fiber_scrub_bytes_total : UInt64,
     )
     end
   end
@@ -101,6 +107,10 @@ module Gcry
       heap.size_class_live_bytes,
       heap.small_mapped_bytes,
       heap.released_chunk_bytes,
+      heap.clear_stack_calls,
+      heap.clear_stack_bytes_total,
+      heap.fiber_scrub_runs,
+      heap.fiber_scrub_bytes_total,
     )
   end
 
@@ -189,6 +199,18 @@ module Gcry
       io << "# HELP #{prefix}_barrier_backend Info label for active barrier\n"
       io << "# TYPE #{prefix}_barrier_backend gauge\n"
       io << "#{prefix}_barrier_backend{name=\"#{m.barrier_backend}\"} 1\n"
+      io << "# HELP #{prefix}_clear_stack_calls_total Alloc-path unused-stack wipes\n"
+      io << "# TYPE #{prefix}_clear_stack_calls_total counter\n"
+      io << "#{prefix}_clear_stack_calls_total #{m.clear_stack_calls}\n"
+      io << "# HELP #{prefix}_clear_stack_bytes_total Bytes zeroed by clear_stack\n"
+      io << "# TYPE #{prefix}_clear_stack_bytes_total counter\n"
+      io << "#{prefix}_clear_stack_bytes_total #{m.clear_stack_bytes_total}\n"
+      io << "# HELP #{prefix}_fiber_scrub_runs_total Collections that scrubbed parked fibers\n"
+      io << "# TYPE #{prefix}_fiber_scrub_runs_total counter\n"
+      io << "#{prefix}_fiber_scrub_runs_total #{m.fiber_scrub_runs}\n"
+      io << "# HELP #{prefix}_fiber_scrub_bytes_total Bytes zeroed on parked fiber stacks\n"
+      io << "# TYPE #{prefix}_fiber_scrub_bytes_total counter\n"
+      io << "#{prefix}_fiber_scrub_bytes_total #{m.fiber_scrub_bytes_total}\n"
     end
   end
 end
