@@ -517,8 +517,9 @@ module Gcry
 
         t0 = monotonic_ns
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_candidate(ptr) }
-        roots.try &.each { |ptr| mark_candidate(ptr) }
+        # Explicit roots respect allow_interior_pointers (ambient-style).
+        @roots.each { |ptr| mark_root_candidate(ptr) }
+        roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
         # Fiber objects + suspended stacks (once; not also via push_gc_roots).
         scan_all_fiber_roots if scan_stack
@@ -743,8 +744,8 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_candidate(ptr) }
-        roots.try &.each { |ptr| mark_candidate(ptr) }
+        @roots.each { |ptr| mark_root_candidate(ptr) }
+        roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
@@ -808,17 +809,19 @@ module Gcry
       end
     end
 
-    # Heap-scan / explicit roots: never apply type_id_gate (raw buffers OK).
+    # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
+    # into its allocation). Never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: false)
+      mark_impl(pointer, gate_type_id: false, base_only: false)
     end
 
-    # Ambient roots (stack / static / fiber stacks): optional type_id plausibility.
+    # Ambient roots (stack / static / fiber stacks): optional type_id gate;
+    # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
     private def mark_root_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: @type_id_gate)
+      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers)
     end
 
-    private def mark_impl(pointer : Void*, gate_type_id : Bool) : Nil
+    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -828,8 +831,9 @@ module Gcry
       return unless header
       return if BlockHeader.free?(header)
 
-      unless @allow_interior_pointers
-        # Object-base only: interiors (e.g. into String bytes) inflate false retention.
+      if base_only
+        # Object-base only on ambient roots: interiors into String/Array buffers
+        # inflate false retention. Heap marks must allow interiors (shift).
         return if addr != BlockHeader.user_from(header).address
       end
 
@@ -848,6 +852,7 @@ module Gcry
     end
 
     # Keep allocation alive without scanning its payload (integer / index buffers).
+    # Always allow interiors — Array(UInt8)#shift stores an interior @buffer.
     private def mark_noscan(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
@@ -856,10 +861,6 @@ module Gcry
       header = find_object(pointer)
       return unless header
       return if BlockHeader.free?(header)
-
-      unless @allow_interior_pointers
-        return if addr != BlockHeader.user_from(header).address
-      end
 
       return if BlockHeader.marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)

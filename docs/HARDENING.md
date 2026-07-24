@@ -28,7 +28,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (escape hatch) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Empty bytes to keep dormant with `MADV_DONTNEED` (default `0` = munmap all) |
-| `GCRY_INTERIOR=1` | Allow interior pointers (default **base-pointer-only**) |
+| `GCRY_INTERIOR=1` | Allow interior pointers on **ambient roots** (default **base-pointer-only**). Heap field marks always allow interiors (`Array#shift`). |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page DONTNEED (opt-in; STW-heavy) |
 | `GCRY_LARGE_CACHE` | Free large-object bytes retained after post-collect trim (default `8388608` / 8 MiB) |
 | `GCRY_CHUNK_BYTES` | Size-class chunk size in bytes (default `262144` / 256 KiB; ≥64 KiB, multiple of 4096) |
