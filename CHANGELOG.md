@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Observability:** `Gcry.metrics`, `Gcry.prometheus_text`, `Gcry::Observability.json_stats`; Kemal `/metrics` + richer `/gc-stats`.
 - **Ameba** lint in CI (`make lint`); [docs/API.md](docs/API.md); README gcry-vs-Boehm table; [docs/ANNOUNCE.md](docs/ANNOUNCE.md) draft.
 
+### Fixed
+
+- **`register_layouts`:** skip non-concrete type args (`Array(Int)`, `Runnables(256)`, unbound generics) so fat apps (e.g. acikturkiye) compile even when the method is present but unused.
+
+### Measured (2026-07-24, median of 3, see [docs/PERF.md](docs/PERF.md) / [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md))
+
+- Kemal: `/` **~91%** Boehm, `/json` **~89%**, post-GC RSS **~0.93×**.
+- acikturkiye `/api/v1/`: thr **~95%** Boehm, post-GC RSS **~3.2×** (RSS gate still fail; dense conservative-live).
+
 ## [0.7.0] - 2026-07-24
 
 ### Fixed
