@@ -18,11 +18,17 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.7.0-dev (pre Phase 12) | — | **~100%** | exact-fit large; empty munmap outside STW; chunks retained by default |
 | 0.7.0-dev + `GCRY_RELEASE_CHUNKS=1` | — | **~92%** | `/json` 37838 vs Boehm 40938; retained ~76 MiB fully-free chunks |
 | 0.7.0-dev + `GCRY_CHUNK_BYTES=131072` | — | **~98.5%** | 40516 vs 41118; RSS ≈ default (empty-chunk waste) |
-| **0.7.0-dev Phase 12** | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
+| 0.7.0-dev Phase 12 | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
+| **0.7.0** | **~92%** | **~90%** | Phase 12 defaults + layout / root type_id / STW SP clamp; post-GC RSS **~0.93×** (median of 3) |
 
-Same-host Phase 12 (2026-07-24, Crystal 1.21, WSL2): five paired `/json` runs — thr median **93.4%** (range 91.7–96.8%); post-GC RSS median **0.93×** (always ≤1.0×). Absolute ~36–38k vs Boehm ~37–41k req/s. `GCRY_KEEP_CHUNKS=1` recovers ~**95%** thr at ~**3×** RSS.
+Same-host **0.7.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path.
 
-STW SP clamp (2026-07-24, median of 3 `/json`): thr **~93%**; post-GC RSS **~0.93×** — on vs `GCRY_DISABLE_SP_CLAMP=1` is noise (Kemal already Boehm-class RSS).
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|-------:|--------------:|
+| `/` | 83619 | 76526 | **91.5%** | **0.94×** |
+| `/json` | 41191 | 37186 | **90.3%** | **0.93×** |
+
+`GCRY_KEEP_CHUNKS=1` still trades thr (~**95%**) for ~**3×** RSS. Soft-dirty nursery stays opt-in.
 
 ## How to record
 

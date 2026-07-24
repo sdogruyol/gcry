@@ -5,7 +5,7 @@
 Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (0.7.0-dev / Phase 12) | bdwgc (Crystal default) |
+| Area | gcry (0.7.0 / Phase 12) | bdwgc (Crystal default) |
 |------|-----------------------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
@@ -25,7 +25,7 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Platforms | Linux x86_64 first; aarch64 cross-compile CI | Broad |
 | Unit-test mode | `Gcry::Heap` under Boehm | N/A |
 | `prof_stats` | Heap / reclaim / explicit-free counters filled | Full LibGC fields |
-| Kemal `/json` (same host) | thr ~**93%**; post-GC RSS ~**0.93×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (same host) | thr ~**90%**; post-GC RSS ~**0.93×** — [PERF.md](PERF.md) | baseline |
 
 ## Smoke checklist (gcry)
 

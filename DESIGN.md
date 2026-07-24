@@ -285,7 +285,8 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Process default: **empty-chunk release on** (`empty_chunk_retain` **0** → munmap outside STW; freelist **range-unlink**). `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes.
 - Mark: **base-pointer-only** (`GCRY_INTERIOR=1`); `GCRY_TYPE_ID_GATE` / `GCRY_PAGE_DONTNEED` opt-in.
 - Process major threshold **32 MiB**; large-cache retain default **8 MiB**.
-- Kemal `/json` (2026-07-24, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×**. Thr gate (≥95%) still open — see [docs/PERF.md](docs/PERF.md).
+- Kemal `/json` (2026-07-24, median of 5, Phase 12-dev): thr **~93%** of Boehm; **post-GC RSS ~0.93×**.
+- **v0.7.0 cut** (2026-07-24, median of 3): `/` **~92%**; `/json` **~90%**; post-GC RSS **~0.93×** — see [docs/PERF.md](docs/PERF.md). Thr gate (≥95%) still open.
 - acikturkiye `/api/v1/` (2026-07-24, median of 3): thr **~96%**; **post-GC RSS ~2.55×** (FAIL ≤1.5×). Released empty chunks ~**2 MiB** vs live ~**165 MiB** — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - **Layout-precise mark** (`Gcry::Layout` / `register_hash`): boot-safe StaticArray registry, size gate, noscan value/index buffers, Hash entry walk. acikturkiye + layout (2026-07-24): RSS still **~2.8×**, precise-scan hit rate low — dense live remains mostly conservative (stacks / unregistered types). `GCRY_DISABLE_LAYOUT=1`.
 - **Root-only type_id gate** (process default-on): ambient roots gated; heap scan ungated. acikturkiye ~**16** rejects/major, RSS still **~3×**.
