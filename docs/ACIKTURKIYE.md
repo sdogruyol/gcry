@@ -6,10 +6,12 @@ Field notes from dogfooding gcry as process GC on **acikturkiye** (Kemal + Postg
 
 - Prefer **`--release`** for wrk A/B (debug/`--error-trace` makes mutator look ~5–10× worse than GC).
 - WSL: Postgres lives on the **Windows host**. Use `ACIKTURKIYE_ENV=demo` (loads `.env.demo` → `DATABASE_URL` with the host IP).
-- Build example: `export ACIKTURKIYE_ENV=demo && crystal build -Dgc_none --release src/acikturkiye.cr -o acikturkiye-gcry`
-- Expose `GET /gc-stats` (see [bench/kemal/src/server.cr](../bench/kemal/src/server.cr)) or dump `Gcry.pause_stats` + `Heap#last_phase_*_ns` + `finalizer_entry_count` / `finalizer_link_count`.
+- One-liner (from acikturkiye tree, sibling `../gcry`): `make run-demo-gcry` / `make run-demo-boehm`.
+- Build: `ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry`
+- Diagnostics (gcry build): `GET /gc-stats` → `Gcry::Observability.json_stats`; `GET /metrics` → Prometheus; `GET /gc-collect`. Same helpers as [docs/API.md](API.md) / Kemal bench.
 - Toy Kemal `make bench-kemal-wrk` understates fat-binary / many-fiber / large-buffer costs.
 - Mobile API needs `X-API-KEY` / `X-API-SECRET` from `.env.demo`.
+- `GCRY_PARALLEL_MARK=N` is experimental — same-host wrk thr **regressed** vs serial; keep default `N=1` unless measuring.
 
 ## Release A/B (same host, wrk `-c 100 -d 30` `/api/v1`)
 

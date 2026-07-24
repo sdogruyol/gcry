@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - README / HARDENING / POLICY: `GCRY_PARALLEL_MARK` is real for process GC (pthread steals), not counter-only — and labeled **experimental / measure first** (Kemal `/json` + acikturkiye `/api/v1/` thr **regressed** vs `N=1` in same-host wrk).
 - README / HARDENING: document `GCRY_DISABLE_*` escapes, `GCRY_TLAB`.
+- Dogfood docs: [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) + [docs/API.md](docs/API.md) point at Observability routes; acikturkiye `make run-demo-gcry` / README GC section.
 
 ## [0.8.0] - 2026-07-24
 
