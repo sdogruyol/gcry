@@ -31,6 +31,13 @@ jobs:
       - name: Check formatting
         run: crystal tool format --check
 
+      - name: Ameba
+        run: |
+          shards install --development
+          cd lib/ameba && shards build
+          cp -f bin/ameba ../../bin/ameba
+          ../../bin/ameba
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 

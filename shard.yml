@@ -15,3 +15,8 @@ description: |
 repository: https://github.com/sdogruyol/gcry
 homepage: https://github.com/sdogruyol/gcry
 documentation: https://github.com/sdogruyol/gcry#readme
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
+    branch: master

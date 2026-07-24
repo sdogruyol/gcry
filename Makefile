@@ -8,12 +8,12 @@ WRK_BASE_URL ?= http://127.0.0.1:3001
 WRK_PATHS ?= / /json
 PORT ?= 3001
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean"
+	@echo "Targets: spec spec-process fuzz fuzz-short format format-check lint samples bench ..."
 	@echo "wrk knobs: WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_PATHS='$(WRK_PATHS)' PORT=$(PORT)"
 	@echo "record: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
@@ -40,6 +40,12 @@ format:
 
 format-check:
 	$(CRYSTAL) tool format --check
+
+lint:
+	shards install --development
+	cd lib/ameba && shards build
+	cp -f lib/ameba/bin/ameba bin/ameba
+	bin/ameba
 
 samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello

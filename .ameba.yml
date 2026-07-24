@@ -1,0 +1,52 @@
+# Ameba for gcry: error-class issues only; GC internals trip style/metrics noise.
+Globs:
+  - src/**/*.cr
+  - spec/**/*.cr
+  - process_spec/**/*.cr
+  - samples/**/*.cr
+
+ExcludedPaths:
+  - lib
+  - bin
+  - bench
+
+Metrics/CyclomaticComplexity:
+  Enabled: false
+Metrics/MethodLength:
+  Enabled: false
+Naming/BlockParameterName:
+  Enabled: false
+Naming/QueryBoolMethods:
+  Enabled: false
+Naming/VariableNames:
+  Enabled: false
+Naming/PredicateName:
+  Enabled: false
+Naming/AccessorMethodName:
+  Enabled: false
+Style/VariableNames:
+  Enabled: false
+Style/RedundantNilInControlExpression:
+  Enabled: false
+Style/RedundantBegin:
+  Enabled: false
+Style/ParenthesesAroundCondition:
+  Enabled: false
+Style/UnlessElse:
+  Enabled: false
+Style/NegatedConditionsInUnless:
+  Enabled: false
+Documentation/Documentation:
+  Enabled: false
+Lint/UselessAssign:
+  Enabled: false
+Lint/UnusedArgument:
+  Enabled: true
+Lint/NotNil:
+  Enabled: false
+Lint/UnusedExpression:
+  Enabled: false
+Lint/WhitespaceAroundMacroExpression:
+  Enabled: false
+Lint/ShadowingOuterLocalVar:
+  Enabled: false
