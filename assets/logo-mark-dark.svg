@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- gcry mark inverted for dark backgrounds -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="gcry mark">
+  <title>gcry</title>
+  <path fill="#fff" d="M64 6 L118 42 L118 94 L64 122 L10 94 L10 42 Z"/>
+  <path fill="#bbb" d="M64 6 L118 42 L64 58 Z"/>
+  <path fill="#999" d="M64 6 L64 58 L10 42 Z"/>
+  <path fill="#ddd" d="M10 42 L64 58 L64 122 L10 94 Z"/>
+  <path fill="#eee" d="M118 42 L64 58 L64 122 L118 94 Z"/>
+  <path fill="none" stroke="#000" stroke-width="9" stroke-linecap="round"
+        d="M38 76 A30 30 0 1 0 90 76"/>
+  <path fill="#000" d="M86 66 L100 78 L84 84 Z"/>
+  <circle cx="64" cy="68" r="8" fill="#000"/>
+  <circle cx="64" cy="68" r="3.5" fill="#fff"/>
+</svg>

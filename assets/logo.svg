@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  gcry lockup: faceted mark + stroke wordmark
+  Original. Palette #000 / #777 / #fff (Crystal media colors) without
+  using or combining with the official Crystal logo.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 128" role="img" aria-label="gcry">
+  <title>gcry</title>
+
+  <path fill="#000" d="M64 6 L118 42 L118 94 L64 122 L10 94 L10 42 Z"/>
+  <path fill="#777" d="M64 6 L118 42 L64 58 Z"/>
+  <path fill="#555" d="M64 6 L64 58 L10 42 Z"/>
+  <path fill="#333" d="M10 42 L64 58 L64 122 L10 94 Z"/>
+  <path fill="#1a1a1a" d="M118 42 L64 58 L64 122 L118 94 Z"/>
+  <path fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round"
+        d="M38 76 A30 30 0 1 0 90 76"/>
+  <path fill="#fff" d="M86 66 L100 78 L84 84 Z"/>
+  <circle cx="64" cy="68" r="8" fill="#fff"/>
+  <circle cx="64" cy="68" r="3.5" fill="#000"/>
+
+  <g fill="none" stroke="#000" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <!-- g: bowl + descender from the right (not a mirrored b) -->
+    <circle cx="176" cy="52" r="24"/>
+    <path d="M200 52 V96 Q200 112 176 112 H158"/>
+    <!-- c -->
+    <path d="M258 32 A24 24 0 1 0 258 72"/>
+    <!-- r -->
+    <path d="M286 28 V92 M286 48 Q286 28 312 28"/>
+    <!-- y -->
+    <path d="M334 28 L356 66 L378 28 M356 66 V112"/>
+  </g>
+</svg>

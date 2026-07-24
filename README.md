@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" alt="gcry" width="400"/>
+</p>
+
 # gcry
 
 **Crystal’s GC, written in Crystal.**
