@@ -1,6 +1,3 @@
-require "./mark"
-require "./roots"
-require "./finalizer"
 {% if flag?(:linux) %}
   require "./platform/linux_roots"
   require "./platform/linux_stack"
@@ -9,7 +6,15 @@ require "./finalizer"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"
+  require "./platform/darwin_roots"
+  require "./platform/darwin_stack"
+  require "./platform/darwin_stw"
+  require "./platform/linux_fork"
 {% end %}
+
+require "./mark"
+require "./roots"
+require "./finalizer"
 
 module Gcry
   class Heap

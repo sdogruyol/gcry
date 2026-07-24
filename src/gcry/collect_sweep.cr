@@ -380,7 +380,7 @@ module Gcry
     # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
     # madvise requires page-aligned addr/len — round into the data region.
     private def dontneed_chunk_data(chunk : ChunkHeader*) : Nil
-      {% if flag?(:linux) %}
+      {% if flag?(:linux) || flag?(:darwin) %}
         page = 4096_u64
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address
@@ -397,7 +397,7 @@ module Gcry
     # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
     # safe because those blocks are omitted from the freelist (HOLED + rebuild).
     private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
-      {% if flag?(:linux) %}
+      {% if flag?(:linux) || flag?(:darwin) %}
         page = 4096_u64
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address

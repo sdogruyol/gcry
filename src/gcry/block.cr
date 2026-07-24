@@ -1,5 +1,12 @@
 require "c/sys/mman"
 
+{% if flag?(:darwin) %}
+  # Linux name; Darwin only defines MAP_ANON.
+  lib LibC
+    MAP_ANONYMOUS = MAP_ANON
+  end
+{% end %}
+
 module Gcry
   # Header placed immediately before every user allocation.
   #

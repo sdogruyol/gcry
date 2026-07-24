@@ -96,7 +96,11 @@ module Gcry
       @mark_lock = Crystal::SpinLock.new
       @mark_parallel = false
       @mark_worker_threads = [] of Thread
-      @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(LibC::PthreadT.new(0))
+      {% if flag?(:darwin) %}
+        @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(Pointer(Void).null.as(LibC::PthreadT))
+      {% else %}
+        @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(LibC::PthreadT.new(0))
+      {% end %}
       @mark_pthread_count = 0
       @mark_pthread_mode = false
       @mark_epoch = Atomic(UInt64).new(0_u64)

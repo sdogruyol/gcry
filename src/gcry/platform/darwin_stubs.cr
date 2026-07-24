@@ -1,6 +1,5 @@
-# macOS / Darwin platform surface. Process GC under `-Dgc_none` is not a
-# supported runtime yet (needs Mach thread suspend + dyld image roots). Stubs
-# keep the shard compiling so library-heap specs can run under Boehm on darwin.
+# Darwin soft-dirty / mprotect stubs + capability flag.
+# Real stack / roots / STW / atfork live in darwin_{stack,roots,stw}.cr + linux_fork.cr.
 
 require "c/pthread"
 
@@ -16,21 +15,7 @@ module Gcry
       PAGE_SIZE = 4096_u64
 
       def self.darwin_process_gc_supported? : Bool
-        false
-      end
-
-      def self.invalidate_static_root_cache : Nil
-      end
-
-      def self.scan_static_roots(& : Void*, Void* ->) : Nil
-      end
-
-      def self.pthread_stack_bounds(thread : LibC::PthreadT) : {Void*, Void*}?
-        nil
-      end
-
-      def self.current_pthread_stack_bounds : {Void*, Void*}?
-        nil
+        true
       end
 
       def self.clear_soft_dirty : Bool
@@ -88,49 +73,6 @@ module Gcry
 
       def self.count_mprotect_dirty_pages : {UInt64, UInt64}
         {0_u64, 0_u64}
-      end
-
-      def self.install_stw_sp_capture : Nil
-      end
-
-      def self.stw_sp_capture_installed? : Bool
-        false
-      end
-
-      def self.stw_sp_clamp_enabled? : Bool
-        false
-      end
-
-      def self.stw_sp_clamp_enabled=(value : Bool) : Bool
-        value
-      end
-
-      def self.clear_thread_sps : Nil
-      end
-
-      def self.reset_stw_after_fork : Nil
-      end
-
-      def self.thread_sp(id : LibC::PthreadT) : Void*?
-        nil
-      end
-
-      def self.sp_from_ucontext(uctx : Void*) : UInt64
-        0_u64
-      end
-
-      def self.rsp_from_ucontext(uctx : Void*) : UInt64
-        0_u64
-      end
-
-      def self.set_atfork_handlers(prepare : -> Nil, parent : -> Nil, child : -> Nil) : Nil
-      end
-
-      def self.install_atfork : Nil
-      end
-
-      def self.atfork_installed? : Bool
-        false
       end
     {% end %}
   end

@@ -20,11 +20,6 @@ module GC
       Gcry::Platform.install_stw_sp_capture
     end
 
-    {% if flag?(:darwin) && flag?(:gc_none) %}
-      # Process GC on Darwin is stubbed; refuse boot rather than silently corrupt.
-      raise "gcry: process GC (-Dgc_none) is not supported on macOS yet (Mach STW / dyld roots); see docs/POLICY.md"
-    {% end %}
-
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
@@ -52,8 +47,11 @@ module GC
 
     {% if flag?(:linux) && flag?(:gnu) %}
       heap.set_stackbottom(LibC.__libc_stack_end)
+    {% elsif flag?(:darwin) %}
+      if bounds = Gcry::Platform.current_pthread_stack_bounds
+        heap.set_stackbottom(bounds[1])
+      end
     {% end %}
-
     # Suspended fiber stacks are scanned once inside Heap#scan_all_fiber_roots
     # (with guard clamp). Do not also call push_gc_roots here — that doubled
     # stack word walks under HTTP (many fibers) and dominated STW pauses.
