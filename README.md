@@ -103,9 +103,12 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty-page scan only if dirty/total ≤ this % (default **25**) |
 | `GCRY_DISABLE_SOFT_DIRTY=1` | Never use soft-dirty page scan |
+| `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV barrier (process GC fallback) |
+| `GCRY_DISABLE_MPROTECT=1` | Forbid mprotect barrier |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
-| `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |
+| `GCRY_INCREMENTAL=1` | Sliced majors + dirty-page re-scan when a barrier is armed |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
+| `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |

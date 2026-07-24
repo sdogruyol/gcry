@@ -71,6 +71,8 @@ jobs:
           GCRY_KEEP_CHUNKS=1 ./bin/hello_env
           GCRY_RELEASE_CHUNKS=1 ./bin/hello_env
           GCRY_STRESS=1 GCRY_STRESS_EVERY=8 ./bin/hello_env
+          GCRY_MPROTECT_BARRIER=1 ./bin/hello_env
+          GCRY_INCREMENTAL=1 ./bin/hello_env
 
       - name: Sample stress under GCRY_STRESS
         run: |

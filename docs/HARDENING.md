@@ -21,9 +21,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; soft-dirty arms on WSL 6.18+, HTTP still too dirty for a win) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
 | `GCRY_SOFT_DIRTY_MAX` | Max dirty/total % for soft-dirty page scan (default `25`; `0` = never) |
-| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0) |
-| `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0); may fall through to mprotect if allowed |
+| `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV card table (process GC) |
+| `GCRY_DISABLE_MPROTECT=1` | Never install mprotect barrier |
+| `GCRY_INCREMENTAL=1` | Sliced auto-majors; dirty-page re-scan when a barrier is armed |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
+| `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default `16`) |
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
 | `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (escape hatch) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |

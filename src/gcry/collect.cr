@@ -283,6 +283,8 @@ module Gcry
     end
 
     # Incremental major mark slice (Boehm-style collect_a_little).
+    # With a page-dirty barrier, termination re-scans dirty pages so stores into
+    # already-scanned objects are not missed (sounder than plain SATB without barriers).
     # Returns true when a full cycle (mark+sweep) has completed.
     def collect_a_little(work_units : Int32 = DEFAULT_INCREMENTAL_WORK) : Bool
       return false if @destroyed
@@ -302,6 +304,12 @@ module Gcry
         stop_world
         mark_loop_budget(work_units)
         if @mark_stack.empty?
+          # Sound termination: rematerialize edges from dirty pages, then continue.
+          if scan_dirty_pages_for_pointers(nursery_only: false)
+            mark_loop_budget(work_units)
+          end
+        end
+        if @mark_stack.empty?
           enqueue_unreachable_finalizers
           sweep(major: true)
           @bytes_since_gc = 0_u64
@@ -312,9 +320,11 @@ module Gcry
           if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
             Platform.invalidate_static_root_cache
           end
+          @soft_dirty_skip_until_major = false
           @inc_active = false
           @incremental_marking = false
           finished = true
+          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
         end
       ensure
         start_world
@@ -328,6 +338,8 @@ module Gcry
       end
 
       if finished
+        flush_pending_empty_chunks
+        trim_large_cache
         @running_finalizers = true
         begin
           @finalizers.run_pending
@@ -483,6 +495,10 @@ module Gcry
       @last_soft_dirty_pages = 0_u64
       @last_soft_dirty_total = 0_u64
       @soft_dirty_skip_until_major = false
+      disarm_mprotect_barrier if @barrier_backend.mprotect?
+      @barrier_backend = Platform::BarrierBackend::None
+      @barrier_dirty_rescans = 0_u64
+      @barrier_full_fallbacks = 0_u64
       reset_pause_stats
     end
 
@@ -553,7 +569,7 @@ module Gcry
         @last_phase_stacks_ns = monotonic_ns - t0
 
         # Conservatively find nursery pointers from old objects.
-        # Soft-dirty (when armed) limits the scan to pages written since last minor.
+        # Official path: page-dirty remembered set (soft-dirty / mprotect).
         scan_old_for_nursery_pointers unless major
 
         t0 = monotonic_ns
@@ -577,11 +593,11 @@ module Gcry
           end
           # Next minor starts a fresh soft-dirty window after a major.
           @soft_dirty_skip_until_major = false
-          arm_soft_dirty_after_collect if @nursery_enabled
+          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
         else
           @nursery_alloc_bytes = 0_u64
           @minor_collections += 1
-          arm_soft_dirty_after_collect
+          arm_page_barrier_after_collect
         end
         @collections += 1
       ensure
@@ -769,6 +785,8 @@ module Gcry
           scan_mutator_stack
           scan_other_thread_stacks
         end
+        # Arm page-dirty barrier for mutator writes between incremental slices.
+        arm_page_barrier_after_collect
       ensure
         start_world
         unlock_write
@@ -781,6 +799,9 @@ module Gcry
       @inc_active = false
       @incremental_marking = false
       @mark_stack.clear
+      disarm_mprotect_barrier if @barrier_backend.mprotect?
+      @barrier_backend = Platform::BarrierBackend::None
+      @soft_dirty_armed = false
     end
 
     # Emit [low, high) minus each mapped heap chunk via sorted chunk index merge.
@@ -1028,61 +1049,12 @@ module Gcry
     end
 
     private def scan_old_for_nursery_pointers : Nil
-      {% if flag?(:linux) %}
-        # Soft-dirty is for process GC (old→young without full old scan).
-        # Library heaps under Boehm keep the full scan (and some kernels/WSL
-        # do not set soft-dirty bits reliably).
-        # Walk mapped old chunks only — [heap_min, heap_max) is sparse and
-        # understates dirty fraction / wastes pagemap I/O on holes.
-        if @soft_dirty_armed && @scan_static_roots && @soft_dirty_max_pct > 0
-          dirty = 0_u64
-          total = 0_u64
-          pagemap_ok = true
-          each_chunk do |chunk|
-            low = chunk.address
-            high = chunk.address + chunk.value.mapped_bytes
-            counts = Platform.count_soft_dirty_pages(low, high)
-            unless counts
-              pagemap_ok = false
-              break
-            end
-            d, t = counts
-            dirty += d
-            total += t
-          end
-          @last_soft_dirty_pages = dirty
-          @last_soft_dirty_total = total
+      # Official remembered set: soft-dirty or mprotect dirty pages.
+      if scan_dirty_pages_for_pointers(nursery_only: true)
+        return
+      end
 
-          if pagemap_ok && total > 0 && dirty * 100 <= total * @soft_dirty_max_pct.to_u64
-            scan_ok = true
-            each_chunk do |chunk|
-              low = chunk.address
-              high = chunk.address + chunk.value.mapped_bytes
-              ok = Platform.each_dirty_page(low, high) do |page|
-                scan_range_for_nursery_pointers(
-                  Pointer(Void).new(page),
-                  Pointer(Void).new(page + Platform::PAGE_SIZE),
-                )
-              end
-              unless ok
-                scan_ok = false
-                break
-              end
-            end
-            if scan_ok
-              @soft_dirty_page_scans += 1
-              return
-            end
-          elsif pagemap_ok
-            @soft_dirty_fallbacks += 1
-            # Dirty-heavy mutator: stop paying pagemap/clear_refs every minor.
-            @soft_dirty_skip_until_major = true
-            @soft_dirty_armed = false
-          end
-          # Pagemap failed or too dirty — fall back to a full old-space scan.
-        end
-      {% end %}
-
+      # Fallback: full conservative old→young object walk.
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
@@ -1100,47 +1072,17 @@ module Gcry
 
     # Word-scan a mapped range for pointers into nursery objects (dirty pages).
     private def scan_range_for_nursery_pointers(low : Void*, high : Void*) : Nil
-      word = sizeof(Void*).to_u64
-      addr = (low.address + word - 1) & ~(word - 1)
-      limit = high.address
-      while addr + word <= limit
-        cand = Pointer(Void).new(Pointer(UInt64).new(addr).value)
-        if (h = find_object(cand)) && BlockHeader.nursery?(h)
-          mark_candidate(cand)
-        end
-        addr += word
-      end
+      scan_range_for_barrier_pointers(low, high, true)
     end
 
+    # Legacy name kept for destroy / docs; delegates to the page-barrier layer.
     private def arm_soft_dirty_after_collect : Nil
-      {% if flag?(:linux) %}
-        # Only arm for process GC; library tests always full-scan old space.
-        unless @scan_static_roots && @nursery_enabled
-          @soft_dirty_armed = false
-          return
-        end
-        if @soft_dirty_skip_until_major
-          @soft_dirty_armed = false
-          return
-        end
-        # Probe once: some kernels/WSL never set soft-dirty bits.
-        unless @soft_dirty_probed
-          @soft_dirty_works = Platform.clear_soft_dirty && soft_dirty_tracks_writes?
-          @soft_dirty_probed = true
-        end
-        if @soft_dirty_works
-          @soft_dirty_armed = Platform.clear_soft_dirty
-        else
-          @soft_dirty_armed = false
-        end
-      {% else %}
-        @soft_dirty_armed = false
-      {% end %}
+      arm_page_barrier_after_collect
     end
 
     # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
     # Uses a dedicated anonymous page — never touch the managed heap.
-    private def soft_dirty_tracks_writes? : Bool
+    protected def soft_dirty_tracks_writes? : Bool
       page = LibC.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(Platform::PAGE_SIZE),
@@ -1757,3 +1699,5 @@ module Gcry
     end
   end
 end
+
+require "./barrier"

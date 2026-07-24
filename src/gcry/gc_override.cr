@@ -110,9 +110,20 @@ module GC
       heap.soft_dirty_max_pct = max_pct.to_i32 if max_pct <= 100
     end
 
+    # Page-dirty barrier: prefer soft-dirty; mprotect as opt-in / fallback.
+    # Process GC may use mprotect when soft-dirty is unavailable.
+    heap.allow_mprotect_barrier = true
+    if env_flag_one?("GCRY_MPROTECT_BARRIER")
+      heap.prefer_mprotect_barrier = true
+      heap.allow_mprotect_barrier = true
+    end
+    if env_flag_one?("GCRY_DISABLE_MPROTECT")
+      heap.prefer_mprotect_barrier = false
+      heap.allow_mprotect_barrier = false
+    end
+
     if env_flag_one?("GCRY_INCREMENTAL")
-      # Experimental: sliced majors. Unsafe without write barriers if the mutator
-      # stores pointers into already-scanned objects (typical JSON/Hash workloads).
+      # Sliced majors with dirty-page re-scan when a barrier backend is armed.
       heap.incremental_auto = true
     end
 
