@@ -175,6 +175,12 @@ module GC
         heap.small_chunk_bytes = chunk_bytes
       end
     end
+
+    # Torture: collect every N allocs (CI / dogfood).
+    if env_flag_one?("GCRY_STRESS")
+      every = env_u64("GCRY_STRESS_EVERY") || 16_u64
+      heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool

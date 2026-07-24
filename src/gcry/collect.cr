@@ -66,6 +66,9 @@ module Gcry
     # ExecutionContext parallelism 1. Without STW + scanning that thread's
     # current fiber stack, live objects are swept → heap corruption under load.
     property stop_the_world : Bool = false
+    # Torture: collect every N allocations (0 = off). Process: GCRY_STRESS=1.
+    property stress_every : Int32 = 0
+    @alloc_ops : UInt64 = 0_u64
 
     getter unmapped_bytes : UInt64 = 0_u64
     # Last major STW phase timings (ns) — for /gc-stats and tuning.
@@ -412,6 +415,12 @@ module Gcry
       return unless @enabled
       return if @collecting
       return if @running_finalizers
+
+      @alloc_ops &+= 1
+      if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
+        collect
+        return
+      end
 
       if @nursery_enabled && @nursery_alloc_bytes >= @nursery_threshold
         minor_collect

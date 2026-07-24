@@ -8,12 +8,12 @@ WRK_BASE_URL ?= http://127.0.0.1:3001
 WRK_PATHS ?= / /json
 PORT ?= 3001
 
-.PHONY: all spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record clean"
+	@echo "Targets: spec spec-process fuzz fuzz-short format format-check samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean"
 	@echo "wrk knobs: WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_PATHS='$(WRK_PATHS)' PORT=$(PORT)"
 	@echo "record: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
@@ -22,6 +22,18 @@ $(BIN):
 
 spec:
 	$(CRYSTAL) spec --error-trace
+
+# Process GC facade tests (gcry is the process collector).
+spec-process: $(BIN)
+	$(CRYSTAL) spec -Dgc_none process_spec --error-trace
+
+fuzz: $(BIN)
+	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
+	$(BIN)/fuzz $${FUZZ_SECONDS:-30} $${FUZZ_SEED:-1}
+
+fuzz-short: $(BIN)
+	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
+	$(BIN)/fuzz 5 1
 
 format:
 	$(CRYSTAL) tool format
@@ -39,6 +51,10 @@ samples: $(BIN)
 
 bench: $(BIN)
 	$(CRYSTAL) build bench/churn.cr -o $(BIN)/churn
+
+# Short A/B thr gate (needs wrk). MIN_PCT=70 by default.
+bench-perf-smoke:
+	PORT=$(PORT) ./bench/perf_smoke.sh
 
 # Realistic Kemal HTTP server under gcry (-Dgc_none).
 bench-kemal: $(BIN)
