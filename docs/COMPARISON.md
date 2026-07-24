@@ -11,7 +11,7 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Language of core | Crystal | C |
 | Collection model | Conservative STW mark–sweep (nursery / incremental opt-in only) | Conservative (BDW) |
 | Fibers / ExecutionContext | STW other OS threads; fiber + stack roots | Yes (LibGC + thread bottoms) |
-| Parallel fibers (multi OS thread) | Experimental (`GCRY_TLAB=1`; `GCRY_PARALLEL_MARK=N` STW-exempt pthread mark) | Yes |
+| Parallel fibers (multi OS thread) | Experimental (`GCRY_TLAB=1`; `GCRY_PARALLEL_MARK` measure-first — HTTP thr can regress) | Yes |
 | Fork safety | **atfork reinit** (default; `LibC.fork`); `GCRY_DISABLE_ATFORK=1` poisons | `GC_set_handle_fork` |
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |

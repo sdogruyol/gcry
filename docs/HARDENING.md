@@ -41,7 +41,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not record/skip pages from type_id-gate false roots |
 | `GCRY_TLAB=1` | Thread-local freelist buffers for parallel ExecutionContexts |
-| `GCRY_PARALLEL_MARK=N` | Mark workers 1–16 — process GC uses STW-exempt `pthread`s; library heaps use `Crystal::Thread` |
+| `GCRY_PARALLEL_MARK=N` | **Experimental** (default **1**). Process: STW-exempt `pthread`s; library: `Crystal::Thread`. Measure thr before enabling — HTTP workloads (Kemal `/json`, acikturkiye) have **regressed** vs serial mark. |
 | `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` on dormant/sparse pages |
 
 Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. **Empty-chunk release is process default** (`GCRY_KEEP_CHUNKS=1` to retain). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
@@ -97,7 +97,7 @@ Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads 
 
 Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
 
-Parallel ExecutionContexts: STW covers all Crystal OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). `GCRY_PARALLEL_MARK=N` steals grey work with **STW-exempt raw pthreads** on process GC (Crystal::Thread helpers on library heaps). High parallelism is still experimental — see [docs/POLICY.md](POLICY.md).
+Parallel ExecutionContexts: STW covers all Crystal OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). `GCRY_PARALLEL_MARK=N` is **experimental** (default off / `N=1`): STW-exempt raw pthreads steal grey work on process GC, but same-host Kemal `/json` and acikturkiye `/api/v1/` wrk showed **lower** req/s than serial mark (mark phase longer under shared `@mark_lock`). Treat as a research knob — see [docs/POLICY.md](POLICY.md).
 
 ## Sanitizers
 
