@@ -155,26 +155,38 @@ Shipped and dogfooded on Linux:
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack scrub | ✅ opt-in (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| macOS process GC | ❌ stubs only |
-| Compiler stack maps | ❌ frontier (see below) |
+| macOS process GC | ❌ stubs only → **v0.10 target** |
+| Compiler stack maps | ❌ later (RSS); not blocking 0.10 |
 
 **Kemal (v0.9.0 cut):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md).
 
 **acikturkiye:** thr trial-median ~**93%**, post-GC RSS ~**2.84×** — dense conservative-live; shard levers mostly exhausted — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
-## Frontier
+## v0.10 — macOS process GC (planned)
 
-What still needs **compiler** (or radical runtime) help:
+**Goal:** `-Dgc_none` + `require "gcry"` runs real process GC on Darwin (arm64 + x86_64), not just compile stubs.
+
+| Must ship | Defer |
+|-----------|--------|
+| Mach `thread_suspend` / resume STW (Crystal threads) | Soft-dirty (Linux-only) |
+| Thread / fiber stack bounds (`pthread_get_stackaddr_np` / fiber stacks) | Full parity nursery wins |
+| dyld image walk for static roots (main + filter) | Windows |
+| `GC.init` raise removed; `samples/hello` + stress under `-Dgc_none` | Stack maps / RSS epic |
+| CI: `macos-latest` native specs + `-Dgc_none` samples | Announce until green |
+
+Replace `platform/darwin_stubs.cr` raise path with a real `darwin_*.cr` surface; keep Linux path untouched.
+
+## Frontier (after 0.10)
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS without hoping scrub + gates are enough |
-| **Write barriers in codegen** | Sound concurrent / cheaper incremental for dirty HTTP heaps |
-| **Moving / compacting** | Fragmentation & locality — only after precise roots |
-| **macOS / Windows STW + roots** | Real process GC beyond Linux |
-| **Parallel contexts by default** | TLAB + STW-exempt mark must win thr before flipping defaults |
+| **Stack maps / precise roots** | Closes fat-app RSS (acikturkiye ~3×) |
+| **Write barriers in codegen** | Sound concurrent / cheaper incremental |
+| **Moving / compacting** | After precise roots |
+| **Windows process GC** | After Darwin MVP |
+| **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
 
-Shard-only work that remains interesting: better layout coverage, smarter large-object policy, pause UX, and keeping parallel-mark honest under real load.
+Shard-only polish that remains interesting: layout coverage, large-object policy, pause UX, honest parallel-mark defaults.
 
 ## Risks
 
