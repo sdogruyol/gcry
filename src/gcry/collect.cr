@@ -472,8 +472,9 @@ module Gcry
       # (see unmarked_live_object?).
       @minor_only = !major
       begin
-        # Start mark helpers before write-lock / STW (they park on @mark_go).
-        ensure_mark_worker_pool if @parallel_mark_workers > 1 && @stop_the_world
+        # Start mark helpers before write-lock / STW (library heaps only; process
+        # STW keeps the pool empty — Crystal threads would freeze with the world).
+        ensure_mark_worker_pool if @parallel_mark_workers > 1
 
         # Block fiber swaps, then suspend other OS threads.
         lock_write
@@ -497,6 +498,7 @@ module Gcry
         roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
         # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+        scrub_parked_fiber_stacks if scan_stack
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
         @last_phase_roots_ns = monotonic_ns - t0
@@ -614,6 +616,7 @@ module Gcry
         @roots.each { |ptr| mark_root_candidate(ptr) }
         roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
+        scrub_parked_fiber_stacks if scan_stack
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
         if @scan_static_roots

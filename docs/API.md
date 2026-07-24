@@ -61,4 +61,4 @@ See [README.md](../README.md) Tuning table and [HARDENING.md](HARDENING.md).
 {% end %}
 ```
 
-Kemal bench already exposes a richer `/gc-stats`: `bench/kemal`.
+Kemal bench and **acikturkiye** dogfood the same helpers: `GET /gc-stats` → `Gcry::Observability.json_stats`, `GET /metrics` → `Gcry.prometheus_text` (under `-Dgc_none`).

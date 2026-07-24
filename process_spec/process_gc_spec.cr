@@ -112,6 +112,33 @@ describe "process GC (-Dgc_none)" do
     h.tlab_refills.should eq(0)
   end
 
+  it "process parallel mark steals grey work via STW-exempt pthreads" do
+    h = Gcry.default_heap.not_nil!
+    h.stop_the_world.should be_true
+    old = h.parallel_mark_workers
+    begin
+      h.parallel_mark_workers = 4
+      before_runs = h.parallel_mark_runs
+      before_stolen = h.parallel_mark_stolen
+
+      # Alloc-heavy graph kept in a local Array (stack root during collect).
+      keep = Array(String).new(64) { |i| "pm-keep-#{i}-#{"y" * 32}" }
+      8.times do
+        nest = Array(String).new(16) { |j| "nest-#{j}-#{"z" * 24}" }
+        keep << nest.join(",")
+      end
+
+      GC.collect
+      GC.collect
+
+      h.parallel_mark_runs.should be > before_runs
+      h.parallel_mark_stolen.should be > before_stolen
+      keep.size.should be > 60
+    ensure
+      h.parallel_mark_workers = old
+    end
+  end
+
   it "registers pthread_atfork by default" do
     Gcry::Platform.atfork_installed?.should be_true
   end

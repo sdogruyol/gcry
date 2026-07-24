@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-24
+
+### Added
+
+- **Process-GC parallel mark (STW-exempt):** with `GCRY_PARALLEL_MARK=N` / `parallel_mark_workers > 1`, helpers are raw `LibC.pthread_create` threads (not Crystal::Thread), so `stop_world` does not suspend them. They steal grey objects under `@mark_lock` (`parallel_mark_stolen`). Fork child abandons the pool via `reset_mark_workers_after_fork`.
+- **Library-heap parallel mark:** with `parallel_mark_workers > 1` and `stop_the_world == false`, helper `Thread`s steal grey objects (`parallel_mark_stolen`).
+- **Stack scrubbing (no Crystal patch):** `GCRY_CLEAR_STACK=1` zeros a window below SP (skips x86_64 red zone; default every **16** allocs) without calling Fiber/Thread APIs; `GCRY_SCRUB_FIBERS=1` zeros a capped window below each parked fiber's saved SP before mark (not the full unused stack — that faults pages in and blows RSS). Metrics: `clear_stack_*` / `fiber_scrub_*` (json_stats + Prometheus). Not stack maps; measure before enabling as default.
+- Richer `Gcry::Observability.json_stats` (phase timers, mapped/live bytes, TLAB, parallel-mark, barrier) — Kemal `/gc-stats` uses it.
+- Prometheus: TLAB, parallel-mark, phase, layout, SP clamp, barrier, size-class live / released chunk gauges; `gcry_clear_stack_*` / `gcry_fiber_scrub_*`.
+- Median-of-3 helpers: `bench/median_kemal_boehm.sh`, `bench/median_acikturkiye_boehm.sh`.
+
+### Changed
+
+- README / HARDENING / POLICY: `GCRY_PARALLEL_MARK` is real for process GC (pthread steals), not counter-only — and labeled **experimental / measure first** (Kemal `/json` + acikturkiye `/api/v1/` thr **regressed** vs `N=1` in same-host wrk).
+- README / HARDENING: document `GCRY_DISABLE_*` escapes, `GCRY_TLAB`, stack-scrub knobs.
+- Dogfood docs: [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) + [docs/API.md](docs/API.md) point at Observability routes; acikturkiye `make run-demo-gcry` / README GC section.
+- Same-host Kemal (0.9.0 cut, median of 3, scrub off): `/` **~89%** of Boehm; `/json` **~92%**; post-GC RSS **~0.97×** — see [docs/PERF.md](docs/PERF.md).
+- Same-host acikturkiye `/api/v1/` (median of 3, scrub off): thr trial-median **~93%**; post-GC RSS **~2.84×** (was ~3.20× at 0.8.0) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+
+### Fixed
+
+- **`clear_stack` aarch64 SEGV:** wipe used approximate `pointerof(local)` as SP (mid-frame). With no x86_64 red zone that zeroed the leaf frame (`Invalid memory access @ 0x0` on CI `test (aarch64 native)`). Now reads hardware SP (`Roots.hardware_stack_pointer`) plus a leaf margin.
+
 ## [0.8.0] - 2026-07-24
 
 ### Added
@@ -214,7 +237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/sdogruyol/gcry/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sdogruyol/gcry/compare/v0.5.0...v0.6.0

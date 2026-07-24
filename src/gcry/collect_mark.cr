@@ -15,6 +15,19 @@ module Gcry
     end
 
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
+      if @mark_parallel
+        @mark_lock.lock
+        begin
+          mark_impl_unlocked(pointer, gate_type_id, base_only)
+        ensure
+          @mark_lock.unlock
+        end
+      else
+        mark_impl_unlocked(pointer, gate_type_id, base_only)
+      end
+    end
+
+    private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -48,6 +61,19 @@ module Gcry
     # Keep allocation alive without scanning its payload (integer / index buffers).
     # Always allow interiors — Array(UInt8)#shift stores an interior @buffer.
     private def mark_noscan(pointer : Void*) : Nil
+      if @mark_parallel
+        @mark_lock.lock
+        begin
+          mark_noscan_unlocked(pointer)
+        ensure
+          @mark_lock.unlock
+        end
+      else
+        mark_noscan_unlocked(pointer)
+      end
+    end
+
+    private def mark_noscan_unlocked(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       return if (addr & (sizeof(Void*).to_u64 - 1)) != 0

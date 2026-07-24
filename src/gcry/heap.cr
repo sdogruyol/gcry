@@ -64,6 +64,15 @@ module Gcry
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
+    @mark_lock = Crystal::SpinLock.new
+    @mark_parallel = false
+    @mark_worker_threads = [] of Thread
+    @mark_pthreads = uninitialized StaticArray(LibC::PthreadT, 15)
+    @mark_pthread_count = 0
+    @mark_pthread_mode = false
+    @mark_epoch = Atomic(UInt64).new(0_u64)
+    @mark_shutdown = Atomic(Int32).new(0)
+    @mark_workers_busy = Atomic(Int32).new(0)
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -84,6 +93,24 @@ module Gcry
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
+      @mark_lock = Crystal::SpinLock.new
+      @mark_parallel = false
+      @mark_worker_threads = [] of Thread
+      @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(LibC::PthreadT.new(0))
+      @mark_pthread_count = 0
+      @mark_pthread_mode = false
+      @mark_epoch = Atomic(UInt64).new(0_u64)
+      @mark_shutdown = Atomic(Int32).new(0)
+      @mark_workers_busy = Atomic(Int32).new(0)
+      @clear_stack_enabled = false
+      @clear_stack_bytes = 4096_u64
+      @clear_stack_every = 1
+      @scrub_fibers_enabled = false
+      @clear_stack_bytes_total = 0_u64
+      @fiber_scrub_bytes_total = 0_u64
+      @clear_stack_calls = 0_u64
+      @fiber_scrub_runs = 0_u64
+      @clear_stack_ops = 0_u64
     end
 
     def finalize
@@ -94,6 +121,7 @@ module Gcry
     def destroy : Nil
       return if @destroyed
       @destroyed = true
+      shutdown_mark_workers
       flush_all_tlabs
 
       chunk = @chunks
@@ -226,6 +254,7 @@ module Gcry
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
       maybe_collect
+      maybe_clear_stack_on_alloc
 
       rounded, class_index = SizeClasses.fit(size)
       flags = atomic ? BlockHeader::Flags::ATOMIC : 0_u32
@@ -732,3 +761,4 @@ end
 require "./collect"
 require "./tlab"
 require "./parallel_mark"
+require "./stack_scrub"
