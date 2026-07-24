@@ -78,12 +78,16 @@ describe "Gcry parallel mark knob" do
         cursor.as(Void**).value = child
         cursor = child
       end
+
+      before_stolen = heap.parallel_mark_stolen
       drop = heap.malloc(32)
       heap.collect(scan_stack: false)
 
       heap.live?(root).should be_true
+      heap.live?(cursor).should be_true
       heap.live?(drop).should be_false
       heap.parallel_mark_runs.should be > 0
+      (heap.parallel_mark_stolen >= before_stolen).should be_true
     ensure
       heap.destroy
     end

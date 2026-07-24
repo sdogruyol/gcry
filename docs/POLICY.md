@@ -46,7 +46,7 @@ Notes:
 | Mode | Support |
 |------|---------|
 | Default `Fiber::ExecutionContext` (parallelism 1) | **Supported** — STW suspends the Monitor (SYSMON) thread; stack bottom refreshed from `Fiber.current`; other threads' current-fiber stacks scanned after STW |
-| Resizing default context / extra parallel contexts | **Experimental** — enable `GCRY_TLAB=1` for alloc-side freelist locality; STW suspends all OS threads and scans each current fiber stack. Mark stays serial (`GCRY_PARALLEL_MARK=N` is a no-op speedup until STW-exempt workers exist). Not tuned for high parallelism |
+| Resizing default context / extra parallel contexts | **Experimental** — enable `GCRY_TLAB=1` for alloc-side freelist locality; STW suspends all OS threads and scans each current fiber stack. Library heaps can use `GCRY_PARALLEL_MARK=N` for real grey-stack stealing; process GC mark stays serial until STW-exempt workers exist. Not tuned for high parallelism |
 | Legacy `-Dpreview_mt` | **Unsupported** (deprecated in Crystal) |
 | Legacy `-Dwithout_mt` (`Crystal::Scheduler`) | Works for API shape; prefer the 1.21 default |
 

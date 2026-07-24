@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Library-heap parallel mark:** with `parallel_mark_workers > 1` and `stop_the_world == false`, helper `Thread`s steal grey objects (`parallel_mark_stolen`). Process GC STW still marks serially (Crystal helpers would freeze).
+- Richer `Gcry::Observability.json_stats` (phase timers, mapped/live bytes, TLAB, parallel-mark, barrier) — Kemal `/gc-stats` uses it.
+- Prometheus: TLAB, parallel-mark, phase, layout, SP clamp, barrier, size-class live / released chunk gauges.
+
+### Changed
+
+- README / HARDENING: document `GCRY_DISABLE_*` escapes, `GCRY_TLAB`, honest `GCRY_PARALLEL_MARK` behavior.
+
 ## [0.8.0] - 2026-07-24
 
 ### Added

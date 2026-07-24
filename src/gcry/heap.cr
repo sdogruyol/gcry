@@ -64,6 +64,12 @@ module Gcry
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
+    @mark_lock = Crystal::SpinLock.new
+    @mark_parallel = false
+    @mark_worker_threads = [] of Thread
+    @mark_epoch = Atomic(UInt64).new(0_u64)
+    @mark_shutdown = Atomic(Int32).new(0)
+    @mark_workers_busy = Atomic(Int32).new(0)
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -84,6 +90,12 @@ module Gcry
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
+      @mark_lock = Crystal::SpinLock.new
+      @mark_parallel = false
+      @mark_worker_threads = [] of Thread
+      @mark_epoch = Atomic(UInt64).new(0_u64)
+      @mark_shutdown = Atomic(Int32).new(0)
+      @mark_workers_busy = Atomic(Int32).new(0)
     end
 
     def finalize
@@ -94,6 +106,7 @@ module Gcry
     def destroy : Nil
       return if @destroyed
       @destroyed = true
+      shutdown_mark_workers
       flush_all_tlabs
 
       chunk = @chunks

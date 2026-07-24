@@ -13,9 +13,14 @@ it "Gcry.metrics exposes pause and generation counters" do
     m.major_collections.should be > 0
     m.heap_size.should be > 0
     m.pause_count.should be > 0
+    m.parallel_mark_workers.should eq(1)
     text = Gcry.prometheus_text(heap)
     text.includes?("gcry_collections_total").should be_true
     text.includes?("gcry_heap_bytes").should be_true
+    text.includes?("gcry_parallel_mark_workers").should be_true
+    json = Gcry::Observability.json_stats(heap)
+    json.includes?("phase_mark_ns").should be_true
+    json.includes?("parallel_mark_stolen").should be_true
   ensure
     heap.destroy
   end

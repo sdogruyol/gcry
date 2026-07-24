@@ -123,8 +123,12 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
 | `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
-| `GCRY_PARALLEL_MARK=N` | Request N mark workers (serial until STW-exempt helpers exist) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers (library heaps: real steal; process STW: serial until STW-exempt helpers) |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only type_id filter (process default **on**) |
+| `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
+| `GCRY_DISABLE_SP_CLAMP=1` | Full pthread stack range on other threads (no RSP clamp) |
+| `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` helpers |
 | `GCRY_AUTO_LAYOUTS=1` | Run `Gcry.register_layouts` at init (opt-in; measure thr first) |
 | `GCRY_DISABLE_ATFORK=1` | Do not register `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
