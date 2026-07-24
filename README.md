@@ -123,7 +123,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
 | `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
-| `GCRY_PARALLEL_MARK=N` | Mark workers (library heaps: real steal; process STW: serial until STW-exempt helpers) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers 1–16 (process: STW-exempt pthreads steal grey work; library: Crystal::Thread) |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only type_id filter (process default **on**) |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |

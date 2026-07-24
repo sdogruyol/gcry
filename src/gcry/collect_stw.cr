@@ -70,6 +70,7 @@ module Gcry
       @soft_dirty_skip_until_major = false
       disarm_mprotect_barrier if @barrier_backend.mprotect?
       @barrier_backend = Platform::BarrierBackend::None
+      reset_mark_workers_after_fork
       Platform.reset_stw_after_fork
       Platform.invalidate_static_root_cache
       begin

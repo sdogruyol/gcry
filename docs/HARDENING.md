@@ -41,7 +41,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
 | `GCRY_DISABLE_BLACKLIST=1` | Do not record/skip pages from type_id-gate false roots |
 | `GCRY_TLAB=1` | Thread-local freelist buffers for parallel ExecutionContexts |
-| `GCRY_PARALLEL_MARK=N` | Mark workers 1–16 (library heaps steal grey work; process STW still serial) |
+| `GCRY_PARALLEL_MARK=N` | Mark workers 1–16 — process GC uses STW-exempt `pthread`s; library heaps use `Crystal::Thread` |
 | `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` on dormant/sparse pages |
 
 Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. **Empty-chunk release is process default** (`GCRY_KEEP_CHUNKS=1` to retain). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
@@ -97,7 +97,7 @@ Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads 
 
 Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
 
-Parallel ExecutionContexts: STW covers all OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). High parallelism is still not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md). `GCRY_PARALLEL_MARK=N` steals grey work on **library heaps**; process STW mark stays serial (Crystal helpers freeze with the world).
+Parallel ExecutionContexts: STW covers all Crystal OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). `GCRY_PARALLEL_MARK=N` steals grey work with **STW-exempt raw pthreads** on process GC (Crystal::Thread helpers on library heaps). High parallelism is still experimental — see [docs/POLICY.md](POLICY.md).
 
 ## Sanitizers
 

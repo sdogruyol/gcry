@@ -9,13 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Library-heap parallel mark:** with `parallel_mark_workers > 1` and `stop_the_world == false`, helper `Thread`s steal grey objects (`parallel_mark_stolen`). Process GC STW still marks serially (Crystal helpers would freeze).
+- **Process-GC parallel mark (STW-exempt):** with `GCRY_PARALLEL_MARK=N` / `parallel_mark_workers > 1`, helpers are raw `LibC.pthread_create` threads (not Crystal::Thread), so `stop_world` does not suspend them. They steal grey objects under `@mark_lock` (`parallel_mark_stolen`). Fork child abandons the pool via `reset_mark_workers_after_fork`.
+- **Library-heap parallel mark:** with `parallel_mark_workers > 1` and `stop_the_world == false`, helper `Thread`s steal grey objects (`parallel_mark_stolen`).
 - Richer `Gcry::Observability.json_stats` (phase timers, mapped/live bytes, TLAB, parallel-mark, barrier) — Kemal `/gc-stats` uses it.
 - Prometheus: TLAB, parallel-mark, phase, layout, SP clamp, barrier, size-class live / released chunk gauges.
 
 ### Changed
 
-- README / HARDENING: document `GCRY_DISABLE_*` escapes, `GCRY_TLAB`, honest `GCRY_PARALLEL_MARK` behavior.
+- README / HARDENING / POLICY: `GCRY_PARALLEL_MARK` is real for process GC (pthread steals), not counter-only.
+- README / HARDENING: document `GCRY_DISABLE_*` escapes, `GCRY_TLAB`.
 
 ## [0.8.0] - 2026-07-24
 
