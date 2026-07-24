@@ -50,7 +50,7 @@ module Gcry
 
       action = LibC::Sigaction.new
       action.sa_flags = LibC::SA_SIGINFO
-      action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, info, uctx|
+      action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, info, _uctx|
         addr = info.value.si_addr.address
         unless Platform.mprotect_fault(addr)
           # Not our RO page — restore previous action so the retried fault is handled normally.

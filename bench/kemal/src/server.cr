@@ -91,7 +91,16 @@ end
       sp_clamp_fallbacks:        h.sp_clamp_fallbacks,
       finalizer_entries:         h.finalizer_entry_count,
       weak_links:                h.finalizer_link_count,
+      blacklist_hits:            h.blacklist_hits,
+      blacklist_skips:           h.blacklist_skips,
+      tlab_refills:              h.tlab_refills,
+      barrier_backend:           h.barrier_backend_name,
     }.to_json
+  end
+
+  get "/metrics" do |env|
+    env.response.content_type = "text/plain; version=0.0.4"
+    Gcry.prometheus_text
   end
 {% end %}
 

@@ -22,7 +22,12 @@ module Gcry
                    @p50_ns : UInt64 = 0_u64, @p99_ns : UInt64 = 0_u64)
     end
   end
+end
 
+require "./gcry/metrics"
+require "./gcry/observability"
+
+module Gcry
   @@default_heap : Heap? = nil
 
   # Process-wide heap used by the module-level allocators.
