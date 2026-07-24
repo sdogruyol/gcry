@@ -192,6 +192,14 @@ module GC
       every = env_u64("GCRY_STRESS_EVERY") || 16_u64
       heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
     end
+
+    # Parallel ExecutionContext support (experimental).
+    if env_flag_one?("GCRY_TLAB")
+      heap.tlab_enabled = true
+    end
+    if pm = env_u64("GCRY_PARALLEL_MARK")
+      heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool

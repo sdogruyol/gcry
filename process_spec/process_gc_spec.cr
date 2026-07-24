@@ -102,4 +102,13 @@ describe "process GC (-Dgc_none)" do
       GC.collect if i % 10 == 0
     end
   end
+
+  it "exposes TLAB / parallel-mark knobs on the process heap" do
+    heap = Gcry.default_heap
+    heap.should_not be_nil
+    h = heap.not_nil!
+    h.tlab_enabled?.should be_false # default; GCRY_TLAB=1 enables at init
+    h.parallel_mark_workers.should eq(1)
+    h.tlab_refills.should eq(0)
+  end
 end

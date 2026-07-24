@@ -29,7 +29,10 @@ module Gcry
     # Async-signal-safe SP table (no Hash / Array growth).
     @@stw_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
     @@stw_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
-    @@stw_live = uninitialized StaticArray(Int32, MAX_STW_SP_SLOTS)
+    # Bitmask of occupied slots. Must be `uninitialized` — a class-var
+    # `Atomic(...).new` goes through Crystal.once and SIGSEGVs in GC.init
+    # before Thread/Fiber exist. Atomic-in-StaticArray also fails (CAS on copy).
+    @@stw_claimed = uninitialized Atomic(UInt64)
     @@stw_booted = false
     @@stw_enabled = true
     @@stw_installed = false
@@ -48,44 +51,49 @@ module Gcry
 
     private def self.ensure_stw_table : Nil
       return if @@stw_booted
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        @@stw_live[i] = 0
-        i += 1
-      end
+      @@stw_claimed.set(0_u64)
       @@stw_booted = true
     end
 
     # Record SP for the interrupted thread (signal-handler safe).
     def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64) : Nil
       ensure_stw_table
+      claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
-        if @@stw_live[i] != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
+        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
           @@stw_sps[i] = sp
           return
         end
         i += 1
       end
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        # Claim empty slot (best-effort under concurrent suspend).
-        if @@stw_live[i] == 0
-          @@stw_ids[i] = id
-          @@stw_sps[i] = sp
-          @@stw_live[i] = 1
-          return
+      # Claim a free slot via CAS on the bitmask.
+      loop do
+        claimed = @@stw_claimed.get(:acquire)
+        i = 0
+        while i < MAX_STW_SP_SLOTS
+          bit = 1_u64 << i
+          if (claimed & bit) == 0
+            if @@stw_claimed.compare_and_set(claimed, claimed | bit)
+              @@stw_ids[i] = id
+              @@stw_sps[i] = sp
+              return
+            end
+            break # retry outer loop with fresh claimed
+          end
+          i += 1
         end
-        i += 1
+        return if i >= MAX_STW_SP_SLOTS # table full
       end
     end
 
     # Lookup SP captured at last suspend for *id*.
     def self.thread_sp(id : LibC::PthreadT) : Void*?
       return nil unless @@stw_enabled && @@stw_booted
+      claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
-        if @@stw_live[i] != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
+        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
           sp = @@stw_sps[i]
           return nil if sp == 0
           return Pointer(Void).new(sp)
@@ -97,9 +105,9 @@ module Gcry
 
     def self.clear_thread_sps : Nil
       return unless @@stw_booted
+      @@stw_claimed.set(0_u64, :release)
       i = 0
       while i < MAX_STW_SP_SLOTS
-        @@stw_live[i] = 0
         @@stw_sps[i] = 0
         i += 1
       end

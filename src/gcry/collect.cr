@@ -526,9 +526,13 @@ module Gcry
       # (see unmarked_live_object?).
       @minor_only = !major
       begin
+        # Start mark helpers before write-lock / STW (they park on @mark_go).
+        ensure_mark_worker_pool if @parallel_mark_workers > 1 && @stop_the_world
+
         # Block fiber swaps, then suspend other OS threads.
         lock_write
         stop_world
+        flush_all_tlabs
         note_collection_begin
         @mark_stack.clear
 

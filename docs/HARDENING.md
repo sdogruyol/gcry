@@ -92,7 +92,7 @@ Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads 
 
 Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
 
-Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
+Parallel ExecutionContexts: STW covers all OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). High parallelism is still not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md). `GCRY_PARALLEL_MARK=N` does not speed up mark yet (Crystal STW suspends helper threads).
 
 ## Sanitizers
 

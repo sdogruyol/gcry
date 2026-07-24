@@ -29,7 +29,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 
 ### What it is *not* (yet)
 
-- Not a drop-in for multi-threaded / parallel ExecutionContexts (stick to parallelism **1**)
+- Parallel ExecutionContexts: experimental (`GCRY_TLAB=1`); stick to parallelism **1** for production
 - Not fork-safe like Boehm’s fork handling
 - Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**90%** of Boehm, post-GC RSS ~**0.93×**; see [docs/PERF.md](docs/PERF.md))
 
@@ -109,6 +109,8 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_INCREMENTAL=1` | Sliced majors + dirty-page re-scan when a barrier is armed |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
 | `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
+| `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
+| `GCRY_PARALLEL_MARK=N` | Request N mark workers (serial until STW-exempt helpers exist) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |
