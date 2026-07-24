@@ -34,14 +34,15 @@ module Gcry
     @@clear_stack_active = false
 
     {% if flag?(:x86_64) %}
+      # SysV ABI red zone — callees may use [SP-128, SP) without adjusting SP.
       CLEAR_STACK_RED_ZONE = 128_u64
     {% else %}
       CLEAR_STACK_RED_ZONE = 0_u64
     {% end %}
+    # Extra skip below hardware SP so leaf spills / alignment never get wiped.
+    CLEAR_STACK_LEAF_MARGIN = 64_u64
 
-    # Zero unused stack below the approximate SP (stack grows down).
-    # Skip the ABI red zone immediately below SP — clearing it corrupts the
-    # current leaf frame (x86_64 SysV: 128 bytes).
+    # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
       return if bytes == 0
       return if @@clear_stack_active
@@ -54,10 +55,13 @@ module Gcry
     end
 
     private def clear_stack_body(bytes : UInt64) : Nil
-      sp_addr = Roots.stack_pointer.address
-      return if sp_addr <= CLEAR_STACK_RED_ZONE
+      # Must use hardware SP — Roots.stack_pointer is mid-frame and wiping
+      # up to it corrupts the leaf (null-deref SEGV on aarch64 CI).
+      sp_addr = Roots.hardware_stack_pointer.address
+      skip = CLEAR_STACK_RED_ZONE + CLEAR_STACK_LEAF_MARGIN
+      return if sp_addr <= skip
 
-      high = sp_addr - CLEAR_STACK_RED_ZONE
+      high = sp_addr - skip
       guard = 0_u64
       on_thread_stack = false
 
@@ -88,7 +92,7 @@ module Gcry
       end
 
       return if high <= guard
-      return if sp_addr <= guard + CLEAR_STACK_RED_ZONE
+      return if sp_addr <= guard + skip
 
       low = high > wipe ? high - wipe : guard
       low = guard if low < guard

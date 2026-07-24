@@ -79,10 +79,28 @@ module Gcry
       end
     end
 
-    # Approximate current stack pointer (address of a local).
+    # Approximate current stack pointer (address of a local). Fine for
+    # conservative *scan* (may start slightly above true SP). Unsafe as the
+    # high bound for *clearing* — that must use `#hardware_stack_pointer`.
     def self.stack_pointer : Void*
       local = 0
       pointerof(local).as(Void*)
+    end
+
+    # True SP via the architecture register. Used by stack scrub so we never
+    # zero the current leaf frame (pointerof(local) sits mid-frame).
+    def self.hardware_stack_pointer : Void*
+      {% if flag?(:x86_64) %}
+        sp = uninitialized UInt64
+        asm("movq %rsp, $0" : "=r"(sp) :: "volatile")
+        Pointer(Void).new(sp)
+      {% elsif flag?(:aarch64) %}
+        sp = uninitialized UInt64
+        asm("mov $0, sp" : "=r"(sp) :: "volatile")
+        Pointer(Void).new(sp)
+      {% else %}
+        stack_pointer
+      {% end %}
     end
 
     # Combined: spill regs + scan [approx SP, bottom), feeding each candidate
