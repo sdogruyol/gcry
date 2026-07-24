@@ -1,0 +1,23 @@
+name: Nightly fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    name: fuzz 30m library heap
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Build and run fuzz
+        run: |
+          mkdir -p bin
+          crystal build --release bench/fuzz.cr -o bin/fuzz
+          ./bin/fuzz 1800 42

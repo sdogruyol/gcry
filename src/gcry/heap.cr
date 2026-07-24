@@ -1,5 +1,6 @@
 require "./block"
 require "./size_classes"
+require "crystal/spin_lock"
 
 module Gcry
   # mmap-backed allocator with size classes and conservative mark–sweep.
@@ -54,6 +55,15 @@ module Gcry
     @pause_ring = uninitialized StaticArray(UInt64, PAUSE_RING_SIZE)
     @pause_ring_len = 0
     @pause_ring_pos = 0
+    # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
+    @alloc_lock = Crystal::SpinLock.new
+    @tlab_enabled = false
+    @tlab_refills = 0_u64
+    @tlab_steals = 0_u64
+    @tlabs_booted = false
+    @parallel_mark_workers = 1
+    @parallel_mark_runs = 0_u64
+    @parallel_mark_stolen = 0_u64
 
     def initialize
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -66,6 +76,14 @@ module Gcry
       SIZE_CLASS_COUNT.times do |i|
         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
       end
+      @tlab_enabled = false
+      @tlab_refills = 0_u64
+      @tlab_steals = 0_u64
+      @tlabs_booted = false
+      @alloc_lock = Crystal::SpinLock.new
+      @parallel_mark_workers = 1
+      @parallel_mark_runs = 0_u64
+      @parallel_mark_stolen = 0_u64
     end
 
     def finalize
@@ -76,6 +94,7 @@ module Gcry
     def destroy : Nil
       return if @destroyed
       @destroyed = true
+      flush_all_tlabs
 
       chunk = @chunks
       while chunk
@@ -149,11 +168,13 @@ module Gcry
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
 
-        @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-        note_explicit_free(payload)
-        @live_objects -= 1 if @live_objects > 0
+        with_alloc_lock do
+          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+          note_explicit_free(payload)
+          @live_objects -= 1 if @live_objects > 0
+        end
         @finalizers.notice_reclaim(pointer)
-        cache_large_chunk(chunk, header)
+        with_alloc_lock { cache_large_chunk(chunk, header) }
         trim_large_cache
         return
       end
@@ -167,20 +188,25 @@ module Gcry
 
       @finalizers.notice_reclaim(pointer)
 
-      if BlockHeader.nursery?(header)
+      if @tlab_enabled
+        tlab_free_small(pointer, class_index, payload, BlockHeader.nursery?(header))
+      elsif BlockHeader.nursery?(header)
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
         @nursery_freelist_clean[class_index] = false
+        @free_bytes += payload.to_u64
       else
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
         @freelists[class_index] = pointer
         @freelist_clean[class_index] = false
+        @free_bytes += payload.to_u64
       end
 
-      @free_bytes += payload.to_u64
-      @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-      note_explicit_free(payload.to_u64)
-      @live_objects -= 1 if @live_objects > 0
+      with_alloc_lock do
+        @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+        note_explicit_free(payload.to_u64)
+        @live_objects -= 1 if @live_objects > 0
+      end
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -210,20 +236,30 @@ module Gcry
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
-        user, from_cache = alloc_large(rounded, flags)
+        user, from_cache = with_alloc_lock { alloc_large(rounded, flags) }
         needs_clear = clear && from_cache
       elsif @nursery_enabled
-        user = alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index)
+        user = if @tlab_enabled
+                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true)
+               else
+                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index)
+               end
         needs_clear = clear && !@nursery_freelist_clean[class_index]
       else
-        user = alloc_old_small(rounded.to_u32, flags, class_index)
+        user = if @tlab_enabled
+                 tlab_alloc_small(rounded.to_u32, flags, class_index, false)
+               else
+                 alloc_old_small(rounded.to_u32, flags, class_index)
+               end
         needs_clear = clear && !@freelist_clean[class_index]
       end
 
       user.as(UInt8*).clear(rounded) if needs_clear
-      @total_bytes += rounded
-      @bytes_since_gc += rounded
-      @live_objects += 1
+      with_alloc_lock do
+        @total_bytes += rounded
+        @bytes_since_gc += rounded
+        @live_objects += 1
+      end
       user
     end
 
@@ -236,9 +272,20 @@ module Gcry
         raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
       end
 
+      if @blacklist_enabled
+        taken = take_non_blacklisted(user, index, true)
+        if taken.null?
+          header = BlockHeader.from_user(user)
+          @nursery_freelists[index] = header.value.next_free
+        else
+          user = taken
+        end
+      else
+        header = BlockHeader.from_user(user)
+        @nursery_freelists[index] = header.value.next_free
+      end
+
       header = BlockHeader.from_user(user)
-      next_free = header.value.next_free
-      @nursery_freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
       # Allocate black during any in-progress collection (STW or incremental)
       # so mid-collect allocations are not swept.
@@ -260,9 +307,20 @@ module Gcry
         raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
       end
 
+      if @blacklist_enabled
+        taken = take_non_blacklisted(user, index, false)
+        if taken.null?
+          header = BlockHeader.from_user(user)
+          @freelists[index] = header.value.next_free
+        else
+          user = taken
+        end
+      else
+        header = BlockHeader.from_user(user)
+        @freelists[index] = header.value.next_free
+      end
+
       header = BlockHeader.from_user(user)
-      next_free = header.value.next_free
-      @freelists[index] = next_free
       BlockHeader.set_used(header, payload, flags)
       BlockHeader.set_mark(header) if @incremental_marking || @collecting
 
@@ -672,3 +730,5 @@ module Gcry
 end
 
 require "./collect"
+require "./tlab"
+require "./parallel_mark"

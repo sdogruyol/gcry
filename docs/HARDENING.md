@@ -21,9 +21,12 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; soft-dirty arms on WSL 6.18+, HTTP still too dirty for a win) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
 | `GCRY_SOFT_DIRTY_MAX` | Max dirty/total % for soft-dirty page scan (default `25`; `0` = never) |
-| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0) |
-| `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0); may fall through to mprotect if allowed |
+| `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV card table (process GC) |
+| `GCRY_DISABLE_MPROTECT=1` | Never install mprotect barrier |
+| `GCRY_INCREMENTAL=1` | Sliced auto-majors; dirty-page re-scan when a barrier is armed |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
+| `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default `16`) |
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
 | `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (escape hatch) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
@@ -34,7 +37,9 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_CHUNK_BYTES` | Size-class chunk size in bytes (default `262144` / 256 KiB; ≥64 KiB, multiple of 4096) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only `type_id` plausibility filter (process default-on) |
 | `GCRY_DISABLE_LAYOUT=1` | Disable `Gcry::Layout` precise heap scan |
+| `GCRY_AUTO_LAYOUTS=1` | Whole-program `Gcry.register_layouts` at init (opt-in) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
+| `GCRY_DISABLE_BLACKLIST=1` | Do not record/skip pages from type_id-gate false roots |
 
 Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. **Empty-chunk release is process default** (`GCRY_KEEP_CHUNKS=1` to retain). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
@@ -52,7 +57,7 @@ GCRY_KEEP_CHUNKS=1 ./bin/stress 200
 ./bin/json_churn 1000
 ```
 
-Process GC defaults (Phase 12): majors at **32 MiB** full STW; nursery off; size-class ceiling 32 KiB; **empty chunks released** unless `GCRY_KEEP_CHUNKS=1`; base-pointer-only mark; **root-only type_id gate** on (`GCRY_DISABLE_TYPE_ID_GATE=1`); layout-precise heap scan on (`GCRY_DISABLE_LAYOUT=1`); **STW SP clamp** on other OS threads (`GCRY_DISABLE_SP_CLAMP=1`). Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (Phase 12): majors at **32 MiB** full STW; nursery off; size-class ceiling 32 KiB; **empty chunks released** unless `GCRY_KEEP_CHUNKS=1`; base-pointer-only mark; **root-only type_id gate** on (`GCRY_DISABLE_TYPE_ID_GATE=1`); **page blacklist** of rejected false roots (`GCRY_DISABLE_BLACKLIST=1`); layout-precise heap scan on (`GCRY_DISABLE_LAYOUT=1`) with builtins (whole-program auto layouts opt-in via `GCRY_AUTO_LAYOUTS=1`); **STW SP clamp** on other OS threads (`GCRY_DISABLE_SP_CLAMP=1`). Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 **Tuning note (Kemal `/json` wrk):** raising `GCRY_THRESHOLD` to 128–256 MiB cuts major count but pause p50 grows roughly with heap; total pause time over a fixed wrk window often stays similar, so req/s may not improve. Prefer measuring `GET /gc-stats` (`pause_p50_ns` / `pause_p99_ns` / `major_collections`) on the real app before changing the default.
 
@@ -89,7 +94,7 @@ Process GC enables **stop-the-world** (`Heap#stop_the_world`): other OS threads 
 
 Static roots scan the **main executable** file-backed `rw-p` (and small RELRO), plus **BSS zero-fill** contiguous with prior file RW. Shared-library `.so` data segments are skipped (Crystal class/global roots live in the main binary). Large RELRO `r--p` (≥64 KiB) is skipped to cut STW on fat binaries. Large-object `munmap` does **not** invalidate the maps cache; empty-chunk release still does. Fiber stacks are scanned **once** per collect (`scan_all_fiber_roots`, not also `push_gc_roots`).
 
-Parallel ExecutionContexts: STW covers all OS threads, but high parallelism is not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md).
+Parallel ExecutionContexts: STW covers all OS threads; `GCRY_TLAB=1` adds per-thread freelist buffers (flush before sweep). High parallelism is still not a tuned/supported production mode — see [docs/POLICY.md](POLICY.md). `GCRY_PARALLEL_MARK=N` does not speed up mark yet (Crystal STW suspends helper threads).
 
 ## Sanitizers
 

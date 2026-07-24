@@ -8,7 +8,7 @@ require "./gcry/heap"
 require "./gcry/layout"
 
 module Gcry
-  VERSION = "0.7.0"
+  VERSION = "0.8.0"
 
   struct PauseStats
     getter last_ns : UInt64
@@ -22,7 +22,12 @@ module Gcry
                    @p50_ns : UInt64 = 0_u64, @p99_ns : UInt64 = 0_u64)
     end
   end
+end
 
+require "./gcry/metrics"
+require "./gcry/observability"
+
+module Gcry
   @@default_heap : Heap? = nil
 
   # Process-wide heap used by the module-level allocators.

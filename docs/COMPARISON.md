@@ -2,17 +2,17 @@
 
 **One-liner:** both are *conservative mark–sweep* collectors. gcry is Crystal-native STW-by-default; Boehm is the C library Crystal ships with (more platforms, MT/fork polish).
 
-Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
+Scope: **Linux x86_64 + aarch64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (0.7.0 / Phase 12) | bdwgc (Crystal default) |
+| Area | gcry (0.8.0) | bdwgc (Crystal default) |
 |------|-----------------------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
 | Collection model | Conservative STW mark–sweep (nursery / incremental opt-in only) | Conservative (BDW) |
 | Fibers / ExecutionContext | STW other OS threads; fiber + stack roots | Yes (LibGC + thread bottoms) |
 | Parallel fibers (multi OS thread) | No | Yes |
-| Fork safety | **Unsupported** (documented) | `GC_set_handle_fork` |
+| Fork safety | **atfork reinit** (default; `LibC.fork`); `GCRY_DISABLE_ATFORK=1` poisons | `GC_set_handle_fork` |
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |
 | Auto-collect knobs | `GCRY_THRESHOLD` (default 32 MiB), `GCRY_KEEP_CHUNKS`, `GCRY_INTERIOR`, … | LibGC env / APIs |
@@ -22,10 +22,10 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Generational | Nursery without write barriers (opt-in) | Optional BDW modes |
 | Compacting / moving | No | Mostly no (conservative) |
 | Precise roots | No (needs compiler) | No |
-| Platforms | Linux x86_64 first; aarch64 cross-compile CI | Broad |
+| Platforms | Linux x86_64 + aarch64; macOS stubs | Broad |
 | Unit-test mode | `Gcry::Heap` under Boehm | N/A |
 | `prof_stats` | Heap / reclaim / explicit-free counters filled | Full LibGC fields |
-| Kemal `/json` (same host) | thr ~**90%**; post-GC RSS ~**0.93×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (same host) | thr ~**89%**; post-GC RSS ~**0.93×** — [PERF.md](PERF.md) | baseline |
 
 ## Smoke checklist (gcry)
 
@@ -37,7 +37,7 @@ Run before claiming app readiness:
 - [ ] Fibers that allocate survive without forced `GC.collect` every iteration
 - [ ] `WeakRef` / finalizers behave on a small fixture if the app uses them
 - [ ] RSS / pause acceptable vs Boehm on a representative workload (`bench/churn.cr` for library-heap; app bench for process GC)
-- [ ] No `fork` without `exec` after boot
+- [ ] Prefer `fork`+`exec`, or rely on gcry atfork reinit for single-threaded children
 - [ ] No GC calls from signal handlers
 - [ ] Do **not** resize ExecutionContext for parallelism / add parallel contexts
 - [ ] Avoid deprecated `-Dpreview_mt`
@@ -45,7 +45,7 @@ Run before claiming app readiness:
 ## When to stay on Boehm
 
 - Need parallel ExecutionContexts / multi-thread STW
-- Process forks and continues running Crystal in the child
+- Need `Process.fork` under ExecutionContext (Crystal itself forbids it; use `LibC.fork` + atfork or Boehm)
 - Need battle-tested production defaults across OS targets
 - Hard dependency on Boehm-specific `prof_stats` fields
 

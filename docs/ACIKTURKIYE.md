@@ -334,6 +334,21 @@ Same-host A/B (`wrk -c 100 -d 30` `/api/v1/`, post-`GC.collect` RSS, median of 3
 
 **Takeaway:** clamp is **correct** (Monitor SP recorded) but does **not** move acikturkiye RSS. False retention is on mutator/fiber stacks already bounded by SP / `stack_top`, not the unused Monitor pthread range. **Shard-only RSS levers for this app are exhausted** — further parity needs compiler stack maps or write barriers.
 
+### 0.8.0 cut (2026-07-24 evening)
+
+Same host, `wrk -c 100 -d 30` `/api/v1/`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials vs 0.8.0 tree (builtins layout; `GCRY_AUTO_LAYOUTS` off).
+
+| Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
+|------:|------------:|--------------:|-----------------:|--------------------:|
+| 1 | 97.6% | 3.15× | 131 / 135 | 231 / 396 |
+| 2 | 92.0% | 3.19× | 132 / 144 | 324 / 228 |
+| 3 | 96.5% | 3.39× | 134 / 139 | 193 / 261 |
+| **median** | **95.2%** | **3.20×** | — | — |
+
+Last gcry `/gc-stats` after trial 3: `heap_size` ≈ **256 MiB**, `size_class_live` ≈ **186 MiB**, `small_mapped` ≈ **238 MiB**, `released_chunk` ≈ **6.8 MiB**, `chunk_fill_ge75` ≈ **842**, `layout_precise_scans` ≈ **646** / cons ≈ **9.4k**.
+
+**Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~3.20×) — same story as Phase 12 / SP-clamp notes (dense conservative-live).
+
 ## Non-goals (still)
 
 - `GCRY_INCREMENTAL=1` / nursery as process default without barriers (unsound on JSON/Hash).

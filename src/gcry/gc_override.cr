@@ -9,15 +9,21 @@
 module GC
   @@gcry_ready = false
   @@gcry_enabled = true
-  # Set via GC.note_fork_child; malloc/collect refuse to run (no atfork reinit yet).
+  # Set when fork child cannot reinit (GCRY_DISABLE_ATFORK=1 or install failed).
   @@after_fork_child = false
+  @@handle_fork = true
 
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
-    # Capture RSP in the suspend handler so other-thread scans skip below-SP.
+    # Capture SP in the suspend handler so other-thread scans skip below-SP.
     unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
       Gcry::Platform.install_stw_sp_capture
     end
+
+    {% if flag?(:darwin) && flag?(:gc_none) %}
+      # Process GC on Darwin is stubbed; refuse boot rather than silently corrupt.
+      raise "gcry: process GC (-Dgc_none) is not supported on macOS yet (Mach STW / dyld roots); see docs/POLICY.md"
+    {% end %}
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -38,6 +44,7 @@ module GC
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
+    heap.blacklist_enabled = true
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -64,21 +71,67 @@ module GC
       Gcry::Layout.enabled = false
     else
       Gcry::Layout.register_builtins
+      # Whole-program auto layouts are opt-in: some nested/stdlib types get
+      # unsound precise offsets and tank HTTP thr. Call Gcry.register_layouts
+      # or set GCRY_AUTO_LAYOUTS=1 after measuring.
+      if env_flag_one?("GCRY_AUTO_LAYOUTS")
+        Gcry.register_layouts
+      end
     end
 
     @@gcry_ready = true
     apply_env_config(heap)
+
+    # Fork: reinit locks/STW in the child (opt out with GCRY_DISABLE_ATFORK=1).
+    unless env_flag_one?("GCRY_DISABLE_ATFORK")
+      @@handle_fork = true
+      Gcry::Platform.set_atfork_handlers(
+        -> { GC.fork_prepare },
+        -> { GC.fork_parent },
+        -> { GC.fork_child },
+      )
+      Gcry::Platform.install_atfork
+    else
+      @@handle_fork = false
+    end
   end
 
-  # Skeleton: refuse GC in a forked child. Full Boehm-style reinit is future work.
+  # Manual integrator hook: mark child poisoned when atfork reinit is disabled.
   # :nodoc:
   def self.note_fork_child : Nil
-    @@after_fork_child = true
+    if @@handle_fork && @@gcry_ready
+      fork_child
+    else
+      @@after_fork_child = true
+    end
+  end
+
+  # :nodoc:
+  def self.fork_prepare : Nil
+    # Avoid holding GC write lock across fork (deadlock if parent owned it).
+  end
+
+  # :nodoc:
+  def self.fork_parent : Nil
+  end
+
+  # :nodoc:
+  def self.fork_child : Nil
+    return unless @@gcry_ready
+    if @@handle_fork
+      Gcry.default_heap.after_fork_child_reinit
+      @@after_fork_child = false
+      unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+        Gcry::Platform.install_stw_sp_capture
+      end
+    else
+      @@after_fork_child = true
+    end
   end
 
   private def self.check_fork_poison! : Nil
     if @@after_fork_child
-      raise "gcry: GC after fork is unsupported (exec or stay on Boehm); see docs/POLICY.md"
+      raise "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md"
     end
   end
 
@@ -110,9 +163,20 @@ module GC
       heap.soft_dirty_max_pct = max_pct.to_i32 if max_pct <= 100
     end
 
+    # Page-dirty barrier: prefer soft-dirty; mprotect as opt-in / fallback.
+    # Process GC may use mprotect when soft-dirty is unavailable.
+    heap.allow_mprotect_barrier = true
+    if env_flag_one?("GCRY_MPROTECT_BARRIER")
+      heap.prefer_mprotect_barrier = true
+      heap.allow_mprotect_barrier = true
+    end
+    if env_flag_one?("GCRY_DISABLE_MPROTECT")
+      heap.prefer_mprotect_barrier = false
+      heap.allow_mprotect_barrier = false
+    end
+
     if env_flag_one?("GCRY_INCREMENTAL")
-      # Experimental: sliced majors. Unsafe without write barriers if the mutator
-      # stores pointers into already-scanned objects (typical JSON/Hash workloads).
+      # Sliced majors with dirty-page re-scan when a barrier backend is armed.
       heap.incremental_auto = true
     end
 
@@ -155,6 +219,13 @@ module GC
       heap.type_id_gate = false
     end
 
+    if env_flag_one?("GCRY_BLACKLIST")
+      heap.blacklist_enabled = true
+    end
+    if env_flag_one?("GCRY_DISABLE_BLACKLIST")
+      heap.blacklist_enabled = false
+    end
+
     if env_flag_one?("GCRY_DISABLE_LAYOUT")
       heap.layout_precise = false
       Gcry::Layout.enabled = false
@@ -174,6 +245,20 @@ module GC
       if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
       end
+    end
+
+    # Torture: collect every N allocs (CI / dogfood).
+    if env_flag_one?("GCRY_STRESS")
+      every = env_u64("GCRY_STRESS_EVERY") || 16_u64
+      heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
+    end
+
+    # Parallel ExecutionContext support (experimental).
+    if env_flag_one?("GCRY_TLAB")
+      heap.tlab_enabled = true
+    end
+    if pm = env_u64("GCRY_PARALLEL_MARK")
+      heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
   end
 

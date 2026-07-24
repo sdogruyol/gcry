@@ -31,8 +31,18 @@ jobs:
       - name: Check formatting
         run: crystal tool format --check
 
+      - name: Ameba
+        run: |
+          shards install --development
+          cd lib/ameba && shards build
+          cp -f bin/ameba ../../bin/ameba
+          ../../bin/ameba
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
+
+      - name: Process GC specs (-Dgc_none)
+        run: crystal spec -Dgc_none process_spec --error-trace
 
       - name: Sample hello (-Dgc_none)
         run: |
@@ -59,7 +69,7 @@ jobs:
           crystal build -Dgc_none samples/json_churn.cr -o bin/json_churn
           ./bin/json_churn 800
 
-      - name: Env knobs smoke (nursery / chunks / incremental)
+      - name: Env knobs smoke (nursery / chunks / incremental / stress)
         run: |
           crystal build -Dgc_none samples/hello.cr -o bin/hello_env
           GCRY_DISABLE_AUTO=1 ./bin/hello_env
@@ -67,11 +77,42 @@ jobs:
           GCRY_NURSERY=262144 ./bin/hello_env
           GCRY_KEEP_CHUNKS=1 ./bin/hello_env
           GCRY_RELEASE_CHUNKS=1 ./bin/hello_env
+          GCRY_STRESS=1 GCRY_STRESS_EVERY=8 ./bin/hello_env
+          GCRY_MPROTECT_BARRIER=1 ./bin/hello_env
+          GCRY_INCREMENTAL=1 ./bin/hello_env
+
+      - name: Sample stress under GCRY_STRESS
+        run: |
+          GCRY_STRESS=1 GCRY_STRESS_EVERY=32 ./bin/stress 100
 
       - name: Bench churn (library heap)
         run: |
           crystal build bench/churn.cr -o bin/churn
           ./bin/churn 500
+
+      - name: Fuzz short (library heap)
+        run: |
+          crystal build bench/fuzz.cr -o bin/fuzz
+          ./bin/fuzz 5 1
+
+  # Short Kemal thr gate vs Boehm (needs wrk).
+  perf-smoke:
+    runs-on: ubuntu-latest
+    name: perf smoke (kemal /json vs Boehm)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Install wrk
+        run: sudo apt-get update && sudo apt-get install -y wrk
+
+      - name: Kemal A/B thr gate
+        run: |
+          mkdir -p bin
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 ./bench/perf_smoke.sh
 
   # aarch64 cross-compile smoke (object emit). Runs on PR + push.
   test-aarch64:
@@ -93,3 +134,26 @@ jobs:
           test -f bin/hello_aarch64.o
           test -f bin/min_aarch64.o
           test -f bin/alloc_aarch64.o
+
+  # Native aarch64 (GitHub ubuntu-24.04-arm).
+  test-aarch64-native:
+    runs-on: ubuntu-24.04-arm
+    name: test (aarch64 native)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Unit + process specs + STW SP + fork on aarch64
+        run: |
+          mkdir -p bin
+          crystal spec --error-trace
+          crystal spec -Dgc_none process_spec --error-trace
+          crystal build -Dgc_none samples/hello.cr -o bin/hello
+          ./bin/hello
+          crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
+          ./bin/stw_sp_clamp
+          crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
+          ./bin/fork_reinit

@@ -20,6 +20,14 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.7.0-dev + `GCRY_CHUNK_BYTES=131072` | — | **~98.5%** | 40516 vs 41118; RSS ≈ default (empty-chunk waste) |
 | 0.7.0-dev Phase 12 | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
 | **0.7.0** | **~92%** | **~90%** | Phase 12 defaults + layout / root type_id / STW SP clamp; post-GC RSS **~0.93×** (median of 3) |
+| **0.8.0** | **~91%** | **~89%** | Barriers/TLAB/blacklist/layouts/atfork/aarch64/metrics; post-GC RSS **~0.93×** (median of 3) |
+
+Same-host **0.8.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path, fresh release binaries.
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|-------:|--------------:|
+| `/` | 88905 | 80604 | **90.7%** | **0.93×** |
+| `/json` | 39801 | 35253 | **88.6%** | **0.93×** |
 
 Same-host **0.7.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path.
 
@@ -29,6 +37,22 @@ Same-host **0.7.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path
 | `/json` | 41191 | 37186 | **90.3%** | **0.93×** |
 
 `GCRY_KEEP_CHUNKS=1` still trades thr (~**95%**) for ~**3×** RSS. Soft-dirty nursery stays opt-in.
+
+## Pause histogram (shard API)
+
+`Gcry.pause_stats` / `Heap#pause_percentile_ns` expose a ring of the last 64 STW pauses:
+
+| Field | Meaning |
+|-------|---------|
+| `last_ns` / `max_ns` / `total_ns` / `count` | Latest, peak, sum, sample count |
+| `p50_ns` / `p99_ns` | Nearest-rank percentiles over the ring |
+
+With a page-dirty barrier (`soft_dirty` or `mprotect`) and `GCRY_INCREMENTAL=1`, slices re-scan dirty pages before sweep so incremental termination is sounder than plain SATB without barriers. Nursery (`GCRY_NURSERY`) still defaults **off** for process GC (dirty HTTP heaps fall back to full old→young and raise pause); enable when measuring p99.
+
+```sh
+# After a run under -Dgc_none:
+#   Gcry.pause_stats.p99_ns
+```
 
 ## How to record
 

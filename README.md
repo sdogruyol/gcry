@@ -29,8 +29,8 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 
 ### What it is *not* (yet)
 
-- Not a drop-in for multi-threaded / parallel ExecutionContexts (stick to parallelism **1**)
-- Not fork-safe like Boehm’s fork handling
+- Parallel ExecutionContexts: experimental (`GCRY_TLAB=1`); stick to parallelism **1** for production
+- Not a drop-in Boehm replacement on macOS / Windows yet
 - Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**90%** of Boehm, post-GC RSS ~**0.93×**; see [docs/PERF.md](docs/PERF.md))
 
 ---
@@ -44,8 +44,21 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 | [docs/HARDENING.md](docs/HARDENING.md) | Tuning & stress |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm checklist |
+| [docs/API.md](docs/API.md) | Public API + `/metrics` helpers |
+| [docs/ANNOUNCE.md](docs/ANNOUNCE.md) | Release / forum announcement draft |
 | [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (%) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed per version |
+
+## gcry or Boehm?
+
+| Choose **gcry** when… | Stay on **Boehm** when… |
+|----------------------|-------------------------|
+| You want a Crystal-readable collector to hack / dogfood | You need macOS / Windows process GC today |
+| Linux x86_64 or aarch64, Crystal ≥ 1.21, parallelism **1** | Parallel ExecutionContexts in production |
+| Kemal-class HTTP thr ~90% of Boehm is acceptable | You need `Process.fork` under ExecutionContext |
+| You’re OK with STW + conservative retention | You need Boehm’s battle-tested defaults everywhere |
+
+See [docs/COMPARISON.md](docs/COMPARISON.md) for the full checklist.
 
 ## Why gcry exists
 
@@ -88,7 +101,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 
 | | |
 |--|--|
-| OS / arch | Linux x86_64 (primary); aarch64 cross-compile smoke in CI |
+| OS / arch | Linux x86_64 + aarch64 (process GC); macOS stubs only (no `-Dgc_none` yet) |
 | Crystal | `>= 1.21.0` |
 | Runtime | Default `Fiber::ExecutionContext`, **parallelism 1** |
 | Fork / signals | See [docs/POLICY.md](docs/POLICY.md) |
@@ -103,9 +116,17 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty-page scan only if dirty/total ≤ this % (default **25**) |
 | `GCRY_DISABLE_SOFT_DIRTY=1` | Never use soft-dirty page scan |
+| `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV barrier (process GC fallback) |
+| `GCRY_DISABLE_MPROTECT=1` | Forbid mprotect barrier |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
-| `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |
+| `GCRY_INCREMENTAL=1` | Sliced majors + dirty-page re-scan when a barrier is armed |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
+| `GCRY_STRESS=1` | Torture: collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
+| `GCRY_TLAB=1` | Thread-local alloc buffers (parallel ExecutionContexts) |
+| `GCRY_PARALLEL_MARK=N` | Request N mark workers (serial until STW-exempt helpers exist) |
+| `GCRY_DISABLE_BLACKLIST=1` | Do not blacklist pages of type_id-gate false roots (process default **on**) |
+| `GCRY_AUTO_LAYOUTS=1` | Run `Gcry.register_layouts` at init (opt-in; measure thr first) |
+| `GCRY_DISABLE_ATFORK=1` | Do not register `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |
@@ -122,8 +143,8 @@ Same machine, vs Boehm (`wrk -c 100 -d 30`). Higher % = closer to Boehm. Prefer 
 
 | Workload | gcry vs Boehm |
 |----------|-------------:|
-| Alloc-heavy JSON (`/json`) thr | **~90%** (median of 3) |
-| Idle `/` thr | **~92%** |
+| Alloc-heavy JSON (`/json`) thr | **~89%** (median of 3) |
+| Idle `/` thr | **~91%** |
 | `/json` post-GC RSS | **~0.93×** |
 | `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 

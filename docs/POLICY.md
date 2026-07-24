@@ -1,8 +1,9 @@
 # Runtime policy (Phase 7+)
 
 How gcry behaves under failure and process lifecycle edges. These are intentional
-product decisions for Linux x86_64 under Crystal **1.21+** defaults
-(`Fiber::ExecutionContext`, parallelism 1).
+product decisions for **Linux** (x86_64 and aarch64) under Crystal **1.21+** defaults
+(`Fiber::ExecutionContext`, parallelism 1). macOS process GC is not supported yet
+(Mach STW / dyld roots stubbed; see below).
 
 ## Out of memory (OOM)
 
@@ -21,15 +22,16 @@ Notes:
 
 ## Fork safety
 
-**Unsupported for continued Crystal execution in the child.**
-
 | Concern | Policy |
 |---------|--------|
-| Child inherits heap / freelist / mark state | Undefined if GC runs |
-| `pthread_atfork` | Not auto-registered; `GC.note_fork_child` poison API exists for integrators |
-| Recommended pattern | `fork` + immediate `exec`, or avoid forking after `GC.init` |
+| Child inherits heap mappings | OK — single surviving OS thread |
+| `pthread_atfork` | **Registered by default** on process GC; child resets locks, STW SP table, maps cache, barriers |
+| `GCRY_DISABLE_ATFORK=1` | Skip registration; post-fork GC raises (poison) |
+| Recommended patterns | Prefer `fork` + `exec`, or single-threaded child that keeps allocating under gcry after reinit |
 
-v0.4 skeleton only **detects** post-fork GC; it does **not** reinitialize the heap (unlike bdwgc’s `GC_set_handle_fork`). Prefer Boehm if you need a live forking server.
+`GC.note_fork_child` still exists for integrators; with atfork enabled it runs the same reinit path.
+
+**Crystal note:** default `Fiber::ExecutionContext` does not support `Process.fork`. Use `LibC.fork` only with `-Dwithout_mt`, or `fork`+`exec`. atfork still resets gcry locks when a C-level fork occurs.
 
 ## Signal safety
 
@@ -44,7 +46,7 @@ v0.4 skeleton only **detects** post-fork GC; it does **not** reinitialize the he
 | Mode | Support |
 |------|---------|
 | Default `Fiber::ExecutionContext` (parallelism 1) | **Supported** — STW suspends the Monitor (SYSMON) thread; stack bottom refreshed from `Fiber.current`; other threads' current-fiber stacks scanned after STW |
-| Resizing default context / extra parallel contexts | **Experimental** — STW suspends all OS threads and scans each current fiber stack; not tuned for high parallelism |
+| Resizing default context / extra parallel contexts | **Experimental** — enable `GCRY_TLAB=1` for alloc-side freelist locality; STW suspends all OS threads and scans each current fiber stack. Mark stays serial (`GCRY_PARALLEL_MARK=N` is a no-op speedup until STW-exempt workers exist). Not tuned for high parallelism |
 | Legacy `-Dpreview_mt` | **Unsupported** (deprecated in Crystal) |
 | Legacy `-Dwithout_mt` (`Crystal::Scheduler`) | Works for API shape; prefer the 1.21 default |
 
@@ -54,9 +56,32 @@ Process GC sets `Heap#stop_the_world = true` (signal-suspend like `gc/none`). Li
 
 | Allocation kind | After reclaim |
 |-----------------|---------------|
-| Large objects | Freelist + outside-STW trim (`GCRY_LARGE_CACHE` retain); counted in `large_free_bytes` / `unmapped_bytes` |
-| Size-class chunks | Kept mapped by default; `GCRY_RELEASE_CHUNKS=1` munmaps fully free chunks after major |
+| Large objects | Freelist + outside-STW trim (`GCRY_LARGE_CACHE` retain, default **8 MiB**); counted in `large_free_bytes` / `unmapped_bytes` |
+| Size-class chunks | **Empty-chunk release is process default-on** (`empty_chunk_retain` default **0** → `munmap` all fully-free chunks outside STW). `GCRY_KEEP_CHUNKS=1` forces retain (higher thr / higher RSS). `GCRY_RELEASE_CHUNKS=1` forces release on. `GCRY_EMPTY_CHUNK_RETAIN` keeps up to N bytes dormant (`MADV_DONTNEED`) for fast reuse. Partial-page `MADV_DONTNEED` stays opt-in via `GCRY_PAGE_DONTNEED=1`. |
 
 ## Incremental mark (process GC)
 
-Default is **full STW majors**. `GCRY_INCREMENTAL=1` enables sliced auto-majors but is **experimental** without write barriers: pointer stores into already-scanned objects can be missed (JSON/Hash workloads). Prefer the default unless measuring pause trade-offs on known-safe code.
+Default is **full STW majors**. With page-dirty barriers (soft-dirty / mprotect), `GCRY_INCREMENTAL=1` can terminate a cycle by re-scanning dirty pages. Without a working barrier backend, sliced majors remain **experimental**: pointer stores into already-scanned objects can be missed (JSON/Hash workloads). Prefer the default unless measuring pause trade-offs on known-safe code.
+
+## Stress / torture
+
+| Variable | Effect |
+|----------|--------|
+| `GCRY_STRESS=1` | Process GC: collect every N allocations (`GCRY_STRESS_EVERY`, default **16**) — CI / dogfood torture |
+
+## Write barriers (shard-only)
+
+| Backend | Role |
+|---------|------|
+| Linux soft-dirty | Preferred remembered-set for nursery old→young and incremental dirty re-scan |
+| `mprotect` + SEGV | Fallback card table when soft-dirty is unavailable (`GCRY_MPROTECT_BARRIER=1` to force) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (or mprotect if enabled) |
+
+## Platforms
+
+| Platform | Process GC (`-Dgc_none`) | Notes |
+|----------|--------------------------|-------|
+| Linux x86_64 | **Supported** | Primary; STW SP clamp, soft-dirty, atfork |
+| Linux aarch64 | **Supported** | STW SP via `uc_mcontext.sp` (glibc offset); CI native runner |
+| macOS (Darwin) | **Not yet** | Platform stubs compile; `-Dgc_none` raises at `GC.init` until Mach STW + dyld roots |
+| musl / Alpine | Best-effort | Prefer gnu; verify SP offset if enabling SP clamp |
