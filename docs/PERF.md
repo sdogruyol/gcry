@@ -22,6 +22,8 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 
 Same-host Phase 12 (2026-07-24, Crystal 1.21, WSL2): five paired `/json` runs — thr median **93.4%** (range 91.7–96.8%); post-GC RSS median **0.93×** (always ≤1.0×). Absolute ~36–38k vs Boehm ~37–41k req/s. `GCRY_KEEP_CHUNKS=1` recovers ~**95%** thr at ~**3×** RSS.
 
+STW SP clamp (2026-07-24, median of 3 `/json`): thr **~93%**; post-GC RSS **~0.93×** — on vs `GCRY_DISABLE_SP_CLAMP=1` is noise (Kemal already Boehm-class RSS).
+
 ## How to record
 
 Same-day gcry + Boehm on both paths → append a row (and refresh README). Do not invent numbers.

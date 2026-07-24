@@ -307,7 +307,32 @@ Same-host A/B after hash-precise (median of 3, post-`GC.collect`):
 | `layout_precise_scans` / cons | — | ~400–560 / ~8k–12k |
 | `size_class_live` | ~165 MiB | ~194–201 MiB |
 
-**Takeaway:** layout plumbing is correct (Hash survival smoke OK) but **does not close** the acikturkiye RSS gate. Only a few hundred objects per major match registered layouts; the dense live set is still mostly conservative (stacks / unregistered types). Next shard-only levers are diminishing; Boehm-class RSS here likely needs better roots / barriers.
+**Takeaway:** layout plumbing is correct (Hash survival smoke OK) but **does not close** the acikturkiye RSS gate. Only a few hundred objects per major match registered layouts; the dense live set is still mostly conservative (stacks / unregistered types).
+
+### Root-only `type_id` gate (2026-07-24)
+
+Ambient roots (stack / static / fiber stacks) reject candidates whose first payload word is not a plausible Crystal `type_id`. **Heap scan stays ungated** so `Array`/`Hash` buffers remain reachable (global gate previously SIGSEGV’d Kemal).
+
+| Metric | + layout | + root type_id gate |
+|--------|---------:|--------------------:|
+| thr % Boehm (median of 3) | ~89% | **~95.9%** |
+| post-GC RSS × | ~2.80× | **~3.14×** |
+| `type_id_root_rejects` / major | — | ~**15–17** |
+
+**Takeaway:** gate is **safe** but nearly a no-op on this workload (~16 rejects vs ~180 MiB live). Remaining false retention is mostly **real Crystal objects** kept via conservative stack words — needs stack maps / barriers (compiler), not more shard filters. Escape: `GCRY_DISABLE_TYPE_ID_GATE=1`.
+
+### STW SP clamp (2026-07-24)
+
+Capture RSP in the SIG_SUSPEND handler; other-thread stack scans start at SP instead of the full pthread range (`sp_clamp_hits`; escape `GCRY_DISABLE_SP_CLAMP=1`).
+
+Same-host A/B (`wrk -c 100 -d 30` `/api/v1/`, post-`GC.collect` RSS, median of 3):
+
+| Config | thr % Boehm | post-GC RSS × | notes |
+|--------|------------:|--------------:|-------|
+| + SP clamp (default) | **~93%** | **~3.3×** | `sp_clamp_hits` ≈ 2 / major |
+| `GCRY_DISABLE_SP_CLAMP=1` | **~94%** | **~3.2×** | `sp_clamp_fallbacks` only |
+
+**Takeaway:** clamp is **correct** (Monitor SP recorded) but does **not** move acikturkiye RSS. False retention is on mutator/fiber stacks already bounded by SP / `stack_top`, not the unused Monitor pthread range. **Shard-only RSS levers for this app are exhausted** — further parity needs compiler stack maps or write barriers.
 
 ## Non-goals (still)
 
@@ -315,3 +340,4 @@ Same-host A/B after hash-precise (median of 3, post-`GC.collect`):
 - `GCRY_CHUNK_BYTES=131072` as default (no acikturkiye RSS win).
 - Treating empty-chunk release as the acikturkiye RSS lever (dense conservative-live).
 - Boehm RSS parity on every app without better root precision / barriers (compiler territory).
+- Expecting STW SP clamp / root `type_id` gate / layout tables to close dense conservative-live RSS (measured no-ops on acikturkiye).

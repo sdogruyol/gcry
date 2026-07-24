@@ -279,7 +279,7 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Chunk-scoped soft-dirty + dirty-fraction fallback (`soft_dirty_max_pct`); skip until major when too dirty.
 - `GCRY_NURSERY` remains **opt-in**. WSL **6.18.33.2**: soft-dirty arms; HTTP workloads too dirty for a win (Kemal ~10× slower; acikturkiye RSS worse).
 
-### Phase 12 — Shard-only RSS (in progress)
+### Phase 12 — Shard-only RSS ✅ (Kemal; acikturkiye capped)
 
 - **Scope:** Boehm-class RSS without a Crystal compiler patch (still conservative; no write barriers / precise roots).
 - Process default: **empty-chunk release on** (`empty_chunk_retain` **0** → munmap outside STW; freelist **range-unlink**). `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes.
@@ -288,6 +288,8 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Kemal `/json` (2026-07-24, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×**. Thr gate (≥95%) still open — see [docs/PERF.md](docs/PERF.md).
 - acikturkiye `/api/v1/` (2026-07-24, median of 3): thr **~96%**; **post-GC RSS ~2.55×** (FAIL ≤1.5×). Released empty chunks ~**2 MiB** vs live ~**165 MiB** — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 - **Layout-precise mark** (`Gcry::Layout` / `register_hash`): boot-safe StaticArray registry, size gate, noscan value/index buffers, Hash entry walk. acikturkiye + layout (2026-07-24): RSS still **~2.8×**, precise-scan hit rate low — dense live remains mostly conservative (stacks / unregistered types). `GCRY_DISABLE_LAYOUT=1`.
+- **Root-only type_id gate** (process default-on): ambient roots gated; heap scan ungated. acikturkiye ~**16** rejects/major, RSS still **~3×**.
+- **STW SP clamp** (process default-on, linux x86_64): replace SIG_SUSPEND handler to record RSP; other-thread stack scans start at SP (`sp_clamp_hits` / `GCRY_DISABLE_SP_CLAMP=1`). Smoke: Monitor clamp hits. acikturkiye A/B (2026-07-24, median of 3): thr ~**93%**; post-GC RSS still **~3.3×** Boehm — clamp on vs off is noise. **Shard false-retention levers exhausted** for this app; remaining gap needs stack maps / barriers (compiler).
 
 ## MVP definition (v0.1)
 

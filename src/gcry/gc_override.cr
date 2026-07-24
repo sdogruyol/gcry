@@ -14,6 +14,10 @@ module GC
 
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
+    # Capture RSP in the suspend handler so other-thread scans skip below-SP.
+    unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+      Gcry::Platform.install_stw_sp_capture
+    end
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -31,9 +35,9 @@ module GC
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
     heap.empty_chunk_retain = Gcry::Heap::DEFAULT_EMPTY_CHUNK_RETAIN
-    # type_id_gate stays off until calibrated against real Crystal type id ranges
-    # (rejecting live objects caused Kemal SIGSEGV under load).
-    heap.type_id_gate = false
+    # type_id_gate on ambient roots only (stack/static). Heap scan must still
+    # mark raw Array/Hash buffers that lack a Crystal type_id header.
+    heap.type_id_gate = true
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -154,6 +158,10 @@ module GC
     if env_flag_one?("GCRY_DISABLE_LAYOUT")
       heap.layout_precise = false
       Gcry::Layout.enabled = false
+    end
+
+    if env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+      Gcry::Platform.stw_sp_clamp_enabled = false
     end
 
     # Free large-object bytes to retain after post-collect trim (default 8 MiB).

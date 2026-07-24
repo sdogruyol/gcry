@@ -32,6 +32,9 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page DONTNEED (opt-in; STW-heavy) |
 | `GCRY_LARGE_CACHE` | Free large-object bytes retained after post-collect trim (default `8388608` / 8 MiB) |
 | `GCRY_CHUNK_BYTES` | Size-class chunk size in bytes (default `262144` / 256 KiB; ≥64 KiB, multiple of 4096) |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only `type_id` plausibility filter (process default-on) |
+| `GCRY_DISABLE_LAYOUT=1` | Disable `Gcry::Layout` precise heap scan |
+| `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
 
 Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. **Empty-chunk release is process default** (`GCRY_KEEP_CHUNKS=1` to retain). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
@@ -49,7 +52,7 @@ GCRY_KEEP_CHUNKS=1 ./bin/stress 200
 ./bin/json_churn 1000
 ```
 
-Process GC defaults (Phase 12): majors at **32 MiB** full STW; nursery off; size-class ceiling 32 KiB; **empty chunks released** unless `GCRY_KEEP_CHUNKS=1`; base-pointer-only mark. Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (Phase 12): majors at **32 MiB** full STW; nursery off; size-class ceiling 32 KiB; **empty chunks released** unless `GCRY_KEEP_CHUNKS=1`; base-pointer-only mark; **root-only type_id gate** on (`GCRY_DISABLE_TYPE_ID_GATE=1`); layout-precise heap scan on (`GCRY_DISABLE_LAYOUT=1`); **STW SP clamp** on other OS threads (`GCRY_DISABLE_SP_CLAMP=1`). Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 **Tuning note (Kemal `/json` wrk):** raising `GCRY_THRESHOLD` to 128–256 MiB cuts major count but pause p50 grows roughly with heap; total pause time over a fixed wrk window often stays similar, so req/s may not improve. Prefer measuring `GET /gc-stats` (`pause_p50_ns` / `pause_p99_ns` / `major_collections`) on the real app before changing the default.
 

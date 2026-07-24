@@ -4,6 +4,7 @@ require "./finalizer"
 require "./platform/linux_roots"
 require "./platform/linux_stack"
 require "./platform/linux_softdirty"
+require "./platform/linux_stw"
 
 module Gcry
   class Heap
@@ -49,9 +50,11 @@ module Gcry
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false
-    # Reject candidates whose payload type_id word looks absurd (opt-in; unsafe for
-    # raw GC.malloc pointer buffers — keep off unless calibrated).
+    # Reject ambient root candidates (stack/static) whose payload type_id looks
+    # absurd. Heap-scan marks stay ungated so Array/Hash buffers remain reachable.
+    # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
     property type_id_gate : Bool = false
+    getter type_id_root_rejects : UInt64 = 0_u64
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
@@ -72,6 +75,9 @@ module Gcry
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
     getter last_phase_sweep_ns : UInt64 = 0_u64
+    # Other-thread stack scans clamped to captured RSP (vs full pthread range).
+    getter sp_clamp_hits : UInt64 = 0_u64
+    getter sp_clamp_fallbacks : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
     getter size_class_chunk_count : UInt64 = 0_u64
     getter fully_free_chunk_bytes : UInt64 = 0_u64
@@ -170,6 +176,7 @@ module Gcry
       Thread.unsafe_each do |thread|
         thread.resume unless thread == current_thread
       end
+      Platform.clear_thread_sps
       @world_stopped = false
     end
 
@@ -208,7 +215,7 @@ module Gcry
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
-        mark_candidate(candidate)
+        mark_root_candidate(candidate)
       end
     end
 
@@ -522,7 +529,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
             end
           end
         end
@@ -591,8 +598,8 @@ module Gcry
     # Mark Thread objects and their current_fiber (TLS alone is not scanned).
     private def scan_thread_roots : Nil
       Thread.unsafe_each do |thread|
-        mark_candidate(Pointer(Void).new(thread.object_id))
-        mark_candidate(Pointer(Void).new(thread.current_fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(thread.object_id))
+        mark_root_candidate(Pointer(Void).new(thread.current_fiber.object_id))
       end
     end
 
@@ -601,7 +608,7 @@ module Gcry
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
       Roots.scan_mutator(bottom) do |candidate|
-        mark_candidate(candidate)
+        mark_root_candidate(candidate)
       end
     end
 
@@ -611,7 +618,7 @@ module Gcry
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
       Fiber.unsafe_each do |fiber|
-        mark_candidate(Pointer(Void).new(fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(fiber.object_id))
         next if fiber == current
         next if fiber.running?
         # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
@@ -621,7 +628,7 @@ module Gcry
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard if top < guard
         Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
-          mark_candidate(candidate)
+          mark_root_candidate(candidate)
         end
       end
     end
@@ -629,9 +636,9 @@ module Gcry
     # Running fibers on *other* OS threads are skipped by `push_gc_roots`
     # (`fiber.running?` is true). After STW, scan their stacks.
     #
-    # Main fibers use the pthread stack — always query pthread bounds (Fiber
-    # `@stack.bottom` was historically a single global and wrong for SYSMON).
-    # Pooled fiber stacks have a PROT_NONE guard page at `stack.pointer`.
+    # Main fibers use the pthread stack — prefer captured RSP from the suspend
+    # signal (unused below-SP is classic false retention); fall back to full
+    # pthread bounds. Pooled fiber stacks have a PROT_NONE guard page.
     private def scan_other_thread_stacks : Nil
       return unless @stop_the_world
 
@@ -640,12 +647,21 @@ module Gcry
         next if thread == current
         fiber = thread.current_fiber
         stack = fiber.@stack
+        pthread = thread.to_unsafe
 
         if fiber.name == "main"
-          if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
-            # glibc may include a guard page inside getattr bounds — probe.
-            Roots.scan_range(bounds[0], bounds[1], safe: true) do |candidate|
-              mark_candidate(candidate)
+          if bounds = Platform.pthread_stack_bounds(pthread)
+            low = bounds[0]
+            high = bounds[1]
+            if (sp = Platform.thread_sp(pthread)) &&
+               sp.address >= low.address && sp.address < high.address
+              low = sp
+              @sp_clamp_hits += 1
+            else
+              @sp_clamp_fallbacks += 1
+            end
+            Roots.scan_range(low, high, safe: true) do |candidate|
+              mark_root_candidate(candidate)
             end
             next
           end
@@ -653,13 +669,19 @@ module Gcry
 
         # Skip PROT_NONE guard; prefer saved stack_top (used portion) when it
         # sits above the guard — full 8 MiB scans kill STW under many fibers.
+        # If suspend SP falls inside this fiber stack, clamp further.
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = fiber.@context.stack_top.address
         top = guard if top < guard
+        if (sp = Platform.thread_sp(pthread)) &&
+           sp.address >= stack.pointer.address && sp.address < stack.bottom.address
+          top = sp.address if sp.address > top
+          @sp_clamp_hits += 1
+        end
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
-          mark_candidate(candidate)
+          mark_root_candidate(candidate)
         end
       end
     end
@@ -704,6 +726,9 @@ module Gcry
       @bytes_reclaimed_since_gc = 0_u64
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
+      @type_id_root_rejects = 0_u64
+      @sp_clamp_hits = 0_u64
+      @sp_clamp_fallbacks = 0_u64
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -726,7 +751,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
             end
           end
         end
@@ -783,7 +808,17 @@ module Gcry
       end
     end
 
+    # Heap-scan / explicit roots: never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: false)
+    end
+
+    # Ambient roots (stack / static / fiber stacks): optional type_id plausibility.
+    private def mark_root_candidate(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: @type_id_gate)
+    end
+
+    private def mark_impl(pointer : Void*, gate_type_id : Bool) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -798,7 +833,8 @@ module Gcry
         return if addr != BlockHeader.user_from(header).address
       end
 
-      if @type_id_gate && !type_id_plausible?(header)
+      if gate_type_id && !type_id_plausible?(header)
+        @type_id_root_rejects += 1
         return
       end
 

@@ -17,7 +17,7 @@ Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 | Weak / disappearing links | Yes | Yes |
 | Auto-collect knobs | `GCRY_THRESHOLD` (default 32 MiB), `GCRY_KEEP_CHUNKS`, `GCRY_INTERIOR`, … | LibGC env / APIs |
 | Empty-chunk RSS | Release **default-on** (munmap outside STW) | LibGC reclaim |
-| Mark filter | Base-pointer-only default (`GCRY_INTERIOR=1`) | Interior pointers typical |
+| Mark filter | Base-pointer-only + root `type_id` gate + layout; STW SP clamp (`GCRY_DISABLE_SP_CLAMP=1`) | Interior pointers typical |
 | Incremental | Opt-in `GCRY_INCREMENTAL=1` (experimental without barriers); default full STW | Yes (BDW) |
 | Generational | Nursery without write barriers (opt-in) | Optional BDW modes |
 | Compacting / moving | No | Mostly no (conservative) |
@@ -59,4 +59,4 @@ Run before claiming app readiness:
 
 ## Phase 12 scope
 
-Shard-only gcry can approach **Boehm-class RSS** on Kemal by returning empty chunks and tightening mark filters. Closing remaining conservative false retention on dense live heaps (e.g. acikturkiye) needs better root precision or barriers — outside a pure shard. Empty-chunk release alone is not that lever.
+Shard-only gcry can approach **Boehm-class RSS** on Kemal by returning empty chunks and tightening mark filters. Closing remaining conservative false retention on dense live heaps (e.g. acikturkiye ~3× post-GC RSS) needs better root precision or barriers — outside a pure shard. Layout tables, root-only `type_id` gating, and STW SP clamp were measured and do not close that gap.

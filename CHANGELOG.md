@@ -21,12 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; chunk-scoped pagemap; dirty-fraction fallback (`GCRY_SOFT_DIRTY_MAX`, default **25%**). `GCRY_NURSERY` stays opt-in (off by default).
 - **Phase 12 (shard-only RSS):** process GC **empty-chunk release default-on** (`empty_chunk_retain` default **0** → munmap; `GCRY_EMPTY_CHUNK_RETAIN` / dormant DONTNEED; `GCRY_KEEP_CHUNKS=1` escape). Freelist **range-unlink** on release (no full size-class rebuild). Process majors at **32 MiB**. Mark roots **base-pointer-only** by default (`GCRY_INTERIOR=1` restores interiors). `GCRY_TYPE_ID_GATE=1` / `GCRY_PAGE_DONTNEED=1` opt-in. Bench: `GET /gc-collect`.
 - **Layout-precise scan (false retention):** `Gcry::Layout` type_id → pointer offsets (StaticArray, boot-safe); size-class gate; noscan buffers; `Gcry.register_hash` entry walk. `GCRY_DISABLE_LAYOUT=1`. Does **not** close acikturkiye RSS (still ~2.8×) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Root-only `type_id` gate (process default-on):** stack/static candidates must have a plausible Crystal `type_id`; heap-scan marks stay ungated (buffers). `GCRY_DISABLE_TYPE_ID_GATE=1`. acikturkiye: ~15 rejects/major, RSS unchanged (~3×) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **STW SP clamp (process default-on, linux x86_64):** capture RSP in SIG_SUSPEND; clamp other-thread stack scans to used SP (`sp_clamp_hits` / `sp_clamp_fallbacks`; `GCRY_DISABLE_SP_CLAMP=1`). acikturkiye RSS unchanged (~3×) — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ### Performance
 
 - Same-host Kemal `/json` (Phase 12 default, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×** Boehm — see [docs/PERF.md](docs/PERF.md). (`GCRY_KEEP_CHUNKS=1` ≈ **95%** thr @ ~**3×** RSS.)
+- Same-host Kemal `/json` after layout + root type_id gate (median of 3, `-d 20`): thr **~91%**; post-GC RSS **~0.91×** (RSS gate OK; thr gate still open).
 - Same-host acikturkiye `/api/v1/` (Phase 12, median of 3): thr **~96%**; **post-GC RSS ~2.55×** — empty release ~noop; dense conservative-live — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Same-host acikturkiye + layout/hash-precise (median of 3): thr **~89%** (noisy); **post-GC RSS ~2.80×** — layout hit rate low vs conservative scans; RSS gate still FAIL.
+- Same-host acikturkiye + layout + root type_id gate (median of 3): thr **~96%**; **post-GC RSS ~3.1×**.
+- Same-host acikturkiye + STW SP clamp (median of 3): thr **~93%**; **post-GC RSS ~3.3×** — clamp vs `GCRY_DISABLE_SP_CLAMP=1` is noise; shard false-retention levers exhausted.
 - Earlier 0.7.0-dev (chunks retained): `/json` ~**100%**; opt-in release ~**92%**; `GCRY_CHUNK_BYTES=131072` ~**98.5%** (RSS flat).
 - Soft-dirty on WSL **6.18.33.2**: HTTP nursery still too dirty — keep opt-in.
 

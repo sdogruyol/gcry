@@ -18,9 +18,9 @@ module Gcry
     KIND_PLAIN = 0_u8
     KIND_HASH  = 1_u8
 
-    VALUE_MODE_NONE   = 0_u8
-    VALUE_MODE_REF    = 1_u8 # value is a Reference pointer in the entry
-    VALUE_MODE_WORDS  = 2_u8 # value is a struct; mark pointer-sized words (e.g. JSON::Any)
+    VALUE_MODE_NONE  = 0_u8
+    VALUE_MODE_REF   = 1_u8 # value is a Reference pointer in the entry
+    VALUE_MODE_WORDS = 2_u8 # value is a struct; mark pointer-sized words (e.g. JSON::Any)
 
     # `uninitialized` — no Crystal `once` (`.new` class-var init needs Fiber; GC.init is too early).
     @@type_ids = uninitialized StaticArray(Int32, MAX_ENTRIES)
