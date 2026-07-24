@@ -79,6 +79,7 @@ describe "Gcry::Heap collection" do
   it "finds objects via interior pointers" do
     heap = Gcry::Heap.new
     begin
+      heap.allow_interior_pointers = true
       obj = heap.malloc(64)
       interior = (obj.as(UInt8*) + 24).as(Void*)
       header = heap.find_object(interior)
@@ -88,6 +89,19 @@ describe "Gcry::Heap collection" do
       heap.add_root(interior)
       heap.collect(scan_stack: false)
       heap.live?(obj).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "ignores interior roots when allow_interior_pointers is false" do
+    heap = Gcry::Heap.new
+    begin
+      heap.allow_interior_pointers = false
+      obj = heap.malloc(64)
+      heap.add_root((obj.as(UInt8*) + 24).as(Void*))
+      heap.collect(scan_stack: false)
+      heap.live?(obj).should be_false
     ensure
       heap.destroy
     end
@@ -147,6 +161,7 @@ it "munmaps fully free size-class chunks on major" do
   begin
     heap.gc_threshold = UInt64::MAX
     heap.release_empty_chunks = true
+    heap.empty_chunk_retain = 0 # force munmap (no dormant retain)
     heap.nursery_enabled = false
 
     keep = heap.malloc(64)
@@ -159,7 +174,99 @@ it "munmaps fully free size-class chunks on major" do
     heap.collect(scan_stack: false)
     heap.live?(keep).should be_true
     heap.unmapped_bytes.should be > 0
+    heap.released_chunk_bytes.should eq(heap.unmapped_bytes)
+    heap.fully_free_chunk_bytes.should eq(heap.released_chunk_bytes)
     heap.heap_size.should be < before
+    # Freelist still works after rebuild from remaining chunks.
+    heap.malloc(64).should_not be_nil
+  ensure
+    heap.destroy
+  end
+end
+
+it "keeps empty chunks dormant within empty_chunk_retain" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = true
+    heap.empty_chunk_retain = UInt64::MAX
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.unmapped_bytes.should eq(0)
+    heap.released_chunk_bytes.should eq(0)
+    heap.dormant_chunk_bytes.should be > 0
+    heap.dontneed_bytes.should be > 0
+    heap.heap_size.should eq(before)
+    heap.malloc(64).should_not be_nil
+  ensure
+    heap.destroy
+  end
+end
+
+it "reports fully_free_chunk_bytes when empty chunks are retained" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = false
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.released_chunk_bytes.should eq(0)
+    heap.fully_free_chunk_bytes.should be > 0
+    heap.size_class_chunk_count.should be > 0
+    # Retained: heap_size does not drop by the fully-free amount.
+    heap.heap_size.should eq(before)
+    heap.unmapped_bytes.should eq(0)
+  ensure
+    heap.destroy
+  end
+end
+
+it "reports size_class_live_bytes and fill histogram after major" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = false
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    heap.collect(scan_stack: false)
+    heap.size_class_live_bytes.should be > 0
+    fill_sum = heap.chunk_fill_lt25 + heap.chunk_fill_lt50 + heap.chunk_fill_lt75 + heap.chunk_fill_ge75
+    fill_sum.should eq(heap.size_class_chunk_count)
+    # Empty retained chunks land in lt25.
+    heap.chunk_fill_lt25.should be > 0
+  ensure
+    heap.destroy
+  end
+end
+
+it "allocates with a custom small_chunk_bytes" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.small_chunk_bytes = 131072_u64 # 128 KiB
+    ptr = heap.malloc(64)
+    heap.is_heap_ptr(ptr).should be_true
+    # One refill maps a 128 KiB chunk.
+    heap.heap_size.should eq(131072)
+    heap.free(ptr)
   ensure
     heap.destroy
   end

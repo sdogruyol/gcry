@@ -14,6 +14,10 @@ module GC
 
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
+    # Capture RSP in the suspend handler so other-thread scans skip below-SP.
+    unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+      Gcry::Platform.install_stw_sp_capture
+    end
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -27,9 +31,15 @@ module GC
     # Full STW majors by default (v0.4+). Incremental without write barriers is
     # unsound under heavy pointer mutation (e.g. Kemal /json).
     heap.incremental_auto = false
-    # Empty-chunk munmap stays opt-in: default-on regresses Kemal wrk ~35–40%.
-    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning makes it safe.
-    heap.release_empty_chunks = false
+    # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
+    # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
+    heap.release_empty_chunks = true
+    heap.empty_chunk_retain = Gcry::Heap::DEFAULT_EMPTY_CHUNK_RETAIN
+    # type_id_gate on ambient roots only (stack/static). Heap scan must still
+    # mark raw Array/Hash buffers that lack a Crystal type_id header.
+    heap.type_id_gate = true
+    heap.allow_interior_pointers = false
+    heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -44,6 +54,16 @@ module GC
     # refresh the running fiber bottom each collect.
     heap.before_collect do
       heap.set_stackbottom(Fiber.current.@stack.bottom)
+    end
+
+    # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
+    # growth under gcry during GC.init SIGSEGVs — Fiber/runtime is not ready yet.
+    # GCRY_DISABLE_LAYOUT is applied here and again in apply_env_config.
+    if env_flag_one?("GCRY_DISABLE_LAYOUT")
+      heap.layout_precise = false
+      Gcry::Layout.enabled = false
+    else
+      Gcry::Layout.register_builtins
     end
 
     @@gcry_ready = true
@@ -82,6 +102,14 @@ module GC
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
     end
 
+    # Soft-dirty page scan only when dirty/total ≤ this percent (default 25).
+    # GCRY_DISABLE_SOFT_DIRTY=1 forces full old→young object scan.
+    if env_flag_one?("GCRY_DISABLE_SOFT_DIRTY")
+      heap.soft_dirty_max_pct = 0
+    elsif max_pct = env_u64("GCRY_SOFT_DIRTY_MAX")
+      heap.soft_dirty_max_pct = max_pct.to_i32 if max_pct <= 100
+    end
+
     if env_flag_one?("GCRY_INCREMENTAL")
       # Experimental: sliced majors. Unsafe without write barriers if the mutator
       # stores pointers into already-scanned objects (typical JSON/Hash workloads).
@@ -96,12 +124,56 @@ module GC
       heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
     end
 
-    # Empty-chunk release remains opt-in (default-on hurts Kemal throughput).
-    # GCRY_RELEASE_CHUNKS=1 enables; GCRY_KEEP_CHUNKS=1 forces off.
+    # Adaptive empty-chunk release is process default (dormant + munmap excess).
+    # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
+    end
+
+    if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
+      heap.empty_chunk_retain = retain
+    end
+
+    if env_flag_one?("GCRY_DISABLE_MADVISE")
+      heap.madvise_free_pages = false
+    elsif env_flag_one?("GCRY_PAGE_DONTNEED")
+      # Sparse-chunk free-page DONTNEED; raises STW, helps RSS when fragmentation is high.
+      heap.madvise_free_pages = true
+    end
+
+    if env_flag_one?("GCRY_INTERIOR")
+      heap.allow_interior_pointers = true
+    end
+
+    if env_flag_one?("GCRY_TYPE_ID_GATE")
+      heap.type_id_gate = true
+    end
+
+    if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
+      heap.type_id_gate = false
+    end
+
+    if env_flag_one?("GCRY_DISABLE_LAYOUT")
+      heap.layout_precise = false
+      Gcry::Layout.enabled = false
+    end
+
+    if env_flag_one?("GCRY_DISABLE_SP_CLAMP")
+      Gcry::Platform.stw_sp_clamp_enabled = false
+    end
+
+    # Free large-object bytes to retain after post-collect trim (default 8 MiB).
+    if cache = env_u64("GCRY_LARGE_CACHE")
+      heap.large_cache_retain = cache
+    end
+
+    # Size-class chunk mmap size (default 256 KiB). Must be ≥64 KiB and page-aligned.
+    if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
+      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
+        heap.small_chunk_bytes = chunk_bytes
+      end
     end
   end
 

@@ -114,6 +114,10 @@ module Gcry
 
     module Flags
       NURSERY = 1_u32
+      # Fully free; pages DONTNEED'd; not on freelist until revived.
+      DORMANT = 2_u32
+      # Some free pages were MADV_DONTNEED'd; freelist must skip those holes.
+      HOLED = 4_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32, @flags : UInt32 = 0_u32)
@@ -143,6 +147,34 @@ module Gcry
 
     def self.nursery?(chunk : ChunkHeader*) : Bool
       (chunk.value.flags & Flags::NURSERY) != 0
+    end
+
+    def self.dormant?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::DORMANT) != 0
+    end
+
+    def self.set_dormant(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::DORMANT
+      else
+        h.flags &= ~Flags::DORMANT
+      end
+      chunk.value = h
+    end
+
+    def self.holed?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::HOLED) != 0
+    end
+
+    def self.set_holed(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::HOLED
+      else
+        h.flags &= ~Flags::HOLED
+      end
+      chunk.value = h
     end
   end
 

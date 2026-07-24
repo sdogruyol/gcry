@@ -3,11 +3,13 @@ require "./roots"
 require "./finalizer"
 require "./platform/linux_roots"
 require "./platform/linux_stack"
+require "./platform/linux_softdirty"
+require "./platform/linux_stw"
 
 module Gcry
   class Heap
     DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD         = 67108864_u64 # 64 MiB — process GC (fewer STW)
+    PROCESS_GC_THRESHOLD         = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
     DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
     DEFAULT_INCREMENTAL_WORK     =         1024
     MAX_AUTO_INCREMENTAL_SLICES  =            4 # slices per alloc when debt is high
@@ -34,9 +36,29 @@ module Gcry
     # Library default false (predictable tests); process GC leaves it off unless
     # GCRY_INCREMENTAL=1 (experimental without write barriers).
     property incremental_auto : Bool = false
-    # When true, fully free size-class chunks are munmap'd after major sweep.
-    # Library + process default false (HTTP cost); enable via GCRY_RELEASE_CHUNKS=1.
+    # When true, fully free size-class chunks beyond empty_chunk_retain are
+    # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
+    # Library default false; process GC enables adaptive release.
     property release_empty_chunks : Bool = false
+    # Bytes of fully-free chunks to keep dormant (DONTNEED) for reuse.
+    property empty_chunk_retain : UInt64 = DEFAULT_EMPTY_CHUNK_RETAIN
+    # MADV_DONTNEED free pages in partially-live chunks after major (Linux).
+    # Partial-page MADV_DONTNEED on sparse chunks (opt-in — STW cost).
+    property madvise_free_pages : Bool = false
+    getter dormant_chunk_bytes : UInt64 = 0_u64
+    getter dontneed_bytes : UInt64 = 0_u64
+    # When false (default for library heaps), only object-base pointers are marked.
+    # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
+    property allow_interior_pointers : Bool = false
+    # Reject ambient root candidates (stack/static) whose payload type_id looks
+    # absurd. Heap-scan marks stay ungated so Array/Hash buffers remain reachable.
+    # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
+    property type_id_gate : Bool = false
+    getter type_id_root_rejects : UInt64 = 0_u64
+    # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
+    property layout_precise : Bool = true
+    getter layout_precise_scans : UInt64 = 0_u64
+    getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
     property nursery_enabled : Bool = true
@@ -53,6 +75,19 @@ module Gcry
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
     getter last_phase_sweep_ns : UInt64 = 0_u64
+    # Other-thread stack scans clamped to captured RSP (vs full pthread range).
+    getter sp_clamp_hits : UInt64 = 0_u64
+    getter sp_clamp_fallbacks : UInt64 = 0_u64
+    # Occupancy after last major (size-class chunks only).
+    getter size_class_chunk_count : UInt64 = 0_u64
+    getter fully_free_chunk_bytes : UInt64 = 0_u64
+    getter released_chunk_bytes : UInt64 = 0_u64
+    getter size_class_live_bytes : UInt64 = 0_u64
+    # Kept size-class chunk fill histogram (live_payload / usable_payload).
+    getter chunk_fill_lt25 : UInt64 = 0_u64
+    getter chunk_fill_lt50 : UInt64 = 0_u64
+    getter chunk_fill_lt75 : UInt64 = 0_u64
+    getter chunk_fill_ge75 : UInt64 = 0_u64
 
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
@@ -70,6 +105,21 @@ module Gcry
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
+    # Fully free size-class chunks queued in STW; munmap outside (like large trim).
+    @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # After a successful clear_soft_dirty, minors may scan dirty pages only.
+    getter? soft_dirty_armed : Bool = false
+    @soft_dirty_probed = false
+    @soft_dirty_works = false
+    # Skip dirty-page scan when dirty/total pages exceed this percent (0 = never use).
+    property soft_dirty_max_pct : Int32 = 25
+    getter soft_dirty_page_scans : UInt64 = 0_u64
+    getter soft_dirty_fallbacks : UInt64 = 0_u64
+    # Last minor: dirty and total heap pages seen by the fraction check (0 if unused).
+    getter last_soft_dirty_pages : UInt64 = 0_u64
+    getter last_soft_dirty_total : UInt64 = 0_u64
+    # After a high-dirty fallback, skip soft-dirty until the next major.
+    @soft_dirty_skip_until_major = false
 
     def enable : Nil
       @enabled = true
@@ -126,6 +176,7 @@ module Gcry
       Thread.unsafe_each do |thread|
         thread.resume unless thread == current_thread
       end
+      Platform.clear_thread_sps
       @world_stopped = false
     end
 
@@ -164,7 +215,7 @@ module Gcry
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
-        mark_candidate(candidate)
+        mark_root_candidate(candidate)
       end
     end
 
@@ -389,6 +440,7 @@ module Gcry
     end
 
     protected def destroy_collector : Nil
+      flush_pending_empty_chunks
       abort_incremental
       @roots.clear
       @mark_stack.destroy
@@ -406,6 +458,22 @@ module Gcry
       @bytes_reclaimed_since_gc = 0_u64
       @reclaimed_bytes_before_gc = 0_u64
       @expl_freed_bytes_since_gc = 0_u64
+      @size_class_chunk_count = 0_u64
+      @fully_free_chunk_bytes = 0_u64
+      @released_chunk_bytes = 0_u64
+      @size_class_live_bytes = 0_u64
+      @chunk_fill_lt25 = 0_u64
+      @chunk_fill_lt50 = 0_u64
+      @chunk_fill_lt75 = 0_u64
+      @chunk_fill_ge75 = 0_u64
+      @soft_dirty_armed = false
+      @soft_dirty_probed = false
+      @soft_dirty_works = false
+      @soft_dirty_page_scans = 0_u64
+      @soft_dirty_fallbacks = 0_u64
+      @last_soft_dirty_pages = 0_u64
+      @last_soft_dirty_total = 0_u64
+      @soft_dirty_skip_until_major = false
       reset_pause_stats
     end
 
@@ -427,6 +495,10 @@ module Gcry
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?) : Nil
       started = monotonic_ns
       @collecting = true
+      # Generational mark skips old objects; old→young edges come from
+      # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
+      # old walk). Finalizers/WeakRef must not treat unmarked old as dead
+      # (see unmarked_live_object?).
       @minor_only = !major
       begin
         # Block fiber swaps, then suspend other OS threads.
@@ -445,8 +517,9 @@ module Gcry
 
         t0 = monotonic_ns
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_candidate(ptr) }
-        roots.try &.each { |ptr| mark_candidate(ptr) }
+        # Explicit roots respect allow_interior_pointers (ambient-style).
+        @roots.each { |ptr| mark_root_candidate(ptr) }
+        roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
         # Fiber objects + suspended stacks (once; not also via push_gc_roots).
         scan_all_fiber_roots if scan_stack
@@ -457,7 +530,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
             end
           end
         end
@@ -470,7 +543,8 @@ module Gcry
         end
         @last_phase_stacks_ns = monotonic_ns - t0
 
-        # Conservatively find nursery pointers from old objects (no write barrier).
+        # Conservatively find nursery pointers from old objects.
+        # Soft-dirty (when armed) limits the scan to pages written since last minor.
         scan_old_for_nursery_pointers unless major
 
         t0 = monotonic_ns
@@ -492,9 +566,13 @@ module Gcry
           if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
             Platform.invalidate_static_root_cache
           end
+          # Next minor starts a fresh soft-dirty window after a major.
+          @soft_dirty_skip_until_major = false
+          arm_soft_dirty_after_collect if @nursery_enabled
         else
           @nursery_alloc_bytes = 0_u64
           @minor_collections += 1
+          arm_soft_dirty_after_collect
         end
         @collections += 1
       ensure
@@ -506,7 +584,8 @@ module Gcry
         record_pause(started)
       end
 
-      # Munmap excess cached large objects outside STW (reuse is the common case).
+      # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+      flush_pending_empty_chunks
       trim_large_cache
 
       @running_finalizers = true
@@ -520,8 +599,8 @@ module Gcry
     # Mark Thread objects and their current_fiber (TLS alone is not scanned).
     private def scan_thread_roots : Nil
       Thread.unsafe_each do |thread|
-        mark_candidate(Pointer(Void).new(thread.object_id))
-        mark_candidate(Pointer(Void).new(thread.current_fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(thread.object_id))
+        mark_root_candidate(Pointer(Void).new(thread.current_fiber.object_id))
       end
     end
 
@@ -530,7 +609,7 @@ module Gcry
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
       Roots.scan_mutator(bottom) do |candidate|
-        mark_candidate(candidate)
+        mark_root_candidate(candidate)
       end
     end
 
@@ -540,7 +619,7 @@ module Gcry
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
       Fiber.unsafe_each do |fiber|
-        mark_candidate(Pointer(Void).new(fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(fiber.object_id))
         next if fiber == current
         next if fiber.running?
         # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
@@ -550,7 +629,7 @@ module Gcry
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard if top < guard
         Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
-          mark_candidate(candidate)
+          mark_root_candidate(candidate)
         end
       end
     end
@@ -558,9 +637,9 @@ module Gcry
     # Running fibers on *other* OS threads are skipped by `push_gc_roots`
     # (`fiber.running?` is true). After STW, scan their stacks.
     #
-    # Main fibers use the pthread stack — always query pthread bounds (Fiber
-    # `@stack.bottom` was historically a single global and wrong for SYSMON).
-    # Pooled fiber stacks have a PROT_NONE guard page at `stack.pointer`.
+    # Main fibers use the pthread stack — prefer captured RSP from the suspend
+    # signal (unused below-SP is classic false retention); fall back to full
+    # pthread bounds. Pooled fiber stacks have a PROT_NONE guard page.
     private def scan_other_thread_stacks : Nil
       return unless @stop_the_world
 
@@ -569,12 +648,21 @@ module Gcry
         next if thread == current
         fiber = thread.current_fiber
         stack = fiber.@stack
+        pthread = thread.to_unsafe
 
         if fiber.name == "main"
-          if bounds = Platform.pthread_stack_bounds(thread.to_unsafe)
-            # glibc may include a guard page inside getattr bounds — probe.
-            Roots.scan_range(bounds[0], bounds[1], safe: true) do |candidate|
-              mark_candidate(candidate)
+          if bounds = Platform.pthread_stack_bounds(pthread)
+            low = bounds[0]
+            high = bounds[1]
+            if (sp = Platform.thread_sp(pthread)) &&
+               sp.address >= low.address && sp.address < high.address
+              low = sp
+              @sp_clamp_hits += 1
+            else
+              @sp_clamp_fallbacks += 1
+            end
+            Roots.scan_range(low, high, safe: true) do |candidate|
+              mark_root_candidate(candidate)
             end
             next
           end
@@ -582,13 +670,19 @@ module Gcry
 
         # Skip PROT_NONE guard; prefer saved stack_top (used portion) when it
         # sits above the guard — full 8 MiB scans kill STW under many fibers.
+        # If suspend SP falls inside this fiber stack, clamp further.
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = fiber.@context.stack_top.address
         top = guard if top < guard
+        if (sp = Platform.thread_sp(pthread)) &&
+           sp.address >= stack.pointer.address && sp.address < stack.bottom.address
+          top = sp.address if sp.address > top
+          @sp_clamp_hits += 1
+        end
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
-          mark_candidate(candidate)
+          mark_root_candidate(candidate)
         end
       end
     end
@@ -631,6 +725,11 @@ module Gcry
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
       @bytes_before_gc = @bytes_since_gc
       @bytes_reclaimed_since_gc = 0_u64
+      @layout_precise_scans = 0_u64
+      @layout_conservative_scans = 0_u64
+      @type_id_root_rejects = 0_u64
+      @sp_clamp_hits = 0_u64
+      @sp_clamp_fallbacks = 0_u64
     end
 
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
@@ -645,15 +744,15 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_candidate(ptr) }
-        roots.try &.each { |ptr| mark_candidate(ptr) }
+        @roots.each { |ptr| mark_root_candidate(ptr) }
+        roots.try &.each { |ptr| mark_root_candidate(ptr) }
         mark_metadata_roots
         scan_all_fiber_roots if scan_stack
         scan_thread_roots if scan_stack && @stop_the_world
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
             end
           end
         end
@@ -710,7 +809,19 @@ module Gcry
       end
     end
 
+    # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
+    # into its allocation). Never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: false, base_only: false)
+    end
+
+    # Ambient roots (stack / static / fiber stacks): optional type_id gate;
+    # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
+    private def mark_root_candidate(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers)
+    end
+
+    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -719,6 +830,18 @@ module Gcry
       header = find_object(pointer)
       return unless header
       return if BlockHeader.free?(header)
+
+      if base_only
+        # Object-base only on ambient roots: interiors into String/Array buffers
+        # inflate false retention. Heap marks must allow interiors (shift).
+        return if addr != BlockHeader.user_from(header).address
+      end
+
+      if gate_type_id && !type_id_plausible?(header)
+        @type_id_root_rejects += 1
+        return
+      end
+
       return if BlockHeader.marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
@@ -726,6 +849,39 @@ module Gcry
 
       BlockHeader.set_mark(header)
       @mark_stack.push(header)
+    end
+
+    # Keep allocation alive without scanning its payload (integer / index buffers).
+    # Always allow interiors — Array(UInt8)#shift stores an interior @buffer.
+    private def mark_noscan(pointer : Void*) : Nil
+      addr = pointer.address
+      return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+
+      header = find_object(pointer)
+      return unless header
+      return if BlockHeader.free?(header)
+
+      return if BlockHeader.marked?(header)
+      if @minor_only && !BlockHeader.nursery?(header)
+        return
+      end
+
+      BlockHeader.set_mark(header)
+    end
+
+    # Crystal Reference payloads start with type_id (Int32). Reject if that
+    # 32-bit word looks like the high half of a pointer / absurd id.
+    private def type_id_plausible?(header : BlockHeader*) : Bool
+      return true if BlockHeader.atomic?(header)
+      size = header.value.size.to_u64
+      return true if size < 4
+
+      tid = BlockHeader.user_from(header).as(Int32*).value
+      return false if tid < 0
+      # Crystal type ids are dense small integers, not pointer-sized values.
+      return false if tid > 1_000_000
+      true
     end
 
     private def mark_loop : Nil
@@ -751,11 +907,97 @@ module Gcry
       size = clamped_scan_size(header, user)
       return if size == 0
 
+      if @layout_precise && size >= 4
+        tid = user.as(Int32*).value
+        if (entry = Layout.entry_for(tid))
+          if entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+            @layout_precise_scans += 1
+            if entry.hash?
+              scan_hash_object(user, size, entry)
+            else
+              entry.scan_offsets.each do |off|
+                next if off.to_u64 + sizeof(Void*).to_u64 > size
+                slot = Pointer(Void*).new(user.address + off.to_u64)
+                mark_candidate(slot.value)
+              end
+              entry.noscan_offsets.each do |off|
+                next if off.to_u64 + sizeof(Void*).to_u64 > size
+                slot = Pointer(Void*).new(user.address + off.to_u64)
+                mark_noscan(slot.value)
+              end
+            end
+            return
+          end
+        end
+      end
+
+      @layout_conservative_scans += 1
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
         mark_candidate(Pointer(Void).new(cursor[i]))
+      end
+    end
+
+    # Precise Hash: keep @indices/@entries blobs alive without scanning them as
+    # pointer arrays; walk Entry slots and mark key/value only.
+    private def scan_hash_object(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
+      entry.scan_offsets.each do |off|
+        next if off.to_u64 + sizeof(Void*).to_u64 > size
+        slot = Pointer(Void*).new(user.address + off.to_u64)
+        mark_candidate(slot.value)
+      end
+
+      entry.noscan_offsets.each do |off|
+        next if off.to_u64 + sizeof(Void*).to_u64 > size
+        slot = Pointer(Void*).new(user.address + off.to_u64)
+        mark_noscan(slot.value)
+      end
+
+      entries_off = entry.hash_entries_off.to_u64
+      pow2_off = entry.hash_pow2_off.to_u64
+      stride = entry.hash_entry_stride.to_u64
+      return if stride == 0
+      return if entries_off + sizeof(Void*).to_u64 > size
+      return if pow2_off + 1 > size
+
+      entries = Pointer(Void*).new(user.address + entries_off).value
+      return if entries.null?
+
+      pow2 = Pointer(UInt8).new(user.address + pow2_off).value
+      # Crystal: indices_size = 1 << pow2; entries_size = indices_size // 2
+      return if pow2 >= 63
+      entries_size = (1_u64 << pow2) // 2
+      return if entries_size == 0 || entries_size > 1_000_000_u64
+
+      key_off = entry.hash_key_off.to_u64
+      value_off = entry.hash_value_off.to_u64
+      value_mode = entry.hash_value_mode
+      value_bytes = entry.hash_value_bytes.to_u64
+      base = entries.as(UInt8*)
+
+      i = 0_u64
+      while i < entries_size
+        slot = base + (i * stride)
+        # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
+        hash_word = slot.as(UInt32*).value
+        if hash_word != 0_u32
+          if key_off != 0
+            mark_candidate(Pointer(Void*).new(slot.address + key_off).value)
+          end
+          case value_mode
+          when Layout::VALUE_MODE_REF
+            mark_candidate(Pointer(Void*).new(slot.address + value_off).value)
+          when Layout::VALUE_MODE_WORDS
+            w = 0_u64
+            while w + sizeof(Void*).to_u64 <= value_bytes
+              mark_candidate(Pointer(Void*).new(slot.address + value_off + w).value)
+              w += sizeof(Void*).to_u64
+            end
+          end
+        end
+        i += 1
       end
     end
 
@@ -777,6 +1019,61 @@ module Gcry
     end
 
     private def scan_old_for_nursery_pointers : Nil
+      {% if flag?(:linux) %}
+        # Soft-dirty is for process GC (old→young without full old scan).
+        # Library heaps under Boehm keep the full scan (and some kernels/WSL
+        # do not set soft-dirty bits reliably).
+        # Walk mapped old chunks only — [heap_min, heap_max) is sparse and
+        # understates dirty fraction / wastes pagemap I/O on holes.
+        if @soft_dirty_armed && @scan_static_roots && @soft_dirty_max_pct > 0
+          dirty = 0_u64
+          total = 0_u64
+          pagemap_ok = true
+          each_chunk do |chunk|
+            low = chunk.address
+            high = chunk.address + chunk.value.mapped_bytes
+            counts = Platform.count_soft_dirty_pages(low, high)
+            unless counts
+              pagemap_ok = false
+              break
+            end
+            d, t = counts
+            dirty += d
+            total += t
+          end
+          @last_soft_dirty_pages = dirty
+          @last_soft_dirty_total = total
+
+          if pagemap_ok && total > 0 && dirty * 100 <= total * @soft_dirty_max_pct.to_u64
+            scan_ok = true
+            each_chunk do |chunk|
+              low = chunk.address
+              high = chunk.address + chunk.value.mapped_bytes
+              ok = Platform.each_dirty_page(low, high) do |page|
+                scan_range_for_nursery_pointers(
+                  Pointer(Void).new(page),
+                  Pointer(Void).new(page + Platform::PAGE_SIZE),
+                )
+              end
+              unless ok
+                scan_ok = false
+                break
+              end
+            end
+            if scan_ok
+              @soft_dirty_page_scans += 1
+              return
+            end
+          elsif pagemap_ok
+            @soft_dirty_fallbacks += 1
+            # Dirty-heavy mutator: stop paying pagemap/clear_refs every minor.
+            @soft_dirty_skip_until_major = true
+            @soft_dirty_armed = false
+          end
+          # Pagemap failed or too dirty — fall back to a full old-space scan.
+        end
+      {% end %}
+
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
@@ -789,6 +1086,72 @@ module Gcry
             scan_object_for_nursery(header)
           end
         end
+      end
+    end
+
+    # Word-scan a mapped range for pointers into nursery objects (dirty pages).
+    private def scan_range_for_nursery_pointers(low : Void*, high : Void*) : Nil
+      word = sizeof(Void*).to_u64
+      addr = (low.address + word - 1) & ~(word - 1)
+      limit = high.address
+      while addr + word <= limit
+        cand = Pointer(Void).new(Pointer(UInt64).new(addr).value)
+        if (h = find_object(cand)) && BlockHeader.nursery?(h)
+          mark_candidate(cand)
+        end
+        addr += word
+      end
+    end
+
+    private def arm_soft_dirty_after_collect : Nil
+      {% if flag?(:linux) %}
+        # Only arm for process GC; library tests always full-scan old space.
+        unless @scan_static_roots && @nursery_enabled
+          @soft_dirty_armed = false
+          return
+        end
+        if @soft_dirty_skip_until_major
+          @soft_dirty_armed = false
+          return
+        end
+        # Probe once: some kernels/WSL never set soft-dirty bits.
+        unless @soft_dirty_probed
+          @soft_dirty_works = Platform.clear_soft_dirty && soft_dirty_tracks_writes?
+          @soft_dirty_probed = true
+        end
+        if @soft_dirty_works
+          @soft_dirty_armed = Platform.clear_soft_dirty
+        else
+          @soft_dirty_armed = false
+        end
+      {% else %}
+        @soft_dirty_armed = false
+      {% end %}
+    end
+
+    # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
+    # Uses a dedicated anonymous page — never touch the managed heap.
+    private def soft_dirty_tracks_writes? : Bool
+      page = LibC.mmap(
+        Pointer(Void).null,
+        LibC::SizeT.new(Platform::PAGE_SIZE),
+        LibC::PROT_READ | LibC::PROT_WRITE,
+        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        -1,
+        0,
+      )
+      return false if Gcry.mmap_failed?(page)
+
+      begin
+        addr = page.address
+        page.as(UInt8*).value = 1_u8
+        dirty = false
+        ok = Platform.each_dirty_page(addr, addr + Platform::PAGE_SIZE) do |_|
+          dirty = true
+        end
+        ok && dirty
+      ensure
+        LibC.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
       end
     end
 
@@ -863,6 +1226,9 @@ module Gcry
       header = find_object(obj)
       return false unless header
       return false if BlockHeader.free?(header)
+      # During generational minor, old objects are intentionally unmarked.
+      # Only nursery deaths may enqueue finalizers / clear WeakRef links.
+      return false if @minor_only && !BlockHeader.nursery?(header)
       !BlockHeader.marked?(header)
     end
 
@@ -872,11 +1238,28 @@ module Gcry
       # then rebuilt/sorted the index (O(n²) insertion sort) — that made sweep
       # multi-second on HTTP apps with many large allocs (see unmapped_bytes).
       kept = Pointer(ChunkHeader).null
+      # Fully free size-class chunks: queue here, munmap after start_world.
       to_unmap = Pointer(ChunkHeader).null
-      any_unmap = false
+      any_drop = false
       # Opt-in empty-chunk release: defer freelist rebuilds per size-class.
       rebuild_mask = 0_u64
       rebuild_nursery_mask = 0_u64
+
+      if major
+        @size_class_chunk_count = 0_u64
+        @fully_free_chunk_bytes = 0_u64
+        @released_chunk_bytes = 0_u64
+        @size_class_live_bytes = 0_u64
+        @chunk_fill_lt25 = 0_u64
+        @chunk_fill_lt50 = 0_u64
+        @chunk_fill_lt75 = 0_u64
+        @chunk_fill_ge75 = 0_u64
+        @dormant_chunk_bytes = 0_u64
+        @dontneed_bytes = 0_u64
+      end
+
+      # Bytes of empty chunks kept dormant this major (within retain budget).
+      dormant_budget_used = 0_u64
 
       chunk = @chunks
       while chunk
@@ -902,46 +1285,132 @@ module Gcry
             # Inline size-class sweep — avoid each_block yield overhead on
             # multi-million block heaps (dominated phase_sweep under HTTP).
             class_index = chunk.value.size_class.to_i32
+            any_live = false
+            live_payload = 0_u64
+            usable_payload = 0_u64
             if class_index >= 0 && class_index < SIZE_CLASS_COUNT
               payload = SizeClasses.payload(class_index)
               block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
               cursor = ChunkHeader.data_start(chunk).as(UInt8*)
               limit = ChunkHeader.data_end(chunk).as(UInt8*)
-              while (cursor + block_bytes) <= limit
-                header = cursor.as(BlockHeader*)
-                unless BlockHeader.free?(header)
-                  if major || BlockHeader.nursery?(header)
+              # When releasing empties: discover live first so fully-dead chunks
+              # skip freelist link (unlink-only for pre-existing free blocks).
+              defer_reclaim = major && @release_empty_chunks
+              if defer_reclaim
+                while (cursor + block_bytes) <= limit
+                  usable_payload += payload.to_u64
+                  header = cursor.as(BlockHeader*)
+                  unless BlockHeader.free?(header)
                     if BlockHeader.marked?(header)
-                      BlockHeader.clear_mark(header)
-                      BlockHeader.promote(header) unless major
-                    else
-                      reclaim_small(chunk, header, payload)
+                      any_live = true
+                      live_payload += payload.to_u64
                     end
                   end
+                  cursor += block_bytes
                 end
-                cursor += block_bytes
+                if any_live
+                  cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+                  while (cursor + block_bytes) <= limit
+                    header = cursor.as(BlockHeader*)
+                    unless BlockHeader.free?(header)
+                      if BlockHeader.marked?(header)
+                        BlockHeader.clear_mark(header)
+                      else
+                        reclaim_small(chunk, header, payload)
+                      end
+                    end
+                    cursor += block_bytes
+                  end
+                else
+                  cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+                  while (cursor + block_bytes) <= limit
+                    header = cursor.as(BlockHeader*)
+                    unless BlockHeader.free?(header)
+                      @live_objects -= 1 if @live_objects > 0
+                    end
+                    cursor += block_bytes
+                  end
+                end
+              else
+                while (cursor + block_bytes) <= limit
+                  usable_payload += payload.to_u64 if major
+                  header = cursor.as(BlockHeader*)
+                  unless BlockHeader.free?(header)
+                    if major || BlockHeader.nursery?(header)
+                      if BlockHeader.marked?(header)
+                        BlockHeader.clear_mark(header)
+                        BlockHeader.promote(header) unless major
+                        any_live = true
+                        live_payload += payload.to_u64 if major
+                      else
+                        reclaim_small(chunk, header, payload)
+                      end
+                    else
+                      any_live = true
+                      live_payload += payload.to_u64 if major
+                    end
+                  end
+                  cursor += block_bytes
+                end
               end
+            else
+              any_live = true
             end
 
-            if major && @release_empty_chunks && chunk_fully_free?(chunk)
-              class_index = chunk.value.size_class.to_i32
-              if class_index >= 0 && class_index < SIZE_CLASS_COUNT
+            if major
+              @size_class_live_bytes += live_payload
+              unless any_live
                 mapped = chunk.value.mapped_bytes
-                nursery = ChunkHeader.nursery?(chunk)
-                @heap_size -= mapped if @heap_size >= mapped
-                @unmapped_bytes += mapped
-                @bytes_reclaimed_since_gc += mapped
-                index_remove(chunk)
-                chunk.value.next = to_unmap
-                to_unmap = chunk
-                drop = true
-                any_unmap = true
-                bit = 1_u64 << class_index
-                if nursery
-                  rebuild_nursery_mask |= bit
-                else
-                  rebuild_mask |= bit
+                @fully_free_chunk_bytes += mapped
+                ChunkHeader.set_holed(chunk, false)
+                if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
+                  if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
+                    # Optional: keep VA with DONTNEED when retain > 0.
+                    ChunkHeader.set_dormant(chunk, true)
+                    dontneed_chunk_data(chunk)
+                    dormant_budget_used += mapped
+                    @dormant_chunk_bytes += mapped
+                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
+                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
+                  else
+                    @heap_size -= mapped if @heap_size >= mapped
+                    @bytes_reclaimed_since_gc += mapped
+                    @released_chunk_bytes += mapped
+                    index_remove(chunk)
+                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
+                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
+                    chunk.value.next = to_unmap
+                    to_unmap = chunk
+                    drop = true
+                    any_drop = true
+                  end
+                elsif ChunkHeader.dormant?(chunk)
+                  # release off: clear stale dormant from a prior process config.
+                  ChunkHeader.set_dormant(chunk, false)
                 end
+              else
+                ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
+                # Partial-page DONTNEED is opt-in (GCRY_PAGE_DONTNEED=1): STW-heavy.
+                if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                   usable_payload > 0 && live_payload * 2 < usable_payload
+                  if dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+                    ChunkHeader.set_holed(chunk, true)
+                    bit = 1_u64 << class_index
+                    if ChunkHeader.nursery?(chunk)
+                      rebuild_nursery_mask |= bit
+                    else
+                      rebuild_mask |= bit
+                    end
+                  else
+                    ChunkHeader.set_holed(chunk, false)
+                  end
+                else
+                  ChunkHeader.set_holed(chunk, false)
+                end
+              end
+              unless drop
+                @size_class_chunk_count += 1
+                note_chunk_fill(live_payload, usable_payload)
               end
             end
           end
@@ -956,30 +1425,61 @@ module Gcry
 
       @chunks = kept
 
-      while to_unmap
-        nxt = to_unmap.value.next
-        LibC.munmap(to_unmap.as(Void*), LibC::SizeT.new(to_unmap.value.mapped_bytes))
-        to_unmap = nxt
+      # Queue for post-STW munmap (do not munmap while world stopped).
+      if to_unmap
+        # Prepend onto any leftover pending (should be empty).
+        tail = to_unmap
+        while !tail.value.next.null?
+          tail = tail.value.next
+        end
+        tail.value.next = @pending_empty_chunks
+        @pending_empty_chunks = to_unmap
       end
 
+      # Page-HOLED freelist rebuild (empty-chunk release uses unlink_freelist_range).
       if rebuild_mask != 0 || rebuild_nursery_mask != 0
         SIZE_CLASS_COUNT.times do |i|
           bit = 1_u64 << i
-          rebuild_size_class_freelist(i, false) if (rebuild_mask & bit) != 0
-          rebuild_size_class_freelist(i, true) if (rebuild_nursery_mask & bit) != 0
+          rebuild_size_class_freelist(i, false, recalc: false) if (rebuild_mask & bit) != 0
+          rebuild_size_class_freelist(i, true, recalc: false) if (rebuild_nursery_mask & bit) != 0
         end
+        recalc_free_bytes
       end
 
-      if any_unmap
+      if any_drop
         update_heap_bounds_after_unmap
       end
     end
 
-    private def chunk_fully_free?(chunk : ChunkHeader*) : Bool
-      each_block(chunk) do |header|
-        return false unless BlockHeader.free?(header)
+    # Munmap size-class chunks queued during STW sweep. Call outside STW.
+    # Do not invalidate the static-root maps cache here (same as the former
+    # in-STW empty-chunk path): heap VMAs are excluded via the chunk index and
+    # static scans use safe probing. Full maps refresh stays on the major interval.
+    private def flush_pending_empty_chunks : Nil
+      chunk = @pending_empty_chunks
+      return if chunk.null?
+
+      @pending_empty_chunks = Pointer(ChunkHeader).null
+      while chunk
+        nxt = chunk.value.next
+        mapped = chunk.value.mapped_bytes
+        @unmapped_bytes += mapped
+        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        chunk = nxt
       end
-      true
+    end
+
+    # Classify a kept size-class chunk by live_payload / usable_payload.
+    private def note_chunk_fill(live_payload : UInt64, usable_payload : UInt64) : Nil
+      if usable_payload == 0 || live_payload * 4 < usable_payload
+        @chunk_fill_lt25 += 1
+      elsif live_payload * 2 < usable_payload
+        @chunk_fill_lt50 += 1
+      elsif live_payload * 4 < usable_payload * 3
+        @chunk_fill_lt75 += 1
+      else
+        @chunk_fill_ge75 += 1
+      end
     end
 
     # Remove a fully free size-class chunk from the heap and rebuild that
@@ -1003,17 +1503,93 @@ module Gcry
       update_heap_bounds_after_unmap
     end
 
-    private def rebuild_size_class_freelist(class_index : Int32, nursery : Bool) : Nil
+    # Drop freelist nodes whose user pointer falls in [lo, hi).
+    private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
+      head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+      new_head = Pointer(Void).null
+      user = head
+      while user
+        header = BlockHeader.from_user(user)
+        nxt = header.value.next_free
+        addr = user.address
+        if addr < lo || addr >= hi
+          payload = header.value.size
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, new_head)
+          new_head = user
+        end
+        user = nxt
+      end
+      if nursery
+        @nursery_freelists[class_index] = new_head
+        @nursery_freelist_clean[class_index] = false
+      else
+        @freelists[class_index] = new_head
+        @freelist_clean[class_index] = false
+      end
+    end
+
+    private def rebuild_size_class_freelist(class_index : Int32, nursery : Bool, *, recalc : Bool = true) : Nil
       payload = SizeClasses.payload(class_index)
       head = Pointer(Void).null
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      page = 4096_u64
 
       each_chunk do |chunk|
         next if ChunkHeader.large?(chunk)
+        next if ChunkHeader.dormant?(chunk)
         next if chunk.value.size_class != class_index.to_u32
         next if ChunkHeader.nursery?(chunk) != nursery
 
+        skip_holes = ChunkHeader.holed?(chunk)
+        live_mask = 0_u64
+        first_page = 0_u64
+        n_pages = 0_u64
+
+        if skip_holes
+          data0 = ChunkHeader.data_start(chunk).address
+          data1 = ChunkHeader.data_end(chunk).address
+          first_page = data0 & ~(page - 1)
+          last_page = (data1 - 1) & ~(page - 1)
+          n_pages = ((last_page - first_page) // page) + 1
+          if n_pages == 0 || n_pages > 64
+            skip_holes = false
+          else
+            cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+            limit = ChunkHeader.data_end(chunk).as(UInt8*)
+            while (cursor + block_bytes) <= limit
+              header = cursor.as(BlockHeader*)
+              unless BlockHeader.free?(header)
+                b0 = cursor.address
+                b1 = cursor.address + block_bytes
+                p = b0 & ~(page - 1)
+                while p < b1
+                  idx = ((p - first_page) // page).to_i32
+                  live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+                  p += page
+                end
+              end
+              cursor += block_bytes
+            end
+          end
+        end
+
         each_block(chunk) do |header|
           next unless BlockHeader.free?(header)
+          if skip_holes
+            b0 = header.address
+            b1 = b0 + block_bytes
+            p = b0 & ~(page - 1)
+            on_live_page = false
+            while p < b1
+              idx = ((p - first_page) // page).to_i32
+              if idx >= 0 && idx < 64 && (live_mask & (1_u64 << idx)) != 0
+                on_live_page = true
+                break
+              end
+              p += page
+            end
+            next unless on_live_page
+          end
           user = BlockHeader.user_from(header)
           header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, head)
           head = user
@@ -1028,7 +1604,76 @@ module Gcry
         @freelist_clean[class_index] = false
       end
 
-      recalc_free_bytes
+      recalc_free_bytes if recalc
+    end
+
+    # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
+    # madvise requires page-aligned addr/len — round into the data region.
+    private def dontneed_chunk_data(chunk : ChunkHeader*) : Nil
+      {% if flag?(:linux) %}
+        page = 4096_u64
+        data0 = ChunkHeader.data_start(chunk).address
+        data1 = ChunkHeader.data_end(chunk).address
+        start = (data0 + page - 1) & ~(page - 1)
+        finish = data1 & ~(page - 1)
+        return if finish <= start
+        len = finish - start
+        if LibC.madvise(Pointer(Void).new(start), LibC::SizeT.new(len), LibC::MADV_DONTNEED) == 0
+          @dontneed_bytes += len
+        end
+      {% end %}
+    end
+
+    # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
+    # safe because those blocks are omitted from the freelist (HOLED + rebuild).
+    private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
+      {% if flag?(:linux) %}
+        page = 4096_u64
+        data0 = ChunkHeader.data_start(chunk).address
+        data1 = ChunkHeader.data_end(chunk).address
+        return false if data1 <= data0
+
+        first_page = data0 & ~(page - 1)
+        last_page = (data1 - 1) & ~(page - 1)
+        n_pages = ((last_page - first_page) // page) + 1
+        return false if n_pages == 0 || n_pages > 64
+
+        live_mask = 0_u64
+        block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            b0 = cursor.address
+            b1 = cursor.address + block_bytes
+            p = b0 & ~(page - 1)
+            while p < b1
+              idx = ((p - first_page) // page).to_i32
+              live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+              p += page
+            end
+          end
+          cursor += block_bytes
+        end
+
+        any = false
+        idx = 0
+        p = first_page
+        while p <= last_page && idx < n_pages.to_i32
+          if p >= data0 && (p + page) <= data1 && (live_mask & (1_u64 << idx)) == 0
+            if LibC.madvise(Pointer(Void).new(p), LibC::SizeT.new(page), LibC::MADV_DONTNEED) == 0
+              @dontneed_bytes += page
+              any = true
+            end
+          end
+          p += page
+          idx += 1
+        end
+        any
+      {% else %}
+        false
+      {% end %}
     end
 
     private def recalc_free_bytes : Nil

@@ -230,7 +230,7 @@ Shipped without compiler write barriers:
 
 1. **Incremental marking** — `collect_a_little` / `GC.collect_a_little` (work-budget mark slices; black alloc while a cycle is active). Process GC (v0.3+) auto-majors use slices by default (`incremental_auto`; `GCRY_DISABLE_INCREMENTAL=1` for full STW).
 2. **Nursery / minor GC** — young size-class freelists; `minor_collect`; old→young conservative scan (no barriers). Survivors promote to old space.
-3. Nursery threshold constant: 512 KiB (`DEFAULT_NURSERY_THRESHOLD`). Library heap leaves nursery at `UInt64::MAX` unless configured. Process GC (v0.2+): nursery **off** unless `GCRY_NURSERY`; majors at 64 MiB (`PROCESS_GC_THRESHOLD`).
+3. Nursery threshold constant: 512 KiB (`DEFAULT_NURSERY_THRESHOLD`). Library heap leaves nursery at `UInt64::MAX` unless configured. Process GC: nursery **off** unless `GCRY_NURSERY`; majors at **32 MiB** (`PROCESS_GC_THRESHOLD`, Phase 12; was 64 MiB).
 4. Bench: `bench/churn.cr` (library heap); `bench/kemal` + `make bench-kemal-wrk` (process GC). Pause counters: `Gcry.pause_stats`.
 
 Deferred (need codegen / barriers):
@@ -262,6 +262,35 @@ Precise GC remains a **separate track**: Crystal stack maps and typed allocation
 - Crystal 1.21 SYSMON STW + stack/static-root hardening (CI SIGBUS / live-object sweep fixes).
 - Size-class ceiling **32 KiB**; `notice_reclaim` flag fast-path; incremental chunk index.
 - Same-host Kemal `/json` ~**100%** of Boehm; acikturkiye `/api/v1/` ~**101%** — see [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+
+### Phase 10 — Large-object / RSS ✅ (diagnostics)
+
+- Large freelist reuse is **exact mapped-size** only (no fat VMA for a smaller need).
+- Heap breakdown: `large_mapped_bytes` / `small_mapped_bytes` / `small_free_bytes`; `GCRY_LARGE_CACHE` retain limit.
+- Empty-chunk `munmap` **outside STW**; occupancy `fully_free_chunk_bytes` / `released_chunk_bytes`.
+- `size_class_live_bytes` + fill histogram; `GCRY_CHUNK_BYTES` (default 256 KiB).
+- Measured: acikturkiye chunks are **dense live** (~64% live/mapped, ~76% ge75) — not sparse; 128 KiB trial no RSS win.
+
+### Phase 11 — Soft-dirty nursery ✅ (measured; stays opt-in)
+
+- Linux soft-dirty platform (`clear_refs` / pagemap bit 55) for old→young edges without compiler barriers.
+- Process minors: dirty-page scan when `soft_dirty_armed`; else full old scan. Library heaps always full-scan.
+- **Fixed:** minor finalizers/WeakRef only for nursery objects (`minor_only` leaves old unmarked).
+- Chunk-scoped soft-dirty + dirty-fraction fallback (`soft_dirty_max_pct`); skip until major when too dirty.
+- `GCRY_NURSERY` remains **opt-in**. WSL **6.18.33.2**: soft-dirty arms; HTTP workloads too dirty for a win (Kemal ~10× slower; acikturkiye RSS worse).
+
+### Phase 12 — Shard-only RSS ✅ (Kemal; acikturkiye capped)
+
+- **Scope:** Boehm-class RSS without a Crystal compiler patch (still conservative; no write barriers / precise roots).
+- Process default: **empty-chunk release on** (`empty_chunk_retain` **0** → munmap outside STW; freelist **range-unlink**). `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes.
+- Mark: **base-pointer-only** (`GCRY_INTERIOR=1`); `GCRY_TYPE_ID_GATE` / `GCRY_PAGE_DONTNEED` opt-in.
+- Process major threshold **32 MiB**; large-cache retain default **8 MiB**.
+- Kemal `/json` (2026-07-24, median of 5, Phase 12-dev): thr **~93%** of Boehm; **post-GC RSS ~0.93×**.
+- **v0.7.0 cut** (2026-07-24, median of 3): `/` **~92%**; `/json` **~90%**; post-GC RSS **~0.93×** — see [docs/PERF.md](docs/PERF.md). Thr gate (≥95%) still open.
+- acikturkiye `/api/v1/` (2026-07-24, median of 3): thr **~96%**; **post-GC RSS ~2.55×** (FAIL ≤1.5×). Released empty chunks ~**2 MiB** vs live ~**165 MiB** — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Layout-precise mark** (`Gcry::Layout` / `register_hash`): boot-safe StaticArray registry, size gate, noscan value/index buffers, Hash entry walk. acikturkiye + layout (2026-07-24): RSS still **~2.8×**, precise-scan hit rate low — dense live remains mostly conservative (stacks / unregistered types). `GCRY_DISABLE_LAYOUT=1`.
+- **Root-only type_id gate** (process default-on): ambient roots gated; heap scan ungated. acikturkiye ~**16** rejects/major, RSS still **~3×**.
+- **STW SP clamp** (process default-on, linux x86_64): replace SIG_SUSPEND handler to record RSP; other-thread stack scans start at SP (`sp_clamp_hits` / `GCRY_DISABLE_SP_CLAMP=1`). Smoke: Monitor clamp hits. acikturkiye A/B (2026-07-24, median of 3): thr ~**93%**; post-GC RSS still **~3.3×** Boehm — clamp on vs off is noise. **Shard false-retention levers exhausted** for this app; remaining gap needs stack maps / barriers (compiler).
 
 ## MVP definition (v0.1)
 

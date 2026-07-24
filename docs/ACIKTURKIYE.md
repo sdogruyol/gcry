@@ -162,20 +162,182 @@ Same load as above (`wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, fresh `--release
 
 Takeaway: real-app throughput remains **≈ Boehm** after the stack/static-root hardening. RSS / `heap_size` still ~3–4× Boehm (conservative retention + large freelist); STW is not the limiter. Toy Kemal re-record the same evening: `/` ~105%, `/json` ~100% of Boehm — see [PERF.md](PERF.md).
 
+### After large exact-fit + RSS breakdown (WSL, same day)
+
+Large freelist reuse is **exact mapped-size** only; `/gc-stats` adds `large_mapped_bytes` / `small_mapped_*`.
+
+**Toy Kemal** (gate; absolute wrk host-noisy vs PERF.md):
+
+| GC | path | req/s | % Boehm | RSS | notes |
+|----|------|------:|--------:|----:|-------|
+| Boehm | `/json` | 35714 | 100% | 17 MiB | same session |
+| gcry | `/json` | 37592 | **~105%** | 92 MiB | `large_mapped` ≈ 0.3 MiB; `small_mapped` ≈ 95 MiB |
+| Boehm | `/` | 89781 | 100% | 16 MiB | |
+| gcry | `/` | 101565 | **~113%** | 98 MiB | no `/json` regression |
+
+**acikturkiye** `/api/v1/` (paired A/B, then instrumented re-run for breakdown):
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 139 | 100% | 44 MiB | 566 | same session |
+| gcry | 146 | **~105%** | 183 MiB | 515 | throughput OK |
+
+Instrumented gcry re-run after wrk: heap ≈ **254 MiB**; **`small_mapped` ≈ 235 MiB**, `large_mapped` ≈ 20 MiB (`large_free` ≈ 7 MiB); pause p50 ≈ 20ms; 15 majors. Takeaway: remaining RSS gap is **size-class / conservative retention**, not the large freelist (~7–15 MiB free). Exact-fit removes fat-VMA live waste; it does not close the 3–4× RSS gap alone.
+
+### After deferred empty-chunk release + occupancy (WSL, same day)
+
+Empty-chunk `munmap` runs **outside STW** (queued in sweep). `/gc-stats` adds `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
+
+**Toy Kemal** `/json` (paired A/B):
+
+| GC | req/s | % Boehm | RSS | notes |
+|----|------:|--------:|----:|-------|
+| Boehm | 40938 | 100% | 16 MiB | same session |
+| gcry | 41069 | **~100%** | 92 MiB | `fully_free` ≈ **76 MiB** retained; 380 size-class chunks |
+| gcry + `GCRY_RELEASE_CHUNKS=1` | 37838 | **~92%** | (steady-state varies) | last major released ≈76 MiB; stays opt-in |
+
+**acikturkiye** `/api/v1/`:
+
+| GC | req/s | % Boehm | RSS | timeouts | notes |
+|----|------:|--------:|----:|---------:|-------|
+| Boehm | 159 | 100% | 42 MiB | 434 | same session |
+| gcry | 164 | **~103%** | 172 MiB | 508 | `fully_free` ≈ **24 MiB**; `small_mapped` ≈ 250 MiB |
+| gcry + chunks | 155 | **~98%** | 166 MiB | 331 | released ≈26 MiB; RSS almost flat; pause p50 rose (freelist rebuild) |
+
+Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 MiB `small_mapped` — **not** the RSS lever. Remaining mass is conservative-live / sparse chunks. Kemal shows large fully-free retention (~76 MiB) so release helps toy RSS more. *(Phase 12: empty release became process **default** for Kemal RSS; acikturkiye still needs a re-measure — see item 15.)*
+
+### After occupancy histogram + `GCRY_CHUNK_BYTES=128KiB` (WSL, same day)
+
+`/gc-stats` adds `size_class_live_bytes` and fill buckets (`chunk_fill_lt25`…`ge75`).
+
+**Toy Kemal** `/json` (paired):
+
+| GC | req/s | % Boehm | RSS | notes |
+|----|------:|--------:|----:|-------|
+| Boehm | 41118 | 100% | 17 MiB | |
+| gcry | 41757 | **~102%** | 92 MiB | live ≈ **10 MiB**; lt25=335 / ge75=44 (empty-chunk dominated) |
+| gcry + 128 KiB chunks | 40516 | **~98.5%** | 89 MiB | gate OK; RSS flat vs default |
+
+**acikturkiye** `/api/v1/`:
+
+| GC | req/s | % Boehm | RSS | notes |
+|----|------:|--------:|----:|-------|
+| Boehm | 156 | 100% | 47 MiB | |
+| gcry | 152 | **~97%** | 176 MiB | live ≈ **148 MiB** / small_mapped 230; **ge75=671 / 888** (~76%) |
+| gcry + 128 KiB | 147 | **~94%** | 169 MiB | live still ~149 MiB; more chunks, no RSS win |
+
+Takeaway: acikturkiye heap is **densely occupied by conservative-live objects**, not sparse fragments. Smaller chunks do not close the ~4× RSS gap. Next real lever: **write barriers** (or better root precision) — not chunk sizing.
+
+### Soft-dirty nursery (Phase 11)
+
+Linux soft-dirty helpers for process minors (`soft_dirty_armed` on `/gc-stats`).
+
+**Bug fixed earlier:** generational minors left old objects unmarked; finalizers/WeakRef treated them as dead under HTTP. Minors now only finalize/clear links for **nursery** objects.
+
+#### Kernel 6.18.33.2-microsoft-standard-WSL2
+
+Soft-dirty **works**. Dirty-page scan is scoped to **mapped chunks** (not sparse `[heap_min,heap_max)`). If dirty/total pages on those chunks exceed `GCRY_SOFT_DIRTY_MAX` (default **25%**), fall back to full old→young object scan and **skip soft-dirty until the next major** (avoids pagemap/`clear_refs` tax on dirty-heavy HTTP).
+
+**Toy Kemal** `/json` (`wrk -c 100 -d 20`):
+
+| Config | req/s | RSS | notes |
+|--------|------:|----:|-------|
+| default (nursery off) | ~**41k** | 93 MiB | majors only |
+| `GCRY_NURSERY=524288` | ~**4.5k** | 125 MiB | soft-dirty arms then falls back (~90% dirty); stays up |
+
+**acikturkiye** `/api/v1/` (`wrk -c 50 -d 15`, demo DB; directional):
+
+| Config | req/s | RSS | notes |
+|--------|------:|----:|-------|
+| default | ~**113** | 114 MiB | live ≈ 92 MiB / small_mapped 158 |
+| `GCRY_NURSERY=524288` | ~**52** | **175 MiB** | ~½ throughput; RSS **worse**; dirty ≈ 89%; fallbacks then skip |
+
+Takeaway: soft-dirty is correct on 6.18+, but HTTP heaps are too dirty for a win. Nursery stays **opt-in / off by default**. Real RSS lever remains write barriers / root precision — not soft-dirty nursery on this workload.
+
 ### Next experiments
 
 1. ~~Same-load RSS / `heap_size` Boehm vs gcry.~~ **Done.**
 2. Speed up mark (`find_object` / candidate reject) — pause already small; limited wrk win. **Deferred.**
 3. ~~Raise size-class ceiling to **16 KiB**.~~ **Done.**
-4. Longer-term: write barriers + nursery / incremental for Boehm-like mutator behavior (RSS / locality).
+4. ~~Fix process-GC **nursery under HTTP load**.~~ **Done** (finalizer/WeakRef minor filter).
 5. ~~Extend ceiling to **32 KiB**.~~ **Done.**
 6. ~~Skip clear on zeroed freelist / `fit`.~~ **Done** (neutral on steady-state).
 7. ~~perf → fix `notice_reclaim` O(n) on free.~~ **Done** (~88%→~**100%** of Boehm on `/api/v1/`).
 8. ~~`ensure_chunk_index` dirty rebuilds.~~ **Done** (incremental index; symbol gone from perf).
 9. ~~Re-record Kemal `docs/PERF.md` + acikturkiye.~~ **Done** (both ≈ Boehm; cut as **v0.6.0**).
+10. ~~Large freelist: exact mapped-size reuse (no fat VMA for smaller need).~~ **Done** (Phase 10 start).
+11. ~~Empty-chunk munmap outside STW + occupancy counters; measure RELEASE_CHUNKS.~~ **Done.**
+12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
+13. ~~Soft-dirty platform + minor wiring.~~ **Done** — WSL 6.18 arms.
+14. ~~Dirty-fraction fallback + chunk-scoped pagemap; acikturkiye nursery RSS.~~ **Done** — no RSS win; nursery stays off.
+15. **Phase 12 (Kemal):** empty release default-on + base-ptr — post-GC RSS ~**0.93×** Boehm, thr ~**93%** ([PERF.md](PERF.md)).
+16. **Phase 12 (acikturkiye A/B, 2026-07-24):** see below.
+
+### Phase 12 defaults — acikturkiye `/api/v1/` (2026-07-24)
+
+Same host, `wrk -c 100 -d 30`, `ACIKTURKIYE_ENV=demo`, post-`GC.collect` RSS, three paired trials (DB timeouts on both sides — thr noisy).
+
+| Trial | thr % Boehm | post-GC RSS × | gcry/Boehm req/s | timeouts gcry/Boehm |
+|------:|------------:|--------------:|-----------------:|--------------------:|
+| 1 | 93.3% | 2.64× | 121 / 129 | 381 / 275 |
+| 2 | 98.4% | 2.55× | 117 / 119 | 528 / 407 |
+| 3 | 95.8% | 2.53× | 119 / 124 | 364 / 463 |
+| **median** | **95.8%** | **2.55×** | — | — |
+
+Last gcry `/gc-stats` after wrk: `heap_size` ≈ **225 MiB**, `size_class_live` ≈ **165 MiB**, `small_mapped` ≈ **207 MiB**, `released_chunk` ≈ **1.8 MiB**, `chunk_fill_ge75` ≈ **748**.
+
+**Gate:** thr ≥95% **PASS** (median); RSS ≤1.5× **FAIL** (~2.55×). Empty-chunk release returns almost nothing here — RSS is **conservative-live / dense chunks**, not mapped waste.
+
+### False-retention: layout tables (2026-07-24)
+
+Shard-only precise scan via `Gcry::Layout` / `Gcry.register_layout` / `Gcry.register_hash`:
+
+- StaticArray registry (boot-safe; Hash/Array class vars SIGSEGV in `GC.init`).
+- Size-class gate (reject raw buffers whose first word equals a `type_id`).
+- **Noscan** pointer ivars: keep alive, do not scan (`Array(value)` `@buffer`, Hash `@indices` / entry blob).
+- **Hash entry walk:** mark key/value only; skip `Entry.@hash` and index bytes (`VALUE_MODE_WORDS` for `JSON::Any`).
+- Escape: `GCRY_DISABLE_LAYOUT=1`. acikturkiye registers `Hash(String, JSON::Any)` + `Array(JSON::Any)`.
+
+Same-host A/B after hash-precise (median of 3, post-`GC.collect`):
+
+| Metric | Phase 12 baseline | + layout / hash-precise |
+|--------|------------------:|------------------------:|
+| thr % Boehm | **95.8%** | **~89%** (noisy; 89–97%) |
+| post-GC RSS × | **2.55×** | **~2.80×** |
+| `layout_precise_scans` / cons | — | ~400–560 / ~8k–12k |
+| `size_class_live` | ~165 MiB | ~194–201 MiB |
+
+**Takeaway:** layout plumbing is correct (Hash survival smoke OK) but **does not close** the acikturkiye RSS gate. Only a few hundred objects per major match registered layouts; the dense live set is still mostly conservative (stacks / unregistered types).
+
+### Root-only `type_id` gate (2026-07-24)
+
+Ambient roots (stack / static / fiber stacks) reject candidates whose first payload word is not a plausible Crystal `type_id`. **Heap scan stays ungated** so `Array`/`Hash` buffers remain reachable (global gate previously SIGSEGV’d Kemal).
+
+| Metric | + layout | + root type_id gate |
+|--------|---------:|--------------------:|
+| thr % Boehm (median of 3) | ~89% | **~95.9%** |
+| post-GC RSS × | ~2.80× | **~3.14×** |
+| `type_id_root_rejects` / major | — | ~**15–17** |
+
+**Takeaway:** gate is **safe** but nearly a no-op on this workload (~16 rejects vs ~180 MiB live). Remaining false retention is mostly **real Crystal objects** kept via conservative stack words — needs stack maps / barriers (compiler), not more shard filters. Escape: `GCRY_DISABLE_TYPE_ID_GATE=1`.
+
+### STW SP clamp (2026-07-24)
+
+Capture RSP in the SIG_SUSPEND handler; other-thread stack scans start at SP instead of the full pthread range (`sp_clamp_hits`; escape `GCRY_DISABLE_SP_CLAMP=1`).
+
+Same-host A/B (`wrk -c 100 -d 30` `/api/v1/`, post-`GC.collect` RSS, median of 3):
+
+| Config | thr % Boehm | post-GC RSS × | notes |
+|--------|------------:|--------------:|-------|
+| + SP clamp (default) | **~93%** | **~3.3×** | `sp_clamp_hits` ≈ 2 / major |
+| `GCRY_DISABLE_SP_CLAMP=1` | **~94%** | **~3.2×** | `sp_clamp_fallbacks` only |
+
+**Takeaway:** clamp is **correct** (Monitor SP recorded) but does **not** move acikturkiye RSS. False retention is on mutator/fiber stacks already bounded by SP / `stack_top`, not the unused Monitor pthread range. **Shard-only RSS levers for this app are exhausted** — further parity needs compiler stack maps or write barriers.
 
 ## Non-goals (still)
 
 - `GCRY_INCREMENTAL=1` / nursery as process default without barriers (unsound on JSON/Hash).
-- `GCRY_RELEASE_CHUNKS=1` as default (Kemal still slower with it; see [PERF.md](PERF.md)).
-- Chasing Boehm RSS parity without write barriers / better large-object policy.
+- `GCRY_CHUNK_BYTES=131072` as default (no acikturkiye RSS win).
+- Treating empty-chunk release as the acikturkiye RSS lever (dense conservative-live).
+- Boehm RSS parity on every app without better root precision / barriers (compiler territory).
+- Expecting STW SP clamp / root `type_id` gate / layout tables to close dense conservative-live RSS (measured no-ops on acikturkiye).

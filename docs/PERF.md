@@ -4,6 +4,8 @@
 
 Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release (`-Dgc_none` for gcry).
 
+**RSS:** prefer **post-`GC.collect`** (bench exposes `GET /gc-collect`) so end-of-wrk sampling noise does not dominate.
+
 ## History
 
 | Version | `/` | `/json` | notes |
@@ -13,8 +15,20 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.5.0 + `GCRY_RELEASE_CHUNKS=1` | ~56% | ~49% | opt-in only |
 | 0.6.0 | **~105%** | **~100%** | size-class 32 KiB, `notice_reclaim`, chunk index; STW/static-root/stack fixes |
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | opt-in only |
+| 0.7.0-dev (pre Phase 12) | — | **~100%** | exact-fit large; empty munmap outside STW; chunks retained by default |
+| 0.7.0-dev + `GCRY_RELEASE_CHUNKS=1` | — | **~92%** | `/json` 37838 vs Boehm 40938; retained ~76 MiB fully-free chunks |
+| 0.7.0-dev + `GCRY_CHUNK_BYTES=131072` | — | **~98.5%** | 40516 vs 41118; RSS ≈ default (empty-chunk waste) |
+| 0.7.0-dev Phase 12 | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
+| **0.7.0** | **~92%** | **~90%** | Phase 12 defaults + layout / root type_id / STW SP clamp; post-GC RSS **~0.93×** (median of 3) |
 
-Same-host raw (2026-07-23, Crystal 1.21, WSL2): Boehm `/` 102154 `/json` 40699 req/s; gcry `/` 107593 `/json` 40653; chunks `/` 94480 `/json` 37547.
+Same-host **0.7.0** (2026-07-24, Crystal 1.21, WSL2): three paired runs per path.
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|-------:|--------------:|
+| `/` | 83619 | 76526 | **91.5%** | **0.94×** |
+| `/json` | 41191 | 37186 | **90.3%** | **0.93×** |
+
+`GCRY_KEEP_CHUNKS=1` still trades thr (~**95%**) for ~**3×** RSS. Soft-dirty nursery stays opt-in.
 
 ## How to record
 
@@ -22,4 +36,5 @@ Same-day gcry + Boehm on both paths → append a row (and refresh README). Do no
 
 ```sh
 make bench-kemal-wrk   # gcry; Boehm: same binary without -Dgc_none
+# RSS: after wrk, curl /gc-collect then read VmRSS
 ```

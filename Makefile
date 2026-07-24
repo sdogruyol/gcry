@@ -35,6 +35,7 @@ samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/alloc.cr -o $(BIN)/alloc
 	$(CRYSTAL) build -Dgc_none samples/stress.cr -o $(BIN)/stress
 	$(CRYSTAL) build -Dgc_none samples/json_churn.cr -o $(BIN)/json_churn
+	$(CRYSTAL) build -Dgc_none samples/stw_sp_clamp.cr -o $(BIN)/stw_sp_clamp
 
 bench: $(BIN)
 	$(CRYSTAL) build bench/churn.cr -o $(BIN)/churn

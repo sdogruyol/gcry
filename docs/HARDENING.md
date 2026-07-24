@@ -16,19 +16,29 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (process default `67108864` / 64 MiB) |
+| `GCRY_THRESHOLD` | Bytes allocated since last major GC before auto-collect (process default `33554432` / 32 MiB) |
 | `GCRY_DISABLE_AUTO=1` | Disables auto-collect (`threshold = UInt64::MAX`) |
-| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set) |
+| `GCRY_NURSERY` | Opt-in nursery; sets young-bytes threshold (process GC leaves nursery **off** unless set; soft-dirty arms on WSL 6.18+, HTTP still too dirty for a win) |
 | `GCRY_DISABLE_NURSERY=1` | Forces nursery off |
+| `GCRY_SOFT_DIRTY_MAX` | Max dirty/total % for soft-dirty page scan (default `25`; `0` = never) |
+| `GCRY_DISABLE_SOFT_DIRTY=1` | Force full old→young object scan (same as max 0) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced auto-majors (unsafe without write barriers on mutating heaps) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Force full STW majors (process default since v0.4) |
 | `GCRY_INCREMENTAL_WORK` | Objects marked per `collect_a_little` slice (default `1024`) |
-| `GCRY_RELEASE_CHUNKS=1` | Munmap fully free size-class chunks after major (opt-in) |
-| `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (overrides release) |
+| `GCRY_KEEP_CHUNKS=1` | Force empty chunks retained (escape hatch) |
+| `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
+| `GCRY_EMPTY_CHUNK_RETAIN` | Empty bytes to keep dormant with `MADV_DONTNEED` (default `0` = munmap all) |
+| `GCRY_INTERIOR=1` | Allow interior pointers on **ambient roots** (default **base-pointer-only**). Heap field marks always allow interiors (`Array#shift`). |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page DONTNEED (opt-in; STW-heavy) |
+| `GCRY_LARGE_CACHE` | Free large-object bytes retained after post-collect trim (default `8388608` / 8 MiB) |
+| `GCRY_CHUNK_BYTES` | Size-class chunk size in bytes (default `262144` / 256 KiB; ≥64 KiB, multiple of 4096) |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root-only `type_id` plausibility filter (process default-on) |
+| `GCRY_DISABLE_LAYOUT=1` | Disable `Gcry::Layout` precise heap scan |
+| `GCRY_DISABLE_SP_CLAMP=1` | Do not install STW RSP capture; other-thread stacks scan full pthread range |
 
-Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. Empty-chunk release stays **opt-in** (finalizer buffers pinned during mark so release is crash-safe; default-on costs too much vs Boehm). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
+Process GC enables **majors only** by default (nursery off; full STW). Incremental auto-majors are opt-in via `GCRY_INCREMENTAL=1`. **Empty-chunk release is process default** (`GCRY_KEEP_CHUNKS=1` to retain). Library `Gcry::Heap` leaves nursery off-threshold, `incremental_auto = false`, and `release_empty_chunks = false` unless you set them.
 
-Inspect pauses with `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `count`). Kemal bench exposes `GET /gc-stats` under `-Dgc_none`. `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects and empty chunks when release is enabled.
+Inspect pauses with `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `count`). Kemal bench exposes `GET /gc-stats` and `GET /gc-collect` under `-Dgc_none`. `GC.stats.unmapped_bytes` tracks cumulative `munmap` from large objects and empty chunks when release is enabled.
 
 Example:
 
@@ -38,11 +48,11 @@ GCRY_DISABLE_AUTO=1 crystal run -Dgc_none samples/hello.cr
 GCRY_NURSERY=262144 ./bin/alloc 1000
 GCRY_DISABLE_NURSERY=1 ./bin/stress 200
 GCRY_INCREMENTAL=1 ./bin/stress 200
-GCRY_RELEASE_CHUNKS=1 ./bin/stress 200
+GCRY_KEEP_CHUNKS=1 ./bin/stress 200
 ./bin/json_churn 1000
 ```
 
-Process GC defaults (v0.6+): majors at 64 MiB full STW; nursery off; size-class ceiling 32 KiB; chunks retained unless `GCRY_RELEASE_CHUNKS=1`. Auto-collect is suppressed while finalizers run (avoids nested collect).
+Process GC defaults (Phase 12): majors at **32 MiB** full STW; nursery off; size-class ceiling 32 KiB; **empty chunks released** unless `GCRY_KEEP_CHUNKS=1`; base-pointer-only mark; **root-only type_id gate** on (`GCRY_DISABLE_TYPE_ID_GATE=1`); layout-precise heap scan on (`GCRY_DISABLE_LAYOUT=1`); **STW SP clamp** on other OS threads (`GCRY_DISABLE_SP_CLAMP=1`). Auto-collect is suppressed while finalizers run (avoids nested collect).
 
 **Tuning note (Kemal `/json` wrk):** raising `GCRY_THRESHOLD` to 128–256 MiB cuts major count but pause p50 grows roughly with heap; total pause time over a fixed wrk window often stays similar, so req/s may not improve. Prefer measuring `GET /gc-stats` (`pause_p50_ns` / `pause_p99_ns` / `major_collections`) on the real app before changing the default.
 
@@ -69,7 +79,7 @@ GC.collect
 after = GC.stats.heap_size
 ```
 
-`heap_size` may not shrink for small objects (chunks retained by default); with `GCRY_RELEASE_CHUNKS=1`, watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;8 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache`). Prefer `Gcry.default_heap.live_objects` in library tests.
+`heap_size` shrinks when empty size-class chunks are released (process default; `GCRY_KEEP_CHUNKS=1` retains). Watch `GC.stats.unmapped_bytes` / RSS. Large objects (&gt;32 KiB) are **cached** on a freelist after collect (no `munmap` during STW — that was multi-second on HTTP apps); reuse is **exact mapped-size** only (no fat VMA for a smaller need). Excess cache is trimmed after STW (`large_free_bytes` / `trim_large_cache` / `GCRY_LARGE_CACHE`). Prefer `Gcry.default_heap.live_objects` in library tests.
 
 ## Process GC notes (HTTP / fibers)
 
