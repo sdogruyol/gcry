@@ -31,7 +31,7 @@ Think of it like a librarian who, every so often, **pauses the whole library**, 
 
 - Not a drop-in for multi-threaded / parallel ExecutionContexts (stick to parallelism **1**)
 - Not fork-safe like Boehm’s fork handling
-- Not as battle-tested as Boehm on every workload (Kemal `/json` ~**100%** of Boehm on this host; see [docs/PERF.md](docs/PERF.md))
+- Not as battle-tested as Boehm on every workload (Kemal `/json` thr ~**93%** of Boehm, post-GC RSS ~**0.93×**; see [docs/PERF.md](docs/PERF.md))
 
 ---
 
@@ -97,7 +97,7 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **64 MiB**) |
+| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **32 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
 | `GCRY_NURSERY` | Opt-in nursery (default **off**); soft-dirty works on WSL 6.18+ but HTTP heaps stay too dirty for a win |
 | `GCRY_DISABLE_NURSERY=1` | Keep nursery disabled (process default) |
@@ -106,9 +106,12 @@ Your code keeps allocating normally (`String`, `Array`, …). gcry sits under Cr
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
 | `GCRY_INCREMENTAL=1` | Experimental sliced majors (unsafe without write barriers) |
 | `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
-| `GCRY_RELEASE_CHUNKS=1` | Return empty chunks to the OS (opt-in; ~92% of Boehm `/json`; little acikturkiye RSS win) |
-| `GCRY_KEEP_CHUNKS=1` | Force chunks retained |
-| `GCRY_LARGE_CACHE` | Free large-object bytes to retain after trim (default **32 MiB**) |
+| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (escape; ~**95%** `/json` thr, ~**3×** RSS) |
+| `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release on (process **default** already releases) |
+| `GCRY_EMPTY_CHUNK_RETAIN` | Bytes of empty chunks to keep dormant (`MADV_DONTNEED`; default **0** = munmap all) |
+| `GCRY_INTERIOR=1` | Allow interior pointers when marking (default **base-pointer-only**) |
+| `GCRY_PAGE_DONTNEED=1` | Sparse-chunk free-page `MADV_DONTNEED` (STW-heavy; opt-in) |
+| `GCRY_LARGE_CACHE` | Free large-object bytes to retain after trim (default **8 MiB**) |
 | `GCRY_CHUNK_BYTES` | Size-class chunk mmap size (default **262144** / 256 KiB; min 64 KiB, page-aligned) |
 
 More: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats` (`last_ns` / `p50_ns` / `p99_ns` / `max_ns` / `total_ns` / `count`).
@@ -119,9 +122,9 @@ Same machine, vs Boehm (`wrk -c 100 -d 30`). Higher % = closer to Boehm. Prefer 
 
 | Workload | gcry vs Boehm |
 |----------|-------------:|
-| Idle HTTP (`/`) | **~105%** |
-| Alloc-heavy JSON (`/json`) | **~100%** |
-| `/json` + chunk release | **~92%** (still opt-in) |
+| Alloc-heavy JSON (`/json`) thr | **~93%** (median of 5) |
+| `/json` post-GC RSS | **~0.93×** |
+| `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 
 Details: [docs/PERF.md](docs/PERF.md). Microbench: `make bench`. HTTP: `make bench-kemal-wrk`.
 

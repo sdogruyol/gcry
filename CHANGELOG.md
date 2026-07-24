@@ -14,17 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Large-object freelist reuse is **exact mapped-size** only (no oversized VMA for a smaller need).
-- `GCRY_LARGE_CACHE` sets free large bytes retained after post-collect trim (default **32 MiB**).
-- Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`.
-- Empty size-class chunk `munmap` deferred **outside STW** (queued in sweep, flushed with `trim_large_cache`); occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
+- `GCRY_LARGE_CACHE` sets free large bytes retained after post-collect trim (default **8 MiB**).
+- Heap / Kemal `/gc-stats`: `large_mapped_bytes`, `small_mapped_bytes`, `small_free_bytes`, `large_cache_retain`, `dormant_chunk_bytes`, `dontneed_bytes`, `empty_chunk_retain`.
+- Empty size-class chunk `munmap` deferred **outside STW**; occupancy: `fully_free_chunk_bytes` / `size_class_chunk_count` / `released_chunk_bytes`.
 - Size-class occupancy: `size_class_live_bytes` + fill histogram (`chunk_fill_lt25`…`ge75`); `GCRY_CHUNK_BYTES` (default **256 KiB**).
-- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; process minors can scan dirty old pages only when the kernel tracks writes (`soft_dirty_armed`). Chunk-scoped pagemap; if dirty fraction > `GCRY_SOFT_DIRTY_MAX` (default **25%**), full old→young scan and skip soft-dirty until next major. `GCRY_DISABLE_SOFT_DIRTY=1` forces object scan. `GCRY_NURSERY` stays opt-in (off by default).
+- **Soft-dirty nursery (Phase 11):** Linux `/proc` soft-dirty helpers; chunk-scoped pagemap; dirty-fraction fallback (`GCRY_SOFT_DIRTY_MAX`, default **25%**). `GCRY_NURSERY` stays opt-in (off by default).
+- **Phase 12 (shard-only RSS):** process GC **empty-chunk release default-on** (`empty_chunk_retain` default **0** → munmap; `GCRY_EMPTY_CHUNK_RETAIN` / dormant DONTNEED; `GCRY_KEEP_CHUNKS=1` escape). Freelist **range-unlink** on release (no full size-class rebuild). Process majors at **32 MiB**. Mark roots **base-pointer-only** by default (`GCRY_INTERIOR=1` restores interiors). `GCRY_TYPE_ID_GATE=1` / `GCRY_PAGE_DONTNEED=1` opt-in. Bench: `GET /gc-collect`.
 
 ### Performance
 
-- Same-host Kemal `/json`: default **~100%** of Boehm; `GCRY_RELEASE_CHUNKS=1` **~92%**; `GCRY_CHUNK_BYTES=131072` **~98.5%** (RSS flat — Kemal waste is mostly retained empty chunks).
-- acikturkiye: live/small_mapped **~64%**, **~76%** of chunks ≥75% full → RSS is **conservative-live**, not sparse; 128 KiB chunks no RSS win — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- Soft-dirty on WSL **6.18.33.2**: chunk-scoped pagemap; dirty-fraction fallback (`GCRY_SOFT_DIRTY_MAX`, default 25%) then skip until major. Kemal nursery ~**4.5k** vs ~**41k** default; acikturkiye nursery **hurts** RSS (~175 vs ~114 MiB) and throughput — keep opt-in. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Same-host Kemal `/json` (Phase 12 default, median of 5): thr **~93%** of Boehm; **post-GC RSS ~0.93×** Boehm — see [docs/PERF.md](docs/PERF.md). (`GCRY_KEEP_CHUNKS=1` ≈ **95%** thr @ ~**3×** RSS.)
+- Earlier 0.7.0-dev (chunks retained): `/json` ~**100%**; opt-in release ~**92%**; `GCRY_CHUNK_BYTES=131072` ~**98.5%** (RSS flat).
+- acikturkiye: live/small_mapped **~64%**, dense chunks — RSS is **conservative-live**, not empty-chunk waste; Phase 12 Kemal RSS win does not automatically close acikturkiye — see [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- Soft-dirty on WSL **6.18.33.2**: HTTP nursery still too dirty — keep opt-in.
 
 ## [0.6.0] - 2026-07-23
 

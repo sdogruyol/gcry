@@ -4,6 +4,8 @@
 
 Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release (`-Dgc_none` for gcry).
 
+**RSS:** prefer **post-`GC.collect`** (bench exposes `GET /gc-collect`) so end-of-wrk sampling noise does not dominate.
+
 ## History
 
 | Version | `/` | `/json` | notes |
@@ -13,11 +15,12 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, Crystal release
 | 0.5.0 + `GCRY_RELEASE_CHUNKS=1` | ~56% | ~49% | opt-in only |
 | 0.6.0 | **~105%** | **~100%** | size-class 32 KiB, `notice_reclaim`, chunk index; STW/static-root/stack fixes |
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | opt-in only |
-| 0.7.0-dev | — | **~100%** | exact-fit large reuse; empty-chunk munmap outside STW; occupancy stats |
-| 0.7.0-dev + `GCRY_RELEASE_CHUNKS=1` | — | **~92%** | same-host `/json` 37838 vs Boehm 40938; default retains ~76 MiB fully-free chunks |
-| 0.7.0-dev + `GCRY_CHUNK_BYTES=131072` | — | **~98.5%** | paired `/json` 40516 vs Boehm 41118; RSS ≈ default (empty-chunk waste) |
+| 0.7.0-dev (pre Phase 12) | — | **~100%** | exact-fit large; empty munmap outside STW; chunks retained by default |
+| 0.7.0-dev + `GCRY_RELEASE_CHUNKS=1` | — | **~92%** | `/json` 37838 vs Boehm 40938; retained ~76 MiB fully-free chunks |
+| 0.7.0-dev + `GCRY_CHUNK_BYTES=131072` | — | **~98.5%** | 40516 vs 41118; RSS ≈ default (empty-chunk waste) |
+| **0.7.0-dev Phase 12** | — | **~93%** | empty release **default-on**; base-ptr-only; post-GC RSS **~0.93×** Boehm (median of 5) |
 
-Same-host raw (2026-07-23, Crystal 1.21, WSL2): Boehm `/` 102154 `/json` 40699 req/s; gcry `/` 107593 `/json` 40653; chunks `/` 94480 `/json` 37547.
+Same-host Phase 12 (2026-07-24, Crystal 1.21, WSL2): five paired `/json` runs — thr median **93.4%** (range 91.7–96.8%); post-GC RSS median **0.93×** (always ≤1.0×). Absolute ~36–38k vs Boehm ~37–41k req/s. `GCRY_KEEP_CHUNKS=1` recovers ~**95%** thr at ~**3×** RSS.
 
 ## How to record
 
@@ -25,4 +28,5 @@ Same-day gcry + Boehm on both paths → append a row (and refresh README). Do no
 
 ```sh
 make bench-kemal-wrk   # gcry; Boehm: same binary without -Dgc_none
+# RSS: after wrk, curl /gc-collect then read VmRSS
 ```

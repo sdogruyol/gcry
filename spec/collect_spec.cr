@@ -79,6 +79,7 @@ describe "Gcry::Heap collection" do
   it "finds objects via interior pointers" do
     heap = Gcry::Heap.new
     begin
+      heap.allow_interior_pointers = true
       obj = heap.malloc(64)
       interior = (obj.as(UInt8*) + 24).as(Void*)
       header = heap.find_object(interior)
@@ -88,6 +89,19 @@ describe "Gcry::Heap collection" do
       heap.add_root(interior)
       heap.collect(scan_stack: false)
       heap.live?(obj).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "ignores interior roots when allow_interior_pointers is false" do
+    heap = Gcry::Heap.new
+    begin
+      heap.allow_interior_pointers = false
+      obj = heap.malloc(64)
+      heap.add_root((obj.as(UInt8*) + 24).as(Void*))
+      heap.collect(scan_stack: false)
+      heap.live?(obj).should be_false
     ensure
       heap.destroy
     end
@@ -147,6 +161,7 @@ it "munmaps fully free size-class chunks on major" do
   begin
     heap.gc_threshold = UInt64::MAX
     heap.release_empty_chunks = true
+    heap.empty_chunk_retain = 0 # force munmap (no dormant retain)
     heap.nursery_enabled = false
 
     keep = heap.malloc(64)
@@ -163,6 +178,32 @@ it "munmaps fully free size-class chunks on major" do
     heap.fully_free_chunk_bytes.should eq(heap.released_chunk_bytes)
     heap.heap_size.should be < before
     # Freelist still works after rebuild from remaining chunks.
+    heap.malloc(64).should_not be_nil
+  ensure
+    heap.destroy
+  end
+end
+
+it "keeps empty chunks dormant within empty_chunk_retain" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = true
+    heap.empty_chunk_retain = UInt64::MAX
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.unmapped_bytes.should eq(0)
+    heap.released_chunk_bytes.should eq(0)
+    heap.dormant_chunk_bytes.should be > 0
+    heap.dontneed_bytes.should be > 0
+    heap.heap_size.should eq(before)
     heap.malloc(64).should_not be_nil
   ensure
     heap.destroy

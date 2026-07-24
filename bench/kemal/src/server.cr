@@ -24,6 +24,16 @@ get "/" do
   "Hello World"
 end
 
+get "/gc-collect" do |env|
+  env.response.content_type = "application/json"
+  GC.collect
+  {% if flag?(:gc_none) %}
+    {ok: true, collections: Gcry.default_heap.collections}.to_json
+  {% else %}
+    {ok: true}.to_json
+  {% end %}
+end
+
 # GC pause / heap snapshot for wrk A/B (gcry builds only).
 {% if flag?(:gc_none) %}
   get "/gc-stats" do |env|
@@ -70,6 +80,9 @@ end
       soft_dirty_last_dirty:  h.last_soft_dirty_pages,
       soft_dirty_last_total:  h.last_soft_dirty_total,
       soft_dirty_max_pct:     h.soft_dirty_max_pct,
+      dormant_chunk_bytes:    h.dormant_chunk_bytes,
+      dontneed_bytes:         h.dontneed_bytes,
+      empty_chunk_retain:     h.empty_chunk_retain,
       finalizer_entries:      h.finalizer_entry_count,
       weak_links:             h.finalizer_link_count,
     }.to_json

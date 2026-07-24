@@ -204,7 +204,7 @@ Empty-chunk `munmap` runs **outside STW** (queued in sweep). `/gc-stats` adds `f
 | gcry | 164 | **~103%** | 172 MiB | 508 | `fully_free` ≈ **24 MiB**; `small_mapped` ≈ 250 MiB |
 | gcry + chunks | 155 | **~98%** | 166 MiB | 331 | released ≈26 MiB; RSS almost flat; pause p50 rose (freelist rebuild) |
 
-Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 MiB `small_mapped` — **not** the RSS lever. Remaining mass is conservative-live / sparse chunks. Kemal shows large fully-free retention (~76 MiB) so release helps toy RSS more. Keep `GCRY_RELEASE_CHUNKS` opt-in.
+Takeaway: on the real app, empty-chunk release frees only ~**25 MiB** of ~250 MiB `small_mapped` — **not** the RSS lever. Remaining mass is conservative-live / sparse chunks. Kemal shows large fully-free retention (~76 MiB) so release helps toy RSS more. *(Phase 12: empty release became process **default** for Kemal RSS; acikturkiye still needs a re-measure — see item 15.)*
 
 ### After occupancy histogram + `GCRY_CHUNK_BYTES=128KiB` (WSL, same day)
 
@@ -270,10 +270,11 @@ Takeaway: soft-dirty is correct on 6.18+, but HTTP heaps are too dirty for a win
 12. ~~Occupancy histogram + `GCRY_CHUNK_BYTES` 128 KiB trial.~~ **Done** — dense live on acikturkiye; 128 KiB not default.
 13. ~~Soft-dirty platform + minor wiring.~~ **Done** — WSL 6.18 arms.
 14. ~~Dirty-fraction fallback + chunk-scoped pagemap; acikturkiye nursery RSS.~~ **Done** — no RSS win; nursery stays off.
+15. **Phase 12 (Kemal):** empty release default-on + base-ptr — post-GC RSS ~**0.93×** Boehm, thr ~**93%** ([PERF.md](PERF.md)). acikturkiye re-measure under new defaults: **pending**.
 
 ## Non-goals (still)
 
 - `GCRY_INCREMENTAL=1` / nursery as process default without barriers (unsound on JSON/Hash).
-- `GCRY_RELEASE_CHUNKS=1` as default (Kemal still ~92%; acikturkiye RSS win negligible).
 - `GCRY_CHUNK_BYTES=131072` as default (no acikturkiye RSS win).
-- Chasing Boehm RSS parity without write barriers / better root precision.
+- Treating empty-chunk release as the acikturkiye RSS lever (dense conservative-live).
+- Boehm RSS parity on every app without better root precision / barriers (compiler territory).

@@ -27,9 +27,14 @@ module GC
     # Full STW majors by default (v0.4+). Incremental without write barriers is
     # unsound under heavy pointer mutation (e.g. Kemal /json).
     heap.incremental_auto = false
-    # Empty-chunk munmap stays opt-in: default-on regresses Kemal wrk ~35–40%.
-    # GCRY_RELEASE_CHUNKS=1 enables; finalizer buffer pinning makes it safe.
-    heap.release_empty_chunks = false
+    # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
+    # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
+    heap.release_empty_chunks = true
+    heap.empty_chunk_retain = Gcry::Heap::DEFAULT_EMPTY_CHUNK_RETAIN
+    # type_id_gate stays off until calibrated against real Crystal type id ranges
+    # (rejecting live objects caused Kemal SIGSEGV under load).
+    heap.type_id_gate = false
+    heap.allow_interior_pointers = false
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
 
@@ -104,15 +109,38 @@ module GC
       heap.incremental_work = work.to_i32 if work > 0 && work <= Int32::MAX
     end
 
-    # Empty-chunk release remains opt-in (default-on hurts Kemal throughput).
-    # GCRY_RELEASE_CHUNKS=1 enables; GCRY_KEEP_CHUNKS=1 forces off.
+    # Adaptive empty-chunk release is process default (dormant + munmap excess).
+    # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
     end
 
-    # Free large-object bytes to retain after post-collect trim (default 32 MiB).
+    if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
+      heap.empty_chunk_retain = retain
+    end
+
+    if env_flag_one?("GCRY_DISABLE_MADVISE")
+      heap.madvise_free_pages = false
+    elsif env_flag_one?("GCRY_PAGE_DONTNEED")
+      # Sparse-chunk free-page DONTNEED; raises STW, helps RSS when fragmentation is high.
+      heap.madvise_free_pages = true
+    end
+
+    if env_flag_one?("GCRY_INTERIOR")
+      heap.allow_interior_pointers = true
+    end
+
+    if env_flag_one?("GCRY_TYPE_ID_GATE")
+      heap.type_id_gate = true
+    end
+
+    if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
+      heap.type_id_gate = false
+    end
+
+    # Free large-object bytes to retain after post-collect trim (default 8 MiB).
     if cache = env_u64("GCRY_LARGE_CACHE")
       heap.large_cache_retain = cache
     end

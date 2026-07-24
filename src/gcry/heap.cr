@@ -13,10 +13,13 @@ module Gcry
     PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
-    # Soft cap on cached free large bytes; trim retains at most half by default.
+    # Soft cap on cached free large bytes.
     LARGE_CACHE_LIMIT = 64_u64 * 1024 * 1024
     # Bytes of free large mappings to keep after trim (process default; override via GCRY_LARGE_CACHE).
-    DEFAULT_LARGE_CACHE_RETAIN = LARGE_CACHE_LIMIT // 2
+    DEFAULT_LARGE_CACHE_RETAIN = 8_u64 * 1024 * 1024
+    # Keep up to this many bytes of fully-free size-class chunks as dormant
+    # (MADV_DONTNEED) for fast reuse; excess is munmap'd when release is on.
+    DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64 # munmap all empty; set GCRY_EMPTY_CHUNK_RETAIN to keep mapped
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
@@ -268,6 +271,10 @@ module Gcry
     end
 
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
+      if revive_dormant_chunk(index, payload, nursery)
+        return
+      end
+
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
       chunk_flags = nursery ? ChunkHeader::Flags::NURSERY : 0_u32
       chunk = map_chunk(@small_chunk_bytes, index.to_u32, chunk_flags)
@@ -294,6 +301,47 @@ module Gcry
         @freelist_clean[index] = true
       end
       @free_bytes += added
+    end
+
+    # Fault a dormant empty chunk back in and install its freelist.
+    private def revive_dormant_chunk(index : Int32, payload : UInt32, nursery : Bool) : Bool
+      chunk = @chunks
+      while chunk
+        if !ChunkHeader.large?(chunk) &&
+           ChunkHeader.dormant?(chunk) &&
+           chunk.value.size_class == index.to_u32 &&
+           ChunkHeader.nursery?(chunk) == nursery
+          ChunkHeader.set_dormant(chunk, false)
+          mapped = chunk.value.mapped_bytes
+          @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
+
+          block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          limit = ChunkHeader.data_end(chunk).as(UInt8*)
+          free_head = Pointer(Void).null
+          added = 0_u64
+          while (cursor + block_bytes) <= limit
+            header = cursor.as(BlockHeader*)
+            user = (cursor + BlockHeader::SIZE).as(Void*)
+            # Touch page (recommit after DONTNEED) and link freelist.
+            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, free_head)
+            free_head = user
+            cursor += block_bytes
+            added += payload
+          end
+          if nursery
+            @nursery_freelists[index] = free_head
+            @nursery_freelist_clean[index] = true
+          else
+            @freelists[index] = free_head
+            @freelist_clean[index] = true
+          end
+          @free_bytes += added
+          return true
+        end
+        chunk = chunk.value.next
+      end
+      false
     end
 
     # Returns {user, from_cache}. Fresh mmap pages are already zeroed.

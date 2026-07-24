@@ -5,24 +5,27 @@
 Scope: **Linux x86_64**, Crystal `>= 1.21`, default `Fiber::ExecutionContext` (parallelism 1).
 Use this when evaluating gcry as a process GC (`require "gcry"` + `-Dgc_none`).
 
-| Area | gcry (v0.6) | bdwgc (Crystal default) |
-|------|-------------|-------------------------|
+| Area | gcry (0.7.0-dev / Phase 12) | bdwgc (Crystal default) |
+|------|-----------------------------|-------------------------|
 | Integration | Shard reopen of `GC` under `-Dgc_none` | Built-in `gc/boehm` |
 | Language of core | Crystal | C |
 | Collection model | Conservative STW mark–sweep (nursery / incremental opt-in only) | Conservative (BDW) |
-| Fibers / ExecutionContext | `before_collect` → `push_gc_roots` / `push_stack`; stack bottom from `Fiber.current` | Yes (LibGC + thread bottoms) |
+| Fibers / ExecutionContext | STW other OS threads; fiber + stack roots | Yes (LibGC + thread bottoms) |
 | Parallel fibers (multi OS thread) | No | Yes |
 | Fork safety | **Unsupported** (documented) | `GC_set_handle_fork` |
 | Finalizers | Same-thread, after collect | LibGC finalizers |
 | Weak / disappearing links | Yes | Yes |
-| Auto-collect knobs | `GCRY_THRESHOLD`, `GCRY_DISABLE_AUTO`, `GCRY_NURSERY`, `GCRY_KEEP_CHUNKS`, … | LibGC env / APIs |
+| Auto-collect knobs | `GCRY_THRESHOLD` (default 32 MiB), `GCRY_KEEP_CHUNKS`, `GCRY_INTERIOR`, … | LibGC env / APIs |
+| Empty-chunk RSS | Release **default-on** (munmap outside STW) | LibGC reclaim |
+| Mark filter | Base-pointer-only default (`GCRY_INTERIOR=1`) | Interior pointers typical |
 | Incremental | Opt-in `GCRY_INCREMENTAL=1` (experimental without barriers); default full STW | Yes (BDW) |
-| Generational | Nursery without write barriers | Optional BDW modes |
+| Generational | Nursery without write barriers (opt-in) | Optional BDW modes |
 | Compacting / moving | No | Mostly no (conservative) |
 | Precise roots | No (needs compiler) | No |
 | Platforms | Linux x86_64 first; aarch64 cross-compile CI | Broad |
 | Unit-test mode | `Gcry::Heap` under Boehm | N/A |
 | `prof_stats` | Heap / reclaim / explicit-free counters filled | Full LibGC fields |
+| Kemal `/json` (same host) | thr ~**93%**; post-GC RSS ~**0.93×** — [PERF.md](PERF.md) | baseline |
 
 ## Smoke checklist (gcry)
 
@@ -51,4 +54,9 @@ Run before claiming app readiness:
 - Want a Crystal-native collector to read, hack, and dogfood
 - Default Crystal 1.21 runtime (ExecutionContext, parallelism 1) on Linux
 - Willing to tune `GCRY_*` and accept conservative false retention
+- Care about **RSS** on alloc-churn HTTP (Kemal post-GC RSS ≈ Boehm) more than last ~5–7% of Boehm thr
 - Evaluating nursery / incremental mark without patching Crystal
+
+## Phase 12 scope
+
+Shard-only gcry can approach **Boehm-class RSS** on Kemal by returning empty chunks and tightening mark filters. Closing remaining conservative false retention on dense live heaps (e.g. acikturkiye) needs better root precision or barriers — outside a pure shard. Empty-chunk release alone is not that lever.
