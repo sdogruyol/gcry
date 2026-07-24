@@ -1,6 +1,6 @@
 # Runtime policy
 
-Product rules for **Linux** (x86_64 + aarch64), Crystal **≥ 1.21**, default ExecutionContext (parallelism **1**). macOS process GC is not ready yet.
+Product rules for **Linux** (x86_64 + aarch64) and **macOS** (arm64 + x86_64), Crystal **≥ 1.21**, default ExecutionContext (parallelism **1**). Soft-dirty / nursery barrier wins remain Linux-first.
 
 ## OOM
 
@@ -67,5 +67,5 @@ Default majors = **full STW**. `GCRY_INCREMENTAL=1` is sounder with soft-dirty o
 |--|------------|
 | Linux x86_64 | **Supported** |
 | Linux aarch64 | **Supported** (CI) |
-| macOS | **Not yet** — stubs compile; `-Dgc_none` raises at init |
+| macOS arm64 / x86_64 | **Supported** (CI `macos-latest`) — signal STW + dyld roots; soft-dirty N/A |
 | musl | Best-effort — verify SP clamp |

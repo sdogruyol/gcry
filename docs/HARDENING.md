@@ -91,4 +91,4 @@ Parallel contexts: STW covers Crystal threads; `GCRY_TLAB=1` helps alloc; `GCRY_
 
 ## CI
 
-Format, specs, `-Dgc_none` samples, env smoke, `bench/churn` on Linux x86_64 (Crystal 1.21 + latest). aarch64 native for STW/fork samples. See `.github/workflows/ci.yml`.
+Format, specs, `-Dgc_none` samples, env smoke, `bench/churn` on Linux x86_64 (Crystal 1.21 + latest). aarch64 native and `macos-latest` for STW/fork samples. See `.github/workflows/ci.yml`.

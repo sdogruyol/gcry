@@ -2,7 +2,7 @@
 
 Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, shipped as a shard. Boehm is the C library Crystal ships with — broader platforms, more MT polish.
 
-**Scope for this checklist:** Linux x86_64 + aarch64, Crystal ≥ 1.21, parallelism **1**, `require "gcry"` + `-Dgc_none`.
+**Scope for this checklist:** Linux x86_64 + aarch64 and macOS arm64 + x86_64, Crystal ≥ 1.21, parallelism **1**, `require "gcry"` + `-Dgc_none`.
 
 ## Head-to-head
 
@@ -18,7 +18,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
-| Platforms | Linux x86_64 + aarch64 | Broad |
+| Platforms | Linux + macOS (soft-dirty Linux-only) | Broad |
 | Kemal `/json` | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
 
 ## Pick gcry when
@@ -31,7 +31,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 ## Stay on Boehm when
 
 - Parallel ExecutionContexts in production
-- macOS / Windows process GC today
+- Windows process GC today; Darwin soft-dirty / nursery parity
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 - You want zero-experiment production defaults across OS targets
 

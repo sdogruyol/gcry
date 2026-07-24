@@ -4,7 +4,7 @@ Crystal-native conservative mark–sweep GC as a **shard** — `require "gcry"` 
 
 ## One-liner
 
-Boehm-class collector you can read and change in Crystal; Linux x86_64 + aarch64; fibers OK; parallelism 1.
+Boehm-class collector you can read and change in Crystal; Linux + macOS; fibers OK; parallelism 1.
 
 ## Numbers (re-record before publishing)
 
@@ -20,7 +20,7 @@ As of v0.9.0 cut: `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
 
 ## When to stay on Boehm
 
-- macOS / Windows process GC
+- Windows process GC; Darwin soft-dirty / nursery parity
 - Parallel ExecutionContexts in production
 - Need `Process.fork` under ExecutionContext (Crystal forbids it; gcry atfork helps `-Dwithout_mt` / `LibC.fork` only)
 

@@ -71,10 +71,10 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 
 | In | Out |
 |----|-----|
-| Linux x86_64 + aarch64, Crystal ≥ 1.21, parallelism **1** | Parallel contexts as production default |
+| Linux x86_64 + aarch64, macOS arm64 + x86_64, Crystal ≥ 1.21, parallelism **1** | Parallel contexts as production default |
 | Full `GC` facade + STW + fiber roots | Deprecated `-Dpreview_mt` |
 | Fork reinit via `pthread_atfork` | Patching Crystal for `-Dgc_gcry` |
-| | Precise / moving GC without compiler maps |
+| | Precise / moving GC without compiler maps; soft-dirty (Linux-only) |
 
 ## Crystal source map (1.21)
 

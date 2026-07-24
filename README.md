@@ -90,7 +90,7 @@ gcry is **production-curious on Linux process GC** at parallelism **1**. It is n
 
 | In scope today | Later / elsewhere |
 |----------------|-------------------|
-| Linux x86_64 + aarch64 process GC | macOS / Windows process GC (stubs only for now) |
+| Linux + macOS process GC (Crystal ≥ 1.21) | Windows process GC; soft-dirty on Darwin |
 | Default ExecutionContext, **parallelism 1** | Parallel contexts: experimental (`GCRY_TLAB=1`; measure) |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it) |
@@ -115,7 +115,7 @@ Full checklist: [docs/COMPARISON.md](docs/COMPARISON.md).
 
 | | |
 |--|--|
-| OS / arch | Linux x86_64 + aarch64 (process GC); macOS type-check stubs |
+| OS / arch | Linux x86_64 + aarch64; macOS arm64 + x86_64 (process GC) |
 | Crystal | `>= 1.21.0` |
 | Runtime | Default `Fiber::ExecutionContext`, **parallelism 1** |
 | Fork / signals | [docs/POLICY.md](docs/POLICY.md) |

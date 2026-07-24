@@ -32,7 +32,7 @@ As of v0.9.0 (same-host Kemal, median of 3): **`/json` ~92% of Boehm thr**, post
 - Replacing Boehm as upstream default (adoption, not a design prerequisite).
 - Precise / moving / compacting GC without stack maps + write barriers from the compiler.
 - Full concurrent collection as the default.
-- macOS / Windows process GC parity (Darwin stubs type-check; process init still Linux-first).
+- Windows process GC parity (macOS process GC landed in v0.10; soft-dirty stays Linux-only).
 - Being a general C malloc for non-Crystal programs.
 
 ## Principles
@@ -136,13 +136,13 @@ src/gcry/
   parallel_mark.cr · barrier.cr · mark.cr
   finalizer.cr · metrics.cr · observability.cr
   gc_override.cr            # module GC reopen
-  platform/                 # linux STW, soft-dirty, mprotect, fork, roots, …
+  platform/                 # linux STW, soft-dirty, mprotect, fork, roots; darwin stack/roots/stw
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.9)
+## Where we are (v0.9 → v0.10)
 
-Shipped and dogfooded on Linux:
+Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
 
 | Area | State |
 |------|--------|
@@ -155,26 +155,26 @@ Shipped and dogfooded on Linux:
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack scrub | ✅ opt-in (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| macOS process GC | ❌ stubs only → **v0.10 target** |
-| Compiler stack maps | ❌ later (RSS); not blocking 0.10 |
+| macOS process GC | ✅ signal STW + dyld roots (Crystal ≥ 1.21); soft-dirty N/A |
+| Compiler stack maps | ❌ later (RSS) |
 
 **Kemal (v0.9.0 cut):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md).
 
 **acikturkiye:** thr trial-median ~**93%**, post-GC RSS ~**2.84×** — dense conservative-live; shard levers mostly exhausted — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
-## v0.10 — macOS process GC (planned)
+## v0.10 — macOS process GC
 
-**Goal:** `-Dgc_none` + `require "gcry"` runs real process GC on Darwin (arm64 + x86_64), not just compile stubs.
+**Goal met:** `-Dgc_none` + `require "gcry"` runs real process GC on Darwin (arm64 + x86_64).
 
-| Must ship | Defer |
-|-----------|--------|
-| Mach `thread_suspend` / resume STW (Crystal threads) | Soft-dirty (Linux-only) |
-| Thread / fiber stack bounds (`pthread_get_stackaddr_np` / fiber stacks) | Full parity nursery wins |
-| dyld image walk for static roots (main + filter) | Windows |
-| `GC.init` raise removed; `samples/hello` + stress under `-Dgc_none` | Stack maps / RSS epic |
-| CI: `macos-latest` native specs + `-Dgc_none` samples | Announce until green |
+| Shipped | Deferred |
+|---------|----------|
+| Crystal signal STW + Darwin ucontext SP clamp (`SIGXFSZ` / `SIGXCPU`) | Soft-dirty (Linux-only) |
+| `pthread_get_stackaddr_np` stack bounds | Full parity nursery / mprotect wins |
+| dyld main-image `__DATA` / `__DATA_CONST` static roots | Windows |
+| `GC.init` raise removed; hello / stress / `stw_sp_clamp` / fork | Stack maps / RSS epic |
+| CI: `macos-latest` native specs + samples | Version cut until CI green |
 
-Replace `platform/darwin_stubs.cr` raise path with a real `darwin_*.cr` surface; keep Linux path untouched.
+Requires Crystal **≥ 1.21** (ExecutionContext Monitor). Platform files: `darwin_{stack,roots,stw}.cr`; soft-dirty/mprotect remain stubs.
 
 ## Frontier (after 0.10)
 
@@ -196,7 +196,7 @@ Shard-only polish that remains interesting: layout coverage, large-object policy
 | Conservative false retention | Size classes, layout, type_id gate, SP clamp, opt-in scrub; measure vs Boehm |
 | Fiber / MT root bugs | Explicit registry; STW; SP clamp; CI samples |
 | “Just make it precise” expectations | Precise is a separate epic — documented, not blocked |
-| Platform divergence | `platform/` isolation; Darwin stubs; Linux CI x86_64 + aarch64 |
+| Platform divergence | `platform/` isolation; Darwin real surface + soft-dirty stubs; CI Linux + macOS |
 
 ## Success bar
 
