@@ -114,9 +114,9 @@ describe "Gcry MT alloc storm (TLAB)" do
       heap.gc_threshold = UInt64::MAX
       heap.nursery_enabled = false
       # No stop_the_world in library unit tests (see above).
+      # Join OS threads — Channel across Thread/Fiber can hang the scheduler.
 
-      done = Channel(Nil).new(4)
-      4.times do
+      threads = Array(Thread).new(4) do
         Thread.new do
           local = [] of Void*
           100.times do
@@ -124,10 +124,9 @@ describe "Gcry MT alloc storm (TLAB)" do
             local.shift if local.size > 20
           end
           local.each { |p| heap.free(p) if heap.is_heap_ptr(p) && heap.live?(p) }
-          done.send(nil)
         end
       end
-      4.times { done.receive }
+      threads.each(&.join)
 
       # Collect from the main thread after workers finish.
       heap.collect(scan_stack: false)
