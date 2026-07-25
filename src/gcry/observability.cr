@@ -65,6 +65,7 @@ module Gcry
         layout_precise_scans:      heap.layout_precise_scans,
         layout_conservative_scans: heap.layout_conservative_scans,
         layout_entries:            Layout.size,
+        layout_unsafe_skips:       Layout.unsafe_skips_count,
         type_id_root_rejects:      heap.type_id_root_rejects,
         sp_clamp_hits:             heap.sp_clamp_hits,
         sp_clamp_fallbacks:        heap.sp_clamp_fallbacks,

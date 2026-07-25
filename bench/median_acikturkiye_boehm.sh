@@ -54,6 +54,9 @@ run_one() {
     set -a; source .env.demo; set +a
     unset GCRY_CLEAR_STACK GCRY_SCRUB_FIBERS GCRY_CLEAR_STACK_EVERY GCRY_PARALLEL_MARK || true
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
+    # Allow callers to set extra env (e.g. GCRY_AUTO_LAYOUTS=1 for A/B with the
+    # opt-in whole-program walk; default is builtins only).
+    if [[ -n "${EXTRA_GCRY_ENV:-}" ]]; then export $EXTRA_GCRY_ENV; fi
     exec "$bin"
   ) >"/tmp/acik-${trial_id}.log" 2>&1 &
   local pid=$!
@@ -76,6 +79,11 @@ run_one() {
   # Prefer /gc-collect; fall back to Observability if present
   curl -sf -o /dev/null "${base}/gc-collect" || curl -sf -X POST "${base}/gc-collect" -o /dev/null || true
   sleep 0.5
+  # Dump compact gc-stats (size_class_live_bytes, precise vs conservative scans, etc.)
+  stats=$(curl -sf "${base}/gc-stats" 2>/dev/null || true)
+  if [[ -n "$stats" ]]; then
+    echo "$stats" > "/tmp/gcstats-acik-${trial_id}.json"
+  fi
 
   local cpid
   cpid=$(pgrep -n -f "$(basename "$bin")" 2>/dev/null || true)

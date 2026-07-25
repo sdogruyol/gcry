@@ -31,6 +31,7 @@ module Gcry
     getter layout_precise_scans : UInt64
     getter layout_conservative_scans : UInt64
     getter layout_entries : Int32
+    getter layout_unsafe_skips : UInt64
     getter sp_clamp_hits : UInt64
     getter sp_clamp_fallbacks : UInt64
     getter barrier_backend : String
@@ -54,7 +55,8 @@ module Gcry
       @tlab_refills : UInt64, @tlab_steals : UInt64,
       @parallel_mark_workers : Int32, @parallel_mark_runs : UInt64, @parallel_mark_stolen : UInt64,
       @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
-      @layout_entries : Int32, @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
+      @layout_entries : Int32, @layout_unsafe_skips : UInt64,
+      @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
       @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
@@ -100,6 +102,7 @@ module Gcry
       heap.layout_precise_scans,
       heap.layout_conservative_scans,
       Layout.size,
+      Layout.unsafe_skips_count,
       heap.sp_clamp_hits,
       heap.sp_clamp_fallbacks,
       heap.barrier_backend_name,
@@ -187,6 +190,9 @@ module Gcry
       io << "# HELP #{prefix}_layout_entries Layout table size\n"
       io << "# TYPE #{prefix}_layout_entries gauge\n"
       io << "#{prefix}_layout_entries #{m.layout_entries}\n"
+      io << "# HELP #{prefix}_layout_unsafe_skips_total Types skipped by @unsafe_layouts blacklist\n"
+      io << "# TYPE #{prefix}_layout_unsafe_skips_total counter\n"
+      io << "#{prefix}_layout_unsafe_skips_total #{m.layout_unsafe_skips}\n"
       io << "# HELP #{prefix}_layout_precise_scans_total Objects scanned via layout tables\n"
       io << "# TYPE #{prefix}_layout_precise_scans_total counter\n"
       io << "#{prefix}_layout_precise_scans_total #{m.layout_precise_scans}\n"

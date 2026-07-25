@@ -53,7 +53,8 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
-| `GCRY_AUTO_LAYOUTS=1` | `register_layouts` at init (measure thr; skips mixed unions / embedded structs) |
+| `GCRY_DISABLE_AUTO_LAYOUTS=1` | Keep builtins only — skip whole-program `Reference.all_subclasses` walk (escape hatch for unsound precise layouts) |
+| `GCRY_AUTO_LAYOUTS=1` | **Legacy**: equivalent to default-on (kept for documentation/back-compat) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
 | `GCRY_BLACKLIST=1` | Opt-in page blacklist (Darwin default off) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |

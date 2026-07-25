@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deferred madvise — STW pause damping (P1.4):** All `madvise` / page-release syscalls defer to post-STW flush functions (`flush_pending_dormant_chunks`, `flush_pending_page_release_chunks`). DORMANT/HOLED flags set during STW; actual syscalls run after threads resume, eliminating kernel VM lock contention that caused 132–150 ms pause tails.
 - **Cross-chunk dormant coalescing (P1.4):** `flush_pending_dormant_chunks` merges contiguous dormant chunks into a single `madvise` region (one syscall per run instead of one per chunk).
 - **Per-chunk free-page coalescing (P1.4):** `dontneed_free_pages_in_chunk` pre-computes a live-page mask and issues one `madvise` per contiguous free run instead of one per free page (reduces from up to 64 syscalls/chunk to 1–3).
+- **Auto-layouts default-on (P2.1):** `GCRY_AUTO_LAYOUTS=1` is now the default. `Gcry.register_layouts` runs at init (unless `GCRY_DISABLE_AUTO_LAYOUTS=1`), registering precise pointer offsets for every concrete `Reference` subclass — collapsing most conservative word-scans into byte-offset scans. Targets fat-app RSS (acikturkiye).
+- **`@unsafe_layouts` compile-time blacklist (P2.1):** Types whose layouts Crystal cannot promise stable (`Cry`, `Crystal::*`, `LibC::*`) are skipped from the auto-walk and kept on conservative scanning. New metric `layout_unsafe_skips` exposes the skip count.
 
 ### Changed
 
 - **`incremental_auto` defaults (P1.3, Linux/Darwin):** `true` on Linux (page-dirty barrier is sound), `false` on Darwin (no soft-dirty alternative yet). Overridable via `GCRY_INCREMENTAL` / `GCRY_NO_INCREMENTAL`.
+- **`GCRY_AUTO_LAYOUTS=1` → legacy alias (P2.1):** the env var is now a no-op kept for documentation. Use `GCRY_DISABLE_AUTO_LAYOUTS=1` to opt out.
 
 ### Performance
 

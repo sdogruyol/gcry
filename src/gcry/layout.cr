@@ -55,13 +55,31 @@ module Gcry
     @@count = uninitialized Int32
     @@enabled = uninitialized Bool
     @@booted = uninitialized Bool
+    # Number of types skipped by register_all_from_reference_subclasses because
+    # they matched an @unsafe_layouts prefix (Cry, Crystal::*, LibC::*). Pure
+    # observability — these types fall back to conservative word-scan at mark
+    # time (no crash; just less precise).
+    @@unsafe_skips = uninitialized UInt64
 
     private def self.ensure_booted : Nil
       return if @@booted
       @@count = 0
       @@enabled = true
+      @@unsafe_skips = 0_u64
       INDEX_SIZE.times { |i| @@index[i] = 0 }
       @@booted = true
+    end
+
+    # Compile-time prefix blacklist. Types whose ivar layout Crystal guarantees
+    # to keep stable across versions (built-in stdlib) get precise offsets via
+    # the macro walk below; types in these prefixes ("Cry", "Crystal::",
+    # "LibC::") change shape across versions or carry platform-specific
+    # conditional fields that the macro cannot see. Skip them — they keep
+    # conservative scanning, which is safe.
+    UNSAFE_PREFIXES = {"Cry", "Crystal::", "LibC::"}
+
+    def self.unsafe_skips_count : UInt64
+      @@unsafe_skips
     end
 
     struct Entry
@@ -533,9 +551,16 @@ module Gcry
     # Hash instantiations use register_hash; unbound generics are skipped.
     # Mixed value|ref unions install scan_cap only (see register).
     def self.register_all_from_reference_subclasses : Nil
+      ensure_booted
       {% begin %}
         {% for t in Reference.all_subclasses %}
           {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
+          {% name = t.stringify %}
+          {% for prefix in UNSAFE_PREFIXES %}
+            {% if name.starts_with?(prefix) %}
+              {% skip = true %}
+            {% end %}
+          {% end %}
           {% for tv in t.type_vars %}
             # Only concrete TypeNode args are instantiable (skip MacroId, Int, 256, …).
             {% unless tv.is_a?(TypeNode) && !tv.abstract? %}
@@ -546,10 +571,14 @@ module Gcry
             {% if t <= Hash %}
               {% if t.type_vars.size == 2 %}
                 register_hash({{t.type_vars[0]}}, {{t.type_vars[1]}})
+              {% else %}
+                @@unsafe_skips += 1_u64
               {% end %}
             {% else %}
               register({{t}})
             {% end %}
+          {% else %}
+            @@unsafe_skips += 1_u64
           {% end %}
         {% end %}
       {% end %}

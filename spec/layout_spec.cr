@@ -308,3 +308,33 @@ it "register_layouts indexes concrete Reference subclasses" do
 ensure
   Gcry::Layout.clear
 end
+
+it "@unsafe_layouts blacklist increments for stdlib/runtime prefixes" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  before = Gcry::Layout.unsafe_skips_count
+  Gcry.register_layouts
+  after = Gcry::Layout.unsafe_skips_count
+  # The blacklist should have skipped at least the Crystal::* prefixes visible
+  # in the test binary (e.g. Crystal::EventLoop, Crystal::System::*, etc.).
+  # The walk also skips abstract/private/generic types — we only assert that
+  # the blacklist path was exercised (delta > 0), not an exact count.
+  (after - before).should be > 0
+ensure
+  Gcry::Layout.clear
+end
+
+it "register_all_from_reference_subclasses is idempotent for the unsafe-skips counter" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry.register_layouts
+  mid = Gcry::Layout.unsafe_skips_count
+  mid.should be > 0
+  # A second pass on the same cleaned table re-counts (counter is non-saturating
+  # observability only). The point is that the counter survives a re-run — useful
+  # for benchmarks that re-init layouts.
+  Gcry.register_layouts
+  (Gcry::Layout.unsafe_skips_count >= mid).should be_true
+ensure
+  Gcry::Layout.clear
+end

@@ -177,11 +177,12 @@ Defaults are tuned for process GC. Escape hatches when you measure:
 | `GCRY_BLACKLIST=1` | Opt-in blacklist (Darwin process default is off) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
-| `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References |
+| `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
+| `GCRY_DISABLE_AUTO_LAYOUTS=1` | Keep builtins only — skip whole-program `Reference.all_subclasses` walk (escape for unsound precise layouts) |
+| `GCRY_AUTO_LAYOUTS=1` | **Legacy**: equivalent to default-on (kept for documentation) |
 | `GCRY_DISABLE_SP_CLAMP=1` | No RSP clamp on other-thread stacks |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default `mach_vm` free-page release |
-| `GCRY_AUTO_LAYOUTS=1` | `Gcry.register_layouts` at init (measure thr) |
 | `GCRY_DISABLE_ATFORK=1` | No `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release (already default-on) |
