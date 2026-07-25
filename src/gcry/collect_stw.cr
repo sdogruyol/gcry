@@ -1,25 +1,44 @@
 # Stop-the-world: GC lock, thread suspend/resume, fork child reinit.
+#
+# RWLock notes for Darwin:
+#   `Crystal::RWLock` is a pure userspace spinlock with no `try_write_lock`.
+#   If thread A holds `lock_read` and then calls `lock_write` (via allocation →
+#   `maybe_collect`), it spins forever because it can't release its own read lock.
+#   On Linux, signal-based thread_suspend interrupts the reader; on Darwin, Mach
+#   `thread_suspend` freezes the thread in place — the lock stays held.
+#
+#   Fortunately, Mach STW already provides mutual exclusion: the collector stops
+#   **all** other threads before touching the heap, so there is no concurrent
+#   mutation during GC.  The RWLock is thus redundant on Darwin — make it a no-op.
 
 module Gcry
   class Heap
     def lock_read : Nil
-      return unless @stop_the_world
-      @gc_lock.read_lock
+      {% unless flag?(:darwin) %}
+        return unless @stop_the_world
+        @gc_lock.read_lock
+      {% end %}
     end
 
     def unlock_read : Nil
-      return unless @stop_the_world
-      @gc_lock.read_unlock
+      {% unless flag?(:darwin) %}
+        return unless @stop_the_world
+        @gc_lock.read_unlock
+      {% end %}
     end
 
     def lock_write : Nil
-      return unless @stop_the_world
-      @gc_lock.write_lock
+      {% unless flag?(:darwin) %}
+        return unless @stop_the_world
+        @gc_lock.write_lock
+      {% end %}
     end
 
     def unlock_write : Nil
-      return unless @stop_the_world
-      @gc_lock.write_unlock
+      {% unless flag?(:darwin) %}
+        return unless @stop_the_world
+        @gc_lock.write_unlock
+      {% end %}
     end
 
     # Match Crystal `gc/none` STW on Linux (signal-suspend). Darwin uses Mach
