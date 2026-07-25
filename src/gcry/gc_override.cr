@@ -77,8 +77,8 @@ module GC
     else
       Gcry::Layout.register_builtins
       # Whole-program auto layouts are opt-in: some nested/stdlib types get
-      # unsound precise offsets and tank HTTP thr. Call Gcry.register_layouts
-      # or set GCRY_AUTO_LAYOUTS=1 after measuring.
+      # unsound precise offsets and tank HTTP thr / correctness. Call
+      # Gcry.register_layouts or set GCRY_AUTO_LAYOUTS=1 after measuring.
       if env_flag_one?("GCRY_AUTO_LAYOUTS")
         Gcry.register_layouts
       end

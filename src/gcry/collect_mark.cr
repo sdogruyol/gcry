@@ -98,8 +98,9 @@ module Gcry
       return true if size < 4
 
       tid = BlockHeader.user_from(header).as(Int32*).value
-      return false if tid < 0
-      # Crystal type ids are dense small integers, not pointer-sized values.
+      # Crystal type ids are dense positive integers (0 is not a real instance id;
+      # a leading zero word is typical of Pointer(T) buffers / empty slots).
+      return false if tid <= 0
       return false if tid > 1_000_000
       true
     end
@@ -152,11 +153,15 @@ module Gcry
       end
 
       @layout_conservative_scans += 1
+      # Raw buffers (no Crystal type_id): object-base only — cuts interior false
+      # hits from JSON/bytes. Typed References keep interiors so Array#shift and
+      # layout-miss types with mid-object pointers stay correct.
+      base_only = size >= 4 && !type_id_plausible?(header)
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
-        mark_candidate(Pointer(Void).new(cursor[i]))
+        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only)
       end
     end
 

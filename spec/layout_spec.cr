@@ -94,6 +94,51 @@ it "size-class mismatch falls back to conservative scan" do
   end
 end
 
+it "raw-buffer conservative scans are object-base only" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = false
+
+    buf = heap.malloc(64)
+    interior = Pointer(Void).new(buf.address + 16)
+    # Parent looks like a raw buffer (type_id 0).
+    parent = heap.malloc(32)
+    parent.as(UInt64*).value = 0_u64
+    Pointer(Void*).new(parent.address + 8).value = interior
+
+    heap.add_root(parent)
+    heap.collect(scan_stack: false)
+
+    heap.live?(parent).should be_true
+    heap.live?(buf).should be_false
+  ensure
+    heap.destroy
+  end
+end
+
+it "typed conservative scans still follow interiors" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = false
+
+    buf = heap.malloc(64)
+    interior = Pointer(Void).new(buf.address + 16)
+    parent = heap.malloc(32)
+    parent.as(Int32*).value = 9
+    Pointer(Void*).new(parent.address + 8).value = interior
+
+    heap.add_root(parent)
+    heap.collect(scan_stack: false)
+
+    heap.live?(parent).should be_true
+    heap.live?(buf).should be_true
+  ensure
+    heap.destroy
+  end
+end
+
 it "register_hash installs KIND_HASH with noscan entries/indices" do
   Gcry::Layout.clear
   Gcry::Layout.enabled = true

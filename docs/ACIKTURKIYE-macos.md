@@ -11,9 +11,10 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Crystal | **≥ 1.21** — rebuild on that toolchain (`gcry` `.tool-versions`) |
 | STW | Mach suspend (signal STW under HTTP was ~hang / ~2 req/s) |
 | Soft-dirty | N/A |
-| Host page | **16 KiB** on Apple Silicon (not 4 KiB) — free-page reclaim must use `sysconf(PAGESIZE)` |
-| Free-page RSS | `MADV_DONTNEED` is a no-op for RSS; process default uses `mach_vm_deallocate` + `mach_vm_allocate(FIXED)` |
-| Blacklist | Default **off** on Darwin (freelist abandonment grew heaps; `GCRY_BLACKLIST=1` to opt in) |
+| Host page | **16 KiB** on Apple Silicon — free-page reclaim uses `sysconf(PAGESIZE)` |
+| Free-page RSS | `MADV_DONTNEED` is a no-op; process default uses `mach_vm_deallocate` + `allocate(FIXED)` |
+| Blacklist | Default **off** on Darwin (`GCRY_BLACKLIST=1` to opt in) |
+| Conservative scan | Untyped payloads (`type_id ≤ 0`) are **object-base only** (cuts interior false hits) |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
 ## Verdict — macOS aarch64 (2026-07-25)
@@ -24,17 +25,17 @@ Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub
 |--|-------------------:|--------------:|
 | **gcry vs Boehm** | **~94%** | **~16.6×** |
 
-Throughput matches the Linux-class story. **RSS does not** — far thicker than Linux acikturkiye (~2.8×).
+### RSS work (same day)
 
-### RSS follow-up (same day, smoke)
+Shipped: 16 KiB `mach_vm` free-page release, Darwin blacklist off, skip `__const` roots, `type_id > 0` gate, base-only scan of untyped buffers.
 
-After Darwin free-page `mach_vm` reclaim (16 KiB host pages) + blacklist default-off + skip `__DATA_CONST.__const`:
+| Smoke (`wrk -c 100 -d 20`) | thr % | post-GC RSS × |
+|--|------------------------:|--------------:|
+| After reclaim + buffer base-only | **~88%** | **~12–14×** |
 
-| | thr (15s smoke) | post-GC RSS × (smoke) |
-|--|----------------:|----------------------:|
-| vs Boehm | ~89% (882 / 989) | **~12.8×** (515 / 40 MiB) |
+`free_bytes` after collect is small (~10 MiB) — reclaim works. **`size_class_live_bytes` stays ~0.7–0.9 GiB`** (dense conservative live). That is the ceiling.
 
-`free_bytes` after collect dropped (~250 MiB → ~15 MiB resident freelist). **`size_class_live_bytes` still ~700 MiB** — dense conservative live, not empty-chunk waste. Closing toward Linux ~2.8× needs stack maps / less false retention, not more madvise. Re-run median before treating the smoke × as the cut number.
+**5× Boehm RSS (~≤230 MiB on this host) was attempted and is not reachable with safe shard-only heuristics.** Prefix / global base-only / default `register_layouts` all produced `SIGSEGV` under wrk (under-retention). Same wall as Linux acikturkiye (~2.8×): needs **compiler stack maps**, not more madvise. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
@@ -50,8 +51,8 @@ Timeouts: 0 / 0 all trials.
 | Date / label | thr % | RSS × | Notes |
 |--------------|------:|------:|-------|
 | 2026-07-24 smoke | — | — | Pre-Mach hang (~2.5 rps) |
-| 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~16.6×** | Mach STW; Crystal 1.21.0; median of 3 |
-| 2026-07-25 RSS smoke | ~89% | **~12.8×** | `mach_vm` free pages @ 16 KiB; blacklist off; no `__const` roots |
+| 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~16.6×** | Mach STW; median of 3 |
+| 2026-07-25 RSS pass | ~88% | **~12–14×** | `mach_vm` @ 16 KiB; blacklist off; buffer base-only; **5× blocked** |
 
 ## How to measure
 
