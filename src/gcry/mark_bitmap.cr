@@ -65,6 +65,11 @@ module Gcry
     # Used at collect start and when the heap grows past the current range.
     # Preserves existing bits that still fall inside the new range.
     #
+    # When the required capacity is *smaller* than the current mapping, the
+    # bitmap is shrunk: a new smaller mmap replaces the old one (one syscall)
+    # and the old pages are released.  This prevents RSS from accumulating
+    # when the heap range contracts after freeing many chunks.
+    #
     # Concurrency: pointer reassignment happens BEFORE unmap of the old mapping
     # so other threads always see either the old (mapped) or the new (mapped)
     # bitmap — never a stale pointer to an unmapped region. Word-aligned pointer
@@ -79,32 +84,48 @@ module Gcry
       target = INITIAL_BYTES if target < INITIAL_BYTES
       target = next_power_of_two(target) if target > INITIAL_BYTES
 
-      if @base.null? || target > @capacity_bytes
+      if @base.null?
+        # First allocation — no old mapping to preserve.
         new_base = mmap_anonymous(target)
         raise OutOfMemoryError.new("mark bitmap mmap failed") if Gcry.mmap_failed?(new_base.as(Void*))
-        old_base = @base
-        old_mapped = @mapped_bytes
-        if !old_base.null?
-          overlap = @capacity_bytes < target ? @capacity_bytes : target
-          old_base.copy_to(new_base, overlap.to_i32) if overlap > 0
-        end
-        # Atomically publish the new mapping first, then unmap the old one.
-        # Any concurrent reader now sees either the old or the new base; both
-        # are valid mappings at the moment of observation.
         @base = new_base
         @mapped_bytes = target
         @capacity_bytes = target
         @base_addr = base_addr
-        if !old_base.null?
-          LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64
+      elsif target == @capacity_bytes && base_addr == @base_addr
+        # Exact same size and origin — nothing to do.
+        yield @base.as(UInt64*), base_addr, @capacity_bytes.to_u64 * 8_u64
+      elsif target > @capacity_bytes
+        # Grow: allocate new (larger) mapping, copy overlapping bits from old.
+        new_base = mmap_anonymous(target)
+        raise OutOfMemoryError.new("mark bitmap mmap failed") if Gcry.mmap_failed?(new_base.as(Void*))
+        old_base = @base
+        old_mapped = @mapped_bytes
+        @base.copy_to(new_base, @capacity_bytes.to_i32)
+        @base = new_base
+        @mapped_bytes = target
+        @capacity_bytes = target
+        @base_addr = base_addr
+        LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64
+      elsif target < @capacity_bytes && base_addr == @base_addr
+        # Shrink: allocate new (smaller) mapping, copy valid bits from old.
+        new_base = mmap_anonymous(target)
+        raise OutOfMemoryError.new("mark bitmap mmap failed") if Gcry.mmap_failed?(new_base.as(Void*))
+        old_base = @base
+        old_mapped = @mapped_bytes
+        if target > 0
+          old_base.copy_to(new_base, target.to_i32)
         end
-        # Mirror to caller's hot fields AFTER the publish so the heap-side
-        # snapshot matches what concurrent readers can observe.
-        yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64 if @base
+        @base = new_base
+        @mapped_bytes = target
+        @capacity_bytes = target
+        # base_addr unchanged
+        LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64
       else
-        # Same size — base shifted. Old bit offsets are now meaningless;
-        # wipe the bitmap. Any reader after the publish sees zeros until the
-        # next `clear_all_marks` runs.
+        # Same size, base_addr shifted — old bits are at wrong offsets.
         @base_addr = base_addr
         zero_all
         yield @base.as(UInt64*), base_addr, @capacity_bytes.to_u64 * 8_u64
@@ -219,8 +240,28 @@ module Gcry
       end
     end
 
+    # Shrink the bitmap mapping to *exactly* cover `needed_bytes` of bitmap
+    # (i.e. `needed_bytes * 8` word-aligned heap addresses), rounded up to a
+    # power of two (minimum INITIAL_BYTES).  No-op if the mapping is already
+    # ≤ `needed_bytes`.
+    #
+    # Use after the heap range contracts (e.g. after `update_heap_bounds_after_unmap`)
+    # to release the surplus bitmap pages back to the OS.
+    def shrink_to_fit!(needed_bytes : UInt64) : Nil
+      return if @base.null?
+      target = needed_bytes
+      target = INITIAL_BYTES if target < INITIAL_BYTES
+      target = next_power_of_two(target) if target > INITIAL_BYTES
+      return if target >= @capacity_bytes
+      relocate(@base_addr, target)
+    end
+
     def base_addr : UInt64
       @base_addr
+    end
+
+    def base : UInt8*
+      @base
     end
 
     def capacity_bytes : UInt64

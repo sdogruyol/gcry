@@ -114,6 +114,10 @@ module Gcry
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
       @pause_hdr = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
+      @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
+      @bitmap_growth_count = 0
+      @bitmap_growth_pos = 0
+      @bitmap_headroom_bytes = (SMALL_CHUNK_BYTES >> 3)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
