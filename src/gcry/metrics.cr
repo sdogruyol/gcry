@@ -21,6 +21,10 @@ module Gcry
     getter phase_mark_ns : UInt64
     getter phase_sweep_ns : UInt64
     getter type_id_root_rejects : UInt64
+    getter type_id_stack_rejects : UInt64
+    getter type_id_static_rejects : UInt64
+    getter type_id_thread_rejects : UInt64
+    getter type_id_root_false_negatives : UInt64
     getter blacklist_hits : UInt64
     getter blacklist_skips : UInt64
     getter tlab_refills : UInt64
@@ -51,7 +55,10 @@ module Gcry
       @pause_count : UInt64, @pause_last_ns : UInt64, @pause_p50_ns : UInt64,
       @pause_p99_ns : UInt64, @pause_max_ns : UInt64, @pause_total_ns : UInt64,
       @phase_mark_ns : UInt64, @phase_sweep_ns : UInt64,
-      @type_id_root_rejects : UInt64, @blacklist_hits : UInt64, @blacklist_skips : UInt64,
+      @type_id_root_rejects : UInt64, @type_id_stack_rejects : UInt64,
+      @type_id_static_rejects : UInt64, @type_id_thread_rejects : UInt64,
+      @type_id_root_false_negatives : UInt64,
+      @blacklist_hits : UInt64, @blacklist_skips : UInt64,
       @tlab_refills : UInt64, @tlab_steals : UInt64,
       @parallel_mark_workers : Int32, @parallel_mark_runs : UInt64, @parallel_mark_stolen : UInt64,
       @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
@@ -92,6 +99,10 @@ module Gcry
       heap.last_phase_mark_ns,
       heap.last_phase_sweep_ns,
       heap.type_id_root_rejects,
+      heap.type_id_stack_rejects,
+      heap.type_id_static_rejects,
+      heap.type_id_thread_rejects,
+      heap.type_id_root_false_negatives,
       heap.blacklist_hits,
       heap.blacklist_skips,
       heap.tlab_refills,
@@ -166,6 +177,18 @@ module Gcry
       io << "# HELP #{prefix}_type_id_root_rejects_total Ambient roots rejected by type_id gate\n"
       io << "# TYPE #{prefix}_type_id_root_rejects_total counter\n"
       io << "#{prefix}_type_id_root_rejects_total #{m.type_id_root_rejects}\n"
+      io << "# HELP #{prefix}_type_id_stack_rejects_total Stack-scan rejects (fiber/mutator)\n"
+      io << "# TYPE #{prefix}_type_id_stack_rejects_total counter\n"
+      io << "#{prefix}_type_id_stack_rejects_total #{m.type_id_stack_rejects}\n"
+      io << "# HELP #{prefix}_type_id_static_rejects_total Static-segment rejects (BSS/data)\n"
+      io << "# TYPE #{prefix}_type_id_static_rejects_total counter\n"
+      io << "#{prefix}_type_id_static_rejects_total #{m.type_id_static_rejects}\n"
+      io << "# HELP #{prefix}_type_id_thread_rejects_total Thread-stack rejects (TLS)\n"
+      io << "# TYPE #{prefix}_type_id_thread_rejects_total counter\n"
+      io << "#{prefix}_type_id_thread_rejects_total #{m.type_id_thread_rejects}\n"
+      io << "# HELP #{prefix}_type_id_root_false_negatives_total Rejected roots later proved valid (UAF risk)\n"
+      io << "# TYPE #{prefix}_type_id_root_false_negatives_total counter\n"
+      io << "#{prefix}_type_id_root_false_negatives_total #{m.type_id_root_false_negatives}\n"
       io << "# HELP #{prefix}_blacklist_hits_total Pages recorded as false roots\n"
       io << "# TYPE #{prefix}_blacklist_hits_total counter\n"
       io << "#{prefix}_blacklist_hits_total #{m.blacklist_hits}\n"

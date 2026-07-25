@@ -68,6 +68,13 @@ module Gcry
     # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
     property type_id_gate : Bool = false
     getter type_id_root_rejects : UInt64 = 0_u64
+    # Per-source breakdown of ambient-root rejects. Combined with
+    # type_id_root_rejects: stack + static + thread == total.
+    # Reset each major collection. Use these to attribute false roots to the
+    # specific scan phase (fiber/mutator stack, BSS/data segment, TLS).
+    getter type_id_stack_rejects : UInt64 = 0_u64
+    getter type_id_static_rejects : UInt64 = 0_u64
+    getter type_id_thread_rejects : UInt64 = 0_u64
     # type_id_root_rejections that were later revisited and would have passed —
     # useful for tuning the upper-bound heuristic (false negatives == UAF risk).
     # When non-zero in production, the gate is too strict and the upper bound
@@ -629,7 +636,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
             end
           end
         end
@@ -801,6 +808,9 @@ module Gcry
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
       @type_id_root_rejects = 0_u64
+      @type_id_stack_rejects = 0_u64
+      @type_id_static_rejects = 0_u64
+      @type_id_thread_rejects = 0_u64
       @type_id_root_false_negatives = 0_u64
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
@@ -843,7 +853,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
             end
           end
         end

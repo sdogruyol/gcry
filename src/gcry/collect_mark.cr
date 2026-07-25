@@ -2,32 +2,43 @@
 
 module Gcry
   class Heap
+    # Ambient-root source tag for per-source reject counters. Distinguishes
+    # fiber/mutator stacks, BSS/data segments, and TLS (thread) so the
+    # false-positive root cause can be attributed. Cheap enum (1 byte) — passed
+    # through mark_root_candidate → mark_impl → mark_impl_unlocked; the case
+    # only runs on the type_id gate reject path, so the hot path is unchanged.
+    private enum RootSource
+      Stack
+      Static
+      Thread
+    end
+
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: false, base_only: false)
+      mark_impl(pointer, gate_type_id: false, base_only: false, source: RootSource::Stack)
     end
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
     # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
-    private def mark_root_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers)
+    private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
+      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers, source: source)
     end
 
-    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
+    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       if @mark_parallel
         @mark_lock.lock
         begin
-          mark_impl_unlocked(pointer, gate_type_id, base_only)
+          mark_impl_unlocked(pointer, gate_type_id, base_only, source)
         ensure
           @mark_lock.unlock
         end
       else
-        mark_impl_unlocked(pointer, gate_type_id, base_only)
+        mark_impl_unlocked(pointer, gate_type_id, base_only, source)
       end
     end
 
-    private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
+    private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -45,6 +56,11 @@ module Gcry
 
       if gate_type_id && !type_id_plausible?(header)
         @type_id_root_rejects += 1
+        case source
+        when RootSource::Stack  then @type_id_stack_rejects += 1
+        when RootSource::Static then @type_id_static_rejects += 1
+        when RootSource::Thread then @type_id_thread_rejects += 1
+        end
         note_false_root(addr)
         return
       end
@@ -159,7 +175,7 @@ module Gcry
             words = limit // word
             cursor = user.as(UInt64*)
             words.times do |i|
-              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false)
+              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false, source: RootSource::Stack)
             end
             return
           elsif size_match
@@ -179,7 +195,7 @@ module Gcry
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
-        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only)
+        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Stack)
       end
     end
 

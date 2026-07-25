@@ -78,6 +78,19 @@ Common sources: stale stack slots, integer bit patterns, broad static scans.
 
 Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout, SP clamp, blacklist. Opt-in scrub (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) wipes **unused** stack only — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
 
+### Diagnosing via `/gc-stats`
+
+Per-source root reject counters tell you where false roots come from:
+
+| Field | Source | When to act |
+|-------|--------|-------------|
+| `type_id_stack_rejects` | Fiber/mutator stacks | Stale slot; consider `GCRY_CLEAR_STACK=1` |
+| `type_id_static_rejects` | BSS/data segments | Library has wide globals; no good fix at GC level |
+| `type_id_thread_rejects` | Thread TLS | Worker stack slack; review thread count |
+| `type_id_root_false_negatives` | Rejected roots later proved valid | **UAF risk**: gate is too strict, raise `1_000_000` upper bound |
+
+`stack_rejects + static_rejects + thread_rejects == type_id_root_rejects`. Any non-zero `false_negatives` is a production alarm.
+
 ```crystal
 before = GC.stats.heap_size
 # drop refs…

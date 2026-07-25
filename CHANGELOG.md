@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-chunk free-page coalescing (P1.4):** `dontneed_free_pages_in_chunk` pre-computes a live-page mask and issues one `madvise` per contiguous free run instead of one per free page (reduces from up to 64 syscalls/chunk to 1–3).
 - **Auto-layouts default-on (P2.1):** `GCRY_AUTO_LAYOUTS=1` is now the default. `Gcry.register_layouts` runs at init (unless `GCRY_DISABLE_AUTO_LAYOUTS=1`), registering precise pointer offsets for every concrete `Reference` subclass — collapsing most conservative word-scans into byte-offset scans. Targets fat-app RSS (acikturkiye).
 - **`@unsafe_layouts` compile-time blacklist (P2.1):** Types whose layouts Crystal cannot promise stable (`Cry`, `Crystal::*`, `LibC::*`) are skipped from the auto-walk and kept on conservative scanning. New metric `layout_unsafe_skips` exposes the skip count.
+- **Per-source root reject counters (P2.2):** New `type_id_stack_rejects` / `type_id_static_rejects` / `type_id_thread_rejects` count where false roots come from (fiber/mutator stacks, BSS/data, TLS). Plus `type_id_root_false_negatives` is now exposed in `/gc-stats`, metrics, and Prometheus — was tracked but never surfaced. Sum invariant: `stack + static + thread == type_id_root_rejects`.
 
 ### Changed
 
