@@ -186,7 +186,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | **Windows process GC** | After Darwin MVP |
 | **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
 
-Shard-only polish that remains interesting: layout coverage, large-object policy, pause UX, honest parallel-mark defaults.
+Shard-only polish that remains interesting: curated layout coverage (builtins / opt-in AUTO), large-object page policy, pause UX, honest parallel-mark defaults. Fat-app RSS still needs stack maps.
 
 ## Risks
 

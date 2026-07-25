@@ -9,6 +9,8 @@
 #   - noscan offsets: mark only (keep alive, do not scan contents) — critical for
 #     Hash @indices and Array(value) @buffer, which are integer tables.
 
+require "json"
+
 module Gcry
   module Layout
     # Fat apps (HTTP + shards) easily exceed 4k concrete Reference types once
@@ -42,6 +44,7 @@ module Gcry
     @@hash_pow2_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_entry_stride = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_key_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    @@hash_key_bytes = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_value_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_value_mode = uninitialized StaticArray(UInt8, MAX_ENTRIES)
     @@hash_value_bytes = uninitialized StaticArray(UInt16, MAX_ENTRIES)
@@ -69,6 +72,7 @@ module Gcry
       getter hash_pow2_off : UInt16
       getter hash_entry_stride : UInt16
       getter hash_key_off : UInt16
+      getter hash_key_bytes : UInt16
       getter hash_value_off : UInt16
       getter hash_value_mode : UInt8
       getter hash_value_bytes : UInt16
@@ -77,7 +81,8 @@ module Gcry
                      @alloc_size : UInt32, @scan_cap : UInt32, @kind : UInt8,
                      @hash_entries_off : UInt16, @hash_indices_off : UInt16,
                      @hash_pow2_off : UInt16, @hash_entry_stride : UInt16,
-                     @hash_key_off : UInt16, @hash_value_off : UInt16,
+                     @hash_key_off : UInt16, @hash_key_bytes : UInt16,
+                     @hash_value_off : UInt16,
                      @hash_value_mode : UInt8, @hash_value_bytes : UInt16)
       end
 
@@ -169,6 +174,7 @@ module Gcry
         @@hash_pow2_off[i],
         @@hash_entry_stride[i],
         @@hash_key_off[i],
+        @@hash_key_bytes[i],
         @@hash_value_off[i],
         @@hash_value_mode[i],
         @@hash_value_bytes[i],
@@ -182,13 +188,13 @@ module Gcry
     # Install pointer-field byte offsets (tests). *alloc_size* 0 → no size gate.
     def self.install(type_id : Int32, offsets : Array(UInt16), alloc_size : UInt32 = 0_u32, scan_cap : UInt32 = 0_u32) : Nil
       install_full(type_id, offsets.to_unsafe, offsets.size, Pointer(UInt16).null, 0, alloc_size, scan_cap,
-        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
     end
 
     # Size-class slack cap only (no pointer offsets). Conservative scan stops at *scan_cap*.
     def self.install_scan_cap(type_id : Int32, alloc_size : UInt32, scan_cap : UInt32) : Nil
       install_full(type_id, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0, alloc_size, scan_cap,
-        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
     end
 
     def self.install_full(type_id : Int32,
@@ -199,7 +205,8 @@ module Gcry
                           kind : UInt8,
                           hash_entries_off : UInt16, hash_indices_off : UInt16,
                           hash_pow2_off : UInt16, hash_entry_stride : UInt16,
-                          hash_key_off : UInt16, hash_value_off : UInt16,
+                          hash_key_off : UInt16, hash_key_bytes : UInt16,
+                          hash_value_off : UInt16,
                           hash_value_mode : UInt8, hash_value_bytes : UInt16) : Nil
       ensure_booted
       total = n_scan + n_noscan
@@ -226,6 +233,7 @@ module Gcry
       @@hash_pow2_off[i] = hash_pow2_off
       @@hash_entry_stride[i] = hash_entry_stride
       @@hash_key_off[i] = hash_key_off
+      @@hash_key_bytes[i] = hash_key_bytes
       @@hash_value_off[i] = hash_value_off
       @@hash_value_mode[i] = hash_value_mode
       @@hash_value_bytes[i] = hash_value_bytes
@@ -244,7 +252,7 @@ module Gcry
     end
 
     # Register pointer ivars of *type* using compile-time layout.
-    # Pointer(T) to a non-Reference T → noscan (value buffer).
+    # Pointer(T) → noscan only when `!T.has_inner_pointers?` (value buffer).
     #
     # Unsound for precise offsets (fall back to scan_cap):
     #   - mixed value|reference unions (not pointer-sized at offsetof)
@@ -288,7 +296,9 @@ module Gcry
           {% is_noscan = false %}
           {% if t <= Pointer %}
             {% elem = t.type_vars[0] %}
-            {% if !(elem < Reference) && !(elem <= Pointer) %}
+            # Noscan only for true value payloads. JSON::Any / Slice / nested
+            # Pointers have_inner_pointers? — must scan or Array(JSON::Any) UAFs.
+            {% unless elem.has_inner_pointers? %}
               {% is_noscan = true %}
             {% end %}
           {% elsif !is_ptr && t.union? %}
@@ -332,7 +342,7 @@ module Gcry
             {% is_noscan = false %}
             {% if t <= Pointer %}
               {% elem = t.type_vars[0] %}
-              {% if !(elem < Reference) && !(elem <= Pointer) %}
+              {% unless elem.has_inner_pointers? %}
                 {% is_noscan = true %}
               {% end %}
             {% elsif !is_ptr && t.union? %}
@@ -363,8 +373,8 @@ module Gcry
           install_full({{T}}.crystal_instance_type_id,
             scan.to_unsafe, {{scan_count}},
             noscan.to_unsafe, {{noscan_count}},
-            rounded.to_u32, 0_u32, KIND_PLAIN,
-            0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+            rounded.to_u32, scan_cap, KIND_PLAIN,
+            0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
         {% else %}
           # No direct pointer ivars — still scan_cap (not leaf): hidden refs via
           # unusual ivar shapes have caused UAF with empty precise bodies.
@@ -392,15 +402,22 @@ module Gcry
 
         {% if K < Reference %}
           key_off = UInt16.new(offsetof(Hash::Entry({{K}}, {{V}}), @key))
+          key_bytes = 0_u16
+        {% elsif K.has_inner_pointers? %}
+          # Struct / union key with nested refs — word-scan the key slot.
+          key_off = UInt16.new(offsetof(Hash::Entry({{K}}, {{V}}), @key))
+          key_bytes = UInt16.new(sizeof({{K}}))
         {% else %}
           key_off = 0_u16
+          key_bytes = 0_u16
         {% end %}
 
         {% if V < Reference %}
           value_mode = VALUE_MODE_REF
           value_off = UInt16.new(offsetof(Hash::Entry({{K}}, {{V}}), @value))
           value_bytes = 0_u16
-        {% elsif V.stringify == "JSON::Any" %}
+        {% elsif V.has_inner_pointers? %}
+          # JSON::Any, String|Array(String), etc.
           value_mode = VALUE_MODE_WORDS
           value_off = UInt16.new(offsetof(Hash::Entry({{K}}, {{V}}), @value))
           value_bytes = UInt16.new(sizeof({{V}}))
@@ -415,44 +432,79 @@ module Gcry
         install_full(Hash({{K}}, {{V}}).crystal_instance_type_id,
           scan.to_unsafe, n_scan,
           noscan.to_unsafe, n_noscan,
-          rounded.to_u32, 0_u32, KIND_HASH,
+          rounded.to_u32, bytes.to_u32, KIND_HASH,
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @entries)),
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices)),
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices_size_pow2)),
           UInt16.new(sizeof(Hash::Entry({{K}}, {{V}}))),
-          key_off, value_off, value_mode, value_bytes)
+          key_off, key_bytes, value_off, value_mode, value_bytes)
       {% end %}
     end
 
+    # Set(T) is Hash(T, Nil) — register the backing map.
+    def self.register_set(elem_type : T.class) forall T
+      register_hash(elem_type, Nil)
+    end
+
     def self.register_builtins : Nil
+      # Primitive arrays — @buffer is noscan (value payload).
+      register(Array(Int8))
       register(Array(UInt8))
+      register(Array(Int16))
+      register(Array(UInt16))
       register(Array(Int32))
-      register(Array(Int64))
       register(Array(UInt32))
+      register(Array(Int64))
       register(Array(UInt64))
       register(Array(Float32))
       register(Array(Float64))
       register(Array(Bool))
       register(Array(Char))
+
+      # Reference-element arrays — @buffer is scanned (pointer table).
       register(Array(String))
+      register(Array(Exception))
+      register(Array(JSON::Any))
       register(Array(Array(String)))
       register(Array(Array(Int32)))
+      register(Array(Array(UInt8)))
       register(Array(Hash(String, String)))
+      register(Array(IO::Memory))
 
       register_hash(String, String)
       register_hash(String, Int32)
       register_hash(String, Int64)
+      register_hash(String, UInt32)
+      register_hash(String, UInt64)
+      register_hash(String, Float32)
       register_hash(String, Float64)
       register_hash(String, Bool)
       register_hash(Int32, Int32)
       register_hash(Int32, String)
+      register_hash(Int64, String)
+      register_hash(UInt64, String)
       register_hash(String, Array(String))
-      register_hash(String, Hash(String, String))
       register_hash(String, Array(Int32))
+      register_hash(String, Array(UInt8))
+      register_hash(String, Hash(String, String))
+      # Set(T) is Hash(T, Nil) under the hood.
+      register_hash(String, Nil)
+      register_hash(Int32, Nil)
+      register_hash(Int64, Nil)
+      register_hash(UInt64, Nil)
+      # JSON APIs (stdlib; VALUE_MODE_WORDS for JSON::Any values).
+      register_hash(String, JSON::Any)
+      register_hash(Int32, JSON::Any)
 
       register(Exception)
+      register(IO::Memory)
+
       register(Deque(String))
       register(Deque(Int32))
+      register(Deque(Int64))
+      register(Deque(UInt8))
+      register(Deque(UInt64))
+      register(Deque(Array(String)))
     end
 
     # Size-class slack caps for every concrete Reference (no pointer offsets).
@@ -513,6 +565,10 @@ module Gcry
 
   def self.register_hash(key_type : K.class, value_type : V.class) forall K, V
     Layout.register_hash(key_type, value_type)
+  end
+
+  def self.register_set(elem_type : T.class) forall T
+    Layout.register_set(elem_type)
   end
 
   # Register layouts for all concrete Reference subclasses visible to the compiler.

@@ -436,9 +436,11 @@ module Gcry
     end
 
     # Returns {user, from_cache}. Fresh mmap pages are already zeroed.
+    # Mapped size is host-page aligned (16 KiB on Apple Silicon) so Darwin
+    # free-page reclaim and munmap stay page-correct.
     private def alloc_large(payload : UInt64, flags : UInt32) : {Void*, Bool}
       need = ChunkHeader::SIZE.to_u64 + BlockHeader::SIZE.to_u64 + payload
-      mapped = align_up(need, 4096_u64)
+      mapped = align_up(need, Platform.host_page_size)
 
       if user = take_large_free(mapped)
         header = BlockHeader.from_user(user)
@@ -510,13 +512,15 @@ module Gcry
 
     # Munmap cached large objects until @large_free_bytes <= *limit*.
     # Call outside STW — munmap of many VMAs is slow on Linux.
+    # Hard-capped by LARGE_CACHE_LIMIT even if retain is set higher.
     def trim_large_cache(limit : UInt64 = @large_cache_retain) : Nil
-      return if @large_free_bytes <= limit
+      effective = limit > LARGE_CACHE_LIMIT ? LARGE_CACHE_LIMIT : limit
+      return if @large_free_bytes <= effective
 
       b = LARGE_FREE_BUCKETS - 1
-      while b >= 0 && @large_free_bytes > limit
+      while b >= 0 && @large_free_bytes > effective
         user = @large_freelists[b]
-        while user && @large_free_bytes > limit
+        while user && @large_free_bytes > effective
           header = BlockHeader.from_user(user)
           chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
           nxt = header.value.next_free

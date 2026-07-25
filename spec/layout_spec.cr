@@ -200,7 +200,7 @@ it "leaf layout entry does not word-scan value fields" do
     tid = 4245
     Gcry::Layout.install_full(tid, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0,
       32_u32, 0_u32, Gcry::Layout::KIND_PLAIN,
-      0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, Gcry::Layout::VALUE_MODE_NONE, 0_u16)
+      0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, Gcry::Layout::VALUE_MODE_NONE, 0_u16)
 
     dead = heap.malloc(32)
     obj = heap.malloc(32)
@@ -214,6 +214,82 @@ it "leaf layout entry does not word-scan value fields" do
     heap.live?(obj).should be_true
     heap.live?(dead).should be_false
     heap.layout_precise_scans.should be > 0
+  ensure
+    heap.destroy
+    Gcry::Layout.clear
+  end
+end
+
+it "IO::Memory buffer is noscan" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry::Layout.register(IO::Memory)
+  entry = Gcry::Layout.entry_for(IO::Memory.crystal_instance_type_id).not_nil!
+  entry.noscan_offsets.includes?(UInt16.new(offsetof(IO::Memory, @buffer))).should be_true
+ensure
+  Gcry::Layout.clear
+end
+
+it "Hash(String, Nil) registers for Set-like maps" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry::Layout.register_hash(String, Nil)
+  entry = Gcry::Layout.entry_for(Hash(String, Nil).crystal_instance_type_id).not_nil!
+  entry.hash?.should be_true
+ensure
+  Gcry::Layout.clear
+end
+
+it "Array(JSON::Any) buffer is scanned (has_inner_pointers)" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry::Layout.register(Array(JSON::Any))
+  entry = Gcry::Layout.entry_for(Array(JSON::Any).crystal_instance_type_id).not_nil!
+  entry.scan_offsets.includes?(UInt16.new(offsetof(Array(JSON::Any), @buffer))).should be_true
+  entry.noscan_offsets.includes?(UInt16.new(offsetof(Array(JSON::Any), @buffer))).should be_false
+ensure
+  Gcry::Layout.clear
+end
+
+it "register_set installs Hash(T, Nil)" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry.register_set(String)
+  entry = Gcry::Layout.entry_for(Hash(String, Nil).crystal_instance_type_id).not_nil!
+  entry.hash?.should be_true
+ensure
+  Gcry::Layout.clear
+end
+
+it "size mismatch uses scan_cap when present" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = true
+    heap.allow_interior_pointers = false
+
+    tid = 4246
+    # Precise offset at 8, but size gate 32 while object is 64 → scan_cap path.
+    Gcry::Layout.install(tid, [8_u16], 32_u32, 16_u32)
+
+    child = heap.malloc(32)
+    dead = heap.malloc(32)
+    obj = heap.malloc(64)
+    user = obj.as(UInt8*)
+    user.as(Int32*).value = tid
+    Pointer(Void*).new(user.address + 8).value = child
+    Pointer(Void*).new(user.address + 16).value = dead
+
+    heap.add_root(obj)
+    heap.collect(scan_stack: false)
+
+    heap.live?(child).should be_true
+    heap.live?(dead).should be_false
+    heap.layout_precise_scans.should eq(0)
+    heap.layout_conservative_scans.should be > 0
   ensure
     heap.destroy
     Gcry::Layout.clear

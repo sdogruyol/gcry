@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Layout builtins:** broader curated coverage — more primitive/`String` arrays, `Set`-backing `Hash(T, Nil)`, `Hash(String, JSON::Any)`, `Array(JSON::Any)`, `IO::Memory` (noscan buffer), extra `Deque`s. Still not whole-program `GCRY_AUTO_LAYOUTS`.
+- **Layout correctness:** `Pointer(T)` noscan uses `!T.has_inner_pointers?` (was `!(T < Reference)` — would UAF on `Array(JSON::Any)`). Hash values/keys with inner pointers use word-scan; `Gcry.register_set(T)` helper.
+- **Mark:** size-class mismatch falls back to `scan_cap` when present (precise entries now store `instance_sizeof`).
+- **Large objects:** mmap size aligned to `Platform.host_page_size` (16 KiB on Apple Silicon); `LARGE_CACHE_LIMIT` hard-caps freelist retain.
+- **Blacklist:** page granularity uses `host_page_size` (Darwin 16 KiB).
+- Darwin process GC: `large_cache_retain` default **0**; `GCRY_SCAN_CAPS` remains opt-in (does not move fat-app live set).
+
 ## [0.9.0] - 2026-07-24
 
 ### Added

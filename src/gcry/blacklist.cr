@@ -3,7 +3,7 @@
 
 module Gcry
   class Heap
-    BLACKLIST_WORDS = 4096 # 4096 * 64 bits * 4 KiB ≈ 1 GiB address span from heap_min
+    BLACKLIST_WORDS = 4096 # 4096 * 64 bits * host_page ≈ multi-GiB from heap_min
 
     property blacklist_enabled : Bool = false
     getter blacklist_hits : UInt64 = 0_u64
@@ -12,6 +12,10 @@ module Gcry
     @blacklist : UInt64* = Pointer(UInt64).null
     @blacklist_base : UInt64 = 0
     @blacklist_words : Int32 = 0
+
+    private def blacklist_page_size : UInt64
+      Platform.host_page_size
+    end
 
     protected def ensure_blacklist : Nil
       return unless @blacklist_enabled
@@ -23,7 +27,8 @@ module Gcry
       ptr.as(UInt8*).clear(bytes)
       @blacklist = ptr
       @blacklist_words = BLACKLIST_WORDS
-      @blacklist_base = @heap_min == UInt64::MAX ? 0_u64 : (@heap_min & ~4095_u64)
+      page = blacklist_page_size
+      @blacklist_base = @heap_min == UInt64::MAX ? 0_u64 : (@heap_min & ~(page - 1))
     end
 
     protected def destroy_blacklist : Nil
@@ -42,16 +47,17 @@ module Gcry
       return unless @blacklist_enabled
       ensure_blacklist
       return if @blacklist.null?
+      page = blacklist_page_size
       if @blacklist_base == 0 && @heap_min != UInt64::MAX
-        @blacklist_base = @heap_min & ~4095_u64
+        @blacklist_base = @heap_min & ~(page - 1)
       end
       return if addr < @blacklist_base
 
-      page = (addr - @blacklist_base) // 4096_u64
-      return if page >= (@blacklist_words * 64).to_u64
+      page_i = (addr - @blacklist_base) // page
+      return if page_i >= (@blacklist_words * 64).to_u64
 
-      word = (page >> 6).to_i32
-      bit = (page & 63).to_i32
+      word = (page_i >> 6).to_i32
+      bit = (page_i & 63).to_i32
       (@blacklist + word).value |= 1_u64 << bit
       @blacklist_hits += 1
     end
@@ -61,11 +67,12 @@ module Gcry
       return false if @blacklist.null? || @blacklist_base == 0
       return false if addr < @blacklist_base
 
-      page = (addr - @blacklist_base) // 4096_u64
-      return false if page >= (@blacklist_words * 64).to_u64
+      page = blacklist_page_size
+      page_i = (addr - @blacklist_base) // page
+      return false if page_i >= (@blacklist_words * 64).to_u64
 
-      word = (page >> 6).to_i32
-      bit = (page & 63).to_i32
+      word = (page_i >> 6).to_i32
+      bit = (page_i & 63).to_i32
       ((@blacklist + word).value & (1_u64 << bit)) != 0
     end
 

@@ -15,6 +15,8 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Free-page RSS | `MADV_DONTNEED` is a no-op; process default uses `mach_vm_deallocate` + `allocate(FIXED)` |
 | Blacklist | Default **off** on Darwin (`GCRY_BLACKLIST=1` to opt in) |
 | Conservative scan | Untyped payloads (`type_id ≤ 0`) are **object-base only** (cuts interior false hits) |
+| Layout builtins | Curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps (not whole-program AUTO) |
+| Large mmap | Host-page aligned (`host_page_size`; 16 KiB on AS) |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
 ## Verdict — macOS aarch64 (2026-07-25)
