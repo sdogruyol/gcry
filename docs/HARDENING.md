@@ -18,7 +18,8 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 
 - Majors at **32 MiB**, **full STW**, nursery **off**
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain)
-- Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on**
+- Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux; Darwin default **off** — freelist abandonment grew fat-app heaps)
+- Darwin process GC: free-page physical release **on** (`mach_vm` punch-hole at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there)
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.
@@ -45,21 +46,24 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty bytes via `MADV_DONTNEED` (default **0**) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page DONTNEED |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux; Darwin process default-on) |
+| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default free-page `mach_vm` release |
 | `GCRY_LARGE_CACHE` | Large freelist retain (default **8 MiB**) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (default **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
 | `GCRY_AUTO_LAYOUTS=1` | `register_layouts` at init (measure thr) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
+| `GCRY_BLACKLIST=1` | Opt-in page blacklist (Darwin default off) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
+| `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
 | `GCRY_TLAB=1` | Thread-local freelists (parallel contexts) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
 | `GCRY_SCRUB_FIBERS=1` | Capped parked-fiber wipe before mark |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
-| `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` |
+| `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
 
 OOM / fork / signals: [POLICY.md](POLICY.md).

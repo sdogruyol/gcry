@@ -146,17 +146,19 @@ Defaults are tuned for process GC. Escape hatches when you measure:
 | `GCRY_SCRUB_FIBERS=1` | Capped parked-fiber wipe before mark (RSS experiment) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers (default **1**). Measure first — HTTP thr often regresses |
 | `GCRY_DISABLE_BLACKLIST=1` | Skip page blacklist of type_id false roots |
+| `GCRY_BLACKLIST=1` | Opt-in blacklist (Darwin process default is off) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
 | `GCRY_DISABLE_SP_CLAMP=1` | No RSP clamp on other-thread stacks |
-| `GCRY_DISABLE_MADVISE=1` | Skip `MADV_DONTNEED` helpers |
+| `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
+| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default `mach_vm` free-page release |
 | `GCRY_AUTO_LAYOUTS=1` | `Gcry.register_layouts` at init (measure thr) |
 | `GCRY_DISABLE_ATFORK=1` | No `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Empty-chunk retain budget (`MADV_DONTNEED`; default **0**) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots (heap marks always allow for `Array#shift`) |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page `MADV_DONTNEED` (STW-heavy) |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin default-on @ host page size) |
 | `GCRY_LARGE_CACHE` | Large-object cache retain (default **8 MiB**) |
 | `GCRY_CHUNK_BYTES` | Size-class chunk mmap (default **256 KiB**) |
 

@@ -174,9 +174,10 @@ module Gcry
 
         return unless section_is_root_candidate?(sect.value.sectname)
 
-        # Mirror Linux: skip large read-only const blobs (word-scan tax).
-        # Writable / zerofill (__data, __bss, __common) always scanned.
-        if section_name_eq?(sect.value.sectname, "__const") && size >= 64_u64 * 1024
+        # Never scan __DATA_CONST.__const — pointer-dense literal pools with
+        # almost no true GC roots; word-scanning it inflates false retention.
+        # Writable / zerofill (__data, __bss, __common) are the real class vars.
+        if section_name_eq?(sect.value.sectname, "__const")
           return
         end
 
@@ -188,8 +189,7 @@ module Gcry
       private def self.section_is_root_candidate?(sectname : StaticArray(UInt8, 16)) : Bool
         section_name_eq?(sectname, "__data") ||
           section_name_eq?(sectname, "__bss") ||
-          section_name_eq?(sectname, "__common") ||
-          section_name_eq?(sectname, "__const")
+          section_name_eq?(sectname, "__common")
       end
 
       private def self.section_name_eq?(sectname : StaticArray(UInt8, 16), want : String) : Bool

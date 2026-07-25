@@ -160,9 +160,12 @@ module Gcry
                 end
               else
                 ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
-                # Partial-page DONTNEED is opt-in (GCRY_PAGE_DONTNEED=1): STW-heavy.
+                # Free-page physical release: Linux opt-in (GCRY_PAGE_DONTNEED);
+                # Darwin process default (MAP_FIXED remap — MADV_DONTNEED is a
+                # no-op for RSS there). Run whenever the chunk has any free
+                # payload so dense HTTP heaps still drop dead pages.
                 if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
-                   usable_payload > 0 && live_payload * 2 < usable_payload
+                   usable_payload > 0 && live_payload < usable_payload
                   if dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
                     ChunkHeader.set_holed(chunk, true)
                     bit = 1_u64 << class_index
@@ -302,7 +305,7 @@ module Gcry
       payload = SizeClasses.payload(class_index)
       head = Pointer(Void).null
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-      page = 4096_u64
+      page = Platform.host_page_size
 
       each_chunk do |chunk|
         next if ChunkHeader.large?(chunk)
@@ -378,17 +381,17 @@ module Gcry
     end
 
     # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
-    # madvise requires page-aligned addr/len — round into the data region.
+    # Addr/len must be page-aligned into the data region.
     private def dontneed_chunk_data(chunk : ChunkHeader*) : Nil
       {% if flag?(:linux) || flag?(:darwin) %}
-        page = 4096_u64
+        page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address
         start = (data0 + page - 1) & ~(page - 1)
         finish = data1 & ~(page - 1)
         return if finish <= start
         len = finish - start
-        if LibC.madvise(Pointer(Void).new(start), LibC::SizeT.new(len), LibC::MADV_DONTNEED) == 0
+        if Platform.release_physical_pages(start, len)
           @dontneed_bytes += len
         end
       {% end %}
@@ -398,7 +401,7 @@ module Gcry
     # safe because those blocks are omitted from the freelist (HOLED + rebuild).
     private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
-        page = 4096_u64
+        page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address
         return false if data1 <= data0
@@ -406,6 +409,7 @@ module Gcry
         first_page = data0 & ~(page - 1)
         last_page = (data1 - 1) & ~(page - 1)
         n_pages = ((last_page - first_page) // page) + 1
+        # 256 KiB chunks → ≤16 host pages on 16 KiB Darwin; ≤64 on 4 KiB Linux.
         return false if n_pages == 0 || n_pages > 64
 
         live_mask = 0_u64
@@ -432,7 +436,7 @@ module Gcry
         p = first_page
         while p <= last_page && idx < n_pages.to_i32
           if p >= data0 && (p + page) <= data1 && (live_mask & (1_u64 << idx)) == 0
-            if LibC.madvise(Pointer(Void).new(p), LibC::SizeT.new(page), LibC::MADV_DONTNEED) == 0
+            if Platform.release_physical_pages(p, page)
               @dontneed_bytes += page
               any = true
             end

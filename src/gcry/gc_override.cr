@@ -39,7 +39,14 @@ module GC
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
-    heap.blacklist_enabled = true
+    # Page blacklist: opt-in. On Darwin fat apps it abandoned freelist pages
+    # (100M+ skips) and grew the heap without cutting live set; keep available
+    # via GCRY_BLACKLIST=1. Linux process default stays on (historical).
+    {% if flag?(:darwin) %}
+      heap.blacklist_enabled = false
+    {% else %}
+      heap.blacklist_enabled = true
+    {% end %}
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -201,9 +208,17 @@ module GC
     if env_flag_one?("GCRY_DISABLE_MADVISE")
       heap.madvise_free_pages = false
     elsif env_flag_one?("GCRY_PAGE_DONTNEED")
-      # Sparse-chunk free-page DONTNEED; raises STW, helps RSS when fragmentation is high.
+      # Sparse-chunk free-page release; raises STW, helps RSS when fragmented.
       heap.madvise_free_pages = true
     end
+
+    {% if flag?(:darwin) %}
+      # Darwin: MADV_DONTNEED does not drop RSS; free-page MAP_FIXED remap does.
+      # Default-on for process GC unless explicitly disabled.
+      unless env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
+        heap.madvise_free_pages = true
+      end
+    {% end %}
 
     if env_flag_one?("GCRY_INTERIOR")
       heap.allow_interior_pointers = true
@@ -215,6 +230,10 @@ module GC
 
     if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
       heap.type_id_gate = false
+    end
+
+    if env_flag_one?("GCRY_DISABLE_STATIC_ROOTS")
+      heap.scan_static_roots = false
     end
 
     if env_flag_one?("GCRY_BLACKLIST")

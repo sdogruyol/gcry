@@ -99,5 +99,21 @@ module Gcry
         false
       {% end %}
     end
+
+    # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
+    def self.host_page_size : UInt64
+      PAGE_SIZE
+    end
+
+    def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
+      {% if flag?(:linux) %}
+        return false if len == 0
+        return false if (addr & (PAGE_SIZE - 1)) != 0
+        return false if (len & (PAGE_SIZE - 1)) != 0
+        LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), LibC::MADV_DONTNEED) == 0
+      {% else %}
+        false
+      {% end %}
+    end
   end
 end
