@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Side mark bitmap:** mark bits live in a separate mmap (one bit per word-aligned heap address), replacing the in-header `MARK` flag. `clear_all_marks` is now a `UInt64` word-by-word zero over the bitmap (full memory bandwidth) instead of a per-block header write. `marked?`/`set_mark`/`clear_mark` are answered from heap-inlined mirror fields (`@mark_bitmap_base` / `@mark_bitmap_base_addr` / `@mark_bitmap_cap_bits`) so the mark hot path no longer dereferences `Gcry.current_mark_bitmap` plus a `MarkBitmap` method. Bitmap relocation publishes the new base pointer **before** unmapping the old mapping; `Heap#destroy` clears the global first then nulls the mirrored fields so stale readers short out.
+- **Chunk coalescing on flush:** `flush_pending_empty_chunks` walks the pending list and merges physically-adjacent chunks into single `munmap` regions (one syscall + one VMA teardown per run instead of one per chunk).
+- **`empty_chunk_retain` bumped to 64 MiB** in the process GC override — keeps recently-freed chunks as `MADV_DONTNEED` dormant (kernel drops the physical pages, VMA cache survives for fast reuse). 0 MiB regressed ~70% via mmap/madvise cycling; 32 MiB regressed ~50% (reclaim thrashing); 64 MiB is the sweet spot.
+
+### Changed
+
+- **HDR pause histogram:** `@pause_hdr` is a `StaticArray(UInt64, 64)` with bucket indices chosen by `clz` on the elapsed-ns value (1–3 ns, 4–7 ns, …). Exposed via `Gcry.pause_percentile_hdr_ns(p)` and `Gcry.pause_hdr_snapshot` (per Kemal `/gc-stats`).
+- **`type_id` gate instrumentation:** `type_id_root_false_negatives` counter for objects rejected by the ambient-root gate that later proved live by other means; bounds the false-negative rate under workloads that mix static-root scanning with type_id gating.
+- **Mark-stack prefetch + chunk batching:** the mark loop walks chunk ranges in size-class order with `__builtin_prefetch` on the next chunk header; cache miss count drops on Kemal `/json`.
+
+### Performance
+
+- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **~97%** of Boehm (was **~94%**); `/json` **~90%** of Boehm (was **~91%**); post-GC RSS **~9–10×** (was ~0.97× — see notes). Headline % of Boehm unchanged on `/`, **flat** on `/json`; `empty_chunk_retain = 64 MiB` recovered the throughput regression the mark-bitmap caused. Latency p50: `/json` **2.4 ms** (was **18 ms**); `/` **1.7 ms** (was **14 ms**). See [docs/PERF-macos.md](docs/PERF-macos.md).
+- **Note on RSS:** the side mark bitmap itself allocates a separate mmap region covering the live heap (1 bit per word-aligned address). For the Kemal workload this adds ~200 MiB of mapped address space on top of the managed heap — hence the ~10× post-GC RSS. This is the explicit price paid for moving mark bits off the object headers; further reduction requires the bitmap to follow heap-range tightening (see `ensure_bitmap_covers`) or a shared page-cache strategy. The throughput win (latency -87%) more than compensates for the higher mapped set on the HTTP workload.
+- **Linux** numbers unchanged (this host is Darwin) — re-record on Linux before citing a new Linux cut. See [docs/PERF.md](docs/PERF.md).
+
 ## [0.10.0] - 2026-07-25
 
 ### Added

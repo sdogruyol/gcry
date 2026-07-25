@@ -30,12 +30,26 @@ Near Boehm on both paths. Prefer **`/json`** when asking “did GC get better?�
 | `/` | 69686 | 67237 | **96.5%** | **0.96×** |
 | `/json` | 62996 | 56655 | **89.9%** | **0.97×** |
 
+## Headline (Unreleased) — macOS aarch64
+
+After the **side mark bitmap** + **`empty_chunk_retain = 64 MiB`** rework on top of v0.10.0:
+
+| Path | Boehm req/s | gcry req/s | % Boehm | p50 lat | p99 lat | post-GC RSS × |
+|------|------------:|-----------:|--------:|--------:|--------:|--------------:|
+| `/` | 88035 | 87867 | **99.8%** | 1.70 ms | 2.71 ms | **~10×** |
+| `/json` | 63087 | 59437 | **94.2%** | 2.28 ms | 2.81 ms | **~10×** |
+
+Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (14 ms → 1.7 ms); p99 latency is now within 2× of Boehm on both paths.
+
+**RSS regression:** the side mark bitmap itself allocates a separate mmap region covering the live heap (1 bit per word-aligned address). For the Kemal workload this adds ~200 MiB of mapped address space on top of the managed heap — hence the ~10× post-GC RSS. This is the explicit price paid for moving mark bits off the object headers; the throughput + latency win more than compensates on HTTP-shaped workloads. RSS recovery options: tighten `ensure_bitmap_covers` to track the actual used heap range (currently keeps headroom for one chunk of growth), or share bitmap pages with the kernel page cache.
+
 ## History (macOS)
 
 | Date / label | `/` | `/json` | RSS × | Notes |
 |--------------|----:|--------:|------:|-------|
 | 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~91%** | **~0.90–0.93×** | Mach STW dogfood (pre-tag) |
 | **0.10.0** `macos-aarch64-v0.10.0` | **~97%** | **~90%** | **~0.96–0.97×** | First tagged macOS process GC cut |
+| **Unreleased** `macos-aarch64-unreleased` | **~100%** | **~94%** | **~10×** | Side mark bitmap + retain 64 MiB; throughput + latency parity, RSS regression from bitmap pages |
 
 ## How to record (macOS)
 

@@ -24,7 +24,10 @@ module Gcry
     DEFAULT_LARGE_CACHE_RETAIN = 8_u64 * 1024 * 1024
     # Keep up to this many bytes of fully-free size-class chunks as dormant
     # (MADV_DONTNEED) for fast reuse; excess is munmap'd when release is on.
-    DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64 # munmap all empty; set GCRY_EMPTY_CHUNK_RETAIN to keep mapped
+    # 0 means "munmap everything immediately" — that path fragmented VMA
+    # space under Kemal-style churn and inflated RSS via mmap/madvise
+    # cycling; the process GC bumps this to 64 MiB (see gc_override.cr).
+    DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64

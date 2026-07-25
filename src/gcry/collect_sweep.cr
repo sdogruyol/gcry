@@ -233,11 +233,28 @@ module Gcry
       return if chunk.null?
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
+
+      # The pending list is built by sweep in heap-walk order, so addresses
+      # are already mostly monotonically increasing. Find the longest
+      # monotonically-non-decreasing prefix and merge it into single munmap
+      # regions (one syscall + one VMA teardown per run instead of one per
+      # chunk). When a run coalesces multiple chunks into one munmap, the
+      # previously-released `@unmapped_bytes` total is bumped by the full
+      # run length here (it was NOT bumped in sweep — sweep only logs the
+      # chunk-release decision; the actual VMA teardown happens in flush).
       while chunk
+        run_base = chunk.as(Void*).address
+        run_end = run_base + chunk.value.mapped_bytes
         nxt = chunk.value.next
-        mapped = chunk.value.mapped_bytes
-        @unmapped_bytes += mapped
-        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        while nxt && nxt.as(Void*).address <= run_end
+          new_end = nxt.as(Void*).address + nxt.value.mapped_bytes
+          run_end = new_end if new_end > run_end
+          chunk = nxt
+          nxt = nxt.value.next
+        end
+        run_total = (run_end - run_base).to_u64
+        @unmapped_bytes += run_total
+        LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
         chunk = nxt
       end
     end
@@ -280,11 +297,14 @@ module Gcry
 
       unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
-      @unmapped_bytes += mapped
+      @released_chunk_bytes += mapped
       @bytes_reclaimed_since_gc += mapped
       # Defer the actual munmap to flush_pending_empty_chunks (post-STW).
       # Previously this called LibC.munmap inline, which could stall mutators
-      # behind the kernel VM lock while we held the world stopped.
+      # behind the kernel VM lock while we held the world stopped. The
+      # @unmapped_bytes counter is bumped inside flush, after the actual
+      # munmap length is known (which may be a coalesced run larger than
+      # a single chunk's mapped_bytes).
       chunk.value.next = @pending_empty_chunks
       @pending_empty_chunks = chunk
       update_heap_bounds_after_unmap
