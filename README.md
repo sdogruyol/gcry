@@ -8,7 +8,7 @@
 
 Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep collector as a **shard**, not a C dependency you hope never breaks. One flag (`-Dgc_none`) and the process runs on gcry.
 
-> **v0.10.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
+> **v0.11.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
 
 ### macOS is real (v0.10)
 
@@ -44,13 +44,14 @@ Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number tha
 | `/json` post-GC RSS | **~0.97×** |
 | `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 
-### macOS (v0.10.0 cut)
+### macOS (v0.11.0 — side mark bitmap + retain 64 MiB)
 
-| Workload | gcry vs Boehm (v0.10.0, macOS aarch64) |
-|----------|--------------------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~90%** |
-| Idle `/` thr | **~97%** |
-| `/json` post-GC RSS | **~0.97×** |
+| Workload | gcry vs Boehm (v0.11.0, macOS aarch64) |
+|----------|---------------------------------------:|
+| Alloc-heavy JSON (`/json`) thr | **~94%** |
+| Idle `/` thr | **~100%** |
+| `/json` p50 latency | **2.3 ms** (Boehm 1.8 ms) |
+| `/json` post-GC RSS | **~10×** (bitmap pages; see [PERF-macos.md](docs/PERF-macos.md)) |
 
 Details & methodology: [docs/PERF.md](docs/PERF.md) (Linux), [docs/PERF-macos.md](docs/PERF-macos.md) (Darwin). Re-run: `make bench-kemal-wrk` or `./bench/median_kemal_boehm.sh`.
 

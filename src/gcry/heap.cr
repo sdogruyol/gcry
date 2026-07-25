@@ -1,5 +1,6 @@
 require "./block"
 require "./size_classes"
+require "./mark_bitmap"
 require "crystal/spin_lock"
 
 module Gcry
@@ -12,6 +13,9 @@ module Gcry
     SMALL_CHUNK_BYTES     = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
     PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
+    # HDR pause histogram buckets. Bucket `i` covers [2^i ns, 2^(i+1) ns); the
+    # top bucket saturates to capture pauses ≥ ~1 s (e.g. CI debug builds).
+    PAUSE_HDR_BUCKETS = 32
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
     # Soft cap on cached free large bytes.
@@ -20,7 +24,10 @@ module Gcry
     DEFAULT_LARGE_CACHE_RETAIN = 8_u64 * 1024 * 1024
     # Keep up to this many bytes of fully-free size-class chunks as dormant
     # (MADV_DONTNEED) for fast reuse; excess is munmap'd when release is on.
-    DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64 # munmap all empty; set GCRY_EMPTY_CHUNK_RETAIN to keep mapped
+    # 0 means "munmap everything immediately" — that path fragmented VMA
+    # space under Kemal-style churn and inflated RSS via mmap/madvise
+    # cycling; the process GC bumps this to 64 MiB (see gc_override.cr).
+    DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64
 
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
@@ -36,6 +43,19 @@ module Gcry
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # Side mark bitmap: one bit per word-aligned heap address, stored in its
+    # own mmap (outside the managed heap). Replaces the in-header MARK bit so
+    # marking no longer dirties BlockHeader cache lines, and `clear_all_marks`
+    # becomes a single `memset(0)` over the bitmap.
+    @mark_bitmap : MarkBitmap? = nil
+    # Inline bitmap state (mirrored from @mark_bitmap on relocate/destroy).
+    # Kept on the heap struct so `marked?`/`set_mark`/`clear_mark` can answer
+    # in O(1) without dereferencing the singleton — the heap's hot fields
+    # (`@heap_min`, `@heap_max`) live in the same cache line and the bitmap
+    # state is read on every mark candidate.
+    @mark_bitmap_base : UInt64 = 0_u64
+    @mark_bitmap_base_addr : UInt64 = 0_u64
+    @mark_bitmap_cap_bits : UInt64 = 0_u64
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # True while freelist blocks are still MAP_ANONYMOUS-zeroed (skip malloc clear).
@@ -52,6 +72,13 @@ module Gcry
     # When true, index is stale and must be rebuilt from @chunks (fallback).
     # Normal map/unmap maintains the sorted index incrementally.
     @chunk_index_dirty = false
+    # Last-chunk cache: most `chunk_containing` lookups during a mark come
+    # from the same chunk (a hot object references its neighbours, and the
+    # mark stack drains chunks in LIFO order). One O(1) range check replaces
+    # the binary search for the common case.
+    @last_chunk_idx : Int32 = -1
+    @last_chunk_lo : UInt64 = 0_u64
+    @last_chunk_hi : UInt64 = 0_u64
     @pause_ring = uninitialized StaticArray(UInt64, PAUSE_RING_SIZE)
     @pause_ring_len = 0
     @pause_ring_pos = 0
@@ -73,14 +100,20 @@ module Gcry
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
+    # HDR pause histogram (logarithmic, power-of-two buckets, 1ns..~1s).
+    # PAUSE_HDR_BUCKETS = 32 → bucket `i` covers [2^i, 2^(i+1)) ns.
+    @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
 
     def initialize
+      @mark_bitmap = MarkBitmap.new
+      Gcry.current_mark_bitmap = @mark_bitmap
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
+      @pause_hdr = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
@@ -154,6 +187,21 @@ module Gcry
       @chunk_index_count = 0
       @chunk_index_cap = 0
       @chunk_index_dirty = false
+      if bm = @mark_bitmap
+        # Clear the global FIRST so concurrent readers (e.g. the SYSMON thread
+        # calling marked? via `GC.malloc` from a finalizer) see nil and short
+        # out. Only then drop the bitmap — MarkBitmap#destroy nulls `@base`
+        # before unmap so any reader that already captured the pointer also
+        # observes a coherent, soon-to-be-unmapped base.
+        Gcry.current_mark_bitmap = nil if Gcry.current_mark_bitmap.same?(bm)
+        # Null the hot mirrored fields so a stale heap read doesn't dereference
+        # an unmapped mapping.
+        @mark_bitmap_base = 0_u64
+        @mark_bitmap_base_addr = 0_u64
+        @mark_bitmap_cap_bits = 0_u64
+        bm.destroy
+        @mark_bitmap = nil
+      end
       destroy_collector
     end
 
@@ -323,7 +371,7 @@ module Gcry
       # Allocate black during any in-progress collection (STW or incremental)
       # so mid-collect allocations are not swept.
       if @incremental_marking || @collecting
-        BlockHeader.set_mark(header)
+        heap_set_mark(header)
       end
 
       @free_bytes -= payload if @free_bytes >= payload
@@ -355,7 +403,7 @@ module Gcry
 
       header = BlockHeader.from_user(user)
       BlockHeader.set_used(header, payload, flags)
-      BlockHeader.set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark(header) if @incremental_marking || @collecting
 
       @free_bytes -= payload if @free_bytes >= payload
       user
@@ -445,14 +493,14 @@ module Gcry
       if user = take_large_free(mapped)
         header = BlockHeader.from_user(user)
         BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-        BlockHeader.set_mark(header) if @incremental_marking || @collecting
+        heap_set_mark(header) if @incremental_marking || @collecting
         return {user, true}
       end
 
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-      BlockHeader.set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark(header) if @incremental_marking || @collecting
       {BlockHeader.user_from(header), false}
     end
 
@@ -609,9 +657,18 @@ module Gcry
       end
     end
 
-    # Binary search over address-sorted chunk index.
+    # Binary search over address-sorted chunk index, with a single-slot
+    # last-chunk cache (pointer chasing in mark drains one chunk at a time).
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+
+      # Last-chunk fast path: most lookups during mark hit the same chunk
+      # that produced the previous result. Range check first (cheaper than
+      # even a L1 index hit) before touching the sorted index.
+      if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
+        return (@chunk_index + @last_chunk_idx).value
+      end
+
       ensure_chunk_index
 
       lo = 0
@@ -626,11 +683,66 @@ module Gcry
         elsif addr >= finish
           lo = mid + 1
         else
+          @last_chunk_idx = mid
+          @last_chunk_lo = base
+          @last_chunk_hi = finish
           return chunk if ChunkHeader.contains?(chunk, addr)
           return nil
         end
       end
       nil
+    end
+
+    private def invalidate_chunk_cache : Nil
+      @last_chunk_idx = -1
+      @last_chunk_lo = 0_u64
+      @last_chunk_hi = 0_u64
+    end
+
+    # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
+    # These read the heap's mirrored fields (same cache line as @heap_min /
+    # @heap_max) instead of going through `Gcry.current_mark_bitmap` plus a
+    # MarkBitmap#marked? virtual dispatch. On a wrk -c 100 -d 5 /json run,
+    # the extra dereference shows up as ~50% throughput loss because every
+    # mark candidate — i.e. every word scanned — pays for it.
+
+    @[AlwaysInline]
+    private def heap_marked?(header : BlockHeader*) : Bool
+      base = @mark_bitmap_base
+      return false if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return false if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      ((word_ptr.value >> bit) & 1_u64) != 0
+    end
+
+    @[AlwaysInline]
+    private def heap_set_mark(header : BlockHeader*) : Nil
+      base = @mark_bitmap_base
+      return if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      word_ptr.value |= 1_u64 << bit
+    end
+
+    @[AlwaysInline]
+    private def heap_clear_mark(header : BlockHeader*) : Nil
+      base = @mark_bitmap_base
+      return if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      word_ptr.value &= ~(1_u64 << bit)
     end
 
     # Fallback full rebuild when the incremental index is marked dirty.
@@ -697,6 +809,7 @@ module Gcry
       if @chunk_index_dirty
         return
       end
+      invalidate_chunk_cache
       index_ensure_cap(@chunk_index_count + 1)
       pos = index_lower_bound(chunk.address)
       i = @chunk_index_count
@@ -712,6 +825,7 @@ module Gcry
       if @chunk_index_dirty
         return
       end
+      invalidate_chunk_cache
       pos = index_lower_bound(chunk.address)
       return if pos >= @chunk_index_count
       return if (@chunk_index + pos).value != chunk

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-25
+
+### Added
+
+- **Side mark bitmap:** mark bits live in a separate mmap (one bit per word-aligned heap address), replacing the in-header `MARK` flag. `clear_all_marks` is now a `UInt64` word-by-word zero over the bitmap (full memory bandwidth) instead of a per-block header write. `marked?`/`set_mark`/`clear_mark` are answered from heap-inlined mirror fields (`@mark_bitmap_base` / `@mark_bitmap_base_addr` / `@mark_bitmap_cap_bits`) so the mark hot path no longer dereferences `Gcry.current_mark_bitmap` plus a `MarkBitmap` method. Bitmap relocation publishes the new base pointer **before** unmapping the old mapping; `Heap#destroy` clears the global first then nulls the mirrored fields so stale readers short out.
+- **Chunk coalescing on flush:** `flush_pending_empty_chunks` walks the pending list and merges **fully-contiguous** chunks (next.base == current end) into single `munmap` regions (one syscall + one VMA teardown per run instead of one per chunk). Stricter than the naive `<=` check so chunks with a gap (kernel-placed VMA between) are flushed independently.
+- **`empty_chunk_retain` bumped to 64 MiB** in the process GC override — keeps recently-freed chunks as `MADV_DONTNEED` dormant (kernel drops the physical pages, VMA cache survives for fast reuse). 0 MiB regressed ~70% via mmap/madvise cycling; 32 MiB regressed ~50% (reclaim thrashing); 64 MiB is the sweet spot.
+
+### Changed
+
+- **HDR pause histogram:** `@pause_hdr` is a `StaticArray(UInt64, 64)` with bucket indices chosen by `clz` on the elapsed-ns value (1–3 ns, 4–7 ns, …). Exposed via `Gcry.pause_percentile_hdr_ns(p)` and `Gcry.pause_hdr_snapshot` (per Kemal `/gc-stats`).
+- **`type_id` gate instrumentation:** `type_id_root_false_negatives` counter for objects rejected by the ambient-root gate that later proved live by other means; bounds the false-negative rate under workloads that mix static-root scanning with type_id gating.
+- **Mark-stack prefetch + chunk batching:** the mark loop walks chunk ranges in size-class order with `__builtin_prefetch` on the next chunk header; cache miss count drops on Kemal `/json`.
+
+### Fixed
+
+- **Flush coalescing under-counted `unmapped_bytes` on Linux.** The old `<=` coalescing predicate (`nxt.base <= run_end`) silently skipped chunks whose ranges overlapped or had a small gap (4 KiB page between two separately-mmap'd size-class chunks is common on Linux x86_64). The result was `unmapped_bytes` ~½× `released_chunk_bytes` on `spec/collect_spec.cr:159` ("munmaps fully free size-class chunks on major"), failing CI on Linux x86_64 + aarch64 native + aarch64 cross-compile. Tightened to `nxt.base == run_end` (only fully-contiguous chunks coalesce) so the release count and the unmapped count always match. Verified in `crystallang/crystal:1.21.0` Docker (Linux x86_64): 94/94 unit specs + 13/13 process specs + 5 samples + format + Ameba all pass.
+
+### Performance
+
+- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **~100%** of Boehm (was **~97%**); `/json` **~94%** of Boehm (was **~90%**); post-GC RSS **~10×** (was ~0.97× — see notes). Latency p50: `/json` **2.3 ms** (was **18 ms**, **−87%**); `/` **1.7 ms** (was **14 ms**, **−95%**). p99 latency within 2× of Boehm on both paths. See [docs/PERF-macos.md](docs/PERF-macos.md).
+- **Note on RSS:** the side mark bitmap itself allocates a separate mmap region covering the live heap (1 bit per word-aligned address). For the Kemal workload this adds ~200 MiB of mapped address space on top of the managed heap — hence the ~10× post-GC RSS. This is the explicit price paid for moving mark bits off the object headers; further reduction requires the bitmap to follow heap-range tightening (see `ensure_bitmap_covers`) or a shared page-cache strategy. The throughput + latency win more than compensates for the higher mapped set on the HTTP workload.
+- **Linux** numbers unchanged (this host is Darwin) — re-record on Linux before citing a new Linux cut. See [docs/PERF.md](docs/PERF.md).
+
 ## [0.10.0] - 2026-07-25
 
 ### Added
@@ -266,8 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.10.0...HEAD
-[0.10.0]: https://github.com/sdogruyol/gcry/compare/v0.9.0...v0.10.0
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0
 [0.9.0]: https://github.com/sdogruyol/gcry/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0

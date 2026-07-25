@@ -49,12 +49,12 @@ module Gcry
         return
       end
 
-      return if BlockHeader.marked?(header)
+      return if heap_marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      BlockHeader.set_mark(header)
+      heap_set_mark(header)
       @mark_stack.push(header)
     end
 
@@ -82,12 +82,12 @@ module Gcry
       return unless header
       return if BlockHeader.free?(header)
 
-      return if BlockHeader.marked?(header)
+      return if heap_marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      BlockHeader.set_mark(header)
+      heap_set_mark(header)
     end
 
     # Crystal Reference payloads start with type_id (Int32). Reject if that
@@ -344,30 +344,31 @@ module Gcry
     end
 
     private def clear_all_marks : Nil
-      each_chunk do |chunk|
-        each_block_or_large(chunk) do |header|
-          next if BlockHeader.free?(header)
-          BlockHeader.clear_mark(header)
+      # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
+      # to managed heap, not to the live-object count. Replaces the legacy
+      # per-object header write that dominated clear_all_marks under HTTP.
+      if bm = Gcry.current_mark_bitmap
+        if @heap_max > @heap_min && @heap_min != UInt64::MAX
+          bm.reset(@heap_min, @heap_max)
+        else
+          bm.zero_all
         end
       end
     end
 
     # Minor GC: reset nursery mark bits only.
     private def clear_nursery_marks : Nil
+      # Side mark bitmap: zero only the address ranges that correspond to
+      # nursery chunks. Chunks are page-aligned at multiples of the chunk size
+      # so we can issue narrow resets without touching the old generation's
+      # bits (which carry over from the prior major and remain valid).
+      bm = Gcry.current_mark_bitmap
+      return unless bm
       each_chunk do |chunk|
         next unless ChunkHeader.nursery?(chunk)
-        each_block(chunk) do |header|
-          next if BlockHeader.free?(header)
-          BlockHeader.clear_mark(header)
-        end
-      end
-    end
-
-    private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
-      if ChunkHeader.large?(chunk)
-        yield ChunkHeader.data_start(chunk).as(BlockHeader*)
-      else
-        each_block(chunk) { |h| yield h }
+        lo = ChunkHeader.data_start(chunk).address
+        hi = chunk.address + chunk.value.mapped_bytes
+        bm.reset(lo, hi) if hi > lo
       end
     end
 
@@ -400,7 +401,18 @@ module Gcry
       # During generational minor, old objects are intentionally unmarked.
       # Only nursery deaths may enqueue finalizers / clear WeakRef links.
       return false if @minor_only && !BlockHeader.nursery?(header)
-      !BlockHeader.marked?(header)
+      if BlockHeader.marked?(header)
+        return false
+      end
+      # False-negative counter: gate rejected the ambient pointer that pointed
+      # here, but a different root still walked this object. If the page is
+      # also blacklisted (we previously declared similar addresses false), this
+      # is exactly the UAF vector the gate is supposed to prevent — record it
+      # so a production heap can alert on a non-zero rate.
+      if @blacklist_enabled && blacklisted_page?(obj.address) && type_id_plausible?(header)
+        @type_id_root_false_negatives += 1
+      end
+      true
     end
   end
 end

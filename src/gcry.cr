@@ -8,7 +8,7 @@ require "./gcry/heap"
 require "./gcry/layout"
 
 module Gcry
-  VERSION = "0.10.0"
+  VERSION = "0.11.0"
 
   struct PauseStats
     getter last_ns : UInt64

@@ -40,8 +40,8 @@ module Gcry
           if ChunkHeader.large?(chunk)
             header = ChunkHeader.data_start(chunk).as(BlockHeader*)
             unless BlockHeader.free?(header)
-              if BlockHeader.marked?(header)
-                BlockHeader.clear_mark(header)
+              if heap_marked?(header)
+                heap_clear_mark(header)
               elsif major
                 # Recycle mapping — never munmap inside STW (Linux VMA munmap
                 # of thousands of large HTTP buffers dominated pause time).
@@ -71,7 +71,7 @@ module Gcry
                   usable_payload += payload.to_u64
                   header = cursor.as(BlockHeader*)
                   unless BlockHeader.free?(header)
-                    if BlockHeader.marked?(header)
+                    if heap_marked?(header)
                       any_live = true
                       live_payload += payload.to_u64
                     end
@@ -83,8 +83,8 @@ module Gcry
                   while (cursor + block_bytes) <= limit
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      if BlockHeader.marked?(header)
-                        BlockHeader.clear_mark(header)
+                      if heap_marked?(header)
+                        heap_clear_mark(header)
                       else
                         reclaim_small(chunk, header, payload)
                       end
@@ -107,8 +107,8 @@ module Gcry
                   header = cursor.as(BlockHeader*)
                   unless BlockHeader.free?(header)
                     if major || BlockHeader.nursery?(header)
-                      if BlockHeader.marked?(header)
-                        BlockHeader.clear_mark(header)
+                      if heap_marked?(header)
+                        heap_clear_mark(header)
                         BlockHeader.promote(header) unless major
                         any_live = true
                         live_payload += payload.to_u64 if major
@@ -233,11 +233,34 @@ module Gcry
       return if chunk.null?
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
+
+      # The pending list is built by sweep in heap-walk order, so addresses
+      # are already mostly monotonically increasing. Find the longest
+      # monotonically-non-decreasing prefix and merge it into single munmap
+      # regions (one syscall + one VMA teardown per run instead of one per
+      # chunk). When a run coalesces multiple chunks into one munmap, the
+      # previously-released `@unmapped_bytes` total is bumped by the full
+      # run length here (it was NOT bumped in sweep — sweep only logs the
+      # chunk-release decision; the actual VMA teardown happens in flush).
       while chunk
+        run_base = chunk.as(Void*).address
+        run_end = run_base + chunk.value.mapped_bytes
         nxt = chunk.value.next
-        mapped = chunk.value.mapped_bytes
-        @unmapped_bytes += mapped
-        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        # Coalesce ONLY fully-contiguous chunks (next.base == current end).
+        # Two chunks whose [base, base+mapped) ranges touch exactly can be
+        # unmapped as a single region; anything with a gap (even a 4 KiB
+        # page) must be a separate munmap — overlapping or with a gap means
+        # the kernel placed some other VMA between them and a single
+        # munmap would unmap unintended pages.
+        while nxt && nxt.as(Void*).address == run_end
+          new_end = nxt.as(Void*).address + nxt.value.mapped_bytes
+          run_end = new_end if new_end > run_end
+          chunk = nxt
+          nxt = nxt.value.next
+        end
+        run_total = (run_end - run_base).to_u64
+        @unmapped_bytes += run_total
+        LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
         chunk = nxt
       end
     end
@@ -255,9 +278,12 @@ module Gcry
       end
     end
 
-    # Remove a fully free size-class chunk from the heap and rebuild that
-    # class's freelist from remaining chunks (avoids dangling freelist links).
-    # Used by explicit paths; major sweep batches empty-chunk release itself.
+    # Defer an empty size-class chunk to the post-STW `flush_pending_empty_chunks`
+    # release list. Safe to call from within STW: the chunk is unlinked now and
+    # the actual munmap runs after threads are resumed (avoids blocking other
+    # mutators on kernel VM locks). Also removes the freelist entries that
+    # pointed inside the chunk so we never hand a user pointer that lives in
+    # soon-to-be-unmapped memory back to an allocation.
     private def reclaim_empty_chunk(chunk : ChunkHeader*) : Nil
       return if ChunkHeader.large?(chunk)
 
@@ -266,13 +292,27 @@ module Gcry
 
       nursery = ChunkHeader.nursery?(chunk)
       mapped = chunk.value.mapped_bytes
+      base = chunk.address
+      finish = base + mapped
+
+      # Drop any free-block pointers inside this range BEFORE unlinking — the
+      # freelist may still hold a node that lives in the about-to-be-released
+      # chunk. unlink_freelist_range walks the freelist and rebuilds the head
+      # from entries outside [base, finish).
+      unlink_freelist_range(class_index, nursery, base, finish)
+
       unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
-      @unmapped_bytes += mapped
+      @released_chunk_bytes += mapped
       @bytes_reclaimed_since_gc += mapped
-      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
-      Platform.invalidate_static_root_cache
-      rebuild_size_class_freelist(class_index, nursery)
+      # Defer the actual munmap to flush_pending_empty_chunks (post-STW).
+      # Previously this called LibC.munmap inline, which could stall mutators
+      # behind the kernel VM lock while we held the world stopped. The
+      # @unmapped_bytes counter is bumped inside flush, after the actual
+      # munmap length is known (which may be a coalesced run larger than
+      # a single chunk's mapped_bytes).
+      chunk.value.next = @pending_empty_chunks
+      @pending_empty_chunks = chunk
       update_heap_bounds_after_unmap
     end
 

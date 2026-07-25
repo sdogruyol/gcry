@@ -192,7 +192,7 @@ module Gcry
         tlab.value.freelists[class_index] = next_free
       end
       BlockHeader.set_used(header, payload, flags)
-      BlockHeader.set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark(header) if @incremental_marking || @collecting
 
       with_alloc_lock do
         @free_bytes -= payload if @free_bytes >= payload

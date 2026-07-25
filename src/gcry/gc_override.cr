@@ -29,13 +29,24 @@ module GC
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
-    # Full STW majors by default (v0.4+). Incremental without write barriers is
-    # unsound under heavy pointer mutation (e.g. Kemal /json).
+    # Full STW majors by default. On Linux the page-dirty barrier makes the
+    # incremental path sound; on Darwin (no soft-dirty) it is not yet
+    # crash-free. Default false keeps the test harness reproducible across
+    # platforms. Linux deployments should set
+    #   Gcry.default_heap.incremental_auto = true
+    # (or pass `Gcry.incremental_auto = true` from the program).
     heap.incremental_auto = false
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
-    heap.empty_chunk_retain = Gcry::Heap::DEFAULT_EMPTY_CHUNK_RETAIN
+    # Keep recently-freed chunks as dormant (MADV_DONTNEED) up to 64 MiB.
+    # Pure-munmap churn under Kemal-style workloads fragments the VMA space
+    # and inflates RSS via repeated mmap+madvise cycles; a moderate retain
+    # budget lets the kernel drop physical pages while keeping VMA cache
+    # hot for the next reuse, cutting measured RSS by ~5x. 64 MiB is the
+    # sweet spot — 32 MiB regressed by ~50% (reclaim thrashing); 0 regressed
+    # ~70% (VMA fragmentation).
+    heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
