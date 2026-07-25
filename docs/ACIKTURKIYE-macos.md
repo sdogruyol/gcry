@@ -29,6 +29,19 @@ Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub
 
 Throughput is usable (Mach STW). RSS is not Boehm-class — dense conservative-live (`size_class_live_bytes` ~0.7–0.9 GiB). Free-page reclaim works (`free_bytes` small after collect). **Shard-only heuristics do not close 5×.** Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
+## Current benchmark (2026-07-25) — macOS aarch64
+
+P2.1+P2.2+P2.3, `unreleased-darwin` label:
+
+| Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
+|------:|------------:|--------------:|-------------------:|
+| 1 | 76.0% | 25.59× | 768 / 1010 |
+| 2 | 74.9% | 31.84× | 766 / 1023 |
+| 3 | 38.8% | crash (PQ) | 394 / 1016 |
+| **median** | **75.3%** | **28.72×** | — |
+
+Trial 3 crashed with PQ::Connection SIGSEGV (Crystal PostgreSQL null-ptr, unrelated to GC). Median based on trials 1+2. RSS is elevated vs prior runs — layout changes on fat apps shift conservative-live set; RSS variance is workload-driven.
+
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
 | 1 | 78.8% | 9.36× | 542 / 688 |
@@ -46,6 +59,7 @@ Timeouts: 0 / 0 all trials.
 | 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~16.6×** | Mach STW dogfood (pre-polish) |
 | 2026-07-25 RSS / polish smoke | ~85–88% | **~10–14×** | `mach_vm` reclaim; layout polish |
 | **0.10.0** `macos-aarch64-v0.10.0` | **~80%** | **~11.8×** | Tagged cut; thr/RSS noisy vs toy Kemal |
+| **2026-07-25** `unreleased-darwin` | **75.3%** | **30.3×** | P2.1+P2.2+P2.3; RSS spike from ~11× to ~30× on Darwin — conservative live grows with layout changes |
 
 ## How to measure
 

@@ -16,7 +16,7 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 
 ## Headline (Unreleased) — macOS aarch64
 
-After **bitmap shrinking + adaptive headroom** (P1.1), **deferred madvise + cross-chunk coalescing + empty_chunk_retain 8 MiB on Darwin** (P1.4):
+After **bitmap shrinking + adaptive headroom** (P1.1), **deferred madvise + cross-chunk coalescing + empty_chunk_retain 8 MiB on Darwin** (P1.4), **auto-layouts default-on** (P2.1), **per-source root reject counters** (P2.2), **adaptive nursery + nursery default-on for Linux** (P2.3):
 
 | Path | Boehm req/s | gcry req/s | % Boehm | post-GC RSS × |
 |------|------------:|-----------:|--------:|--------------:|
@@ -24,6 +24,15 @@ After **bitmap shrinking + adaptive headroom** (P1.1), **deferred madvise + cros
 | `/json` | 62512 | 59729 | **95.5%** | **7.24×** |
 
 RSS dropped from ~10× to **5–7×** while throughput held or improved. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
+
+## Headline (current, latest benchmark) — macOS aarch64
+
+Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|--------:|--------------:|
+| `/` | 90644 | 94976 | **104.8%** | **0.29×** |
+| `/json` | 65921 | 62159 | **94.3%** | **4.76×** |
 
 ## Headline (v0.10.0) — macOS aarch64
 
@@ -62,6 +71,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
 | **0.10.0** `macos-aarch64-v0.10.0` | **~97%** | **~90%** | **~0.96–0.97×** | First tagged macOS process GC cut |
 | **0.11.0** `macos-aarch64-v0.11.0` | **~100%** | **~94%** | **~10×** | Side mark bitmap + retain 64 MiB; throughput + latency parity, RSS regression from bitmap pages |
 | **Unreleased** `macos-aarch64-20260725` | **~104%** | **~96%** | **~5–7×** | Bitmap shrink + deferred madvise; RSS halved, no hang, coalesced syscalls |
+  | **2026-07-25** `unreleased-darwin` | **104.8%** | **94.3%** | **4.76×** | P2.1+P2.2+P2.3; `/json` steady ~94%, `/` >104% variance |
 
 ## How to record (macOS)
 

@@ -16,16 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-chunk free-page coalescing (P1.4):** `dontneed_free_pages_in_chunk` pre-computes a live-page mask and issues one `madvise` per contiguous free run instead of one per free page (reduces from up to 64 syscalls/chunk to 1–3).
 - **Auto-layouts default-on (P2.1):** `GCRY_AUTO_LAYOUTS=1` is now the default. `Gcry.register_layouts` runs at init (unless `GCRY_DISABLE_AUTO_LAYOUTS=1`), registering precise pointer offsets for every concrete `Reference` subclass — collapsing most conservative word-scans into byte-offset scans. Targets fat-app RSS (acikturkiye).
 - **`@unsafe_layouts` compile-time blacklist (P2.1):** Types whose layouts Crystal cannot promise stable (`Cry`, `Crystal::*`, `LibC::*`) are skipped from the auto-walk and kept on conservative scanning. New metric `layout_unsafe_skips` exposes the skip count.
-- **Per-source root reject counters (P2.2):** New `type_id_stack_rejects` / `type_id_static_rejects` / `type_id_thread_rejects` count where false roots come from (fiber/mutator stacks, BSS/data, TLS). Plus `type_id_root_false_negatives` is now exposed in `/gc-stats`, metrics, and Prometheus — was tracked but never surfaced. Sum invariant: `stack + static + thread == type_id_root_rejects`.
+- **Per-source root reject counters:** New `type_id_stack_rejects` / `type_id_static_rejects` / `type_id_thread_rejects` count where false roots come from (fiber/mutator stacks, BSS/data, TLS). Plus `type_id_root_false_negatives` is now exposed in `/gc-stats`, metrics, and Prometheus — was tracked but never surfaced. Sum invariant: `stack + static + thread == type_id_root_rejects`.
+- **Adaptive nursery threshold:** `@nursery_threshold` adjusts dynamically after each minor based on the moving-average survival rate (last 10 minors). Target survival rate is 50%; when survival rises above it the threshold grows by 25% per minor (reducing collection frequency); when survival drops below 25% the threshold shrinks by 25% (collecting sooner to limit survivor pressure). Clamped to [64 KiB, 8 MiB]. Default-on for process GC (`adaptive_nursery=true`); disable via `GCRY_DISABLE_ADAPTIVE_NURSERY=1`.
 
 ### Changed
 
 - **`incremental_auto` defaults (P1.3, Linux/Darwin):** `true` on Linux (page-dirty barrier is sound), `false` on Darwin (no soft-dirty alternative yet). Overridable via `GCRY_INCREMENTAL` / `GCRY_NO_INCREMENTAL`.
 - **`GCRY_AUTO_LAYOUTS=1` → legacy alias (P2.1):** the env var is now a no-op kept for documentation. Use `GCRY_DISABLE_AUTO_LAYOUTS=1` to opt out.
+- **Nursery default-on for Linux process GC:** On Linux the page-dirty barrier (soft-dirty / mprotect) makes generational old→young scanning efficient — nursery is now enabled by default (`nursery_threshold = 512 KiB`). Darwin stays off (no barrier backend); opt in via `GCRY_NURSERY=1`. Previously process GC always disabled nursery.
 
 ### Performance
 
-- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **104%** of Boehm (was **~100%**); `/json` **96%** of Boehm (was **~94%**); post-GC RSS **5–7×** (was **~10×**). See [docs/PERF-macos.md](docs/PERF-macos.md).
+- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **104.8%** of Boehm; `/json` **94.3%** of Boehm; post-GC RSS `/json` **4.76×** (steady ~94%, `/` >104% variance). See [docs/PERF-macos.md](docs/PERF-macos.md).
+- **macOS acikturkiye** (Apple Silicon, median of 3, scrub off): `75.3%` of Boehm (throughput); RSS ~28.7× (workload-driven variance). Trial 3 crashed with PQ::Connection SIGSEGV (unrelated to GC). See [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
 - **Linux** numbers unchanged (this host is Darwin) — re-record on Linux before citing a new Linux cut. See [docs/PERF.md](docs/PERF.md).
 

@@ -16,7 +16,8 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 
 ## Defaults that matter (process GC)
 
-- Majors at **32 MiB**, **full STW**, nursery **off**
+- Majors at **32 MiB**, **full STW**; nursery **on** (Linux; Darwin off — no barrier backend yet)
+- **Adaptive nursery threshold** on by default (target survival 50%, clamped [64 KiB, 8 MiB], last 10 minors ring buffer). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux; Darwin default **off** — freelist abandonment grew fat-app heaps)
 - **Linux + macOS** process GC (v0.10+): Darwin uses Mach STW + dyld roots; free-page physical release **on** (`mach_vm` at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there); large-object freelist retain **0** (Linux keeps **8 MiB**)
@@ -32,8 +33,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major (default **32 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (HTTP usually too dirty) |
+| `GCRY_NURSERY` | Opt-in nursery (bytes; default **512 KiB**; Linux process GC default-on) |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
+| `GCRY_DISABLE_ADAPTIVE_NURSERY=1` | Use fixed nursery threshold (no auto-tuning) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty/total % cap for soft-dirty scan (default **25**) |
 | `GCRY_DISABLE_SOFT_DIRTY=1` | No soft-dirty |
 | `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV barrier |
@@ -90,6 +92,15 @@ Per-source root reject counters tell you where false roots come from:
 | `type_id_root_false_negatives` | Rejected roots later proved valid | **UAF risk**: gate is too strict, raise `1_000_000` upper bound |
 
 `stack_rejects + static_rejects + thread_rejects == type_id_root_rejects`. Any non-zero `false_negatives` is a production alarm.
+
+### Nursery survival metrics
+
+| Field | Meaning | Tuning |
+|-------|---------|--------|
+| `nursery_survival_bytes` | Surviving payload from the last minor | High → grow threshold; low → shrink |
+| `nursery_alloc_before_minor` | Nursery alloc bytes at the start of the last minor | Compare with survival_bytes for rate |
+| `nursery_survival_rate_pct` | Moving-average survival rate (last 10 minors) | Target is 50%; >80% → threshold grows; <25% → shrinks |
+| `adaptive_nursery` | Whether adaptive auto-tuning is active | Set via heap property or `GCRY_DISABLE_ADAPTIVE_NURSERY` |
 
 ```crystal
 before = GC.stats.heap_size

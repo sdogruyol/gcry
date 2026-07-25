@@ -44,6 +44,29 @@ Conservative mark–sweep allocator used as the process GC or as a private heap 
 
 Notable knobs (also via `GCRY_*` env on process GC): `gc_threshold`, `nursery_enabled`, `incremental_auto`, `release_empty_chunks`, `type_id_gate`, `blacklist_enabled`, `tlab_enabled`, `layout_precise`, `stop_the_world`.
 
+## Nursery (generational)
+
+The nursery is a young-object space (size-class chunks tagged `NURSERY`). Allocations go there when `nursery_enabled` is true. A minor collection walks roots + old→young edges (via page-dirty barrier on Linux, full old scan on Darwin) and promotes survivors to old-space.
+
+**Process GC defaults:**
+- **Linux:** nursery enabled, threshold 512 KiB, adaptive threshold on.
+- **Darwin:** nursery disabled (no barrier backend yet; opt in via `GCRY_NURSERY=1`).
+
+### Adaptive threshold
+
+When `adaptive_nursery` is true (default), the threshold adjusts after each minor based on the moving-average survival rate (last 10 minors):
+
+| Survival rate | Action |
+|---------------|--------|
+| > 50% target | Threshold grows 25% (collect less often) |
+| < 25% | Threshold shrinks 25% (collect sooner, limit survivor pressure) |
+
+Clamped to [64 KiB, 8 MiB]. Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1` or set `heap.adaptive_nursery = false`.
+
+### Monitoring
+
+`/gc-stats` exposes `nursery_survival_bytes`, `nursery_alloc_before_minor`, `nursery_survival_rate_pct`, `adaptive_nursery`. Prometheus exposes `gcry_nursery_*` gauges.
+
 ## Env knobs
 
 See [README.md](../README.md) Tuning table and [HARDENING.md](HARDENING.md).
