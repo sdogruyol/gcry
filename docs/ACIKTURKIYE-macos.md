@@ -27,15 +27,24 @@ Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub
 
 ### RSS work (same day)
 
-Shipped: 16 KiB `mach_vm` free-page release, Darwin blacklist off, skip `__const` roots, `type_id > 0` gate, base-only scan of untyped buffers.
+Shipped earlier: 16 KiB `mach_vm` free-page release, Darwin blacklist off, skip `__const` roots, `type_id > 0` gate, base-only scan of untyped buffers.
 
-| Smoke (`wrk -c 100 -d 20`) | thr % | post-GC RSS × |
+Further shard-only pass (still same day):
+
+| Change | Result |
+|--------|--------|
+| Darwin `large_cache_retain=0` | Avoids retaining free large maps |
+| `scan_cap` / `GCRY_SCAN_CAPS` | Clips size-class padding; **did not move** `size_class_live_bytes` on this app (~0.66–0.88 GiB either way) |
+| Hardened `register_layouts` (mixed unions + embedded structs → scan_cap) | Safer `GCRY_AUTO_LAYOUTS=1`; still not process-default (under-retention risk) |
+| Default AUTO / leaf empties / scan_cap `base_only` | **Rejected** — UAF or higher RSS under wrk |
+
+| Smoke (`wrk -c 100 -d 15–20`) | thr % | post-GC RSS × |
 |--|------------------------:|--------------:|
-| After reclaim + buffer base-only | **~88%** | **~12–14×** |
+| After reclaim + buffer base-only | **~85–88%** | **~10–14×** (noisy; live set dominates) |
 
-`free_bytes` after collect is small (~10 MiB) — reclaim works. **`size_class_live_bytes` stays ~0.7–0.9 GiB`** (dense conservative live). That is the ceiling.
+`free_bytes` after collect stays small — reclaim works. **`size_class_live_bytes` stays ~0.7–0.9 GiB`** (dense conservative live). That is the ceiling without stack maps.
 
-**5× Boehm RSS (~≤230 MiB on this host) was attempted and is not reachable with safe shard-only heuristics.** Prefix / global base-only / default `register_layouts` all produced `SIGSEGV` under wrk (under-retention). Same wall as Linux acikturkiye (~2.8×): needs **compiler stack maps**, not more madvise. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
+**5× Boehm RSS (~≤230 MiB on this host) is not reachable with safe shard-only heuristics.** Same wall as Linux acikturkiye (~2.8×): needs **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
@@ -53,6 +62,7 @@ Timeouts: 0 / 0 all trials.
 | 2026-07-24 smoke | — | — | Pre-Mach hang (~2.5 rps) |
 | 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~16.6×** | Mach STW; median of 3 |
 | 2026-07-25 RSS pass | ~88% | **~12–14×** | `mach_vm` @ 16 KiB; blacklist off; buffer base-only; **5× blocked** |
+| 2026-07-25 shard polish | ~85% | **~10–14×** smoke | `large_cache=0`; scan_cap opt-in; AUTO still unsafe as default |
 
 ## How to measure
 

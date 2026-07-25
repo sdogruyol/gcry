@@ -152,6 +152,74 @@ ensure
   Gcry::Layout.clear
 end
 
+it "scan_cap clips size-class padding on conservative fallback" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = true
+    heap.allow_interior_pointers = false
+
+    tid = 4244
+    # Object fits in 64-byte class; only first 16 bytes are "real".
+    Gcry::Layout.install_scan_cap(tid, 64_u32, 16_u32)
+
+    child = heap.malloc(32)
+    dead = heap.malloc(32)
+    obj = heap.malloc(64)
+    user = obj.as(UInt8*)
+    user.as(Int32*).value = tid
+    # Word at offset 8 is inside scan_cap → kept.
+    Pointer(Void*).new(user.address + 8).value = child
+    # Word at offset 16 is past scan_cap → must not keep.
+    Pointer(Void*).new(user.address + 16).value = dead
+
+    heap.add_root(obj)
+    heap.collect(scan_stack: false)
+
+    heap.live?(child).should be_true
+    heap.live?(dead).should be_false
+  ensure
+    heap.destroy
+    Gcry::Layout.clear
+  end
+end
+
+it "leaf layout entry does not word-scan value fields" do
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = true
+    heap.allow_interior_pointers = false
+
+    tid = 4245
+    Gcry::Layout.install_full(tid, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0,
+      32_u32, 0_u32, Gcry::Layout::KIND_PLAIN,
+      0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, Gcry::Layout::VALUE_MODE_NONE, 0_u16)
+
+    dead = heap.malloc(32)
+    obj = heap.malloc(32)
+    user = obj.as(UInt8*)
+    user.as(Int32*).value = tid
+    Pointer(Void*).new(user.address + 8).value = dead
+
+    heap.add_root(obj)
+    heap.collect(scan_stack: false)
+
+    heap.live?(obj).should be_true
+    heap.live?(dead).should be_false
+    heap.layout_precise_scans.should be > 0
+  ensure
+    heap.destroy
+    Gcry::Layout.clear
+  end
+end
+
 it "register_layouts indexes concrete Reference subclasses" do
   Gcry::Layout.clear
   Gcry::Layout.enabled = true

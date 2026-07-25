@@ -44,6 +44,9 @@ module GC
     # via GCRY_BLACKLIST=1. Linux process default stays on (historical).
     {% if flag?(:darwin) %}
       heap.blacklist_enabled = false
+      # No free large cache on Darwin — mach_vm reclaim already punches holes;
+      # retaining 8 MiB of cached larges just pads RSS on fat apps.
+      heap.large_cache_retain = 0_u64
     {% else %}
       heap.blacklist_enabled = true
     {% end %}
@@ -76,9 +79,13 @@ module GC
       Gcry::Layout.enabled = false
     else
       Gcry::Layout.register_builtins
-      # Whole-program auto layouts are opt-in: some nested/stdlib types get
-      # unsound precise offsets and tank HTTP thr / correctness. Call
-      # Gcry.register_layouts or set GCRY_AUTO_LAYOUTS=1 after measuring.
+      # Optional size-class slack caps for all Reference types (GCRY_SCAN_CAPS=1).
+      # On acikturkiye this did not move size_class_live_bytes (padding ≪ false live).
+      if env_flag_one?("GCRY_SCAN_CAPS")
+        Gcry::Layout.register_scan_caps
+      end
+      # Precise whole-program layouts: opt-in. register() skips mixed unions and
+      # embedded structs (scan_cap fallback). Measure before enabling.
       if env_flag_one?("GCRY_AUTO_LAYOUTS")
         Gcry.register_layouts
       end

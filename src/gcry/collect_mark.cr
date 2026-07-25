@@ -132,22 +132,42 @@ module Gcry
         tid = user.as(Int32*).value
         if (entry = Layout.entry_for(tid))
           if entry.alloc_size == 0 || size == entry.alloc_size.to_u64
-            @layout_precise_scans += 1
-            if entry.hash?
-              scan_hash_object(user, size, entry)
+            if entry.precise_fields?
+              @layout_precise_scans += 1
+              if entry.hash?
+                scan_hash_object(user, size, entry)
+              else
+                entry.scan_offsets.each do |off|
+                  next if off.to_u64 + sizeof(Void*).to_u64 > size
+                  slot = Pointer(Void*).new(user.address + off.to_u64)
+                  mark_candidate(slot.value)
+                end
+                entry.noscan_offsets.each do |off|
+                  next if off.to_u64 + sizeof(Void*).to_u64 > size
+                  slot = Pointer(Void*).new(user.address + off.to_u64)
+                  mark_noscan(slot.value)
+                end
+              end
+              return
+            elsif entry.scan_cap > 0
+              # Size-cap entry: word-scan only the real instance, not size-class
+              # padding (common false-pointer source). Keep interiors — embedded
+              # buffer pointers / shift-style ivars still appear in some types.
+              @layout_conservative_scans += 1
+              cap = entry.scan_cap.to_u64
+              limit = size < cap ? size : cap
+              word = sizeof(Void*).to_u64
+              words = limit // word
+              cursor = user.as(UInt64*)
+              words.times do |i|
+                mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false)
+              end
+              return
             else
-              entry.scan_offsets.each do |off|
-                next if off.to_u64 + sizeof(Void*).to_u64 > size
-                slot = Pointer(Void*).new(user.address + off.to_u64)
-                mark_candidate(slot.value)
-              end
-              entry.noscan_offsets.each do |off|
-                next if off.to_u64 + sizeof(Void*).to_u64 > size
-                slot = Pointer(Void*).new(user.address + off.to_u64)
-                mark_noscan(slot.value)
-              end
+              # Leaf / value-only type: nothing to mark in the body.
+              @layout_precise_scans += 1
+              return
             end
-            return
           end
         end
       end

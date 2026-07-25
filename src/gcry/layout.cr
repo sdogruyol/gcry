@@ -11,11 +11,13 @@
 
 module Gcry
   module Layout
-    MAX_ENTRIES  = 4096
-    MAX_OFFSETS  =   32
+    # Fat apps (HTTP + shards) easily exceed 4k concrete Reference types once
+    # size-caps / auto-layouts are process-default.
+    MAX_ENTRIES  = 16384
+    MAX_OFFSETS  =    32
     OFFSET_SLOTS = MAX_ENTRIES * MAX_OFFSETS
     # Open-addressing index (entry index + 1; 0 = empty). Power of two.
-    INDEX_SIZE = 8192
+    INDEX_SIZE = 32768
     INDEX_MASK = INDEX_SIZE - 1
 
     KIND_PLAIN = 0_u8
@@ -28,6 +30,9 @@ module Gcry
     # `uninitialized` — no Crystal `once` (`.new` class-var init needs Fiber; GC.init is too early).
     @@type_ids = uninitialized StaticArray(Int32, MAX_ENTRIES)
     @@alloc_sizes = uninitialized StaticArray(UInt32, MAX_ENTRIES)
+    # Unrounded instance_sizeof: cap conservative word-scan so size-class slack
+    # (padding past the real object) is not treated as pointers.
+    @@scan_caps = uninitialized StaticArray(UInt32, MAX_ENTRIES)
     @@n_scan = uninitialized StaticArray(UInt8, MAX_ENTRIES)
     @@n_noscan = uninitialized StaticArray(UInt8, MAX_ENTRIES)
     @@offsets = uninitialized StaticArray(UInt16, OFFSET_SLOTS) # scan then noscan packed
@@ -57,6 +62,7 @@ module Gcry
       getter scan_offsets : Slice(UInt16)
       getter noscan_offsets : Slice(UInt16)
       getter alloc_size : UInt32
+      getter scan_cap : UInt32
       getter kind : UInt8
       getter hash_entries_off : UInt16
       getter hash_indices_off : UInt16
@@ -68,7 +74,7 @@ module Gcry
       getter hash_value_bytes : UInt16
 
       def initialize(@scan_offsets : Slice(UInt16), @noscan_offsets : Slice(UInt16),
-                     @alloc_size : UInt32, @kind : UInt8,
+                     @alloc_size : UInt32, @scan_cap : UInt32, @kind : UInt8,
                      @hash_entries_off : UInt16, @hash_indices_off : UInt16,
                      @hash_pow2_off : UInt16, @hash_entry_stride : UInt16,
                      @hash_key_off : UInt16, @hash_value_off : UInt16,
@@ -77,6 +83,11 @@ module Gcry
 
       def hash? : Bool
         @kind == KIND_HASH
+      end
+
+      # Pointer-field / hash table walk available.
+      def precise_fields? : Bool
+        hash? || @scan_offsets.size > 0 || @noscan_offsets.size > 0
       end
     end
 
@@ -151,6 +162,7 @@ module Gcry
         Slice.new(@@offsets.to_unsafe + base, n_scan),
         Slice.new(@@offsets.to_unsafe + base + n_scan, n_noscan),
         @@alloc_sizes[i],
+        @@scan_caps[i],
         @@kind[i],
         @@hash_entries_off[i],
         @@hash_indices_off[i],
@@ -168,8 +180,14 @@ module Gcry
     end
 
     # Install pointer-field byte offsets (tests). *alloc_size* 0 → no size gate.
-    def self.install(type_id : Int32, offsets : Array(UInt16), alloc_size : UInt32 = 0_u32) : Nil
-      install_full(type_id, offsets.to_unsafe, offsets.size, Pointer(UInt16).null, 0, alloc_size,
+    def self.install(type_id : Int32, offsets : Array(UInt16), alloc_size : UInt32 = 0_u32, scan_cap : UInt32 = 0_u32) : Nil
+      install_full(type_id, offsets.to_unsafe, offsets.size, Pointer(UInt16).null, 0, alloc_size, scan_cap,
+        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+    end
+
+    # Size-class slack cap only (no pointer offsets). Conservative scan stops at *scan_cap*.
+    def self.install_scan_cap(type_id : Int32, alloc_size : UInt32, scan_cap : UInt32) : Nil
+      install_full(type_id, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0, alloc_size, scan_cap,
         KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
     end
 
@@ -177,6 +195,7 @@ module Gcry
                           scan_ptr : UInt16*, n_scan : Int32,
                           noscan_ptr : UInt16*, n_noscan : Int32,
                           alloc_size : UInt32,
+                          scan_cap : UInt32,
                           kind : UInt8,
                           hash_entries_off : UInt16, hash_indices_off : UInt16,
                           hash_pow2_off : UInt16, hash_entry_stride : UInt16,
@@ -184,7 +203,8 @@ module Gcry
                           hash_value_mode : UInt8, hash_value_bytes : UInt16) : Nil
       ensure_booted
       total = n_scan + n_noscan
-      return if total <= 0 && kind == KIND_PLAIN
+      # Allow: precise offsets, hash walk, leaf (alloc only), or scan-cap-only.
+      return if total <= 0 && kind == KIND_PLAIN && alloc_size == 0 && scan_cap == 0
       raise "Gcry::Layout full (#{MAX_ENTRIES})" if @@count >= MAX_ENTRIES
       raise "Gcry::Layout too many offsets (#{total} > #{MAX_OFFSETS})" if total > MAX_OFFSETS
 
@@ -197,6 +217,7 @@ module Gcry
 
       @@type_ids[i] = type_id
       @@alloc_sizes[i] = alloc_size
+      @@scan_caps[i] = scan_cap
       @@n_scan[i] = n_scan.to_u8
       @@n_noscan[i] = n_noscan.to_u8
       @@kind[i] = kind
@@ -224,6 +245,10 @@ module Gcry
 
     # Register pointer ivars of *type* using compile-time layout.
     # Pointer(T) to a non-Reference T → noscan (value buffer).
+    #
+    # Unsound for precise offsets (fall back to scan_cap):
+    #   - mixed value|reference unions (not pointer-sized at offsetof)
+    #   - embedded structs / StaticArray (may hide nested References)
     def self.register(type : T.class) forall T
       {% if T.private? %}
         # Skip — cannot reference private constants from this shard.
@@ -234,8 +259,31 @@ module Gcry
       {% begin %}
         {% scan_count = 0 %}
         {% noscan_count = 0 %}
+        {% force_scan_cap = false %}
         {% for ivar in T.instance_vars %}
           {% t = ivar.type %}
+          {% if t.union? %}
+            {% union_safe = true %}
+            {% union_has_ref = false %}
+            {% for ut in t.union_types %}
+              {% if ut == Nil || ut < Reference || ut <= Pointer %}
+                {% if ut < Reference || ut <= Pointer %}
+                  {% union_has_ref = true %}
+                {% end %}
+              {% else %}
+                {% union_safe = false %}
+              {% end %}
+            {% end %}
+            {% if union_has_ref && !union_safe %}
+              {% force_scan_cap = true %}
+            {% end %}
+          {% end %}
+          # Embedded struct / StaticArray may contain References at non-ivar offsets.
+          {% if !(t < Reference) && !(t <= Pointer) && !t.union? %}
+            {% if (t < Value && t.instance_vars.size > 0) || t <= StaticArray %}
+              {% force_scan_cap = true %}
+            {% end %}
+          {% end %}
           {% is_ptr = t <= Pointer || t < Reference %}
           {% is_noscan = false %}
           {% if t <= Pointer %}
@@ -244,9 +292,17 @@ module Gcry
               {% is_noscan = true %}
             {% end %}
           {% elsif !is_ptr && t.union? %}
+            {% union_safe = true %}
             {% for ut in t.union_types %}
-              {% if ut <= Pointer || ut < Reference %}
-                {% is_ptr = true %}
+              {% unless ut == Nil || ut < Reference || ut <= Pointer %}
+                {% union_safe = false %}
+              {% end %}
+            {% end %}
+            {% if union_safe %}
+              {% for ut in t.union_types %}
+                {% if ut <= Pointer || ut < Reference %}
+                  {% is_ptr = true %}
+                {% end %}
               {% end %}
             {% end %}
           {% end %}
@@ -258,7 +314,14 @@ module Gcry
             {% end %}
           {% end %}
         {% end %}
-        {% if scan_count + noscan_count > 0 %}
+
+        bytes = instance_sizeof({{T}}).to_u64
+        rounded, _ = SizeClasses.fit(bytes)
+        scan_cap = bytes.to_u32
+
+        {% if force_scan_cap %}
+          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap)
+        {% elsif scan_count + noscan_count > 0 %}
           scan = StaticArray(UInt16, {{scan_count == 0 ? 1 : scan_count}}).new(0)
           noscan = StaticArray(UInt16, {{noscan_count == 0 ? 1 : noscan_count}}).new(0)
           si = 0
@@ -273,9 +336,17 @@ module Gcry
                 {% is_noscan = true %}
               {% end %}
             {% elsif !is_ptr && t.union? %}
+              {% union_safe = true %}
               {% for ut in t.union_types %}
-                {% if ut <= Pointer || ut < Reference %}
-                  {% is_ptr = true %}
+                {% unless ut == Nil || ut < Reference || ut <= Pointer %}
+                  {% union_safe = false %}
+                {% end %}
+              {% end %}
+              {% if union_safe %}
+                {% for ut in t.union_types %}
+                  {% if ut <= Pointer || ut < Reference %}
+                    {% is_ptr = true %}
+                  {% end %}
                 {% end %}
               {% end %}
             {% end %}
@@ -289,13 +360,15 @@ module Gcry
               {% end %}
             {% end %}
           {% end %}
-          bytes = instance_sizeof({{T}}).to_u64
-          rounded, _ = SizeClasses.fit(bytes)
           install_full({{T}}.crystal_instance_type_id,
             scan.to_unsafe, {{scan_count}},
             noscan.to_unsafe, {{noscan_count}},
-            rounded.to_u32, KIND_PLAIN,
+            rounded.to_u32, 0_u32, KIND_PLAIN,
             0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+        {% else %}
+          # No direct pointer ivars — still scan_cap (not leaf): hidden refs via
+          # unusual ivar shapes have caused UAF with empty precise bodies.
+          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap)
         {% end %}
       {% end %}
       {% end %}
@@ -342,7 +415,7 @@ module Gcry
         install_full(Hash({{K}}, {{V}}).crystal_instance_type_id,
           scan.to_unsafe, n_scan,
           noscan.to_unsafe, n_noscan,
-          rounded.to_u32, KIND_HASH,
+          rounded.to_u32, 0_u32, KIND_HASH,
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @entries)),
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices)),
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices_size_pow2)),
@@ -382,9 +455,31 @@ module Gcry
       register(Deque(Int32))
     end
 
+    # Size-class slack caps for every concrete Reference (no pointer offsets).
+    # Always-on and sound: only shortens conservative word-scan past instance_sizeof.
+    # Do not install "leaf" empties here — misclassified value-only types UAF under HTTP.
+    def self.register_scan_caps : Nil
+      {% begin %}
+        {% for t in Reference.all_subclasses %}
+          {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
+          {% for tv in t.type_vars %}
+            {% unless tv.is_a?(TypeNode) && !tv.abstract? %}
+              {% skip = true %}
+            {% end %}
+          {% end %}
+          {% unless skip || t <= Hash %}
+            bytes = instance_sizeof({{t}}).to_u64
+            rounded, _ = SizeClasses.fit(bytes)
+            install_scan_cap({{t}}.crystal_instance_type_id, rounded.to_u32, bytes.to_u32)
+          {% end %}
+        {% end %}
+      {% end %}
+    end
+
     # Auto-register precise layouts for every concrete Reference subclass in the
     # program. Must be a method (instance_vars are unavailable at top-level macro).
     # Hash instantiations use register_hash; unbound generics are skipped.
+    # Mixed value|ref unions install scan_cap only (see register).
     def self.register_all_from_reference_subclasses : Nil
       {% begin %}
         {% for t in Reference.all_subclasses %}
