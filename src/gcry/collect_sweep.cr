@@ -246,7 +246,13 @@ module Gcry
         run_base = chunk.as(Void*).address
         run_end = run_base + chunk.value.mapped_bytes
         nxt = chunk.value.next
-        while nxt && nxt.as(Void*).address <= run_end
+        # Coalesce ONLY fully-contiguous chunks (next.base == current end).
+        # Two chunks whose [base, base+mapped) ranges touch exactly can be
+        # unmapped as a single region; anything with a gap (even a 4 KiB
+        # page) must be a separate munmap — overlapping or with a gap means
+        # the kernel placed some other VMA between them and a single
+        # munmap would unmap unintended pages.
+        while nxt && nxt.as(Void*).address == run_end
           new_end = nxt.as(Void*).address + nxt.value.mapped_bytes
           run_end = new_end if new_end > run_end
           chunk = nxt
