@@ -589,7 +589,10 @@ module Gcry
     end
 
     private def record_pause(started_ns : UInt64) : Nil
-      elapsed = monotonic_ns - started_ns
+      now = monotonic_ns
+      # Saturate on clock backward jump — checked UInt64 subtract raises
+      # "Arithmetic overflow" (seen in Linux CI at_exit after STW).
+      elapsed = now >= started_ns ? now - started_ns : 0_u64
       @last_pause_ns = elapsed
       @max_pause_ns = elapsed if elapsed > @max_pause_ns
       @total_pause_ns += elapsed

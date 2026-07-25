@@ -220,12 +220,14 @@ it "leaf layout entry does not word-scan value fields" do
   end
 end
 
-it "IO::Memory buffer is noscan" do
+it "IO::Memory falls back to scan_cap (EncodingOptions is struct|Nil)" do
   Gcry::Layout.clear
   Gcry::Layout.enabled = true
   Gcry::Layout.register(IO::Memory)
   entry = Gcry::Layout.entry_for(IO::Memory.crystal_instance_type_id).not_nil!
-  entry.noscan_offsets.includes?(UInt16.new(offsetof(IO::Memory, @buffer))).should be_true
+  # Precise offsets would miss inline EncodingOptions.name : String.
+  entry.precise_fields?.should be_false
+  entry.scan_cap.should eq(instance_sizeof(IO::Memory).to_u32)
 ensure
   Gcry::Layout.clear
 end

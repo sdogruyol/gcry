@@ -6,6 +6,8 @@ Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), s
 
 ## Verdict (v0.9.0) — Linux
 
+> **v0.10.0** did not re-cut Linux acikturkiye (release host was Darwin). Numbers below remain the **0.9.0** Linux cut. Darwin: [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+
 Same host, `wrk -c 100 -d 30`, `--release`, post-`GC.collect` RSS, median of 3 (scrub **off**):
 
 | | thr (trial median) | post-GC RSS × |

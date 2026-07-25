@@ -7,14 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-25
+
+### Added
+
+- **macOS process GC (the headline):** `-Dgc_none` + `require "gcry"` is a **real collector on Darwin** (arm64 + x86_64), Crystal **≥ 1.21** — not stubs.
+  - **STW:** Mach `thread_suspend` / `thread_resume` (signal STW under HTTP was ~hang / ~2 req/s)
+  - **SP clamp:** `thread_get_state` + `pthread_get_stackaddr_np` stack bounds
+  - **Static roots:** dyld main-image `__DATA` / `__DATA_CONST` (`__data` / `__bss` / `__common`; skip `__const`)
+  - **Free-page RSS:** host-page `mach_vm_deallocate` + `allocate(FIXED)` (Apple Silicon **16 KiB**; `MADV_DONTNEED` does not drop Darwin RSS)
+  - **Defaults:** page blacklist **off** (opt-in `GCRY_BLACKLIST=1`); `large_cache_retain` **0**
+  - CI: `macos-latest` native specs + samples
+- **`Gcry.register_set(T)`** — registers `Hash(T, Nil)` for `Set` backing maps.
+- **`GCRY_SCAN_CAPS=1`** — optional whole-program `instance_sizeof` scan caps (fat-app live set often unchanged).
+
 ### Changed
 
-- **Layout builtins:** broader curated coverage — more primitive/`String` arrays, `Set`-backing `Hash(T, Nil)`, `Hash(String, JSON::Any)`, `Array(JSON::Any)`, `IO::Memory` (noscan buffer), extra `Deque`s. Still not whole-program `GCRY_AUTO_LAYOUTS`.
-- **Layout correctness:** `Pointer(T)` noscan uses `!T.has_inner_pointers?` (was `!(T < Reference)` — would UAF on `Array(JSON::Any)`). Hash values/keys with inner pointers use word-scan; `Gcry.register_set(T)` helper.
-- **Mark:** size-class mismatch falls back to `scan_cap` when present (precise entries now store `instance_sizeof`).
-- **Large objects:** mmap size aligned to `Platform.host_page_size` (16 KiB on Apple Silicon); `LARGE_CACHE_LIMIT` hard-caps freelist retain.
-- **Blacklist:** page granularity uses `host_page_size` (Darwin 16 KiB).
-- Darwin process GC: `large_cache_retain` default **0**; `GCRY_SCAN_CAPS` remains opt-in (does not move fat-app live set).
+- **Layout builtins:** broader curated coverage — primitive/`String` arrays, `Set`-backing hashes, `Hash`/`Array` + `JSON::Any`, `IO::Memory` (noscan buffer), more `Deque`s. Still not whole-program `GCRY_AUTO_LAYOUTS`.
+- **Layout correctness:** `Pointer(T)` noscan uses `!T.has_inner_pointers?` (safe for `Array(JSON::Any)`). Hash keys/values with inner pointers word-scanned.
+- **Mark:** size-class mismatch falls back to `scan_cap` when present; precise entries store `instance_sizeof`.
+- **Large objects:** mmap aligned to `Platform.host_page_size`; `LARGE_CACHE_LIMIT` hard-caps freelist retain.
+- **Blacklist:** page granularity uses `host_page_size`.
+- Docs: Linux vs Darwin PERF / ACIKTURKIYE split; README highlights macOS.
+
+### Performance
+
+- **macOS** Kemal (0.10.0 cut, Apple Silicon, median of 3, scrub off): `/` **~97%** of Boehm; `/json` **~90%**; post-GC RSS **~0.96–0.97×** — see [docs/PERF-macos.md](docs/PERF-macos.md).
+- **macOS** acikturkiye `/api/v1/` (median of 3): thr trial-median **~80%**; post-GC RSS **~11.8×** (dense conservative-live; reclaim works) — see [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **Linux** Kemal / acikturkiye cut numbers unchanged from **0.9.0** (this host is Darwin; re-record on Linux before citing a new Linux cut) — [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## [0.9.0] - 2026-07-24
 
@@ -246,7 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/sdogruyol/gcry/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sdogruyol/gcry/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0

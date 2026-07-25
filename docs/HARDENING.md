@@ -19,7 +19,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 - Majors at **32 MiB**, **full STW**, nursery **off**
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux; Darwin default **off** — freelist abandonment grew fat-app heaps)
-- Darwin process GC: free-page physical release **on** (`mach_vm` punch-hole at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there); large-object freelist retain **0** (Linux keeps **8 MiB**)
+- **Linux + macOS** process GC (v0.10+): Darwin uses Mach STW + dyld roots; free-page physical release **on** (`mach_vm` at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there); large-object freelist retain **0** (Linux keeps **8 MiB**)
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.

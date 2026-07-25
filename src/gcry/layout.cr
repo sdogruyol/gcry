@@ -13,13 +13,16 @@ require "json"
 
 module Gcry
   module Layout
-    # Fat apps (HTTP + shards) easily exceed 4k concrete Reference types once
-    # size-caps / auto-layouts are process-default.
-    MAX_ENTRIES  = 16384
-    MAX_OFFSETS  =    32
+    # Keep tables modest: multi-MiB `uninitialized` StaticArrays live in the
+    # process image and are walked by static-root scan. On Linux (blacklist on)
+    # that volume of ambient words was enough to UAF under process_spec STW
+    # (Fiber Monitor / ENV RWLock). Opt-in GCRY_AUTO_LAYOUTS / GCRY_SCAN_CAPS
+    # that need >4k entries should move to LibC-backed storage, not BSS.
+    MAX_ENTRIES  = 4096
+    MAX_OFFSETS  =   32
     OFFSET_SLOTS = MAX_ENTRIES * MAX_OFFSETS
     # Open-addressing index (entry index + 1; 0 = empty). Power of two.
-    INDEX_SIZE = 32768
+    INDEX_SIZE = 8192
     INDEX_MASK = INDEX_SIZE - 1
 
     KIND_PLAIN = 0_u8
@@ -272,17 +275,14 @@ module Gcry
           {% t = ivar.type %}
           {% if t.union? %}
             {% union_safe = true %}
-            {% union_has_ref = false %}
             {% for ut in t.union_types %}
-              {% if ut == Nil || ut < Reference || ut <= Pointer %}
-                {% if ut < Reference || ut <= Pointer %}
-                  {% union_has_ref = true %}
-                {% end %}
-              {% else %}
+              {% unless ut == Nil || ut < Reference || ut <= Pointer %}
                 {% union_safe = false %}
               {% end %}
             {% end %}
-            {% if union_has_ref && !union_safe %}
+            # Struct|Nil (e.g. Exception::CallStack, IO::EncodingOptions) has no
+            # Reference arm — still unsound for precise single-word offsets.
+            {% unless union_safe %}
               {% force_scan_cap = true %}
             {% end %}
           {% end %}

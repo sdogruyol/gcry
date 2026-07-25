@@ -10,6 +10,8 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 ## Headline (v0.9.0) — Linux
 
+> **v0.10.0** was cut on Darwin (macOS process GC). Linux Kemal / acikturkiye numbers below are still the **0.9.0** cut — re-run `median_kemal_boehm.sh` on Linux before claiming a new Linux headline. Darwin: [PERF-macos.md](PERF-macos.md).
+
 Same host, Crystal 1.21, WSL2 x86_64, median of 3, scrub **off**:
 
 | Path | % of Boehm | post-GC RSS × |
@@ -38,6 +40,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.7.0 | ~92% | ~90% | **~0.93×** | empty-chunk release **default-on**; layout / type_id / SP clamp |
 | 0.8.0 | ~91% | ~89% | **~0.93×** | barriers, TLAB, blacklist, atfork, aarch64, metrics |
 | **0.9.0** | **~89%** | **~92%** | **~0.97×** | stack scrub (opt-in); parallel-mark experimental; observability |
+| 0.10.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | **macOS process GC** — Linux not re-cut this release; see [PERF-macos.md](PERF-macos.md) |
 
 **Escape knobs (same era, not defaults):**
 
@@ -59,7 +62,7 @@ Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier
 
 ## How to record (Linux)
 
-Same-day gcry + Boehm, both paths → update **this** file and the README table. Do **not** overwrite these tables with macOS wrk — use [PERF-macos.md](PERF-macos.md).
+Same-day gcry + Boehm, both paths → update **this** file and the README Linux table. Do **not** overwrite these tables with macOS wrk — use [PERF-macos.md](PERF-macos.md).
 
 ```sh
 make bench-kemal-wrk

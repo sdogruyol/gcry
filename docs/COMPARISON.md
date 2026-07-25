@@ -6,8 +6,8 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-| | gcry (0.9.0) | Boehm (Crystal default) |
-|--|--------------|-------------------------|
+| | gcry (0.10.0) | Boehm (Crystal default) |
+|--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
@@ -18,14 +18,15 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
-| Platforms | Linux + macOS (soft-dirty Linux-only) | Broad |
-| Kemal `/json` (Linux) | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
+| Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
+| Kemal `/json` (Linux v0.9.0) | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (macOS v0.10.0) | thr ~**90%**, post-GC RSS ~**0.97×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 
 ## Pick gcry when
 
 - You want a collector you can **read and change** in Crystal
-- Linux + default ExecutionContext (parallelism 1)
+- Linux **or macOS** + default ExecutionContext (parallelism 1)
 - Kemal-class thr/RSS near Boehm is the bar — and you’re hitting it
 - You’re OK tuning `GCRY_*` and naming conservative retention honestly
 

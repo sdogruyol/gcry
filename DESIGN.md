@@ -4,7 +4,7 @@
 
 Crystal runs on [Boehm](https://github.com/ivmai/bdwgc) today. That works — and it also means the language’s most intimate runtime piece lives in C, behind a wall. **gcry** is the other path: a conservative mark–sweep collector written in Crystal, shipped as a shard, plugged in with `-Dgc_none`. No compiler fork. No waiting for upstream to grow a third backend.
 
-This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.9**.
+This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.10**.
 
 ---
 
@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of v0.9.0 (same-host Kemal on **Linux**, median of 3): **`/json` ~92% of Boehm thr**, post-GC RSS **~0.97×**. Fat apps still show the conservative tax — see [docs/PERF.md](docs/PERF.md) (Linux), [docs/PERF-macos.md](docs/PERF-macos.md) (Darwin), and [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). The point stands: this is not a lab toy.
+As of **v0.10.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (last cut **v0.9.0**): **`/json` ~92% of Boehm thr**, post-GC RSS **~0.97×**. macOS Kemal (v0.10.0 cut): **`/json` ~90%**, RSS **~0.97×**. Fat apps still show the conservative tax — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## Goals
 
@@ -140,9 +140,9 @@ src/gcry/
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.9 → v0.10)
+## Where we are (v0.10)
 
-Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
+Shipped and dogfooded on Linux; **macOS process GC tagged in v0.10.0**:
 
 | Area | State |
 |------|--------|
@@ -150,29 +150,31 @@ Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64 |
 | Empty-chunk RSS | ✅ default-on — Kemal ~**0.97×** Boehm |
 | Layout / type_id / blacklist | ✅ defaults + escapes |
-| Barriers (soft-dirty / mprotect) | ✅; nursery still **opt-in** |
+| Barriers (soft-dirty / mprotect) | ✅; nursery still **opt-in**; soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack scrub | ✅ opt-in (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| macOS process GC | ✅ Mach `thread_suspend` + dyld roots (Crystal ≥ 1.21); soft-dirty N/A |
+| macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `mach_vm` reclaim (Crystal ≥ 1.21) |
 | Compiler stack maps | ❌ later (RSS) |
 
-**Kemal (v0.9.0 cut, Linux):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md). macOS: [PERF-macos.md](docs/PERF-macos.md).
+**Kemal Linux (v0.9.0 cut):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md).
 
-**acikturkiye (Linux):** thr trial-median ~**93%**, post-GC RSS ~**2.84×** — dense conservative-live; shard levers mostly exhausted — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin dogfood: [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**Kemal macOS (v0.10.0 cut):** `/` ~**97%**, `/json` ~**90%**, post-GC RSS ~**0.97×** — [PERF-macos.md](docs/PERF-macos.md).
+
+**acikturkiye:** Linux thr ~**93%**, RSS ~**2.84×** — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**80%**, RSS ~**11.8×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
-**Goal met:** `-Dgc_none` + `require "gcry"` runs real process GC on Darwin (arm64 + x86_64).
+**Goal met and tagged:** `-Dgc_none` + `require "gcry"` runs real process GC on Darwin (arm64 + x86_64).
 
 | Shipped | Deferred |
 |---------|----------|
 | Crystal Mach `thread_suspend` / resume STW + `thread_get_state` SP clamp | Soft-dirty (Linux-only) |
 | `pthread_get_stackaddr_np` stack bounds | Full parity nursery / mprotect wins |
 | dyld main-image `__DATA` / `__DATA_CONST` static roots | Windows |
-| `GC.init` raise removed; hello / stress / `stw_sp_clamp` / fork | Stack maps / RSS epic |
-| CI: `macos-latest` native specs + samples | Version cut until CI green |
+| `mach_vm` free-page reclaim @ host page size | Stack maps / fat-app RSS |
+| CI: `macos-latest` native specs + samples | Linux PERF re-cut (optional; carry 0.9.0) |
 
 Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pairing).
 
@@ -180,13 +182,14 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS (acikturkiye ~3×) |
+| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~3× / Darwin ~12×) |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
-| **Windows process GC** | After Darwin MVP |
+| **Windows process GC** | After Darwin |
 | **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
+| **Linux PERF re-cut** | Confirm 0.10 layout polish on Linux hosts |
 
-Shard-only polish that remains interesting: curated layout coverage (builtins / opt-in AUTO), large-object page policy, pause UX, honest parallel-mark defaults. Fat-app RSS still needs stack maps.
+Shard-only polish continues (curated layouts, large-object page policy). Fat-app RSS still needs stack maps.
 
 ## Risks
 
