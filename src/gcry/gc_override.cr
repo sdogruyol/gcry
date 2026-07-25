@@ -29,13 +29,14 @@ module GC
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
-    # Full STW majors by default. On Linux the page-dirty barrier makes the
-    # incremental path sound; on Darwin (no soft-dirty) it is not yet
-    # crash-free. Default false keeps the test harness reproducible across
-    # platforms. Linux deployments should set
-    #   Gcry.default_heap.incremental_auto = true
-    # (or pass `Gcry.incremental_auto = true` from the program).
-    heap.incremental_auto = false
+    # Incremental (sliced) majors. On Linux the page-dirty barrier makes the
+    # incremental path sound — default ON. On Darwin (no soft-dirty) it is not
+    # yet crash-free — default OFF.
+    {% if flag?(:linux) %}
+      heap.incremental_auto = true
+    {% else %}
+      heap.incremental_auto = false
+    {% end %}
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
@@ -207,7 +208,7 @@ module GC
       heap.incremental_auto = true
     end
 
-    if env_flag_one?("GCRY_DISABLE_INCREMENTAL")
+    if env_flag_one?("GCRY_DISABLE_INCREMENTAL") || env_flag_one?("GCRY_NO_INCREMENTAL")
       heap.incremental_auto = false
     end
 
@@ -235,8 +236,8 @@ module GC
     end
 
     {% if flag?(:darwin) %}
-      # Darwin: MADV_DONTNEED does not drop RSS; free-page MAP_FIXED remap does.
-      # Default-on for process GC unless explicitly disabled.
+      # Darwin: MADV_FREE_REUSABLE drops RSS; enable free-page release.
+      # (MADV_DONTNEED on Darwin does NOT drop RSS — advisory only.)
       unless env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
         heap.madvise_free_pages = true
       end

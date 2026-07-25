@@ -43,9 +43,11 @@ module Gcry
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
     # When true, auto major uses collect_a_little slices instead of full STW.
-    # Default OFF: Darwin currently lacks a sound page-dirty barrier, so
-    # incremental on macOS would crash under heavy pointer churn. Linux runs
-    # safely with the default ON. Override via `heap.incremental_auto = true`.
+    # ON on Linux (page-dirty barrier makes incremental sound), OFF on Darwin
+    # (lacks soft-dirty — incremental would crash under pointer churn).
+    # The property default is always false; gc_override.cr sets the platform
+    # default at process-GC boot. Override via `heap.incremental_auto = true`
+    # or `GCRY_INCREMENTAL` / `GCRY_DISABLE_INCREMENTAL` env vars.
     property incremental_auto : Bool = false
     # When true, fully free size-class chunks beyond empty_chunk_retain are
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
