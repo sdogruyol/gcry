@@ -13,14 +13,19 @@ describe "Gcry page blacklist" do
       first = heap.malloc(64)
       heap.free(first)
 
-      page = first.address & ~4095_u64
-      heap.blacklist_address(page)
+      page_size = Gcry::Platform.host_page_size
+      page = first.address & ~(page_size - 1)
+      heap.blacklist_address(first.address)
       heap.blacklist_hits.should be > 0
       heap.blacklisted_page?(page).should be_true
+      heap.blacklisted_page?(first.address).should be_true
 
-      # Fill freelist on that page, then prefer a non-blacklisted block.
+      # Fill freelist across multiple host pages (16 KiB on Apple Silicon —
+      # a handful of 64-byte blocks all sit on one blacklisted page).
+      block_span = 128_u64 # header + payload headroom
+      need = ((page_size // block_span).to_i32 + 64)
       ptrs = [] of Void*
-      64.times { ptrs << heap.malloc(64) }
+      need.times { ptrs << heap.malloc(64) }
       ptrs.each { |p| heap.free(p) }
 
       again = heap.malloc(64)

@@ -33,7 +33,10 @@ Under `-Dgc_none`, `require "gcry"` reopens Crystal’s `GC` module. Everyday co
 | `Gcry.prometheus_text` | Prometheus exposition format |
 | `Gcry::Observability.json_stats` | JSON snapshot for `/gc-stats` |
 | `Gcry.register_layout(T)` / `register_hash(K,V)` | Precise scan tables |
+| `Gcry.register_set(T)` | `register_hash(T, Nil)` for `Set(T)` backing |
 | `Gcry.register_layouts` | Auto-register concrete `Reference` subclasses (opt-in; see `GCRY_AUTO_LAYOUTS`) |
+
+Process GC calls `Layout.register_builtins` at init (curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps — not whole-program auto).
 
 ## Class `Gcry::Heap`
 

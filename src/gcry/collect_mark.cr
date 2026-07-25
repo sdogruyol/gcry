@@ -98,8 +98,9 @@ module Gcry
       return true if size < 4
 
       tid = BlockHeader.user_from(header).as(Int32*).value
-      return false if tid < 0
-      # Crystal type ids are dense small integers, not pointer-sized values.
+      # Crystal type ids are dense positive integers (0 is not a real instance id;
+      # a leading zero word is typical of Pointer(T) buffers / empty slots).
+      return false if tid <= 0
       return false if tid > 1_000_000
       true
     end
@@ -130,7 +131,8 @@ module Gcry
       if @layout_precise && size >= 4
         tid = user.as(Int32*).value
         if (entry = Layout.entry_for(tid))
-          if entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+          size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+          if size_match && entry.precise_fields?
             @layout_precise_scans += 1
             if entry.hash?
               scan_hash_object(user, size, entry)
@@ -147,16 +149,37 @@ module Gcry
               end
             end
             return
+          elsif entry.scan_cap > 0
+            # Size-cap (or size-class mismatch): word-scan only the real instance,
+            # not size-class padding. Keep interiors for embedded buffer ivars.
+            @layout_conservative_scans += 1
+            cap = entry.scan_cap.to_u64
+            limit = size < cap ? size : cap
+            word = sizeof(Void*).to_u64
+            words = limit // word
+            cursor = user.as(UInt64*)
+            words.times do |i|
+              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false)
+            end
+            return
+          elsif size_match
+            # Leaf / value-only type: nothing to mark in the body.
+            @layout_precise_scans += 1
+            return
           end
         end
       end
 
       @layout_conservative_scans += 1
+      # Raw buffers (no Crystal type_id): object-base only — cuts interior false
+      # hits from JSON/bytes. Typed References keep interiors so Array#shift and
+      # layout-miss types with mid-object pointers stay correct.
+      base_only = size >= 4 && !type_id_plausible?(header)
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
-        mark_candidate(Pointer(Void).new(cursor[i]))
+        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only)
       end
     end
 
@@ -192,6 +215,7 @@ module Gcry
       return if entries_size == 0 || entries_size > 1_000_000_u64
 
       key_off = entry.hash_key_off.to_u64
+      key_bytes = entry.hash_key_bytes.to_u64
       value_off = entry.hash_value_off.to_u64
       value_mode = entry.hash_value_mode
       value_bytes = entry.hash_value_bytes.to_u64
@@ -203,7 +227,13 @@ module Gcry
         # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
         hash_word = slot.as(UInt32*).value
         if hash_word != 0_u32
-          if key_off != 0
+          if key_bytes > 0
+            w = 0_u64
+            while w + sizeof(Void*).to_u64 <= key_bytes
+              mark_candidate(Pointer(Void*).new(slot.address + key_off + w).value)
+              w += sizeof(Void*).to_u64
+            end
+          elsif key_off != 0
             mark_candidate(Pointer(Void*).new(slot.address + key_off).value)
           end
           case value_mode

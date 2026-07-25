@@ -157,3 +157,34 @@ jobs:
           ./bin/stw_sp_clamp
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
+
+  # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
+  test-macos:
+    runs-on: macos-latest
+    name: test (darwin native)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Unit + process specs + samples on Darwin
+        run: |
+          mkdir -p bin
+          crystal spec --error-trace
+          crystal spec -Dgc_none process_spec --error-trace
+          crystal build -Dgc_none samples/hello.cr -o bin/hello
+          ./bin/hello
+          crystal build -Dgc_none samples/min.cr -o bin/min
+          ./bin/min
+          crystal build -Dgc_none samples/alloc.cr -o bin/alloc
+          ./bin/alloc 500
+          crystal build -Dgc_none samples/stress.cr -o bin/stress
+          ./bin/stress 300
+          crystal build -Dgc_none samples/json_churn.cr -o bin/json_churn
+          ./bin/json_churn 800
+          crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
+          ./bin/stw_sp_clamp
+          crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
+          ./bin/fork_reinit

@@ -4,23 +4,29 @@ Crystal-native conservative mark–sweep GC as a **shard** — `require "gcry"` 
 
 ## One-liner
 
-Boehm-class collector you can read and change in Crystal; Linux x86_64 + aarch64; fibers OK; parallelism 1.
+Boehm-class collector you can read and change in Crystal; **Linux + macOS**; fibers OK; parallelism 1.
 
-## Numbers (re-record before publishing)
+## macOS (v0.10.0)
 
-Same-host Kemal `wrk -c 100 -d 30` vs Boehm — cite [docs/PERF.md](PERF.md) only (do not invent). Prefer **`/json`**.
+Process GC on Darwin is real: Mach STW, dyld roots, host-page reclaim. Crystal **≥ 1.21**.
 
-As of v0.9.0 cut: `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
+Same-host Kemal on Apple Silicon (`wrk -c 100 -d 30`, median of 3): `/` ~**97%**, `/json` ~**90%**, post-GC RSS ~**0.97×** — [PERF-macos.md](PERF-macos.md).
+
+## Linux numbers
+
+Cite [PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**.
+
+As of last Linux cut (**v0.9.0**): `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm. (v0.10.0 did not re-cut Linux on the Darwin release host.)
 
 ## When to try gcry
 
 - Want a Crystal-readable GC / dogfood alternative
-- Linux, Crystal ≥ 1.21, default ExecutionContext (parallelism 1)
+- Linux **or macOS**, Crystal ≥ 1.21, default ExecutionContext (parallelism 1)
 - Can accept STW pauses and conservative retention
 
 ## When to stay on Boehm
 
-- macOS / Windows process GC
+- Windows process GC; Darwin soft-dirty / nursery parity
 - Parallel ExecutionContexts in production
 - Need `Process.fork` under ExecutionContext (Crystal forbids it; gcry atfork helps `-Dwithout_mt` / `LibC.fork` only)
 
@@ -32,6 +38,7 @@ As of v0.9.0 cut: `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
 
 ## Checklist before posting
 
-- [ ] Tag release; PERF.md + README table refreshed same day
-- [ ] CI green on x86_64 + aarch64 native
+- [ ] Tag `v0.10.0`; PERF-macos.md + README refreshed same day
+- [ ] CI green on x86_64 + aarch64 + macOS
 - [ ] Link COMPARISON.md + POLICY.md
+- [ ] Call out **macOS process GC** in the title / first paragraph

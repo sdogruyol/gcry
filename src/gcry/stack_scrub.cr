@@ -81,6 +81,15 @@ module Gcry
           end
           LibC.pthread_attr_destroy(pointerof(attr))
         end
+      {% elsif flag?(:darwin) %}
+        if bounds = Platform.current_pthread_stack_bounds
+          lo = bounds[0].address
+          hi = bounds[1].address
+          if sp_addr > lo && sp_addr <= hi
+            on_thread_stack = true
+            guard = lo + Roots::PAGE_SIZE
+          end
+        end
       {% end %}
 
       wipe = bytes

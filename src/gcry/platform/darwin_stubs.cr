@@ -1,8 +1,22 @@
-# macOS / Darwin platform surface. Process GC under `-Dgc_none` is not a
-# supported runtime yet (needs Mach thread suspend + dyld image roots). Stubs
-# keep the shard compiling so library-heap specs can run under Boehm on darwin.
+# Darwin soft-dirty / mprotect stubs + capability flag.
+# Real stack / roots / STW / atfork live in darwin_{stack,roots,stw}.cr + linux_fork.cr.
 
 require "c/pthread"
+require "c/sys/mman"
+require "c/unistd"
+
+lib LibMachVM
+  alias MachPort = UInt32
+  alias KernReturn = Int32
+  alias VmAddress = UInt64
+  alias VmSize = UInt64
+  alias VmProt = Int32
+
+  $mach_task_self_ : MachPort
+  fun mach_vm_deallocate(target : MachPort, address : VmAddress, size : VmSize) : KernReturn
+  fun mach_vm_allocate(target : MachPort, address : VmAddress*, size : VmSize, flags : Int32) : KernReturn
+  fun mach_vm_protect(target : MachPort, address : VmAddress, size : VmSize, set_max : Int32, new_prot : VmProt) : KernReturn
+end
 
 module Gcry
   module Platform
@@ -15,22 +29,12 @@ module Gcry
 
       PAGE_SIZE = 4096_u64
 
+      VM_FLAGS_FIXED = 0
+      VM_PROT_READ   = 1
+      VM_PROT_WRITE  = 2
+
       def self.darwin_process_gc_supported? : Bool
-        false
-      end
-
-      def self.invalidate_static_root_cache : Nil
-      end
-
-      def self.scan_static_roots(& : Void*, Void* ->) : Nil
-      end
-
-      def self.pthread_stack_bounds(thread : LibC::PthreadT) : {Void*, Void*}?
-        nil
-      end
-
-      def self.current_pthread_stack_bounds : {Void*, Void*}?
-        nil
+        true
       end
 
       def self.clear_soft_dirty : Bool
@@ -90,47 +94,33 @@ module Gcry
         {0_u64, 0_u64}
       end
 
-      def self.install_stw_sp_capture : Nil
+      # Host page size (16 KiB on Apple Silicon, 4 KiB on Intel).
+      def self.host_page_size : UInt64
+        sz = LibC.sysconf(LibC::SC_PAGESIZE)
+        sz > 0 ? sz.to_u64 : 16384_u64
       end
 
-      def self.stw_sp_capture_installed? : Bool
-        false
-      end
+      # Drop physical pages while keeping the VA reserved.
+      # Darwin rejects MAP_FIXED over a subrange of an existing mmap; use
+      # mach_vm_deallocate + mach_vm_allocate(FIXED) instead (RSS actually falls).
+      # Ranges must be host-page aligned (16 KiB on arm64 macOS).
+      def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
+        return false if len == 0
+        page = host_page_size
+        return false if (addr & (page - 1)) != 0
+        return false if (len & (page - 1)) != 0
 
-      def self.stw_sp_clamp_enabled? : Bool
-        false
-      end
+        task = LibMachVM.mach_task_self_
+        kr = LibMachVM.mach_vm_deallocate(task, addr, len)
+        return false if kr != 0
 
-      def self.stw_sp_clamp_enabled=(value : Bool) : Bool
-        value
-      end
+        slot = addr
+        kr = LibMachVM.mach_vm_allocate(task, pointerof(slot), len, VM_FLAGS_FIXED)
+        if kr != 0 || slot != addr
+          return false
+        end
 
-      def self.clear_thread_sps : Nil
-      end
-
-      def self.reset_stw_after_fork : Nil
-      end
-
-      def self.thread_sp(id : LibC::PthreadT) : Void*?
-        nil
-      end
-
-      def self.sp_from_ucontext(uctx : Void*) : UInt64
-        0_u64
-      end
-
-      def self.rsp_from_ucontext(uctx : Void*) : UInt64
-        0_u64
-      end
-
-      def self.set_atfork_handlers(prepare : -> Nil, parent : -> Nil, child : -> Nil) : Nil
-      end
-
-      def self.install_atfork : Nil
-      end
-
-      def self.atfork_installed? : Bool
-        false
+        LibMachVM.mach_vm_protect(task, addr, len, 0, VM_PROT_READ | VM_PROT_WRITE) == 0
       end
     {% end %}
   end

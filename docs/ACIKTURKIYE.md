@@ -1,8 +1,12 @@
-# acikturkiye dogfood
+# acikturkiye dogfood (Linux)
+
+**Linux-only cut / history.** macOS: [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (v0.9.0)
+## Verdict (v0.9.0) — Linux
+
+> **v0.10.0** did not re-cut Linux acikturkiye (release host was Darwin). Numbers below remain the **0.9.0** Linux cut. Darwin: [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
 
 Same host, `wrk -c 100 -d 30`, `--release`, post-`GC.collect` RSS, median of 3 (scrub **off**):
 
@@ -20,7 +24,7 @@ Throughput is in the fight. RSS is not — dense conservative-live, not empty-ch
 | 3 | 90.9% | 3.25× | 128 / 141 |
 | **median** | **93.3%** | **2.84×** | — |
 
-Script: `gcry/bench/median_acikturkiye_boehm.sh`.
+Script: `gcry/bench/median_acikturkiye_boehm.sh` (tag runs with `LABEL=linux-…`).
 
 ## How to measure
 
@@ -29,6 +33,7 @@ Script: `gcry/bench/median_acikturkiye_boehm.sh`.
 make run-demo-gcry    # or run-demo-boehm
 # release A/B:
 ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry
+LABEL=linux-$(date +%Y%m%d) ../gcry/bench/median_acikturkiye_boehm.sh
 ```
 
 - Always **`--release`** — debug mutator swamps GC.
@@ -36,7 +41,7 @@ ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin
 - Auth: `X-API-KEY` / `X-API-SECRET` from `.env.demo`.
 - Diagnostics: `GET /gc-stats` (`Observability.json_stats`), `GET /metrics`, `GET /gc-collect`.
 
-Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC get better?”
+Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC get better?” on **Linux**.
 
 ## What we learned
 
@@ -54,4 +59,4 @@ Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC ge
 - Smaller `GCRY_CHUNK_BYTES` for RSS
 - Expecting another shard filter to hit ≤1.5× Boehm RSS
 
-Toy Kemal numbers: [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).
+Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).

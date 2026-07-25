@@ -1,6 +1,3 @@
-require "./mark"
-require "./roots"
-require "./finalizer"
 {% if flag?(:linux) %}
   require "./platform/linux_roots"
   require "./platform/linux_stack"
@@ -9,7 +6,15 @@ require "./finalizer"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"
+  require "./platform/darwin_roots"
+  require "./platform/darwin_stack"
+  require "./platform/darwin_stw"
+  require "./platform/linux_fork"
 {% end %}
+
+require "./mark"
+require "./roots"
+require "./finalizer"
 
 module Gcry
   class Heap
@@ -574,13 +579,20 @@ module Gcry
     end
 
     private def monotonic_ns : UInt64
-      ts = uninitialized LibC::Timespec
-      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      {% if flag?(:darwin) %}
+        Time.monotonic.total_nanoseconds.to_u64
+      {% else %}
+        ts = uninitialized LibC::Timespec
+        LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
+        ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      {% end %}
     end
 
     private def record_pause(started_ns : UInt64) : Nil
-      elapsed = monotonic_ns - started_ns
+      now = monotonic_ns
+      # Saturate on clock backward jump — checked UInt64 subtract raises
+      # "Arithmetic overflow" (seen in Linux CI at_exit after STW).
+      elapsed = now >= started_ns ? now - started_ns : 0_u64
       @last_pause_ns = elapsed
       @max_pause_ns = elapsed if elapsed > @max_pause_ns
       @total_pause_ns += elapsed

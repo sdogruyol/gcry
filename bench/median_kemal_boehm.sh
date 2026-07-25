@@ -2,6 +2,7 @@
 # Median-of-3 Kemal wrk: gcry (-Dgc_none) vs Boehm, both paths, post-GC RSS.
 # Usage: ./bench/median_kemal_boehm.sh
 # Env: PORT WRK_CONNECTIONS WRK_DURATION LABEL
+# Record Linux → docs/PERF.md; Darwin → docs/PERF-macos.md (never mix).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +12,7 @@ PORT="${PORT:-3001}"
 WRK_CONNECTIONS="${WRK_CONNECTIONS:-100}"
 WRK_DURATION="${WRK_DURATION:-30}"
 BASE="http://127.0.0.1:${PORT}"
-LABEL="${LABEL:-unreleased}"
+LABEL="${LABEL:-unreleased-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 TRIALS="${TRIALS:-3}"
 OUT="/tmp/gcry-median-kemal-${LABEL}.tsv"
 

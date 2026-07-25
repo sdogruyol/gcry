@@ -1,5 +1,5 @@
 name: gcry
-version: 0.9.0
+version: 0.10.0
 
 authors:
   - Serdar Dogruyol <dogruyolserdar@gmail.com>
@@ -10,7 +10,7 @@ license: MIT
 
 description: |
   Crystal-native conservative mark–sweep GC (Boehm-class).
-  Drop-in via `require "gcry"` + `-Dgc_none` — no compiler patch.
+  Drop-in via `require "gcry"` + `-Dgc_none` — Linux + macOS, no compiler patch.
 
 repository: https://github.com/sdogruyol/gcry
 homepage: https://github.com/sdogruyol/gcry

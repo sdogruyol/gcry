@@ -2,6 +2,7 @@
 # Median-of-3 acikturkiye /api/v1/: gcry vs Boehm, post-GC RSS.
 # Run from anywhere; uses sibling ../acikturkiye by default.
 # Usage: ./bench/median_acikturkiye_boehm.sh
+# Record Linux → docs/ACIKTURKIYE.md; Darwin → docs/ACIKTURKIYE-macos.md (never mix).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +12,7 @@ BASE="http://127.0.0.1:${PORT}"
 PATH_API="${API_PATH:-/api/v1/}"
 WRK_CONNECTIONS="${WRK_CONNECTIONS:-100}"
 WRK_DURATION="${WRK_DURATION:-30}"
-LABEL="${LABEL:-unreleased}"
+LABEL="${LABEL:-unreleased-$(uname -s | tr '[:upper:]' '[:lower:]')}"
 TRIALS="${TRIALS:-3}"
 OUT="/tmp/gcry-median-acik-${LABEL}.tsv"
 
