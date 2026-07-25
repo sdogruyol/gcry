@@ -14,6 +14,17 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | Host page | **16 KiB** on Apple Silicon — large mmap + free-page reclaim use `host_page_size` |
 | CI | `macos-latest` correctness only — **not** a thr gate |
 
+## Headline (Unreleased) — macOS aarch64
+
+After **bitmap shrinking + adaptive headroom** (P1.1), **deferred madvise + cross-chunk coalescing + empty_chunk_retain 8 MiB on Darwin** (P1.4):
+
+| Path | Boehm req/s | gcry req/s | % Boehm | post-GC RSS × |
+|------|------------:|-----------:|--------:|--------------:|
+| `/` | 87205 | 90731 | **104.0%** | **5.29×** |
+| `/json` | 62512 | 59729 | **95.5%** | **7.24×** |
+
+RSS dropped from ~10× to **5–7×** while throughput held or improved. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
+
 ## Headline (v0.10.0) — macOS aarch64
 
 Same host, Crystal 1.21.0, Apple Silicon, median of 3, scrub **off** (`LABEL=macos-aarch64-v0.10.0`):
@@ -30,7 +41,7 @@ Near Boehm on both paths. Prefer **`/json`** when asking “did GC get better?�
 | `/` | 69686 | 67237 | **96.5%** | **0.96×** |
 | `/json` | 62996 | 56655 | **89.9%** | **0.97×** |
 
-## Headline (Unreleased) — macOS aarch64
+## Headline (v0.11.0) — macOS aarch64
 
 After the **side mark bitmap** + **`empty_chunk_retain = 64 MiB`** rework on top of v0.10.0:
 
@@ -50,6 +61,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
 | 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~91%** | **~0.90–0.93×** | Mach STW dogfood (pre-tag) |
 | **0.10.0** `macos-aarch64-v0.10.0` | **~97%** | **~90%** | **~0.96–0.97×** | First tagged macOS process GC cut |
 | **0.11.0** `macos-aarch64-v0.11.0` | **~100%** | **~94%** | **~10×** | Side mark bitmap + retain 64 MiB; throughput + latency parity, RSS regression from bitmap pages |
+| **Unreleased** `macos-aarch64-20260725` | **~104%** | **~96%** | **~5–7×** | Bitmap shrink + deferred madvise; RSS halved, no hang, coalesced syscalls |
 
 ## How to record (macOS)
 

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bitmap shrinking + adaptive headroom (P1.1):** `MarkBitmap#shrink_to_fit!` reduces the side-mark bitmap mmap when the heap range contracts. Adaptive headroom (25% of recent growth history) prevents immediate re-growth. Combined with tighter `update_heap_bounds_after_unmap`, Kemal RSS drops from ~10× to ~5–7×.
+- **Darwin `MADV_FREE_REUSABLE` (P1.1, macOS):** `release_physical_pages` switched from the expensive 3-syscall `mach_vm_deallocate`+`allocate`+`protect` to a single `madvise(..., 5)`. `empty_chunk_retain` lowered from 64 MiB to **8 MiB** on Darwin (no cost; `MADV_FREE_REUSABLE` is cheaper than the retain budget).
+- **Deferred madvise — STW pause damping (P1.4):** All `madvise` / page-release syscalls defer to post-STW flush functions (`flush_pending_dormant_chunks`, `flush_pending_page_release_chunks`). DORMANT/HOLED flags set during STW; actual syscalls run after threads resume, eliminating kernel VM lock contention that caused 132–150 ms pause tails.
+- **Cross-chunk dormant coalescing (P1.4):** `flush_pending_dormant_chunks` merges contiguous dormant chunks into a single `madvise` region (one syscall per run instead of one per chunk).
+- **Per-chunk free-page coalescing (P1.4):** `dontneed_free_pages_in_chunk` pre-computes a live-page mask and issues one `madvise` per contiguous free run instead of one per free page (reduces from up to 64 syscalls/chunk to 1–3).
+
+### Changed
+
+- **`incremental_auto` defaults (P1.3, Linux/Darwin):** `true` on Linux (page-dirty barrier is sound), `false` on Darwin (no soft-dirty alternative yet). Overridable via `GCRY_INCREMENTAL` / `GCRY_NO_INCREMENTAL`.
+
+### Performance
+
+- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **104%** of Boehm (was **~100%**); `/json` **96%** of Boehm (was **~94%**); post-GC RSS **5–7×** (was **~10×**). See [docs/PERF-macos.md](docs/PERF-macos.md).
+- **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
+- **Linux** numbers unchanged (this host is Darwin) — re-record on Linux before citing a new Linux cut. See [docs/PERF.md](docs/PERF.md).
+
 ## [0.11.0] - 2026-07-25
 
 ### Added
