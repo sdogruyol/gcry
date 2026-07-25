@@ -479,6 +479,8 @@ module Gcry
 
     # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
     # safe because those blocks are omitted from the freelist (HOLED + rebuild).
+    # Pre-computes contiguous free-page runs and issues ONE madvise per run
+    # instead of one per page (reduces syscall count from up to 64 to 1-3).
     private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
         page = Platform.host_page_size
@@ -489,7 +491,6 @@ module Gcry
         first_page = data0 & ~(page - 1)
         last_page = (data1 - 1) & ~(page - 1)
         n_pages = ((last_page - first_page) // page) + 1
-        # 256 KiB chunks → ≤16 host pages on 16 KiB Darwin; ≤64 on 4 KiB Linux.
         return false if n_pages == 0 || n_pages > 64
 
         live_mask = 0_u64
@@ -512,17 +513,26 @@ module Gcry
         end
 
         any = false
+        # Walk pages and coalesce contiguous free runs into single madvise.
         idx = 0
-        p = first_page
-        while p <= last_page && idx < n_pages.to_i32
-          if p >= data0 && (p + page) <= data1 && (live_mask & (1_u64 << idx)) == 0
-            if Platform.release_physical_pages(p, page)
-              @dontneed_bytes += page
-              any = true
+        while idx < n_pages.to_i32
+          if (live_mask & (1_u64 << idx)) == 0
+            run_start = first_page + idx.to_u64 * page
+            # Extend the run while pages are free and within chunk data.
+            while idx < n_pages.to_i32 && (live_mask & (1_u64 << idx)) == 0
+              idx += 1
             end
+            run_end = first_page + idx.to_u64 * page
+            len = run_end - run_start
+            if run_start >= data0 && run_end <= data1 && len > 0
+              if Platform.release_physical_pages(run_start, len)
+                @dontneed_bytes += len
+                any = true
+              end
+            end
+          else
+            idx += 1
           end
-          p += page
-          idx += 1
         end
         any
       {% else %}
