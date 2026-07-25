@@ -49,7 +49,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
 |--------------|----:|--------:|------:|-------|
 | 2026-07-25 `macos-aarch64-20260725` | **~94%** | **~91%** | **~0.90–0.93×** | Mach STW dogfood (pre-tag) |
 | **0.10.0** `macos-aarch64-v0.10.0` | **~97%** | **~90%** | **~0.96–0.97×** | First tagged macOS process GC cut |
-| **Unreleased** `macos-aarch64-unreleased` | **~100%** | **~94%** | **~10×** | Side mark bitmap + retain 64 MiB; throughput + latency parity, RSS regression from bitmap pages |
+| **0.11.0** `macos-aarch64-v0.11.0` | **~100%** | **~94%** | **~10×** | Side mark bitmap + retain 64 MiB; throughput + latency parity, RSS regression from bitmap pages |
 
 ## How to record (macOS)
 
