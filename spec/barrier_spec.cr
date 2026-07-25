@@ -148,6 +148,47 @@ describe "Gcry sound incremental (dirty re-scan)" do
     end
   end
 
+  it "gracefully skips sweep when process-GC has no barrier" do
+    # Regression: when incremental cycles start but no page-dirty barrier can
+    # be armed (Darwin), collect_a_little must avoid sweeping live objects.
+    # This test verifies the guard: begin_incremental bails early, so
+    # collect_a_little returns false and the caller falls through to full STW.
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.scan_static_roots = true
+      # Simulate process-GC mode (Darwin): stop_the_world = true signals the
+      # incremental guard that a concurrent mutator may write between slices.
+      # We do NOT actually run stop_world here (single-threaded spec would
+      # deadlock) — the guard only checks @stop_the_world, it doesn't invoke it.
+      heap.stop_the_world = true
+      heap.incremental_auto = true
+      heap.incremental_work = 64
+      heap.gc_threshold = UInt64::MAX
+      heap.allow_mprotect_barrier = false
+
+      root = heap.malloc(64)
+      heap.add_root(root)
+      80.times { heap.malloc(32) }
+
+      # collect_a_little must bail — no barrier -> no inc_active.
+      # Returning false without sweeping means no major_collection was
+      # credited + root stays alive.
+      finished = heap.collect_a_little(64)
+      finished.should be_false
+      heap.live?(root).should be_true
+      heap.major_collections.should eq(0)
+
+      # Full STW collect still works correctly.
+      heap.collect(scan_stack: false)
+      heap.live?(root).should be_true
+      heap.major_collections.should eq(1)
+    ensure
+      heap.stop_the_world = false
+      heap.destroy
+    end
+  end
+
   it "exposes pause percentiles via Gcry.pause_stats" do
     heap = Gcry::Heap.new
     Gcry.default_heap = heap

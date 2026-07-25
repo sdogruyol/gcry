@@ -264,6 +264,10 @@ module Gcry
         begin_incremental(scan_stack: true, roots: nil)
       end
 
+      # If begin_incremental couldn't arm a barrier, inc_active stays false
+      # and we bail out so the alloc path falls through to a full STW collect.
+      return false unless @inc_active
+
       @collecting = true
       @incremental_marking = true
       finished = false
@@ -802,7 +806,23 @@ module Gcry
       @sp_clamp_fallbacks = 0_u64
     end
 
+    # Returns true when a page-dirty barrier backend is available.
+    # Incremental mark is unsound without barrier re-scan — live objects
+    # written into already-scanned pages between slices would be swept.
+    private def incremental_barrier_possible? : Bool
+      !select_barrier_backend.none?
+    end
+
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
+      # Without a page-dirty barrier, incremental mark is unsound when a
+      # concurrent mutator can write pointers into already-scanned pages
+      # between slices (process GC with @stop_the_world).  Single-threaded
+      # library heaps are safe only when the caller never mutates the object
+      # graph between slices — we allow it for backward compat with specs.
+      if @stop_the_world && !incremental_barrier_possible?
+        return
+      end
+
       @collecting = true
       @incremental_marking = true
       @inc_active = true
