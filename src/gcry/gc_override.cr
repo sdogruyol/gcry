@@ -39,14 +39,18 @@ module GC
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
-    # Keep recently-freed chunks as dormant (MADV_DONTNEED) up to 64 MiB.
+    # Keep recently-freed chunks as dormant (MADV_DONTNEED-style page release)
+    # up to 8 MiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently)
+    # and 64 MiB on other platforms.
     # Pure-munmap churn under Kemal-style workloads fragments the VMA space
     # and inflates RSS via repeated mmap+madvise cycles; a moderate retain
     # budget lets the kernel drop physical pages while keeping VMA cache
-    # hot for the next reuse, cutting measured RSS by ~5x. 64 MiB is the
-    # sweet spot — 32 MiB regressed by ~50% (reclaim thrashing); 0 regressed
-    # ~70% (VMA fragmentation).
-    heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+    # hot for the next reuse.
+    {% if flag?(:darwin) %}
+      heap.empty_chunk_retain = 8_u64 * 1024_u64 * 1024_u64
+    {% else %}
+      heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+    {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true

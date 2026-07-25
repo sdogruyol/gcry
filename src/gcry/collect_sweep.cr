@@ -161,9 +161,10 @@ module Gcry
               else
                 ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
                 # Free-page physical release: Linux opt-in (GCRY_PAGE_DONTNEED);
-                # Darwin process default (MAP_FIXED remap — MADV_DONTNEED is a
-                # no-op for RSS there). Run whenever the chunk has any free
-                # payload so dense HTTP heaps still drop dead pages.
+                # Darwin process default (MADV_FREE_REUSABLE — drops RSS like
+                # Linux DONTNEED but keeps VMA cache for fast reuse).
+                # Run whenever the chunk has any free payload so dense HTTP
+                # heaps still drop dead pages.
                 if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                    usable_payload > 0 && live_payload < usable_payload
                   if dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
