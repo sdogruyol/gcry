@@ -65,6 +65,11 @@ module Gcry
     # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
     property type_id_gate : Bool = false
     getter type_id_root_rejects : UInt64 = 0_u64
+    # type_id_root_rejections that were later revisited and would have passed —
+    # useful for tuning the upper-bound heuristic (false negatives == UAF risk).
+    # When non-zero in production, the gate is too strict and the upper bound
+    # (1_000_000) needs to grow or the layout-aware gate must take over.
+    getter type_id_root_false_negatives : UInt64 = 0_u64
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
@@ -308,6 +313,7 @@ module Gcry
       @pause_ring_len = 0
       @pause_ring_pos = 0
       PAUSE_RING_SIZE.times { |i| @pause_ring[i] = 0_u64 }
+      PAUSE_HDR_BUCKETS.times { |i| @pause_hdr[i] = 0_u64 }
     end
 
     # Approximate percentile over the last up to PAUSE_RING_SIZE pauses (ns).
@@ -458,9 +464,28 @@ module Gcry
       finish = base + chunk.value.mapped_bytes
       @heap_min = base if base < @heap_min
       @heap_max = finish if finish > @heap_max
+      ensure_bitmap_covers(@heap_min, @heap_max)
+    end
+
+    protected def ensure_bitmap_covers(lo : UInt64, hi : UInt64) : Nil
+      return if lo >= hi || lo == UInt64::MAX
+      bm = Gcry.current_mark_bitmap
+      return unless bm
+      # 1 bit per word-aligned address → bytes_needed = (range / 8).
+      range_bytes = (hi - lo) >> 3
+      # Round up to page, leave headroom for one more chunk growth.
+      needed = range_bytes + (@small_chunk_bytes >> 3)
+      if bm.base_addr != lo || !bm.covers?(lo, hi)
+        bm.relocate(lo, needed)
+      elsif bm.capacity_bytes < needed
+        bm.relocate(lo, needed)
+      end
     end
 
     protected def update_heap_bounds_after_unmap : Nil
+      @last_chunk_idx = -1
+      @last_chunk_lo = 0_u64
+      @last_chunk_hi = 0_u64
       @heap_min = UInt64::MAX
       @heap_max = 0_u64
       each_chunk do |chunk|
@@ -600,6 +625,68 @@ module Gcry
       @pause_ring[@pause_ring_pos] = elapsed
       @pause_ring_pos = (@pause_ring_pos + 1) % PAUSE_RING_SIZE
       @pause_ring_len += 1 if @pause_ring_len < PAUSE_RING_SIZE
+      # HDR bucket: floor(log2(elapsed)) clamped to [0, PAUSE_HDR_BUCKETS-1].
+      # 0 ns and very small pauses still need a bucket → use msb of (elapsed | 1).
+      bucket = elapsed < 1_u64 ? 0 : bucket_for(elapsed)
+      @pause_hdr[bucket] += 1
+    end
+
+    @[AlwaysInline]
+    private def bucket_for(elapsed_ns : UInt64) : Int32
+      # Bit-scan reverse + saturate to PAUSE_HDR_BUCKETS - 1.
+      v = elapsed_ns
+      idx = 0
+      while v >= 2
+        v >>= 1
+        idx += 1
+        break if idx >= PAUSE_HDR_BUCKETS - 1
+      end
+      idx
+    end
+
+    # HDR-based percentile over ALL recorded pauses (not bounded by ring size).
+    # `pct` is in [0.0, 100.0]; returns 0 when no samples are recorded.
+    def pause_percentile_hdr_ns(pct : Float64) : UInt64
+      return 0_u64 if @pause_count == 0
+      # Rank of the target sample in the cumulative distribution.
+      # Linear interpolation between adjacent samples so p99.9 lands inside a
+      # bucket instead of snapping to its high edge.
+      total = @pause_count.to_f64
+      rank = (pct / 100.0) * total
+      rank = 0.0 if rank < 0.0
+      target = rank
+      cum = 0.0
+      chosen = 0_u64
+      chosen_high = 0_u64
+      PAUSE_HDR_BUCKETS.times do |i|
+        cnt = @pause_hdr[i].to_f64
+        next if cnt <= 0
+        if cum + cnt >= target
+          # Bucket bounds: [2^i, 2^(i+1)). Interpolate inside the bucket based
+          # on where the rank falls within the bucket mass.
+          lo = 1_u64 << i
+          hi = i + 1 < PAUSE_HDR_BUCKETS - 1 ? (1_u64 << (i + 1)) - 1_u64 : 1_u64 << (PAUSE_HDR_BUCKETS - 1)
+          within = (target - cum) / cnt
+          span = (hi.to_f64 - lo.to_f64) + 1.0
+          chosen = lo + (within * span).to_u64
+          # Clamp into [lo, hi].
+          chosen = lo if chosen < lo
+          chosen = hi if chosen > hi
+          return chosen
+        end
+        cum += cnt
+        chosen_high = (1_u64 << (i + 1)) - 1_u64
+      end
+      chosen_high
+    end
+
+    # Snapshot the HDR histogram (counts per power-of-two bucket, ns). Useful
+    # for `/metrics`-style scrapers that want full distribution not just
+    # percentiles.
+    def pause_hdr_snapshot : StaticArray(UInt64, PAUSE_HDR_BUCKETS)
+      out = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
+      PAUSE_HDR_BUCKETS.times { |i| out[i] = @pause_hdr[i] }
+      out
     end
 
     private def note_collection_begin : Nil
@@ -609,6 +696,7 @@ module Gcry
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
       @type_id_root_rejects = 0_u64
+      @type_id_root_false_negatives = 0_u64
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
     end

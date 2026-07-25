@@ -255,9 +255,12 @@ module Gcry
       end
     end
 
-    # Remove a fully free size-class chunk from the heap and rebuild that
-    # class's freelist from remaining chunks (avoids dangling freelist links).
-    # Used by explicit paths; major sweep batches empty-chunk release itself.
+    # Defer an empty size-class chunk to the post-STW `flush_pending_empty_chunks`
+    # release list. Safe to call from within STW: the chunk is unlinked now and
+    # the actual munmap runs after threads are resumed (avoids blocking other
+    # mutators on kernel VM locks). Also removes the freelist entries that
+    # pointed inside the chunk so we never hand a user pointer that lives in
+    # soon-to-be-unmapped memory back to an allocation.
     private def reclaim_empty_chunk(chunk : ChunkHeader*) : Nil
       return if ChunkHeader.large?(chunk)
 
@@ -266,13 +269,24 @@ module Gcry
 
       nursery = ChunkHeader.nursery?(chunk)
       mapped = chunk.value.mapped_bytes
+      base = chunk.address
+      finish = base + mapped
+
+      # Drop any free-block pointers inside this range BEFORE unlinking — the
+      # freelist may still hold a node that lives in the about-to-be-released
+      # chunk. unlink_freelist_range walks the freelist and rebuilds the head
+      # from entries outside [base, finish).
+      unlink_freelist_range(class_index, nursery, base, finish)
+
       unlink_chunk(chunk)
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
       @bytes_reclaimed_since_gc += mapped
-      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
-      Platform.invalidate_static_root_cache
-      rebuild_size_class_freelist(class_index, nursery)
+      # Defer the actual munmap to flush_pending_empty_chunks (post-STW).
+      # Previously this called LibC.munmap inline, which could stall mutators
+      # behind the kernel VM lock while we held the world stopped.
+      chunk.value.next = @pending_empty_chunks
+      @pending_empty_chunks = chunk
       update_heap_bounds_after_unmap
     end
 

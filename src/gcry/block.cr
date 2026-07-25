@@ -23,8 +23,12 @@ module Gcry
     end
 
     module Flags
-      FREE         =  1_u32
-      ATOMIC       =  2_u32
+      FREE   = 1_u32
+      ATOMIC = 2_u32
+      # Bit 4 (was MARK) is now sourced from the side MarkBitmap; the in-header
+      # bit is kept reserved to preserve the wire layout of BlockHeader (ABI
+      # stability for the GC facade). `marked?/set_mark/clear_mark` below read
+      # and write through the bitmap and no longer touch `flags`.
       MARK         =  4_u32
       LARGE        =  8_u32
       NURSERY      = 16_u32 # young generation (Phase 6)
@@ -56,8 +60,43 @@ module Gcry
       (header.value.flags & Flags::NURSERY) != 0
     end
 
+    # MARK flag is now authoritative in the side MarkBitmap (see mark_bitmap.cr).
+    # These helpers resolve the user pointer for a header and delegate to the
+    # bitmap; the in-header MARK flag is never read or written through them.
     def self.marked?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::MARK) != 0
+      bm = Gcry.current_mark_bitmap
+      return false unless bm
+      bm.marked?(user_from(header).address)
+    end
+
+    def self.set_mark(header : BlockHeader*) : Nil
+      bm = Gcry.current_mark_bitmap
+      return unless bm
+      bm.set(user_from(header).address)
+    end
+
+    def self.clear_mark(header : BlockHeader*) : Nil
+      bm = Gcry.current_mark_bitmap
+      return unless bm
+      bm.clear(user_from(header).address)
+    end
+
+    def self.marked_user?(user : Void*) : Bool
+      bm = Gcry.current_mark_bitmap
+      return false unless bm
+      bm.marked?(user.address)
+    end
+
+    def self.set_mark_user(user : Void*) : Nil
+      bm = Gcry.current_mark_bitmap
+      return unless bm
+      bm.set(user.address)
+    end
+
+    def self.clear_mark_user(user : Void*) : Nil
+      bm = Gcry.current_mark_bitmap
+      return unless bm
+      bm.clear(user.address)
     end
 
     def self.finalizer?(header : BlockHeader*) : Bool
@@ -77,18 +116,6 @@ module Gcry
     def self.set_disappearing(header : BlockHeader*) : Nil
       h = header.value
       h.flags |= Flags::DISAPPEARING
-      header.value = h
-    end
-
-    def self.set_mark(header : BlockHeader*) : Nil
-      h = header.value
-      h.flags |= Flags::MARK
-      header.value = h
-    end
-
-    def self.clear_mark(header : BlockHeader*) : Nil
-      h = header.value
-      h.flags &= ~Flags::MARK
       header.value = h
     end
 
@@ -192,5 +219,27 @@ module Gcry
   # needs Fiber, but `GC.init` (and thus our first mmap) runs before Fiber.init.
   def self.mmap_failed?(ptr : Void*) : Bool
     ptr.null? || ptr.address == UInt64::MAX
+  end
+
+  # The currently active side MarkBitmap. There is at most one bitmap per
+  # process; library heaps that pre-date `@@mark_bitmap` initialization will
+  # see `nil` here and the mark helpers degrade to no-ops (the legacy in-header
+  # MARK flag path is gone; the bitmap is the sole authority).
+  #
+  # Note: not Atomic. Crystal reference types are always read through a GC-managed
+  # pointer; without one (we are not on the GC heap here), tearing isn't the
+  # issue — the issue is concurrent destroy. The MarkBitmap#destroy path now
+  # nulls `@base` BEFORE the unmap, so any reader that already observed a
+  # non-nil base continues to dereference a still-mapped page (until the unmap
+  # completes). Together with the `current_mark_bitmap = nil` clear in
+  # Heap#destroy, this closes the use-after-free window for library heaps.
+  @@mark_bitmap : MarkBitmap? = nil
+
+  def self.current_mark_bitmap : MarkBitmap?
+    @@mark_bitmap
+  end
+
+  def self.current_mark_bitmap=(bitmap : MarkBitmap?) : MarkBitmap?
+    @@mark_bitmap = bitmap
   end
 end
