@@ -40,8 +40,8 @@ module Gcry
           if ChunkHeader.large?(chunk)
             header = ChunkHeader.data_start(chunk).as(BlockHeader*)
             unless BlockHeader.free?(header)
-              if BlockHeader.marked?(header)
-                BlockHeader.clear_mark(header)
+              if heap_marked?(header)
+                heap_clear_mark(header)
               elsif major
                 # Recycle mapping — never munmap inside STW (Linux VMA munmap
                 # of thousands of large HTTP buffers dominated pause time).
@@ -71,7 +71,7 @@ module Gcry
                   usable_payload += payload.to_u64
                   header = cursor.as(BlockHeader*)
                   unless BlockHeader.free?(header)
-                    if BlockHeader.marked?(header)
+                    if heap_marked?(header)
                       any_live = true
                       live_payload += payload.to_u64
                     end
@@ -83,8 +83,8 @@ module Gcry
                   while (cursor + block_bytes) <= limit
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      if BlockHeader.marked?(header)
-                        BlockHeader.clear_mark(header)
+                      if heap_marked?(header)
+                        heap_clear_mark(header)
                       else
                         reclaim_small(chunk, header, payload)
                       end
@@ -107,8 +107,8 @@ module Gcry
                   header = cursor.as(BlockHeader*)
                   unless BlockHeader.free?(header)
                     if major || BlockHeader.nursery?(header)
-                      if BlockHeader.marked?(header)
-                        BlockHeader.clear_mark(header)
+                      if heap_marked?(header)
+                        heap_clear_mark(header)
                         BlockHeader.promote(header) unless major
                         any_live = true
                         live_payload += payload.to_u64 if major

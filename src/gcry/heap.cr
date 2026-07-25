@@ -45,6 +45,14 @@ module Gcry
     # marking no longer dirties BlockHeader cache lines, and `clear_all_marks`
     # becomes a single `memset(0)` over the bitmap.
     @mark_bitmap : MarkBitmap? = nil
+    # Inline bitmap state (mirrored from @mark_bitmap on relocate/destroy).
+    # Kept on the heap struct so `marked?`/`set_mark`/`clear_mark` can answer
+    # in O(1) without dereferencing the singleton — the heap's hot fields
+    # (`@heap_min`, `@heap_max`) live in the same cache line and the bitmap
+    # state is read on every mark candidate.
+    @mark_bitmap_base : UInt64 = 0_u64
+    @mark_bitmap_base_addr : UInt64 = 0_u64
+    @mark_bitmap_cap_bits : UInt64 = 0_u64
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # True while freelist blocks are still MAP_ANONYMOUS-zeroed (skip malloc clear).
@@ -183,6 +191,11 @@ module Gcry
         # before unmap so any reader that already captured the pointer also
         # observes a coherent, soon-to-be-unmapped base.
         Gcry.current_mark_bitmap = nil if Gcry.current_mark_bitmap.same?(bm)
+        # Null the hot mirrored fields so a stale heap read doesn't dereference
+        # an unmapped mapping.
+        @mark_bitmap_base = 0_u64
+        @mark_bitmap_base_addr = 0_u64
+        @mark_bitmap_cap_bits = 0_u64
         bm.destroy
         @mark_bitmap = nil
       end
@@ -355,7 +368,7 @@ module Gcry
       # Allocate black during any in-progress collection (STW or incremental)
       # so mid-collect allocations are not swept.
       if @incremental_marking || @collecting
-        BlockHeader.set_mark(header)
+        heap_set_mark(header)
       end
 
       @free_bytes -= payload if @free_bytes >= payload
@@ -387,7 +400,7 @@ module Gcry
 
       header = BlockHeader.from_user(user)
       BlockHeader.set_used(header, payload, flags)
-      BlockHeader.set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark(header) if @incremental_marking || @collecting
 
       @free_bytes -= payload if @free_bytes >= payload
       user
@@ -477,14 +490,14 @@ module Gcry
       if user = take_large_free(mapped)
         header = BlockHeader.from_user(user)
         BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-        BlockHeader.set_mark(header) if @incremental_marking || @collecting
+        heap_set_mark(header) if @incremental_marking || @collecting
         return {user, true}
       end
 
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-      BlockHeader.set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark(header) if @incremental_marking || @collecting
       {BlockHeader.user_from(header), false}
     end
 
@@ -681,6 +694,52 @@ module Gcry
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
       @last_chunk_hi = 0_u64
+    end
+
+    # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
+    # These read the heap's mirrored fields (same cache line as @heap_min /
+    # @heap_max) instead of going through `Gcry.current_mark_bitmap` plus a
+    # MarkBitmap#marked? virtual dispatch. On a wrk -c 100 -d 5 /json run,
+    # the extra dereference shows up as ~50% throughput loss because every
+    # mark candidate — i.e. every word scanned — pays for it.
+
+    @[AlwaysInline]
+    private def heap_marked?(header : BlockHeader*) : Bool
+      base = @mark_bitmap_base
+      return false if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return false if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      ((word_ptr.value >> bit) & 1_u64) != 0
+    end
+
+    @[AlwaysInline]
+    private def heap_set_mark(header : BlockHeader*) : Nil
+      base = @mark_bitmap_base
+      return if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      word_ptr.value |= 1_u64 << bit
+    end
+
+    @[AlwaysInline]
+    private def heap_clear_mark(header : BlockHeader*) : Nil
+      base = @mark_bitmap_base
+      return if base == 0
+      user_addr = BlockHeader.user_from(header).address
+      bit_index = user_addr - @mark_bitmap_base_addr
+      return if bit_index >= @mark_bitmap_cap_bits
+      word_index = (bit_index >> 6).to_i32
+      bit = (bit_index & 63).to_i32
+      word_ptr = Pointer(UInt64).new(base) + word_index
+      word_ptr.value &= ~(1_u64 << bit)
     end
 
     # Fallback full rebuild when the incremental index is marked dirty.

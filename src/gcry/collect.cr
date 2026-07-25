@@ -476,9 +476,17 @@ module Gcry
       # Round up to page, leave headroom for one more chunk growth.
       needed = range_bytes + (@small_chunk_bytes >> 3)
       if bm.base_addr != lo || !bm.covers?(lo, hi)
-        bm.relocate(lo, needed)
+        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
+          @mark_bitmap_base = base.address
+          @mark_bitmap_base_addr = base_addr
+          @mark_bitmap_cap_bits = cap_bits
+        end
       elsif bm.capacity_bytes < needed
-        bm.relocate(lo, needed)
+        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
+          @mark_bitmap_base = base.address
+          @mark_bitmap_base_addr = base_addr
+          @mark_bitmap_cap_bits = cap_bits
+        end
       end
     end
 

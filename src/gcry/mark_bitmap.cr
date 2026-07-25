@@ -70,7 +70,11 @@ module Gcry
     # bitmap — never a stale pointer to an unmapped region. Word-aligned pointer
     # stores are atomic on every supported architecture, so a parallel reader
     # sees one or the other.
-    def relocate(base_addr : UInt64, capacity_bytes : UInt64) : Nil
+    #
+    # The optional *mirror* block is invoked AFTER the new mapping is published
+    # so the calling Heap can mirror (base, base_addr, cap_bits) into its own
+    # hot fields without an extra round-trip through `MarkBitmap#marked?`.
+    def relocate(base_addr : UInt64, capacity_bytes : UInt64, & : (UInt64*, UInt64, UInt64) ->) : Nil
       target = capacity_bytes
       target = INITIAL_BYTES if target < INITIAL_BYTES
       target = next_power_of_two(target) if target > INITIAL_BYTES
@@ -94,13 +98,23 @@ module Gcry
         if !old_base.null?
           LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
         end
+        # Mirror to caller's hot fields AFTER the publish so the heap-side
+        # snapshot matches what concurrent readers can observe.
+        yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64 if @base
       else
         # Same size — base shifted. Old bit offsets are now meaningless;
         # wipe the bitmap. Any reader after the publish sees zeros until the
         # next `clear_all_marks` runs.
         @base_addr = base_addr
         zero_all
+        yield @base.as(UInt64*), base_addr, @capacity_bytes.to_u64 * 8_u64
       end
+    end
+
+    # Overload for callers that do not need the (base, base_addr, cap_bits)
+    # mirror (e.g. MarkBitmap#initialize before any heap is attached).
+    def relocate(base_addr : UInt64, capacity_bytes : UInt64) : Nil
+      relocate(base_addr, capacity_bytes) { |_b, _a, _c| nil }
     end
 
     # Test, set, clear — nil-safe and fast (constant time, no syscalls).
@@ -180,13 +194,28 @@ module Gcry
     end
 
     # Bulk zero of the bitmap (full clear). Used when the heap range is reset
-    # wholesale (e.g. on incremental cycle begin). Memset the whole mapping.
+    # wholesale (e.g. on incremental cycle begin). Word-at-a-time clear; the
+    # Crystal `memset` builtin is unavailable for opaque pointers, but UInt64
+    # stores through the mmap mapping land at full memory bandwidth and the
+    # kernel treats untouched pages as already-zero (MADV_DONTNEED-style).
     def zero_all : Nil
       return if @base.null?
-      i = 0_u64
-      while i < @mapped_bytes
-        (@base.as(UInt8*) + i).value = 0_u8
+      words = (@mapped_bytes >> 3).to_i32
+      i = 0_i32
+      base = @base.as(UInt64*)
+      while i < words
+        (base + i).value = 0_u64
         i += 1
+      end
+      # Trailing bytes (mapped_bytes rounded up to page but we operate in words).
+      tail = @mapped_bytes & 7_u64
+      if tail > 0
+        j = (@base.as(UInt8*)) + (words.to_u64 * 8_u64)
+        k = 0_u64
+        while k < tail
+          (j + k).value = 0_u8
+          k += 1
+        end
       end
     end
 

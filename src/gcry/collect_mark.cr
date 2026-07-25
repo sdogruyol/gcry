@@ -49,12 +49,12 @@ module Gcry
         return
       end
 
-      return if BlockHeader.marked?(header)
+      return if heap_marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      BlockHeader.set_mark(header)
+      heap_set_mark(header)
       @mark_stack.push(header)
     end
 
@@ -82,12 +82,12 @@ module Gcry
       return unless header
       return if BlockHeader.free?(header)
 
-      return if BlockHeader.marked?(header)
+      return if heap_marked?(header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      BlockHeader.set_mark(header)
+      heap_set_mark(header)
     end
 
     # Crystal Reference payloads start with type_id (Int32). Reject if that
