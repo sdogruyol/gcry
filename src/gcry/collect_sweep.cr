@@ -136,8 +136,9 @@ module Gcry
                 if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
                   if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
                     # Optional: keep VA with DONTNEED when retain > 0.
+                    # Set DORMANT flag but defer madvise to post-STW
+                    # `flush_pending_dormant_chunks` (kernel VM lock outside STW).
                     ChunkHeader.set_dormant(chunk, true)
-                    dontneed_chunk_data(chunk)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
                     unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
@@ -160,23 +161,16 @@ module Gcry
                 end
               else
                 ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
-                # Free-page physical release: Linux opt-in (GCRY_PAGE_DONTNEED);
-                # Darwin process default (MADV_FREE_REUSABLE — drops RSS like
-                # Linux DONTNEED but keeps VMA cache for fast reuse).
-                # Run whenever the chunk has any free payload so dense HTTP
-                # heaps still drop dead pages.
+                # Free-page physical release: detect free pages in STW, set HOLED
+                # flag; actual madvise runs post-STW in flush_pending_page_release.
                 if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                    usable_payload > 0 && live_payload < usable_payload
-                  if dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
-                    ChunkHeader.set_holed(chunk, true)
-                    bit = 1_u64 << class_index
-                    if ChunkHeader.nursery?(chunk)
-                      rebuild_nursery_mask |= bit
-                    else
-                      rebuild_mask |= bit
-                    end
+                  ChunkHeader.set_holed(chunk, true)
+                  bit = 1_u64 << class_index
+                  if ChunkHeader.nursery?(chunk)
+                    rebuild_nursery_mask |= bit
                   else
-                    ChunkHeader.set_holed(chunk, false)
+                    rebuild_mask |= bit
                   end
                 else
                   ChunkHeader.set_holed(chunk, false)
@@ -263,6 +257,51 @@ module Gcry
         @unmapped_bytes += run_total
         LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
         chunk = nxt
+      end
+    end
+
+    # Apply MADV_FREE / DONTNEED to dormant chunks after STW.
+    # Walks @chunks; dormant chunks stay in the chunk list but their
+    # physical pages are released outside STW (kernel VM lock avoided).
+    # Coalesces contiguous dormant ranges into a single madvise.
+    private def flush_pending_dormant_chunks : Nil
+      data_lo = UInt64::MAX
+      data_hi = 0_u64
+      page = Platform.host_page_size
+
+      each_chunk do |chunk|
+        next unless ChunkHeader.dormant?(chunk)
+        base = ChunkHeader.data_start(chunk).address
+        finish = base + chunk.value.mapped_bytes
+        start_page = (base + page - 1) & ~(page - 1)
+        end_page = finish & ~(page - 1)
+        if start_page < end_page
+          if data_hi == start_page
+            data_hi = end_page
+          else
+            if data_hi > data_lo
+              Platform.release_physical_pages(data_lo, data_hi - data_lo)
+              @dontneed_bytes += data_hi - data_lo
+            end
+            data_lo = start_page
+            data_hi = end_page
+          end
+        end
+      end
+      if data_hi > data_lo
+        Platform.release_physical_pages(data_lo, data_hi - data_lo)
+        @dontneed_bytes += data_hi - data_lo
+      end
+    end
+
+    # Apply per-chunk free-page madvise to HOLED chunks after STW.
+    private def flush_pending_page_release_chunks : Nil
+      each_chunk do |chunk|
+        next unless ChunkHeader.holed?(chunk)
+        next if ChunkHeader.large?(chunk)
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
       end
     end
 

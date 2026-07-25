@@ -137,7 +137,6 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # After a successful clear_soft_dirty, minors may scan dirty pages only.
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
@@ -442,6 +441,8 @@ module Gcry
 
     protected def destroy_collector : Nil
       flush_pending_empty_chunks
+      flush_pending_dormant_chunks
+      flush_pending_page_release_chunks
       abort_incremental
       @roots.clear
       @mark_stack.destroy
@@ -678,6 +679,10 @@ module Gcry
 
       # Munmap outside STW — empty chunks + excess large freelist (reuse common).
       flush_pending_empty_chunks
+      # DORMANT madvise outside STW — kernel VM lock contention avoided.
+      flush_pending_dormant_chunks
+      # Partial-chunk free-page madvise outside STW.
+      flush_pending_page_release_chunks
       trim_large_cache
 
       # After a major collect, record the heap range observation so the
