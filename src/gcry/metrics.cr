@@ -47,6 +47,9 @@ module Gcry
     getter clear_stack_bytes_total : UInt64
     getter fiber_scrub_runs : UInt64
     getter fiber_scrub_bytes_total : UInt64
+    getter nursery_survival_bytes : UInt64
+    getter nursery_alloc_before_minor : UInt64
+    getter nursery_survival_rate_pct : UInt64
 
     def initialize(
       @collections : UInt64, @major_collections : UInt64, @minor_collections : UInt64,
@@ -68,6 +71,8 @@ module Gcry
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
       @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
       @fiber_scrub_runs : UInt64, @fiber_scrub_bytes_total : UInt64,
+      @nursery_survival_bytes : UInt64, @nursery_alloc_before_minor : UInt64,
+      @nursery_survival_rate_pct : UInt64,
     )
     end
   end
@@ -125,6 +130,9 @@ module Gcry
       heap.clear_stack_bytes_total,
       heap.fiber_scrub_runs,
       heap.fiber_scrub_bytes_total,
+      heap.nursery_survival_bytes,
+      heap.nursery_alloc_before_minor,
+      heap.nursery_survival_rate_pct,
     )
   end
 
@@ -240,6 +248,15 @@ module Gcry
       io << "# HELP #{prefix}_fiber_scrub_bytes_total Bytes zeroed on parked fiber stacks\n"
       io << "# TYPE #{prefix}_fiber_scrub_bytes_total counter\n"
       io << "#{prefix}_fiber_scrub_bytes_total #{m.fiber_scrub_bytes_total}\n"
+      io << "# HELP #{prefix}_nursery_survival_bytes Surviving nursery payload bytes from last minor\n"
+      io << "# TYPE #{prefix}_nursery_survival_bytes gauge\n"
+      io << "#{prefix}_nursery_survival_bytes #{m.nursery_survival_bytes}\n"
+      io << "# HELP #{prefix}_nursery_alloc_before_minor Nursery alloc bytes before last minor\n"
+      io << "# TYPE #{prefix}_nursery_alloc_before_minor gauge\n"
+      io << "#{prefix}_nursery_alloc_before_minor #{m.nursery_alloc_before_minor}\n"
+      io << "# HELP #{prefix}_nursery_survival_rate_pct Nursery survival rate (0-100)\n"
+      io << "# TYPE #{prefix}_nursery_survival_rate_pct gauge\n"
+      io << "#{prefix}_nursery_survival_rate_pct #{m.nursery_survival_rate_pct}\n"
     end
   end
 end

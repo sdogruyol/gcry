@@ -110,6 +110,9 @@ module Gcry
                       if heap_marked?(header)
                         heap_clear_mark(header)
                         BlockHeader.promote(header) unless major
+                        unless major
+                          @nursery_survival_bytes += payload.to_u64
+                        end
                         any_live = true
                         live_payload += payload.to_u64 if major
                       else

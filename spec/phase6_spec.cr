@@ -84,6 +84,79 @@ describe "Gcry nursery (minor GC)" do
       heap.destroy
     end
   end
+
+  it "records nursery survival statistics after minor" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = true
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_threshold = UInt64::MAX
+      heap.adaptive_nursery = false
+
+      keep = heap.malloc(64)
+      heap.add_root(keep)
+      # Alloc more in the nursery so there's alloc_before_minor > 0.
+      10.times { heap.malloc(32) }
+
+      heap.minor_collect(scan_stack: false)
+
+      # All nursery allocs including keep should be in nursery_alloc_before_minor.
+      heap.nursery_alloc_before_minor.should be > 0
+      heap.nursery_survival_rate_pct.should be >= 0
+      heap.nursery_survival_rate_pct.should be <= 100
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "adjusts nursery threshold via adaptation and stays within clamp bounds" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = true
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_threshold = 1024
+      heap.adaptive_nursery = true
+
+      keep = heap.malloc(16)
+      heap.add_root(keep)
+
+      # Several minors: keep survives, temp allocs die → mixed survival.
+      5.times do
+        20.times { heap.malloc(64) }
+        heap.minor_collect(scan_stack: false)
+      end
+
+      # The adaptive threshold should be clamped within bounds.
+      heap.nursery_threshold.should be >= Gcry::Heap::MIN_ADAPTIVE_NURSERY_THRESHOLD
+      heap.nursery_threshold.should be <= Gcry::Heap::MAX_ADAPTIVE_NURSERY_THRESHOLD
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "disables adaptive nursery when property is false" do
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = true
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_threshold = 2048
+      heap.adaptive_nursery = false
+
+      prev_thr = heap.nursery_threshold
+      keep = heap.malloc(16)
+      heap.add_root(keep)
+
+      3.times do
+        20.times { heap.malloc(64) }
+        heap.minor_collect(scan_stack: false)
+      end
+
+      # With adaptive disabled, threshold should stay at 2048.
+      heap.nursery_threshold.should eq(prev_thr)
+    ensure
+      heap.destroy
+    end
+  end
 end
 
 describe "Gcry incremental mark" do

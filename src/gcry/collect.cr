@@ -21,6 +21,10 @@ module Gcry
     DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
     PROCESS_GC_THRESHOLD         = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
     DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
+    MIN_ADAPTIVE_NURSERY_THRESHOLD =   65536_u64 # 64 KiB floor
+    MAX_ADAPTIVE_NURSERY_THRESHOLD = 8388608_u64 # 8 MiB cap — prevents unbounded growth
+    NURSERY_SURVIVAL_HISTORY     =          10   # ring buffer for adaptive threshold
+    TARGET_SURVIVAL_PCT          =          50_u64
     DEFAULT_INCREMENTAL_WORK     =         1024
     MAX_AUTO_INCREMENTAL_SLICES  =            4 # slices per alloc when debt is high
     STATIC_ROOT_REFRESH_INTERVAL =       64_u64 # majors between /proc/self/maps refresh
@@ -98,6 +102,23 @@ module Gcry
     @bitmap_headroom_bytes : UInt64 = 0
 
     property nursery_enabled : Bool = true
+    # Adaptive nursery threshold: adjusted after each minor based on the
+    # survival rate of the last N minors. When survival is below the target
+    # (50%), the threshold shrinks to collect earlier; above, it grows to
+    # reduce collection frequency. Clamped to [MIN_ADAPTIVE_NURSERY_THRESHOLD,
+    # MAX_ADAPTIVE_NURSERY_THRESHOLD]. Disable with GCRY_DISABLE_ADAPTIVE_NURSERY=1.
+    property adaptive_nursery : Bool = true
+    # Ring buffer of nursery alloc bytes before each minor (last N entries).
+    @nursery_alloc_history = StaticArray(UInt64, NURSERY_SURVIVAL_HISTORY).new(0_u64)
+    # Ring buffer of surviving nursery bytes after each minor.
+    @nursery_survival_history = StaticArray(UInt64, NURSERY_SURVIVAL_HISTORY).new(0_u64)
+    # Current index in the ring buffers.
+    @nursery_history_pos : Int32 = 0
+    # Number of entries recorded so far.
+    @nursery_history_count : Int32 = 0
+    getter nursery_survival_bytes : UInt64 = 0_u64
+    getter nursery_alloc_before_minor : UInt64 = 0_u64
+    getter nursery_survival_rate_pct : UInt64 = 100_u64
     # Process GC: Crystal 1.21+ always has a Monitor (SYSMON) thread even at
     # ExecutionContext parallelism 1. Without STW + scanning that thread's
     # current fiber stack, live objects are swept → heap corruption under load.
@@ -543,6 +564,65 @@ module Gcry
       @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 2) : (@small_chunk_bytes >> 3)
     end
 
+    # Record nursery survival from the just-completed minor collection. Updates
+    # the ring buffer and the cached survival-rate. Also adjusts the nursery
+    # threshold via the adaptive-nursery policy when @adaptive_nursery is true.
+    private def note_nursery_survival : Nil
+      before = @nursery_alloc_before_minor
+      survived = @nursery_survival_bytes
+      return if before == 0 && survived == 0
+
+      pos = @nursery_history_pos
+      @nursery_alloc_history[pos] = before
+      @nursery_survival_history[pos] = survived
+      @nursery_history_pos = (pos + 1) % NURSERY_SURVIVAL_HISTORY
+      @nursery_history_count += 1 if @nursery_history_count < NURSERY_SURVIVAL_HISTORY
+
+      # Compute average survival rate across recorded history.
+      total_alloc = 0_u64
+      total_survived = 0_u64
+      count = @nursery_history_count
+      NURSERY_SURVIVAL_HISTORY.times do |i|
+        next if i >= count
+        total_alloc += @nursery_alloc_history[i]
+        total_survived += @nursery_survival_history[i]
+      end
+      @nursery_survival_rate_pct = if total_alloc > 0 && total_survived <= total_alloc
+                                     (total_survived * 100_u64) // total_alloc
+                                   elsif total_survived > total_alloc
+                                     100_u64
+                                   else
+                                     0_u64
+                                   end
+
+      # Adaptive threshold adjustment: tune the nursery threshold so the
+      # survival rate stays near TARGET_SURVIVAL_PCT (50%).
+      adjust_nursery_threshold if @adaptive_nursery && count > 0
+    end
+
+    # Adjust nursery_threshold based on the moving-average survival rate.
+    # - Survival > target: the nursery is too small → grow threshold.
+    # - Survival < target: the nursery is too large / too much survives → shrink.
+    # Clamped to [MIN_ADAPTIVE_NURSERY_THRESHOLD, MAX_ADAPTIVE_NURSERY_THRESHOLD].
+    # Always respects an explicit (non-default) GCRY_NURSERY threshold unless
+    # adaptive is explicitly enabled.
+    private def adjust_nursery_threshold : Nil
+      thr = @nursery_threshold
+      return if thr == UInt64::MAX || thr == 0
+      rate = @nursery_survival_rate_pct
+      if rate > TARGET_SURVIVAL_PCT
+        # Survival above target: grow threshold by 25%
+        thr = thr + (thr >> 2)
+      elsif rate < TARGET_SURVIVAL_PCT / 2
+        # Survival well below target (25%): shrink threshold by 25%
+        thr = thr - (thr >> 2)
+      end
+      # Clamp
+      thr = MIN_ADAPTIVE_NURSERY_THRESHOLD if thr < MIN_ADAPTIVE_NURSERY_THRESHOLD
+      thr = MAX_ADAPTIVE_NURSERY_THRESHOLD if thr > MAX_ADAPTIVE_NURSERY_THRESHOLD
+      @nursery_threshold = thr
+    end
+
     # Average of recorded growth history entries (0 if none).
     private def compute_bitmap_growth_avg : UInt64
       return 0_u64 if @bitmap_growth_count == 0
@@ -661,25 +741,33 @@ module Gcry
         enqueue_unreachable_finalizers
 
         t0 = monotonic_ns
+        # For minor collections, snapshot nursery alloc bytes and reset survival
+        # counter before sweep accumulates surviving nursery payload.
+        if !major
+          @nursery_alloc_before_minor = @nursery_alloc_bytes
+          @nursery_survival_bytes = 0_u64
+        end
         sweep(major: major)
         @last_phase_sweep_ns = monotonic_ns - t0
 
-        if major
-          @bytes_since_gc = 0_u64
-          @nursery_alloc_bytes = 0_u64
-          @expl_freed_bytes_since_gc = 0_u64
-          @major_collections += 1
-          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
-            Platform.invalidate_static_root_cache
-          end
-          # Next minor starts a fresh soft-dirty window after a major.
-          @soft_dirty_skip_until_major = false
-          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-        else
-          @nursery_alloc_bytes = 0_u64
-          @minor_collections += 1
-          arm_page_barrier_after_collect
+if major
+        @bytes_since_gc = 0_u64
+        @nursery_alloc_bytes = 0_u64
+        @expl_freed_bytes_since_gc = 0_u64
+        @major_collections += 1
+        if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+          Platform.invalidate_static_root_cache
         end
+        # Next minor starts a fresh soft-dirty window after a major.
+        @soft_dirty_skip_until_major = false
+        arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+      else
+        @nursery_alloc_bytes = 0_u64
+        @minor_collections += 1
+        # Record nursery survival statistics for adaptive threshold.
+        note_nursery_survival
+        arm_page_barrier_after_collect
+      end
         @collections += 1
       ensure
         start_world

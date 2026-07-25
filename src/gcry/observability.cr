@@ -88,6 +88,10 @@ module Gcry
         fiber_scrub_bytes_total:   heap.fiber_scrub_bytes_total,
         barrier_backend:           heap.barrier_backend_name,
         barrier_dirty_rescans:     heap.barrier_dirty_rescans,
+        nursery_survival_bytes:    heap.nursery_survival_bytes,
+        nursery_alloc_before_minor: heap.nursery_alloc_before_minor,
+        nursery_survival_rate_pct: heap.nursery_survival_rate_pct,
+        adaptive_nursery:          heap.adaptive_nursery,
       }.to_json
     end
 

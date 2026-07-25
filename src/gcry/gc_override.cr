@@ -27,8 +27,16 @@ module GC
     heap.stop_the_world = true
     # Process GC: majors only by default. Nursery without write barriers must
     # scan all old objects each minor — that dominates pause time under HTTP.
-    heap.nursery_enabled = false
-    heap.nursery_threshold = UInt64::MAX
+    # On Linux the page-dirty barrier (soft-dirty / mprotect) makes generational
+    # old→young scanning efficient — default on. On Darwin (no barrier backend)
+    # nursery is off; opt in via GCRY_NURSERY=1.
+    {% if flag?(:linux) %}
+      heap.nursery_enabled = true
+      heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD
+    {% else %}
+      heap.nursery_enabled = false
+      heap.nursery_threshold = UInt64::MAX
+    {% end %}
     # Incremental (sliced) majors. On Linux the page-dirty barrier makes the
     # incremental path sound — default ON. On Darwin (no soft-dirty) it is not
     # yet crash-free — default OFF.
@@ -185,6 +193,10 @@ module GC
       heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
+    end
+
+    if env_flag_one?("GCRY_DISABLE_ADAPTIVE_NURSERY")
+      heap.adaptive_nursery = false
     end
 
     # Soft-dirty page scan only when dirty/total ≤ this percent (default 25).
