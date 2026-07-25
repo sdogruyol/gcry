@@ -29,8 +29,12 @@ module GC
     # scan all old objects each minor — that dominates pause time under HTTP.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
-    # Full STW majors by default (v0.4+). Incremental without write barriers is
-    # unsound under heavy pointer mutation (e.g. Kemal /json).
+    # Full STW majors by default. On Linux the page-dirty barrier makes the
+    # incremental path sound; on Darwin (no soft-dirty) it is not yet
+    # crash-free. Default false keeps the test harness reproducible across
+    # platforms. Linux deployments should set
+    #   Gcry.default_heap.incremental_auto = true
+    # (or pass `Gcry.incremental_auto = true` from the program).
     heap.incremental_auto = false
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.

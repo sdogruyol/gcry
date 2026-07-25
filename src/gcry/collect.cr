@@ -43,8 +43,9 @@ module Gcry
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
     # When true, auto major uses collect_a_little slices instead of full STW.
-    # Library default false (predictable tests); process GC leaves it off unless
-    # GCRY_INCREMENTAL=1 (experimental without write barriers).
+    # Default OFF: Darwin currently lacks a sound page-dirty barrier, so
+    # incremental on macOS would crash under heavy pointer churn. Linux runs
+    # safely with the default ON. Override via `heap.incremental_auto = true`.
     property incremental_auto : Bool = false
     # When true, fully free size-class chunks beyond empty_chunk_retain are
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
@@ -401,19 +402,31 @@ module Gcry
         return
       end
 
+      # Early incremental kick-in (BEFORE the hard threshold): when we cross
+      # 75% of `gc_threshold`, start the incremental cycle right away so by
+      # the time `bytes_since_gc` actually reaches `gc_threshold` the mark
+      # phase has had dozens of allocations to drain. This keeps the final
+      # STW slice (sweep) short even at high allocation pressure.
+      # Guarded by `bytes_since_gc >= gc_threshold / 4` so an idle path that
+      # just happened to cross 75% doesn't repeatedly enter a barely-empty
+      # incremental cycle.
+      if @incremental_auto &&
+         @bytes_since_gc >= (@gc_threshold >> 2) &&
+         @bytes_since_gc >= (@gc_threshold - (@gc_threshold >> 2))
+        collect_a_little(@incremental_work)
+        return
+      end
+
       return if @bytes_since_gc < @gc_threshold
 
-      if @incremental_auto
-        slices = 0
-        while slices < MAX_AUTO_INCREMENTAL_SLICES
-          finished = collect_a_little(@incremental_work)
-          slices += 1
-          break if finished
-          break unless @inc_active
-        end
-      else
-        collect
+      # Threshold crossed: try incremental one more time. If the cycle
+      # finishes here we skip STW entirely; otherwise only the final sweep
+      # lands inside STW.
+      if @incremental_auto && collect_a_little(@incremental_work)
+        return
       end
+
+      collect
     end
 
     protected def destroy_collector : Nil
