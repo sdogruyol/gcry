@@ -19,7 +19,8 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
 | Platforms | Linux + macOS (soft-dirty Linux-only) | Broad |
-| Kemal `/json` | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (Linux) | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
+
 
 ## Pick gcry when
 
@@ -42,7 +43,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 - [ ] `samples/stress.cr` under `-Dgc_none`
 - [ ] Fibers allocate without forced collect every loop
 - [ ] WeakRef / finalizers OK if the app uses them
-- [ ] Same-host wrk vs Boehm on a real path ([PERF.md](PERF.md))
+- [ ] Same-host wrk vs Boehm on a real path ([PERF.md](PERF.md) Linux; [PERF-macos.md](PERF-macos.md) Darwin)
 - [ ] No GC from signal handlers; prefer fork+exec
 - [ ] Do not resize ExecutionContext for parallelism without measuring
 

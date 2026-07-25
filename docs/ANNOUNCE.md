@@ -8,9 +8,9 @@ Boehm-class collector you can read and change in Crystal; Linux + macOS; fibers 
 
 ## Numbers (re-record before publishing)
 
-Same-host Kemal `wrk -c 100 -d 30` vs Boehm — cite [docs/PERF.md](PERF.md) only (do not invent). Prefer **`/json`**.
+Same-host Kemal `wrk -c 100 -d 30` vs Boehm — cite [docs/PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**. Darwin: [PERF-macos.md](PERF-macos.md).
 
-As of v0.9.0 cut: `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
+As of v0.9.0 cut (Linux): `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm.
 
 ## When to try gcry
 

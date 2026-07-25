@@ -10,7 +10,7 @@ Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep c
 
 > **v0.9** · Linux **x86_64 + aarch64** · Crystal ≥ 1.21 · fibers on one OS thread
 
-Same-host Kemal vs Boehm (`wrk -c 100 -d 30`, median of 3): **`/json` ~92% thr**, post-GC RSS **~0.97×**. Not a toy. See [docs/PERF.md](docs/PERF.md).
+Same-host Kemal vs Boehm on **Linux** (`wrk -c 100 -d 30`, median of 3): **`/json` ~92% thr**, post-GC RSS **~0.97×**. Not a toy. See [docs/PERF.md](docs/PERF.md). macOS numbers stay in [docs/PERF-macos.md](docs/PERF-macos.md).
 
 ---
 
@@ -27,16 +27,16 @@ If you care how your language reclaims memory, this is the repo.
 
 ## How fast?
 
-Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters.
+Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters. Table is **Linux** (version-cut); macOS: [docs/PERF-macos.md](docs/PERF-macos.md).
 
-| Workload | gcry vs Boehm (v0.9.0) |
-|----------|----------------------:|
+| Workload | gcry vs Boehm (v0.9.0, Linux) |
+|----------|-----------------------------:|
 | Alloc-heavy JSON (`/json`) thr | **~92%** |
 | Idle `/` thr | **~89%** |
 | `/json` post-GC RSS | **~0.97×** |
 | `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
 
-Details & methodology: [docs/PERF.md](docs/PERF.md). Re-run: `make bench-kemal-wrk` or `./bench/median_kemal_boehm.sh`.
+Details & methodology: [docs/PERF.md](docs/PERF.md) (Linux), [docs/PERF-macos.md](docs/PERF-macos.md) (Darwin). Re-run: `make bench-kemal-wrk` or `./bench/median_kemal_boehm.sh`.
 
 ## Drop in
 
@@ -102,8 +102,11 @@ Full checklist: [docs/COMPARISON.md](docs/COMPARISON.md).
 | Doc | |
 |-----|--|
 | [DESIGN.md](DESIGN.md) | Architecture & roadmap |
-| [docs/PERF.md](docs/PERF.md) | Speed vs Boehm |
+| [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (**Linux** cut) |
+| [docs/PERF-macos.md](docs/PERF-macos.md) | Speed vs Boehm (Darwin, separate) |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm |
+| [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) | Fat-app dogfood (Linux) |
+| [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md) | Fat-app dogfood (Darwin) |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
 | [docs/HARDENING.md](docs/HARDENING.md) | Env knobs & stress |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |

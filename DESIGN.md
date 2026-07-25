@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of v0.9.0 (same-host Kemal, median of 3): **`/json` ~92% of Boehm thr**, post-GC RSS **~0.97×**. Fat apps still show the conservative tax — see [docs/PERF.md](docs/PERF.md) and [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). The point stands: this is not a lab toy.
+As of v0.9.0 (same-host Kemal on **Linux**, median of 3): **`/json` ~92% of Boehm thr**, post-GC RSS **~0.97×**. Fat apps still show the conservative tax — see [docs/PERF.md](docs/PERF.md) (Linux), [docs/PERF-macos.md](docs/PERF-macos.md) (Darwin), and [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). The point stands: this is not a lab toy.
 
 ## Goals
 
@@ -158,9 +158,9 @@ Shipped and dogfooded on Linux; macOS process GC MVP on Crystal ≥ 1.21:
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots (Crystal ≥ 1.21); soft-dirty N/A |
 | Compiler stack maps | ❌ later (RSS) |
 
-**Kemal (v0.9.0 cut):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md).
+**Kemal (v0.9.0 cut, Linux):** `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](docs/PERF.md). macOS: [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** thr trial-median ~**93%**, post-GC RSS ~**2.84×** — dense conservative-live; shard levers mostly exhausted — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+**acikturkiye (Linux):** thr trial-median ~**93%**, post-GC RSS ~**2.84×** — dense conservative-live; shard levers mostly exhausted — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin dogfood: [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
@@ -208,8 +208,10 @@ Shard-only polish that remains interesting: layout coverage, large-object policy
 ## References
 
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — Crystal 1.21 GC / fiber contract
-- [docs/PERF.md](docs/PERF.md) — % of Boehm methodology
-- [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) — fat-app dogfood
+- [docs/PERF.md](docs/PERF.md) — % of Boehm methodology (**Linux** cut)
+- [docs/PERF-macos.md](docs/PERF-macos.md) — Darwin Kemal A/B (separate)
+- [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) — fat-app dogfood (Linux)
+- [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md) — fat-app dogfood (Darwin)
 - [docs/POLICY.md](docs/POLICY.md) — OOM / fork / signals
 - [docs/COMPARISON.md](docs/COMPARISON.md) — vs bdwgc
 - [docs/HARDENING.md](docs/HARDENING.md) — env knobs
