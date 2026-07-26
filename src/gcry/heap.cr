@@ -286,23 +286,33 @@ module Gcry
       @finalizers.notice_reclaim(pointer)
 
       if @tlab_enabled
+        # TLAB free is per-thread; no global lock needed.
         tlab_free_small(pointer, class_index, payload, BlockHeader.nursery?(header))
-      elsif BlockHeader.nursery?(header)
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
-        @nursery_freelists[class_index] = pointer
-        @nursery_freelist_clean[class_index] = false
-        @free_bytes += payload.to_u64
+        with_alloc_lock do
+          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+          note_explicit_free(payload.to_u64)
+          @live_objects -= 1 if @live_objects > 0
+        end
       else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
-        @freelists[class_index] = pointer
-        @freelist_clean[class_index] = false
-        @free_bytes += payload.to_u64
-      end
+        # Non-TLAB path: global freelist + counters must be serialised with
+        # @alloc_lock (with_alloc_lock skips locking when TLAB is disabled).
+        @alloc_lock.sync do
+          if BlockHeader.nursery?(header)
+            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+            @nursery_freelists[class_index] = pointer
+            @nursery_freelist_clean[class_index] = false
+            @free_bytes += payload.to_u64
+          else
+            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
+            @freelists[class_index] = pointer
+            @freelist_clean[class_index] = false
+            @free_bytes += payload.to_u64
+          end
 
-      with_alloc_lock do
-        @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-        note_explicit_free(payload.to_u64)
-        @live_objects -= 1 if @live_objects > 0
+          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+          note_explicit_free(payload.to_u64)
+          @live_objects -= 1 if @live_objects > 0
+        end
       end
     end
 
@@ -362,68 +372,70 @@ module Gcry
     end
 
     private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      user = @nursery_freelists[index]
-
-      if user.null?
-        refill_size_class(index, payload, nursery: true)
+      @alloc_lock.sync do
         user = @nursery_freelists[index]
-        raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
-      end
 
-      if @blacklist_enabled
-        taken = take_non_blacklisted(user, index, true)
-        if taken.null?
+        if user.null?
+          refill_size_class(index, payload, nursery: true)
+          user = @nursery_freelists[index]
+          raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
+        end
+
+        if @blacklist_enabled
+          taken = take_non_blacklisted(user, index, true)
+          if taken.null?
+            header = BlockHeader.from_user(user)
+            @nursery_freelists[index] = header.value.next_free
+          else
+            user = taken
+          end
+        else
           header = BlockHeader.from_user(user)
           @nursery_freelists[index] = header.value.next_free
-        else
-          user = taken
         end
-      else
+
         header = BlockHeader.from_user(user)
-        @nursery_freelists[index] = header.value.next_free
-      end
+        BlockHeader.set_used(header, payload, flags)
+        if @incremental_marking || @collecting
+          heap_set_mark(header)
+        end
 
-      header = BlockHeader.from_user(user)
-      BlockHeader.set_used(header, payload, flags)
-      # Allocate black during any in-progress collection (STW or incremental)
-      # so mid-collect allocations are not swept.
-      if @incremental_marking || @collecting
-        heap_set_mark(header)
+        @free_bytes -= payload if @free_bytes >= payload
+        @nursery_alloc_bytes += payload.to_u64
+        user
       end
-
-      @free_bytes -= payload if @free_bytes >= payload
-      @nursery_alloc_bytes += payload.to_u64
-      user
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      user = @freelists[index]
-
-      if user.null?
-        refill_size_class(index, payload, nursery: false)
+      @alloc_lock.sync do
         user = @freelists[index]
-        raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
-      end
 
-      if @blacklist_enabled
-        taken = take_non_blacklisted(user, index, false)
-        if taken.null?
+        if user.null?
+          refill_size_class(index, payload, nursery: false)
+          user = @freelists[index]
+          raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
+        end
+
+        if @blacklist_enabled
+          taken = take_non_blacklisted(user, index, false)
+          if taken.null?
+            header = BlockHeader.from_user(user)
+            @freelists[index] = header.value.next_free
+          else
+            user = taken
+          end
+        else
           header = BlockHeader.from_user(user)
           @freelists[index] = header.value.next_free
-        else
-          user = taken
         end
-      else
+
         header = BlockHeader.from_user(user)
-        @freelists[index] = header.value.next_free
+        BlockHeader.set_used(header, payload, flags)
+        heap_set_mark(header) if @incremental_marking || @collecting
+
+        @free_bytes -= payload if @free_bytes >= payload
+        user
       end
-
-      header = BlockHeader.from_user(user)
-      BlockHeader.set_used(header, payload, flags)
-      heap_set_mark(header) if @incremental_marking || @collecting
-
-      @free_bytes -= payload if @free_bytes >= payload
-      user
     end
 
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
@@ -651,7 +663,11 @@ module Gcry
       @chunks = chunk
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
-      index_insert(chunk)
+      # Mark index dirty instead of inline insert — concurrent chunk_containing
+      # readers (called from free/is_heap_ptr off TLAB) would race on the
+      # sorted array shift. Marking dirty triggers a safe linear fallback walk.
+      @chunk_index_dirty = true
+      invalidate_chunk_cache
       note_mapped(chunk)
       chunk
     end
@@ -704,6 +720,21 @@ module Gcry
       # even a L1 index hit) before touching the sorted index.
       if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
         return (@chunk_index + @last_chunk_idx).value
+      end
+
+      # If the chunk index is dirty (being rebuilt by another thread, or stale
+      # from a concurrent chunk addition), fall back to a linear walk of the
+      # chunks linked list. This avoids a data race on @chunk_index entries
+      # during concurrent malloc/free (TLAB MT tests). Linear walk is O(n) but
+      # acceptable for query paths (is_heap_ptr, live?, explicit free); the
+      # hot mark path uses last-chunk cache which rarely misses.
+      if @chunk_index_dirty
+        chunk = @chunks
+        while chunk
+          return chunk if ChunkHeader.contains?(chunk, addr)
+          chunk = chunk.value.next
+        end
+        return nil
       end
 
       ensure_chunk_index
@@ -783,35 +814,39 @@ module Gcry
     end
 
     # Fallback full rebuild when the incremental index is marked dirty.
+    # Protected by @alloc_lock to prevent concurrent rebuilds during TLAB MT.
     protected def ensure_chunk_index : Nil
       return unless @chunk_index_dirty
+      @alloc_lock.sync do
+        return unless @chunk_index_dirty
 
-      count = 0
-      each_chunk { count += 1 }
+        count = 0
+        each_chunk { count += 1 }
 
-      index_ensure_cap(count)
+        index_ensure_cap(count)
 
-      i = 0
-      each_chunk do |chunk|
-        (@chunk_index + i).value = chunk
-        i += 1
-      end
-      @chunk_index_count = count
-
-      i = 1
-      while i < @chunk_index_count
-        key = (@chunk_index + i).value
-        key_addr = key.address
-        j = i - 1
-        while j >= 0 && (@chunk_index + j).value.address > key_addr
-          (@chunk_index + (j + 1)).value = (@chunk_index + j).value
-          j -= 1
+        i = 0
+        each_chunk do |chunk|
+          (@chunk_index + i).value = chunk
+          i += 1
         end
-        (@chunk_index + (j + 1)).value = key
-        i += 1
-      end
+        @chunk_index_count = count
 
-      @chunk_index_dirty = false
+        i = 1
+        while i < @chunk_index_count
+          key = (@chunk_index + i).value
+          key_addr = key.address
+          j = i - 1
+          while j >= 0 && (@chunk_index + j).value.address > key_addr
+            (@chunk_index + (j + 1)).value = (@chunk_index + j).value
+            j -= 1
+          end
+          (@chunk_index + (j + 1)).value = key
+          i += 1
+        end
+
+        @chunk_index_dirty = false
+      end
     end
 
     private def index_ensure_cap(need : Int32) : Nil
