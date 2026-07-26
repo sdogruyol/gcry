@@ -180,7 +180,11 @@ describe "Gcry sound incremental (dirty re-scan)" do
       heap.major_collections.should eq(0)
 
       # Full STW collect still works correctly.
+      # Temporarily disable stop_the_world since this is a single-threaded spec
+      # (the guard only checks the flag, suspend/signal would hang on Linux).
+      heap.stop_the_world = false
       heap.collect(scan_stack: false)
+      heap.stop_the_world = true
       heap.live?(root).should be_true
       heap.major_collections.should eq(1)
     ensure
