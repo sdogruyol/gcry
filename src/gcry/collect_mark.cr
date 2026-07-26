@@ -172,9 +172,12 @@ module Gcry
               end
             end
             return
-          elsif entry.scan_cap > 0
-            # Size-cap (or size-class mismatch): word-scan only the real instance,
-            # not size-class padding. Keep interiors for embedded buffer ivars.
+          elsif size_match && entry.scan_cap > 0
+            # Size-cap only when this really is the registered type (alloc_size
+            # matches). Applying scan_cap on size mismatch was unsound: raw
+            # buffers whose first Int32 randomly equals a registered type_id
+            # stopped after instance_sizeof bytes and missed the rest → UAF
+            # (acikturkiye; fixed by requiring size_match here).
             @layout_conservative_scans += 1
             cap = entry.scan_cap.to_u64
             limit = size < cap ? size : cap
@@ -190,6 +193,8 @@ module Gcry
             @layout_precise_scans += 1
             return
           end
+          # size mismatch: ignore the layout entry (likely a raw buffer whose
+          # leading word collided with a Crystal type_id) → full conservative.
         end
       end
 
@@ -208,6 +213,9 @@ module Gcry
 
     # Precise Hash: keep @indices/@entries blobs alive without scanning them as
     # pointer arrays; walk Entry slots and mark key/value only.
+    # Live range is Crystal `@size + @deleted_count` (entries_size), NOT
+    # entries_capacity from `@indices_size_pow2` — capacity slots after realloc
+    # are uninitialized and must not be treated as Entry records.
     private def scan_hash_object(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
       entry.scan_offsets.each do |off|
         next if off.to_u64 + sizeof(Void*).to_u64 > size
@@ -221,6 +229,17 @@ module Gcry
         mark_noscan(slot.value)
       end
 
+      # Proc? @block is multi-word (function pointer + closure data).
+      block_off = entry.hash_block_off.to_u64
+      block_bytes = entry.hash_block_bytes.to_u64
+      if block_bytes > 0 && block_off + block_bytes <= size
+        w = 0_u64
+        while w + sizeof(Void*).to_u64 <= block_bytes
+          mark_candidate(Pointer(Void*).new(user.address + block_off + w).value)
+          w += sizeof(Void*).to_u64
+        end
+      end
+
       entries_off = entry.hash_entries_off.to_u64
       pow2_off = entry.hash_pow2_off.to_u64
       stride = entry.hash_entry_stride.to_u64
@@ -232,10 +251,25 @@ module Gcry
       return if entries.null?
 
       pow2 = Pointer(UInt8).new(user.address + pow2_off).value
-      # Crystal: indices_size = 1 << pow2; entries_size = indices_size // 2
+      # Crystal: indices_size = 1 << pow2; entries_capacity = indices_size // 2
       return if pow2 >= 63
-      entries_size = (1_u64 << pow2) // 2
-      return if entries_size == 0 || entries_size > 1_000_000_u64
+      capacity = (1_u64 << pow2) // 2
+      return if capacity == 0 || capacity > 1_000_000_u64
+
+      # Crystal entries_size == @size + @deleted_count (not capacity).
+      used = capacity
+      size_off = entry.hash_size_off.to_u64
+      deleted_off = entry.hash_deleted_off.to_u64
+      if size_off + 4 <= size && deleted_off + 4 <= size
+        live_size = Pointer(Int32).new(user.address + size_off).value
+        deleted = Pointer(Int32).new(user.address + deleted_off).value
+        if live_size >= 0 && deleted >= 0
+          sum = live_size.to_i64 + deleted.to_i64
+          if sum >= 0 && sum.to_u64 <= capacity
+            used = sum.to_u64
+          end
+        end
+      end
 
       key_off = entry.hash_key_off.to_u64
       key_bytes = entry.hash_key_bytes.to_u64
@@ -245,7 +279,7 @@ module Gcry
       base = entries.as(UInt8*)
 
       i = 0_u64
-      while i < entries_size
+      while i < used
         slot = base + (i * stride)
         # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
         hash_word = slot.as(UInt32*).value

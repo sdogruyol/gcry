@@ -100,16 +100,14 @@ module GC
     else
       Gcry::Layout.register_builtins
       # Precise whole-program layouts (Reference.all_subclasses walk). Default-on
-      # for process GC — drastically cuts conservative scanning on fat apps.
-      # register() auto-falls back to scan_cap for unsafe ivars (unions, embedded
-      # structs); @unsafe_layouts blacklist in layout.cr skips known-broken types.
-      # Escape: GCRY_DISABLE_AUTO_LAYOUTS=1 keeps builtins only.
+      # for process GC. register() falls back to scan_cap for unsafe ivars;
+      # @unsafe_layouts skips Cry/Crystal::/LibC::. Layout scan requires
+      # alloc_size match before applying precise/scan_cap (raw-buffer type_id
+      # collisions must not truncate scans). Escape: GCRY_DISABLE_AUTO_LAYOUTS=1.
       unless env_flag_one?("GCRY_DISABLE_AUTO_LAYOUTS")
         Gcry.register_layouts
       end
       # Optional size-class slack caps for all Reference types (GCRY_SCAN_CAPS=1).
-      # Redundant when register_layouts ran (already installed via scan_cap fallback)
-      # — kept for legacy opt-in / measure-only mode.
       if env_flag_one?("GCRY_SCAN_CAPS")
         Gcry::Layout.register_scan_caps
       end

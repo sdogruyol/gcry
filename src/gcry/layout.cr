@@ -51,6 +51,13 @@ module Gcry
     @@hash_value_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@hash_value_mode = uninitialized StaticArray(UInt8, MAX_ENTRIES)
     @@hash_value_bytes = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    # Crystal Hash: live entry range is @size + @deleted_count (NOT entries_capacity).
+    # Walking capacity after realloc reads uninitialized slots → false marks / UAF.
+    @@hash_size_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    @@hash_deleted_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    # @block is Proc? (16 bytes on 64-bit): word-scan, don't treat as a single pointer.
+    @@hash_block_off = uninitialized StaticArray(UInt16, MAX_ENTRIES)
+    @@hash_block_bytes = uninitialized StaticArray(UInt16, MAX_ENTRIES)
     @@index = uninitialized StaticArray(Int32, INDEX_SIZE) # 0 = empty; else entry_index + 1
     @@count = uninitialized Int32
     @@enabled = uninitialized Bool
@@ -97,6 +104,10 @@ module Gcry
       getter hash_value_off : UInt16
       getter hash_value_mode : UInt8
       getter hash_value_bytes : UInt16
+      getter hash_size_off : UInt16
+      getter hash_deleted_off : UInt16
+      getter hash_block_off : UInt16
+      getter hash_block_bytes : UInt16
 
       def initialize(@scan_offsets : Slice(UInt16), @noscan_offsets : Slice(UInt16),
                      @alloc_size : UInt32, @scan_cap : UInt32, @kind : UInt8,
@@ -104,7 +115,9 @@ module Gcry
                      @hash_pow2_off : UInt16, @hash_entry_stride : UInt16,
                      @hash_key_off : UInt16, @hash_key_bytes : UInt16,
                      @hash_value_off : UInt16,
-                     @hash_value_mode : UInt8, @hash_value_bytes : UInt16)
+                     @hash_value_mode : UInt8, @hash_value_bytes : UInt16,
+                     @hash_size_off : UInt16, @hash_deleted_off : UInt16,
+                     @hash_block_off : UInt16, @hash_block_bytes : UInt16)
       end
 
       def hash? : Bool
@@ -199,6 +212,10 @@ module Gcry
         @@hash_value_off[i],
         @@hash_value_mode[i],
         @@hash_value_bytes[i],
+        @@hash_size_off[i],
+        @@hash_deleted_off[i],
+        @@hash_block_off[i],
+        @@hash_block_bytes[i],
       )
     end
 
@@ -209,13 +226,15 @@ module Gcry
     # Install pointer-field byte offsets (tests). *alloc_size* 0 → no size gate.
     def self.install(type_id : Int32, offsets : Array(UInt16), alloc_size : UInt32 = 0_u32, scan_cap : UInt32 = 0_u32) : Nil
       install_full(type_id, offsets.to_unsafe, offsets.size, Pointer(UInt16).null, 0, alloc_size, scan_cap,
-        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
+        0_u16, 0_u16, 0_u16, 0_u16)
     end
 
     # Size-class slack cap only (no pointer offsets). Conservative scan stops at *scan_cap*.
     def self.install_scan_cap(type_id : Int32, alloc_size : UInt32, scan_cap : UInt32) : Nil
       install_full(type_id, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0, alloc_size, scan_cap,
-        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+        KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
+        0_u16, 0_u16, 0_u16, 0_u16)
     end
 
     def self.install_full(type_id : Int32,
@@ -228,7 +247,9 @@ module Gcry
                           hash_pow2_off : UInt16, hash_entry_stride : UInt16,
                           hash_key_off : UInt16, hash_key_bytes : UInt16,
                           hash_value_off : UInt16,
-                          hash_value_mode : UInt8, hash_value_bytes : UInt16) : Nil
+                          hash_value_mode : UInt8, hash_value_bytes : UInt16,
+                          hash_size_off : UInt16 = 0_u16, hash_deleted_off : UInt16 = 0_u16,
+                          hash_block_off : UInt16 = 0_u16, hash_block_bytes : UInt16 = 0_u16) : Nil
       ensure_booted
       total = n_scan + n_noscan
       # Allow: precise offsets, hash walk, leaf (alloc only), or scan-cap-only.
@@ -258,6 +279,10 @@ module Gcry
       @@hash_value_off[i] = hash_value_off
       @@hash_value_mode[i] = hash_value_mode
       @@hash_value_bytes[i] = hash_value_bytes
+      @@hash_size_off[i] = hash_size_off
+      @@hash_deleted_off[i] = hash_deleted_off
+      @@hash_block_off[i] = hash_block_off
+      @@hash_block_bytes[i] = hash_block_bytes
 
       base = i * MAX_OFFSETS
       j = 0
@@ -392,7 +417,8 @@ module Gcry
             scan.to_unsafe, {{scan_count}},
             noscan.to_unsafe, {{noscan_count}},
             rounded.to_u32, scan_cap, KIND_PLAIN,
-            0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16)
+            0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
+            0_u16, 0_u16, 0_u16, 0_u16)
         {% else %}
           # No direct pointer ivars — still scan_cap (not leaf): hidden refs via
           # unusual ivar shapes have caused UAF with empty precise bodies.
@@ -405,13 +431,11 @@ module Gcry
     # Register a Hash(K,V) with entry-table walking + noscan @indices/@entries blob.
     def self.register_hash(key_type : K.class, value_type : V.class) forall K, V
       {% begin %}
-        scan = StaticArray(UInt16, 2).new(0)
+        # @block is Proc? (multi-word) — word-scanned via hash_block_*; not a single ptr.
+        scan = StaticArray(UInt16, 1).new(0)
         noscan = StaticArray(UInt16, 2).new(0)
         n_scan = 0
         n_noscan = 0
-
-        scan[n_scan] = UInt16.new(offsetof(Hash({{K}}, {{V}}), @block))
-        n_scan += 1
 
         noscan[n_noscan] = UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices))
         n_noscan += 1
@@ -455,7 +479,11 @@ module Gcry
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices)),
           UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices_size_pow2)),
           UInt16.new(sizeof(Hash::Entry({{K}}, {{V}}))),
-          key_off, key_bytes, value_off, value_mode, value_bytes)
+          key_off, key_bytes, value_off, value_mode, value_bytes,
+          UInt16.new(offsetof(Hash({{K}}, {{V}}), @size)),
+          UInt16.new(offsetof(Hash({{K}}, {{V}}), @deleted_count)),
+          UInt16.new(offsetof(Hash({{K}}, {{V}}), @block)),
+          UInt16.new(sizeof((Hash({{K}}, {{V}}), {{K}} -> {{V}})?)))
       {% end %}
     end
 

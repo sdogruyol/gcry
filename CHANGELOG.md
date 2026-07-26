@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Large-cache LRU eviction + adaptive retain (P3.3):** `cache_large_chunk` inserts at tail (LRU). `trim_large_cache` evicts from head. Adaptive retain: after each major, hit-rate above 50% doubles retain (capped at 64 MiB); hit-rate below 10% halves it (floor 1 MiB). Default: 1 MiB on Darwin (macOS), 8 MiB on Linux.
 - **Bitmap headroom reduced 25% → 12.5%:** `note_bitmap_growth` now uses `avg_range >> 3` instead of `>> 2`, shrinking side-mark bitmap reserve — less RSS waste on stable heaps.
 
+### Fixed
+
+- **Hash layout walk used `entries_capacity` instead of Crystal `entries_size`:** precise `scan_hash_object` iterated `(1 << indices_size_pow2) / 2` slots. After `realloc`, slots past `@size + @deleted_count` are uninitialized; non-zero garbage `@hash` words caused false marks / mutator UAF under acikturkiye (`GCRY_DISABLE_LAYOUT=1` was the only green bisect). Now walks `@size + @deleted_count`, capped by capacity. Also word-scans `@block` (`Proc?`, 16 bytes) instead of treating it as a single pointer.
+- **Layout `scan_cap` required `alloc_size` match:** on size mismatch (raw buffer whose leading `Int32` collided with a registered `type_id`), the old path still applied that type's `scan_cap` and returned — truncating the mark scan and dropping live pointers (acikturkiye SEGV with layouts on; green with `GCRY_DISABLE_LAYOUT=1`). Size mismatch now falls through to full conservative scan.
+
 ### Changed
 
 - **Nursery + incremental default-off for process GC:** Linux no longer enables `nursery` / `incremental_auto` by default. Soft-dirty false-negatives under WSL release HTTP (Kemal) caused Hash key UAF / SEGV (`0x0`/`0x4`/`0x11`). Opt in with `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1` after measuring. Darwin unchanged (already off). Related fixes kept: `realloc` pins old buffers across collect; explicit roots skip `type_id_gate`; old→young always full-walks (soft-dirty is additive only) with one-level buffer chase.
