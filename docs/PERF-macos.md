@@ -25,14 +25,16 @@ After **reverting side bitmap as default**, making **in-header MARK the standard
 
 RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on both paths — the in-header MARK trades some throughput for a dramatic RSS recovery. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
 
-## Headline (current, latest benchmark) — macOS aarch64
+## Headline (current, latest benchmark, v0.13.0) — macOS aarch64
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|--------:|--------------:|
-| `/` | 92,070 | 78,622 | **85.4%** | **1.34×** |
-| `/json` | 66,508 | 57,558 | **86.5%** | **1.36×** |
+| `/` | 82,010 | 74,061 | **90.3%** | **1.04×** |
+| `/json` | 61,782 | 51,021 | **82.6%** | **1.05×** |
+
+RSS is now **~1.04× Boehm** (down from 1.34× in v0.12.0) — essentially at parity with Boehm on both paths. `empty_chunk_retain` reduced to 512 KB (was 8 MB) drives aggressive `MADV_FREE_REUSABLE` reclaim on Darwin. Throughput at 90% `/` and 83% `/json`.
 
 ## Headline (v0.10.0) — macOS aarch64
 
@@ -74,6 +76,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
   | **2026-07-25** `unreleased-darwin` | **104.8%** | **94.3%** | **4.76×** | P2.1+P2.2+P2.3; `/json` steady ~94%, `/` >104% variance |
   | **2026-07-26** `rss-yak-darwin` | **102.2%** | **79.7%** | **n/a** | P3.3 (LRU cache) + blacklist re-enable + aggressive madvise; `/json` dropped to ~80% — blacklist default-on adds root-scan cost on Darwin |
   | **0.12.0** `in-header-mark` | **85.4%** | **86.5%** | **1.34–1.36×** | Reverted side bitmap → in-header MARK default; RSS dropped from ~10× to ~1.3×, throughput settled at ~85% both paths |
+  | **v0.13.0** `darwin-rss-tuning` | **90.3%** | **82.6%** | **1.04–1.05×** | `empty_chunk_retain` 512KB, `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS at near-Boehm parity; `/json` ~82% thr due to more frequent collections. |
 
 ## How to record (macOS)
 

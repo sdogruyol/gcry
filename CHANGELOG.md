@@ -7,13 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-### Fixed
-
 ### Changed
 
+- **Darwin `empty_chunk_retain` 8 MB → 512 KB:** Aggressive `MADV_FREE_REUSABLE` reclaim on Darwin. Kemal RSS drops from ~160 MiB to ~18 MiB (1.04× Boehm). ACIKTURKIYE RSS unchanged (~700 MiB); conservative live set remains the dominant driver.
+- **Darwin `scrub_fibers_enabled` = true:** Default-on fiber stack scrubbing on Darwin to reduce false roots from parked fiber stacks. Opt-out via `GCRY_DISABLE_SCRUB_FIBERS=1`.
+- **Darwin `gc_threshold` 32 MB → 16 MB:** More frequent major collections on Darwin; pause halved (47→25 ms p50) on ACIKTURKIYE.
+
+### Added
+
+- **Darwin large-freelist `MADV_FREE_REUSABLE`:** `darwin_release_large_freelist_pages` issues `MADV_FREE_REUSABLE` for every cached large-object chunk after major collection on Darwin, dropping physical pages without unmapping. Linux unchanged (mmap-resident for cache budget).
+
 ### Performance
+
+- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, session `bench/log/2026-07-26-200423/`): `/` **90.3%** of Boehm; `/json` **82.6%**; post-GC RSS **1.04–1.05×** (near Boehm parity, down from 1.34× in v0.12.0). ACIKTURKIYE `/api/v1/`: **78.0%** of Boehm, post-GC RSS **25.6×** (RSS steady at ~700 MiB; conservative live set ~1.2 GiB dominant). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## [0.12.0] - 2026-07-26
 
@@ -338,6 +344,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
 [Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.12.0...HEAD
+[0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/sdogruyol/gcry/compare/v0.9.0...v0.10.0

@@ -39,14 +39,22 @@ module GC
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
     # Keep recently-freed chunks as dormant (MADV_DONTNEED-style page release)
-    # up to 8 MiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently)
-    # and 64 MiB on other platforms.
+    # up to 512 KiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently
+    # at the page level, so a 512 KiB cap keeps tiny reuse bursts warm without
+    # pinning the full 8 MiB wastage seen in v0.12.0). Higher retain budgets on
+    # macOS only inflate RSS — the per-page reclaim is already done.
     # Pure-munmap churn under Kemal-style workloads fragments the VMA space
     # and inflates RSS via repeated mmap+madvise cycles; a moderate retain
     # budget lets the kernel drop physical pages while keeping VMA cache
     # hot for the next reuse.
     {% if flag?(:darwin) %}
-      heap.empty_chunk_retain = 8_u64 * 1024_u64 * 1024_u64
+      heap.empty_chunk_retain = 512_u64 * 1024_u64
+      # Parked fiber stacks carry stale pointer values from prior activations
+      # — those become false roots during conservative scanning and inflate
+      # retention (acikturkiye macOS: ~1.2 GiB live set, where much of it is
+      # not real reachable). Default-on for macOS process GC; Linux unchanged
+      # (Kemal Linux RSS is already at parity). Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      heap.scrub_fibers_enabled = true
     {% else %}
       heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
     {% end %}
@@ -176,7 +184,15 @@ module GC
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
     else
-      heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
+      # macOS: lower major threshold (16 MiB) halves the dense-live growth
+      # window under fat apps (acikturkiye: 32 MiB grew the live set to
+      # ~1.2 GiB before the next major; 16 MiB splits the heap in two and
+      # keeps the working set tighter). GCRY_THRESHOLD above already wins.
+      {% if flag?(:darwin) %}
+        heap.gc_threshold = 16_u64 * 1024_u64 * 1024_u64
+      {% else %}
+        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
+      {% end %}
     end
 
     if env_flag_one?("GCRY_DISABLE_NURSERY")
@@ -330,6 +346,9 @@ module GC
     end
     if env_flag_one?("GCRY_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = true
+    end
+    if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
+      heap.scrub_fibers_enabled = false
     end
   end
 

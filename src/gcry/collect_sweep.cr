@@ -322,6 +322,43 @@ module Gcry
       {% end %}
     end
 
+    # Darwin only: MADV_FREE_REUSABLE every cached large-object chunk after a
+    # major collection. Large freelist chunks (`cache_large_chunk`) keep their
+    # physical pages hot (the entire mmap is one object, so partial-page reclaim
+    # does not apply). On macOS, MADV_FREE_REUSABLE drops RSS while preserving
+    # page contents — the next allocation from the cache pays a page-fault
+    # cost instead of a syscall, which is uniformly cheaper than holding
+    # 100+ MiB of cached large object pages that may never be reused before
+    # `trim_large_cache` fires.
+    #
+    # Linux keeps the conservative full-page retention because CEL users with
+    # large mmap churn (acikturkiye) showed MADV_DONTNEED on large chunks
+    # actually increased RSS via re-fault storms; Darwin's per-page
+    # MADV_FREE_REUSABLE is the cheap and safe path.
+    private def darwin_release_large_freelist_pages : Nil
+      {% if flag?(:darwin) %}
+        page = Platform.host_page_size
+        LARGE_FREE_BUCKETS.times do |b|
+          user = @large_freelists[b]
+          while user
+            header = BlockHeader.from_user(user)
+            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            next_user = header.value.next_free
+            data_lo = chunk.address
+            data_hi = data_lo + chunk.value.mapped_bytes
+            start = (data_lo + page - 1) & ~(page - 1)
+            finish = data_hi & ~(page - 1)
+            if start < finish
+              if Platform.release_physical_pages(start, finish - start)
+                @dontneed_bytes += (finish - start)
+              end
+            end
+            user = next_user
+          end
+        end
+      {% end %}
+    end
+
     # Classify a kept size-class chunk by live_payload / usable_payload.
     private def note_chunk_fill(live_payload : UInt64, usable_payload : UInt64) : Nil
       if usable_payload == 0 || live_payload * 4 < usable_payload
