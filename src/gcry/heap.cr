@@ -90,6 +90,7 @@ module Gcry
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
+    @tlab_hits = 0_u64
     @tlabs_booted = false
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
@@ -109,6 +110,8 @@ module Gcry
 
     def initialize
       @mark_bitmap = MarkBitmap.new
+      # Save the previous bitmap owner (may be the process GC under -Dgc_none).
+      @saved_mark_bitmap = Gcry.current_mark_bitmap
       Gcry.current_mark_bitmap = @mark_bitmap
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -167,6 +170,12 @@ module Gcry
       @destroyed = true
       shutdown_mark_workers
       flush_all_tlabs
+      # MUST tear down collector state (pending chunk flush, finalizers,
+      # mark-stack) BEFORE unmapping the chunk list — destroy_collector walks
+      # @chunks for flush_pending_dormant_chunks and
+      # flush_pending_page_release_chunks. Reversing the order causes a
+      # use-after-unmap SIGSEGV in at_exit handlers.
+      destroy_collector
 
       chunk = @chunks
       while chunk
@@ -197,12 +206,12 @@ module Gcry
       @chunk_index_cap = 0
       @chunk_index_dirty = false
       if bm = @mark_bitmap
-        # Clear the global FIRST so concurrent readers (e.g. the SYSMON thread
-        # calling marked? via `GC.malloc` from a finalizer) see nil and short
-        # out. Only then drop the bitmap — MarkBitmap#destroy nulls `@base`
-        # before unmap so any reader that already captured the pointer also
-        # observes a coherent, soon-to-be-unmapped base.
-        Gcry.current_mark_bitmap = nil if Gcry.current_mark_bitmap.same?(bm)
+        # Restore the previous bitmap owner (may be the process GC under
+        # -Dgc_none) instead of unconditionally clearing the global pointer.
+        # The spec suite creates Heap objects alongside the process GC heap;
+        # clearing the global pointer leaves the process GC without a bitmap
+        # and causes a SIGSEGV in heap_marked?  during at_exit finalization.
+        Gcry.current_mark_bitmap = @saved_mark_bitmap
         # Null the hot mirrored fields so a stale heap read doesn't dereference
         # an unmapped mapping.
         @mark_bitmap_base = 0_u64
@@ -211,7 +220,6 @@ module Gcry
         bm.destroy
         @mark_bitmap = nil
       end
-      destroy_collector
     end
 
     def malloc(size : Int) : Void*

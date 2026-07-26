@@ -528,7 +528,7 @@ module Gcry
 
     protected def ensure_bitmap_covers(lo : UInt64, hi : UInt64) : Nil
       return if lo >= hi || lo == UInt64::MAX
-      bm = Gcry.current_mark_bitmap
+      bm = @mark_bitmap
       return unless bm
       # 1 bit per word-aligned address → bytes_needed = (range / 8).
       range_bytes = (hi - lo) >> 3
@@ -658,7 +658,7 @@ module Gcry
       # trim_large_cache, and reclaim_empty_chunk) so the syscall cost is
       # tolerable.
       if hi > lo && lo != UInt64::MAX
-        bm = Gcry.current_mark_bitmap
+        bm = @mark_bitmap
         if bm
           needed = ((hi - lo) >> 3) + @bitmap_headroom_bytes
           waste = bm.capacity_bytes > needed ? bm.capacity_bytes - needed : 0_u64
@@ -821,13 +821,9 @@ if major
     end
 
     private def monotonic_ns : UInt64
-      {% if flag?(:darwin) %}
-        Time.monotonic.total_nanoseconds.to_u64
-      {% else %}
-        ts = uninitialized LibC::Timespec
-        LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-        ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
-      {% end %}
+      ts = uninitialized LibC::Timespec
+      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
+      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
     end
 
     private def record_pause(started_ns : UInt64) : Nil

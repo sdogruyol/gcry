@@ -363,7 +363,9 @@ module Gcry
       # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
       # to managed heap, not to the live-object count. Replaces the legacy
       # per-object header write that dominated clear_all_marks under HTTP.
-      if bm = Gcry.current_mark_bitmap
+      # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
+      # -Dgc_none a test heap does not clobber the process GC's bitmap.
+      if bm = @mark_bitmap
         if @heap_max > @heap_min && @heap_min != UInt64::MAX
           bm.reset(@heap_min, @heap_max)
         else
@@ -378,7 +380,7 @@ module Gcry
       # nursery chunks. Chunks are page-aligned at multiples of the chunk size
       # so we can issue narrow resets without touching the old generation's
       # bits (which carry over from the prior major and remain valid).
-      bm = Gcry.current_mark_bitmap
+      bm = @mark_bitmap
       return unless bm
       each_chunk do |chunk|
         next unless ChunkHeader.nursery?(chunk)

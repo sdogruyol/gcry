@@ -79,6 +79,8 @@ module Gcry
         blacklist_skips:           heap.blacklist_skips,
         tlab_refills:              heap.tlab_refills,
         tlab_steals:               heap.tlab_steals,
+        tlab_hits:             heap.tlab_hits,
+        tlab_hit_rate_pct:     heap.tlab_refills + heap.tlab_hits > 0 ? (heap.tlab_hits * 100) // (heap.tlab_refills + heap.tlab_hits) : 100_u64,
         parallel_mark_workers:     heap.parallel_mark_workers,
         parallel_mark_runs:        heap.parallel_mark_runs,
         parallel_mark_stolen:      heap.parallel_mark_stolen,

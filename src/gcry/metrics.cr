@@ -29,6 +29,7 @@ module Gcry
     getter blacklist_skips : UInt64
     getter tlab_refills : UInt64
     getter tlab_steals : UInt64
+    getter tlab_hits : UInt64
     getter parallel_mark_workers : Int32
     getter parallel_mark_runs : UInt64
     getter parallel_mark_stolen : UInt64
@@ -62,7 +63,7 @@ module Gcry
       @type_id_static_rejects : UInt64, @type_id_thread_rejects : UInt64,
       @type_id_root_false_negatives : UInt64,
       @blacklist_hits : UInt64, @blacklist_skips : UInt64,
-      @tlab_refills : UInt64, @tlab_steals : UInt64,
+      @tlab_refills : UInt64, @tlab_steals : UInt64, @tlab_hits : UInt64,
       @parallel_mark_workers : Int32, @parallel_mark_runs : UInt64, @parallel_mark_stolen : UInt64,
       @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
       @layout_entries : Int32, @layout_unsafe_skips : UInt64,
@@ -112,6 +113,7 @@ module Gcry
       heap.blacklist_skips,
       heap.tlab_refills,
       heap.tlab_steals,
+      heap.tlab_hits,
       heap.parallel_mark_workers,
       heap.parallel_mark_runs,
       heap.parallel_mark_stolen,
@@ -209,6 +211,9 @@ module Gcry
       io << "# HELP #{prefix}_tlab_steals_total TLAB steals from other threads\n"
       io << "# TYPE #{prefix}_tlab_steals_total counter\n"
       io << "#{prefix}_tlab_steals_total #{m.tlab_steals}\n"
+      io << "# HELP #{prefix}_tlab_hits_total TLAB allocs satisfied without refill (hit)\n"
+      io << "# TYPE #{prefix}_tlab_hits_total counter\n"
+      io << "#{prefix}_tlab_hits_total #{m.tlab_hits}\n"
       io << "# HELP #{prefix}_parallel_mark_workers Requested mark workers\n"
       io << "# TYPE #{prefix}_parallel_mark_workers gauge\n"
       io << "#{prefix}_parallel_mark_workers #{m.parallel_mark_workers}\n"
