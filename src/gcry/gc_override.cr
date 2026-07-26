@@ -25,42 +25,51 @@ module GC
     heap.scan_static_roots = true
     # Process GC must STW: ExecutionContext always has a Monitor OS thread.
     heap.stop_the_world = true
-    # Process GC: majors only by default. Nursery without write barriers must
-    # scan all old objects each minor — that dominates pause time under HTTP.
+    # Process GC majors by default. Nursery needs a sound old→young remembered
+    # set: Linux soft-dirty is probed later, but has false-negatives under WSL
+    # release HTTP (Kemal Hash key UAF / SEGV at 0x0..0x11). Default OFF on all
+    # platforms; opt in with GCRY_NURSERY=1 once barriers are measured clean.
     heap.nursery_enabled = false
     heap.nursery_threshold = UInt64::MAX
-    # Full STW majors by default. On Linux the page-dirty barrier makes the
-    # incremental path sound; on Darwin (no soft-dirty) it is not yet
-    # crash-free. Default false keeps the test harness reproducible across
-    # platforms. Linux deployments should set
-    #   Gcry.default_heap.incremental_auto = true
-    # (or pass `Gcry.incremental_auto = true` from the program).
+    # Incremental majors likewise depend on the page-dirty barrier between
+    # slices. Same WSL false-negatives made Kemal release crashy — default OFF;
+    # opt in via GCRY_INCREMENTAL=1.
     heap.incremental_auto = false
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
-    # Keep recently-freed chunks as dormant (MADV_DONTNEED) up to 64 MiB.
+    # Keep recently-freed chunks as dormant (MADV_DONTNEED-style page release)
+    # up to 8 MiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently)
+    # and 64 MiB on other platforms.
     # Pure-munmap churn under Kemal-style workloads fragments the VMA space
     # and inflates RSS via repeated mmap+madvise cycles; a moderate retain
     # budget lets the kernel drop physical pages while keeping VMA cache
-    # hot for the next reuse, cutting measured RSS by ~5x. 64 MiB is the
-    # sweet spot — 32 MiB regressed by ~50% (reclaim thrashing); 0 regressed
-    # ~70% (VMA fragmentation).
-    heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+    # hot for the next reuse.
+    {% if flag?(:darwin) %}
+      heap.empty_chunk_retain = 8_u64 * 1024_u64 * 1024_u64
+    {% else %}
+      heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+    {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
-    # Page blacklist: opt-in. On Darwin fat apps it abandoned freelist pages
-    # (100M+ skips) and grew the heap without cutting live set; keep available
-    # via GCRY_BLACKLIST=1. Linux process default stays on (historical).
+    # Page blacklist: previously off on Darwin (freelist abandonment spiral under
+    # all-conservative scanning). Re-enabled in P2.3 era now that layout-precise
+    # scans cut false root hits sharply — the abandon spiral is unlikely.
+    # Escape: GCRY_DISABLE_BLACKLIST=1.
     {% if flag?(:darwin) %}
-      heap.blacklist_enabled = false
-      # No free large cache on Darwin — mach_vm reclaim already punches holes;
-      # retaining 8 MiB of cached larges just pads RSS on fat apps.
-      heap.large_cache_retain = 0_u64
+      heap.blacklist_enabled = true
+      # Large cache on Darwin starts at 1 MiB (adaptive can grow to LARGE_CACHE_LIMIT
+      # if hit-rate warrants it). mach_vm reclaim already punches holes on free,
+      # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
+      heap.large_cache_retain = 1048576_u64
     {% else %}
       heap.blacklist_enabled = true
     {% end %}
+    # Re-enabled on Darwin in P2.3 era: layout-precise scanning (P2.1) cuts
+    # false root hits sharply vs the old all-conservative regime, so the
+    # freelist-abandonment spiral that forced it off is much less likely.
+    # Escape: GCRY_DISABLE_BLACKLIST=1.
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -90,15 +99,17 @@ module GC
       Gcry::Layout.enabled = false
     else
       Gcry::Layout.register_builtins
+      # Precise whole-program layouts (Reference.all_subclasses). Opt-in via
+      # GCRY_AUTO_LAYOUTS=1 — Linux Kemal /json ~7pp thr vs builtins-only
+      # (bench/log/thr-abis). register() falls back to scan_cap for unsafe ivars;
+      # alloc_size must match before precise/scan_cap (raw-buffer type_id collisions).
+      # Escape when opted in: GCRY_DISABLE_AUTO_LAYOUTS=1.
+      if env_flag_one?("GCRY_AUTO_LAYOUTS") && !env_flag_one?("GCRY_DISABLE_AUTO_LAYOUTS")
+        Gcry.register_layouts
+      end
       # Optional size-class slack caps for all Reference types (GCRY_SCAN_CAPS=1).
-      # On acikturkiye this did not move size_class_live_bytes (padding ≪ false live).
       if env_flag_one?("GCRY_SCAN_CAPS")
         Gcry::Layout.register_scan_caps
-      end
-      # Precise whole-program layouts: opt-in. register() skips mixed unions and
-      # embedded structs (scan_cap fallback). Measure before enabling.
-      if env_flag_one?("GCRY_AUTO_LAYOUTS")
-        Gcry.register_layouts
       end
     end
 
@@ -178,6 +189,10 @@ module GC
       heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD if heap.nursery_threshold == UInt64::MAX
     end
 
+    if env_flag_one?("GCRY_DISABLE_ADAPTIVE_NURSERY")
+      heap.adaptive_nursery = false
+    end
+
     # Soft-dirty page scan only when dirty/total ≤ this percent (default 25).
     # GCRY_DISABLE_SOFT_DIRTY=1 forces full old→young object scan.
     if env_flag_one?("GCRY_DISABLE_SOFT_DIRTY")
@@ -203,7 +218,7 @@ module GC
       heap.incremental_auto = true
     end
 
-    if env_flag_one?("GCRY_DISABLE_INCREMENTAL")
+    if env_flag_one?("GCRY_DISABLE_INCREMENTAL") || env_flag_one?("GCRY_NO_INCREMENTAL")
       heap.incremental_auto = false
     end
 
@@ -231,10 +246,12 @@ module GC
     end
 
     {% if flag?(:darwin) %}
-      # Darwin: MADV_DONTNEED does not drop RSS; free-page MAP_FIXED remap does.
-      # Default-on for process GC unless explicitly disabled.
+      # Darwin: MADV_FREE_REUSABLE drops RSS; enable free-page release.
+      # (MADV_DONTNEED on Darwin does NOT drop RSS — advisory only.)
       unless env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
         heap.madvise_free_pages = true
+        # flush_pending_page_release_chunks also walks ALL chunks on Darwin
+        # (not just HOLED) for more aggressive RSS recovery.
       end
     {% end %}
 
@@ -265,6 +282,9 @@ module GC
       heap.layout_precise = false
       Gcry::Layout.enabled = false
     end
+
+    # GCRY_DISABLE_AUTO_LAYOUTS is handled in GC.init (before apply_env_config).
+    # The env var is listed here for discoverability — GC.init already checked it.
 
     if env_flag_one?("GCRY_DISABLE_SP_CLAMP")
       Gcry::Platform.stw_sp_clamp_enabled = false

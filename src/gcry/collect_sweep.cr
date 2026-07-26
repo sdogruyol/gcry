@@ -110,6 +110,9 @@ module Gcry
                       if heap_marked?(header)
                         heap_clear_mark(header)
                         BlockHeader.promote(header) unless major
+                        unless major
+                          @nursery_survival_bytes += payload.to_u64
+                        end
                         any_live = true
                         live_payload += payload.to_u64 if major
                       else
@@ -136,8 +139,9 @@ module Gcry
                 if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
                   if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
                     # Optional: keep VA with DONTNEED when retain > 0.
+                    # Set DORMANT flag but defer madvise to post-STW
+                    # `flush_pending_dormant_chunks` (kernel VM lock outside STW).
                     ChunkHeader.set_dormant(chunk, true)
-                    dontneed_chunk_data(chunk)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
                     unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
@@ -160,22 +164,16 @@ module Gcry
                 end
               else
                 ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
-                # Free-page physical release: Linux opt-in (GCRY_PAGE_DONTNEED);
-                # Darwin process default (MAP_FIXED remap — MADV_DONTNEED is a
-                # no-op for RSS there). Run whenever the chunk has any free
-                # payload so dense HTTP heaps still drop dead pages.
+                # Free-page physical release: detect free pages in STW, set HOLED
+                # flag; actual madvise runs post-STW in flush_pending_page_release.
                 if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                    usable_payload > 0 && live_payload < usable_payload
-                  if dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
-                    ChunkHeader.set_holed(chunk, true)
-                    bit = 1_u64 << class_index
-                    if ChunkHeader.nursery?(chunk)
-                      rebuild_nursery_mask |= bit
-                    else
-                      rebuild_mask |= bit
-                    end
+                  ChunkHeader.set_holed(chunk, true)
+                  bit = 1_u64 << class_index
+                  if ChunkHeader.nursery?(chunk)
+                    rebuild_nursery_mask |= bit
                   else
-                    ChunkHeader.set_holed(chunk, false)
+                    rebuild_mask |= bit
                   end
                 else
                   ChunkHeader.set_holed(chunk, false)
@@ -263,6 +261,65 @@ module Gcry
         LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
         chunk = nxt
       end
+    end
+
+    # Apply MADV_FREE / DONTNEED to dormant chunks after STW.
+    # Walks @chunks; dormant chunks stay in the chunk list but their
+    # physical pages are released outside STW (kernel VM lock avoided).
+    # Coalesces contiguous dormant ranges into a single madvise.
+    private def flush_pending_dormant_chunks : Nil
+      data_lo = UInt64::MAX
+      data_hi = 0_u64
+      page = Platform.host_page_size
+
+      each_chunk do |chunk|
+        next unless ChunkHeader.dormant?(chunk)
+        base = ChunkHeader.data_start(chunk).address
+        finish = base + chunk.value.mapped_bytes
+        start_page = (base + page - 1) & ~(page - 1)
+        end_page = finish & ~(page - 1)
+        if start_page < end_page
+          if data_hi == start_page
+            data_hi = end_page
+          else
+            if data_hi > data_lo
+              Platform.release_physical_pages(data_lo, data_hi - data_lo)
+              @dontneed_bytes += data_hi - data_lo
+            end
+            data_lo = start_page
+            data_hi = end_page
+          end
+        end
+      end
+      if data_hi > data_lo
+        Platform.release_physical_pages(data_lo, data_hi - data_lo)
+        @dontneed_bytes += data_hi - data_lo
+      end
+    end
+
+    # Apply per-chunk free-page madvise to HOLED chunks after STW.
+    # On Darwin where MADV_FREE_REUSABLE preserves page content, walks ALL
+    # kept size-class chunks (not just HOLED) for more aggressive RSS recovery.
+    # Safe because the live-mask computation correctly identifies free pages
+    # regardless of HOLED; MADV_FREE_REUSABLE on Darwin does not zero headers.
+    private def flush_pending_page_release_chunks : Nil
+      {% if flag?(:darwin) %}
+        each_chunk do |chunk|
+          next if ChunkHeader.large?(chunk)
+          next if ChunkHeader.dormant?(chunk)
+          class_index = chunk.value.size_class.to_i32
+          next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+        end
+      {% else %}
+        each_chunk do |chunk|
+          next unless ChunkHeader.holed?(chunk)
+          next if ChunkHeader.large?(chunk)
+          class_index = chunk.value.size_class.to_i32
+          next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+        end
+      {% end %}
     end
 
     # Classify a kept size-class chunk by live_payload / usable_payload.
@@ -439,6 +496,8 @@ module Gcry
 
     # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
     # safe because those blocks are omitted from the freelist (HOLED + rebuild).
+    # Pre-computes contiguous free-page runs and issues ONE madvise per run
+    # instead of one per page (reduces syscall count from up to 64 to 1-3).
     private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
         page = Platform.host_page_size
@@ -449,7 +508,6 @@ module Gcry
         first_page = data0 & ~(page - 1)
         last_page = (data1 - 1) & ~(page - 1)
         n_pages = ((last_page - first_page) // page) + 1
-        # 256 KiB chunks → ≤16 host pages on 16 KiB Darwin; ≤64 on 4 KiB Linux.
         return false if n_pages == 0 || n_pages > 64
 
         live_mask = 0_u64
@@ -472,17 +530,26 @@ module Gcry
         end
 
         any = false
+        # Walk pages and coalesce contiguous free runs into single madvise.
         idx = 0
-        p = first_page
-        while p <= last_page && idx < n_pages.to_i32
-          if p >= data0 && (p + page) <= data1 && (live_mask & (1_u64 << idx)) == 0
-            if Platform.release_physical_pages(p, page)
-              @dontneed_bytes += page
-              any = true
+        while idx < n_pages.to_i32
+          if (live_mask & (1_u64 << idx)) == 0
+            run_start = first_page + idx.to_u64 * page
+            # Extend the run while pages are free and within chunk data.
+            while idx < n_pages.to_i32 && (live_mask & (1_u64 << idx)) == 0
+              idx += 1
             end
+            run_end = first_page + idx.to_u64 * page
+            len = run_end - run_start
+            if run_start >= data0 && run_end <= data1 && len > 0
+              if Platform.release_physical_pages(run_start, len)
+                @dontneed_bytes += len
+                any = true
+              end
+            end
+          else
+            idx += 1
           end
-          p += page
-          idx += 1
         end
         any
       {% else %}

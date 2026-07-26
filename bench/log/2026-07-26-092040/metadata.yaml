@@ -1,0 +1,16 @@
+timestamp_utc: "2026-07-26T09:20:40Z"
+hostname: "Uzumakis-MacBook-Pro"
+os: "Darwin"
+os_release: "25.5.0"
+os_version: "Darwin Kernel Version 25.5.0: Mon Apr 27 20:39:09 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T6020"
+arch: "arm64"
+cpu: "Apple M2 Pro"
+cpu_cores: "10"
+crystal_version: "1.21.0"
+crystal_commit: "unknown"
+gcry_version: "0.11.0"
+git_commit: "eca0f1d"
+git_tag: "v0.11.0-19-geca0f1d"
+wrk_connections: 100
+wrk_duration_seconds: 15
+trials: 3

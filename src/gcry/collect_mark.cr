@@ -2,32 +2,50 @@
 
 module Gcry
   class Heap
+    # Ambient-root source tag for per-source reject counters. Distinguishes
+    # fiber/mutator stacks, BSS/data segments, and TLS (thread) so the
+    # false-positive root cause can be attributed. Cheap enum (1 byte) — passed
+    # through mark_root_candidate → mark_impl → mark_impl_unlocked; the case
+    # only runs on the type_id gate reject path, so the hot path is unchanged.
+    private enum RootSource
+      Stack
+      Static
+      Thread
+    end
+
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: false, base_only: false)
+      mark_impl(pointer, gate_type_id: false, base_only: false, source: RootSource::Stack)
     end
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
     # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
-    private def mark_root_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers)
+    private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
+      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers, source: source)
     end
 
-    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
+    # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash
+    # @entries / Array @buffer have no Crystal type_id). Interior policy matches
+    # ambient roots so allow_interior_pointers still applies.
+    private def mark_explicit_root(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
+    end
+
+    private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       if @mark_parallel
         @mark_lock.lock
         begin
-          mark_impl_unlocked(pointer, gate_type_id, base_only)
+          mark_impl_unlocked(pointer, gate_type_id, base_only, source)
         ensure
           @mark_lock.unlock
         end
       else
-        mark_impl_unlocked(pointer, gate_type_id, base_only)
+        mark_impl_unlocked(pointer, gate_type_id, base_only, source)
       end
     end
 
-    private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool) : Nil
+    private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
@@ -45,6 +63,11 @@ module Gcry
 
       if gate_type_id && !type_id_plausible?(header)
         @type_id_root_rejects += 1
+        case source
+        when RootSource::Stack  then @type_id_stack_rejects += 1
+        when RootSource::Static then @type_id_static_rejects += 1
+        when RootSource::Thread then @type_id_thread_rejects += 1
+        end
         note_false_root(addr)
         return
       end
@@ -149,9 +172,12 @@ module Gcry
               end
             end
             return
-          elsif entry.scan_cap > 0
-            # Size-cap (or size-class mismatch): word-scan only the real instance,
-            # not size-class padding. Keep interiors for embedded buffer ivars.
+          elsif size_match && entry.scan_cap > 0
+            # Size-cap only when this really is the registered type (alloc_size
+            # matches). Applying scan_cap on size mismatch was unsound: raw
+            # buffers whose first Int32 randomly equals a registered type_id
+            # stopped after instance_sizeof bytes and missed the rest → UAF
+            # (acikturkiye; fixed by requiring size_match here).
             @layout_conservative_scans += 1
             cap = entry.scan_cap.to_u64
             limit = size < cap ? size : cap
@@ -159,7 +185,7 @@ module Gcry
             words = limit // word
             cursor = user.as(UInt64*)
             words.times do |i|
-              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false)
+              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false, source: RootSource::Stack)
             end
             return
           elsif size_match
@@ -167,6 +193,8 @@ module Gcry
             @layout_precise_scans += 1
             return
           end
+          # size mismatch: ignore the layout entry (likely a raw buffer whose
+          # leading word collided with a Crystal type_id) → full conservative.
         end
       end
 
@@ -179,12 +207,15 @@ module Gcry
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
-        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only)
+        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Stack)
       end
     end
 
     # Precise Hash: keep @indices/@entries blobs alive without scanning them as
     # pointer arrays; walk Entry slots and mark key/value only.
+    # Live range is Crystal `@size + @deleted_count` (entries_size), NOT
+    # entries_capacity from `@indices_size_pow2` — capacity slots after realloc
+    # are uninitialized and must not be treated as Entry records.
     private def scan_hash_object(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
       entry.scan_offsets.each do |off|
         next if off.to_u64 + sizeof(Void*).to_u64 > size
@@ -198,6 +229,17 @@ module Gcry
         mark_noscan(slot.value)
       end
 
+      # Proc? @block is multi-word (function pointer + closure data).
+      block_off = entry.hash_block_off.to_u64
+      block_bytes = entry.hash_block_bytes.to_u64
+      if block_bytes > 0 && block_off + block_bytes <= size
+        w = 0_u64
+        while w + sizeof(Void*).to_u64 <= block_bytes
+          mark_candidate(Pointer(Void*).new(user.address + block_off + w).value)
+          w += sizeof(Void*).to_u64
+        end
+      end
+
       entries_off = entry.hash_entries_off.to_u64
       pow2_off = entry.hash_pow2_off.to_u64
       stride = entry.hash_entry_stride.to_u64
@@ -209,10 +251,25 @@ module Gcry
       return if entries.null?
 
       pow2 = Pointer(UInt8).new(user.address + pow2_off).value
-      # Crystal: indices_size = 1 << pow2; entries_size = indices_size // 2
+      # Crystal: indices_size = 1 << pow2; entries_capacity = indices_size // 2
       return if pow2 >= 63
-      entries_size = (1_u64 << pow2) // 2
-      return if entries_size == 0 || entries_size > 1_000_000_u64
+      capacity = (1_u64 << pow2) // 2
+      return if capacity == 0 || capacity > 1_000_000_u64
+
+      # Crystal entries_size == @size + @deleted_count (not capacity).
+      used = capacity
+      size_off = entry.hash_size_off.to_u64
+      deleted_off = entry.hash_deleted_off.to_u64
+      if size_off + 4 <= size && deleted_off + 4 <= size
+        live_size = Pointer(Int32).new(user.address + size_off).value
+        deleted = Pointer(Int32).new(user.address + deleted_off).value
+        if live_size >= 0 && deleted >= 0
+          sum = live_size.to_i64 + deleted.to_i64
+          if sum >= 0 && sum.to_u64 <= capacity
+            used = sum.to_u64
+          end
+        end
+      end
 
       key_off = entry.hash_key_off.to_u64
       key_bytes = entry.hash_key_bytes.to_u64
@@ -222,7 +279,7 @@ module Gcry
       base = entries.as(UInt8*)
 
       i = 0_u64
-      while i < entries_size
+      while i < used
         slot = base + (i * stride)
         # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
         hash_word = slot.as(UInt32*).value
@@ -269,16 +326,16 @@ module Gcry
     end
 
     private def scan_old_for_nursery_pointers : Nil
-      # Official remembered set: soft-dirty or mprotect dirty pages.
-      if scan_dirty_pages_for_pointers(nursery_only: true)
-        return
-      end
+      # Soft-dirty/mprotect can *help* mark from dirty pages, but must not
+      # replace the full old→young walk: WSL soft-dirty false-negatives under
+      # release HTTP left nursery Hash keys unmarked → SEGV.
+      scan_dirty_pages_for_pointers(nursery_only: true)
 
-      # Fallback: full conservative old→young object walk.
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
           next if BlockHeader.free?(header)
+          next if BlockHeader.nursery?(header)
           scan_object_for_nursery(header)
         else
           each_block(chunk) do |header|
@@ -332,6 +389,68 @@ module Gcry
       size = clamped_scan_size(header, user)
       return if size == 0
 
+      # Old Hash objects store keys/values in a separate @entries blob. Word-scanning
+      # only the Hash shell sees @entries/@indices pointers — not the String keys
+      # inside the blob. When the blob is old and soft-dirty missed the page,
+      # those nursery keys were swept → Hash UAF (OverflowError / SEGV in
+      # HTTP::Headers keep-alive). Precise walk marks nursery targets only
+      # (mark_candidate / mark_noscan already no-op on old objects during minor).
+      if @layout_precise && size >= 4
+        tid = user.as(Int32*).value
+        if (entry = Layout.entry_for(tid))
+          size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+          if size_match && entry.hash?
+            scan_hash_object(user, size, entry)
+            return
+          end
+          if size_match && entry.precise_fields?
+            entry.scan_offsets.each do |off|
+              next if off.to_u64 + sizeof(Void*).to_u64 > size
+              ptr = Pointer(Void*).new(user.address + off.to_u64).value
+              mark_candidate(ptr)
+              # Old Array(String) @buffer holds nursery element refs.
+              scan_buffer_words_for_nursery(ptr)
+            end
+            # Noscan buffers (Array(UInt8) etc.): usually no refs; still scan
+            # cheaply in case a mixed layout parked pointers here.
+            entry.noscan_offsets.each do |off|
+              next if off.to_u64 + sizeof(Void*).to_u64 > size
+              buf = Pointer(Void*).new(user.address + off.to_u64).value
+              scan_buffer_words_for_nursery(buf)
+            end
+            return
+          end
+        end
+      end
+
+      word = sizeof(Void*).to_u64
+      words = size // word
+      cursor = user.as(UInt64*)
+      words.times do |i|
+        cand = Pointer(Void).new(cursor[i])
+        next unless (h = find_object(cand))
+        if BlockHeader.nursery?(h)
+          mark_candidate(cand)
+        elsif !BlockHeader.atomic?(h)
+          # One-level chase: old Hash.@entries / Array.@buffer holding nursery refs.
+          scan_buffer_words_for_nursery(cand)
+        end
+      end
+    end
+
+    # Conservative word-scan of a heap buffer for nursery pointers (old→young).
+    private def scan_buffer_words_for_nursery(pointer : Void*) : Nil
+      header = find_object(pointer)
+      return unless header
+      return if BlockHeader.free?(header)
+      # Keep the buffer itself if it is nursery (rare for long-lived tables).
+      mark_candidate(pointer) if BlockHeader.nursery?(header)
+      return if BlockHeader.atomic?(header)
+
+      user = BlockHeader.user_from(header).as(UInt8*)
+      size = clamped_scan_size(header, user)
+      return if size == 0
+
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
@@ -344,31 +463,60 @@ module Gcry
     end
 
     private def clear_all_marks : Nil
-      # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
-      # to managed heap, not to the live-object count. Replaces the legacy
-      # per-object header write that dominated clear_all_marks under HTTP.
-      if bm = Gcry.current_mark_bitmap
-        if @heap_max > @heap_min && @heap_min != UInt64::MAX
-          bm.reset(@heap_min, @heap_max)
-        else
-          bm.zero_all
+      {% unless flag?(:gcry_side_bitmap) %}
+        each_chunk do |chunk|
+          each_block_or_large(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
+          end
         end
-      end
+      {% else %}
+        # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
+        # to managed heap, not to the live-object count. Replaces the legacy
+        # per-object header write that dominated clear_all_marks under HTTP.
+        # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
+        # -Dgc_none a test heap does not clobber the process GC's bitmap.
+        if bm = @mark_bitmap
+          if @heap_max > @heap_min && @heap_min != UInt64::MAX
+            bm.reset(@heap_min, @heap_max)
+          else
+            bm.zero_all
+          end
+        end
+      {% end %}
     end
 
     # Minor GC: reset nursery mark bits only.
     private def clear_nursery_marks : Nil
-      # Side mark bitmap: zero only the address ranges that correspond to
-      # nursery chunks. Chunks are page-aligned at multiples of the chunk size
-      # so we can issue narrow resets without touching the old generation's
-      # bits (which carry over from the prior major and remain valid).
-      bm = Gcry.current_mark_bitmap
-      return unless bm
-      each_chunk do |chunk|
-        next unless ChunkHeader.nursery?(chunk)
-        lo = ChunkHeader.data_start(chunk).address
-        hi = chunk.address + chunk.value.mapped_bytes
-        bm.reset(lo, hi) if hi > lo
+      {% unless flag?(:gcry_side_bitmap) %}
+        each_chunk do |chunk|
+          next unless ChunkHeader.nursery?(chunk)
+          each_block(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
+          end
+        end
+      {% else %}
+        # Side mark bitmap: zero only the address ranges that correspond to
+        # nursery chunks. Chunks are page-aligned at multiples of the chunk size
+        # so we can issue narrow resets without touching the old generation's
+        # bits (which carry over from the prior major and remain valid).
+        bm = @mark_bitmap
+        return unless bm
+        each_chunk do |chunk|
+          next unless ChunkHeader.nursery?(chunk)
+          lo = ChunkHeader.data_start(chunk).address
+          hi = chunk.address + chunk.value.mapped_bytes
+          bm.reset(lo, hi) if hi > lo
+        end
+      {% end %}
+    end
+
+    private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
+      if ChunkHeader.large?(chunk)
+        yield ChunkHeader.data_start(chunk).as(BlockHeader*)
+      else
+        each_block(chunk) { |h| yield h }
       end
     end
 
@@ -401,7 +549,10 @@ module Gcry
       # During generational minor, old objects are intentionally unmarked.
       # Only nursery deaths may enqueue finalizers / clear WeakRef links.
       return false if @minor_only && !BlockHeader.nursery?(header)
-      if BlockHeader.marked?(header)
+      # Use heap-local mark check (not BlockHeader.marked? which reads the
+      # global Gcry.current_mark_bitmap) — under -Dgc_none a test heap may
+      # have swapped the global bitmap, causing cross-heap false negatives.
+      if heap_marked?(header)
         return false
       end
       # False-negative counter: gate rejected the ambient pointer that pointed

@@ -8,15 +8,15 @@
 
 Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep collector as a **shard**, not a C dependency you hope never breaks. One flag (`-Dgc_none`) and the process runs on gcry.
 
-> **v0.11.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
+> **v0.12.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
 
-### macOS is real (v0.10)
+### macOS (v0.12)
 
 Process GC on Darwin is no longer a stub. Mach STW, dyld roots, 16 KiB host-page reclaim — `require "gcry"` + `-Dgc_none` on Apple Silicon / Intel Macs (Crystal **≥ 1.21**).
 
-Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~90% thr**, post-GC RSS **~0.97×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
+Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~87% thr**, post-GC RSS **~1.36×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
 
-**Linux** (last cut **v0.9.0**, still the Linux headline): **`/json` ~92% thr**, post-GC RSS **~0.97×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
+**Linux** (v0.12.0, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
 
 ---
 
@@ -35,14 +35,22 @@ If you care how your language reclaims memory, this is the repo.
 
 Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters.
 
-### Linux (version-cut headline — v0.9.0)
+### Linux (v0.12.0 — in-header MARK default)
 
-| Workload | gcry vs Boehm (v0.9.0, Linux) |
-|----------|-----------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~92%** |
-| Idle `/` thr | **~89%** |
-| `/json` post-GC RSS | **~0.97×** |
-| `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
+| Workload | gcry vs Boehm (v0.12.0, Linux) |
+|----------|---------------------------------:|
+| Alloc-heavy JSON (`/json`) thr | **~89%** |
+| Idle `/` thr | **~90%** |
+| `/json` post-GC RSS | **~0.99×** |
+| Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS |
+
+### macOS (v0.12.0 — in-header MARK default)
+
+| Workload | gcry vs Boehm (v0.12.0, macOS aarch64) |
+|----------|------------------------------------------:|
+| Alloc-heavy JSON (`/json`) thr | **~87%** |
+| Idle `/` thr | **~85%** |
+| `/json` post-GC RSS | **~1.36×** (down from ~10× in v0.11.0) |
 
 ### macOS (v0.11.0 — side mark bitmap + retain 64 MiB)
 
@@ -169,11 +177,12 @@ Defaults are tuned for process GC. Escape hatches when you measure:
 | `GCRY_BLACKLIST=1` | Opt-in blacklist (Darwin process default is off) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
-| `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References |
+| `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
+| `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
+| `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program `Reference.all_subclasses` precise layouts (~−7pp Kemal `/json` thr on Linux) |
 | `GCRY_DISABLE_SP_CLAMP=1` | No RSP clamp on other-thread stacks |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default `mach_vm` free-page release |
-| `GCRY_AUTO_LAYOUTS=1` | `Gcry.register_layouts` at init (measure thr) |
 | `GCRY_DISABLE_ATFORK=1` | No `pthread_atfork`; post-fork GC raises |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (~**95%** `/json` thr, ~**3×** RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release (already default-on) |

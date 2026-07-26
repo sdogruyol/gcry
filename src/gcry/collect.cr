@@ -18,12 +18,16 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD         = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
-    DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
-    DEFAULT_INCREMENTAL_WORK     =         1024
-    MAX_AUTO_INCREMENTAL_SLICES  =            4 # slices per alloc when debt is high
-    STATIC_ROOT_REFRESH_INTERVAL =       64_u64 # majors between /proc/self/maps refresh
+    DEFAULT_GC_THRESHOLD           =  4194304_u64 # 4 MiB — library / conservative
+    PROCESS_GC_THRESHOLD           = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_NURSERY_THRESHOLD      =   524288_u64 # 512 KiB minor
+    MIN_ADAPTIVE_NURSERY_THRESHOLD =    65536_u64 # 64 KiB floor
+    MAX_ADAPTIVE_NURSERY_THRESHOLD =  8388608_u64 # 8 MiB cap — prevents unbounded growth
+    NURSERY_SURVIVAL_HISTORY       =           10 # ring buffer for adaptive threshold
+    TARGET_SURVIVAL_PCT            =       50_u64
+    DEFAULT_INCREMENTAL_WORK       =         1024
+    MAX_AUTO_INCREMENTAL_SLICES    =            4 # slices per alloc when debt is high
+    STATIC_ROOT_REFRESH_INTERVAL   =       64_u64 # majors between /proc/self/maps refresh
 
     getter collections : UInt64 = 0_u64
     getter minor_collections : UInt64 = 0_u64
@@ -43,9 +47,11 @@ module Gcry
     property nursery_threshold : UInt64 = UInt64::MAX
     property incremental_work : Int32 = DEFAULT_INCREMENTAL_WORK
     # When true, auto major uses collect_a_little slices instead of full STW.
-    # Default OFF: Darwin currently lacks a sound page-dirty barrier, so
-    # incremental on macOS would crash under heavy pointer churn. Linux runs
-    # safely with the default ON. Override via `heap.incremental_auto = true`.
+    # ON on Linux (page-dirty barrier makes incremental sound), OFF on Darwin
+    # (lacks soft-dirty — incremental would crash under pointer churn).
+    # The property default is always false; gc_override.cr sets the platform
+    # default at process-GC boot. Override via `heap.incremental_auto = true`
+    # or `GCRY_INCREMENTAL` / `GCRY_DISABLE_INCREMENTAL` env vars.
     property incremental_auto : Bool = false
     # When true, fully free size-class chunks beyond empty_chunk_retain are
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
@@ -66,6 +72,13 @@ module Gcry
     # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
     property type_id_gate : Bool = false
     getter type_id_root_rejects : UInt64 = 0_u64
+    # Per-source breakdown of ambient-root rejects. Combined with
+    # type_id_root_rejects: stack + static + thread == total.
+    # Reset each major collection. Use these to attribute false roots to the
+    # specific scan phase (fiber/mutator stack, BSS/data segment, TLS).
+    getter type_id_stack_rejects : UInt64 = 0_u64
+    getter type_id_static_rejects : UInt64 = 0_u64
+    getter type_id_thread_rejects : UInt64 = 0_u64
     # type_id_root_rejections that were later revisited and would have passed —
     # useful for tuning the upper-bound heuristic (false negatives == UAF risk).
     # When non-zero in production, the gate is too strict and the upper bound
@@ -77,7 +90,35 @@ module Gcry
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
+    # Ring buffer for heap range observations (raw bytes, not headroom-inflated).
+    # On each major we record the heap range in bitmap-bytes; the average × 25 %
+    # becomes the adaptive headroom for the next interval.
+    BITMAP_GROWTH_HISTORY_CAPACITY = 16
+    @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
+    @bitmap_growth_count : Int32 = 0
+    @bitmap_growth_pos : Int32 = 0
+    # Cached adaptive headroom (in bitmap-bytes), recomputed after each major.
+    # Read by `ensure_bitmap_covers` on the allocation hot path — must be O(1).
+    @bitmap_headroom_bytes : UInt64 = 0
+
     property nursery_enabled : Bool = true
+    # Adaptive nursery threshold: adjusted after each minor based on the
+    # survival rate of the last N minors. When survival is below the target
+    # (50%), the threshold shrinks to collect earlier; above, it grows to
+    # reduce collection frequency. Clamped to [MIN_ADAPTIVE_NURSERY_THRESHOLD,
+    # MAX_ADAPTIVE_NURSERY_THRESHOLD]. Disable with GCRY_DISABLE_ADAPTIVE_NURSERY=1.
+    property adaptive_nursery : Bool = true
+    # Ring buffer of nursery alloc bytes before each minor (last N entries).
+    @nursery_alloc_history = StaticArray(UInt64, NURSERY_SURVIVAL_HISTORY).new(0_u64)
+    # Ring buffer of surviving nursery bytes after each minor.
+    @nursery_survival_history = StaticArray(UInt64, NURSERY_SURVIVAL_HISTORY).new(0_u64)
+    # Current index in the ring buffers.
+    @nursery_history_pos : Int32 = 0
+    # Number of entries recorded so far.
+    @nursery_history_count : Int32 = 0
+    getter nursery_survival_bytes : UInt64 = 0_u64
+    getter nursery_alloc_before_minor : UInt64 = 0_u64
+    getter nursery_survival_rate_pct : UInt64 = 100_u64
     # Process GC: Crystal 1.21+ always has a Monitor (SYSMON) thread even at
     # ExecutionContext parallelism 1. Without STW + scanning that thread's
     # current fiber stack, live objects are swept → heap corruption under load.
@@ -126,7 +167,6 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # After a successful clear_soft_dirty, minors may scan dirty pages only.
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
@@ -251,6 +291,10 @@ module Gcry
       unless @inc_active
         begin_incremental(scan_stack: true, roots: nil)
       end
+
+      # If begin_incremental couldn't arm a barrier, inc_active stays false
+      # and we bail out so the alloc path falls through to a full STW collect.
+      return false unless @inc_active
 
       @collecting = true
       @incremental_marking = true
@@ -431,6 +475,8 @@ module Gcry
 
     protected def destroy_collector : Nil
       flush_pending_empty_chunks
+      flush_pending_dormant_chunks
+      flush_pending_page_release_chunks
       abort_incremental
       @roots.clear
       @mark_stack.destroy
@@ -482,12 +528,14 @@ module Gcry
 
     protected def ensure_bitmap_covers(lo : UInt64, hi : UInt64) : Nil
       return if lo >= hi || lo == UInt64::MAX
-      bm = Gcry.current_mark_bitmap
+      bm = @mark_bitmap
       return unless bm
       # 1 bit per word-aligned address → bytes_needed = (range / 8).
       range_bytes = (hi - lo) >> 3
-      # Round up to page, leave headroom for one more chunk growth.
-      needed = range_bytes + (@small_chunk_bytes >> 3)
+      # Adaptive headroom: cached from last major (recomputed outside hot path).
+      headroom = @bitmap_headroom_bytes
+      headroom = @small_chunk_bytes >> 3 if headroom < (@small_chunk_bytes >> 3)
+      needed = range_bytes + headroom
       if bm.base_addr != lo || !bm.covers?(lo, hi)
         bm.relocate(lo, needed) do |base, base_addr, cap_bits|
           @mark_bitmap_base = base.address
@@ -503,14 +551,124 @@ module Gcry
       end
     end
 
+    # Record a heap range observation (bytes, not headroom-inflated).
+    # Called after each major collect with the current `range_bytes`.
+    # Also recomputes the cached `@bitmap_headroom_bytes`.
+    private def note_bitmap_growth(actual_range_bytes : UInt64) : Nil
+      @bitmap_growth_history[@bitmap_growth_pos] = actual_range_bytes
+      @bitmap_growth_pos = (@bitmap_growth_pos + 1) % BITMAP_GROWTH_HISTORY_CAPACITY
+      @bitmap_growth_count += 1 if @bitmap_growth_count < BITMAP_GROWTH_HISTORY_CAPACITY
+      # Recompute cached headroom: 25 % of the running average of raw heap
+      # range observations. Done once per major — never on the allocation path.
+      avg_range = compute_bitmap_growth_avg
+      @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 3) : (@small_chunk_bytes >> 3)
+    end
+
+    # Record nursery survival from the just-completed minor collection. Updates
+    # the ring buffer and the cached survival-rate. Also adjusts the nursery
+    # threshold via the adaptive-nursery policy when @adaptive_nursery is true.
+    private def note_nursery_survival : Nil
+      before = @nursery_alloc_before_minor
+      survived = @nursery_survival_bytes
+      return if before == 0 && survived == 0
+
+      pos = @nursery_history_pos
+      @nursery_alloc_history[pos] = before
+      @nursery_survival_history[pos] = survived
+      @nursery_history_pos = (pos + 1) % NURSERY_SURVIVAL_HISTORY
+      @nursery_history_count += 1 if @nursery_history_count < NURSERY_SURVIVAL_HISTORY
+
+      # Compute average survival rate across recorded history.
+      total_alloc = 0_u64
+      total_survived = 0_u64
+      count = @nursery_history_count
+      NURSERY_SURVIVAL_HISTORY.times do |i|
+        next if i >= count
+        total_alloc += @nursery_alloc_history[i]
+        total_survived += @nursery_survival_history[i]
+      end
+      @nursery_survival_rate_pct = if total_alloc > 0 && total_survived <= total_alloc
+                                     (total_survived * 100_u64) // total_alloc
+                                   elsif total_survived > total_alloc
+                                     100_u64
+                                   else
+                                     0_u64
+                                   end
+
+      # Adaptive threshold adjustment: tune the nursery threshold so the
+      # survival rate stays near TARGET_SURVIVAL_PCT (50%).
+      adjust_nursery_threshold if @adaptive_nursery && count > 0
+    end
+
+    # Adjust nursery_threshold based on the moving-average survival rate.
+    # - Survival > target: the nursery is too small → grow threshold.
+    # - Survival < target: the nursery is too large / too much survives → shrink.
+    # Clamped to [MIN_ADAPTIVE_NURSERY_THRESHOLD, MAX_ADAPTIVE_NURSERY_THRESHOLD].
+    # Always respects an explicit (non-default) GCRY_NURSERY threshold unless
+    # adaptive is explicitly enabled.
+    private def adjust_nursery_threshold : Nil
+      thr = @nursery_threshold
+      return if thr == UInt64::MAX || thr == 0
+      rate = @nursery_survival_rate_pct
+      if rate > TARGET_SURVIVAL_PCT
+        # Survival above target: grow threshold by 25%
+        thr = thr + (thr >> 2)
+      elsif rate < TARGET_SURVIVAL_PCT / 2
+        # Survival well below target (25%): shrink threshold by 25%
+        thr = thr - (thr >> 2)
+      end
+      # Clamp
+      thr = MIN_ADAPTIVE_NURSERY_THRESHOLD if thr < MIN_ADAPTIVE_NURSERY_THRESHOLD
+      thr = MAX_ADAPTIVE_NURSERY_THRESHOLD if thr > MAX_ADAPTIVE_NURSERY_THRESHOLD
+      @nursery_threshold = thr
+    end
+
+    # Average of recorded growth history entries (0 if none).
+    private def compute_bitmap_growth_avg : UInt64
+      return 0_u64 if @bitmap_growth_count == 0
+      sum = 0_u64
+      count = @bitmap_growth_count
+      BITMAP_GROWTH_HISTORY_CAPACITY.times do |i|
+        sum += @bitmap_growth_history[i] if i < count
+      end
+      sum // count.to_u64
+    end
+
     protected def update_heap_bounds_after_unmap : Nil
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
       @last_chunk_hi = 0_u64
-      @heap_min = UInt64::MAX
-      @heap_max = 0_u64
+      # Single pass to recompute bounds, then one call to ensure_bitmap_covers
+      # (avoids O(N) `note_mapped` per chunk → O(N) `ensure_bitmap_covers`).
+      lo = UInt64::MAX
+      hi = 0_u64
       each_chunk do |chunk|
-        note_mapped(chunk)
+        base = chunk.address
+        finish = base + chunk.value.mapped_bytes
+        lo = base if base < lo
+        hi = finish if finish > hi
+      end
+      @heap_min = lo
+      @heap_max = hi
+      ensure_bitmap_covers(lo, hi)
+      # After bounds are tightened, check whether the bitmap has grown
+      # well beyond the current need and shrink it if so.  Threshold:
+      # capacity > 1.2 × needed  OR  capacity > needed + 1 MiB (absolute waste).
+      # This runs outside STW (called from flush_pending_empty_chunks,
+      # trim_large_cache, and reclaim_empty_chunk) so the syscall cost is
+      # tolerable.
+      if hi > lo && lo != UInt64::MAX
+        bm = @mark_bitmap
+        if bm
+          needed = ((hi - lo) >> 3) + @bitmap_headroom_bytes
+          waste = bm.capacity_bytes > needed ? bm.capacity_bytes - needed : 0_u64
+          if waste > needed / 5 || waste > 1048576_u64 # 1.2× OR >1 MiB waste
+            bm.shrink_to_fit!(needed)
+            @mark_bitmap_base = bm.base.as(UInt64*).address
+            @mark_bitmap_base_addr = bm.base_addr
+            @mark_bitmap_cap_bits = bm.capacity_bytes * 8_u64
+          end
+        end
       end
     end
 
@@ -544,9 +702,10 @@ module Gcry
 
         t0 = monotonic_ns
         @before_collect_callbacks.each(&.call)
-        # Explicit roots respect allow_interior_pointers (ambient-style).
-        @roots.each { |ptr| mark_root_candidate(ptr) }
-        roots.try &.each { |ptr| mark_root_candidate(ptr) }
+        # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
+        # realloc pin / add_root); still respect allow_interior_pointers.
+        @roots.each { |ptr| mark_explicit_root(ptr) }
+        roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         # Fiber objects + suspended stacks (once; not also via push_gc_roots).
         scrub_parked_fiber_stacks if scan_stack
@@ -558,7 +717,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
             end
           end
         end
@@ -583,6 +742,12 @@ module Gcry
         enqueue_unreachable_finalizers
 
         t0 = monotonic_ns
+        # For minor collections, snapshot nursery alloc bytes and reset survival
+        # counter before sweep accumulates surviving nursery payload.
+        if !major
+          @nursery_alloc_before_minor = @nursery_alloc_bytes
+          @nursery_survival_bytes = 0_u64
+        end
         sweep(major: major)
         @last_phase_sweep_ns = monotonic_ns - t0
 
@@ -600,6 +765,8 @@ module Gcry
         else
           @nursery_alloc_bytes = 0_u64
           @minor_collections += 1
+          # Record nursery survival statistics for adaptive threshold.
+          note_nursery_survival
           arm_page_barrier_after_collect
         end
         @collections += 1
@@ -614,7 +781,37 @@ module Gcry
 
       # Munmap outside STW — empty chunks + excess large freelist (reuse common).
       flush_pending_empty_chunks
+      # DORMANT madvise outside STW — kernel VM lock contention avoided.
+      flush_pending_dormant_chunks
+      # Partial-chunk free-page madvise outside STW.
+      flush_pending_page_release_chunks
       trim_large_cache
+
+      # After a major collect, record the heap range observation so the
+      # adaptive headroom in `ensure_bitmap_covers` stays tight.
+      # We record the raw range_bytes (not headroom-inflated) to avoid a
+      # positive-feedback loop where headroom drives up the running average.
+      if major
+        range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
+        note_bitmap_growth(range_bytes)
+
+        # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
+        # Resets counters each major so the policy tracks the current working set.
+        total_large = @large_cache_hits + @large_cache_misses
+        if total_large > 0
+          hit_pct = (@large_cache_hits * 100) // total_large
+          current = @large_cache_retain
+          if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+            # Good reuse: double retain (capped at limit).
+            @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
+          elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
+            # Poor reuse: halve retain (floor at 1 MiB).
+            @large_cache_retain = {current >> 1, 1048576_u64}.max
+          end
+        end
+        @large_cache_hits = 0_u64
+        @large_cache_misses = 0_u64
+      end
 
       @running_finalizers = true
       begin
@@ -625,13 +822,9 @@ module Gcry
     end
 
     private def monotonic_ns : UInt64
-      {% if flag?(:darwin) %}
-        Time.monotonic.total_nanoseconds.to_u64
-      {% else %}
-        ts = uninitialized LibC::Timespec
-        LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-        ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
-      {% end %}
+      ts = uninitialized LibC::Timespec
+      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
+      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
     end
 
     private def record_pause(started_ns : UInt64) : Nil
@@ -717,12 +910,31 @@ module Gcry
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
       @type_id_root_rejects = 0_u64
+      @type_id_stack_rejects = 0_u64
+      @type_id_static_rejects = 0_u64
+      @type_id_thread_rejects = 0_u64
       @type_id_root_false_negatives = 0_u64
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
     end
 
+    # Returns true when a page-dirty barrier backend is available.
+    # Incremental mark is unsound without barrier re-scan — live objects
+    # written into already-scanned pages between slices would be swept.
+    private def incremental_barrier_possible? : Bool
+      !select_barrier_backend.none?
+    end
+
     private def begin_incremental(scan_stack : Bool, roots : Array(Void*)?) : Nil
+      # Without a page-dirty barrier, incremental mark is unsound when a
+      # concurrent mutator can write pointers into already-scanned pages
+      # between slices (process GC with @stop_the_world).  Single-threaded
+      # library heaps are safe only when the caller never mutates the object
+      # graph between slices — we allow it for backward compat with specs.
+      if @stop_the_world && !incremental_barrier_possible?
+        return
+      end
+
       @collecting = true
       @incremental_marking = true
       @inc_active = true
@@ -734,8 +946,8 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_root_candidate(ptr) }
-        roots.try &.each { |ptr| mark_root_candidate(ptr) }
+        @roots.each { |ptr| mark_explicit_root(ptr) }
+        roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack
         scan_all_fiber_roots if scan_stack
@@ -743,7 +955,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate) }
+              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
             end
           end
         end

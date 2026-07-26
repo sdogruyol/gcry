@@ -186,6 +186,32 @@ describe Gcry::Heap do
     end
   end
 
+  # Process-GC style: type_id_gate rejects raw buffers on the stack. Growing via
+  # realloc must pin the old block so a collect inside allocate cannot reclaim it
+  # (Kemal HTTP::Headers Hash resize → double free).
+  it "realloc survives collect under type_id_gate (raw buffer)" do
+    heap = Gcry::Heap.new
+    begin
+      heap.type_id_gate = true
+      heap.allow_interior_pointers = false
+      heap.gc_threshold = UInt64::MAX
+      heap.nursery_enabled = false
+
+      # Poison first word like Hash::Entry.@hash so ambient type_id_gate rejects.
+      ptr = heap.malloc(64)
+      ptr.as(UInt32*).value = 0xDEADBEEF_u32
+      4.upto(63) { |i| ptr.as(UInt8*)[i] = i.to_u8 }
+
+      heap.gc_threshold = 1
+      grown = heap.realloc(ptr, 256)
+      grown.as(UInt32*).value.should eq(0xDEADBEEF_u32)
+      4.upto(63) { |i| grown.as(UInt8*)[i].should eq(i.to_u8) }
+      heap.live?(grown).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
   it "realloc shrinking keeps the same pointer" do
     heap = Gcry::Heap.new
     begin
@@ -244,6 +270,7 @@ end
 
 describe Gcry do
   it "exposes module-level allocators on the default heap" do
+    saved = Gcry.default_heap
     heap = Gcry::Heap.new
     Gcry.default_heap = heap
     begin
@@ -253,7 +280,7 @@ describe Gcry do
       Gcry.is_heap_ptr(ptr).should be_true
       Gcry.free(ptr)
     ensure
-      Gcry.default_heap = Gcry::Heap.new
+      Gcry.default_heap = saved
     end
   end
 

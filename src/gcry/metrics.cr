@@ -21,16 +21,22 @@ module Gcry
     getter phase_mark_ns : UInt64
     getter phase_sweep_ns : UInt64
     getter type_id_root_rejects : UInt64
+    getter type_id_stack_rejects : UInt64
+    getter type_id_static_rejects : UInt64
+    getter type_id_thread_rejects : UInt64
+    getter type_id_root_false_negatives : UInt64
     getter blacklist_hits : UInt64
     getter blacklist_skips : UInt64
     getter tlab_refills : UInt64
     getter tlab_steals : UInt64
+    getter tlab_hits : UInt64
     getter parallel_mark_workers : Int32
     getter parallel_mark_runs : UInt64
     getter parallel_mark_stolen : UInt64
     getter layout_precise_scans : UInt64
     getter layout_conservative_scans : UInt64
     getter layout_entries : Int32
+    getter layout_unsafe_skips : UInt64
     getter sp_clamp_hits : UInt64
     getter sp_clamp_fallbacks : UInt64
     getter barrier_backend : String
@@ -42,6 +48,9 @@ module Gcry
     getter clear_stack_bytes_total : UInt64
     getter fiber_scrub_runs : UInt64
     getter fiber_scrub_bytes_total : UInt64
+    getter nursery_survival_bytes : UInt64
+    getter nursery_alloc_before_minor : UInt64
+    getter nursery_survival_rate_pct : UInt64
 
     def initialize(
       @collections : UInt64, @major_collections : UInt64, @minor_collections : UInt64,
@@ -50,15 +59,21 @@ module Gcry
       @pause_count : UInt64, @pause_last_ns : UInt64, @pause_p50_ns : UInt64,
       @pause_p99_ns : UInt64, @pause_max_ns : UInt64, @pause_total_ns : UInt64,
       @phase_mark_ns : UInt64, @phase_sweep_ns : UInt64,
-      @type_id_root_rejects : UInt64, @blacklist_hits : UInt64, @blacklist_skips : UInt64,
-      @tlab_refills : UInt64, @tlab_steals : UInt64,
+      @type_id_root_rejects : UInt64, @type_id_stack_rejects : UInt64,
+      @type_id_static_rejects : UInt64, @type_id_thread_rejects : UInt64,
+      @type_id_root_false_negatives : UInt64,
+      @blacklist_hits : UInt64, @blacklist_skips : UInt64,
+      @tlab_refills : UInt64, @tlab_steals : UInt64, @tlab_hits : UInt64,
       @parallel_mark_workers : Int32, @parallel_mark_runs : UInt64, @parallel_mark_stolen : UInt64,
       @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
-      @layout_entries : Int32, @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
+      @layout_entries : Int32, @layout_unsafe_skips : UInt64,
+      @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
       @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
       @fiber_scrub_runs : UInt64, @fiber_scrub_bytes_total : UInt64,
+      @nursery_survival_bytes : UInt64, @nursery_alloc_before_minor : UInt64,
+      @nursery_survival_rate_pct : UInt64,
     )
     end
   end
@@ -90,16 +105,22 @@ module Gcry
       heap.last_phase_mark_ns,
       heap.last_phase_sweep_ns,
       heap.type_id_root_rejects,
+      heap.type_id_stack_rejects,
+      heap.type_id_static_rejects,
+      heap.type_id_thread_rejects,
+      heap.type_id_root_false_negatives,
       heap.blacklist_hits,
       heap.blacklist_skips,
       heap.tlab_refills,
       heap.tlab_steals,
+      heap.tlab_hits,
       heap.parallel_mark_workers,
       heap.parallel_mark_runs,
       heap.parallel_mark_stolen,
       heap.layout_precise_scans,
       heap.layout_conservative_scans,
       Layout.size,
+      Layout.unsafe_skips_count,
       heap.sp_clamp_hits,
       heap.sp_clamp_fallbacks,
       heap.barrier_backend_name,
@@ -111,6 +132,9 @@ module Gcry
       heap.clear_stack_bytes_total,
       heap.fiber_scrub_runs,
       heap.fiber_scrub_bytes_total,
+      heap.nursery_survival_bytes,
+      heap.nursery_alloc_before_minor,
+      heap.nursery_survival_rate_pct,
     )
   end
 
@@ -163,6 +187,18 @@ module Gcry
       io << "# HELP #{prefix}_type_id_root_rejects_total Ambient roots rejected by type_id gate\n"
       io << "# TYPE #{prefix}_type_id_root_rejects_total counter\n"
       io << "#{prefix}_type_id_root_rejects_total #{m.type_id_root_rejects}\n"
+      io << "# HELP #{prefix}_type_id_stack_rejects_total Stack-scan rejects (fiber/mutator)\n"
+      io << "# TYPE #{prefix}_type_id_stack_rejects_total counter\n"
+      io << "#{prefix}_type_id_stack_rejects_total #{m.type_id_stack_rejects}\n"
+      io << "# HELP #{prefix}_type_id_static_rejects_total Static-segment rejects (BSS/data)\n"
+      io << "# TYPE #{prefix}_type_id_static_rejects_total counter\n"
+      io << "#{prefix}_type_id_static_rejects_total #{m.type_id_static_rejects}\n"
+      io << "# HELP #{prefix}_type_id_thread_rejects_total Thread-stack rejects (TLS)\n"
+      io << "# TYPE #{prefix}_type_id_thread_rejects_total counter\n"
+      io << "#{prefix}_type_id_thread_rejects_total #{m.type_id_thread_rejects}\n"
+      io << "# HELP #{prefix}_type_id_root_false_negatives_total Rejected roots later proved valid (UAF risk)\n"
+      io << "# TYPE #{prefix}_type_id_root_false_negatives_total counter\n"
+      io << "#{prefix}_type_id_root_false_negatives_total #{m.type_id_root_false_negatives}\n"
       io << "# HELP #{prefix}_blacklist_hits_total Pages recorded as false roots\n"
       io << "# TYPE #{prefix}_blacklist_hits_total counter\n"
       io << "#{prefix}_blacklist_hits_total #{m.blacklist_hits}\n"
@@ -175,6 +211,9 @@ module Gcry
       io << "# HELP #{prefix}_tlab_steals_total TLAB steals from other threads\n"
       io << "# TYPE #{prefix}_tlab_steals_total counter\n"
       io << "#{prefix}_tlab_steals_total #{m.tlab_steals}\n"
+      io << "# HELP #{prefix}_tlab_hits_total TLAB allocs satisfied without refill (hit)\n"
+      io << "# TYPE #{prefix}_tlab_hits_total counter\n"
+      io << "#{prefix}_tlab_hits_total #{m.tlab_hits}\n"
       io << "# HELP #{prefix}_parallel_mark_workers Requested mark workers\n"
       io << "# TYPE #{prefix}_parallel_mark_workers gauge\n"
       io << "#{prefix}_parallel_mark_workers #{m.parallel_mark_workers}\n"
@@ -187,6 +226,9 @@ module Gcry
       io << "# HELP #{prefix}_layout_entries Layout table size\n"
       io << "# TYPE #{prefix}_layout_entries gauge\n"
       io << "#{prefix}_layout_entries #{m.layout_entries}\n"
+      io << "# HELP #{prefix}_layout_unsafe_skips_total Types skipped by @unsafe_layouts blacklist\n"
+      io << "# TYPE #{prefix}_layout_unsafe_skips_total counter\n"
+      io << "#{prefix}_layout_unsafe_skips_total #{m.layout_unsafe_skips}\n"
       io << "# HELP #{prefix}_layout_precise_scans_total Objects scanned via layout tables\n"
       io << "# TYPE #{prefix}_layout_precise_scans_total counter\n"
       io << "#{prefix}_layout_precise_scans_total #{m.layout_precise_scans}\n"
@@ -211,6 +253,15 @@ module Gcry
       io << "# HELP #{prefix}_fiber_scrub_bytes_total Bytes zeroed on parked fiber stacks\n"
       io << "# TYPE #{prefix}_fiber_scrub_bytes_total counter\n"
       io << "#{prefix}_fiber_scrub_bytes_total #{m.fiber_scrub_bytes_total}\n"
+      io << "# HELP #{prefix}_nursery_survival_bytes Surviving nursery payload bytes from last minor\n"
+      io << "# TYPE #{prefix}_nursery_survival_bytes gauge\n"
+      io << "#{prefix}_nursery_survival_bytes #{m.nursery_survival_bytes}\n"
+      io << "# HELP #{prefix}_nursery_alloc_before_minor Nursery alloc bytes before last minor\n"
+      io << "# TYPE #{prefix}_nursery_alloc_before_minor gauge\n"
+      io << "#{prefix}_nursery_alloc_before_minor #{m.nursery_alloc_before_minor}\n"
+      io << "# HELP #{prefix}_nursery_survival_rate_pct Nursery survival rate (0-100)\n"
+      io << "# TYPE #{prefix}_nursery_survival_rate_pct gauge\n"
+      io << "#{prefix}_nursery_survival_rate_pct #{m.nursery_survival_rate_pct}\n"
     end
   end
 end

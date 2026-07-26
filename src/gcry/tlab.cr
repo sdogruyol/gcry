@@ -42,6 +42,10 @@ module Gcry
       @tlab_steals
     end
 
+    def tlab_hits : UInt64
+      @tlab_hits
+    end
+
     protected def ensure_tlabs : Nil
       return if @tlabs_booted
       MAX_TLABS.times do |i|
@@ -104,8 +108,10 @@ module Gcry
     end
 
     # Steal a batch from the global freelist into the calling thread's TLAB.
+    # Adaptive batch size: targets ~8 KiB per refill (per-class, clamped to [1, 256]).
     protected def tlab_refill(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = Pointer(Void).null
+      batch = (8192_u64 / payload.to_u64).to_i32.clamp(1, 256)
       @alloc_lock.sync do
         if nursery
           if @nursery_freelists[class_index].null?
@@ -140,7 +146,7 @@ module Gcry
           head = src
           tail = src
           count = 1
-          while count < 32
+          while count < batch
             h = BlockHeader.from_user(tail)
             nxt = h.value.next_free
             break if nxt.null?
@@ -182,6 +188,8 @@ module Gcry
       if user.null?
         user = tlab_refill(class_index, payload, nursery)
         raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if user.null?
+      else
+        @tlab_hits += 1
       end
 
       header = BlockHeader.from_user(user)

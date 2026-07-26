@@ -148,7 +148,58 @@ describe "Gcry sound incremental (dirty re-scan)" do
     end
   end
 
+  it "gracefully skips sweep when process-GC has no barrier" do
+    # Regression: when incremental cycles start but no page-dirty barrier can
+    # be armed (Darwin), collect_a_little must avoid sweeping live objects.
+    # This test verifies the guard: begin_incremental bails early, so
+    # collect_a_little returns false and the caller falls through to full STW.
+    heap = Gcry::Heap.new
+    begin
+      heap.nursery_enabled = false
+      heap.scan_static_roots = true
+      # Simulate process-GC mode (Darwin): stop_the_world = true signals the
+      # incremental guard that a concurrent mutator may write between slices.
+      # We do NOT actually run stop_world here (single-threaded spec would
+      # deadlock) — the guard only checks @stop_the_world, it doesn't invoke it.
+      heap.stop_the_world = true
+      heap.incremental_auto = true
+      heap.incremental_work = 64
+      heap.gc_threshold = UInt64::MAX
+      heap.allow_mprotect_barrier = false
+      # Also disable soft-dirty so incremental_barrier_possible? returns false
+      # on real Linux (CI); Docker containers lack /proc access so soft-dirty
+      # fails auto-probe, but on CI it succeeds, making begin_incremental
+      # attempt stop_world and deadlock in this single-threaded spec.
+      heap.soft_dirty_max_pct = 0
+
+      root = heap.malloc(64)
+      heap.add_root(root)
+      80.times { heap.malloc(32) }
+
+      # collect_a_little must bail — no barrier -> no inc_active.
+      # Returning false without sweeping means no major_collection was
+      # credited + root stays alive.
+      finished = heap.collect_a_little(64)
+      finished.should be_false
+      heap.live?(root).should be_true
+      heap.major_collections.should eq(0)
+
+      # Full STW collect still works correctly.
+      # Temporarily disable stop_the_world since this is a single-threaded spec
+      # (the guard only checks the flag, suspend/signal would hang on Linux).
+      heap.stop_the_world = false
+      heap.collect(scan_stack: false)
+      heap.stop_the_world = true
+      heap.live?(root).should be_true
+      heap.major_collections.should eq(1)
+    ensure
+      heap.stop_the_world = false
+      heap.destroy
+    end
+  end
+
   it "exposes pause percentiles via Gcry.pause_stats" do
+    saved = Gcry.default_heap
     heap = Gcry::Heap.new
     Gcry.default_heap = heap
     begin
@@ -164,7 +215,7 @@ describe "Gcry sound incremental (dirty re-scan)" do
       ps.p50_ns.should be > 0
       ps.p99_ns.should be >= ps.p50_ns
     ensure
-      Gcry.default_heap = Gcry::Heap.new
+      Gcry.default_heap = saved
     end
   end
 end

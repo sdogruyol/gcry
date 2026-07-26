@@ -7,15 +7,15 @@ module Gcry
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
-        mark_root_candidate(candidate)
+        mark_root_candidate(candidate, source: RootSource::Stack)
       end
     end
 
     # Mark Thread objects and their current_fiber (TLS alone is not scanned).
     private def scan_thread_roots : Nil
       Thread.unsafe_each do |thread|
-        mark_root_candidate(Pointer(Void).new(thread.object_id))
-        mark_root_candidate(Pointer(Void).new(thread.current_fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
+        mark_root_candidate(Pointer(Void).new(thread.current_fiber.object_id), source: RootSource::Thread)
       end
     end
 
@@ -24,14 +24,14 @@ module Gcry
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
       Roots.scan_mutator(bottom) do |candidate|
-        mark_root_candidate(candidate)
+        mark_root_candidate(candidate, source: RootSource::Stack)
       end
     end
 
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
       Fiber.unsafe_each do |fiber|
-        mark_root_candidate(Pointer(Void).new(fiber.object_id))
+        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
         next if fiber.running?
         # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
@@ -41,7 +41,7 @@ module Gcry
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard if top < guard
         Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
-          mark_root_candidate(candidate)
+          mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end
     end
@@ -68,7 +68,7 @@ module Gcry
               @sp_clamp_fallbacks += 1
             end
             Roots.scan_range(low, high, safe: true) do |candidate|
-              mark_root_candidate(candidate)
+              mark_root_candidate(candidate, source: RootSource::Thread)
             end
             next
           end
@@ -88,7 +88,7 @@ module Gcry
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
-          mark_root_candidate(candidate)
+          mark_root_candidate(candidate, source: RootSource::Thread)
         end
       end
     end

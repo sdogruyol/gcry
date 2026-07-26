@@ -8,7 +8,7 @@ require "./gcry/heap"
 require "./gcry/layout"
 
 module Gcry
-  VERSION = "0.11.0"
+  VERSION = "0.12.0"
 
   struct PauseStats
     getter last_ns : UInt64
@@ -35,9 +35,10 @@ module Gcry
     @@default_heap ||= Heap.new
   end
 
-  # Replace the default heap (mainly for tests). Destroys the previous one.
+  # Replace the default heap (mainly for tests). Does NOT destroy the previous
+  # heap — under -Dgc_none the process GC heap has live Crystal runtime objects
+  # in its chunks and munmap would SIGILL on the next access.
   def self.default_heap=(heap : Heap) : Heap
-    @@default_heap.try(&.destroy)
     @@default_heap = heap
   end
 

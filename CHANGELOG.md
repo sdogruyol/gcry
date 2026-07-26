@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Fixed
+
+### Changed
+
+### Performance
+
+## [0.12.0] - 2026-07-26
+
+### Added
+
+- **`-Dgcry_side_bitmap` (opt-in):** side `MarkBitmap` mmap path kept for experiments. Default is in-header `MARK` again after Linux A/B showed bitmap default at **82%** `/json` @ **~9.2×** RSS vs header **89%** @ **0.99×** (acikturkiye **50%**→**93%**, **5.6×**→**3.0×**) — `bench/log/bitmap-ab/FINDINGS.txt`.
+- **Bitmap shrinking + adaptive headroom (P1.1):** `MarkBitmap#shrink_to_fit!` reduces the side-mark bitmap mmap when the heap range contracts. Adaptive headroom (25% of recent growth history) prevents immediate re-growth. Combined with tighter `update_heap_bounds_after_unmap`, Kemal RSS drops from ~10× to ~5–7× (when `-Dgcry_side_bitmap`).
+- **Darwin `MADV_FREE_REUSABLE` (P1.1, macOS):** `release_physical_pages` switched from the expensive 3-syscall `mach_vm_deallocate`+`allocate`+`protect` to a single `madvise(..., 5)`. `empty_chunk_retain` lowered from 64 MiB to **8 MiB** on Darwin (no cost; `MADV_FREE_REUSABLE` is cheaper than the retain budget).
+- **Deferred madvise — STW pause damping (P1.4):** All `madvise` / page-release syscalls defer to post-STW flush functions (`flush_pending_dormant_chunks`, `flush_pending_page_release_chunks`). DORMANT/HOLED flags set during STW; actual syscalls run after threads resume, eliminating kernel VM lock contention that caused 132–150 ms pause tails.
+- **Cross-chunk dormant coalescing (P1.4):** `flush_pending_dormant_chunks` merges contiguous dormant chunks into a single `madvise` region (one syscall per run instead of one per chunk).
+- **Per-chunk free-page coalescing (P1.4):** `dontneed_free_pages_in_chunk` pre-computes a live-page mask and issues one `madvise` per contiguous free run instead of one per free page (reduces from up to 64 syscalls/chunk to 1–3).
+- **Auto-layouts (P2.1):** `Gcry.register_layouts` whole-program walk + `@unsafe_layouts` blacklist (`Cry` / `Crystal::*` / `LibC::*`; metric `layout_unsafe_skips`). **Opt-in** via `GCRY_AUTO_LAYOUTS=1` (Linux Kemal `/json` ~**−7pp** vs builtins-only — see `bench/log/thr-abis`). Escape when opted in: `GCRY_DISABLE_AUTO_LAYOUTS=1`.
+- **Per-source root reject counters:** New `type_id_stack_rejects` / `type_id_static_rejects` / `type_id_thread_rejects` count where false roots come from (fiber/mutator stacks, BSS/data, TLS). Plus `type_id_root_false_negatives` is now exposed in `/gc-stats`, metrics, and Prometheus — was tracked but never surfaced. Sum invariant: `stack + static + thread == type_id_root_rejects`.
+- **Adaptive nursery threshold:** `@nursery_threshold` adjusts dynamically after each minor based on the moving-average survival rate (last 10 minors). Target survival rate is 50%; when survival rises above it the threshold grows by 25% per minor (reducing collection frequency); when survival drops below 25% the threshold shrinks by 25% (collecting sooner to limit survivor pressure). Clamped to [64 KiB, 8 MiB]. Default-on for process GC (`adaptive_nursery=true`); disable via `GCRY_DISABLE_ADAPTIVE_NURSERY=1`.
+- **Large-cache LRU eviction + adaptive retain (P3.3):** `cache_large_chunk` inserts at tail (LRU). `trim_large_cache` evicts from head. Adaptive retain: after each major, hit-rate above 50% doubles retain (capped at 64 MiB); hit-rate below 10% halves it (floor 1 MiB). Default: 1 MiB on Darwin (macOS), 8 MiB on Linux.
+- **Bitmap headroom reduced 25% → 12.5%:** `note_bitmap_growth` now uses `avg_range >> 3` instead of `>> 2`, shrinking side-mark bitmap reserve — less RSS waste on stable heaps.
+
+### Fixed
+
+- **Hash layout walk used `entries_capacity` instead of Crystal `entries_size`:** precise `scan_hash_object` iterated `(1 << indices_size_pow2) / 2` slots. After `realloc`, slots past `@size + @deleted_count` are uninitialized; non-zero garbage `@hash` words caused false marks / mutator UAF under acikturkiye (`GCRY_DISABLE_LAYOUT=1` was the only green bisect). Now walks `@size + @deleted_count`, capped by capacity. Also word-scans `@block` (`Proc?`, 16 bytes) instead of treating it as a single pointer.
+- **Layout `scan_cap` required `alloc_size` match:** on size mismatch (raw buffer whose leading `Int32` collided with a registered `type_id`), the old path still applied that type's `scan_cap` and returned — truncating the mark scan and dropping live pointers (acikturkiye SEGV with layouts on; green with `GCRY_DISABLE_LAYOUT=1`). Size mismatch now falls through to full conservative scan.
+
+### Changed
+
+- **In-header MARK is default again:** side mark bitmap moved to `-Dgcry_side_bitmap` after Linux HTTP A/B (`bench/log/bitmap-ab`). Headline cut: Kemal `/json` **88.8%** @ **0.99×** RSS; acikturkiye **92.8%** @ **3.0×** — [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Nursery + incremental default-off for process GC:** Linux no longer enables `nursery` / `incremental_auto` by default. Soft-dirty false-negatives under WSL release HTTP (Kemal) caused Hash key UAF / SEGV (`0x0`/`0x4`/`0x11`). Opt in with `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1` after measuring. Darwin unchanged (already off). Related fixes kept: `realloc` pins old buffers across collect; explicit roots skip `type_id_gate`; old→young always full-walks (soft-dirty is additive only) with one-level buffer chase.
+- **`incremental_auto` defaults (P1.3, Linux/Darwin):** *(superseded — both off by default; see above.)*
+- **`GCRY_AUTO_LAYOUTS` opt-in (P2.1):** briefly default-on; reverted after Linux A/B — builtins-only `/json` **~85%** Boehm vs auto-on **~78%** (`bench/log/thr-abis`). Set `GCRY_AUTO_LAYOUTS=1` to enable.
+- **Bench default build:** `bench/run_all.sh` uses pure `--release` again (PERF.md). `--release --debug --error-trace` cost ~15–18pp thr; use `CRYSTAL_FLAGS` / `DEBUG=1` only for SEGV hunting.
+- **Nursery default-on for Linux process GC:** *(superseded — off by default again; see above.)*
+- **Darwin blacklist re-enabled:** Previously default-off on Darwin (freelist-abandonment spiral under all-conservative scanning). Layout-precise scans (P2.1) cut false root hits sharply, making the blacklist safe. Escape via `GCRY_DISABLE_BLACKLIST=1`.
+- **Darwin aggressive free-page release:** `flush_pending_page_release_chunks` walks ALL kept size-class chunks (not just HOLED) on Darwin. `MADV_FREE_REUSABLE` is page-table-level (no VM lock churn), so the extra walk is cheap per major.
+- **Darwin large cache reduced to 1 MiB (adaptive):** Adaptive LRU policy starts at 1 MiB on Darwin (vs 8 MiB on Linux). mach_vm reclaim already punches holes on free, so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
+
+### Performance
+
+- **Linux** Kemal (WSL2 x86_64, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-173602/`): `/` **90.4%** of Boehm; `/json` **88.8%**; post-GC RSS **0.99×**. acikturkiye `/api/v1/`: **92.8%** of Boehm, post-GC RSS **3.00×**. Side-bitmap A/B (`2026-07-26-171942`): `/json` **82.3%** @ **~9.2×**, acik **50.1%** @ **5.58×**. See [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-181318/`): `/` **85.4%** of Boehm; `/json` **86.5%**; post-GC RSS **1.34–1.36×**. acikturkiye `/api/v1/`: **76.7%** of Boehm, post-GC RSS **22.3×** (RSS improved 2.6× vs prior session; conservative live set remains the dominant driver). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
+
 ## [0.11.0] - 2026-07-25
 
 ### Added
@@ -290,8 +337,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/sdogruyol/gcry/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sdogruyol/gcry/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0

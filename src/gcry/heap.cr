@@ -39,14 +39,15 @@ module Gcry
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).
     property large_cache_retain : UInt64 = DEFAULT_LARGE_CACHE_RETAIN
+    # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
+    getter large_cache_hits : UInt64 = 0_u64
+    getter large_cache_misses : UInt64 = 0_u64
     # Size-class chunk mmap size (process default 256 KiB; override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # Side mark bitmap: one bit per word-aligned heap address, stored in its
-    # own mmap (outside the managed heap). Replaces the in-header MARK bit so
-    # marking no longer dirties BlockHeader cache lines, and `clear_all_marks`
-    # becomes a single `memset(0)` over the bitmap.
+    # Side mark bitmap (`-Dgcry_side_bitmap` only): one bit per word-aligned
+    # heap address in its own mmap. Default path keeps MARK in BlockHeader.
     @mark_bitmap : MarkBitmap? = nil
     # Inline bitmap state (mirrored from @mark_bitmap on relocate/destroy).
     # Kept on the heap struct so `marked?`/`set_mark`/`clear_mark` can answer
@@ -69,9 +70,6 @@ module Gcry
     @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
     @chunk_index_count = 0
     @chunk_index_cap = 0
-    # When true, index is stale and must be rebuilt from @chunks (fallback).
-    # Normal map/unmap maintains the sorted index incrementally.
-    @chunk_index_dirty = false
     # Last-chunk cache: most `chunk_containing` lookups during a mark come
     # from the same chunk (a hot object references its neighbours, and the
     # mark stack drains chunks in LIFO order). One O(1) range check replaces
@@ -87,6 +85,7 @@ module Gcry
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
+    @tlab_hits = 0_u64
     @tlabs_booted = false
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
@@ -105,8 +104,10 @@ module Gcry
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
 
     def initialize
-      @mark_bitmap = MarkBitmap.new
-      Gcry.current_mark_bitmap = @mark_bitmap
+      {% if flag?(:gcry_side_bitmap) %}
+        @mark_bitmap = MarkBitmap.new
+        Gcry.current_mark_bitmap = @mark_bitmap
+      {% end %}
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
@@ -114,6 +115,10 @@ module Gcry
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
       @pause_hdr = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
+      @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
+      @bitmap_growth_count = 0
+      @bitmap_growth_pos = 0
+      @bitmap_headroom_bytes = (SMALL_CHUNK_BYTES >> 3)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
@@ -160,6 +165,12 @@ module Gcry
       @destroyed = true
       shutdown_mark_workers
       flush_all_tlabs
+      # MUST tear down collector state (pending chunk flush, finalizers,
+      # mark-stack) BEFORE unmapping the chunk list — destroy_collector walks
+      # @chunks for flush_pending_dormant_chunks and
+      # flush_pending_page_release_chunks. Reversing the order causes a
+      # use-after-unmap SIGSEGV in at_exit handlers.
+      destroy_collector
 
       chunk = @chunks
       while chunk
@@ -180,20 +191,22 @@ module Gcry
       @large_mapped_bytes = 0_u64
       @live_objects = 0_u64
       @nursery_alloc_bytes = 0_u64
+      @large_cache_hits = 0_u64
+      @large_cache_misses = 0_u64
       unless @chunk_index.null?
         LibC.free(@chunk_index.as(Void*))
         @chunk_index = Pointer(ChunkHeader*).null
       end
       @chunk_index_count = 0
       @chunk_index_cap = 0
-      @chunk_index_dirty = false
       if bm = @mark_bitmap
-        # Clear the global FIRST so concurrent readers (e.g. the SYSMON thread
-        # calling marked? via `GC.malloc` from a finalizer) see nil and short
-        # out. Only then drop the bitmap — MarkBitmap#destroy nulls `@base`
-        # before unmap so any reader that already captured the pointer also
-        # observes a coherent, soon-to-be-unmapped base.
-        Gcry.current_mark_bitmap = nil if Gcry.current_mark_bitmap.same?(bm)
+        # Clear the global bitmap pointer only if we still own it — another
+        # heap may have taken over since we installed ourselves.
+        # Under -Dgc_none this avoids nulling the process-GC heap's bitmap
+        # at test teardown.
+        if Gcry.current_mark_bitmap.same?(bm)
+          Gcry.current_mark_bitmap = nil
+        end
         # Null the hot mirrored fields so a stale heap read doesn't dereference
         # an unmapped mapping.
         @mark_bitmap_base = 0_u64
@@ -202,7 +215,6 @@ module Gcry
         bm.destroy
         @mark_bitmap = nil
       end
-      destroy_collector
     end
 
     def malloc(size : Int) : Void*
@@ -230,10 +242,19 @@ module Gcry
 
       return pointer if new_size <= old_size
 
-      fresh = allocate(new_size, atomic: atomic, clear: !atomic)
-      fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
-      free(pointer)
-      fresh
+      # Pin across allocate: process-GC type_id_gate rejects raw Pointer buffers
+      # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
+      # not re-scan an old-gen owner — without an explicit root, collect would
+      # reclaim `pointer` before we copy/free → double-free / UAF (Kemal HTTP).
+      add_root(pointer)
+      begin
+        fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        free(pointer)
+        fresh
+      ensure
+        delete_root(pointer)
+      end
     end
 
     def free(pointer : Void*) : Nil
@@ -269,23 +290,33 @@ module Gcry
       @finalizers.notice_reclaim(pointer)
 
       if @tlab_enabled
+        # TLAB free is per-thread; no global lock needed.
         tlab_free_small(pointer, class_index, payload, BlockHeader.nursery?(header))
-      elsif BlockHeader.nursery?(header)
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
-        @nursery_freelists[class_index] = pointer
-        @nursery_freelist_clean[class_index] = false
-        @free_bytes += payload.to_u64
+        with_alloc_lock do
+          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+          note_explicit_free(payload.to_u64)
+          @live_objects -= 1 if @live_objects > 0
+        end
       else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
-        @freelists[class_index] = pointer
-        @freelist_clean[class_index] = false
-        @free_bytes += payload.to_u64
-      end
+        # Non-TLAB path: global freelist + counters must be serialised with
+        # @alloc_lock (with_alloc_lock skips locking when TLAB is disabled).
+        @alloc_lock.sync do
+          if BlockHeader.nursery?(header)
+            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+            @nursery_freelists[class_index] = pointer
+            @nursery_freelist_clean[class_index] = false
+            @free_bytes += payload.to_u64
+          else
+            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
+            @freelists[class_index] = pointer
+            @freelist_clean[class_index] = false
+            @free_bytes += payload.to_u64
+          end
 
-      with_alloc_lock do
-        @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-        note_explicit_free(payload.to_u64)
-        @live_objects -= 1 if @live_objects > 0
+          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
+          note_explicit_free(payload.to_u64)
+          @live_objects -= 1 if @live_objects > 0
+        end
       end
     end
 
@@ -345,68 +376,70 @@ module Gcry
     end
 
     private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      user = @nursery_freelists[index]
-
-      if user.null?
-        refill_size_class(index, payload, nursery: true)
+      @alloc_lock.sync do
         user = @nursery_freelists[index]
-        raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
-      end
 
-      if @blacklist_enabled
-        taken = take_non_blacklisted(user, index, true)
-        if taken.null?
+        if user.null?
+          refill_size_class(index, payload, nursery: true)
+          user = @nursery_freelists[index]
+          raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
+        end
+
+        if @blacklist_enabled
+          taken = take_non_blacklisted(user, index, true)
+          if taken.null?
+            header = BlockHeader.from_user(user)
+            @nursery_freelists[index] = header.value.next_free
+          else
+            user = taken
+          end
+        else
           header = BlockHeader.from_user(user)
           @nursery_freelists[index] = header.value.next_free
-        else
-          user = taken
         end
-      else
+
         header = BlockHeader.from_user(user)
-        @nursery_freelists[index] = header.value.next_free
-      end
+        BlockHeader.set_used(header, payload, flags)
+        if @incremental_marking || @collecting
+          heap_set_mark(header)
+        end
 
-      header = BlockHeader.from_user(user)
-      BlockHeader.set_used(header, payload, flags)
-      # Allocate black during any in-progress collection (STW or incremental)
-      # so mid-collect allocations are not swept.
-      if @incremental_marking || @collecting
-        heap_set_mark(header)
+        @free_bytes -= payload if @free_bytes >= payload
+        @nursery_alloc_bytes += payload.to_u64
+        user
       end
-
-      @free_bytes -= payload if @free_bytes >= payload
-      @nursery_alloc_bytes += payload.to_u64
-      user
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      user = @freelists[index]
-
-      if user.null?
-        refill_size_class(index, payload, nursery: false)
+      @alloc_lock.sync do
         user = @freelists[index]
-        raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
-      end
 
-      if @blacklist_enabled
-        taken = take_non_blacklisted(user, index, false)
-        if taken.null?
+        if user.null?
+          refill_size_class(index, payload, nursery: false)
+          user = @freelists[index]
+          raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
+        end
+
+        if @blacklist_enabled
+          taken = take_non_blacklisted(user, index, false)
+          if taken.null?
+            header = BlockHeader.from_user(user)
+            @freelists[index] = header.value.next_free
+          else
+            user = taken
+          end
+        else
           header = BlockHeader.from_user(user)
           @freelists[index] = header.value.next_free
-        else
-          user = taken
         end
-      else
+
         header = BlockHeader.from_user(user)
-        @freelists[index] = header.value.next_free
+        BlockHeader.set_used(header, payload, flags)
+        heap_set_mark(header) if @incremental_marking || @collecting
+
+        @free_bytes -= payload if @free_bytes >= payload
+        user
       end
-
-      header = BlockHeader.from_user(user)
-      BlockHeader.set_used(header, payload, flags)
-      heap_set_mark(header) if @incremental_marking || @collecting
-
-      @free_bytes -= payload if @free_bytes >= payload
-      user
     end
 
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
@@ -497,6 +530,8 @@ module Gcry
         return {user, true}
       end
 
+      @large_cache_misses += 1
+
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
@@ -517,13 +552,30 @@ module Gcry
     end
 
     # Recycle a large chunk (stays mapped, stays on @chunks). No munmap.
+    # Inserts at tail of freelist bucket for LRU eviction: trim_large_cache
+    # pops from the head, evicting the least recently re-used entry.
     protected def cache_large_chunk(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       mapped = chunk.value.mapped_bytes
       payload = header.value.size
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.user_from(header)
-      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, @large_freelists[bucket])
-      @large_freelists[bucket] = user
+      # Find tail of bucket freelist.
+      tail = @large_freelists[bucket]
+      while tail
+        th = BlockHeader.from_user(tail)
+        tnxt = th.value.next_free
+        break if tnxt.null?
+        tail = tnxt
+      end
+      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
+      if tail.null?
+        @large_freelists[bucket] = user
+      else
+        th = BlockHeader.from_user(tail)
+        tv = th.value
+        tv.next_free = user
+        th.value = tv
+      end
       @free_bytes += mapped
       @large_free_bytes += mapped
     end
@@ -550,6 +602,7 @@ module Gcry
           mapped = chunk.value.mapped_bytes
           @free_bytes -= mapped if @free_bytes >= mapped
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
+          @large_cache_hits += 1
           return user
         end
         prev = user
@@ -614,7 +667,12 @@ module Gcry
       @chunks = chunk
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
+      # Inline insert into sorted chunk index. Under TLAB MT this is called
+      # from refill_size_class which already holds @alloc_lock (via
+      # with_alloc_lock), so index_insert is serialised. Under Boehm (library
+      # heap) there is no contention.
       index_insert(chunk)
+      invalidate_chunk_cache
       note_mapped(chunk)
       chunk
     end
@@ -669,8 +727,6 @@ module Gcry
         return (@chunk_index + @last_chunk_idx).value
       end
 
-      ensure_chunk_index
-
       lo = 0
       hi = @chunk_index_count
       while lo < hi
@@ -699,53 +755,70 @@ module Gcry
       @last_chunk_hi = 0_u64
     end
 
-    # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
-    # These read the heap's mirrored fields (same cache line as @heap_min /
-    # @heap_max) instead of going through `Gcry.current_mark_bitmap` plus a
-    # MarkBitmap#marked? virtual dispatch. On a wrk -c 100 -d 5 /json run,
-    # the extra dereference shows up as ~50% throughput loss because every
-    # mark candidate — i.e. every word scanned — pays for it.
+    {% unless flag?(:gcry_side_bitmap) %}
+      # In-header MARK (default): no side bitmap mmap.
+      @[AlwaysInline]
+      private def heap_marked?(header : BlockHeader*) : Bool
+        BlockHeader.marked?(header)
+      end
 
-    @[AlwaysInline]
-    private def heap_marked?(header : BlockHeader*) : Bool
-      base = @mark_bitmap_base
-      return false if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return false if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      ((word_ptr.value >> bit) & 1_u64) != 0
-    end
+      @[AlwaysInline]
+      private def heap_set_mark(header : BlockHeader*) : Nil
+        BlockHeader.set_mark(header)
+      end
 
-    @[AlwaysInline]
-    private def heap_set_mark(header : BlockHeader*) : Nil
-      base = @mark_bitmap_base
-      return if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      word_ptr.value |= 1_u64 << bit
-    end
+      @[AlwaysInline]
+      private def heap_clear_mark(header : BlockHeader*) : Nil
+        BlockHeader.clear_mark(header)
+      end
+    {% else %}
+      # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
+      # Opt-in via `-Dgcry_side_bitmap`. These read the heap's mirrored fields
+      # (same cache line as @heap_min / @heap_max) instead of going through
+      # `Gcry.current_mark_bitmap` plus a MarkBitmap#marked? virtual dispatch.
 
-    @[AlwaysInline]
-    private def heap_clear_mark(header : BlockHeader*) : Nil
-      base = @mark_bitmap_base
-      return if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      word_ptr.value &= ~(1_u64 << bit)
-    end
+      @[AlwaysInline]
+      private def heap_marked?(header : BlockHeader*) : Bool
+        base = @mark_bitmap_base
+        return false if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return false if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        ((word_ptr.value >> bit) & 1_u64) != 0
+      end
 
-    # Fallback full rebuild when the incremental index is marked dirty.
+      @[AlwaysInline]
+      private def heap_set_mark(header : BlockHeader*) : Nil
+        base = @mark_bitmap_base
+        return if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        word_ptr.value |= 1_u64 << bit
+      end
+
+      @[AlwaysInline]
+      private def heap_clear_mark(header : BlockHeader*) : Nil
+        base = @mark_bitmap_base
+        return if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        word_ptr.value &= ~(1_u64 << bit)
+      end
+    {% end %}
+
+    # Rebuild the sorted chunk index from @chunks linked list.
+    # Called during mark (range scan) — all mutators stopped, no lock needed.
     protected def ensure_chunk_index : Nil
       return unless @chunk_index_dirty
 
@@ -806,9 +879,6 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
-      if @chunk_index_dirty
-        return
-      end
       invalidate_chunk_cache
       index_ensure_cap(@chunk_index_count + 1)
       pos = index_lower_bound(chunk.address)
@@ -822,9 +892,6 @@ module Gcry
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
-      if @chunk_index_dirty
-        return
-      end
       invalidate_chunk_cache
       pos = index_lower_bound(chunk.address)
       return if pos >= @chunk_index_count

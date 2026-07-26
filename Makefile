@@ -1,21 +1,15 @@
 CRYSTAL ?= crystal
 BIN := bin
-KEMAL_DIR := bench/kemal
-WRK ?= wrk
-WRK_CONNECTIONS ?= 100
-WRK_DURATION ?= 30
-WRK_BASE_URL ?= http://127.0.0.1:3001
-WRK_PATHS ?= / /json
-PORT ?= 3001
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench bench-kemal bench-kemal-boehm bench-kemal-wrk bench-kemal-record bench-perf-smoke clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short format format-check lint samples bench ..."
-	@echo "wrk knobs: WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_PATHS='$(WRK_PATHS)' PORT=$(PORT)"
-	@echo "record: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
+	@echo "Targets: spec spec-process fuzz fuzz-short format format-check lint samples"
+	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
+	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
+	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
 $(BIN):
 	mkdir -p $(BIN)
@@ -23,7 +17,6 @@ $(BIN):
 spec:
 	$(CRYSTAL) spec --error-trace
 
-# Process GC facade tests (gcry is the process collector).
 spec-process: $(BIN)
 	$(CRYSTAL) spec -Dgc_none process_spec --error-trace
 
@@ -55,47 +48,38 @@ samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/json_churn.cr -o $(BIN)/json_churn
 	$(CRYSTAL) build -Dgc_none samples/stw_sp_clamp.cr -o $(BIN)/stw_sp_clamp
 
-bench: $(BIN)
-	$(CRYSTAL) build bench/churn.cr -o $(BIN)/churn
-
-# Short A/B thr gate (needs wrk). MIN_PCT=70 by default.
+# Short A/B thr gate for CI (needs wrk). MIN_PCT=70 by default.
 bench-perf-smoke:
 	PORT=$(PORT) ./bench/perf_smoke.sh
 
-# Realistic Kemal HTTP server under gcry (-Dgc_none).
-bench-kemal: $(BIN)
-	cd $(KEMAL_DIR) && shards install
-	cd $(KEMAL_DIR) && $(CRYSTAL) build -Dgc_none --release src/server.cr -o ../../$(BIN)/kemal-gcry
-
-# Same app on Crystal's default Boehm GC (for A/B).
-bench-kemal-boehm: $(BIN)
-	cd $(KEMAL_DIR) && shards install
-	cd $(KEMAL_DIR) && $(CRYSTAL) build --release src/server.cr -o ../../$(BIN)/kemal-boehm
-
-# Start kemal-gcry and run wrk against / and /json (fresh process per path).
-bench-kemal-wrk: bench-kemal
-	@command -v $(WRK) >/dev/null || (echo "wrk not found; install wrk" && exit 1)
-	@for path in $(WRK_PATHS); do \
-	  echo "=== wrk $$path ==="; \
-	  PORT=$(PORT) $(BIN)/kemal-gcry & echo $$! > $(BIN)/kemal-gcry.pid; \
-	  for i in 1 2 3 4 5 6 7 8 9 10; do \
-	    curl -sf -o /dev/null $(WRK_BASE_URL)/ && break; \
-	    sleep 0.3; \
-	  done; \
-	  $(WRK) -c $(WRK_CONNECTIONS) -d $(WRK_DURATION) $(WRK_BASE_URL)$$path; \
-	  kill $$(cat $(BIN)/kemal-gcry.pid) 2>/dev/null || true; \
-	  wait $$(cat $(BIN)/kemal-gcry.pid) 2>/dev/null || true; \
-	  rm -f $(BIN)/kemal-gcry.pid; \
-	  sleep 0.3; \
-	done
-
-# A/B previous tag vs current tree for / and /json; prints docs/PERF.md History rows.
-# Example: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0
+# A/B previous tag vs current tree; prints docs/PERF.md History rows.
 bench-kemal-record:
 	@test -n "$(PREV)" || (echo "set PREV=vX.Y.Z" && exit 1)
 	@test -n "$(LABEL)" || (echo "set LABEL=A.B.C" && exit 1)
-	PREV=$(PREV) LABEL=$(LABEL) PORT=$(PORT) WRK_CONNECTIONS=$(WRK_CONNECTIONS) WRK_DURATION=$(WRK_DURATION) WRK_BASE_URL=$(WRK_BASE_URL) WRK_PATHS="$(WRK_PATHS)" ./bench/record_kemal.sh
+	PREV=$(PREV) LABEL=$(LABEL) ./bench/record_kemal.sh
+
+# Full benchmark suite via run_all.sh.
+# Default: --release (PERF.md). DEBUG=1 → --debug --error-trace.
+# SEGV symbols on release: CRYSTAL_FLAGS="--release --debug --error-trace"
+bench-run-all:
+	bash bench/run_all.sh all
+
+# Kemal-only.
+bench-run-kemal:
+	bash bench/run_all.sh kemal
+
+# acikturkiye-only.
+bench-run-acik:
+	bash bench/run_all.sh acik
+
+# Debug build (no --release) for SEGV / GC bugs.
+bench-run-kemal-debug:
+	DEBUG=1 bash bench/run_all.sh kemal
+
+# Release + DWARF (crash hunting without full debug mutator).
+bench-run-kemal-symbols:
+	CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal
 
 clean:
 	rm -rf $(BIN)
-	rm -rf $(KEMAL_DIR)/lib $(KEMAL_DIR)/.shards $(KEMAL_DIR)/shard.lock
+	rm -rf bench/kemal/lib bench/kemal/.shards bench/kemal/shard.lock
