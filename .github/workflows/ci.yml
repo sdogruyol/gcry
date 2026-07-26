@@ -39,21 +39,7 @@ jobs:
           ../../bin/ameba
 
       - name: Unit specs (library heap under Boehm)
-        run: |
-          timeout 30 crystal spec --error-trace spec/barrier_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/collect_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/heap_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/fiber_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/blacklist_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/mt_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/array_shift_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/stress_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/metrics_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/phase6_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/type_id_gate_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/layout_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/softdirty_spec.cr 2>&1
-          timeout 30 crystal spec --error-trace spec/stack_scrub_spec.cr 2>&1
+        run: crystal spec --error-trace
 
       - name: Process GC specs (-Dgc_none)
         run: crystal spec -Dgc_none process_spec --error-trace
