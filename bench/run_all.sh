@@ -77,7 +77,11 @@ build_kemal() {
   cd "$ROOT/bench/kemal"
   shards install --production 2>/dev/null || shards install
   echo -n "  kemal-gcry "; crystal build -Dgc_none --release src/server.cr -o "$ROOT/bin/kemal-gcry" 2>&1 | tail -1
-  echo -n "  kemal-boehm "; crystal build --release src/server.cr -o "$ROOT/bin/kemal-boehm" 2>&1 | tail -1
+  if [[ -f "$ROOT/bin/kemal-boehm" ]]; then
+    echo "  kemal-boehm (cached)"
+  else
+    echo -n "  kemal-boehm "; crystal build --release src/server.cr -o "$ROOT/bin/kemal-boehm" 2>&1 | tail -1
+  fi
   cd "$ROOT"
 }
 
@@ -86,7 +90,11 @@ build_acik() {
   cd "$AT"
   mkdir -p bin
   echo -n "  acik-gcry "; ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry 2>&1 | tail -1 || return 1
-  echo -n "  acik-boehm "; ACIKTURKIYE_ENV=demo crystal build --release src/acikturkiye.cr -o bin/acikturkiye-boehm 2>&1 | tail -1 || return 1
+  if [[ -f "bin/acikturkiye-boehm" ]]; then
+    echo "  acik-boehm (cached)"
+  else
+    echo -n "  acik-boehm "; ACIKTURKIYE_ENV=demo crystal build --release src/acikturkiye.cr -o bin/acikturkiye-boehm 2>&1 | tail -1 || return 1
+  fi
   cd "$ROOT"
 }
 
@@ -232,14 +240,24 @@ run_acik() {
       if ! wait_http_auth "$base" 60; then
         echo "FAIL (server)"
         tail -10 "/tmp/acik-${trial_id}.log" 2>&1 | sed 's/^/    /' || true
-        kill_both "$pid" || true
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        printf "%s\t%d\t%s\t%s\n" "$tag" "$trial" "0" "0" >>"$out"
+        echo "0 req/s"
         continue
       fi
 
       wrk -c "$WRK_CONNECTIONS" -d "$WRK_DURATION" "${AUTH[@]}" "${base}/api/v1/" \
         >"/tmp/wrk-acik-${trial_id}.txt" 2>&1 || true
+
+      # If server crashed (process gone), dump its log
+      if ! kill -0 "$pid" 2>/dev/null; then
+        echo "  CRASHED — last 20 lines:"
+        tail -20 "/tmp/acik-${trial_id}.log" 2>/dev/null | sed 's/^/    /'
+      fi
+
       local rps
-      rps=$(awk '/Requests\/sec:/ {print $2}' "/tmp/wrk-acik-${trial_id}.txt")
+      rps=$(awk '/Requests\/sec:/ {print $2}' "/tmp/wrk-acik-${trial_id}.txt") || rps=0
 
       curl -sf -o /dev/null "${base}/gc-collect" || true
       sleep 0.5
@@ -251,10 +269,12 @@ run_acik() {
       local cpid
       cpid=$(get_crystal_pid "$(basename "$bin")" "$pid")
       local rss
-      rss=$(ps -o rss= -p "$cpid" 2>/dev/null | tr -d ' ')
+      rss=$(ps -o rss= -p "$cpid" 2>/dev/null | tr -d ' ') || rss=0
       rss=${rss:-0}
 
-      kill_both "$cpid" "$pid" || true
+      kill -9 "$cpid" 2>/dev/null || true
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
 
       printf "%s\t%d\t%s\t%s\n" "$tag" "$trial" "$rps" "$rss" >>"$out"
       echo "$rps req/s"
@@ -262,31 +282,51 @@ run_acik() {
   done
 
   # Summarize
-  python3 "$ROOT/bench/summarize_acik.py" "$out" "$LOG/acik-summary.md"
-  cat "$LOG/acik-summary.md"
+  python3 "$ROOT/bench/summarize_acik.py" "$out" "$LOG/acik-summary.md" || true
+  cat "$LOG/acik-summary.md" 2>/dev/null || true
 }
 
 ###############################################################################
-# Main
+# Main dispatch
 ###############################################################################
-echo ""
-echo "╔══════════════════════════════════════════════╗"
-echo "║        gcry benchmark suite                  ║"
-echo "╚══════════════════════════════════════════════╝"
+cmd="${1:-all}"
 
-build_kemal
-run_kemal
-
-if [[ "$HAS_ACIK" == "yes" ]]; then
-  if build_acik; then
-    run_acik
-  else
-    echo "  SKIP acikturkiye (build failed)"
-  fi
-else
-  echo ""
-  echo "=== SKIP acikturkiye (not found at $AT/.env.demo) ==="
-fi
+case "$cmd" in
+  kemal)
+    build_kemal
+    run_kemal
+    ;;
+  acik)
+    if [[ "$HAS_ACIK" == "yes" ]]; then
+      if build_acik; then
+        run_acik
+      else
+        echo "  SKIP acikturkiye (build failed)"
+      fi
+    else
+      echo ""
+      echo "=== SKIP acikturkiye (not found at $AT/.env.demo) ==="
+    fi
+    ;;
+  all|"")
+    build_kemal
+    run_kemal
+    if [[ "$HAS_ACIK" == "yes" ]]; then
+      if build_acik; then
+        run_acik
+      else
+        echo "  SKIP acikturkiye (build failed)"
+      fi
+    else
+      echo ""
+      echo "=== SKIP acikturkiye (not found at $AT/.env.demo) ==="
+    fi
+    ;;
+  *)
+    echo "Usage: bash bench/run_all.sh [kemal|acik|all]"
+    exit 1
+    ;;
+esac
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
