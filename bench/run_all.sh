@@ -6,19 +6,19 @@
 #         COUNT=5 bash bench/run_all.sh kemal   # repeat full suite 5×
 #         GC=gcry bash bench/run_all.sh kemal  # only gcry (boehm|gcry|both)
 #         GCRY_FLAGS="GCRY_NURSERY=1 GCRY_INCREMENTAL=1" GC=gcry bash bench/run_all.sh kemal
-#         CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal
+#         CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal  # SEGV symbols
 #
 # GCRY_FLAGS — space-separated KEY=VALUE applied only to gcry server processes
 # (boehm runs stay clean). Ambient GCRY_* in the shell are also inherited by
 # gcry; GCRY_FLAGS wins on duplicate keys. Recorded in metadata.yaml.
 #
 # CRYSTAL_FLAGS — space-separated `crystal build` flags (overrides DEBUG presets).
-#   default / unset + DEBUG=0  — --release --debug --error-trace
+#   default / unset + DEBUG=0  — --release   (PERF.md methodology)
 #   DEBUG=1                    — --debug --error-trace
-#   CRYSTAL_FLAGS="--release"  — exactly what you pass (forces rebuild, no bin cache)
+#   CRYSTAL_FLAGS="--release --debug --error-trace"  — release + SEGV file:line
 #
 #   DEBUG=1 bash bench/run_all.sh kemal
-#   CRYSTAL_FLAGS="--release --debug --error-trace -Dpreview_mt" bash bench/run_all.sh kemal
+#   CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal
 #   DEBUG=1 TRIALS=1 WRK_DURATION=10 bash bench/run_all.sh kemal
 #   COUNT=3 TRIALS=1 WRK_DURATION=15 bash bench/run_all.sh kemal
 #   GC=gcry COUNT=5 bash bench/run_all.sh kemal
@@ -102,9 +102,9 @@ ambient_gcry_env() {
   fi
 }
 
-# DEBUG=1 → --debug --error-trace (file:line + symbols for SEGV).
-# Otherwise → --release --debug --error-trace (perf + symbolicated SEGV;
-# Crystal --release alone strips DWARF frames → ?? in Signal 11 traces).
+# DEBUG=1 → --debug --error-trace (file:line + symbols for SEGV; no --release).
+# Default → --release only (matches docs/PERF.md; thr gate).
+# For release + symbolicated SEGV: CRYSTAL_FLAGS="--release --debug --error-trace"
 # CRYSTAL_FLAGS overrides both presets and forces a rebuild (no bin cache).
 CRYSTAL_FLAGS="${CRYSTAL_FLAGS:-}"
 DEBUG="${DEBUG:-0}"
@@ -129,7 +129,7 @@ elif [[ "$DEBUG" == "1" ]]; then
   FORCE_REBUILD=1
 else
   BUILD_MODE="release"
-  CRYSTAL_BUILD_FLAGS=(--release --debug --error-trace)
+  CRYSTAL_BUILD_FLAGS=(--release)
 fi
 
 HAS_ACIK="no"
@@ -478,7 +478,7 @@ case "$cmd" in
     echo "  CRYSTAL_FLAGS=\"--release --debug …\"  — crystal build flags (overrides DEBUG)"
     echo "  DEBUG=1             — --debug --error-trace (no --release); forces rebuild"
     echo "  COUNT=N             — repeat suite N times → log/.../run-01 .. run-NN"
-    echo "  default             — --release --debug --error-trace (perf + SEGV file:line)"
+    echo "  default             — --release (PERF.md); SEGV symbols: CRYSTAL_FLAGS=--release --debug --error-trace"
     exit 1
     ;;
 esac
