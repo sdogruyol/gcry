@@ -94,7 +94,7 @@ fi
 AMBIENT_GCRY=()
 while IFS= read -r line; do
   [[ -n "$line" ]] && AMBIENT_GCRY+=("$line")
-done < <(env | awk -F= '/^GCRY_/ {print}' | sort || true)
+done < <(env | awk -F= '/^GCRY_/ && $1 != "GCRY_FLAGS" {print}' | sort || true)
 
 ambient_gcry_env() {
   if [[ ${#AMBIENT_GCRY[@]} -gt 0 ]]; then
