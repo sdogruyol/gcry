@@ -11,26 +11,51 @@ with open(tsv_path) as f:
     header = next(f)
     for line in f:
         tag, pth, trial, rps, rss = line.strip().split("\t")
-        rows.append((tag, pth, int(trial), float(rps), int(rss)))
+        try:
+            rows.append((tag, pth, int(trial), float(rps), int(rss)))
+        except ValueError:
+            continue
 
-lines = [
-    f"Kemal median-of-{trials}",
-    "",
-    "| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |",
-    "|------|------------------:|-----------------:|-------:|----------------:|---------------:|------:|",
-]
-for pth in ("/", "/json"):
-    b = sorted(r for r in rows if r[0] == "boehm" and r[1] == pth)
-    g = sorted(r for r in rows if r[0] == "gcry" and r[1] == pth)
-    if not b or not g:
-        continue
-    bm = statistics.median([r[3] for r in b])
-    gm = statistics.median([r[3] for r in g])
-    br = statistics.median([r[4] for r in b])
-    gr = statistics.median([r[4] for r in g])
-    pct = 100.0 * gm / bm if bm else 0
-    rx = gr / br if br else 0
-    lines.append(f"| `{pth}` | {bm:,.0f} | {gm:,.0f} | **{pct:.1f}%** | {br:,} | {gr:,} | **{rx:.2f}×** |")
+tags = sorted({r[0] for r in rows})
+has_b = "boehm" in tags
+has_g = "gcry" in tags
+
+lines = [f"Kemal median-of-{trials}", ""]
+
+if has_b and has_g:
+    lines += [
+        "| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |",
+        "|------|------------------:|-----------------:|-------:|----------------:|---------------:|------:|",
+    ]
+    for pth in ("/", "/json"):
+        b = sorted(r for r in rows if r[0] == "boehm" and r[1] == pth)
+        g = sorted(r for r in rows if r[0] == "gcry" and r[1] == pth)
+        if not b or not g:
+            continue
+        bm = statistics.median([r[3] for r in b])
+        gm = statistics.median([r[3] for r in g])
+        br = statistics.median([r[4] for r in b])
+        gr = statistics.median([r[4] for r in g])
+        pct = 100.0 * gm / bm if bm else 0
+        rx = gr / br if br else 0
+        lines.append(
+            f"| `{pth}` | {bm:,.0f} | {gm:,.0f} | **{pct:.1f}%** | {br:,} | {gr:,} | **{rx:.2f}×** |"
+        )
+elif tags:
+    tag = tags[0]
+    lines += [
+        f"| Path | {tag} req/s (med) | {tag} RSS (KiB) |",
+        "|------|-----------------:|---------------:|",
+    ]
+    for pth in ("/", "/json"):
+        xs = sorted(r for r in rows if r[0] == tag and r[1] == pth)
+        if not xs:
+            continue
+        rm = statistics.median([r[3] for r in xs])
+        rs = statistics.median([r[4] for r in xs])
+        lines.append(f"| `{pth}` | {rm:,.0f} | {rs:,} |")
+else:
+    lines.append("_no trials_")
 
 lines.append("")
 text = "\n".join(lines) + "\n"
