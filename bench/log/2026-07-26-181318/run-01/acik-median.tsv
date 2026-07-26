@@ -1,0 +1,7 @@
+tag	trial	rps	rss_kib
+boehm	1	943.70	46448
+gcry	1	810.59	693536
+boehm	2	998.90	27600
+gcry	2	765.96	670352
+boehm	3	909.65	26832
+gcry	3	662.68	599232
