@@ -166,6 +166,11 @@ describe "Gcry sound incremental (dirty re-scan)" do
       heap.incremental_work = 64
       heap.gc_threshold = UInt64::MAX
       heap.allow_mprotect_barrier = false
+      # Also disable soft-dirty so incremental_barrier_possible? returns false
+      # on real Linux (CI); Docker containers lack /proc access so soft-dirty
+      # fails auto-probe, but on CI it succeeds, making begin_incremental
+      # attempt stop_world and deadlock in this single-threaded spec.
+      heap.soft_dirty_max_pct = 0
 
       root = heap.malloc(64)
       heap.add_root(root)
