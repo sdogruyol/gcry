@@ -110,8 +110,6 @@ module Gcry
 
     def initialize
       @mark_bitmap = MarkBitmap.new
-      # Save the previous bitmap owner (may be the process GC under -Dgc_none).
-      @saved_mark_bitmap = Gcry.current_mark_bitmap
       Gcry.current_mark_bitmap = @mark_bitmap
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -206,12 +204,13 @@ module Gcry
       @chunk_index_cap = 0
       @chunk_index_dirty = false
       if bm = @mark_bitmap
-        # Restore the previous bitmap owner (may be the process GC under
-        # -Dgc_none) instead of unconditionally clearing the global pointer.
-        # The spec suite creates Heap objects alongside the process GC heap;
-        # clearing the global pointer leaves the process GC without a bitmap
-        # and causes a SIGSEGV in heap_marked?  during at_exit finalization.
-        Gcry.current_mark_bitmap = @saved_mark_bitmap
+        # Clear the global bitmap pointer only if we still own it — another
+        # heap may have taken over since we installed ourselves.
+        # Under -Dgc_none this avoids nulling the process-GC heap's bitmap
+        # at test teardown.
+        if Gcry.current_mark_bitmap.same?(bm)
+          Gcry.current_mark_bitmap = nil
+        end
         # Null the hot mirrored fields so a stale heap read doesn't dereference
         # an unmapped mapping.
         @mark_bitmap_base = 0_u64

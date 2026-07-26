@@ -244,6 +244,7 @@ end
 
 describe Gcry do
   it "exposes module-level allocators on the default heap" do
+    saved = Gcry.default_heap
     heap = Gcry::Heap.new
     Gcry.default_heap = heap
     begin
@@ -253,7 +254,7 @@ describe Gcry do
       Gcry.is_heap_ptr(ptr).should be_true
       Gcry.free(ptr)
     ensure
-      Gcry.default_heap = Gcry::Heap.new
+      Gcry.default_heap = saved
     end
   end
 

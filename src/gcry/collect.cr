@@ -18,16 +18,16 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD         =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD         = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
-    DEFAULT_NURSERY_THRESHOLD    =   524288_u64 # 512 KiB minor
-    MIN_ADAPTIVE_NURSERY_THRESHOLD =   65536_u64 # 64 KiB floor
-    MAX_ADAPTIVE_NURSERY_THRESHOLD = 8388608_u64 # 8 MiB cap — prevents unbounded growth
-    NURSERY_SURVIVAL_HISTORY     =          10   # ring buffer for adaptive threshold
-    TARGET_SURVIVAL_PCT          =          50_u64
-    DEFAULT_INCREMENTAL_WORK     =         1024
-    MAX_AUTO_INCREMENTAL_SLICES  =            4 # slices per alloc when debt is high
-    STATIC_ROOT_REFRESH_INTERVAL =       64_u64 # majors between /proc/self/maps refresh
+    DEFAULT_GC_THRESHOLD           =  4194304_u64 # 4 MiB — library / conservative
+    PROCESS_GC_THRESHOLD           = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_NURSERY_THRESHOLD      =   524288_u64 # 512 KiB minor
+    MIN_ADAPTIVE_NURSERY_THRESHOLD =    65536_u64 # 64 KiB floor
+    MAX_ADAPTIVE_NURSERY_THRESHOLD =  8388608_u64 # 8 MiB cap — prevents unbounded growth
+    NURSERY_SURVIVAL_HISTORY       =           10 # ring buffer for adaptive threshold
+    TARGET_SURVIVAL_PCT            =       50_u64
+    DEFAULT_INCREMENTAL_WORK       =         1024
+    MAX_AUTO_INCREMENTAL_SLICES    =            4 # slices per alloc when debt is high
+    STATIC_ROOT_REFRESH_INTERVAL   =       64_u64 # majors between /proc/self/maps refresh
 
     getter collections : UInt64 = 0_u64
     getter minor_collections : UInt64 = 0_u64
@@ -750,24 +750,24 @@ module Gcry
         sweep(major: major)
         @last_phase_sweep_ns = monotonic_ns - t0
 
-if major
-        @bytes_since_gc = 0_u64
-        @nursery_alloc_bytes = 0_u64
-        @expl_freed_bytes_since_gc = 0_u64
-        @major_collections += 1
-        if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
-          Platform.invalidate_static_root_cache
+        if major
+          @bytes_since_gc = 0_u64
+          @nursery_alloc_bytes = 0_u64
+          @expl_freed_bytes_since_gc = 0_u64
+          @major_collections += 1
+          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+            Platform.invalidate_static_root_cache
+          end
+          # Next minor starts a fresh soft-dirty window after a major.
+          @soft_dirty_skip_until_major = false
+          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+        else
+          @nursery_alloc_bytes = 0_u64
+          @minor_collections += 1
+          # Record nursery survival statistics for adaptive threshold.
+          note_nursery_survival
+          arm_page_barrier_after_collect
         end
-        # Next minor starts a fresh soft-dirty window after a major.
-        @soft_dirty_skip_until_major = false
-        arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-      else
-        @nursery_alloc_bytes = 0_u64
-        @minor_collections += 1
-        # Record nursery survival statistics for adaptive threshold.
-        note_nursery_survival
-        arm_page_barrier_after_collect
-      end
         @collections += 1
       ensure
         start_world

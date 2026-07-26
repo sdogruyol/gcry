@@ -419,7 +419,10 @@ module Gcry
       # During generational minor, old objects are intentionally unmarked.
       # Only nursery deaths may enqueue finalizers / clear WeakRef links.
       return false if @minor_only && !BlockHeader.nursery?(header)
-      if BlockHeader.marked?(header)
+      # Use heap-local mark check (not BlockHeader.marked? which reads the
+      # global Gcry.current_mark_bitmap) — under -Dgc_none a test heap may
+      # have swapped the global bitmap, causing cross-heap false negatives.
+      if heap_marked?(header)
         return false
       end
       # False-negative counter: gate rejected the ambient pointer that pointed

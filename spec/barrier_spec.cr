@@ -190,6 +190,7 @@ describe "Gcry sound incremental (dirty re-scan)" do
   end
 
   it "exposes pause percentiles via Gcry.pause_stats" do
+    saved = Gcry.default_heap
     heap = Gcry::Heap.new
     Gcry.default_heap = heap
     begin
@@ -205,7 +206,7 @@ describe "Gcry sound incremental (dirty re-scan)" do
       ps.p50_ns.should be > 0
       ps.p99_ns.should be >= ps.p50_ns
     ensure
-      Gcry.default_heap = Gcry::Heap.new
+      Gcry.default_heap = saved
     end
   end
 end
