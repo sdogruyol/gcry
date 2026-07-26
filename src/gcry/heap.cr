@@ -723,16 +723,21 @@ module Gcry
 
       # If the chunk index is dirty (being rebuilt by another thread, or stale
       # from a concurrent chunk addition), fall back to a linear walk of the
-      # chunks linked list. This avoids a data race on @chunk_index entries
-      # during concurrent malloc/free (TLAB MT tests). Linear walk is O(n) but
-      # acceptable for query paths (is_heap_ptr, live?, explicit free); the
-      # hot mark path uses last-chunk cache which rarely misses.
+      # chunks linked list. Rebuild the sorted index afterwards so the NEXT
+      # lookup hits the O(log n) binary search path.
       if @chunk_index_dirty
         chunk = @chunks
         while chunk
-          return chunk if ChunkHeader.contains?(chunk, addr)
+          if ChunkHeader.contains?(chunk, addr)
+            # Found via linear walk; rebuild index before returning so
+            # subsequent lookups use O(log n) binary search.
+            ensure_chunk_index
+            return chunk
+          end
           chunk = chunk.value.next
         end
+        # Miss: still rebuild — next lookup will be fast.
+        ensure_chunk_index
         return nil
       end
 
