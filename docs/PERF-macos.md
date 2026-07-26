@@ -14,7 +14,7 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | Host page | **16 KiB** on Apple Silicon — large mmap + free-page reclaim use `host_page_size` |
 | CI | `macos-latest` correctness only — **not** a thr gate |
 
-## Headline (Unreleased — in-header MARK default) — macOS aarch64
+## Headline (v0.12.0 — in-header MARK default) — macOS aarch64
 
 After **reverting side bitmap as default**, making **in-header MARK the standard**, with **layout scan improvements**, **hash layout scanning**, and **conservative marking fixes**:
 
@@ -73,7 +73,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
 | **Unreleased** `macos-aarch64-20260725` | **~104%** | **~96%** | **~5–7×** | Bitmap shrink + deferred madvise; RSS halved, no hang, coalesced syscalls |
   | **2026-07-25** `unreleased-darwin` | **104.8%** | **94.3%** | **4.76×** | P2.1+P2.2+P2.3; `/json` steady ~94%, `/` >104% variance |
   | **2026-07-26** `rss-yak-darwin` | **102.2%** | **79.7%** | **n/a** | P3.3 (LRU cache) + blacklist re-enable + aggressive madvise; `/json` dropped to ~80% — blacklist default-on adds root-scan cost on Darwin |
-  | **2026-07-26** `in-header-mark` | **85.4%** | **86.5%** | **1.34–1.36×** | Reverted side bitmap → in-header MARK default; RSS dropped from ~10× to ~1.3×, throughput settled at ~85% both paths |
+  | **0.12.0** `in-header-mark` | **85.4%** | **86.5%** | **1.34–1.36×** | Reverted side bitmap → in-header MARK default; RSS dropped from ~10× to ~1.3×, throughput settled at ~85% both paths |
 
 ## How to record (macOS)
 

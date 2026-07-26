@@ -8,15 +8,15 @@
 
 Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep collector as a **shard**, not a C dependency you hope never breaks. One flag (`-Dgc_none`) and the process runs on gcry.
 
-> **v0.11.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
+> **v0.12.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
 
-### macOS is real (v0.10)
+### macOS (v0.12)
 
 Process GC on Darwin is no longer a stub. Mach STW, dyld roots, 16 KiB host-page reclaim — `require "gcry"` + `-Dgc_none` on Apple Silicon / Intel Macs (Crystal **≥ 1.21**).
 
 Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~87% thr**, post-GC RSS **~1.36×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
 
-**Linux** (Unreleased, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
+**Linux** (v0.12.0, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
 
 ---
 
@@ -35,18 +35,18 @@ If you care how your language reclaims memory, this is the repo.
 
 Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters.
 
-### Linux (Unreleased — in-header MARK default)
+### Linux (v0.12.0 — in-header MARK default)
 
-| Workload | gcry vs Boehm (Unreleased, Linux) |
+| Workload | gcry vs Boehm (v0.12.0, Linux) |
 |----------|---------------------------------:|
 | Alloc-heavy JSON (`/json`) thr | **~89%** |
 | Idle `/` thr | **~90%** |
 | `/json` post-GC RSS | **~0.99×** |
 | Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS |
 
-### macOS (Unreleased — in-header MARK default)
+### macOS (v0.12.0 — in-header MARK default)
 
-| Workload | gcry vs Boehm (Unreleased, macOS aarch64) |
+| Workload | gcry vs Boehm (v0.12.0, macOS aarch64) |
 |----------|------------------------------------------:|
 | Alloc-heavy JSON (`/json`) thr | **~87%** |
 | Idle `/` thr | **~85%** |

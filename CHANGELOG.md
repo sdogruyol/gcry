@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Fixed
+
+### Changed
+
+### Performance
+
+## [0.12.0] - 2026-07-26
+
+### Added
+
 - **`-Dgcry_side_bitmap` (opt-in):** side `MarkBitmap` mmap path kept for experiments. Default is in-header `MARK` again after Linux A/B showed bitmap default at **82%** `/json` @ **~9.2×** RSS vs header **89%** @ **0.99×** (acikturkiye **50%**→**93%**, **5.6×**→**3.0×**) — `bench/log/bitmap-ab/FINDINGS.txt`.
 - **Bitmap shrinking + adaptive headroom (P1.1):** `MarkBitmap#shrink_to_fit!` reduces the side-mark bitmap mmap when the heap range contracts. Adaptive headroom (25% of recent growth history) prevents immediate re-growth. Combined with tighter `update_heap_bounds_after_unmap`, Kemal RSS drops from ~10× to ~5–7× (when `-Dgcry_side_bitmap`).
 - **Darwin `MADV_FREE_REUSABLE` (P1.1, macOS):** `release_physical_pages` switched from the expensive 3-syscall `mach_vm_deallocate`+`allocate`+`protect` to a single `madvise(..., 5)`. `empty_chunk_retain` lowered from 64 MiB to **8 MiB** on Darwin (no cost; `MADV_FREE_REUSABLE` is cheaper than the retain budget).
@@ -41,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Performance
 
 - **Linux** Kemal (WSL2 x86_64, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-173602/`): `/` **90.4%** of Boehm; `/json` **88.8%**; post-GC RSS **0.99×**. acikturkiye `/api/v1/`: **92.8%** of Boehm, post-GC RSS **3.00×**. Side-bitmap A/B (`2026-07-26-171942`): `/json` **82.3%** @ **~9.2×**, acik **50.1%** @ **5.58×**. See [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- **macOS** Kemal: `/` **102.2%** of Boehm; `/json` **79.7%** of Boehm (regression from ~94% — blacklist default-on adds root-scan cost on Darwin). acikturkiye: **73.7%** of Boehm, post-GC RSS **26.8×** (marginal RSS improvement from blacklist + aggressive madvise + LRU cache + bitmap headroom 12.5%). Trial 3 crashed PQ::Connection SIGSEGV (unrelated). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-181318/`): `/` **85.4%** of Boehm; `/json` **86.5%**; post-GC RSS **1.34–1.36×**. acikturkiye `/api/v1/`: **76.7%** of Boehm, post-GC RSS **22.3×** (RSS improved 2.6× vs prior session; conservative live set remains the dominant driver). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
 
 ## [0.11.0] - 2026-07-25
@@ -327,8 +337,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/sdogruyol/gcry/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sdogruyol/gcry/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sdogruyol/gcry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sdogruyol/gcry/compare/v0.6.0...v0.7.0
