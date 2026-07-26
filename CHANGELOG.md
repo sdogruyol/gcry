@@ -23,9 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`incremental_auto` defaults (P1.3, Linux/Darwin):** `true` on Linux (page-dirty barrier is sound), `false` on Darwin (no soft-dirty alternative yet). Overridable via `GCRY_INCREMENTAL` / `GCRY_NO_INCREMENTAL`.
+- **Nursery + incremental default-off for process GC:** Linux no longer enables `nursery` / `incremental_auto` by default. Soft-dirty false-negatives under WSL release HTTP (Kemal) caused Hash key UAF / SEGV (`0x0`/`0x4`/`0x11`). Opt in with `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1` after measuring. Darwin unchanged (already off). Related fixes kept: `realloc` pins old buffers across collect; explicit roots skip `type_id_gate`; old→young always full-walks (soft-dirty is additive only) with one-level buffer chase.
+- **`incremental_auto` defaults (P1.3, Linux/Darwin):** *(superseded — both off by default; see above.)*
 - **`GCRY_AUTO_LAYOUTS=1` → legacy alias (P2.1):** the env var is now a no-op kept for documentation. Use `GCRY_DISABLE_AUTO_LAYOUTS=1` to opt out.
-- **Nursery default-on for Linux process GC:** On Linux the page-dirty barrier (soft-dirty / mprotect) makes generational old→young scanning efficient — nursery is now enabled by default (`nursery_threshold = 512 KiB`). Darwin stays off (no barrier backend); opt in via `GCRY_NURSERY=1`. Previously process GC always disabled nursery.
+- **Nursery default-on for Linux process GC:** *(superseded — off by default again; see above.)*
 - **Darwin blacklist re-enabled:** Previously default-off on Darwin (freelist-abandonment spiral under all-conservative scanning). Layout-precise scans (P2.1) cut false root hits sharply, making the blacklist safe. Escape via `GCRY_DISABLE_BLACKLIST=1`.
 - **Darwin aggressive free-page release:** `flush_pending_page_release_chunks` walks ALL kept size-class chunks (not just HOLED) on Darwin. `MADV_FREE_REUSABLE` is page-table-level (no VM lock churn), so the extra walk is cheap per major.
 - **Darwin large cache reduced to 1 MiB (adaptive):** Adaptive LRU policy starts at 1 MiB on Darwin (vs 8 MiB on Linux). mach_vm reclaim already punches holes on free, so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.

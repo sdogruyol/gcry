@@ -554,6 +554,10 @@ module Gcry
       ensure_booted
       {% begin %}
         {% for t in Reference.all_subclasses %}
+          # Skip nested Foo::Bar(T) names (macro hygiene). This also skips
+          # Hash(HTTP::Headers::Key, …) — those stay conservative. Precise
+          # Hash registration for nested key types was unsound with soft-dirty
+          # minors under release Kemal (nursery keys in old @entries).
           {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
           {% name = t.stringify %}
           {% for prefix in UNSAFE_PREFIXES %}

@@ -702,9 +702,10 @@ module Gcry
 
         t0 = monotonic_ns
         @before_collect_callbacks.each(&.call)
-        # Explicit roots respect allow_interior_pointers (ambient-style).
-        @roots.each { |ptr| mark_root_candidate(ptr) }
-        roots.try &.each { |ptr| mark_root_candidate(ptr) }
+        # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
+        # realloc pin / add_root); still respect allow_interior_pointers.
+        @roots.each { |ptr| mark_explicit_root(ptr) }
+        roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         # Fiber objects + suspended stacks (once; not also via push_gc_roots).
         scrub_parked_fiber_stacks if scan_stack
@@ -945,8 +946,8 @@ module Gcry
         @mark_stack.clear
         clear_all_marks
         @before_collect_callbacks.each(&.call)
-        @roots.each { |ptr| mark_root_candidate(ptr) }
-        roots.try &.each { |ptr| mark_root_candidate(ptr) }
+        @roots.each { |ptr| mark_explicit_root(ptr) }
+        roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack
         scan_all_fiber_roots if scan_stack

@@ -25,26 +25,16 @@ module GC
     heap.scan_static_roots = true
     # Process GC must STW: ExecutionContext always has a Monitor OS thread.
     heap.stop_the_world = true
-    # Process GC: majors only by default. Nursery without write barriers must
-    # scan all old objects each minor — that dominates pause time under HTTP.
-    # On Linux the page-dirty barrier (soft-dirty / mprotect) makes generational
-    # old→young scanning efficient — default on. On Darwin (no barrier backend)
-    # nursery is off; opt in via GCRY_NURSERY=1.
-    {% if flag?(:linux) %}
-      heap.nursery_enabled = true
-      heap.nursery_threshold = Gcry::Heap::DEFAULT_NURSERY_THRESHOLD
-    {% else %}
-      heap.nursery_enabled = false
-      heap.nursery_threshold = UInt64::MAX
-    {% end %}
-    # Incremental (sliced) majors. On Linux the page-dirty barrier makes the
-    # incremental path sound — default ON. On Darwin (no soft-dirty) it is not
-    # yet crash-free — default OFF.
-    {% if flag?(:linux) %}
-      heap.incremental_auto = true
-    {% else %}
-      heap.incremental_auto = false
-    {% end %}
+    # Process GC majors by default. Nursery needs a sound old→young remembered
+    # set: Linux soft-dirty is probed later, but has false-negatives under WSL
+    # release HTTP (Kemal Hash key UAF / SEGV at 0x0..0x11). Default OFF on all
+    # platforms; opt in with GCRY_NURSERY=1 once barriers are measured clean.
+    heap.nursery_enabled = false
+    heap.nursery_threshold = UInt64::MAX
+    # Incremental majors likewise depend on the page-dirty barrier between
+    # slices. Same WSL false-negatives made Kemal release crashy — default OFF;
+    # opt in via GCRY_INCREMENTAL=1.
+    heap.incremental_auto = false
     # Process GC: adaptive empty-chunk release (dormant DONTNEED within retain,
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true

@@ -242,10 +242,19 @@ module Gcry
 
       return pointer if new_size <= old_size
 
-      fresh = allocate(new_size, atomic: atomic, clear: !atomic)
-      fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
-      free(pointer)
-      fresh
+      # Pin across allocate: process-GC type_id_gate rejects raw Pointer buffers
+      # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
+      # not re-scan an old-gen owner — without an explicit root, collect would
+      # reclaim `pointer` before we copy/free → double-free / UAF (Kemal HTTP).
+      add_root(pointer)
+      begin
+        fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        free(pointer)
+        fresh
+      ensure
+        delete_root(pointer)
+      end
     end
 
     def free(pointer : Void*) : Nil

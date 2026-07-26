@@ -25,6 +25,13 @@ module Gcry
       mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers, source: source)
     end
 
+    # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash
+    # @entries / Array @buffer have no Crystal type_id). Interior policy matches
+    # ambient roots so allow_interior_pointers still applies.
+    private def mark_explicit_root(pointer : Void*) : Nil
+      mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
+    end
+
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       if @mark_parallel
         @mark_lock.lock
@@ -285,16 +292,16 @@ module Gcry
     end
 
     private def scan_old_for_nursery_pointers : Nil
-      # Official remembered set: soft-dirty or mprotect dirty pages.
-      if scan_dirty_pages_for_pointers(nursery_only: true)
-        return
-      end
+      # Soft-dirty/mprotect can *help* mark from dirty pages, but must not
+      # replace the full old→young walk: WSL soft-dirty false-negatives under
+      # release HTTP left nursery Hash keys unmarked → SEGV.
+      scan_dirty_pages_for_pointers(nursery_only: true)
 
-      # Fallback: full conservative old→young object walk.
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
           next if BlockHeader.free?(header)
+          next if BlockHeader.nursery?(header)
           scan_object_for_nursery(header)
         else
           each_block(chunk) do |header|
@@ -344,6 +351,68 @@ module Gcry
 
     private def scan_object_for_nursery(header : BlockHeader*) : Nil
       return if BlockHeader.atomic?(header)
+      user = BlockHeader.user_from(header).as(UInt8*)
+      size = clamped_scan_size(header, user)
+      return if size == 0
+
+      # Old Hash objects store keys/values in a separate @entries blob. Word-scanning
+      # only the Hash shell sees @entries/@indices pointers — not the String keys
+      # inside the blob. When the blob is old and soft-dirty missed the page,
+      # those nursery keys were swept → Hash UAF (OverflowError / SEGV in
+      # HTTP::Headers keep-alive). Precise walk marks nursery targets only
+      # (mark_candidate / mark_noscan already no-op on old objects during minor).
+      if @layout_precise && size >= 4
+        tid = user.as(Int32*).value
+        if (entry = Layout.entry_for(tid))
+          size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
+          if size_match && entry.hash?
+            scan_hash_object(user, size, entry)
+            return
+          end
+          if size_match && entry.precise_fields?
+            entry.scan_offsets.each do |off|
+              next if off.to_u64 + sizeof(Void*).to_u64 > size
+              ptr = Pointer(Void*).new(user.address + off.to_u64).value
+              mark_candidate(ptr)
+              # Old Array(String) @buffer holds nursery element refs.
+              scan_buffer_words_for_nursery(ptr)
+            end
+            # Noscan buffers (Array(UInt8) etc.): usually no refs; still scan
+            # cheaply in case a mixed layout parked pointers here.
+            entry.noscan_offsets.each do |off|
+              next if off.to_u64 + sizeof(Void*).to_u64 > size
+              buf = Pointer(Void*).new(user.address + off.to_u64).value
+              scan_buffer_words_for_nursery(buf)
+            end
+            return
+          end
+        end
+      end
+
+      word = sizeof(Void*).to_u64
+      words = size // word
+      cursor = user.as(UInt64*)
+      words.times do |i|
+        cand = Pointer(Void).new(cursor[i])
+        next unless (h = find_object(cand))
+        if BlockHeader.nursery?(h)
+          mark_candidate(cand)
+        elsif !BlockHeader.atomic?(h)
+          # One-level chase: old Hash.@entries / Array.@buffer holding nursery refs.
+          scan_buffer_words_for_nursery(cand)
+        end
+      end
+    end
+
+    # Conservative word-scan of a heap buffer for nursery pointers (old→young).
+    private def scan_buffer_words_for_nursery(pointer : Void*) : Nil
+      header = find_object(pointer)
+      return unless header
+      return if BlockHeader.free?(header)
+      # Keep the buffer itself if it is nursery (rare for long-lived tables).
+      mark_candidate(pointer) if BlockHeader.nursery?(header)
+      return if BlockHeader.atomic?(header)
+
       user = BlockHeader.user_from(header).as(UInt8*)
       size = clamped_scan_size(header, user)
       return if size == 0

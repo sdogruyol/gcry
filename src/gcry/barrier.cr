@@ -133,6 +133,11 @@ module Gcry
         @last_soft_dirty_total = total
         return false unless pagemap_ok && total > 0
 
+        # dirty==0: either no old→young stores, or soft-dirty missed them (seen
+        # on WSL under release HTTP). Returning true here skipped the full
+        # old→young walk and swept live Hash keys → SEGV at 0x4 in String.
+        return false if dirty == 0
+
         if dirty * 100 > total * @soft_dirty_max_pct.to_u64
           @soft_dirty_fallbacks += 1
           @barrier_full_fallbacks += 1
