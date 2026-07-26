@@ -72,9 +72,6 @@ module Gcry
     @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
     @chunk_index_count = 0
     @chunk_index_cap = 0
-    # When true, index is stale and must be rebuilt from @chunks (fallback).
-    # Normal map/unmap maintains the sorted index incrementally.
-    @chunk_index_dirty = false
     # Last-chunk cache: most `chunk_containing` lookups during a mark come
     # from the same chunk (a hot object references its neighbours, and the
     # mark stack drains chunks in LIFO order). One O(1) range check replaces
@@ -202,7 +199,6 @@ module Gcry
       end
       @chunk_index_count = 0
       @chunk_index_cap = 0
-      @chunk_index_dirty = false
       if bm = @mark_bitmap
         # Clear the global bitmap pointer only if we still own it — another
         # heap may have taken over since we installed ourselves.
@@ -662,10 +658,11 @@ module Gcry
       @chunks = chunk
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
-      # Mark index dirty instead of inline insert — concurrent chunk_containing
-      # readers (called from free/is_heap_ptr off TLAB) would race on the
-      # sorted array shift. Marking dirty triggers a safe linear fallback walk.
-      @chunk_index_dirty = true
+      # Inline insert into sorted chunk index. Under TLAB MT this is called
+      # from refill_size_class which already holds @alloc_lock (via
+      # with_alloc_lock), so index_insert is serialised. Under Boehm (library
+      # heap) there is no contention.
+      index_insert(chunk)
       invalidate_chunk_cache
       note_mapped(chunk)
       chunk
@@ -720,28 +717,6 @@ module Gcry
       if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
         return (@chunk_index + @last_chunk_idx).value
       end
-
-      # If the chunk index is dirty (being rebuilt by another thread, or stale
-      # from a concurrent chunk addition), fall back to a linear walk of the
-      # chunks linked list. Rebuild the sorted index afterwards so the NEXT
-      # lookup hits the O(log n) binary search path.
-      if @chunk_index_dirty
-        chunk = @chunks
-        while chunk
-          if ChunkHeader.contains?(chunk, addr)
-            # Found via linear walk; rebuild index before returning so
-            # subsequent lookups use O(log n) binary search.
-            ensure_chunk_index
-            return chunk
-          end
-          chunk = chunk.value.next
-        end
-        # Miss: still rebuild — next lookup will be fast.
-        ensure_chunk_index
-        return nil
-      end
-
-      ensure_chunk_index
 
       lo = 0
       hi = @chunk_index_count
@@ -817,40 +792,37 @@ module Gcry
       word_ptr.value &= ~(1_u64 << bit)
     end
 
-    # Fallback full rebuild when the incremental index is marked dirty.
-    # Protected by @alloc_lock to prevent concurrent rebuilds during TLAB MT.
+    # Rebuild the sorted chunk index from @chunks linked list.
+    # Called during mark (range scan) — all mutators stopped, no lock needed.
     protected def ensure_chunk_index : Nil
       return unless @chunk_index_dirty
-      @alloc_lock.sync do
-        return unless @chunk_index_dirty
 
-        count = 0
-        each_chunk { count += 1 }
+      count = 0
+      each_chunk { count += 1 }
 
-        index_ensure_cap(count)
+      index_ensure_cap(count)
 
-        i = 0
-        each_chunk do |chunk|
-          (@chunk_index + i).value = chunk
-          i += 1
-        end
-        @chunk_index_count = count
-
-        i = 1
-        while i < @chunk_index_count
-          key = (@chunk_index + i).value
-          key_addr = key.address
-          j = i - 1
-          while j >= 0 && (@chunk_index + j).value.address > key_addr
-            (@chunk_index + (j + 1)).value = (@chunk_index + j).value
-            j -= 1
-          end
-          (@chunk_index + (j + 1)).value = key
-          i += 1
-        end
-
-        @chunk_index_dirty = false
+      i = 0
+      each_chunk do |chunk|
+        (@chunk_index + i).value = chunk
+        i += 1
       end
+      @chunk_index_count = count
+
+      i = 1
+      while i < @chunk_index_count
+        key = (@chunk_index + i).value
+        key_addr = key.address
+        j = i - 1
+        while j >= 0 && (@chunk_index + j).value.address > key_addr
+          (@chunk_index + (j + 1)).value = (@chunk_index + j).value
+          j -= 1
+        end
+        (@chunk_index + (j + 1)).value = key
+        i += 1
+      end
+
+      @chunk_index_dirty = false
     end
 
     private def index_ensure_cap(need : Int32) : Nil
@@ -882,9 +854,6 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
-      if @chunk_index_dirty
-        return
-      end
       invalidate_chunk_cache
       index_ensure_cap(@chunk_index_count + 1)
       pos = index_lower_bound(chunk.address)
@@ -898,9 +867,6 @@ module Gcry
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
-      if @chunk_index_dirty
-        return
-      end
       invalidate_chunk_cache
       pos = index_lower_bound(chunk.address)
       return if pos >= @chunk_index_count
