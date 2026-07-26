@@ -63,17 +63,23 @@ module GC
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
     heap.type_id_gate = true
-    # Page blacklist: opt-in. On Darwin fat apps it abandoned freelist pages
-    # (100M+ skips) and grew the heap without cutting live set; keep available
-    # via GCRY_BLACKLIST=1. Linux process default stays on (historical).
+    # Page blacklist: previously off on Darwin (freelist abandonment spiral under
+    # all-conservative scanning). Re-enabled in P2.3 era now that layout-precise
+    # scans cut false root hits sharply — the abandon spiral is unlikely.
+    # Escape: GCRY_DISABLE_BLACKLIST=1.
     {% if flag?(:darwin) %}
-      heap.blacklist_enabled = false
-      # No free large cache on Darwin — mach_vm reclaim already punches holes;
-      # retaining 8 MiB of cached larges just pads RSS on fat apps.
-      heap.large_cache_retain = 0_u64
+      heap.blacklist_enabled = true
+      # Large cache on Darwin starts at 1 MiB (adaptive can grow to LARGE_CACHE_LIMIT
+      # if hit-rate warrants it). mach_vm reclaim already punches holes on free,
+      # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
+      heap.large_cache_retain = 1048576_u64
     {% else %}
       heap.blacklist_enabled = true
     {% end %}
+    # Re-enabled on Darwin in P2.3 era: layout-precise scanning (P2.1) cuts
+    # false root hits sharply vs the old all-conservative regime, so the
+    # freelist-abandonment spiral that forced it off is much less likely.
+    # Escape: GCRY_DISABLE_BLACKLIST=1.
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -256,6 +262,8 @@ module GC
       # (MADV_DONTNEED on Darwin does NOT drop RSS — advisory only.)
       unless env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
         heap.madvise_free_pages = true
+        # flush_pending_page_release_chunks also walks ALL chunks on Darwin
+        # (not just HOLED) for more aggressive RSS recovery.
       end
     {% end %}
 

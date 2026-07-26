@@ -298,14 +298,28 @@ module Gcry
     end
 
     # Apply per-chunk free-page madvise to HOLED chunks after STW.
+    # On Darwin where MADV_FREE_REUSABLE preserves page content, walks ALL
+    # kept size-class chunks (not just HOLED) for more aggressive RSS recovery.
+    # Safe because the live-mask computation correctly identifies free pages
+    # regardless of HOLED; MADV_FREE_REUSABLE on Darwin does not zero headers.
     private def flush_pending_page_release_chunks : Nil
-      each_chunk do |chunk|
-        next unless ChunkHeader.holed?(chunk)
-        next if ChunkHeader.large?(chunk)
-        class_index = chunk.value.size_class.to_i32
-        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-        dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
-      end
+      {% if flag?(:darwin) %}
+        each_chunk do |chunk|
+          next if ChunkHeader.large?(chunk)
+          next if ChunkHeader.dormant?(chunk)
+          class_index = chunk.value.size_class.to_i32
+          next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+        end
+      {% else %}
+        each_chunk do |chunk|
+          next unless ChunkHeader.holed?(chunk)
+          next if ChunkHeader.large?(chunk)
+          class_index = chunk.value.size_class.to_i32
+          next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+        end
+      {% end %}
     end
 
     # Classify a kept size-class chunk by live_payload / usable_payload.

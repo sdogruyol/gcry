@@ -39,6 +39,9 @@ module Gcry
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).
     property large_cache_retain : UInt64 = DEFAULT_LARGE_CACHE_RETAIN
+    # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
+    getter large_cache_hits : UInt64 = 0_u64
+    getter large_cache_misses : UInt64 = 0_u64
     # Size-class chunk mmap size (process default 256 KiB; override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
@@ -184,6 +187,8 @@ module Gcry
       @large_mapped_bytes = 0_u64
       @live_objects = 0_u64
       @nursery_alloc_bytes = 0_u64
+      @large_cache_hits = 0_u64
+      @large_cache_misses = 0_u64
       unless @chunk_index.null?
         LibC.free(@chunk_index.as(Void*))
         @chunk_index = Pointer(ChunkHeader*).null
@@ -501,6 +506,8 @@ module Gcry
         return {user, true}
       end
 
+      @large_cache_misses += 1
+
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
@@ -521,13 +528,30 @@ module Gcry
     end
 
     # Recycle a large chunk (stays mapped, stays on @chunks). No munmap.
+    # Inserts at tail of freelist bucket for LRU eviction: trim_large_cache
+    # pops from the head, evicting the least recently re-used entry.
     protected def cache_large_chunk(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       mapped = chunk.value.mapped_bytes
       payload = header.value.size
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.user_from(header)
-      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, @large_freelists[bucket])
-      @large_freelists[bucket] = user
+      # Find tail of bucket freelist.
+      tail = @large_freelists[bucket]
+      while tail
+        th = BlockHeader.from_user(tail)
+        tnxt = th.value.next_free
+        break if tnxt.null?
+        tail = tnxt
+      end
+      header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
+      if tail.null?
+        @large_freelists[bucket] = user
+      else
+        th = BlockHeader.from_user(tail)
+        tv = th.value
+        tv.next_free = user
+        th.value = tv
+      end
       @free_bytes += mapped
       @large_free_bytes += mapped
     end
@@ -554,6 +578,7 @@ module Gcry
           mapped = chunk.value.mapped_bytes
           @free_bytes -= mapped if @free_bytes >= mapped
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
+          @large_cache_hits += 1
           return user
         end
         prev = user

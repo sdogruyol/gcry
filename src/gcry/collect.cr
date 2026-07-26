@@ -561,7 +561,7 @@ module Gcry
       # Recompute cached headroom: 25 % of the running average of raw heap
       # range observations. Done once per major — never on the allocation path.
       avg_range = compute_bitmap_growth_avg
-      @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 2) : (@small_chunk_bytes >> 3)
+      @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 3) : (@small_chunk_bytes >> 3)
     end
 
     # Record nursery survival from the just-completed minor collection. Updates
@@ -793,6 +793,23 @@ if major
       if major
         range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
         note_bitmap_growth(range_bytes)
+
+        # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
+        # Resets counters each major so the policy tracks the current working set.
+        total_large = @large_cache_hits + @large_cache_misses
+        if total_large > 0
+          hit_pct = (@large_cache_hits * 100) // total_large
+          current = @large_cache_retain
+          if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+            # Good reuse: double retain (capped at limit).
+            @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
+          elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
+            # Poor reuse: halve retain (floor at 1 MiB).
+            @large_cache_retain = {current >> 1, 1048576_u64}.max
+          end
+        end
+        @large_cache_hits = 0_u64
+        @large_cache_misses = 0_u64
       end
 
       @running_finalizers = true
