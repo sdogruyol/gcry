@@ -1,13 +1,13 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
 help:
 	@echo "Targets: spec spec-process fuzz fuzz-short format format-check lint samples"
-	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-acik bench-perf-smoke bench-kemal-record"
+	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
@@ -59,7 +59,8 @@ bench-kemal-record:
 	PREV=$(PREV) LABEL=$(LABEL) ./bench/record_kemal.sh
 
 # Full benchmark suite via run_all.sh.
-# DEBUG=1 → --debug --error-trace. Default: --release --debug --error-trace.
+# Default: --release (PERF.md). DEBUG=1 → --debug --error-trace.
+# SEGV symbols on release: CRYSTAL_FLAGS="--release --debug --error-trace"
 bench-run-all:
 	bash bench/run_all.sh all
 
@@ -71,9 +72,13 @@ bench-run-kemal:
 bench-run-acik:
 	bash bench/run_all.sh acik
 
-# Same as bench-run-kemal but debug symbols + error-trace (for SEGV / GC bugs).
+# Debug build (no --release) for SEGV / GC bugs.
 bench-run-kemal-debug:
 	DEBUG=1 bash bench/run_all.sh kemal
+
+# Release + DWARF (crash hunting without full debug mutator).
+bench-run-kemal-symbols:
+	CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal
 
 clean:
 	rm -rf $(BIN)

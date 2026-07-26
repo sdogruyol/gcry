@@ -34,9 +34,9 @@ Under `-Dgc_none`, `require "gcry"` reopens Crystal’s `GC` module. Everyday co
 | `Gcry::Observability.json_stats` | JSON snapshot for `/gc-stats` |
 | `Gcry.register_layout(T)` / `register_hash(K,V)` | Precise scan tables |
 | `Gcry.register_set(T)` | `register_hash(T, Nil)` for `Set(T)` backing |
-| `Gcry.register_layouts` | Auto-register concrete `Reference` subclasses (default-on; skip with `GCRY_DISABLE_AUTO_LAYOUTS=1`) |
+| `Gcry.register_layouts` | Auto-register concrete `Reference` subclasses (opt-in `GCRY_AUTO_LAYOUTS=1`; skip with `GCRY_DISABLE_AUTO_LAYOUTS=1`) |
 
-Process GC calls `Layout.register_builtins` at init (curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps) and, by default, `Gcry.register_layouts` for the whole-program walk. The compile-time `@unsafe_layouts` blacklist (Cry, Crystal::*, LibC::*) keeps conservative scanning for stdlib/runtime internals whose layouts shift across versions. Disable with `GCRY_DISABLE_AUTO_LAYOUTS=1` (escape hatch for unsound precise layouts).
+Process GC calls `Layout.register_builtins` at init (curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` maps). Whole-program `Gcry.register_layouts` is **opt-in** (`GCRY_AUTO_LAYOUTS=1`) — Linux HTTP thr regresses ~7pp on Kemal `/json` vs builtins-only. The compile-time `@unsafe_layouts` blacklist (Cry, Crystal::*, LibC::*) keeps conservative scanning for stdlib/runtime internals whose layouts shift across versions.
 
 ## Class `Gcry::Heap`
 

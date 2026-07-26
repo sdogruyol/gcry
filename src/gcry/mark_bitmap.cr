@@ -1,8 +1,8 @@
-# Side mark bitmap: one bit per word-aligned heap address, stored in mmap'd
-# regions outside the managed heap. Replacing the in-header MARK bit removes
-# the read-modify-write on BlockHeader on every mark candidate (hot path),
-# keeps the bit dirty-free in its own cache lines, and lets `clear_all_marks`
-# become a single `memset(0)` over the bitmap.
+# Side mark bitmap (opt-in via `-Dgcry_side_bitmap`): one bit per word-aligned
+# heap address, stored in mmap'd regions outside the managed heap. Default is
+# in-header MARK — the bitmap path removes RMW on BlockHeader on every mark
+# candidate and lets `clear_all_marks` become a single `memset(0)`, at the cost
+# of a large side mmap (Linux HTTP A/B: ~9× RSS vs ~1× header marks).
 #
 # Layout:
 #   - `@base`, `@base_addr`, `@capacity_bytes` describe the current mapping.

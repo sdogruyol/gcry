@@ -463,33 +463,60 @@ module Gcry
     end
 
     private def clear_all_marks : Nil
-      # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
-      # to managed heap, not to the live-object count. Replaces the legacy
-      # per-object header write that dominated clear_all_marks under HTTP.
-      # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
-      # -Dgc_none a test heap does not clobber the process GC's bitmap.
-      if bm = @mark_bitmap
-        if @heap_max > @heap_min && @heap_min != UInt64::MAX
-          bm.reset(@heap_min, @heap_max)
-        else
-          bm.zero_all
+      {% unless flag?(:gcry_side_bitmap) %}
+        each_chunk do |chunk|
+          each_block_or_large(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
+          end
         end
-      end
+      {% else %}
+        # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
+        # to managed heap, not to the live-object count. Replaces the legacy
+        # per-object header write that dominated clear_all_marks under HTTP.
+        # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
+        # -Dgc_none a test heap does not clobber the process GC's bitmap.
+        if bm = @mark_bitmap
+          if @heap_max > @heap_min && @heap_min != UInt64::MAX
+            bm.reset(@heap_min, @heap_max)
+          else
+            bm.zero_all
+          end
+        end
+      {% end %}
     end
 
     # Minor GC: reset nursery mark bits only.
     private def clear_nursery_marks : Nil
-      # Side mark bitmap: zero only the address ranges that correspond to
-      # nursery chunks. Chunks are page-aligned at multiples of the chunk size
-      # so we can issue narrow resets without touching the old generation's
-      # bits (which carry over from the prior major and remain valid).
-      bm = @mark_bitmap
-      return unless bm
-      each_chunk do |chunk|
-        next unless ChunkHeader.nursery?(chunk)
-        lo = ChunkHeader.data_start(chunk).address
-        hi = chunk.address + chunk.value.mapped_bytes
-        bm.reset(lo, hi) if hi > lo
+      {% unless flag?(:gcry_side_bitmap) %}
+        each_chunk do |chunk|
+          next unless ChunkHeader.nursery?(chunk)
+          each_block(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
+          end
+        end
+      {% else %}
+        # Side mark bitmap: zero only the address ranges that correspond to
+        # nursery chunks. Chunks are page-aligned at multiples of the chunk size
+        # so we can issue narrow resets without touching the old generation's
+        # bits (which carry over from the prior major and remain valid).
+        bm = @mark_bitmap
+        return unless bm
+        each_chunk do |chunk|
+          next unless ChunkHeader.nursery?(chunk)
+          lo = ChunkHeader.data_start(chunk).address
+          hi = chunk.address + chunk.value.mapped_bytes
+          bm.reset(lo, hi) if hi > lo
+        end
+      {% end %}
+    end
+
+    private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
+      if ChunkHeader.large?(chunk)
+        yield ChunkHeader.data_start(chunk).as(BlockHeader*)
+      else
+        each_block(chunk) { |h| yield h }
       end
     end
 

@@ -25,10 +25,8 @@ module Gcry
     module Flags
       FREE   = 1_u32
       ATOMIC = 2_u32
-      # Bit 4 (was MARK) is now sourced from the side MarkBitmap; the in-header
-      # bit is kept reserved to preserve the wire layout of BlockHeader (ABI
-      # stability for the GC facade). `marked?/set_mark/clear_mark` below read
-      # and write through the bitmap and no longer touch `flags`.
+      # Bit 4: in-header MARK is the default. Opt into a side MarkBitmap with
+      # `-Dgcry_side_bitmap` (keeps this bit reserved / unused on that path).
       MARK         =  4_u32
       LARGE        =  8_u32
       NURSERY      = 16_u32 # young generation (Phase 6)
@@ -60,44 +58,72 @@ module Gcry
       (header.value.flags & Flags::NURSERY) != 0
     end
 
-    # MARK flag is now authoritative in the side MarkBitmap (see mark_bitmap.cr).
-    # These helpers resolve the user pointer for a header and delegate to the
-    # bitmap; the in-header MARK flag is never read or written through them.
-    def self.marked?(header : BlockHeader*) : Bool
-      bm = Gcry.current_mark_bitmap
-      return false unless bm
-      bm.marked?(user_from(header).address)
-    end
+    {% unless flag?(:gcry_side_bitmap) %}
+      def self.marked?(header : BlockHeader*) : Bool
+        (header.value.flags & Flags::MARK) != 0
+      end
 
-    def self.set_mark(header : BlockHeader*) : Nil
-      bm = Gcry.current_mark_bitmap
-      return unless bm
-      bm.set(user_from(header).address)
-    end
+      def self.set_mark(header : BlockHeader*) : Nil
+        h = header.value
+        h.flags |= Flags::MARK
+        header.value = h
+      end
 
-    def self.clear_mark(header : BlockHeader*) : Nil
-      bm = Gcry.current_mark_bitmap
-      return unless bm
-      bm.clear(user_from(header).address)
-    end
+      def self.clear_mark(header : BlockHeader*) : Nil
+        h = header.value
+        h.flags &= ~Flags::MARK
+        header.value = h
+      end
 
-    def self.marked_user?(user : Void*) : Bool
-      bm = Gcry.current_mark_bitmap
-      return false unless bm
-      bm.marked?(user.address)
-    end
+      def self.marked_user?(user : Void*) : Bool
+        marked?(from_user(user))
+      end
 
-    def self.set_mark_user(user : Void*) : Nil
-      bm = Gcry.current_mark_bitmap
-      return unless bm
-      bm.set(user.address)
-    end
+      def self.set_mark_user(user : Void*) : Nil
+        set_mark(from_user(user))
+      end
 
-    def self.clear_mark_user(user : Void*) : Nil
-      bm = Gcry.current_mark_bitmap
-      return unless bm
-      bm.clear(user.address)
-    end
+      def self.clear_mark_user(user : Void*) : Nil
+        clear_mark(from_user(user))
+      end
+    {% else %}
+      # Side MarkBitmap is authoritative (`-Dgcry_side_bitmap`; see mark_bitmap.cr).
+      def self.marked?(header : BlockHeader*) : Bool
+        bm = Gcry.current_mark_bitmap
+        return false unless bm
+        bm.marked?(user_from(header).address)
+      end
+
+      def self.set_mark(header : BlockHeader*) : Nil
+        bm = Gcry.current_mark_bitmap
+        return unless bm
+        bm.set(user_from(header).address)
+      end
+
+      def self.clear_mark(header : BlockHeader*) : Nil
+        bm = Gcry.current_mark_bitmap
+        return unless bm
+        bm.clear(user_from(header).address)
+      end
+
+      def self.marked_user?(user : Void*) : Bool
+        bm = Gcry.current_mark_bitmap
+        return false unless bm
+        bm.marked?(user.address)
+      end
+
+      def self.set_mark_user(user : Void*) : Nil
+        bm = Gcry.current_mark_bitmap
+        return unless bm
+        bm.set(user.address)
+      end
+
+      def self.clear_mark_user(user : Void*) : Nil
+        bm = Gcry.current_mark_bitmap
+        return unless bm
+        bm.clear(user.address)
+      end
+    {% end %}
 
     def self.finalizer?(header : BlockHeader*) : Bool
       (header.value.flags & Flags::FINALIZER) != 0

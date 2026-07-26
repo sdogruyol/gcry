@@ -46,10 +46,8 @@ module Gcry
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # Side mark bitmap: one bit per word-aligned heap address, stored in its
-    # own mmap (outside the managed heap). Replaces the in-header MARK bit so
-    # marking no longer dirties BlockHeader cache lines, and `clear_all_marks`
-    # becomes a single `memset(0)` over the bitmap.
+    # Side mark bitmap (`-Dgcry_side_bitmap` only): one bit per word-aligned
+    # heap address in its own mmap. Default path keeps MARK in BlockHeader.
     @mark_bitmap : MarkBitmap? = nil
     # Inline bitmap state (mirrored from @mark_bitmap on relocate/destroy).
     # Kept on the heap struct so `marked?`/`set_mark`/`clear_mark` can answer
@@ -106,8 +104,10 @@ module Gcry
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
 
     def initialize
-      @mark_bitmap = MarkBitmap.new
-      Gcry.current_mark_bitmap = @mark_bitmap
+      {% if flag?(:gcry_side_bitmap) %}
+        @mark_bitmap = MarkBitmap.new
+        Gcry.current_mark_bitmap = @mark_bitmap
+      {% end %}
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
@@ -755,51 +755,67 @@ module Gcry
       @last_chunk_hi = 0_u64
     end
 
-    # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
-    # These read the heap's mirrored fields (same cache line as @heap_min /
-    # @heap_max) instead of going through `Gcry.current_mark_bitmap` plus a
-    # MarkBitmap#marked? virtual dispatch. On a wrk -c 100 -d 5 /json run,
-    # the extra dereference shows up as ~50% throughput loss because every
-    # mark candidate — i.e. every word scanned — pays for it.
+    {% unless flag?(:gcry_side_bitmap) %}
+      # In-header MARK (default): no side bitmap mmap.
+      @[AlwaysInline]
+      private def heap_marked?(header : BlockHeader*) : Bool
+        BlockHeader.marked?(header)
+      end
 
-    @[AlwaysInline]
-    private def heap_marked?(header : BlockHeader*) : Bool
-      base = @mark_bitmap_base
-      return false if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return false if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      ((word_ptr.value >> bit) & 1_u64) != 0
-    end
+      @[AlwaysInline]
+      private def heap_set_mark(header : BlockHeader*) : Nil
+        BlockHeader.set_mark(header)
+      end
 
-    @[AlwaysInline]
-    private def heap_set_mark(header : BlockHeader*) : Nil
-      base = @mark_bitmap_base
-      return if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      word_ptr.value |= 1_u64 << bit
-    end
+      @[AlwaysInline]
+      private def heap_clear_mark(header : BlockHeader*) : Nil
+        BlockHeader.clear_mark(header)
+      end
+    {% else %}
+      # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
+      # Opt-in via `-Dgcry_side_bitmap`. These read the heap's mirrored fields
+      # (same cache line as @heap_min / @heap_max) instead of going through
+      # `Gcry.current_mark_bitmap` plus a MarkBitmap#marked? virtual dispatch.
 
-    @[AlwaysInline]
-    private def heap_clear_mark(header : BlockHeader*) : Nil
-      base = @mark_bitmap_base
-      return if base == 0
-      user_addr = BlockHeader.user_from(header).address
-      bit_index = user_addr - @mark_bitmap_base_addr
-      return if bit_index >= @mark_bitmap_cap_bits
-      word_index = (bit_index >> 6).to_i32
-      bit = (bit_index & 63).to_i32
-      word_ptr = Pointer(UInt64).new(base) + word_index
-      word_ptr.value &= ~(1_u64 << bit)
-    end
+      @[AlwaysInline]
+      private def heap_marked?(header : BlockHeader*) : Bool
+        base = @mark_bitmap_base
+        return false if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return false if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        ((word_ptr.value >> bit) & 1_u64) != 0
+      end
+
+      @[AlwaysInline]
+      private def heap_set_mark(header : BlockHeader*) : Nil
+        base = @mark_bitmap_base
+        return if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        word_ptr.value |= 1_u64 << bit
+      end
+
+      @[AlwaysInline]
+      private def heap_clear_mark(header : BlockHeader*) : Nil
+        base = @mark_bitmap_base
+        return if base == 0
+        user_addr = BlockHeader.user_from(header).address
+        bit_index = user_addr - @mark_bitmap_base_addr
+        return if bit_index >= @mark_bitmap_cap_bits
+        word_index = (bit_index >> 6).to_i32
+        bit = (bit_index & 63).to_i32
+        word_ptr = Pointer(UInt64).new(base) + word_index
+        word_ptr.value &= ~(1_u64 << bit)
+      end
+    {% end %}
 
     # Rebuild the sorted chunk index from @chunks linked list.
     # Called during mark (range scan) — all mutators stopped, no lock needed.

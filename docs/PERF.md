@@ -8,25 +8,23 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (v0.9.0) — Linux
+## Headline (Unreleased) — Linux
 
-> **v0.10.0** was cut on Darwin (macOS process GC). Linux Kemal / acikturkiye numbers below are still the **0.9.0** cut — re-run `median_kemal_boehm.sh` on Linux before claiming a new Linux headline. Darwin: [PERF-macos.md](PERF-macos.md).
-
-Same host, Crystal 1.21, WSL2 x86_64, median of 3, scrub **off**:
+Same host, Crystal 1.21, WSL2 x86_64, median of 3, pure `--release`, **in-header MARK** (default), scrub **off**, auto-layouts **off**. Session: `bench/log/2026-07-26-173602/`.
 
 | Path | % of Boehm | post-GC RSS × |
 |------|----------:|--------------:|
-| `/json` | **~92%** | **~0.97×** |
-| `/` | **~89%** | **~0.97×** |
+| `/json` | **~89%** | **~0.99×** |
+| `/` | **~90%** | **~0.99×** |
 
-Near Boehm on the alloc-heavy path. Idle `/` is sanity, not the gate.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. Near-Boehm thr and RSS again after reverting side-bitmap as default.
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
-| `/` | 92922 | 82494 | **88.8%** | **0.97×** |
-| `/json` | 40162 | 36878 | **91.8%** | **0.97×** |
+| `/` | 83891 | 75797 | **90.4%** | **0.99×** |
+| `/json` | 37675 | 33450 | **88.8%** | **0.99×** |
 
-`GCRY_KEEP_CHUNKS=1` → ~**95%** `/json` thr @ ~**3×** RSS. Soft-dirty nursery stays opt-in (HTTP too dirty for a win).
+`GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
 
 ## History (Linux)
 
@@ -41,6 +39,9 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.8.0 | ~91% | ~89% | **~0.93×** | barriers, TLAB, blacklist, atfork, aarch64, metrics |
 | **0.9.0** | **~89%** | **~92%** | **~0.97×** | stack scrub (opt-in); parallel-mark experimental; observability |
 | 0.10.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | **macOS process GC** — Linux not re-cut this release; see [PERF-macos.md](PERF-macos.md) |
+| 0.11.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | side mark bitmap landed on Darwin host; Linux not re-cut at tag |
+| Unreleased (bitmap) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
+| **Unreleased** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
 
 **Escape knobs (same era, not defaults):**
 
@@ -50,7 +51,8 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (current) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape |
+| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure on Unreleased |
+| `-Dgcry_side_bitmap` (Unreleased A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
@@ -68,5 +70,6 @@ Same-day gcry + Boehm, both paths → update **this** file and the README Linux 
 make bench-kemal-wrk
 LABEL=linux-$(date +%Y%m%d) ./bench/median_kemal_boehm.sh
 LABEL=linux-$(date +%Y%m%d) ./bench/median_acikturkiye_boehm.sh
+# or: GC=both COUNT=1 TRIALS=3 bash bench/run_all.sh all
 # after wrk: curl …/gc-collect && read RSS
 ```

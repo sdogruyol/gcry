@@ -16,7 +16,7 @@ Process GC on Darwin is no longer a stub. Mach STW, dyld roots, 16 KiB host-pa
 
 Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~96% thr**, post-GC RSS **~7×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
 
-**Linux** (last cut **v0.9.0**, still the Linux headline): **`/json` ~92% thr**, post-GC RSS **~0.97×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
+**Linux** (Unreleased, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
 
 ---
 
@@ -35,14 +35,14 @@ If you care how your language reclaims memory, this is the repo.
 
 Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters.
 
-### Linux (version-cut headline — v0.9.0)
+### Linux (Unreleased — in-header MARK default)
 
-| Workload | gcry vs Boehm (v0.9.0, Linux) |
-|----------|-----------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~92%** |
-| Idle `/` thr | **~89%** |
-| `/json` post-GC RSS | **~0.97×** |
-| `/json` + `GCRY_KEEP_CHUNKS=1` | ~**95%** thr @ ~**3×** RSS |
+| Workload | gcry vs Boehm (Unreleased, Linux) |
+|----------|---------------------------------:|
+| Alloc-heavy JSON (`/json`) thr | **~89%** |
+| Idle `/` thr | **~90%** |
+| `/json` post-GC RSS | **~0.99×** |
+| Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS |
 
 ### macOS (Unreleased — bitmap shrinking + pause damping)
 
@@ -178,8 +178,8 @@ Defaults are tuned for process GC. Escape hatches when you measure:
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
-| `GCRY_DISABLE_AUTO_LAYOUTS=1` | Keep builtins only — skip whole-program `Reference.all_subclasses` walk (escape for unsound precise layouts) |
-| `GCRY_AUTO_LAYOUTS=1` | **Legacy**: equivalent to default-on (kept for documentation) |
+| `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
+| `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program `Reference.all_subclasses` precise layouts (~−7pp Kemal `/json` thr on Linux) |
 | `GCRY_DISABLE_SP_CLAMP=1` | No RSP clamp on other-thread stacks |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default `mach_vm` free-page release |

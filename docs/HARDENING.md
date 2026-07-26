@@ -12,12 +12,14 @@ Stress the collector. Tune process GC. Know where false retention comes from.
 ```sh
 crystal spec
 crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
+# optional: side mark bitmap (higher RSS on Linux HTTP) — crystal build -Dgc_none -Dgcry_side_bitmap …
 ```
 
 ## Defaults that matter (process GC)
 
-- Majors at **32 MiB**, **full STW**; nursery **on** (Linux; Darwin off — no barrier backend yet)
-- **Adaptive nursery threshold** on by default (target survival 50%, clamped [64 KiB, 8 MiB], last 10 minors ring buffer). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
+- Marks live in the **BlockHeader** (`MARK` flag). Side `MarkBitmap` mmap is **opt-in** (`-Dgcry_side_bitmap`) — Linux HTTP A/B: ~9× Kemal RSS vs ~1× header marks
+- Majors at **32 MiB**, **full STW**; nursery / incremental **off** for process GC (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
+- **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux; Darwin default **off** — freelist abandonment grew fat-app heaps)
 - **Linux + macOS** process GC (v0.10+): Darwin uses Mach STW + dyld roots; free-page physical release **on** (`mach_vm` at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there); large-object freelist retain **0** (Linux keeps **8 MiB**)
@@ -55,8 +57,8 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
-| `GCRY_DISABLE_AUTO_LAYOUTS=1` | Keep builtins only — skip whole-program `Reference.all_subclasses` walk (escape hatch for unsound precise layouts) |
-| `GCRY_AUTO_LAYOUTS=1` | **Legacy**: equivalent to default-on (kept for documentation/back-compat) |
+| `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
+| `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program precise layouts (Linux Kemal `/json` thr cost ~7pp) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
 | `GCRY_BLACKLIST=1` | Opt-in page blacklist (Darwin default off) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
