@@ -13,10 +13,11 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Soft-dirty | N/A |
 | Host page | **16 KiB** on Apple Silicon — free-page reclaim uses `sysconf(PAGESIZE)` |
 | Free-page RSS | `MADV_DONTNEED` is a no-op; process default uses `mach_vm_deallocate` + `allocate(FIXED)` |
-| Blacklist | Default **off** on Darwin (`GCRY_BLACKLIST=1` to opt in) |
+| Blacklist | Default **on** on Darwin (re-enabled in P2.3 era; `GCRY_DISABLE_BLACKLIST=1` to opt out) |
 | Conservative scan | Untyped payloads (`type_id ≤ 0`) are **object-base only** |
 | Layout builtins | Curated Array/Hash/Deque/`IO::Memory`/`JSON::Any` (not whole-program AUTO) |
-| Large mmap | Host-page aligned; Darwin `large_cache_retain` default **0** |
+| Large mmap | Host-page aligned; Darwin `large_cache_retain` starts at **1 MiB** (adaptive LRU) |
+| Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
 ## Verdict (v0.10.0) — macOS aarch64
@@ -29,18 +30,18 @@ Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub
 
 Throughput is usable (Mach STW). RSS is not Boehm-class — dense conservative-live (`size_class_live_bytes` ~0.7–0.9 GiB). Free-page reclaim works (`free_bytes` small after collect). **Shard-only heuristics do not close 5×.** Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
-## Current benchmark (2026-07-25) — macOS aarch64
+## Current benchmark (2026-07-26) — macOS aarch64
 
-P2.1+P2.2+P2.3, `unreleased-darwin` label:
+P3.3 (large-cache LRU + adaptive retain) + Darwin blacklist re-enable + aggressive free-page release + bitmap headroom 25%→12.5%, `rss-yak-darwin` label:
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
-| 1 | 76.0% | 25.59× | 768 / 1010 |
-| 2 | 74.9% | 31.84× | 766 / 1023 |
-| 3 | 38.8% | crash (PQ) | 394 / 1016 |
-| **median** | **75.3%** | **28.72×** | — |
+| 1 | 73.6% | 25.44× | 768 / 1044 |
+| 2 | 75.1% | 31.57× | 772 / 1028 |
+| 3 | 39.3% | crash (PQ) | 409 / 1041 |
+| **median** | **73.7%** | **26.78×** | — |
 
-Trial 3 crashed with PQ::Connection SIGSEGV (Crystal PostgreSQL null-ptr, unrelated to GC). Median based on trials 1+2. RSS is elevated vs prior runs — layout changes on fat apps shift conservative-live set; RSS variance is workload-driven.
+Trial 3 crashed with PQ::Connection SIGSEGV (Crystal PostgreSQL null-ptr, unrelated to GC). RSS improved slightly (27× vs prior 29×) but throughput regressed from ~75% to ~74% — blacklist default-on adds false-root rejection cost on Darwin stacks.
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
@@ -60,6 +61,7 @@ Timeouts: 0 / 0 all trials.
 | 2026-07-25 RSS / polish smoke | ~85–88% | **~10–14×** | `mach_vm` reclaim; layout polish |
 | **0.10.0** `macos-aarch64-v0.10.0` | **~80%** | **~11.8×** | Tagged cut; thr/RSS noisy vs toy Kemal |
 | **2026-07-25** `unreleased-darwin` | **75.3%** | **30.3×** | P2.1+P2.2+P2.3; RSS spike from ~11× to ~30× on Darwin — conservative live grows with layout changes |
+| **2026-07-26** `rss-yak-darwin` | **73.7%** | **26.8×** | Blacklist re-enable + aggressive madvise + LRU cache + bitmap headroom 12.5%; slight RSS improvement, throughput cost from blacklist |
 
 ## How to measure
 

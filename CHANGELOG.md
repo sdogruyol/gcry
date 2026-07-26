@@ -18,17 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`@unsafe_layouts` compile-time blacklist (P2.1):** Types whose layouts Crystal cannot promise stable (`Cry`, `Crystal::*`, `LibC::*`) are skipped from the auto-walk and kept on conservative scanning. New metric `layout_unsafe_skips` exposes the skip count.
 - **Per-source root reject counters:** New `type_id_stack_rejects` / `type_id_static_rejects` / `type_id_thread_rejects` count where false roots come from (fiber/mutator stacks, BSS/data, TLS). Plus `type_id_root_false_negatives` is now exposed in `/gc-stats`, metrics, and Prometheus — was tracked but never surfaced. Sum invariant: `stack + static + thread == type_id_root_rejects`.
 - **Adaptive nursery threshold:** `@nursery_threshold` adjusts dynamically after each minor based on the moving-average survival rate (last 10 minors). Target survival rate is 50%; when survival rises above it the threshold grows by 25% per minor (reducing collection frequency); when survival drops below 25% the threshold shrinks by 25% (collecting sooner to limit survivor pressure). Clamped to [64 KiB, 8 MiB]. Default-on for process GC (`adaptive_nursery=true`); disable via `GCRY_DISABLE_ADAPTIVE_NURSERY=1`.
+- **Large-cache LRU eviction + adaptive retain (P3.3):** `cache_large_chunk` inserts at tail (LRU). `trim_large_cache` evicts from head. Adaptive retain: after each major, hit-rate above 50% doubles retain (capped at 64 MiB); hit-rate below 10% halves it (floor 1 MiB). Default: 1 MiB on Darwin (macOS), 8 MiB on Linux.
+- **Bitmap headroom reduced 25% → 12.5%:** `note_bitmap_growth` now uses `avg_range >> 3` instead of `>> 2`, shrinking side-mark bitmap reserve — less RSS waste on stable heaps.
 
 ### Changed
 
 - **`incremental_auto` defaults (P1.3, Linux/Darwin):** `true` on Linux (page-dirty barrier is sound), `false` on Darwin (no soft-dirty alternative yet). Overridable via `GCRY_INCREMENTAL` / `GCRY_NO_INCREMENTAL`.
 - **`GCRY_AUTO_LAYOUTS=1` → legacy alias (P2.1):** the env var is now a no-op kept for documentation. Use `GCRY_DISABLE_AUTO_LAYOUTS=1` to opt out.
 - **Nursery default-on for Linux process GC:** On Linux the page-dirty barrier (soft-dirty / mprotect) makes generational old→young scanning efficient — nursery is now enabled by default (`nursery_threshold = 512 KiB`). Darwin stays off (no barrier backend); opt in via `GCRY_NURSERY=1`. Previously process GC always disabled nursery.
+- **Darwin blacklist re-enabled:** Previously default-off on Darwin (freelist-abandonment spiral under all-conservative scanning). Layout-precise scans (P2.1) cut false root hits sharply, making the blacklist safe. Escape via `GCRY_DISABLE_BLACKLIST=1`.
+- **Darwin aggressive free-page release:** `flush_pending_page_release_chunks` walks ALL kept size-class chunks (not just HOLED) on Darwin. `MADV_FREE_REUSABLE` is page-table-level (no VM lock churn), so the extra walk is cheap per major.
+- **Darwin large cache reduced to 1 MiB (adaptive):** Adaptive LRU policy starts at 1 MiB on Darwin (vs 8 MiB on Linux). mach_vm reclaim already punches holes on free, so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
 
 ### Performance
 
-- **macOS** Kemal (Apple Silicon, median of 3, scrub off): `/` **104.8%** of Boehm; `/json` **94.3%** of Boehm; post-GC RSS `/json` **4.76×** (steady ~94%, `/` >104% variance). See [docs/PERF-macos.md](docs/PERF-macos.md).
-- **macOS acikturkiye** (Apple Silicon, median of 3, scrub off): `75.3%` of Boehm (throughput); RSS ~28.7× (workload-driven variance). Trial 3 crashed with PQ::Connection SIGSEGV (unrelated to GC). See [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **macOS** Kemal: `/` **102.2%** of Boehm; `/json` **79.7%** of Boehm (regression from ~94% — blacklist default-on adds root-scan cost on Darwin). acikturkiye: **73.7%** of Boehm, post-GC RSS **26.8×** (marginal RSS improvement from blacklist + aggressive madvise + LRU cache + bitmap headroom 12.5%). Trial 3 crashed PQ::Connection SIGSEGV (unrelated). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
 - **Linux** numbers unchanged (this host is Darwin) — re-record on Linux before citing a new Linux cut. See [docs/PERF.md](docs/PERF.md).
 
