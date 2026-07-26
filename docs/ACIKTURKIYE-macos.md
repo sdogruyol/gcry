@@ -32,16 +32,16 @@ Throughput is usable (Mach STW). RSS is not Boehm-class — dense conservative-l
 
 ## Current benchmark (2026-07-26) — macOS aarch64
 
-P3.3 (large-cache LRU + adaptive retain) + Darwin blacklist re-enable + aggressive free-page release + bitmap headroom 25%→12.5%, `rss-yak-darwin` label:
+After reverting side bitmap → in-header MARK default, with layout scan improvements and hash layout scanning. Commit `a716a87`, `v0.11.0-36-ga716a87`:
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
-| 1 | 73.6% | 25.44× | 768 / 1044 |
-| 2 | 75.1% | 31.57× | 772 / 1028 |
-| 3 | 39.3% | crash (PQ) | 409 / 1041 |
-| **median** | **73.7%** | **26.78×** | — |
+| 1 | 85.9% | 14.93× | 811 / 944 |
+| 2 | 76.7% | 24.29× | 766 / 999 |
+| 3 | 72.8% | 22.33× | 663 / 910 |
+| **median** | **76.7%** | **22.33×** | — |
 
-Trial 3 crashed with PQ::Connection SIGSEGV (Crystal PostgreSQL null-ptr, unrelated to GC). RSS improved slightly (27× vs prior 29×) but throughput regressed from ~75% to ~74% — blacklist default-on adds false-root rejection cost on Darwin stacks.
+CSS note: app restarted between trials (fresh process). RSS improved from 1.77 GiB (previous session at 12:53) to ~670 MiB (~2.6× reduction), but still ~22× Boehm. Throughput is ~77% vs Boehm — the in-header MARK recovers RSS at some throughput cost for fat apps. Conservative live set (~1.2 GiB live_bytes) remains the dominant RSS driver.
 
 | Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
 |------:|------------:|--------------:|-------------------:|
@@ -62,6 +62,7 @@ Timeouts: 0 / 0 all trials.
 | **0.10.0** `macos-aarch64-v0.10.0` | **~80%** | **~11.8×** | Tagged cut; thr/RSS noisy vs toy Kemal |
 | **2026-07-25** `unreleased-darwin` | **75.3%** | **30.3×** | P2.1+P2.2+P2.3; RSS spike from ~11× to ~30× on Darwin — conservative live grows with layout changes |
 | **2026-07-26** `rss-yak-darwin` | **73.7%** | **26.8×** | Blacklist re-enable + aggressive madvise + LRU cache + bitmap headroom 12.5%; slight RSS improvement, throughput cost from blacklist |
+| **2026-07-26** `in-header-mark` | **76.7%** | **22.3×** | Reverted side bitmap → in-header MARK default; RSS improved 2.6× vs prior session, throughput ~77% |
 
 ## How to measure
 
