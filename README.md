@@ -1,29 +1,67 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="gcry" width="200"/>
+  <img src="assets/logo.svg" alt="gcry" width="240"/>
 </p>
 
-# gcry
+<h1 align="center">gcry</h1>
 
-**Crystal's GC, written in Crystal. Ship it with `require "gcry"` + `-Dgc_none`.**
+<p align="center">
+  <b>The garbage collector Crystal deserves — written in Crystal.</b><br>
+  <i>Conservative mark–sweep. Ship as a shard. One flag replaces Boehm.</i>
+</p>
 
-[![Stars](https://img.shields.io/github/stars/sdogruyol/gcry)](https://github.com/sdogruyol/gcry)
-[![Crystal](https://img.shields.io/badge/Crystal-%3E%3D1.21-000)](https://crystal-lang.org)
-[![Platform](https://img.shields.io/badge/Linux-macOS-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Benchmark](https://img.shields.io/badge/Kemal%20%2Fjson-~89%25%20of%20Boehm-orange)](https://github.com/sdogruyol/gcry)
+<p align="center">
+  <a href="https://github.com/sdogruyol/gcry/stargazers"><img src="https://img.shields.io/github/stars/sdogruyol/gcry?style=flat-square&logo=github" alt="Stars"></a>
+  <a href="https://crystal-lang.org"><img src="https://img.shields.io/badge/Crystal-%3E%3D1.21-000?style=flat-square&logo=crystal" alt="Crystal"></a>
+  <a href="https://github.com/sdogruyol/gcry/actions"><img src="https://img.shields.io/github/actions/workflow/status/sdogruyol/gcry/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI" alt="CI"></a>
+  <a href="docs/PERF.md"><img src="https://img.shields.io/badge/Kemal%20%2Fjson-%E2%89%8889%25%20of%20Boehm-f5a623?style=flat-square" alt="Benchmark"></a>
+  <img src="https://img.shields.io/badge/Linux-macOS-4a90d9?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License">
+</p>
 
-Boehm is fine. gcry is yours to read, change, and ship — a real mark-sweep collector
-as a **shard**, not a C dependency you hope never breaks.
-
-One flag (`-Dgc_none`) and the process runs on gcry. Linux + macOS, x86_64 + ARM64.
+<br>
 
 ---
 
-## Quick Start
+## In one line
 
-**1.** Add to `shard.yml`:
+```crystal
+{% if flag?(:gc_none) %} require "gcry" {% end %}
+```
+
+```sh
+crystal build -Dgc_none app.cr -o app
+```
+
+String, Array, Hash — everything allocates on gcry. No API changes. One line
+to swap Boehm out, one line to swap it back.
+
+**Kemal `/json`: ~89% of Boehm throughput, post-GC RSS ~0.95x.**  
+**Fat app (acikturkiye): ~93% throughput, RSS ~2.65x.**
+
+---
+
+## A GC you can actually own
+
+Boehm works. Nobody is denying that. But Crystal's most intimate runtime
+component is a C library — one you can't read, can't debug, can't change.
+
+| | Boehm | gcry |
+|--|-------|------|
+| Language | C | **Crystal** |
+| Integration | Built-in C library | **Shard** (`shards update`) |
+| Debug | C stack frames | **Crystal stack traces** |
+| Modify | Recompile C + patch Crystal | **Commit to shard** |
+| Metrics | Nothing built-in | **HDR histograms + Prometheus** |
+| Ownership | Upstream C project | **Your community** |
+
+Readable. Debuggable. Changeable. Yours.
+
+---
+
+## The moment you missed this
 
 ```yaml
+# shard.yml
 dependencies:
   gcry:
     github: sdogruyol/gcry
@@ -33,9 +71,8 @@ dependencies:
 shards install
 ```
 
-**2.** Require under the null GC:
-
 ```crystal
+# src/app.cr
 {% if flag?(:gc_none) %}
   require "gcry"
 {% end %}
@@ -43,109 +80,11 @@ shards install
 puts "hello from gcry"
 ```
 
-**3.** Build with `-Dgc_none`:
-
 ```sh
-crystal build -Dgc_none app.cr -o app
-./app
+crystal build -Dgc_none app.cr -o app && ./app
 ```
 
-No special malloc API. gcry reopens Crystal's `GC` module. Without `-Dgc_none`,
-Boehm stays in charge.
-
-> Darwin note: Crystal **≥ 1.21** on macOS (Fiber::ExecutionContext / Monitor contract).
-> Older toolchains hang under HTTP STW.
-
----
-
-## Why gcry, not Boehm?
-
-| | gcry | Boehm |
-|--|------|-------|
-| Language | **Crystal** | C |
-| Integration | Shard (`-Dgc_none`) | Built-in C library |
-| Read & debug | Stack traces in Crystal | C frames |
-| Modify & ship | `shards update` | Recompile C, patch Crystal |
-| Metrics | HDR histograms, Prometheus, `/gc-stats` | Nothing built-in |
-| Ownership | Crystal community owns it | Upstream C project |
-
----
-
-## Performance
-
-One number that matters: **gcry req/s ÷ Boehm req/s** on the same host.
-Absolute wrk is host noise; **% of Boehm** is the score.
-Prefer `/json` (alloc-heavy) — idle `/` is sanity.
-
-### Linux (v0.13.0, scrub default-on)
-
-| Workload | gcry vs Boehm |
-|----------|--------------:|
-| Kemal `/json` thr | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
-| Kemal `/json` post-GC RSS | **~0.95×** |
-| Kemal `/` thr | **~90%** |
-| Fat app `/api/v1/` thr | **~93%** |
-| Fat app `/api/v1/` RSS | **~2.65×** |
-
-### macOS (v0.13.0, 256 KiB chunk default)
-
-| Workload | gcry vs Boehm |
-|----------|--------------:|
-| Kemal `/json` thr | **~84%** |
-| Kemal `/json` post-GC RSS | **~0.93×** |
-| Kemal `/` thr | **~93%** |
-| Fat app `/api/v1/` thr | **~78%** |
-
-Methodology & full tables: [docs/PERF.md](docs/PERF.md) (Linux),
-[docs/PERF-macos.md](docs/PERF-macos.md) (macOS).
-
----
-
-## Roadmap
-
-gcry aims to earn its place as Crystal's default GC. Four phase plan:
-
-- **HERE** — Conservative mark-sweep, STW, Linux + macOS, observability
-- **Phase 2** — Compiler stack maps, write barriers, Windows, `-Dgc_gcry` compiler flag
-- **Phase 3** — Throughput parity, parallel mark, nursery default-on
-- **Phase 4** — Default GC, concurrent collection, compaction
-
-[Full roadmap →](./ROADMAP.md)
-
----
-
-## What you get
-
-| | |
-|--|--|
-| **Conservative mark-sweep** | Safe for today's Crystal ABI; scans for pointer-shaped words |
-| **Stop-the-world** | Linux signals / Darwin Mach suspend; histogram via `Gcry.pause_stats` |
-| **Non-moving** | Stable addresses — no compacting surprises |
-| **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
-| **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
-| **Empty-chunk release** | Default-on munmap — Kemal post-GC RSS at Boehm parity |
-| **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
-| **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
-| **Fork path** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
-
----
-
-## Scope
-
-gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
-
-| In scope today | Later / elsewhere |
-|----------------|-------------------|
-| **Linux + macOS** process GC (Crystal ≥ 1.21) | Windows process GC; soft-dirty on Darwin |
-| Default ExecutionContext, **parallelism 1** | Parallel contexts: experimental (`GCRY_TLAB=1`; measure) |
-| Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
-| `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it) |
-
-Full checklist: [docs/COMPARISON.md](docs/COMPARISON.md).
-
----
-
-## Try it in 10 seconds
+10 seconds. Or faster with Docker:
 
 ```sh
 docker run --rm -v "$PWD:/app" crystallang/crystal:1.21.0 \
@@ -154,41 +93,137 @@ docker run --rm -v "$PWD:/app" crystallang/crystal:1.21.0 \
 
 ---
 
-## Docs
+## Why a second option alongside Boehm?
 
-| Doc | |
-|-----|--|
-| [DESIGN.md](DESIGN.md) | Architecture & roadmap |
-| [ROADMAP.md](./ROADMAP.md) | Public plan to become Crystal's default GC |
-| [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (Linux cut) |
-| [docs/PERF-macos.md](docs/PERF-macos.md) | Speed vs Boehm (macOS cut) |
-| [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm |
-| [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) | Fat-app dogfood (Linux) |
-| [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md) | Fat-app dogfood (Darwin) |
-| [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
-| [docs/HARDENING.md](docs/HARDENING.md) | Env knobs & stress |
-| [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
-| [docs/API.md](docs/API.md) | Public API + `/metrics` |
-| [docs/ANNOUNCE.md](docs/ANNOUNCE.md) | Release blurb draft |
-| [CHANGELOG.md](CHANGELOG.md) | Per-version history |
+Because a language's garbage collector is its most intimate runtime component.
+You shouldn't have to trust that to a C library you can't touch.
+
+Boehm is a 30-year-old, battle-tested, broad-platform C library. gcry is
+Crystal-native, shard-delivered, and yours to debug, change, and fork.
+
+Both use the same contract (conservative, non-moving mark-sweep). Both
+reopen the same `GC` module. The difference: one you can read and understand,
+the other you can't.
 
 ---
 
-## Tuning (tl;dr)
+## Performance — numbers don't lie
 
-Defaults are tuned for process GC. Escape hatches when you measure:
+**% of Boehm** is the only score that matters. Same host, same load, same wrk.
+Absolute req/s is host noise; the ratio is truth. Prefer `/json` (alloc-heavy).
+Full methodology: [docs/PERF.md](docs/PERF.md).
+
+### Linux
+
+| Workload | gcry vs Boehm (v0.13.0) |
+|----------|------------------------:|
+| Kemal `/json` throughput | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
+| Kemal `/json` post-GC RSS | **~0.95x** |
+| Kemal `/` throughput | **~90%** |
+| Fat app `/api/v1/` throughput | **~93%** |
+| Fat app `/api/v1/` RSS | **~2.65x** |
+
+### macOS (Apple Silicon)
+
+| Workload | gcry vs Boehm (v0.13.0) |
+|----------|------------------------:|
+| Kemal `/json` throughput | **~84%** |
+| Kemal `/json` post-GC RSS | **~0.93x** |
+| Kemal `/` throughput | **~93%** |
+| Fat app `/api/v1/` throughput | **~78%** |
+
+Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
+
+That fat-app RSS (2.65x) is an honest number. Stack maps will bring it to ~1.2x.
+Until then, we live with this reality. We don't hide our numbers.
+
+---
+
+## Feature set
+
+| Feature | Description |
+|---------|-------------|
+| **Conservative mark-sweep** | Safe for today's Crystal ABI; scans for pointer-shaped words |
+| **Stop-the-world** | Linux signals / Darwin Mach suspend; HDR histogram via `Gcry.pause_stats` |
+| **Non-moving** | Stable addresses — no compaction surprises |
+| **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
+| **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
+| **Empty-chunk release** | On by default — Kemal post-GC RSS at Boehm parity |
+| **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
+| **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
+| **Fork** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
+
+---
+
+## Scope (honest)
+
+gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
+Windows is coming.
+
+| Today | Later / elsewhere |
+|-------|-------------------|
+| **Linux + macOS** process GC (Crystal >= 1.21) | Windows process GC |
+| Default ExecutionContext, **parallelism 1** | Parallel contexts: experimental (`GCRY_TLAB=1`; measure) |
+| Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
+| `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
+
+---
+
+## Roadmap
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 1  DONE: Conservative mark-sweep, STW, Linux+macOS   │ ✅
+│ Phase 2  NOW: Stack maps, barriers, Windows, -Dgc_gcry     │ 🔄
+│ Phase 3  NEXT: Performance parity with Boehm, parallel mark │ 📋
+│ Phase 4  GOAL: Crystal's default GC                        │ 🎯
+└─────────────────────────────────────────────────────────────┘
+```
+
+[Full plan →](./ROADMAP.md)
+
+---
+
+## Tuning (quick reference)
+
+Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (default 32 MiB) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks → ~95% `/json` thr, ~3x RSS |
-| `GCRY_INCREMENTAL=1` | Sliced majors + dirty re-scan (measure first) |
-| `GCRY_PARALLEL_MARK=N` | Experimental mark workers (default 1) |
-| `GCRY_NURSERY=1` | Opt-in nursery (default off for process HTTP) |
-| `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~‑7pp `/json` thr on Linux) |
-| `GCRY_STRESS=1` | Collect every N allocs (debug help) |
+| `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
+| `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
+| `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
+| `GCRY_PARALLEL_MARK=N` | Experimental parallel mark workers (default 1) |
+| `GCRY_STRESS=1` | Collect every N allocs (debug) |
 
 Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
+
+---
+
+## Docs
+
+| Doc | What |
+|-----|------|
+| [DESIGN.md](DESIGN.md) | Architecture & design decisions |
+| [ROADMAP.md](./ROADMAP.md) | Public roadmap to becoming Crystal's default GC |
+| [docs/PERF.md](docs/PERF.md) | Linux performance numbers |
+| [docs/PERF-macos.md](docs/PERF-macos.md) | macOS performance numbers |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
+| [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
+| [docs/API.md](docs/API.md) | Public API + `/metrics` |
+| [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+
+---
+
+## Contributing
+
+1. Fork → branch → commit → push → PR
+2. Collector hot paths: **no managed-heap allocation**
+3. Prefer small modules (`heap`, `mark`, `sweep`, `roots`)
+4. Stuck? [good first issues](https://github.com/sdogruyol/gcry/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 
 ---
 
@@ -202,19 +237,6 @@ make bench-kemal-wrk  # Kemal + wrk on / and /json
 make format-check
 ```
 
-Heap unit tests exercise `Gcry::*` as a library allocator under Boehm.
-Process-GC samples need `-Dgc_none`.
-
----
-
-## Contributing
-
-1. Fork → branch → commit → push → PR
-2. Collector hot paths: **no** managed-heap allocation
-3. Prefer small modules (`heap`, `mark`, `sweep`, `roots`)
-4. Looking for a place to start? Check [good first issues](https://github.com/sdogruyol/gcry/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-   — Windows stubs, benchmark workloads, spec coverage.
-
 ---
 
 ## License
@@ -223,4 +245,9 @@ MIT — see [LICENSE](LICENSE).
 
 ## Contributors
 
-- [Serdar Dogruyol](https://github.com/sdogruyol) — creator and maintainer
+[Serdar Dogruyol](https://github.com/sdogruyol) — creator and maintainer
+
+<br>
+
+<sub>Tried it? Star it. Haven't tried it? Try it first, then star it.
+No, really — one `crystal build -Dgc_none` and you'll understand.</sub>
