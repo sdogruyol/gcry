@@ -39,16 +39,36 @@ module GC
     # munmap excess). GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
     heap.release_empty_chunks = true
     # Keep recently-freed chunks as dormant (MADV_DONTNEED-style page release)
-    # up to 8 MiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently)
-    # and 64 MiB on other platforms.
+    # up to 512 KiB on Darwin (macOS MADV_FREE_REUSABLE drops RSS efficiently
+    # at the page level, so a 512 KiB cap keeps tiny reuse bursts warm without
+    # pinning the full 8 MiB wastage seen in v0.12.0). Higher retain budgets on
+    # macOS only inflate RSS — the per-page reclaim is already done.
     # Pure-munmap churn under Kemal-style workloads fragments the VMA space
     # and inflates RSS via repeated mmap+madvise cycles; a moderate retain
     # budget lets the kernel drop physical pages while keeping VMA cache
     # hot for the next reuse.
     {% if flag?(:darwin) %}
-      heap.empty_chunk_retain = 8_u64 * 1024_u64 * 1024_u64
+      heap.empty_chunk_retain = 512_u64 * 1024_u64
+      # 256 KiB size-class chunk (up from 128 KiB library default). The 128 KiB
+      # chunk inflated collection count (~290 majors in 30s) and crushed
+      # acikturkiye throughput to ~57% Boehm (vs ~79% at 256 KiB). Kemal RSS
+      # barely moves (0.88× → 1.04× Boehm). Escape: GCRY_CHUNK_BYTES=131072.
+      heap.small_chunk_bytes = 262144_u64
+      # Parked fiber stacks carry stale pointer values from prior activations
+      # — those become false roots during conservative scanning and inflate
+      # retention (acikturkiye macOS: ~1.2 GiB live set, where much of it is
+      # not real reachable). Default-on for macOS and Linux process GC.
+      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      heap.scrub_fibers_enabled = true
     {% else %}
-      heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+      # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
+      # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
+      heap.empty_chunk_retain = 16_u64 * 1024_u64 * 1024_u64
+      # Linux: scrub parked fiber stacks to cut false retention from stale
+      # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
+      # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
+      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      heap.scrub_fibers_enabled = true
     {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
@@ -176,7 +196,14 @@ module GC
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
     else
-      heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
+      # Lower major threshold (16 MiB) halves the dense-live growth window
+      # under fat apps on Darwin. Linux stays at 32 MiB (PROCESS_GC_THRESHOLD)
+      # — 16 MiB regressed acikturkiye thr by ~20pp via excessive major cycling.
+      {% if flag?(:darwin) %}
+        heap.gc_threshold = 16_u64 * 1024_u64 * 1024_u64
+      {% else %}
+        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
+      {% end %}
     end
 
     if env_flag_one?("GCRY_DISABLE_NURSERY")
@@ -295,7 +322,8 @@ module GC
       heap.large_cache_retain = cache
     end
 
-    # Size-class chunk mmap size (default 256 KiB). Must be ≥64 KiB and page-aligned.
+    # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
+    # Must be ≥64 KiB and page-aligned.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
       if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
@@ -330,6 +358,9 @@ module GC
     end
     if env_flag_one?("GCRY_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = true
+    end
+    if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
+      heap.scrub_fibers_enabled = false
     end
   end
 

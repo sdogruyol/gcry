@@ -10,7 +10,7 @@ module Gcry
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES     = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
+    SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — library default; macOS process GC bumps to 256 KiB (gc_override.cr)
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
     PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
     # HDR pause histogram buckets. Bucket `i` covers [2^i ns, 2^(i+1) ns); the
@@ -19,9 +19,9 @@ module Gcry
     # Power-of-two buckets for recycled large mappings (avoid munmap during STW).
     LARGE_FREE_BUCKETS = 20
     # Soft cap on cached free large bytes.
-    LARGE_CACHE_LIMIT = 64_u64 * 1024 * 1024
+    LARGE_CACHE_LIMIT = 32_u64 * 1024 * 1024
     # Bytes of free large mappings to keep after trim (process default; override via GCRY_LARGE_CACHE).
-    DEFAULT_LARGE_CACHE_RETAIN = 8_u64 * 1024 * 1024
+    DEFAULT_LARGE_CACHE_RETAIN = 4_u64 * 1024 * 1024
     # Keep up to this many bytes of fully-free size-class chunks as dormant
     # (MADV_DONTNEED) for fast reuse; excess is munmap'd when release is on.
     # 0 means "munmap everything immediately" — that path fragmented VMA
@@ -42,7 +42,8 @@ module Gcry
     # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
     getter large_cache_hits : UInt64 = 0_u64
     getter large_cache_misses : UInt64 = 0_u64
-    # Size-class chunk mmap size (process default 256 KiB; override via GCRY_CHUNK_BYTES).
+    # Size-class chunk mmap size (process default 128 KiB; macOS bumps to 256 KiB;
+    # override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -661,6 +662,16 @@ module Gcry
       end
 
       raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
+
+      # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
+      # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a
+      # partially-filled huge page does not reclaim the full 2 MiB even
+      # when only 4 KiB is live. Base pages let MADV_DONTNEED / MADV_COLD
+      # reclaim at 4 KiB granularity, keeping RSS proportional to the
+      # live object set.
+      {% if flag?(:linux) %}
+        LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_NOHUGEPAGE)
+      {% end %}
 
       chunk = ptr.as(ChunkHeader*)
       chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)

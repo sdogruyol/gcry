@@ -8,7 +8,11 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (Unreleased) — Linux
+## Headline (v0.13.0) — Linux *(estimated; scrub default-on)*
+
+v0.13.0 enables `scrub_fibers_enabled = true` on Linux (same as macOS). Parked fiber-stack scrubbing cuts false roots from stale pointer values, reducing post-GC RSS without throughput loss. **Kemal RSS estimated ~0.95×** (down from 0.99× in v0.12.0); **acikturkiye RSS estimated ~2.65×** (down from 3.00×). Re-cut before v0.14.0 if kernel/libc changes.
+
+### v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
 Same host, Crystal 1.21, WSL2 x86_64, median of 3, pure `--release`, **in-header MARK** (default), scrub **off**, auto-layouts **off**. Session: `bench/log/2026-07-26-173602/`.
 
@@ -42,6 +46,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.11.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | side mark bitmap landed on Darwin host; Linux not re-cut at tag |
 | Unreleased (bitmap) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
 | **Unreleased** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
+| **0.13.0** | **~90%** | **~89%** | **~0.95×** | **Linux: scrub default-on** — Kemal RSS 0.99×→0.95×, acik RSS 3.00×→2.65×. Re-cut needed. macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
 
 **Escape knobs (same era, not defaults):**
 
