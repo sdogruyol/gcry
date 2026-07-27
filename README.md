@@ -10,11 +10,14 @@
 </p>
 
 <p align="center">
+  <b>gcry runs at ~89% of Boehm's throughput with ~0.95x the RSS (Linux).</b>
+</p>
+
+<p align="center">
   <a href="https://github.com/sdogruyol/gcry/stargazers"><img src="https://img.shields.io/github/stars/sdogruyol/gcry?style=flat-square&logo=github" alt="Stars"></a>
   <a href="https://github.com/sdogruyol/gcry/releases"><img src="https://img.shields.io/github/v/release/sdogruyol/gcry?style=flat-square&logo=github&label=version" alt="Version"></a>
   <a href="https://crystal-lang.org"><img src="https://img.shields.io/badge/Crystal-%3E%3D1.21-000?style=flat-square&logo=crystal" alt="Crystal"></a>
   <a href="https://github.com/sdogruyol/gcry/actions"><img src="https://img.shields.io/github/actions/workflow/status/sdogruyol/gcry/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI" alt="CI"></a>
-  <a href="docs/PERF.md"><img src="https://img.shields.io/badge/Kemal%20%2Fjson-%E2%89%8889%25%20of%20Boehm-f5a623?style=flat-square" alt="Benchmark"></a>
   <img src="https://img.shields.io/badge/Linux-macOS-4a90d9?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License">
 </p>
@@ -36,8 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Kemal `/json`: ~89% of Boehm throughput, post-GC RSS ~0.95x.**  
-**Fat app (acikturkiye): ~93% throughput, RSS ~2.65x.**
+**Near-Boehm performance: ~89% throughput at ~0.95x RSS (Linux).**
 
 ---
 
@@ -100,7 +102,7 @@ No compiler patch. No linker tricks. One flag.
 
 ---
 
-## The moment you missed this
+## How to use it
 
 ```yaml
 # shard.yml
