@@ -5,13 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
-## [Unreleased]
+## [0.13.0] - 2026-07-27
 
 ### Changed
 
 - **Darwin `empty_chunk_retain` 8 MB → 512 KB:** Aggressive `MADV_FREE_REUSABLE` reclaim on Darwin. Kemal RSS drops from ~160 MiB to ~18 MiB (1.04× Boehm). ACIKTURKIYE RSS unchanged (~700 MiB); conservative live set remains the dominant driver.
-- **Darwin `scrub_fibers_enabled` = true:** Default-on fiber stack scrubbing on Darwin to reduce false roots from parked fiber stacks. Opt-out via `GCRY_DISABLE_SCRUB_FIBERS=1`.
+- **`scrub_fibers_enabled` = true (Linux + macOS):** Default-on fiber stack scrubbing to reduce false roots from parked fiber stacks. Linux: Kemal RSS 0.99×→0.95×, acikturkiye RSS 3.00×→2.65×. macOS: ACIKTURKIYE RSS steady at ~700 MiB (conservative live set dominant). Opt-out via `GCRY_DISABLE_SCRUB_FIBERS=1`.
 - **Darwin `gc_threshold` 32 MB → 16 MB:** More frequent major collections on Darwin; pause halved (47→25 ms p50) on ACIKTURKIYE.
+- **Darwin `small_chunk_bytes` 128 KiB → 256 KiB:** The 128 KiB chunk inflated collection count (~290 majors in 30s) and crushed acikturkiye throughput to ~57% Boehm. 256 KiB recovers throughput to ~78% without meaningful Kemal RSS cost (1.06× vs 0.88×). Set in `gc_override.cr` for Darwin only; library default stays 128 KiB. Escape: `GCRY_CHUNK_BYTES=131072`.
 
 ### Added
 
@@ -19,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, session `bench/log/2026-07-26-200423/`): `/` **90.3%** of Boehm; `/json` **82.6%**; post-GC RSS **1.04–1.05×** (near Boehm parity, down from 1.34× in v0.12.0). ACIKTURKIYE `/api/v1/`: **78.0%** of Boehm, post-GC RSS **25.6×** (RSS steady at ~700 MiB; conservative live set ~1.2 GiB dominant). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **macOS v0.13.0** (Apple Silicon M2 Pro, median-of-3, `wrk -c 100 -d 30`, `--release`, 256 KiB chunk default):
+  - Kemal: `/` **92.6%** of Boehm; `/json` **83.9%**; post-GC RSS **0.93–1.06×**.
+  - ACIKTURKIYE `/api/v1/`: **77.9%** of Boehm, post-GC RSS **15.8×** (~600 MiB). 0 crashes across 3 trials.
+  - See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## [0.12.0] - 2026-07-26
 
@@ -343,7 +347,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.13.0...HEAD
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0

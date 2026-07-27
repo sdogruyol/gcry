@@ -4,7 +4,11 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (Unreleased) — Linux
+## Verdict (v0.13.0) — Linux *(estimated; scrub default-on)*
+
+v0.13.0 enables `scrub_fibers_enabled = true` on Linux. Parked fiber-stack scrubbing cuts false roots — **acikturkiye RSS estimated ~2.65×** (down from 3.00× in v0.12.0). Re-cut before v0.14.0.
+
+## v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
 Same host, `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), post-`GC.collect` RSS, median of 3 (scrub **off**, auto-layouts **off**). Session: `bench/log/2026-07-26-173602/`.
 
@@ -49,7 +53,7 @@ Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC ge
 | STW pauses ≪ wall | Thr gaps were mostly mutator / retention / VMA — fixed those first |
 | Empty-chunk release | Kemal RSS ≈ Boehm (0.9 era); acikturkiye chunks are **dense live** (~noop for RSS) |
 | Layout / type_id / SP clamp | Correct; ~no RSS move on this app |
-| Stack scrub (opt-in) | Can cut live some; thr cost; not a substitute for stack maps |
+| Stack scrub (default-on since v0.13.0) | Kemal RSS 0.99×→0.95×, acikturkiye 3.00×→2.65×; no thr cost. Not a substitute for stack maps |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 

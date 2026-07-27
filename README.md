@@ -8,13 +8,13 @@
 
 Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep collector as a **shard**, not a C dependency you hope never breaks. One flag (`-Dgc_none`) and the process runs on gcry.
 
-> **v0.12.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
+> **v0.13.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
 
-### macOS (v0.12)
+### macOS (v0.13.0 — 256 KiB chunk default)
 
 Process GC on Darwin is no longer a stub. Mach STW, dyld roots, 16 KiB host-page reclaim — `require "gcry"` + `-Dgc_none` on Apple Silicon / Intel Macs (Crystal **≥ 1.21**).
 
-Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~87% thr**, post-GC RSS **~1.36×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
+Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~84% thr**, post-GC RSS **~0.93–1.06×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
 
 **Linux** (v0.12.0, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
 
@@ -41,8 +41,17 @@ Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number tha
 |----------|---------------------------------:|
 | Alloc-heavy JSON (`/json`) thr | **~89%** |
 | Idle `/` thr | **~90%** |
-| `/json` post-GC RSS | **~0.99×** |
-| Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS |
+| `/json` post-GC RSS | **~0.99×** (v0.13.0: ~0.95× with scrub on) |
+| Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS (v0.13.0: ~2.65× with scrub on) |
+
+### macOS (v0.13.0 — 256 KiB chunk default)
+
+| Workload | gcry vs Boehm (v0.13.0, macOS aarch64) |
+|----------|------------------------------------------:|
+| Alloc-heavy JSON (`/json`) thr | **~84%** |
+| Idle `/` thr | **~93%** |
+| `/json` post-GC RSS | **~0.93×** |
+| Fat app (acikturkiye `/api/v1/`) | **~78%** thr @ **~16×** RSS |
 
 ### macOS (v0.12.0 — in-header MARK default)
 
