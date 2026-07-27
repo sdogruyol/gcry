@@ -322,21 +322,20 @@ module Gcry
       {% end %}
     end
 
-    # Darwin only: MADV_FREE_REUSABLE every cached large-object chunk after a
-    # major collection. Large freelist chunks (`cache_large_chunk`) keep their
+    # Release physical pages for cached large-object chunks after a major
+    # collection. Large freelist chunks (`cache_large_chunk`) keep their
     # physical pages hot (the entire mmap is one object, so partial-page reclaim
-    # does not apply). On macOS, MADV_FREE_REUSABLE drops RSS while preserving
-    # page contents — the next allocation from the cache pays a page-fault
-    # cost instead of a syscall, which is uniformly cheaper than holding
-    # 100+ MiB of cached large object pages that may never be reused before
-    # `trim_large_cache` fires.
+    # does not apply).
     #
-    # Linux keeps the conservative full-page retention because CEL users with
-    # large mmap churn (acikturkiye) showed MADV_DONTNEED on large chunks
-    # actually increased RSS via re-fault storms; Darwin's per-page
-    # MADV_FREE_REUSABLE is the cheap and safe path.
-    private def darwin_release_large_freelist_pages : Nil
-      {% if flag?(:darwin) %}
+    # On Darwin: MADV_FREE_REUSABLE drops RSS while preserving page contents —
+    # the next allocation from the cache pays a page-fault cost instead of a
+    # syscall.
+    # On Linux: MADV_FREE — kernel may defer reclaim until memory pressure
+    # rises; page content is preserved until reclaimed.  Unlike
+    # MADV_DONTNEED (which zeroes and evicts immediately), this avoids the
+    # re-fault storms that made larger RSS under acikturkiye.
+    private def release_large_freelist_pages : Nil
+      {% if flag?(:darwin) || flag?(:linux) %}
         page = Platform.host_page_size
         LARGE_FREE_BUCKETS.times do |b|
           user = @large_freelists[b]
@@ -349,7 +348,12 @@ module Gcry
             start = (data_lo + page - 1) & ~(page - 1)
             finish = data_hi & ~(page - 1)
             if start < finish
-              if Platform.release_physical_pages(start, finish - start)
+              ok = {% if flag?(:darwin) %}
+                     Platform.release_physical_pages(start, finish - start)
+                   {% else %}
+                     Platform.release_physical_pages_free(start, finish - start)
+                   {% end %}
+              if ok
                 @dontneed_bytes += (finish - start)
               end
             end

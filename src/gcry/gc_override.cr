@@ -56,7 +56,9 @@ module GC
       # (Kemal Linux RSS is already at parity). Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
       heap.scrub_fibers_enabled = true
     {% else %}
-      heap.empty_chunk_retain = 64_u64 * 1024_u64 * 1024_u64
+      # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
+      # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
+      heap.empty_chunk_retain = 16_u64 * 1024_u64 * 1024_u64
     {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
@@ -184,10 +186,9 @@ module GC
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
     else
-      # macOS: lower major threshold (16 MiB) halves the dense-live growth
-      # window under fat apps (acikturkiye: 32 MiB grew the live set to
-      # ~1.2 GiB before the next major; 16 MiB splits the heap in two and
-      # keeps the working set tighter). GCRY_THRESHOLD above already wins.
+      # Lower major threshold (16 MiB) halves the dense-live growth window
+      # under fat apps on Darwin. Linux stays at 32 MiB (PROCESS_GC_THRESHOLD)
+      # — 16 MiB regressed acikturkiye thr by ~20pp via excessive major cycling.
       {% if flag?(:darwin) %}
         heap.gc_threshold = 16_u64 * 1024_u64 * 1024_u64
       {% else %}

@@ -787,7 +787,7 @@ module Gcry
       flush_pending_page_release_chunks
       # Darwin: MADV_FREE_REUSABLE for cached large-object chunks. Linux keeps
       # the mmap-resident for the `large_cache_retain` budget (cheaper fault).
-      darwin_release_large_freelist_pages
+      release_large_freelist_pages
       trim_large_cache
 
       # After a major collect, record the heap range observation so the

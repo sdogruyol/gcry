@@ -100,10 +100,15 @@ module Gcry
       {% end %}
     end
 
-    # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
-    def self.host_page_size : UInt64
-      PAGE_SIZE
-    end
+# madvise advice constants (Linux <asm/mman.h>).
+  MADV_NOHUGEPAGE = 15
+  MADV_FREE       = 8
+  MADV_COLD       = 20
+
+  # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
+  def self.host_page_size : UInt64
+    PAGE_SIZE
+  end
 
     def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
       {% if flag?(:linux) %}
@@ -111,6 +116,38 @@ module Gcry
         return false if (addr & (PAGE_SIZE - 1)) != 0
         return false if (len & (PAGE_SIZE - 1)) != 0
         LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), LibC::MADV_DONTNEED) == 0
+      {% else %}
+        false
+      {% end %}
+    end
+
+    # Lightweight hint: mark pages as cold so the kernel reclaims them first
+    # under memory pressure, but keep content valid.  Cheaper than DONTNEED for
+    # dormant chunks that may be revived soon — no page-zeroing on revive.
+    # Unlike MADV_DONTNEED, MADV_COLD does not clear pages, so the first access
+    # after revive hits a minor fault (not major + zero-fill).
+    def self.release_physical_pages_cold(addr : UInt64, len : UInt64) : Bool
+      {% if flag?(:linux) %}
+        return false if len == 0
+        return false if (addr & (PAGE_SIZE - 1)) != 0
+        return false if (len & (PAGE_SIZE - 1)) != 0
+        LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), MADV_COLD) == 0
+      {% else %}
+        false
+      {% end %}
+    end
+
+    # MADV_FREE: hint that pages contain freeable data.  Kernel may defer
+    # reclaiming them until memory pressure rises; page content is preserved
+    # until reclaimed.  Caller must not rely on content staying valid.
+    # Suitable for large freelist pages that are cached for reuse but whose
+    # physical pages can be returned to the system under pressure.
+    def self.release_physical_pages_free(addr : UInt64, len : UInt64) : Bool
+      {% if flag?(:linux) %}
+        return false if len == 0
+        return false if (addr & (PAGE_SIZE - 1)) != 0
+        return false if (len & (PAGE_SIZE - 1)) != 0
+        LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), MADV_FREE) == 0
       {% else %}
         false
       {% end %}
