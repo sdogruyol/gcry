@@ -49,6 +49,11 @@ module GC
     # hot for the next reuse.
     {% if flag?(:darwin) %}
       heap.empty_chunk_retain = 512_u64 * 1024_u64
+      # 256 KiB size-class chunk (up from 128 KiB library default). The 128 KiB
+      # chunk inflated collection count (~290 majors in 30s) and crushed
+      # acikturkiye throughput to ~57% Boehm (vs ~79% at 256 KiB). Kemal RSS
+      # barely moves (0.88× → 1.04× Boehm). Escape: GCRY_CHUNK_BYTES=131072.
+      heap.small_chunk_bytes = 262144_u64
       # Parked fiber stacks carry stale pointer values from prior activations
       # — those become false roots during conservative scanning and inflate
       # retention (acikturkiye macOS: ~1.2 GiB live set, where much of it is
@@ -317,8 +322,7 @@ module GC
       heap.large_cache_retain = cache
     end
 
-    # Size-class chunk mmap size (default 128 KiB). 256 KiB baseline; 128 KiB cuts
-    # Kemal RSS 0.97×→0.77× with acikturkiye throughput 97%→94% (viable trade-off).
+    # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
     # Must be ≥64 KiB and page-aligned.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
       if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0

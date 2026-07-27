@@ -10,7 +10,7 @@ module Gcry
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — 256 KiB baseline; 128 KiB cuts Kemal RSS 0.97×→0.77×, acik throughput 97%→94%.
+    SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — library default; macOS process GC bumps to 256 KiB (gc_override.cr)
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
     PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
     # HDR pause histogram buckets. Bucket `i` covers [2^i ns, 2^(i+1) ns); the
@@ -42,7 +42,8 @@ module Gcry
     # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
     getter large_cache_hits : UInt64 = 0_u64
     getter large_cache_misses : UInt64 = 0_u64
-    # Size-class chunk mmap size (process default 128 KiB; override via GCRY_CHUNK_BYTES).
+    # Size-class chunk mmap size (process default 128 KiB; macOS bumps to 256 KiB;
+    # override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
