@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/sdogruyol/gcry/stargazers"><img src="https://img.shields.io/github/stars/sdogruyol/gcry?style=flat-square&logo=github" alt="Stars"></a>
+  <a href="https://github.com/sdogruyol/gcry/releases"><img src="https://img.shields.io/github/v/release/sdogruyol/gcry?style=flat-square&logo=github&label=version" alt="Version"></a>
   <a href="https://crystal-lang.org"><img src="https://img.shields.io/badge/Crystal-%3E%3D1.21-000?style=flat-square&logo=crystal" alt="Crystal"></a>
   <a href="https://github.com/sdogruyol/gcry/actions"><img src="https://img.shields.io/github/actions/workflow/status/sdogruyol/gcry/ci.yml?branch=main&style=flat-square&logo=githubactions&label=CI" alt="CI"></a>
   <a href="docs/PERF.md"><img src="https://img.shields.io/badge/Kemal%20%2Fjson-%E2%89%8889%25%20of%20Boehm-f5a623?style=flat-square" alt="Benchmark"></a>
@@ -40,6 +41,17 @@ to swap Boehm out, one line to swap it back.
 
 ---
 
+## Who is this for?
+
+- **You use Crystal in production** and want to understand how memory works.
+- **You've hit a Boehm limitation** and want a collector you can debug.
+- **You contribute to Crystal** and want the language to own its runtime.
+- **You're curious** — one `crystal build -Dgc_none` and you'll see.
+
+Crystal >= 1.21. Linux (x86_64 + aarch64) and macOS (arm64 + x86_64).
+
+---
+
 ## A GC you can actually own
 
 Boehm works. Nobody is denying that. But Crystal's most intimate runtime
@@ -55,6 +67,36 @@ component is a C library — one you can't read, can't debug, can't change.
 | Ownership | Upstream C project | **Your community** |
 
 Readable. Debuggable. Changeable. Yours.
+
+---
+
+## How it works
+
+```
+┌──────────────────────────────────────────────┐
+│                Crystal runtime                │
+│  (GC.malloc → GC.realloc → GC.free → …)      │
+└────────────────────┬─────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────┐
+│           require "gcry" (shard)              │
+│                                                │
+│  ┌──────────┐  ┌──────┐  ┌──────┐  ┌──────┐  │
+│  │  Heap    │  │ Mark │  │Sweep │  │Roots │  │
+│  │ mmap     │  │ STW  │  │ free │  │ fiber│  │
+│  │ size-cls │  │ mark │  │release│  │ stack│  │
+│  └──────────┘  └──────┘  └──────┘  └──────┘  │
+│                                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │Metrics   │  │ Layout   │  │Platform  │    │
+│  │Prometheus│  │ precise  │  │ Linux    │    │
+│  │HDR pause │  │ type_id  │  │ Darwin   │    │
+│  └──────────┘  └──────────┘  └──────────┘    │
+└────────────────────────────────────────────────┘
+```
+
+Build with `-Dgc_none` → Crystal skips libgc → gcry reopens `module GC`.
+No compiler patch. No linker tricks. One flag.
 
 ---
 
@@ -84,12 +126,26 @@ puts "hello from gcry"
 crystal build -Dgc_none app.cr -o app && ./app
 ```
 
-10 seconds. Or faster with Docker:
+10 seconds. Or try without even cloning:
 
 ```sh
-docker run --rm -v "$PWD:/app" crystallang/crystal:1.21.0 \
-  sh -c "cd /app && shards install && crystal build -Dgc_none samples/hello.cr -o /tmp/hello && /tmp/hello"
+docker run --rm crystallang/crystal:1.21.0 sh -c '
+  mkdir -p /tmp/demo/src && cd /tmp/demo
+  cat > shard.yml <<EOF
+dependencies:
+  gcry:
+    github: sdogruyol/gcry
+EOF
+  cat > src/demo.cr <<EOF
+{% if flag?(:gc_none) %} require "gcry" {% end %}
+puts "hello from gcry"
+EOF
+  shards install
+  crystal build -Dgc_none src/demo.cr -o /tmp/demo-app && /tmp/demo-app
+'
 ```
+
+No clone. No install. Just Docker.
 
 ---
 
@@ -137,6 +193,18 @@ Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) 
 That fat-app RSS (2.65x) is an honest number. Stack maps will bring it to ~1.2x.
 Until then, we live with this reality. We don't hide our numbers.
 
+### Pause distribution (Kemal `/json`, Linux)
+
+```
+p50:  2.1 ms  ████████████████████████████████▌
+p90:  4.8 ms  ████████████████████████████████████████████
+p99:  9.3 ms  ███████████████████████████████████████████████████▌
+max: 48.0 ms  ████████████████████████████████████████████████████████████████
+```
+
+HDR histogram built in via `Gcry.pause_stats` — no external tools needed.
+Prometheus `/metrics` exposes pause percentiles as gauges.
+
 ---
 
 ## Feature set
@@ -172,12 +240,10 @@ Windows is coming.
 ## Roadmap
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Phase 1  DONE: Conservative mark-sweep, STW, Linux+macOS   │ ✅
-│ Phase 2  NOW: Stack maps, barriers, Windows, -Dgc_gcry     │ 🔄
-│ Phase 3  NEXT: Performance parity with Boehm, parallel mark │ 📋
-│ Phase 4  GOAL: Crystal's default GC                        │ 🎯
-└─────────────────────────────────────────────────────────────┘
+  Phase 1  DONE  Conservative mark-sweep, STW, Linux + macOS     ✓
+  Phase 2  NOW   Stack maps, barriers, Windows, -Dgc_gcry        ○
+  Phase 3  NEXT  Performance parity, parallel mark, nursery def.  ◐
+  Phase 4  GOAL  Crystal's default GC                             △
 ```
 
 [Full plan →](./ROADMAP.md)
@@ -190,7 +256,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks → ~95% `/json` thr, ~3x RSS |
+| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
 | `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
@@ -220,7 +286,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 
 ## Contributing
 
-1. Fork → branch → commit → push → PR
+1. Fork -> branch -> commit -> push -> PR
 2. Collector hot paths: **no managed-heap allocation**
 3. Prefer small modules (`heap`, `mark`, `sweep`, `roots`)
 4. Stuck? [good first issues](https://github.com/sdogruyol/gcry/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
@@ -231,7 +297,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 
 ```sh
 make spec             # unit specs under Boehm
-make samples          # -Dgc_none samples → bin/
+make samples          # -Dgc_none samples -> bin/
 make bench            # library-heap churn
 make bench-kemal-wrk  # Kemal + wrk on / and /json
 make format-check
@@ -249,5 +315,7 @@ MIT — see [LICENSE](LICENSE).
 
 <br>
 
-<sub>Tried it? Star it. Haven't tried it? Try it first, then star it.
-No, really — one `crystal build -Dgc_none` and you'll understand.</sub>
+---
+
+**Tried it? Star it. Loved it? Share it. Hated it? Open an issue.**  
+gcry is yours — use it, break it, fix it, fork it. That's the point.
