@@ -1,80 +1,27 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="gcry" width="400"/>
+  <img src="assets/logo.svg" alt="gcry" width="200"/>
 </p>
 
 # gcry
 
-**Crystal’s GC, written in Crystal.**
+**Crystal's GC, written in Crystal. Ship it with `require "gcry"` + `-Dgc_none`.**
 
-Boehm is fine. gcry is yours to read, change, and ship — a real mark–sweep collector as a **shard**, not a C dependency you hope never breaks. One flag (`-Dgc_none`) and the process runs on gcry.
+[![Stars](https://img.shields.io/github/stars/sdogruyol/gcry)](https://github.com/sdogruyol/gcry)
+[![Crystal](https://img.shields.io/badge/Crystal-%3E%3D1.21-000)](https://crystal-lang.org)
+[![Platform](https://img.shields.io/badge/Linux-macOS-blue)]()
+[![License](https://img.shields.io/badge/license-MIT-green)]()
+[![Benchmark](https://img.shields.io/badge/Kemal%20%2Fjson-~89%25%20of%20Boehm-orange)](https://github.com/sdogruyol/gcry)
 
-> **v0.13.0** · **Linux + macOS** · Crystal ≥ 1.21 · fibers on one OS thread
+Boehm is fine. gcry is yours to read, change, and ship — a real mark-sweep collector
+as a **shard**, not a C dependency you hope never breaks.
 
-### macOS (v0.13.0 — 256 KiB chunk default)
-
-Process GC on Darwin is no longer a stub. Mach STW, dyld roots, 16 KiB host-page reclaim — `require "gcry"` + `-Dgc_none` on Apple Silicon / Intel Macs (Crystal **≥ 1.21**).
-
-Same-host Kemal on **macOS aarch64** (`wrk -c 100 -d 30`, median of 3): **`/json` ~84% thr**, post-GC RSS **~0.93–1.06×** Boehm. Details: [docs/PERF-macos.md](docs/PERF-macos.md).
-
-**Linux** (v0.12.0, in-header MARK): **`/json` ~89% thr**, post-GC RSS **~0.99×** — [docs/PERF.md](docs/PERF.md). Do not mix Darwin wrk into Linux tables.
+One flag (`-Dgc_none`) and the process runs on gcry. Linux + macOS, x86_64 + ARM64.
 
 ---
 
-## Why this exists
+## Quick Start
 
-Crystal ships Boehm and a stub (`gc_none`). The stub is a dead end for anyone who wants to **own** the collector. gcry fills that hole:
-
-- **Shard, not a compiler fork** — `require "gcry"` + `-Dgc_none`
-- **Crystal end-to-end** — heap, mark, sweep, STW, roots, metrics you can grep
-- **Boehm-class model** — conservative, non-moving mark–sweep (the shape Crystal already assumes)
-- **Dogfood-ready** — Kemal-class HTTP near Boehm on thr and RSS; fat apps under active measurement
-
-If you care how your language reclaims memory, this is the repo.
-
-## How fast?
-
-Prefer **`/json`**. Absolute wrk is host-noisy; **% of Boehm** is the number that matters.
-
-### Linux (v0.12.0 — in-header MARK default)
-
-| Workload | gcry vs Boehm (v0.12.0, Linux) |
-|----------|---------------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~89%** |
-| Idle `/` thr | **~90%** |
-| `/json` post-GC RSS | **~0.99×** (v0.13.0: ~0.95× with scrub on) |
-| Fat app (acikturkiye `/api/v1/`) | **~93%** thr @ **~3.0×** RSS (v0.13.0: ~2.65× with scrub on) |
-
-### macOS (v0.13.0 — 256 KiB chunk default)
-
-| Workload | gcry vs Boehm (v0.13.0, macOS aarch64) |
-|----------|------------------------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~84%** |
-| Idle `/` thr | **~93%** |
-| `/json` post-GC RSS | **~0.93×** |
-| Fat app (acikturkiye `/api/v1/`) | **~78%** thr @ **~16×** RSS |
-
-### macOS (v0.12.0 — in-header MARK default)
-
-| Workload | gcry vs Boehm (v0.12.0, macOS aarch64) |
-|----------|------------------------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~87%** |
-| Idle `/` thr | **~85%** |
-| `/json` post-GC RSS | **~1.36×** (down from ~10× in v0.11.0) |
-
-### macOS (v0.11.0 — side mark bitmap + retain 64 MiB)
-
-| Workload | gcry vs Boehm (v0.11.0, macOS aarch64) |
-|----------|---------------------------------------:|
-| Alloc-heavy JSON (`/json`) thr | **~94%** |
-| Idle `/` thr | **~100%** |
-| `/json` p50 latency | **2.3 ms** (Boehm 1.8 ms) |
-| `/json` post-GC RSS | **~10×** (bitmap pages; see [PERF-macos.md](docs/PERF-macos.md)) |
-
-Details & methodology: [docs/PERF.md](docs/PERF.md) (Linux), [docs/PERF-macos.md](docs/PERF-macos.md) (Darwin). Re-run: `make bench-kemal-wrk` or `./bench/median_kemal_boehm.sh`.
-
-## Drop in
-
-**1.** `shard.yml`:
+**1.** Add to `shard.yml`:
 
 ```yaml
 dependencies:
@@ -86,44 +33,106 @@ dependencies:
 shards install
 ```
 
-**2.** Require under the null GC, build with `-Dgc_none`:
+**2.** Require under the null GC:
 
 ```crystal
 {% if flag?(:gc_none) %}
   require "gcry"
 {% end %}
 
-puts "hello"
+puts "hello from gcry"
 ```
+
+**3.** Build with `-Dgc_none`:
 
 ```sh
 crystal build -Dgc_none app.cr -o app
 ./app
 ```
 
-No special malloc API — `String`, `Array`, … allocate as usual. gcry reopens Crystal’s `GC` module. Without `-Dgc_none`, Boehm stays in charge.
+No special malloc API. gcry reopens Crystal's `GC` module. Without `-Dgc_none`,
+Boehm stays in charge.
 
-**Crystal ≥ 1.21** on macOS (ExecutionContext / Monitor contract). Older toolchains hang under HTTP STW.
+> Darwin note: Crystal **≥ 1.21** on macOS (Fiber::ExecutionContext / Monitor contract).
+> Older toolchains hang under HTTP STW.
+
+---
+
+## Why gcry, not Boehm?
+
+| | gcry | Boehm |
+|--|------|-------|
+| Language | **Crystal** | C |
+| Integration | Shard (`-Dgc_none`) | Built-in C library |
+| Read & debug | Stack traces in Crystal | C frames |
+| Modify & ship | `shards update` | Recompile C, patch Crystal |
+| Metrics | HDR histograms, Prometheus, `/gc-stats` | Nothing built-in |
+| Ownership | Crystal community owns it | Upstream C project |
+
+---
+
+## Performance
+
+One number that matters: **gcry req/s ÷ Boehm req/s** on the same host.
+Absolute wrk is host noise; **% of Boehm** is the score.
+Prefer `/json` (alloc-heavy) — idle `/` is sanity.
+
+### Linux (v0.13.0, scrub default-on)
+
+| Workload | gcry vs Boehm |
+|----------|--------------:|
+| Kemal `/json` thr | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
+| Kemal `/json` post-GC RSS | **~0.95×** |
+| Kemal `/` thr | **~90%** |
+| Fat app `/api/v1/` thr | **~93%** |
+| Fat app `/api/v1/` RSS | **~2.65×** |
+
+### macOS (v0.13.0, 256 KiB chunk default)
+
+| Workload | gcry vs Boehm |
+|----------|--------------:|
+| Kemal `/json` thr | **~84%** |
+| Kemal `/json` post-GC RSS | **~0.93×** |
+| Kemal `/` thr | **~93%** |
+| Fat app `/api/v1/` thr | **~78%** |
+
+Methodology & full tables: [docs/PERF.md](docs/PERF.md) (Linux),
+[docs/PERF-macos.md](docs/PERF-macos.md) (macOS).
+
+---
+
+## Roadmap
+
+gcry aims to earn its place as Crystal's default GC. Four phase plan:
+
+- **HERE** — Conservative mark-sweep, STW, Linux + macOS, observability
+- **Phase 2** — Compiler stack maps, write barriers, Windows, `-Dgc_gcry` compiler flag
+- **Phase 3** — Throughput parity, parallel mark, nursery default-on
+- **Phase 4** — Default GC, concurrent collection, compaction
+
+[Full roadmap →](./ROADMAP.md)
+
+---
 
 ## What you get
 
 | | |
 |--|--|
-| **Conservative mark–sweep** | Safe for today’s Crystal ABI; scans for pointer-shaped words |
+| **Conservative mark-sweep** | Safe for today's Crystal ABI; scans for pointer-shaped words |
 | **Stop-the-world** | Linux signals / Darwin Mach suspend; histogram via `Gcry.pause_stats` |
 | **Non-moving** | Stable addresses — no compacting surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
 | **Empty-chunk release** | Default-on munmap — Kemal post-GC RSS at Boehm parity |
-| **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
+| **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
 | **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
 | **Fork path** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
 
-Same family as Boehm. Roadmap beyond this (precise maps, concurrent mark, always-on nursery) is explicit — not papered over.
+---
 
-## Scope (honest, not shy)
+## Scope
 
-gcry is **production-curious** on Linux and macOS process GC at parallelism **1**. It is not trying to be every platform tomorrow.
+gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
 
 | In scope today | Later / elsewhere |
 |----------------|-------------------|
@@ -134,13 +143,25 @@ gcry is **production-curious** on Linux and macOS process GC at parallelism **1*
 
 Full checklist: [docs/COMPARISON.md](docs/COMPARISON.md).
 
+---
+
+## Try it in 10 seconds
+
+```sh
+docker run --rm -v "$PWD:/app" crystallang/crystal:1.21.0 \
+  sh -c "cd /app && shards install && crystal build -Dgc_none samples/hello.cr -o /tmp/hello && /tmp/hello"
+```
+
+---
+
 ## Docs
 
 | Doc | |
 |-----|--|
 | [DESIGN.md](DESIGN.md) | Architecture & roadmap |
-| [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (**Linux** cut) |
-| [docs/PERF-macos.md](docs/PERF-macos.md) | Speed vs Boehm (**macOS** / v0.10) |
+| [ROADMAP.md](./ROADMAP.md) | Public plan to become Crystal's default GC |
+| [docs/PERF.md](docs/PERF.md) | Speed vs Boehm (Linux cut) |
+| [docs/PERF-macos.md](docs/PERF-macos.md) | Speed vs Boehm (macOS cut) |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm |
 | [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) | Fat-app dogfood (Linux) |
 | [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md) | Fat-app dogfood (Darwin) |
@@ -151,57 +172,25 @@ Full checklist: [docs/COMPARISON.md](docs/COMPARISON.md).
 | [docs/ANNOUNCE.md](docs/ANNOUNCE.md) | Release blurb draft |
 | [CHANGELOG.md](CHANGELOG.md) | Per-version history |
 
-## Platforms
+---
 
-| | |
-|--|--|
-| OS / arch | **Linux** x86_64 + aarch64; **macOS** arm64 + x86_64 (process GC since **v0.10**) |
-| Crystal | `>= 1.21.0` |
-| Runtime | Default `Fiber::ExecutionContext`, **parallelism 1** |
-| Fork / signals | [docs/POLICY.md](docs/POLICY.md) |
-
-## Tuning (optional)
+## Tuning (tl;dr)
 
 Defaults are tuned for process GC. Escape hatches when you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (process default **32 MiB**) |
-| `GCRY_DISABLE_AUTO=1` | Disable major auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (default **off** for process HTTP) |
-| `GCRY_DISABLE_NURSERY=1` | Keep nursery off (process default) |
-| `GCRY_SOFT_DIRTY_MAX` | Dirty-page scan only if dirty/total ≤ this % (default **25**) |
-| `GCRY_DISABLE_SOFT_DIRTY=1` | Never use soft-dirty page scan |
-| `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV barrier |
-| `GCRY_DISABLE_MPROTECT=1` | Forbid mprotect barrier |
-| `GCRY_DISABLE_INCREMENTAL=1` | Full STW major (process **default**) |
-| `GCRY_INCREMENTAL=1` | Sliced majors + dirty re-scan when a barrier is armed |
-| `GCRY_INCREMENTAL_WORK` | Mark work units per slice (default `1024`) |
-| `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
-| `GCRY_TLAB=1` | Thread-local alloc buffers (parallel contexts) |
-| `GCRY_CLEAR_STACK=1` | Unused-stack wipe below SP (RSS experiment; every 16 allocs) |
-| `GCRY_SCRUB_FIBERS=1` | Capped parked-fiber wipe before mark (RSS experiment) |
-| `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers (default **1**). Measure first — HTTP thr often regresses |
-| `GCRY_DISABLE_BLACKLIST=1` | Skip page blacklist of type_id false roots |
-| `GCRY_BLACKLIST=1` | Opt-in blacklist (Darwin process default is off) |
-| `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
-| `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise heap scan |
-| `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
-| `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
-| `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program `Reference.all_subclasses` precise layouts (~−7pp Kemal `/json` thr on Linux) |
-| `GCRY_DISABLE_SP_CLAMP=1` | No RSP clamp on other-thread stacks |
-| `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
-| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default `mach_vm` free-page release |
-| `GCRY_DISABLE_ATFORK=1` | No `pthread_atfork`; post-fork GC raises |
-| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks mapped (~**95%** `/json` thr, ~**3×** RSS) |
-| `GCRY_RELEASE_CHUNKS=1` | Force empty-chunk release (already default-on) |
-| `GCRY_EMPTY_CHUNK_RETAIN` | Empty-chunk retain budget (`MADV_DONTNEED`; default **0**) |
-| `GCRY_INTERIOR=1` | Interior pointers on ambient roots (heap marks always allow for `Array#shift`) |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin default-on @ host page size) |
-| `GCRY_LARGE_CACHE` | Large-object cache retain (default **8 MiB**; Darwin process default **0**) |
-| `GCRY_CHUNK_BYTES` | Size-class chunk mmap (default **256 KiB**) |
+| `GCRY_THRESHOLD` | Bytes since last major before auto-collect (default 32 MiB) |
+| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks → ~95% `/json` thr, ~3x RSS |
+| `GCRY_INCREMENTAL=1` | Sliced majors + dirty re-scan (measure first) |
+| `GCRY_PARALLEL_MARK=N` | Experimental mark workers (default 1) |
+| `GCRY_NURSERY=1` | Opt-in nursery (default off for process HTTP) |
+| `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~‑7pp `/json` thr on Linux) |
+| `GCRY_STRESS=1` | Collect every N allocs (debug help) |
 
 Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
+
+---
 
 ## Development
 
@@ -213,13 +202,20 @@ make bench-kemal-wrk  # Kemal + wrk on / and /json
 make format-check
 ```
 
-Heap unit tests exercise `Gcry::*` as a library allocator under Boehm. Process-GC samples need `-Dgc_none`.
+Heap unit tests exercise `Gcry::*` as a library allocator under Boehm.
+Process-GC samples need `-Dgc_none`.
+
+---
 
 ## Contributing
 
 1. Fork → branch → commit → push → PR
 2. Collector hot paths: **no** managed-heap allocation
 3. Prefer small modules (`heap`, `mark`, `sweep`, `roots`)
+4. Looking for a place to start? Check [good first issues](https://github.com/sdogruyol/gcry/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+   — Windows stubs, benchmark workloads, spec coverage.
+
+---
 
 ## License
 
