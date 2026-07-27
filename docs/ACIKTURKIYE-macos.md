@@ -30,27 +30,18 @@ Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub
 
 Throughput is usable (Mach STW). RSS is not Boehm-class — dense conservative-live (`size_class_live_bytes` ~0.7–0.9 GiB). Free-page reclaim works (`free_bytes` small after collect). **Shard-only heuristics do not close 5×.** Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
-## Current benchmark (v0.12.0) — macOS aarch64
+## Current benchmark (2026-07-27, `6416ad6`, v0.12.0-8-g6416ad6) — macOS aarch64
 
-After reverting side bitmap → in-header MARK default, with layout scan improvements and hash layout scanning. Commit `a716a87`, `v0.11.0-36-ga716a87`:
+Small chunk 128 KiB, fiber scrub enabled, plugged in. Median-of-3, `wrk -c 100 -d 30`, `--release`:
 
-| Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
-|------:|------------:|--------------:|-------------------:|
-| 1 | 85.9% | 14.93× | 811 / 944 |
-| 2 | 76.7% | 24.29× | 766 / 999 |
-| 3 | 72.8% | 22.33× | 663 / 910 |
-| **median** | **76.7%** | **22.33×** | — |
+| Trial | Boehm req/s | gcry req/s | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
+|------:|-----------:|----------:|-------:|----------------:|---------------:|------:|
+| 1 | 952 | 587 | 61.7% | 27,968 | 637,056 | 22.78× |
+| 2 | 920 | 562 | 61.1% | 46,800 | 595,536 | 12.73× |
+| 3 | 959 | 590 | 61.6% | 36,368 | 648,288 | 17.83× |
+| **median** | 952 | 587 | **61.7%** | 36,368 | 637,056 | **17.52×** |
 
-CSS note: app restarted between trials (fresh process). RSS improved from 1.77 GiB (previous session at 12:53) to ~670 MiB (~2.6× reduction), but still ~22× Boehm. Throughput is ~77% vs Boehm — the in-header MARK recovers RSS at some throughput cost for fat apps. Conservative live set (~1.2 GiB live_bytes) remains the dominant RSS driver.
-
-| Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
-|------:|------------:|--------------:|-------------------:|
-| 1 | 78.8% | 9.36× | 542 / 688 |
-| 2 | 81.9% | 12.14× | 584 / 713 |
-| 3 | 85.7% | 15.67× | 552 / 645 |
-| **median** | **80.3%** | **11.79×** | — |
-
-Timeouts: 0 / 0 all trials.
+Throughput at ~62% Boehm. RSS varies 12.7–22.8× across trials (conservative live set dominates at ~560 MiB `size_class_live_bytes`). Small chunk 128 KiB reduces fragmentation but increases collection count (~275 majors in 30s).
 
 ## History (macOS)
 
@@ -64,6 +55,7 @@ Timeouts: 0 / 0 all trials.
 | **2026-07-26** `rss-yak-darwin` | **73.7%** | **26.8×** | Blacklist re-enable + aggressive madvise + LRU cache + bitmap headroom 12.5%; slight RSS improvement, throughput cost from blacklist |
 | **0.12.0** `in-header-mark` | **76.7%** | **22.3×** | Reverted side bitmap → in-header MARK default; RSS improved 2.6× vs prior session, throughput ~77% |
 | **v0.13.0** `darwin-rss-tuning` | **78.0%** | **22.1×** | `empty_chunk_retain` 512KB (was 8MB), `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS dropped from ~160 MiB to ~18 MiB (1.04× Boehm); ACIKTURKIYE ~700 MiB steady (conservative live set still dominant). Pause halved (47→25 ms). |
+| | **2026-07-27** `6416ad6` | **61.7%** | **17.5×** | Small chunk 128 KiB, fiber scrub. RSS improved from 22× to 17.5×; throughput dropped to ~62% (more collections from smaller chunks). |
 
 ## How to measure
 
