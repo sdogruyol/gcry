@@ -52,13 +52,18 @@ module GC
       # Parked fiber stacks carry stale pointer values from prior activations
       # — those become false roots during conservative scanning and inflate
       # retention (acikturkiye macOS: ~1.2 GiB live set, where much of it is
-      # not real reachable). Default-on for macOS process GC; Linux unchanged
-      # (Kemal Linux RSS is already at parity). Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      # not real reachable). Default-on for macOS and Linux process GC.
+      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
       heap.scrub_fibers_enabled = true
     {% else %}
       # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
       # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
       heap.empty_chunk_retain = 16_u64 * 1024_u64 * 1024_u64
+      # Linux: scrub parked fiber stacks to cut false retention from stale
+      # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
+      # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
+      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      heap.scrub_fibers_enabled = true
     {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.

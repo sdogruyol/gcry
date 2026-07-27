@@ -100,15 +100,15 @@ module Gcry
       {% end %}
     end
 
-# madvise advice constants (Linux <asm/mman.h>).
-  MADV_NOHUGEPAGE = 15
-  MADV_FREE       = 8
-  MADV_COLD       = 20
+    # madvise advice constants (Linux <asm/mman.h>).
+    MADV_NOHUGEPAGE = 15
+    MADV_FREE       =  8
+    MADV_COLD       = 20
 
-  # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
-  def self.host_page_size : UInt64
-    PAGE_SIZE
-  end
+    # Drop physical pages while keeping the VMA (MADV_DONTNEED on Linux).
+    def self.host_page_size : UInt64
+      PAGE_SIZE
+    end
 
     def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
       {% if flag?(:linux) %}
