@@ -10,7 +10,7 @@ module Gcry
   # chunks and freelist links live outside the managed heap so this can later
   # become the process GC under `-Dgc_none`.
   class Heap
-    SMALL_CHUNK_BYTES     = 262144_u64 # 256 KiB — 512 KiB regressed /json vs Boehm
+    SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — 256 KiB baseline; 128 KiB cuts Kemal RSS 0.97×→0.77×, acik throughput 97%→94%.
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
     PAUSE_RING_SIZE       =         64 # recent pause samples for p50/p99
     # HDR pause histogram buckets. Bucket `i` covers [2^i ns, 2^(i+1) ns); the
@@ -42,7 +42,7 @@ module Gcry
     # Large-cache hit / miss counters for adaptive retain tuning (reset each major).
     getter large_cache_hits : UInt64 = 0_u64
     getter large_cache_misses : UInt64 = 0_u64
-    # Size-class chunk mmap size (process default 256 KiB; override via GCRY_CHUNK_BYTES).
+    # Size-class chunk mmap size (process default 128 KiB; override via GCRY_CHUNK_BYTES).
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -663,7 +663,7 @@ module Gcry
       raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
 
       # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
-      # rounding 256 KiB chunks up to 2 MiB huge pages — madvise on a
+      # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a
       # partially-filled huge page does not reclaim the full 2 MiB even
       # when only 4 KiB is live. Base pages let MADV_DONTNEED / MADV_COLD
       # reclaim at 4 KiB granularity, keeping RSS proportional to the

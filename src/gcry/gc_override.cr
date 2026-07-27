@@ -317,7 +317,9 @@ module GC
       heap.large_cache_retain = cache
     end
 
-    # Size-class chunk mmap size (default 256 KiB). Must be ≥64 KiB and page-aligned.
+    # Size-class chunk mmap size (default 128 KiB). 256 KiB baseline; 128 KiB cuts
+    # Kemal RSS 0.97×→0.77× with acikturkiye throughput 97%→94% (viable trade-off).
+    # Must be ≥64 KiB and page-aligned.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
       if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
