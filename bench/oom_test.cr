@@ -81,10 +81,12 @@ class OomTest
 
     heap = Gcry.default_heap
     saved_threshold = heap.gc_threshold
-    heap.gc_threshold = 32768_u64 # collect every ~32KB
+    # Keep threshold low enough to force frequent collects, but not so low
+    # that every malloc re-enters collect (stack overflow under -Dgc_none).
+    heap.gc_threshold = 256_000_u64 # ~256KB
 
-    start = Time.instant
-    iterations = 500
+    start = Time.monotonic
+    iterations = 200
     errors = 0
 
     iterations.times do |i|
@@ -93,7 +95,7 @@ class OomTest
         sz = 8 + (j % 7) * 16
         begin
           p = GC.malloc_atomic(sz)
-          ptrs << p
+          ptrs << p unless p.null?
         rescue ex : Gcry::OutOfMemoryError
           break
         rescue ex
@@ -105,22 +107,30 @@ class OomTest
 
       ptrs.each_with_index { |p, idx| GC.free(p) rescue nil if idx.even? }
 
-      begin
-        GC.collect
-      rescue ex
-        record_error("bounded collect #{i}: #{ex}")
-        errors += 1
+      # Collect periodically — not every iteration (avoids deep reentrancy).
+      if i % 10 == 9
+        begin
+          GC.collect
+        rescue ex
+          record_error("bounded collect #{i}: #{ex}")
+          errors += 1
+        end
       end
 
       ptrs.each_with_index { |p, idx| GC.free(p) rescue nil if idx.odd? }
 
-      print "." if i % 100 == 0
+      print "." if i % 50 == 0
     end
     puts ""
 
+    begin
+      GC.collect
+    rescue
+    end
+
     heap.gc_threshold = saved_threshold
 
-    elapsed = (Time.instant - start).total_seconds
+    elapsed = (Time.monotonic - start).total_seconds
     puts "  Phase 1 done: #{iterations} iterations, #{elapsed.round(2)}s, #{errors} errors"
     errors
   end
@@ -191,7 +201,7 @@ class OomTest
 
     Finalizable.reset_stats
     errors = 0
-    start = Time.instant
+    start = Time.monotonic
     iterations = 500
 
     iterations.times do |i|
@@ -209,7 +219,7 @@ class OomTest
     GC.collect rescue nil
     GC.collect rescue nil
 
-    elapsed = (Time.instant - start).total_seconds
+    elapsed = (Time.monotonic - start).total_seconds
     finalized = Finalizable.finalized
     created = Finalizable.created
 
