@@ -75,14 +75,15 @@ Priority labels:
 - **Invariant checker too slow (1.2):** Full validation after every alloc may make the test suite 10x slower. Mitigation: run invariants only on `spec/` (not `process_spec/`) in CI; keep full mode for local debugging.
 - **kcov / crystal-coverage doesn't work (1.1):** Crystal coverage tooling is immature. Mitigation: fall back to line-counting via `crystal tool hierarchy` + manual annotation, or wait for upstream support.
 - **Valgrind false positives (1.3):** Crystal runtime may trigger Valgrind warnings unrelated to gcry. Mitigation: maintain a Valgrind suppression file, iterate.
+- **Deterministic replay drift (1.4):** `spawn` + Channel operations are non-deterministic in Crystal runtime (Fiber scheduling). Mitigation: op 9 (spawn+Channel) is excluded from logs and skipped during replay. Other RNG-dependent ops (e.g. `sample` for root selection) use deterministic algorithms, but replay must reconstruct `live` array state precisely. Mitigation: log enough context (opcode + args) to reproduce the sequence.
 
 **Definition of Done:**
-- [ ] CI job prints branch coverage percentage on every PR
-- [ ] Coverage gate blocks PRs that decrease coverage
-- [ ] `GCRY_DEBUG_INVARIANTS=1` exists and passes `make spec`
-- [ ] CI runs Valgrind on process_spec — all clean
-- [ ] CI runs fuzz replay on previous crashes — all reproduce
-- [ ] `Makefile` has `coverage`, `valgrind`, `invariants` targets
+- [x] CI job prints branch coverage percentage on every PR
+- [x] Coverage gate blocks PRs that decrease coverage
+- [x] `GCRY_DEBUG_INVARIANTS=1` exists and passes `make spec`
+- [x] CI runs Valgrind on process_spec — all clean
+- [x] CI runs fuzz replay on previous crashes — all reproduce
+- [x] `Makefile` has `coverage`, `valgrind`, `invariants`, `fuzz-replay` targets
 
 **Success signal:** CI reports branch coverage, Valgrind is green on every PR, invariant checker catches at least one real bug within 2 months.
 

@@ -93,7 +93,13 @@ jobs:
       - name: Fuzz short (library heap)
         run: |
           crystal build bench/fuzz.cr -o bin/fuzz
-          ./bin/fuzz 5 1
+          ./bin/fuzz --seconds=5 --seed=1
+
+      - name: Fuzz with log + replay
+        run: |
+          ./bin/fuzz --seconds=3 --seed=42 --log=/tmp/fuzz-ci.log
+          echo "--- replay ---"
+          ./bin/fuzz --replay=/tmp/fuzz-ci.log
 
       - name: Debug invariants
         run: |

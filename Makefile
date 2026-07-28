@@ -1,7 +1,7 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
@@ -25,11 +25,16 @@ invariants:
 
 fuzz: $(BIN)
 	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
-	$(BIN)/fuzz $${FUZZ_SECONDS:-30} $${FUZZ_SEED:-1}
+	$(BIN)/fuzz --seconds=$${FUZZ_SECONDS:-30} --seed=$${FUZZ_SEED:-1}
 
 fuzz-short: $(BIN)
 	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
-	$(BIN)/fuzz 5 1
+	$(BIN)/fuzz --seconds=5 --seed=1
+
+fuzz-replay: $(BIN)
+	@test -n "$(FUZZ_LOG)" || (echo 'set FUZZ_LOG=path/to/crash.log' && exit 1)
+	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz
+	$(BIN)/fuzz --replay=$(FUZZ_LOG)
 
 format:
 	$(CRYSTAL) tool format
