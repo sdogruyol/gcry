@@ -101,6 +101,11 @@ jobs:
           echo "--- replay ---"
           ./bin/fuzz --replay=/tmp/fuzz-ci.log
 
+      - name: Property test (5000 iterations + invariants)
+        run: |
+          crystal build bench/property_test.cr -o bin/property_test
+          ./bin/property_test --seed=1 --iterations=5000
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
