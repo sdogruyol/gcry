@@ -128,6 +128,11 @@ jobs:
           crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
           ./bin/thread_storm --iterations=100 --workers=4
 
+      - name: OOM test (phases 1,2,3)
+        run: |
+          crystal build -Dgc_none bench/oom_test.cr -o bin/oom_test
+          ./bin/oom_test --phases=1,2,3
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

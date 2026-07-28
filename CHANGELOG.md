@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **24-hour soak test:** `bench/soak.cr` — sustained load with alloc storm (~1000 obj/s), periodic collect (1 Hz), fiber spawn (10 Hz), finalizer load (100 obj/s), WeakRef via disappearing links (10 Hz). Hourly telemetry: heap size, free bytes, live objects, pause p50/p99, RSS. Post-soak RSS check (< 10% growth) and drain verification. Weekly CI cron (Monday 06:00 UTC). (`make soak`, CI `soak` job.)
 |- **Alloc pattern fuzzing:** `bench/pattern_fuzz.cr` — 3 allocation distributions (Zipfian power-law, bimodal small+large, stride array-growth) each checked against baseline uniform-random. Verifies pause p99 < 8-10x baseline and RSS growth < 10%. 200 phases × 5000 objects per phase. (`make pattern-fuzz`, CI `Alloc pattern fuzz` step.)
 |- **Thread storm test:** `bench/thread_storm.cr` — 3 phases: thread spawn storm (OS threads doing alloc/free/collect in batches), rapid thread create/destroy (250 short-lived threads), signal safety (GC.malloc inside SIGUSR1 handler). 1000+ iterations total, 0 errors. (`make thread-storm`, CI `Thread storm` step.)
+|- **OOM scenarios:** `bench/oom_test.cr` — 3 phases: bounded heap (low gc_threshold, 500 iterations, no crash), mmap failure (graceful OutOfMemoryError), finalizer under OOM (no crash under pressure). (`make oom-test`, CI `OOM test` step.)
 
 ### Fixed
 
