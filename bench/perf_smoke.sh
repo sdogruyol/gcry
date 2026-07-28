@@ -48,7 +48,7 @@ parse_rps() {
 
 single_run() {
   local bin="$1" path="$2"
-  PORT="$PORT" "$bin" &
+  PORT="$PORT" "$bin" >/dev/null 2>&1 &
   local pid=$!
   trap 'kill $pid 2>/dev/null || true' RETURN
   for _ in $(seq 1 30); do
