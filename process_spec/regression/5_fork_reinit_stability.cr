@@ -24,7 +24,7 @@ describe "Regression: fork reinit stability" do
     end
 
     # Parent: wait for child, then continue allocating
-    Process.wait(pid)
+    LibC.waitpid(pid, nil, 0)
 
     # Parent should be able to allocate and collect after fork
     after_ptr = GC.malloc_atomic(256)
