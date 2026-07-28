@@ -10,20 +10,20 @@ require "../../src/gcry"
 require "spec"
 
 {% if flag?(:linux) %}
-describe "Regression: signal handler stack false roots" do
-  it "survives signal trap during allocation" do
-    handled = false
-    Signal::USR1.trap do
-      # Allocate inside handler (signal-safe GC.malloc)
-      _p = GC.malloc_atomic(64)
-      handled = true
+  describe "Regression: signal handler stack false roots" do
+    it "survives signal trap during allocation" do
+      handled = false
+      Signal::USR1.trap do
+        # Allocate inside handler (signal-safe GC.malloc)
+        _p = GC.malloc_atomic(64)
+        handled = true
+      end
+
+      Process.signal(Signal::USR1, Process.pid)
+      sleep(0.01.seconds)
+
+      Signal::USR1.reset
+      handled.should be_true
     end
-
-    Process.signal(Signal::USR1, Process.pid)
-    sleep(0.01.seconds)
-
-    Signal::USR1.reset
-    handled.should be_true
   end
-end
 {% end %}

@@ -72,22 +72,22 @@ describe "API misuse" do
   end
 
   {% if flag?(:linux) %}
-  it "collect inside finalizer does not deadlock" do
-    reentered = false
+    it "collect inside finalizer does not deadlock" do
+      reentered = false
 
-    Signal::USR1.trap do
-      # GC.malloc inside signal handler (async-signal-safe)
-      _ = GC.malloc_atomic(32)
-      reentered = true
+      Signal::USR1.trap do
+        # GC.malloc inside signal handler (async-signal-safe)
+        _ = GC.malloc_atomic(32)
+        reentered = true
+      end
+
+      Process.signal(Signal::USR1, Process.pid)
+      sleep(0.01.seconds)
+
+      Signal::USR1.reset
+      reentered.should be_true
     end
-
-    Process.signal(Signal::USR1, Process.pid)
-    sleep(0.01.seconds)
-
-    Signal::USR1.reset
-    reentered.should be_true
-  end
-{% end %}
+  {% end %}
 
   # push_stack with invalid bounds — we test via Gcry::MarkStack directly
   it "add_root with large pointer is ignored" do
