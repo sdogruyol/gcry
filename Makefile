@@ -1,7 +1,7 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
@@ -19,6 +19,9 @@ spec:
 
 spec-process: $(BIN)
 	$(CRYSTAL) spec -Dgc_none process_spec --error-trace
+
+invariants:
+	GCRY_DEBUG_INVARIANTS=1 $(CRYSTAL) spec --error-trace
 
 fuzz: $(BIN)
 	$(CRYSTAL) build bench/fuzz.cr -o $(BIN)/fuzz

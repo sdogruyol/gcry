@@ -95,6 +95,10 @@ jobs:
           crystal build bench/fuzz.cr -o bin/fuzz
           ./bin/fuzz 5 1
 
+      - name: Debug invariants
+        run: |
+          GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
+
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
     runs-on: ubuntu-latest
