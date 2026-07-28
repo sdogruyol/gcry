@@ -123,6 +123,11 @@ jobs:
           crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
           ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
 
+      - name: Thread storm (100 iterations, 4 workers)
+        run: |
+          crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
+          ./bin/thread_storm --iterations=100 --workers=4
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

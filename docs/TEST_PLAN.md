@@ -153,7 +153,7 @@ Priority labels:
 - [x] Soak runs on a weekly CI cron schedule
 - [x] Soak telemetry is logged to a file for post-hoc analysis
 - [x] Alloc pattern fuzz passes for 3 distributions (Zipfian, Bimodal, Stride) - verifies pause p99 < 8-10x baseline, RSS growth < 10%
-- [ ] Thread spawn/exit during collect passes 1000 iterations
+- [x] Thread spawn/exit during collect passes 1000 iterations (thread_storm.cr: spawn storm, rapid create/destroy, signal safety)
 - [ ] OOM test passes without segfault under `GCRY_HEAP_LIMIT=32MB`
 
 **Success signal:** Soak test runs 24h without crash, OOM tests never segfault, thread spawn storm doesn't deadlock.
