@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Debug invariant checker (`GCRY_DEBUG_INVARIANTS=1`):** validates heap invariants at runtime — `live_objects` counter accuracy, freelist cycle/consistency checks, chunk index integrity, and block overlap detection. Hooks into `malloc`, `free`, and `collect`. Signal-safe stderr output; `-Dgcry_invariant_abort` for core dumps. Exposed `Heap#each_chunk`, `#freelist_for`, `#nursery_freelist_for` for the checker. CI runs invariants on every PR. (`spec/invariant_spec.cr`, `make invariants`, CI `Debug invariants` step.)
+
+### Fixed
+
+- **`live_objects` counter drift on dormant chunks:** the counter was not updated when a fully-free chunk was marked DORMANT during sweep, causing the invariant checker to flag a mismatch (actual=6502, reported=1). *Discovered by the new invariant checker.*
+
 ## [0.13.0] - 2026-07-27
 
 ### Changed
