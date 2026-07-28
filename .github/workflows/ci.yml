@@ -143,6 +143,11 @@ jobs:
           crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
           ./bin/finalizer_complex
 
+      - name: Microbenchmark suite
+        run: |
+          crystal build -Dgc_none bench/micro/run_all.cr -o bin/microbench --error-trace
+          ./bin/microbench
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
@@ -269,7 +274,14 @@ jobs:
       - name: Kemal A/B thr gate
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 ./bench/perf_smoke.sh
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 BENCH_RUNS=3 ./bench/perf_smoke.sh
+
+      - name: Upload perf report
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke-report
+          path: bench/log/
+          retention-days: 30
 
   # Weekly soak test (24h, Sunday 06:00 UTC).
   soak:

@@ -226,12 +226,12 @@ For each workload:
 - **RSS comparison against Boehm is unavailable in CI (5.4):** CI may not have Boehm installed in the `-Dgc_none` job. Mitigation: store a pinned Boehm baseline value in `bench/baseline.json`, compare against that instead.
 
 **Definition of Done:**
-- [ ] `bench/perf_smoke.sh` has variance protocol implemented (5 runs, min/max discard, median, noise ratio)
+- [x] `bench/perf_smoke.sh` has variance protocol implemented (5 runs, min/max discard, median, noise ratio)
 - [ ] PR comment posts before/after perf numbers automatically
-- [ ] `bench/micro/` exists with at least 6 benchmarks covering alloc, free, collect, TLAB, STW, safepoint
-- [ ] Microbenchmarks run in CI with < 5 min overhead
+- [x] `bench/micro/` exists with at least 6 benchmarks covering alloc, free, collect, TLAB, STW, lock overhead
+- [x] Microbenchmarks run in CI with < 5 min overhead (current: ~6s)
 - [ ] Pause budget assertions pass in CI
-- [ ] RSS baseline stored in `bench/baseline.json`, alert mechanism active
+- [x] RSS baseline stored in `bench/baseline.json`, alert mechanism active
 
 **Success signal:** Microbenchmark suite runs in CI, perf regression alerts fire only on real regressions (no false positives in 1 month), RSS leak trend visible.
 

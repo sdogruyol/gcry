@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex microbench soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex microbench soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -92,6 +92,10 @@ finalizer-complex: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex
 	$(BIN)/finalizer_complex
 
+microbench: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/micro/run_all.cr -o $(BIN)/microbench
+	$(BIN)/microbench
+
 soak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/soak.cr -o $(BIN)/soak
 	$(BIN)/soak --duration=$${SOAK_DURATION:-86400} --telemetry=/tmp/gcry-soak.log
@@ -154,7 +158,7 @@ samples: $(BIN)
 
 # Short A/B thr gate for CI (needs wrk). MIN_PCT=70 by default.
 bench-perf-smoke:
-	PORT=$(PORT) ./bench/perf_smoke.sh
+	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/perf_smoke.sh
 
 # A/B previous tag vs current tree; prints docs/PERF.md History rows.
 bench-kemal-record:
