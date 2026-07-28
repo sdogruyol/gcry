@@ -2,9 +2,11 @@
 #
 # Generates random alloc/free/collect sequences and verifies GC invariants:
 #   1. All explicitly-rooted nodes survive collection (no false negatives)
-#   2. live_objects counter is consistent
-#   3. No double-free or use-after-free errors
-#   4. Each collect can run with GCRY_DEBUG_INVARIANTS=1
+#   2. live_objects counter matches actual live block count
+#   3. heap_size == sum(chunk.mapped_bytes) across all chunks
+#   4. Every live block header is non-FREE and in-bounds
+#   5. Freelist consistency (via Gcry::Invariant)
+#   6. No double-free or use-after-free errors
 #
 # Every alive node is passed as a root to collect(roots: ...).
 #
@@ -57,12 +59,72 @@ errors = [] of String
   next_id += 1
 end
 
-# ---- Helpers ----
+# ---- Deep invariant checks ----
 
-def verify(live_ptrs, heap)
+# Count live blocks and sum chunk mapped_bytes by walking the chunk list.
+def walk_heap(heap)
+  chunk_count = 0_u64
+  mapped_sum = 0_u64
+  live_count = 0_u64
+  free_count = 0_u64
+  chunk_size_classes = [] of Int32
+
+  heap.each_chunk do |chunk|
+    chunk_count += 1
+    mapped_sum += chunk.value.mapped_bytes
+    chunk_size_classes << chunk.value.size_class.to_i32
+
+    if Gcry::ChunkHeader.large?(chunk)
+      # Large objects store a single block, read its header.
+      header = Gcry::ChunkHeader.data_start(chunk).as(Gcry::BlockHeader*)
+      if Gcry::BlockHeader.free?(header)
+        free_count += 1
+      else
+        live_count += 1
+      end
+    else
+      class_index = chunk.value.size_class.to_i32
+      payload = Gcry::SizeClasses.payload(class_index)
+      block_bytes = Gcry::BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = Gcry::ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = Gcry::ChunkHeader.data_end(chunk).as(UInt8*)
+      while (cursor + block_bytes) <= limit
+        header = cursor.as(Gcry::BlockHeader*)
+        if Gcry::BlockHeader.free?(header)
+          free_count += 1
+        else
+          live_count += 1
+        end
+        cursor += block_bytes
+      end
+    end
+  end
+
+  {chunk_count, mapped_sum, live_count, free_count, chunk_size_classes}
+end
+
+# Verify all heap invariants.
+def verify_heap_invariants(heap, live_ptrs, verify_id)
   errors = [] of String
   pass = true
 
+  chunk_count, mapped_sum, actual_live, free_count, chunk_sizes = walk_heap(heap)
+
+  # 1. heap_size == sum(chunk.mapped_bytes)
+  reported_size = heap.heap_size
+  if reported_size != mapped_sum
+    errors << "HEAP_SIZE mismatch: reported=#{reported_size} walked=#{mapped_sum} (chunks=#{chunk_count})"
+    pass = false
+  end
+
+  # 2. live_objects == actual live block count in walk
+  reported_live = heap.live_objects
+  if reported_live != actual_live
+    errors << "LIVE_OBJECTS mismatch: reported=#{reported_live} walked=#{actual_live}"
+    pass = false
+  end
+
+  # 3. All our tracked pointers are live (no false negatives).
   live_ptrs.each_with_index do |ptr, i|
     next if ptr.null?
     unless heap.live?(ptr)
@@ -71,15 +133,25 @@ def verify(live_ptrs, heap)
     end
   end
 
-  # live_objects sanity: should be at least as many as our live ptrs
-  actual_live = heap.live_objects
-  expected_min = live_ptrs.count { |p| !p.null? }
-  if actual_live < expected_min
-    errors << "LIVE_OBJECTS UNDERSHOOT: expected at least #{expected_min}, got #{actual_live}"
-    pass = false
+  # 4. Freelist invariants (via Gcry::Invariant).
+  Gcry::Invariant.check_all_freelists(heap)
+
+  # 5. Every live block we know about has a valid non-FREE header.
+  live_ptrs.each do |ptr|
+    next if ptr.null?
+    header = Gcry::BlockHeader.from_user(ptr)
+    if Gcry::BlockHeader.free?(header)
+      errors << "FREE HEADER on ptr=#{ptr}"
+      pass = false
+    end
+    # Block should be inside the heap
+    unless heap.is_heap_ptr(ptr)
+      errors << "NOT HEAP PTR: ptr=#{ptr}"
+      pass = false
+    end
   end
 
-  {pass, errors}
+  {pass, errors, chunk_count, mapped_sum, actual_live, free_count}
 end
 
 # ---- Log ----
@@ -132,12 +204,12 @@ begin
         freed_count += 1
         log_file.puts("F") if log_file
       end
-    when 4 # COLLECT + VERIFY
+    when 4 # COLLECT + VERIFY_ALL
       ptrs = live_ptrs.reject(&.null?).dup
       heap.collect(scan_stack: false, roots: ptrs)
       collect_count += 1
 
-      pass, errs = verify(live_ptrs, heap)
+      pass, errs, cc, ms, al, fc = verify_heap_invariants(heap, live_ptrs, verify_count)
       errors.concat(errs)
       unless pass
         STDERR.puts "PROPERTY FAIL: #{errs.first}"
@@ -146,21 +218,21 @@ begin
       end
       verify_count += 1
       log_file.puts("C") if log_file
-    when 5 # COLLECT (no log)
+    when 5 # COLLECT (verify only live_ptrs)
       ptrs = live_ptrs.reject(&.null?).dup
       heap.collect(scan_stack: false, roots: ptrs)
       collect_count += 1
 
-      pass, errs = verify(live_ptrs, heap)
-      errors.concat(errs)
-      unless pass
-        STDERR.puts "PROPERTY FAIL: #{errs.first}"
-        STDERR.puts "seed=#{seed} ops=#{ops} collects=#{collect_count}"
-        exit 1
+      live_ptrs.each_with_index do |ptr, i|
+        next if ptr.null?
+        unless heap.live?(ptr)
+          STDERR.puts "PROPERTY FAIL: node #{i} DEAD after collect"
+          STDERR.puts "seed=#{seed} ops=#{ops} collects=#{collect_count}"
+          exit 1
+        end
       end
       verify_count += 1
-    when 6 # COLLECT with invariants check
-      # Verify invariants before collect
+    when 6 # COLLECT with full invariants (freelist + heap walk)
       Gcry::Invariant.check_all_freelists(heap)
       Gcry::Invariant.check_live_objects(heap)
 
@@ -168,11 +240,7 @@ begin
       heap.collect(scan_stack: false, roots: ptrs)
       collect_count += 1
 
-      # Verify invariants after collect
-      Gcry::Invariant.check_all_freelists(heap)
-      Gcry::Invariant.check_live_objects(heap)
-
-      pass, errs = verify(live_ptrs, heap)
+      pass, errs, cc, ms, al, fc = verify_heap_invariants(heap, live_ptrs, verify_count)
       errors.concat(errs)
       unless pass
         STDERR.puts "PROPERTY FAIL: #{errs.first}"
@@ -184,11 +252,11 @@ begin
     ops += 1
   end
 
-  # Final collect + verify
+  # Final collect + full verify
   ptrs = live_ptrs.reject(&.null?).dup
   heap.collect(scan_stack: false, roots: ptrs)
   collect_count += 1
-  pass, errs = verify(live_ptrs, heap)
+  pass, errs, cc, ms, al, fc = verify_heap_invariants(heap, live_ptrs, verify_count)
   errors.concat(errs)
   unless pass
     STDERR.puts "PROPERTY FAIL (final): #{errs.first}"
@@ -210,6 +278,7 @@ begin
   end
 
   puts "property test ok seed=#{seed} iterations=#{ops} collects=#{collect_count} verifies=#{verify_count} freed=#{freed_count} peak_nodes=#{next_id} warnings=#{errors.size}"
+  puts "  last walk: chunks=#{cc} mapped_sum=#{ms} live=#{al} free=#{fc}"
 ensure
   log_file.try(&.close)
   Gcry::Invariant.disable

@@ -115,9 +115,10 @@ Priority labels:
 - [x] `bench/property_test.cr` exists and runs in CI
 - [x] Heap graph fuzzer completes 100k iterations on every CI run (short: 5k in CI, full optional)
 - [x] Every property test failure logs the seed for deterministic replay
+- [x] Random alloc/free/collect sequences verify: `live_objects` counter accuracy, `heap_size` == sum chunk `mapped_bytes`, freelist consistency, no false negatives
 - [ ] MT property tests run with watchdog timer, no deadlocks in CI
 - [ ] At least one layout property test passes (2.3)
-- [x] Property tests add less than 10 min to CI runtime (~7s for 100k)
+- [x] Property tests add less than 10 min to CI runtime (~8s for 100k)
 
 **Success signal:** Property tests run in CI, find at least one heap corruption or lost-object bug within 3 months.
 
