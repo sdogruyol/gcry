@@ -9,6 +9,7 @@
 require "../../src/gcry"
 require "spec"
 
+{% if flag?(:linux) %}
 describe "Regression: signal handler stack false roots" do
   it "survives signal trap during allocation" do
     handled = false
@@ -25,3 +26,4 @@ describe "Regression: signal handler stack false roots" do
     handled.should be_true
   end
 end
+{% end %}

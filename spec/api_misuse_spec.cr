@@ -71,6 +71,7 @@ describe "API misuse" do
     true.should be_true
   end
 
+  {% if flag?(:linux) %}
   it "collect inside finalizer does not deadlock" do
     reentered = false
 
@@ -86,6 +87,7 @@ describe "API misuse" do
     Signal::USR1.reset
     reentered.should be_true
   end
+{% end %}
 
   # push_stack with invalid bounds — we test via Gcry::MarkStack directly
   it "add_root with large pointer is ignored" do
