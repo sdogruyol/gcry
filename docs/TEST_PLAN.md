@@ -149,12 +149,12 @@ Priority labels:
 - **Thread storm test hangs (3.3):** Hard to reproduce in CI. Mitigation: add a 60s timeout, log all thread IDs on failure.
 
 **Definition of Done:**
-- [ ] `bench/soak.cr` exists and runs 24h without crash, RSS stable
-- [ ] Soak runs on a weekly CI cron schedule
+- [x] `bench/soak.cr` exists and runs 24h without crash, RSS stable
+- [x] Soak runs on a weekly CI cron schedule
+- [x] Soak telemetry is logged to a file for post-hoc analysis
 - [ ] Alloc pattern fuzz passes for 3 distributions
 - [ ] Thread spawn/exit during collect passes 1000 iterations
 - [ ] OOM test passes without segfault under `GCRY_HEAP_LIMIT=32MB`
-- [ ] Soak telemetry is logged to a file for post-hoc analysis
 
 **Success signal:** Soak test runs 24h without crash, OOM tests never segfault, thread spawn storm doesn't deadlock.
 

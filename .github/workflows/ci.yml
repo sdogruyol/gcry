@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC
 
 jobs:
   test:
@@ -243,6 +245,34 @@ jobs:
         run: |
           mkdir -p bin
           PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 ./bench/perf_smoke.sh
+
+  # Weekly soak test (24h, Sunday 06:00 UTC).
+  soak:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    name: soak (24h)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Build soak test
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none bench/soak.cr -o bin/soak --error-trace
+
+      - name: Run soak test (24h)
+        run: |
+          ./bin/soak --duration=86400 --telemetry=/tmp/gcry-soak.log
+
+      - name: Upload telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-telemetry
+          path: /tmp/gcry-soak.log
+          retention-days: 30
 
   # aarch64 cross-compile smoke (object emit). Runs on PR + push.
   test-aarch64:
