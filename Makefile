@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -43,6 +43,14 @@ property-test: $(BIN)
 property-test-short: $(BIN)
 	$(CRYSTAL) build bench/property_test.cr -o $(BIN)/property_test
 	$(BIN)/property_test --seed=1 --iterations=5000
+
+layout-property-test: $(BIN)
+	$(CRYSTAL) build bench/layout_property_test.cr -o $(BIN)/layout_property_test
+	$(BIN)/layout_property_test --seed=$${LAYOUT_PROP_SEED:-1} --iterations=$${LAYOUT_PROP_ITERATIONS:-10000}
+
+layout-property-test-short: $(BIN)
+	$(CRYSTAL) build bench/layout_property_test.cr -o $(BIN)/layout_property_test
+	$(BIN)/layout_property_test --seed=1 --iterations=500
 
 format:
 	$(CRYSTAL) tool format

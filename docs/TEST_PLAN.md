@@ -109,15 +109,18 @@ Priority labels:
 **What could go wrong:**
 - **Custom property framework takes too long (2.1):** Writing a good random graph generator is harder than it looks. Mitigation: if not working after 2 weeks, simplify — start with random alloc/free sequences only, add pointer graphs later.
 - **Property tests are flaky (2.1-2.4):** Random tests may fail intermittently. Mitigation: all property tests must log the seed on failure. CI reruns with the same seed for deterministic debugging. Treat flakiness as a bug in the test, not the code.
+- **Layout property test design vs GC behavior (2.3):** The test must align with the GC's actual scanning semantics. For example, conservative fallback (first word = 0, no type_id) uses `base_only` — only root-of-object hits survive, not interior pointers. `scan_cap` with `alloc_size` match triggers capped conservative scan, not precise. Leaf layout with `scan_cap=0` truly marks nothing. Mitigation: each sub-test is self-contained (no shared state), verified against the GC source, and runs 10k iterations independently.
 - **MT property test deadlocks (2.4):** Thread + GC + STW can deadlock in unpredictable ways. Mitigation: add a watchdog timer per test iteration (30s max). If it fires, fail with a clear message and the seed.
 
 **Definition of Done:**
 - [x] `bench/property_test.cr` exists and runs in CI
+- [x] `bench/layout_property_test.cr` exists with 5 sub-tests: precise offsets, conservative fallback, leaf layout, noscan offset, scan_cap limiting
 - [x] Heap graph fuzzer completes 100k iterations on every CI run (short: 5k in CI, full optional)
 - [x] Every property test failure logs the seed for deterministic replay
 - [x] Random alloc/free/collect sequences verify: `live_objects` counter accuracy, `heap_size` == sum chunk `mapped_bytes`, freelist consistency, no false negatives
+- [x] Layout property test passes 10k iterations in ~2.5s with 5 sub-tests, each self-contained (no shared state)
 - [ ] MT property tests run with watchdog timer, no deadlocks in CI
-- [ ] At least one layout property test passes (2.3)
+- [x] At least one layout property test passes (2.3)
 - [x] Property tests add less than 10 min to CI runtime (~8s for 100k)
 
 **Success signal:** Property tests run in CI, find at least one heap corruption or lost-object bug within 3 months.

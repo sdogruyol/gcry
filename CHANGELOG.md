@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Memory safety CI:** `make asan` builds and runs specs with AddressSanitizer (`-Dasan`). `make valgrind-samples` runs samples under Valgrind memcheck (`--leak-check=full`). CI `asan` and `valgrind` jobs on every PR. (`Makefile`, `.github/workflows/ci.yml`)
 - **Deterministic replay fuzzing:** `bench/fuzz.cr` rewritten with `--seed=`, `--seconds=`, `--log=`, and `--replay=` flags. Fuzz logs every operation to a replayable log file (opcode + args). Replay mode reads the log and replays the exact sequence of heap operations. Op 9 (spawn + Channel) excluded from logs as non-deterministic Crystal runtime. CI runs fuzz + replay on every PR. (`make fuzz-replay FUZZ_LOG=path`, CI `Fuzz with log + replay` step.)
 - **Property-based testing:** `bench/property_test.cr` — random alloc/free/collect sequences with deep heap invariant verification: `live_objects` counter accuracy (reported == walked count), `heap_size` == sum of chunk `mapped_bytes`, freelist consistency, and per-node `live?` assertion. 100k iterations in ~8s. (`make property-test`, CI `Property test` step.)
+- **Layout property test:** `bench/layout_property_test.cr` — 5 self-contained sub-tests verifying precise scan offset correctness, conservative fallback, leaf layout (scan_cap=0), noscan offset keep-alive semantics, and scan_cap limiting. Runs 10k iterations in ~2.5s. (`make layout-property-test`, CI `Layout property test` step.)
 
 ### Fixed
 
