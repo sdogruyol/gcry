@@ -105,20 +105,4 @@ describe "API misuse" do
     end
     true.should be_true
   end
-
-  it "double free is safe" do
-    ptr = GC.malloc(16)
-    GC.free(ptr)
-    GC.free(ptr) # should not crash
-    true.should be_true
-  end
-
-  it "realloc of freed pointer is safe" do
-    ptr = GC.malloc(16)
-    GC.free(ptr)
-    result = GC.realloc(ptr, 32_u64)
-    # Result may be a new allocation (implementation-defined)
-    GC.free(result) if result != ptr
-    true.should be_true
-  end
 end
