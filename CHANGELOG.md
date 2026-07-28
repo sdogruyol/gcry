@@ -60,8 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **Linux** Kemal (WSL2 x86_64, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-173602/`): `/` **90.4%** of Boehm; `/json` **88.8%**; post-GC RSS **0.99×**. acikturkiye `/api/v1/`: **92.8%** of Boehm, post-GC RSS **3.00×**. Side-bitmap A/B (`2026-07-26-171942`): `/json` **82.3%** @ **~9.2×**, acik **50.1%** @ **5.58×**. See [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
-- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, in-header MARK default, session `bench/log/2026-07-26-181318/`): `/` **85.4%** of Boehm; `/json` **86.5%**; post-GC RSS **1.34–1.36×**. acikturkiye `/api/v1/`: **76.7%** of Boehm, post-GC RSS **22.3×** (RSS improved 2.6× vs prior session; conservative live set remains the dominant driver). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **Linux** Kemal (WSL2 x86_64, median of 3, pure `--release`, in-header MARK default, session `bench/log/linux/2026-07-26-173602/`): `/` **90.4%** of Boehm; `/json` **88.8%**; post-GC RSS **0.99×**. acikturkiye `/api/v1/`: **92.8%** of Boehm, post-GC RSS **3.00×**. Side-bitmap A/B (`2026-07-26-171942`): `/json` **82.3%** @ **~9.2×**, acik **50.1%** @ **5.58×**. See [docs/PERF.md](docs/PERF.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **macOS** Kemal (Apple Silicon M2 Pro, median of 3, pure `--release`, in-header MARK default, session `bench/log/macos/2026-07-26-181318/`): `/` **85.4%** of Boehm; `/json` **86.5%**; post-GC RSS **1.34–1.36×**. acikturkiye `/api/v1/`: **76.7%** of Boehm, post-GC RSS **22.3×** (RSS improved 2.6× vs prior session; conservative live set remains the dominant driver). See [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **STW pause tail eliminated:** deferred madvise removes kernel VM lock from the STW window. Max pause drops from 132–150 ms to well under 50 ms on Kemal `/json` c=100.
 
 ## [0.11.0] - 2026-07-25

@@ -23,14 +23,16 @@
 #   COUNT=3 TRIALS=1 WRK_DURATION=15 bash bench/run_all.sh kemal
 #   GC=gcry COUNT=5 bash bench/run_all.sh kemal
 #
-# Output in bench/log/:
-#   YYYY-MM-DD-HHMMSS/
-#     run-01/
-#       metadata.yaml
-#       kemal-median.tsv / kemal-summary.md / kemal-gcry-gcstats-*.json
-#       acik-* (if available)
-#     run-02/
-#       ...
+# Output in bench/log/ (auto-detected platform):
+#   linux/       — `uname -s` = Linux
+#   macos/       — `uname -s` = Darwin
+#     YYYY-MM-DD-HHMMSS/
+#       run-01/
+#         metadata.yaml
+#         kemal-median.tsv / kemal-summary.md / kemal-gcry-gcstats-*.json
+#         acik-* (if available)
+#       run-02/
+#         ...
 #
 # Requires: wrk, curl, python3, git
 # Requires sibling ../acikturkiye for acikturkiye benchmarks.
@@ -135,8 +137,22 @@ fi
 HAS_ACIK="no"
 [[ -d "$AT" && -f "$AT/.env.demo" ]] && HAS_ACIK="yes"
 
+# Detect platform: Linux → bench/log/linux/, Darwin → bench/log/macos/
+OS_NAME="$(uname -s)"
+case "$OS_NAME" in
+  Linux)
+    PLATFORM_DIR="linux"
+    ;;
+  Darwin)
+    PLATFORM_DIR="macos"
+    ;;
+  *)
+    PLATFORM_DIR="other"
+    ;;
+esac
+
 SESSION_TS="$(date -u +%Y-%m-%d-%H%M%S)"
-LOG_ROOT="$ROOT/bench/log/$SESSION_TS"
+LOG_ROOT="$ROOT/bench/log/$PLATFORM_DIR/$SESSION_TS"
 mkdir -p "$LOG_ROOT"
 RUN=1
 LOG="$LOG_ROOT/run-$(printf '%02d' "$RUN")"

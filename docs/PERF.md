@@ -14,7 +14,7 @@ v0.13.0 enables `scrub_fibers_enabled = true` on Linux (same as macOS). Parked f
 
 ### v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
-Same host, Crystal 1.21, WSL2 x86_64, median of 3, pure `--release`, **in-header MARK** (default), scrub **off**, auto-layouts **off**. Session: `bench/log/2026-07-26-173602/`.
+Same host, Crystal 1.21, WSL2 x86_64, median of 3, pure `--release`, **in-header MARK** (default), scrub **off**, auto-layouts **off**. Session: `bench/log/linux/2026-07-26-173602/`.
 
 | Path | % of Boehm | post-GC RSS × |
 |------|----------:|--------------:|

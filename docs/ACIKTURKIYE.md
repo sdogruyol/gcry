@@ -10,7 +10,7 @@ v0.13.0 enables `scrub_fibers_enabled = true` on Linux. Parked fiber-stack scrub
 
 ## v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
-Same host, `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), post-`GC.collect` RSS, median of 3 (scrub **off**, auto-layouts **off**). Session: `bench/log/2026-07-26-173602/`.
+Same host, `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), post-`GC.collect` RSS, median of 3 (scrub **off**, auto-layouts **off**). Session: `bench/log/linux/2026-07-26-173602/`.
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
