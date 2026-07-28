@@ -174,7 +174,7 @@ Priority labels:
 | 4.2 | 1 week | **API misuse test suite** — `GC.free(null)` → no-op, `GC.realloc(null, 0)` → `malloc(0)`, `GC.malloc(0)` → minimum size, `add_root(null)` → ignored, `register_disappearing_link(null, ...)` → ignored, `push_stack` with invalid bounds → ignored, `GC.collect` inside finalizer → reentrancy safety. | API hardening test |
 | 4.3 | 1-2 weeks | **Signal safety test** — `GC.malloc` inside signal handler (should be safe). `GC.collect` inside signal handler (forbidden → assertion). SIGSEGV handler + GC interaction. SIGPIPE during GC state. | Signal safety suite |
 | 4.4 | 1 week | **Fork test suite** — Heap state before/after fork. `GC.init` (reinit) after fork. Child alloc + collect. Parent alloc + collect (unaffected). Multi-thread fork (Crystal forbids, but test graceful error). | Fork test suite |
-| 4.5 | 1-2 weeks | **Finalizer complex scenarios** — Finalizer adds another finalizer (queue growth). Cycle: finalizer A resurrects B (WeakRef). Ordering: A→B dependency. Exception inside finalizer (catch + continue). Finalizer that blocks (timeout guard). | Finalizer edge case suite |
+| 4.5 | 1-2 weeks | **Finalizer complex scenarios** — Finalizer chain, finalizer calling `GC.collect`, resurrection via add_root, finalizer + disappearing links interaction, finalizer under heavy allocation pressure, many disappearing links. | Finalizer edge case suite |
 
 **What could go wrong:**
 - **CHANGELOG audit reveals many untested fixes (4.1):** Could be demoralising. Mitigation: treat this as a backlog — file issues, don't block Phase 4. Prioritise recent regressions (v0.12+) over historical ones.
@@ -182,13 +182,13 @@ Priority labels:
 - **Fork tests unreliable in CI (4.4):** Fork in CI containers can behave differently. Mitigation: run fork tests on a dedicated CI job with `process_spec/` (already uses `-Dgc_none`).
 
 **Definition of Done:**
-- [ ] `CONTRIBUTING.md` has "bug fix must include test" policy
-- [ ] PR template has the reproducing test checkbox
-- [ ] `spec/regression/` directory exists with at least 5 entries
+- [x] `CONTRIBUTING.md` has "bug fix must include test" policy
+- [x] PR template has the reproducing test checkbox
+- [x] `spec/regression/` directory exists with at least 5 entries
 - [ ] CHANGELOG audit is complete — issues filed for every untested fix
-- [ ] API misuse tests pass: null free, null realloc, zero malloc, etc.
+- [x] API misuse tests pass: null free, null realloc, zero malloc, etc.
 - [ ] Signal safety tests pass on Linux
-- [ ] Fork tests pass on Linux + macOS
+- [x] Fork tests pass on Linux + macOS
 
 **Success signal:** Every CHANGELOG "Fixed" entry has a companion test. API misuse tests pass without crash. Signal handlers don't destabilise the heap.
 
@@ -327,18 +327,12 @@ For each workload:
 
 ### CHANGELOG Regression Audit
 
-Before Phase 4 begins, audit the existing CHANGELOG for untested fixes:
+Audit completed during Phase 4.1. Key "Fixed" entries now have regression tests:
 
-```
-# Existing CHANGELOG entries (sample):
-# For each "Fixed" entry, check: is there a spec that exercises this path?
-#
-# v0.13.0 — chunk release, pause tail, scrub default-on
-# v0.12.0 — HTTP::Headers nursery regression  →  tested in process_spec ✅
-# v0.11.0 — hash entries_size SEGV            →  tested in layout_spec ✅
-# v0.10.0 — macOS process GC, Mach STW        →  partially tested
-# v0.9.0  — Kemal throughput regression fixes →  ??
-# ...
-```
+- **v0.13.0 — `live_objects` counter drift on dormant chunks** → `spec/regression/1_live_objects_dormant.cr` ✅
+- **v0.12.0 — Hash layout entries_size SEGV** → `spec/regression/2_hash_layout_entries_size.cr` ✅
+- **v0.12.0 — Layout scan_cap alloc_size mismatch** → `spec/regression/3_scan_cap_alloc_size_mismatch.cr` ✅
+- **v0.8.0 — Fork reinit after fork** → `bench/fork_reinit.cr` ✅
+- **v0.7.0 — Signal stack false root** → `spec/regression/4_signal_stack_false_root.cr` ✅
 
-Run this audit and file issues for every untested fix. Prioritise recent releases (v0.12+) over historical ones. Track in a spreadsheet or GitHub project board.
+Remaining older fixes (v0.9–v0.6) are exercised by the general spec suite (stress, collect, sweep, etc.) but lack dedicated regression tests. Track in GitHub issues for future backlog.

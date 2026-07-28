@@ -20,10 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 |- **Alloc pattern fuzzing:** `bench/pattern_fuzz.cr` — 3 allocation distributions (Zipfian power-law, bimodal small+large, stride array-growth) each checked against baseline uniform-random. Verifies pause p99 < 8-10x baseline and RSS growth < 10%. 200 phases × 5000 objects per phase. (`make pattern-fuzz`, CI `Alloc pattern fuzz` step.)
 |- **Thread storm test:** `bench/thread_storm.cr` — 3 phases: thread spawn storm (OS threads doing alloc/free/collect in batches), rapid thread create/destroy (250 short-lived threads), signal safety (GC.malloc inside SIGUSR1 handler). 1000+ iterations total, 0 errors. (`make thread-storm`, CI `Thread storm` step.)
 |- **OOM scenarios:** `bench/oom_test.cr` — 3 phases: bounded heap (low gc_threshold, 500 iterations, no crash), mmap failure (graceful OutOfMemoryError), finalizer under OOM (no crash under pressure). (`make oom-test`, CI `OOM test` step.)
+|- **Bug-fix test policy:** `CONTRIBUTING.md` with "bug fix must include test" rule, `.github/PULL_REQUEST_TEMPLATE.md` with reproducing test checkbox, and `spec/regression/` directory with 4 regression tests (live_objects dormant chunk, hash_layout entries_size, scan_cap alloc_size mismatch, signal_stack false root). (`spec/regression/`, `process_spec/regression/`, CI regression jobs.)
+|- **API misuse test suite:** `spec/api_misuse_spec.cr` — 14 tests covering `GC.free(null)`, `GC.realloc(null, 0)`, `GC.malloc(0)`, `GC.malloc_atomic(0)`, `Gcry.add_root(null)`, `Gcry.register_disappearing_link(null, ...)`, `GC.collect` inside signal handler, `add_root` with large pointer, alternating malloc/free, double free, and realloc of freed pointer. (`make spec`, CI `spec` step.)
+|- **Fork reinit test:** `bench/fork_reinit.cr` — standalone `LibC.fork` + `after_fork_child_reinit` + alloc in child + parent continues allocating after collect. 3 assertions, all pass. (`make fork-test`, CI `Fork reinit test` step.)
+|- **Finalizer complex scenarios:** `bench/finalizer_complex.cr` — 7 phases: finalizer chain, finalizer calling `GC.collect`, finalizer adding root (resurrection), finalizer + disappearing links interaction, finalizer under heavy allocation pressure (500 objects), finalizer creating 1000 objects, and many disappearing links (200). 8/8 assertions pass. (`make finalizer-complex`, CI `Finalizer complex scenarios` step.)
 
 ### Fixed
 
-- **`live_objects` counter drift on dormant chunks:** the counter was not updated when a fully-free chunk was marked DORMANT during sweep, causing the invariant checker to flag a mismatch (actual=6502, reported=1). *Discovered by the new invariant checker.*
+- **`live_objects` counter drift on dormant chunks:** the counter was not updated when a fully-free chunk was marked DORMANT during sweep, causing the invariant checker to flag a mismatch (actual=6502, reported=1). *Discovered by the new invariant checker. Covered by `spec/regression/1_live_objects_dormant.cr`.*
+- **`after_fork_child_reinit` stability:** `LibC.fork` + reinit + alloc in child, parent continues after collect. Covered by `bench/fork_reinit.cr`.
 
 ## [0.13.0] - 2026-07-27
 

@@ -133,6 +133,16 @@ jobs:
           crystal build -Dgc_none bench/oom_test.cr -o bin/oom_test
           ./bin/oom_test --phases=1,2,3
 
+      - name: Fork reinit test
+        run: |
+          crystal build -Dgc_none bench/fork_reinit.cr -o bin/fork_reinit
+          ./bin/fork_reinit
+
+      - name: Finalizer complex scenarios
+        run: |
+          crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
+          ./bin/finalizer_complex
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
