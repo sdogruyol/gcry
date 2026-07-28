@@ -1,7 +1,7 @@
 # Trace + heap-dump smoke (Phase 7.1 / 7.2).
 #
 # Build: crystal build bench/trace_smoke.cr -o bin/trace_smoke
-# Run:   GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=1 GCRY_TRACE_FILE=/tmp/gcry-trace.ndjson ./bin/trace_smoke
+# Run:   ./bin/trace_smoke
 #
 # Or: make trace-smoke
 
@@ -11,9 +11,9 @@ require "../src/gcry"
 trace_path = ENV["GCRY_TRACE_FILE"]? || File.tempname("gcry-trace", ".ndjson")
 File.delete(trace_path) if File.exists?(trace_path)
 
-# Force-enable even if env was not set at require time.
-io = File.open(trace_path, "w")
-Gcry::Trace.enable(io, alloc_sample: 1_u64)
+fd = LibC.open(trace_path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
+raise "open trace file failed" if fd < 0
+Gcry::Trace.enable(fd, alloc_sample: 1_u64, owned: true)
 
 heap = Gcry::Heap.new
 keep = [] of Void*
@@ -61,14 +61,12 @@ gone_expect.each do |a|
 end
 
 # Finalizer register event
-fin_ran = false
 obj = heap.malloc(64)
-heap.add_finalizer(obj) { |_| fin_ran = true }
-heap.free(obj) # notice_reclaim may drop finalizer without running if explicit free
+heap.add_finalizer(obj) { |_| }
+heap.free(obj)
 heap.collect
 
 Gcry::Trace.disable
-io.close
 
 # Parse NDJSON
 events = [] of String

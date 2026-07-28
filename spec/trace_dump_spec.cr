@@ -50,8 +50,10 @@ end
 
 describe "Gcry::Trace" do
   it "emits parseable NDJSON for collect" do
-    io = IO::Memory.new
-    Gcry::Trace.enable(io, alloc_sample: 1_u64)
+    path = File.tempname("gcry-trace-spec", ".ndjson")
+    fd = LibC.open(path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
+    fd.should be >= 0
+    Gcry::Trace.enable(fd, alloc_sample: 1_u64, owned: true)
     begin
       heap = Gcry::Heap.new
       begin
@@ -66,12 +68,14 @@ describe "Gcry::Trace" do
     end
 
     events = [] of String
-    io.to_s.each_line do |line|
+    File.each_line(path) do |line|
       next if line.empty?
       obj = JSON.parse(line)
       events << obj["event"].as_s
       obj["ts_ns"].as_i64 # must exist
     end
+    File.delete(path) if File.exists?(path)
+
     events.should contain("alloc")
     events.should contain("collect_start")
     events.should contain("collect_end")

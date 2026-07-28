@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Gcry::Trace` under `-Dgc_none`:** do not `require "json"` or write via abstract `IO` — both pulled JSON/OpenSSL into the GC bootstrap and broke process builds. Trace now emits NDJSON with a stack buffer + `LibC.write` to a raw fd.
 - **Darwin `release_physical_pages` spec:** do not assert immediate zero-fill after `MADV_FREE_REUSABLE` (kernel may keep contents until reclaim). Assert aligned success + still-mapped only.
 - **Nursery HTTP::Headers regression:** moved from `process_spec` to standalone `bench/nursery_headers.cr` — Spec + process GC + nursery was flaky on CI (SEGV during Spec reporting).
 - **Process parallel mark:** moved from `process_spec` to `bench/parallel_mark_process.cr` for the same Spec+process-GC flake; CI retries `process_spec` up to 3 times.
