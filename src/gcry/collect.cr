@@ -265,6 +265,7 @@ module Gcry
 
       abort_incremental
       run_collection(major: true, scan_stack: scan_stack, roots: roots)
+      Invariant.after_collect(self)
     end
 
     # Young-generation collection. Scans roots + old objects for nursery pointers
