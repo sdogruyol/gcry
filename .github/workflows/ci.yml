@@ -148,6 +148,16 @@ jobs:
           crystal build -Dgc_none bench/micro/run_all.cr -o bin/microbench --error-trace
           ./bin/microbench
 
+      - name: Pause budget
+        run: |
+          crystal build -Dgc_none bench/pause_budget.cr -o bin/pause_budget --error-trace
+          ./bin/pause_budget --live-mb=20
+
+      - name: RSS leak detection
+        run: |
+          crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
+          ./bin/rss_leak --cycles=20 --objects=5000
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
