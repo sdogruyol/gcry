@@ -111,6 +111,11 @@ jobs:
           crystal build bench/layout_property_test.cr -o bin/layout_property_test
           ./bin/layout_property_test --seed=1 --iterations=500
 
+      - name: MT property test (50 iterations, 2+4 workers)
+        run: |
+          crystal build bench/mt_property_test.cr -o bin/mt_property_test
+          ./bin/mt_property_test --seed=1 --iterations=50 --workers=2,4
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

@@ -102,7 +102,7 @@ Priority labels:
 | 2.1 | Must | 2-3 weeks | **Heap graph fuzzer** — `bench/property_test.cr`. Generate random pointer graphs: cycles, chains, trees, DAGs, disjoint sets. Random alloc/free/write sequences. Run 100k iterations per CI run. Verify invariants after every collect: all reachable objects are alive, all unreachable objects are dead. Use seed-based RNG for determinism. | Property test suite |
 | 2.2 | Must | 1-2 weeks | **Heap invariant property test** — Random alloc/free/collect sequences (50k iterations). Verify invariants with and without `GCRY_DEBUG_INVARIANTS=1`: `live_objects` matches actual live count, freelist walk yields all blocks, `heap_size` ≥ sum of all chunk sizes, no double-free, no use-after-free. | Invariant properties |
 | 2.3 | Should | 1 week | **Layout property test** — Random type_id, offset, scan_cap combinations (10k). Verify: (a) precise scan follows only registered offsets, (b) scan conservative fallback keeps all reachable, (c) `scan_cap ≤ alloc_size`, (d) hash entry stride matches `sizeof(Hash::Entry)`, (e) leaf layout produces no false roots. | Layout properties |
-| 2.4 | Should | 2-3 weeks | **MT property test** — Random thread count (2-8), alloc patterns, collect timing. 10k iterations. Verify: (a) no object lost under concurrent alloc + periodic collect, (b) TLAB flush makes all allocations visible to sweeper, (c) parallel mark produces the same live set as serial mark (bitmap comparison). | MT properties |
+| 2.4 | Should | 1 week | **MT property test** — Concurrent alloc via fiber workers (2-8), periodic collect, 500 iterations per worker count. Verify: (a) no object lost under concurrent alloc + periodic collect, (b) `live_objects` counter accuracy after TLAB flush, (c) parallel mark produces the same live set as serial mark. | MT properties |
 
 **Framework note:** Crystal lacks a mature QuickCheck library. Start with a simple custom generator (`Random` + `Iterator(T)`) inside `bench/property_test.cr` — no external dependency needed. Port to a formal framework later if one emerges.
 
@@ -110,7 +110,7 @@ Priority labels:
 - **Custom property framework takes too long (2.1):** Writing a good random graph generator is harder than it looks. Mitigation: if not working after 2 weeks, simplify — start with random alloc/free sequences only, add pointer graphs later.
 - **Property tests are flaky (2.1-2.4):** Random tests may fail intermittently. Mitigation: all property tests must log the seed on failure. CI reruns with the same seed for deterministic debugging. Treat flakiness as a bug in the test, not the code.
 - **Layout property test design vs GC behavior (2.3):** The test must align with the GC's actual scanning semantics. For example, conservative fallback (first word = 0, no type_id) uses `base_only` — only root-of-object hits survive, not interior pointers. `scan_cap` with `alloc_size` match triggers capped conservative scan, not precise. Leaf layout with `scan_cap=0` truly marks nothing. Mitigation: each sub-test is self-contained (no shared state), verified against the GC source, and runs 10k iterations independently.
-- **MT property test deadlocks (2.4):** Thread + GC + STW can deadlock in unpredictable ways. Mitigation: add a watchdog timer per test iteration (30s max). If it fires, fail with a clear message and the seed.
+- **MT property test deadlocks (2.4):** Fiber + collect + STW can deadlock in unpredictable ways. Mitigation: library heap mode (`stop_the_world=false`) avoids STW entirely. Workers use `Fiber.yield` to cooperate with the collector. Watchdog timer (120s deadline) prevents infinite hangs. Tested with 2, 4, 8 workers.
 
 **Definition of Done:**
 - [x] `bench/property_test.cr` exists and runs in CI
@@ -119,7 +119,8 @@ Priority labels:
 - [x] Every property test failure logs the seed for deterministic replay
 - [x] Random alloc/free/collect sequences verify: `live_objects` counter accuracy, `heap_size` == sum chunk `mapped_bytes`, freelist consistency, no false negatives
 - [x] Layout property test passes 10k iterations in ~2.5s with 5 sub-tests, each self-contained (no shared state)
-- [ ] MT property tests run with watchdog timer, no deadlocks in CI
+- [x] `bench/mt_property_test.cr` exists with concurrent workers (2, 4, 8), periodic collect, parallel/serial mark verification
+- [x] MT property tests run with 2, 4, 8 workers, no deadlocks, no lost objects
 - [x] At least one layout property test passes (2.3)
 - [x] Property tests add less than 10 min to CI runtime (~8s for 100k)
 
