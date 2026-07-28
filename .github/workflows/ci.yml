@@ -152,6 +152,58 @@ jobs:
           path: coverage/
           retention-days: 14
 
+  asan:
+    runs-on: ubuntu-latest
+    name: asan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Build ASan spec binary
+        run: |
+          mkdir -p bin
+          crystal build -Dasan spec/all_specs.cr -o bin/all_specs_asan --error-trace
+
+      - name: Run ASan specs
+        run: |
+          bin/all_specs_asan
+
+  valgrind:
+    runs-on: ubuntu-latest
+    name: valgrind
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Build samples for valgrind
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none samples/hello.cr -o bin/hello_valgrind
+          crystal build -Dgc_none samples/min.cr -o bin/min_valgrind
+          crystal build -Dgc_none samples/alloc.cr -o bin/alloc_valgrind
+          crystal build -Dgc_none samples/stress.cr -o bin/stress_valgrind
+
+      - name: Valgrind memcheck hello
+        run: valgrind --leak-check=full --error-exitcode=1 ./bin/hello_valgrind
+
+      - name: Valgrind memcheck min
+        run: valgrind --leak-check=full --error-exitcode=1 ./bin/min_valgrind
+
+      - name: Valgrind memcheck alloc 500
+        run: valgrind --leak-check=full --error-exitcode=1 ./bin/alloc_valgrind 500
+
+      - name: Valgrind memcheck stress 300
+        run: valgrind --leak-check=full --error-exitcode=1 ./bin/stress_valgrind 300
+
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
     runs-on: ubuntu-latest

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Debug invariant checker (`GCRY_DEBUG_INVARIANTS=1`):** validates heap invariants at runtime — `live_objects` counter accuracy, freelist cycle/consistency checks, chunk index integrity, and block overlap detection. Hooks into `malloc`, `free`, and `collect`. Signal-safe stderr output; `-Dgcry_invariant_abort` for core dumps. Exposed `Heap#each_chunk`, `#freelist_for`, `#nursery_freelist_for` for the checker. CI runs invariants on every PR. (`spec/invariant_spec.cr`, `make invariants`, CI `Debug invariants` step.)
 - **Coverage infrastructure:** `spec/all_specs.cr` entrypoint for kcov (DWARF-based line/branch coverage). `ci/coverage.sh` wrapper runs kcov + `crystal tool unreachable` + `crystal tool macro_code_coverage`. `make coverage` / `coverage-kcov` / `coverage-unreachable` / `coverage-macro` targets. CI `coverage` job builds the spec binary, installs kcov from Debian, and uploads the report. (`ci/coverage.sh`, `Makefile`, `.github/workflows/ci.yml`)
+- **Memory safety CI:** `make asan` builds and runs specs with AddressSanitizer (`-Dasan`). `make valgrind-samples` runs samples under Valgrind memcheck (`--leak-check=full`). CI `asan` and `valgrind` jobs on every PR. (`Makefile`, `.github/workflows/ci.yml`)
 
 ### Fixed
 

@@ -1,7 +1,7 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
@@ -54,6 +54,24 @@ coverage-unreachable:
 
 coverage-macro:
 	./ci/coverage.sh macro
+
+asan: $(BIN)
+	$(CRYSTAL) build -Dasan spec/all_specs.cr -o $(BIN)/all_specs_asan
+	$(BIN)/all_specs_asan
+
+asan-hello: $(BIN)
+	$(CRYSTAL) build -Dasan samples/hello.cr -o $(BIN)/hello_asan
+	$(BIN)/hello_asan
+
+valgrind-samples: $(BIN)
+	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello_valgrind
+	valgrind --leak-check=full --error-exitcode=1 $(BIN)/hello_valgrind
+	$(CRYSTAL) build -Dgc_none samples/min.cr -o $(BIN)/min_valgrind
+	valgrind --leak-check=full --error-exitcode=1 $(BIN)/min_valgrind
+	$(CRYSTAL) build -Dgc_none samples/alloc.cr -o $(BIN)/alloc_valgrind
+	valgrind --leak-check=full --error-exitcode=1 $(BIN)/alloc_valgrind 500
+	$(CRYSTAL) build -Dgc_none samples/stress.cr -o $(BIN)/stress_valgrind
+	valgrind --leak-check=full --error-exitcode=1 $(BIN)/stress_valgrind 300
 
 samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello
