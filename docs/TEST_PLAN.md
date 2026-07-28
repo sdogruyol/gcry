@@ -152,7 +152,7 @@ Priority labels:
 - [x] `bench/soak.cr` exists and runs 24h without crash, RSS stable
 - [x] Soak runs on a weekly CI cron schedule
 - [x] Soak telemetry is logged to a file for post-hoc analysis
-- [ ] Alloc pattern fuzz passes for 3 distributions
+- [x] Alloc pattern fuzz passes for 3 distributions (Zipfian, Bimodal, Stride) - verifies pause p99 < 8-10x baseline, RSS growth < 10%
 - [ ] Thread spawn/exit during collect passes 1000 iterations
 - [ ] OOM test passes without segfault under `GCRY_HEAP_LIMIT=32MB`
 

@@ -118,6 +118,11 @@ jobs:
           crystal build bench/mt_property_test.cr -o bin/mt_property_test
           ./bin/mt_property_test --seed=1 --iterations=50 --workers=2,4
 
+      - name: Alloc pattern fuzz (20 phases, 1000 objects)
+        run: |
+          crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
+          ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
