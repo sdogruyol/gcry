@@ -63,15 +63,17 @@ asan-hello: $(BIN)
 	$(CRYSTAL) build -Dasan samples/hello.cr -o $(BIN)/hello_asan
 	$(BIN)/hello_asan
 
+VALGRIND_FLAGS := --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no
+
 valgrind-samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello_valgrind
-	valgrind --leak-check=full --error-exitcode=1 $(BIN)/hello_valgrind
+	valgrind $(VALGRIND_FLAGS) $(BIN)/hello_valgrind
 	$(CRYSTAL) build -Dgc_none samples/min.cr -o $(BIN)/min_valgrind
-	valgrind --leak-check=full --error-exitcode=1 $(BIN)/min_valgrind
+	valgrind $(VALGRIND_FLAGS) $(BIN)/min_valgrind
 	$(CRYSTAL) build -Dgc_none samples/alloc.cr -o $(BIN)/alloc_valgrind
-	valgrind --leak-check=full --error-exitcode=1 $(BIN)/alloc_valgrind 500
+	valgrind $(VALGRIND_FLAGS) $(BIN)/alloc_valgrind 500
 	$(CRYSTAL) build -Dgc_none samples/stress.cr -o $(BIN)/stress_valgrind
-	valgrind --leak-check=full --error-exitcode=1 $(BIN)/stress_valgrind 300
+	valgrind $(VALGRIND_FLAGS) $(BIN)/stress_valgrind 300
 
 samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello

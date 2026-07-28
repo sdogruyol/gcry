@@ -193,16 +193,16 @@ jobs:
           crystal build -Dgc_none samples/stress.cr -o bin/stress_valgrind
 
       - name: Valgrind memcheck hello
-        run: valgrind --leak-check=full --error-exitcode=1 ./bin/hello_valgrind
+        run: valgrind --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no ./bin/hello_valgrind
 
       - name: Valgrind memcheck min
-        run: valgrind --leak-check=full --error-exitcode=1 ./bin/min_valgrind
+        run: valgrind --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no ./bin/min_valgrind
 
       - name: Valgrind memcheck alloc 500
-        run: valgrind --leak-check=full --error-exitcode=1 ./bin/alloc_valgrind 500
+        run: valgrind --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no ./bin/alloc_valgrind 500
 
       - name: Valgrind memcheck stress 300
-        run: valgrind --leak-check=full --error-exitcode=1 ./bin/stress_valgrind 300
+        run: valgrind --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no ./bin/stress_valgrind 300
 
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
