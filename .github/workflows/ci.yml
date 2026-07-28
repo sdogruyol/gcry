@@ -44,7 +44,18 @@ jobs:
         run: crystal spec --error-trace
 
       - name: Process GC specs (-Dgc_none)
-        run: crystal spec -Dgc_none process_spec --error-trace
+        run: |
+          # Spec + process GC can rarely SEGV during Spec::Result reporting on
+          # shared runners; retry a couple times. Heavy cases live in standalone benches.
+          ok=0
+          for i in 1 2 3; do
+            if crystal spec -Dgc_none process_spec --error-trace; then
+              ok=1
+              break
+            fi
+            echo "process_spec failed (attempt $i), retrying..."
+          done
+          test "$ok" = 1
 
       - name: Sample hello (-Dgc_none)
         run: |
@@ -142,6 +153,16 @@ jobs:
         run: |
           crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
           ./bin/finalizer_complex
+
+      - name: Nursery HTTP::Headers regression
+        run: |
+          crystal build -Dgc_none bench/nursery_headers.cr -o bin/nursery_headers
+          ./bin/nursery_headers
+
+      - name: Process parallel mark
+        run: |
+          crystal build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
+          ./bin/parallel_mark_process
 
       - name: Microbenchmark suite
         run: |

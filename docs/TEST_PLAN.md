@@ -14,7 +14,7 @@
 | Area | Grade | Notes |
 |------|-------|-------|
 | **Unit test coverage** | A | 17 files covering every module (heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate). Focused assertions, proper `ensure` cleanup. |
-| **Integration test** | A- | `process_spec/` runs under `-Dgc_none` as real process GC. Real-world scenarios like HTTP::Headers nursery regression. |
+| **Integration test** | A- | `process_spec/` runs under `-Dgc_none` as real process GC. HTTP::Headers nursery regression in `bench/nursery_headers.cr`. |
 | **Fuzz test** | B+ | Nightly 30-minute fuzz (`bench/fuzz.cr`), deterministic seed 42. Good start but duration is insufficient. |
 | **CI infrastructure** | A- | 6 jobs: Linux x86_64, aarch64, macOS, perf-smoke gate, nightly fuzz. Runs under both Boehm and `-Dgc_none`. |
 | **Regression tests** | B+ | `array_shift_spec`, `phase6` nursery regression, barrier graceful skip, hash entries_size SEGV regression. |

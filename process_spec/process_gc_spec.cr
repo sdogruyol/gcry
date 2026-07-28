@@ -113,63 +113,8 @@ describe "process GC (-Dgc_none)" do
     h.tlab_refills.should eq(0)
   end
 
-  it "process parallel mark steals grey work via STW-exempt pthreads" do
-    h = Gcry.default_heap.not_nil!
-    h.stop_the_world.should be_true
-    old = h.parallel_mark_workers
-    begin
-      h.parallel_mark_workers = 4
-      before_runs = h.parallel_mark_runs
-      before_stolen = h.parallel_mark_stolen
-
-      # Alloc-heavy graph kept in a local Array (stack root during collect).
-      keep = Array(String).new(64) { |i| "pm-keep-#{i}-#{"y" * 32}" }
-      8.times do
-        nest = Array(String).new(16) { |j| "nest-#{j}-#{"z" * 24}" }
-        keep << nest.join(",")
-      end
-
-      GC.collect
-      GC.collect
-
-      h.parallel_mark_runs.should be > before_runs
-      h.parallel_mark_stolen.should be > before_stolen
-      keep.size.should be > 60
-    ensure
-      h.parallel_mark_workers = old
-    end
-  end
-
   it "registers pthread_atfork by default" do
     Gcry::Platform.atfork_installed?.should be_true
-  end
-
-  # Regression: OverflowError/SEGV in HTTP keep-alive Hash lookup when minor GC
-  # swept nursery String keys that lived only inside an old Hash.@entries blob.
-  it "minor GC keeps nursery keys inside old HTTP::Headers Hash" do
-    h = Gcry.default_heap
-    old_soft = h.soft_dirty_max_pct
-    old_nursery = h.nursery_enabled
-    begin
-      h.nursery_enabled = true
-      h.soft_dirty_max_pct = 0 # force scan_object_for_nursery fallback
-      Gcry.register_hash(HTTP::Headers::Key, String | Array(String))
-
-      headers = HTTP::Headers.new
-      headers["Connection"] = "keep-alive"
-      # Promote Hash + entries out of nursery.
-      GC.collect
-      headers["X-Nursery"] = "young-#{Random.rand(1_000_000)}"
-      young = headers["X-Nursery"]
-      h.minor_collect(scan_stack: true)
-      GC.collect
-      headers["Connection"].should eq("keep-alive")
-      headers["X-Nursery"].should eq(young)
-      HTTP.keep_alive?(HTTP::Request.new("GET", "/", headers)).should be_true
-    ensure
-      h.soft_dirty_max_pct = old_soft
-      h.nursery_enabled = old_nursery
-    end
   end
 end
 

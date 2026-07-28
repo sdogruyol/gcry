@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Darwin `release_physical_pages` spec:** do not assert immediate zero-fill after `MADV_FREE_REUSABLE` (kernel may keep contents until reclaim). Assert aligned success + still-mapped only.
+- **Nursery HTTP::Headers regression:** moved from `process_spec` to standalone `bench/nursery_headers.cr` — Spec + process GC + nursery was flaky on CI (SEGV during Spec reporting).
+- **Process parallel mark:** moved from `process_spec` to `bench/parallel_mark_process.cr` for the same Spec+process-GC flake; CI retries `process_spec` up to 3 times.
+
 - **`live_objects` counter drift on dormant chunks:** the counter was not updated when a fully-free chunk was marked DORMANT during sweep, causing the invariant checker to flag a mismatch (actual=6502, reported=1). *Discovered by the new invariant checker. Covered by `spec/regression/1_live_objects_dormant.cr`.*
 - **`after_fork_child_reinit` stability:** `LibC.fork` + reinit + alloc in child, parent continues after collect. Covered by `bench/fork_reinit.cr`.
 

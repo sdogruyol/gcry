@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -91,6 +91,14 @@ fork-test: $(BIN)
 finalizer-complex: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex
 	$(BIN)/finalizer_complex
+
+nursery-headers: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/nursery_headers.cr -o $(BIN)/nursery_headers
+	$(BIN)/nursery_headers
+
+parallel-mark-process: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/parallel_mark_process.cr -o $(BIN)/parallel_mark_process
+	$(BIN)/parallel_mark_process
 
 microbench: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/micro/run_all.cr -o $(BIN)/microbench

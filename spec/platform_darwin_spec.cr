@@ -68,9 +68,11 @@ require "./spec_helper"
         Gcry::Platform.release_physical_pages(ptr.address, page + 1).should be_false
         Gcry::Platform.release_physical_pages(ptr.address, 0_u64).should be_false
 
+        # MADV_FREE_REUSABLE may keep contents until the kernel reclaims under
+        # pressure — do not assert zero-fill. Only that the aligned call succeeds.
         Gcry::Platform.release_physical_pages(ptr.address, page).should be_true
-        # MADV_FREE_REUSABLE zero-fills on next fault.
-        ptr.as(UInt8*).value.should eq(0_u8)
+        # Page remains mapped and readable.
+        _ = ptr.as(UInt8*).value
       ensure
         LibC.munmap(ptr, LibC::SizeT.new(page)) unless Gcry.mmap_failed?(ptr)
       end
