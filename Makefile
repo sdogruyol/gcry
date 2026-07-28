@@ -1,7 +1,7 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
 
 all: spec samples
 
@@ -42,6 +42,18 @@ lint:
 	cd lib/ameba && shards build
 	cp -f lib/ameba/bin/ameba bin/ameba
 	bin/ameba
+
+coverage:
+	CRYSTAL_CACHE_DIR=/tmp/crystal-cache ./ci/coverage.sh all
+
+coverage-kcov:
+	./ci/coverage.sh kcov
+
+coverage-unreachable:
+	./ci/coverage.sh unreachable
+
+coverage-macro:
+	./ci/coverage.sh macro
 
 samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello

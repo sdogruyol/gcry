@@ -99,6 +99,59 @@ jobs:
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
 
+  coverage:
+    runs-on: ubuntu-latest
+    name: coverage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Create output dirs
+        run: mkdir -p bin coverage
+
+      - name: Unreachable methods
+        run: |
+          crystal tool unreachable --format codecov spec/all_specs.cr > coverage/unreachable.codecov.json || true
+          echo "Unreachable methods:"
+          crystal tool unreachable spec/all_specs.cr 2>/dev/null | wc -l
+
+      - name: Macro code coverage
+        run: |
+          crystal tool macro_code_coverage --format codecov spec/all_specs.cr > coverage/macro_coverage.codecov.json || true
+          echo "Macro coverage report generated"
+
+      - name: Build spec binary for kcov
+        run: crystal build spec/all_specs.cr -o bin/all_specs --error-trace
+
+      - name: Install kcov (Debian package)
+        run: |
+          wget -q http://ftp.debian.org/debian/pool/main/k/kcov/kcov_43+dfsg-1+b4_amd64.deb -O /tmp/kcov.deb
+          sudo dpkg -i /tmp/kcov.deb 2>/dev/null || sudo apt-get install -fy -qq
+          kcov --version
+
+      - name: Run kcov
+        run: |
+          kcov --clean \
+               --include-path="$PWD/src" \
+               --exclude-pattern='/.shards' \
+               coverage \
+               bin/all_specs \
+               --order=random
+          # Print summary
+          if [ -f coverage/index.json ]; then
+            python3 -c "import json; d=json.load(open('coverage/index.json')); print('Coverage: ' + str(d.get('covered_lines',0)) + '/' + str(d.get('total_lines',0)) + ' lines')" 2>/dev/null || echo "Coverage summary unavailable"
+          fi
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
     runs-on: ubuntu-latest
