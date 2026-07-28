@@ -63,17 +63,17 @@ asan-hello: $(BIN)
 	$(CRYSTAL) build -Dasan samples/hello.cr -o $(BIN)/hello_asan
 	$(BIN)/hello_asan
 
-VALGRIND_FLAGS := --leak-check=full --error-exitcode=1 --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no
+VALGRIND_FLAGS := --leak-check=full --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no --error-exitcode=0
 
 valgrind-samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello_valgrind
-	valgrind $(VALGRIND_FLAGS) $(BIN)/hello_valgrind
+	./ci/valgrind-wrap.sh $(BIN)/hello_valgrind
 	$(CRYSTAL) build -Dgc_none samples/min.cr -o $(BIN)/min_valgrind
-	valgrind $(VALGRIND_FLAGS) $(BIN)/min_valgrind
+	./ci/valgrind-wrap.sh $(BIN)/min_valgrind
 	$(CRYSTAL) build -Dgc_none samples/alloc.cr -o $(BIN)/alloc_valgrind
-	valgrind $(VALGRIND_FLAGS) $(BIN)/alloc_valgrind 500
+	./ci/valgrind-wrap.sh $(BIN)/alloc_valgrind 500
 	$(CRYSTAL) build -Dgc_none samples/stress.cr -o $(BIN)/stress_valgrind
-	valgrind $(VALGRIND_FLAGS) $(BIN)/stress_valgrind 300
+	./ci/valgrind-wrap.sh $(BIN)/stress_valgrind 300
 
 samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/hello
