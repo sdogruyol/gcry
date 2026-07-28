@@ -172,3 +172,43 @@ describe "process GC (-Dgc_none)" do
     end
   end
 end
+
+{% if flag?(:darwin) %}
+  describe "process GC Darwin Mach STW" do
+    it "stop_world_threads / start_world_threads round-trip" do
+      # Wake ExecutionContext Monitor so STW has another OS thread.
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
+
+      Gcry::Platform.install_stw_sp_capture
+      Gcry::Platform.stw_sp_capture_installed?.should be_true
+
+      current = Thread.current
+      Gcry::Platform.stop_world_threads(current)
+      begin
+        # World is stopped; do not allocate. Resume must succeed.
+      ensure
+        Gcry::Platform.start_world_threads(current)
+        Gcry::Platform.clear_thread_sps
+      end
+
+      # Alloc + collect after resume proves threads are live again.
+      p = GC.malloc(32)
+      GC.is_heap_ptr(p).should be_true
+      GC.free(p)
+      GC.collect
+    end
+
+    it "GC.collect exercises Mach STW SP clamp" do
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
+
+      GC.collect
+      Gcry::Platform.stw_sp_capture_installed?.should be_true
+      h = Gcry.default_heap
+      (h.sp_clamp_hits + h.sp_clamp_fallbacks).should be > 0
+    end
+  end
+{% end %}

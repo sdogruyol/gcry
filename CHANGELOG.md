@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Microbenchmark suite:** `bench/micro/run_all.cr` -- 6-phase suite measuring alloc latency (10 size classes, p50/p99/max), free latency, collect latency (5000 obj, p50/p99/max), TLAB refill cost, STW suspend/resume latency, and GC lock overhead. Runs in < 10s. (`make microbench`, CI `Microbenchmark suite` step.)
 - **Pause time budget:** `bench/pause_budget.cr` -- major p99/max budgets scaled to live set, incremental `collect_a_little` slice budget (STW-aware), minor vs major pause ratio. (`make pause-budget`, CI `Pause budget` step.)
 - **RSS leak detection:** `bench/rss_leak.cr` -- cyclic alloc/free/collect; gate is intra-run RSS growth only (late-half vs early-half <10%). RSS/heap ratio is informational. Writes gitignored `bench/trend.json`. (`make rss-leak`, CI `RSS leak detection` step.)
+- **Darwin platform parity tests (Phase 6.1):** `spec/platform_darwin_spec.cr` asserts soft-dirty/mprotect stubs return unsupported, `pthread_get_stackaddr_np` stack bounds contain the current SP, and host-page-aligned `MADV_FREE_REUSABLE` reclaim works. `process_spec` Darwin section exercises Mach `thread_suspend`/`resume` STW round-trip + SP clamp under `-Dgc_none`. Windows process-GC gap documented in `docs/INTEGRATION.md` (crystal#15173 HeapAlloc stub ≠ gcry port).
+- **Compiler GC contract (Phase 6.3):** `bench/compiler_gc_contract.cr` mirrors Crystal `spec/std/gc_spec.cr` (stats/prof_stats/enable) plus malloc/realloc/collect, disable/enable, and runtime `@crystal_type_id` vs `crystal_instance_type_id`. CI also runs `crystal tool hierarchy` / `unreachable` on gcry sources. (`make compiler-gc-contract`)
+- **Kemal E2E (Phase 6.4):** `bench/kemal_e2e.sh` hits every endpoint (`/`, `/json`, `/gc-collect`, `/gc-stats`, `/metrics`) before and after concurrent wrk load. CI runs 60s; full 10-min DoD via `KEMAL_E2E_DURATION=600 make kemal-e2e`.
 
 ### Fixed
 

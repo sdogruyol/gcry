@@ -75,6 +75,21 @@ Never `require "gcry"` as process GC without `-Dgc_none` — you fight Boehm.
 | Full `GC` facade + STW + fiber roots | Deprecated `-Dpreview_mt` |
 | Fork reinit via `pthread_atfork` | Patching Crystal for `-Dgc_gcry` |
 | | Precise / moving GC without compiler maps; soft-dirty (Linux-only) |
+| | **Windows** as process GC (see below) |
+
+## Windows (blocked)
+
+Crystal’s stub allocator under `-Dgc_none` works on Windows via Win32 `HeapAlloc` ([crystal-lang/crystal#15173](https://github.com/crystal-lang/crystal/pull/15173)). That is **not** enough for gcry:
+
+| Need | Status |
+|------|--------|
+| Crystal `-Dgc_none` + reopen `GC` | Partially available (HeapAlloc stub) |
+| `VirtualAlloc` / `VirtualFree` arena mapping | Not in gcry |
+| Win32 thread suspend / resume STW | Not in gcry |
+| Soft-dirty / mprotect stubs | Not in gcry |
+| Windows CI runner | Not set up |
+
+Track progress in [TEST_PLAN.md](TEST_PLAN.md) Phase 6.2. Until a Windows platform layer exists, treat Windows as **out of scope** for process GC.
 
 ## Crystal source map (1.21)
 

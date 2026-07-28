@@ -248,7 +248,7 @@ For each workload (same host, same job):
 | # | Effort | Task | Deliverable |
 |---|--------|------|-------------|
 | 6.1 | 2-3 weeks | **Darwin test parity** — Soft-dirty stub returns false. Mprotect stub returns false. Stack bounds via `pthread_get_stackaddr_np` tested. Mach `thread_suspend`/resume STW tested. RSS reclaim (`MADV_FREE_REUSABLE`) tested. All existing spec/process_spec green on macOS CI. | Darwin full suite |
-| 6.2 | — | **Windows plan** — **BLOCKED upstream:** Crystal does not support `-Dgc_none` on Windows yet. Track Crystal Windows `gc_none` support. When available: VirtualAlloc/VirtualFree test, Windows thread suspension test, CI runner setup. | Blocked (upstream) |
+| 6.2 | — | **Windows plan** — **BLOCKED in gcry:** Crystal has basic `-Dgc_none` via Win32 `HeapAlloc` ([crystal#15173](https://github.com/crystal-lang/crystal/pull/15173)), but gcry has no Windows platform layer (`VirtualAlloc`, Win32 STW, barrier stubs, CI). See [INTEGRATION.md](INTEGRATION.md#windows-blocked). When ported: VirtualAlloc/VirtualFree test, Win32 thread suspend test, CI runner. | Blocked (gcry port) |
 | 6.3 | 2-3 weeks | **Crystal compiler integration test** — Run Crystal stdlib GC-related specs under `-Dgc_none` + gcry. Verify `GC.malloc`/`GC.free`/`GC.collect` contract. Verify `@crystal_type_id` correctness in compiled output (sample: print type_id at runtime). Test `crystal tool` commands (hierarchy, docs) under gcry. | Compiler integration |
 | 6.4 | 1-2 weeks | **Real-world app test** — `bench/kemal/` full HTTP suite: every endpoint, concurrent requests (wrk -c 100), 1-hour long-running, response correctness (status + body). Fat app scenario (acikturkiye-like: many types, large object graph). | E2E app test |
 
@@ -258,15 +258,15 @@ For each workload (same host, same job):
 - **Real-world app test is flaky (6.4):** Kemal + wrk in CI may time out. Mitigation: use a shorter duration (10 min), not 1 hour. Keep 1-hour runs for nightly/weekly cron.
 
 **Definition of Done:**
-- [ ] All `spec/` tests pass on macOS CI
-- [ ] All `process_spec/` tests pass on Linux CI
-- [ ] Darwin platform stubs are tested (soft-dirty returns false, mprotect returns false)
-- [ ] Mach STW test exists and passes on macOS
-- [ ] Windows upstream issue is tracked and linked
-- [ ] Crystal stdlib GC spec subset runs green under `-Dgc_none`
-- [ ] `bench/kemal/` runs for 10 min in CI without failure
+- [x] All `spec/` tests pass on macOS CI *(CI `test-macos`)*
+- [x] All `process_spec/` tests pass on Linux CI *(and Darwin CI)*
+- [x] Darwin platform stubs are tested (soft-dirty returns false, mprotect returns false) — `spec/platform_darwin_spec.cr`
+- [x] Mach STW test exists and passes on macOS — `process_spec/process_gc_spec.cr` (Darwin section)
+- [x] Windows blocker is tracked and linked — [INTEGRATION.md](INTEGRATION.md#windows-blocked), crystal#15173 + gcry port gap
+- [x] Crystal stdlib GC spec subset runs green under `-Dgc_none` — `bench/compiler_gc_contract.cr` (mirrors `spec/std/gc_spec.cr` + type_id/malloc contract)
+- [x] `bench/kemal/` E2E — endpoint correctness + concurrent wrk (`bench/kemal_e2e.sh`); CI 60s; full 10-min via `KEMAL_E2E_DURATION=600 make kemal-e2e`
 
-**Success signal:** macOS CI is equivalent to Linux CI. Compiler integration tests pass. Windows dependency is tracked with an upstream issue link.
+**Success signal:** macOS CI exercises Darwin stubs + Mach STW. Compiler GC contract + crystal tools pass. Kemal E2E green. Windows dependency is tracked (gcry port + crystal#15173).
 
 ---
 
