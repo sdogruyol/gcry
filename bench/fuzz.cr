@@ -63,7 +63,7 @@ if replay_path
   finalized = Atomic(Int32).new(0)
   callback = ->(_obj : Void*) { finalized.add(1) }
 
-  prune = ->{
+  prune = -> {
     live.select! { |p| heap.is_heap_ptr(p) && heap.live?(p) }
   }
 
@@ -170,7 +170,7 @@ finalized = Atomic(Int32).new(0)
 
 callback = ->(_obj : Void*) { finalized.add(1) }
 
-prune = ->{
+prune = -> {
   live.select! { |p| heap.is_heap_ptr(p) && heap.live?(p) }
 }
 
