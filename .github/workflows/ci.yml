@@ -186,6 +186,11 @@ jobs:
           crystal tool hierarchy src/gcry.cr >/dev/null
           crystal tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
 
+      - name: Trace + heap dump smoke
+        run: |
+          crystal build bench/trace_smoke.cr -o bin/trace_smoke --error-trace
+          ./bin/trace_smoke
+
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

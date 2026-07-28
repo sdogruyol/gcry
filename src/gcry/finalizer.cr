@@ -130,6 +130,7 @@ module Gcry
           callback = node.value.callback
           object = node.value.object
           LibC.free(node.as(Void*))
+          Trace.finalizer("run", object)
           callback.call(object)
           node = nxt
         end

@@ -32,6 +32,9 @@ Under `-Dgc_none`, `require "gcry"` reopens Crystal’s `GC` module. Everyday co
 | `Gcry.metrics` | Extended counters (collections, RSS-ish bytes, blacklist, layout, …) |
 | `Gcry.prometheus_text` | Prometheus exposition format |
 | `Gcry::Observability.json_stats` | JSON snapshot for `/gc-stats` |
+| `Gcry.dump_heap(io)` | Live-object NDJSON dump (debug; large heaps may take seconds) |
+| `Gcry.dump_heap_addresses` / `heap_dump_gone` / `heap_dump_new` | Address-set dump + leak diff helpers |
+| `Gcry::Trace` | NDJSON event log (`GCRY_TRACE=1`) |
 | `Gcry.register_layout(T)` / `register_hash(K,V)` | Precise scan tables |
 | `Gcry.register_set(T)` | `register_hash(T, Nil)` for `Set(T)` backing |
 | `Gcry.register_layouts` | Auto-register concrete `Reference` subclasses (opt-in `GCRY_AUTO_LAYOUTS=1`; skip with `GCRY_DISABLE_AUTO_LAYOUTS=1`) |

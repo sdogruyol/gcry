@@ -1,0 +1,98 @@
+# Heap dump — live-object NDJSON for leak hunting (Phase 7.2).
+#
+# Debug-only: walking a multi-GB heap may take seconds. Prefer after a collect
+# when the live set is stable.
+#
+#   Gcry.dump_heap(io)           # NDJSON lines
+#   Gcry.dump_heap_addresses     # Set of live user pointers (for diff)
+
+module Gcry
+  # Write one NDJSON object per live block to *io*.
+  # Returns the number of live objects written.
+  # Warning: dumping heaps ≥ ~1 GiB may take > 10s.
+  def self.dump_heap(io : IO, heap : Heap = default_heap) : UInt64
+    count = 0_u64
+    heap.each_chunk do |chunk|
+      if ChunkHeader.large?(chunk)
+        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        next if BlockHeader.free?(header)
+        write_dump_line(io, header)
+        count += 1
+      else
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        payload = SizeClasses.payload(class_index)
+        block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            write_dump_line(io, header)
+            count += 1
+          end
+          cursor += block_bytes
+        end
+      end
+    end
+    count
+  end
+
+  # Collect live user-pointer addresses (allocation-light for small heaps).
+  def self.dump_heap_addresses(heap : Heap = default_heap) : Set(UInt64)
+    addrs = Set(UInt64).new
+    heap.each_chunk do |chunk|
+      if ChunkHeader.large?(chunk)
+        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        next if BlockHeader.free?(header)
+        addrs << BlockHeader.user_from(header).address
+      else
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        payload = SizeClasses.payload(class_index)
+        block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            addrs << BlockHeader.user_from(header).address
+          end
+          cursor += block_bytes
+        end
+      end
+    end
+    addrs
+  end
+
+  # Addresses present in *after* but not *before* (new survivors / growth).
+  def self.heap_dump_new(before : Set(UInt64), after : Set(UInt64)) : Set(UInt64)
+    after - before
+  end
+
+  # Addresses present in *before* but not *after* (reclaimed).
+  def self.heap_dump_gone(before : Set(UInt64), after : Set(UInt64)) : Set(UInt64)
+    before - after
+  end
+
+  private def self.write_dump_line(io : IO, header : BlockHeader*) : Nil
+    user = BlockHeader.user_from(header)
+    size = header.value.size.to_u64
+    type_id = 0_i32
+    # Crystal objects store type_id as Int32 at the start of the payload when
+    # the block is large enough; raw buffers may contain garbage — still report.
+    if size >= 4
+      type_id = user.as(Int32*).value
+    end
+    marked = BlockHeader.marked?(header)
+    atomic = BlockHeader.atomic?(header)
+    nursery = BlockHeader.nursery?(header)
+    io << "{\"addr\":\"0x" << user.address.to_s(16)
+    io << "\",\"size\":" << size
+    io << ",\"type_id\":" << type_id
+    io << ",\"marked\":" << marked
+    io << ",\"atomic\":" << atomic
+    io << ",\"nursery\":" << nursery
+    io << "}\n"
+  end
+end

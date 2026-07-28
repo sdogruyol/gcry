@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Darwin platform parity tests (Phase 6.1):** `spec/platform_darwin_spec.cr` asserts soft-dirty/mprotect stubs return unsupported, `pthread_get_stackaddr_np` stack bounds contain the current SP, and host-page-aligned `MADV_FREE_REUSABLE` reclaim works. `process_spec` Darwin section exercises Mach `thread_suspend`/`resume` STW round-trip + SP clamp under `-Dgc_none`. Windows process-GC gap documented in `docs/INTEGRATION.md` (crystal#15173 HeapAlloc stub ≠ gcry port).
 - **Compiler GC contract (Phase 6.3):** `bench/compiler_gc_contract.cr` mirrors Crystal `spec/std/gc_spec.cr` (stats/prof_stats/enable) plus malloc/realloc/collect, disable/enable, and runtime `@crystal_type_id` vs `crystal_instance_type_id`. CI also runs `crystal tool hierarchy` / `unreachable` on gcry sources. (`make compiler-gc-contract`)
 - **Kemal E2E (Phase 6.4):** `bench/kemal_e2e.sh` hits every endpoint (`/`, `/json`, `/gc-collect`, `/gc-stats`, `/metrics`) before and after concurrent wrk load. CI runs 60s; full 10-min DoD via `KEMAL_E2E_DURATION=600 make kemal-e2e`.
+- **GC trace log (Phase 7.1):** `GCRY_TRACE=1` emits NDJSON events (`alloc`/`free` sampled, `collect_start`/`collect_end`, `finalizer`, `barrier_arm`) via `Gcry::Trace`. Reentrancy guard avoids malloc recursion. (`make trace-smoke`, `spec/trace_dump_spec.cr`)
+- **Heap dump (Phase 7.2):** `Gcry.dump_heap(io)` / `dump_heap_addresses` / `heap_dump_gone`/`new` for live-object NDJSON and leak diffs. Dump count matches `live_objects`.
+- **Mutation harness (Phase 7.3):** `bench/mutations/run.sh` — 10 hand-crafted sed mutants; kill suite scores **10/10**. Feasibility notes in `docs/MUTATION.md`.
 
 ### Fixed
 

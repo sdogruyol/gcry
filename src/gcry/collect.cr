@@ -223,6 +223,7 @@ module Gcry
       header = BlockHeader.from_user(object)
       BlockHeader.set_finalizer(header)
       @finalizers.add(object, callback)
+      Trace.finalizer("register", object)
     end
 
     def add_finalizer(object : Void*, &block : Finalizers::Callback) : Nil
@@ -264,7 +265,9 @@ module Gcry
       return if @collecting
 
       abort_incremental
+      Trace.collect_start(major: true)
       run_collection(major: true, scan_stack: scan_stack, roots: roots)
+      Trace.collect_end(self, major: true)
       Invariant.after_collect(self)
     end
 
@@ -276,7 +279,9 @@ module Gcry
       return unless @nursery_enabled
 
       abort_incremental
+      Trace.collect_start(major: false)
       run_collection(major: false, scan_stack: scan_stack, roots: roots)
+      Trace.collect_end(self, major: false)
     end
 
     # Incremental major mark slice (Boehm-style collect_a_little).

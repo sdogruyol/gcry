@@ -223,12 +223,14 @@ module Gcry
     def malloc(size : Int) : Void*
       ptr = allocate(size.to_u64, atomic: false, clear: true)
       Invariant.after_malloc(self, ptr, size.to_u64)
+      Trace.after_malloc(ptr, size.to_u64, atomic: false)
       ptr
     end
 
     def malloc_atomic(size : Int) : Void*
       ptr = allocate(size.to_u64, atomic: true, clear: false)
       Invariant.after_malloc(self, ptr, size.to_u64)
+      Trace.after_malloc(ptr, size.to_u64, atomic: true)
       ptr
     end
 
@@ -284,6 +286,8 @@ module Gcry
         @finalizers.notice_reclaim(pointer)
         with_alloc_lock { cache_large_chunk(chunk, header) }
         trim_large_cache
+        Invariant.after_free(self, pointer)
+        Trace.after_free(pointer)
         return
       end
 
@@ -326,6 +330,7 @@ module Gcry
         end
       end
       Invariant.after_free(self, pointer)
+      Trace.after_free(pointer)
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -983,3 +988,5 @@ require "./tlab"
 require "./parallel_mark"
 require "./stack_scrub"
 require "./invariant"
+require "./trace"
+require "./heap_dump"
