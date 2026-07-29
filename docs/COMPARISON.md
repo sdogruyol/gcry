@@ -6,20 +6,20 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-| | gcry (0.14.0) | Boehm (Crystal default) |
+| | gcry (0.15.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
 | Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
-| Parallel OS threads | Experimental (measure — HTTP thr can drop) | Yes |
+| Parallel OS threads | Experimental (measure — HTTP thr can drop; TLAB opt-in) | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
-| Kemal `/json` (Linux v0.14.0) | thr ~**89%**, post-GC RSS ~**0.79×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (Linux v0.15.0) | thr ~**86%**, post-GC RSS ~**0.77×** — [PERF.md](PERF.md) | baseline |
 | Kemal `/json` (macOS v0.13.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when

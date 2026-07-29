@@ -7,7 +7,7 @@
 
 ## Current State Assessment
 
-**Grade: B+ / "Solid, but not industry-leading."** *(post-PR#9 / v0.14.0)*
+**Grade: A- / "Industry-grade suite for a shard GC."** *(v0.15.0 — process-STW MT + TLAB gates)*
 
 Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrower than the original Critical list.
 

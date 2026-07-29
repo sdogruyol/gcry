@@ -8,23 +8,27 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (v0.14.0) — Linux *(measured)*
+## Headline (v0.15.0) — Linux *(measured)*
 
-Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on** (process default since v0.13), auto-layouts **off**. Session: `bench/log/linux/2026-07-29-035426/` (`git` `015d66d`, post-PR#9).
+Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on**, auto-layouts **off**. Session: `bench/log/linux/2026-07-29-151144/` (`git` `bebedae`, pre-tag tip).
 
 | Path | % of Boehm | post-GC RSS × |
 |------|----------:|--------------:|
-| `/json` | **~89%** | **~0.79×** |
-| `/` | **~89%** | **~0.78×** |
+| `/json` | **~86%** | **~0.77×** |
+| `/` | **~86%** | **~0.76×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. Throughput unchanged vs the v0.12/0.13 carry; **Kemal post-GC RSS improved** vs the scrub-off 0.99× cut (scrub default-on now measured, not estimated). Fat-app (acikturkiye) re-cut 2026-07-29: **~90%** thr @ **~2.54×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`bench/log/linux/2026-07-29-112202/`).
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.15.0 is a correctness release** (TLAB+process STW); collector defaults unchanged vs 0.14 — thr within host noise of the v0.14 ~89% cut; RSS still under Boehm. Fat-app (acikturkiye): **~90%** thr @ **~2.54×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`bench/log/linux/2026-07-29-112202/`).
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
-| `/` | 86159 | 76631 | **88.9%** | **0.78×** |
-| `/json` | 36724 | 32729 | **89.1%** | **0.79×** |
+| `/` | 85246 | 73495 | **86.2%** | **0.76×** |
+| `/json` | 38398 | 33154 | **86.3%** | **0.77×** |
 
 `GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+
+### v0.14.0 Linux cut (superseded headline)
+
+Same host method. Session: `bench/log/linux/2026-07-29-035426/` (`015d66d`). `/json` **89.1%** @ **0.79×** RSS; `/` **88.9%** @ **0.78×**.
 
 ### v0.12.0-era Linux cut (scrub off; superseded)
 
@@ -48,6 +52,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | **0.12.0** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
 | **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
 | **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
+| **0.15.0** | **~86%** | **~86%** | **~0.77×** | Correctness: TLAB+process STW freelist fix + STW MT harness. Kemal re-cut `2026-07-29-151144`; acik ~90% / ~2.54× (`112202`). |
 
 **Escape knobs (same era, not defaults):**
 
@@ -57,7 +62,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.14.0** cut |
+| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.15.0** cut |
 | `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).

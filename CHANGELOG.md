@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-29
+
+Correctness release: process-STW × TLAB freelist UAF class fixed and CI-gated;
+process-STW MT property harness; acikturkiye Linux re-cut measured; shard RSS
+dead-end defaults documented. Supported path remains EC parallelism **1**,
+`GCRY_TLAB` **off** (Parallel+TLAB stays experimental).
+
 ### Performance
 
-- **Shard RSS A/B (process GC, defaults unchanged):** same-host Linux cuts rejected as defaults — Linux HOLED `GCRY_PAGE_DONTNEED` (Kemal `/json` and acik thr down; sweep p50 ~3→~70 ms; freelist abandon → chunk churn), process-default curated `HTTP::Headers::Key` Hash layout (Kemal `/json` soft vs builtins-only), collect-time mutator `clear_stack`, and Linux 1 MiB large-cache floor. Keep fiber scrub, Linux **4 MiB** large-cache, HOLED **opt-in**; Headers layout stays app-side / `GCRY_AUTO_LAYOUTS`. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) “Don’t bother”.
+- **Linux Kemal** (same-host median-of-3, `wrk -c 100 -d 30`, scrub on): `/json` **~86%** of Boehm @ **~0.77×** post-GC RSS; `/` **~86%** @ **~0.76×**. Session `bench/log/linux/2026-07-29-151144/` (`bebedae`). Collector defaults unchanged vs 0.14 — thr within host noise of the v0.14 ~89% cut. See [docs/PERF.md](docs/PERF.md) (Linux).
 - **acikturkiye Linux re-cut (measured):** `/api/v1/` **~90%** of Boehm thr @ **~2.54×** post-GC RSS (median-of-3, `wrk -c 100 -d 30`, scrub on). Session `bench/log/linux/2026-07-29-112202/` (`9decd01`). Replaces the v0.14.0 ~93% / ~2.65× *estimate*. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Shard RSS A/B (defaults unchanged):** same-host cuts rejected as defaults — Linux HOLED `GCRY_PAGE_DONTNEED`, process-default curated `HTTP::Headers::Key` Hash layout, collect-time mutator `clear_stack`, Linux 1 MiB large-cache floor. Keep fiber scrub, Linux **4 MiB** large-cache, HOLED **opt-in**; Headers layout stays app-side / `GCRY_AUTO_LAYOUTS`. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) “Don’t bother”.
 
 ### Fixed
 
@@ -23,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Docs / knobs:** Linux HOLED page release documented as **opt-in** (post-STW; not “STW-heavy”). Large-cache defaults clarified (Linux process **4 MiB**, Darwin **1 MiB**). Darwin `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1` explicitly clear `madvise_free_pages`.
+
 ## [0.14.0] - 2026-07-29
 
 Trust and tooling release: industry-style test suite, debug observability, and a
@@ -417,7 +426,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0

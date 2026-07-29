@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs at ~89% of Boehm's throughput with ~0.79x the RSS (Linux).</b>
+  <b>gcry runs at ~86% of Boehm's throughput with ~0.77x the RSS (Linux).</b>
 </p>
 
 <p align="center">
@@ -173,15 +173,15 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.14.0)* |
+| Workload | gcry vs Boehm (v0.15.0)* |
 |----------|------------------------:|
-| Kemal `/json` throughput | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
-| Kemal `/json` post-GC RSS | **~0.79x** |
-| Kemal `/` throughput | **~89%** |
+| Kemal `/json` throughput | **~86%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
+| Kemal `/json` post-GC RSS | **~0.77x** |
+| Kemal `/` throughput | **~86%** |
 | Fat app `/api/v1/` throughput | **~90%** |
 | Fat app `/api/v1/` RSS | **~2.54x** |
 
-\*Kemal: measured `bench/log/linux/2026-07-29-035426/` (median-of-3, scrub on). Fat app: `2026-07-29-112202/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+\*Kemal: measured `bench/log/linux/2026-07-29-151144/` (median-of-3, scrub on). Fat app: `2026-07-29-112202/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ### macOS (Apple Silicon)
 
@@ -199,7 +199,7 @@ Until then, we live with this reality. We don't hide our numbers.
 
 ### Pause distribution (Kemal `/json`, Linux)
 
-Illustrative histogram from an earlier cut (not the v0.14.0 median session). Prefer `Gcry.pause_stats` / `/gc-stats` on your host.
+Illustrative histogram from an earlier cut (not the v0.15.0 median session). Prefer `Gcry.pause_stats` / `/gc-stats` on your host.
 
 ```
 p50:  2.1 ms  ████████████████████████████████▌
@@ -222,7 +222,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
-| **Empty-chunk release** | On by default — Kemal post-GC RSS ~**0.79×** Boehm (Linux v0.14.0) |
+| **Empty-chunk release** | On by default — Kemal post-GC RSS ~**0.77×** Boehm (Linux v0.15.0) |
 | **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
 | **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
 | **Fork** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
