@@ -115,9 +115,13 @@ module Gcry
     # Skips !free? nodes (USED-on-freelist after mid-alloc STW). If skipping
     # empties the list, force a fresh size-class chunk once.
 
-    # Like tlab_refill but if the freelist is empty after steal/map, drop the
+    # Like tlab_refill but if the freelist is empty after map, drop the
     # alloc lock and STW-collect once (map_chunk must not collect under TLAB
     # lock — that deadlocks), then retry.
+    # No live-TLAB steal: nulling another thread's freelist head races with
+    # lock-free tlab_alloc_small (TOCTOU dual-alloc). Idle freelists return via
+    # flush_all_tlabs under STW. (@tlab_steals stays 0; reserved for a future
+    # CAS steal if imbalance warrants it.)
     protected def tlab_refill(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = tlab_refill_once(class_index, payload, nursery)
       return head unless head.null?
@@ -166,29 +170,8 @@ module Gcry
             next
           end
 
-          if src.null?
-            stolen = steal_from_other_tlabs(class_index, nursery)
-            unless stolen.null?
-              tlab = current_tlab_under_lock
-              if tlab.null?
-                if nursery
-                  @nursery_freelists[class_index] = splice_free_nodes(stolen, @nursery_freelists[class_index])
-                else
-                  @freelists[class_index] = splice_free_nodes(stolen, @freelists[class_index])
-                end
-                break
-              end
-              if nursery
-                tlab.value.nursery_freelists[class_index] = stolen
-              else
-                tlab.value.freelists[class_index] = stolen
-              end
-              head = stolen
-              @tlab_refills += 1
-              @tlab_steals += 1
-            end
-            break
-          end
+          # Global still empty: do not steal from other live TLABs (TOCTOU).
+          break if src.null?
 
           if @blacklist_enabled
             taken = take_non_blacklisted(src, class_index, nursery)
@@ -253,35 +236,10 @@ module Gcry
             tlab.value.freelists[class_index] = head
           end
           @tlab_refills += 1
-          @tlab_steals += count.to_u64
           break
         end
       end
       head
-    end
-
-    # Caller holds @alloc_lock. Take another live TLAB's freelist for this class.
-    private def steal_from_other_tlabs(class_index : Int32, nursery : Bool) : Void*
-      self_key = current_thread_key
-      i = 0
-      while i < MAX_TLABS
-        if @tlabs[i].live && @tlabs[i].owner != self_key
-          head = nursery ? @tlabs[i].nursery_freelists[class_index] : @tlabs[i].freelists[class_index]
-          unless head.null?
-            if nursery
-              @tlabs[i].nursery_freelists[class_index] = Pointer(Void).null
-            else
-              @tlabs[i].freelists[class_index] = Pointer(Void).null
-            end
-            while !head.null? && !BlockHeader.free?(BlockHeader.from_user(head))
-              head = BlockHeader.from_user(head).value.next_free
-            end
-            return head unless head.null?
-          end
-        end
-        i += 1
-      end
-      Pointer(Void).null
     end
 
     protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool) : Void*

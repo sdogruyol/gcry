@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
+
 ## [0.15.0] - 2026-07-29
 
 Correctness release: process-STW × TLAB freelist UAF class fixed and CI-gated;
