@@ -139,6 +139,16 @@ jobs:
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
 
+      - name: Process-GC STW MT property test with TLAB+nursery (50 iterations, 2+4 workers)
+        run: |
+          crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+          ./bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+
+      - name: Process-GC nursery+TLAB minor smoke (single-thread)
+        run: |
+          crystal build -Dgc_none bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke
+          ./bin/nursery_tlab_smoke
+
       - name: Alloc pattern fuzz (20 phases, 1000 objects)
         run: |
           crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz

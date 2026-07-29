@@ -59,6 +59,10 @@ describe "Gcry TLAB" do
       heap.destroy
     end
   end
+
+  # FREE-claim × minor ordering is process-STW-only (`stop_the_world`); library
+  # heaps must not enable STW+collect under Boehm (Thread.suspend hangs). See
+  # `collect_mark` minor×old skip + `bench/nursery_tlab_smoke.cr`.
 end
 
 describe "Gcry parallel mark knob" do

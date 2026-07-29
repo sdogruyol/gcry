@@ -60,19 +60,23 @@ module Gcry
       # find_object ignores FREE → empty-chunk munmap risk. Clear FREE but keep
       # next_free so scrub can walk the chain (BlockHeader.set_used would null
       # next_free and sever the freelist → OOM). Do not scan (uninit payload).
+      #
+      # Minor × old: never claim. Minor does not munmap old chunks, and clearing
+      # FREE on an old freelist node (then skipping mark) leaves USED-on-freelist
+      # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
       if BlockHeader.free?(header)
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread
         if base_only && addr != BlockHeader.user_from(header).address
           return
         end
+        if @minor_only && !BlockHeader.nursery?(header)
+          return
+        end
         h = header.value
         h.flags = h.flags & ~BlockHeader::Flags::FREE
         header.value = h
         return if heap_marked?(header)
-        if @minor_only && !BlockHeader.nursery?(header)
-          return
-        end
         heap_set_mark(header)
         return
       elsif base_only

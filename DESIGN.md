@@ -154,7 +154,7 @@ Shipped and dogfooded on Linux + macOS; **v0.15.0** is a correctness release (pr
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ✅ fiber scrub **default-on**; `GCRY_CLEAR_STACK` still opt-in |
-| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF fixed; live steal removed (TOCTOU); FREE-claim × minor still open |
+| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF, live steal, FREE-claim×minor ordering fixed; Parallel+TLAB+`minor_collect` still open |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
@@ -185,7 +185,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | Track | Why it matters |
 |-------|----------------|
 | **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
-| **TLAB FREE-claim × minor** | Before calling Parallel+TLAB supported (live steal already removed) |
+| **Parallel+TLAB+minor** | FREE-claim×minor ordering fixed; `minor_collect` under Parallel+TLAB still drops explicit roots |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |
