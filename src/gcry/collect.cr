@@ -802,10 +802,9 @@ module Gcry
       flush_pending_empty_chunks
       # DORMANT madvise outside STW — kernel VM lock contention avoided.
       flush_pending_dormant_chunks
-      # Partial-chunk free-page madvise outside STW.
+      # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
       flush_pending_page_release_chunks
-      # Darwin: MADV_FREE_REUSABLE for cached large-object chunks. Linux keeps
-      # the mmap-resident for the `large_cache_retain` budget (cheaper fault).
+      # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
       release_large_freelist_pages
       trim_large_cache
 

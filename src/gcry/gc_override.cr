@@ -60,6 +60,11 @@ module GC
       # not real reachable). Default-on for macOS and Linux process GC.
       # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
       heap.scrub_fibers_enabled = true
+      heap.blacklist_enabled = true
+      # Large cache on Darwin starts at 1 MiB (adaptive can grow to LARGE_CACHE_LIMIT
+      # if hit-rate warrants it). mach_vm reclaim already punches holes on free,
+      # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
+      heap.large_cache_retain = 1048576_u64
     {% else %}
       # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
       # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
@@ -68,7 +73,13 @@ module GC
       # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
       # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
       # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      # Collect-time mutator clear_stack was measured and dropped (below-SP wipe
+      # is outside the root-scan window; no durable thr/RSS win).
       heap.scrub_fibers_enabled = true
+      heap.blacklist_enabled = true
+      # Large-cache stays at Heap::DEFAULT_LARGE_CACHE_RETAIN (4 MiB). A 1 MiB
+      # Linux floor was tried with HOLED default-on and did not help; adaptive
+      # still grows on high hit-rate. Escape: GCRY_LARGE_CACHE=<bytes>.
     {% end %}
     # type_id_gate on ambient roots only (stack/static). Heap scan must still
     # mark raw Array/Hash buffers that lack a Crystal type_id header.
@@ -77,19 +88,7 @@ module GC
     # all-conservative scanning). Re-enabled in P2.3 era now that layout-precise
     # scans cut false root hits sharply — the abandon spiral is unlikely.
     # Escape: GCRY_DISABLE_BLACKLIST=1.
-    {% if flag?(:darwin) %}
-      heap.blacklist_enabled = true
-      # Large cache on Darwin starts at 1 MiB (adaptive can grow to LARGE_CACHE_LIMIT
-      # if hit-rate warrants it). mach_vm reclaim already punches holes on free,
-      # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
-      heap.large_cache_retain = 1048576_u64
-    {% else %}
-      heap.blacklist_enabled = true
-    {% end %}
-    # Re-enabled on Darwin in P2.3 era: layout-precise scanning (P2.1) cuts
-    # false root hits sharply vs the old all-conservative regime, so the
-    # freelist-abandonment spiral that forced it off is much less likely.
-    # Escape: GCRY_DISABLE_BLACKLIST=1.
+    # (blacklist_enabled set in the Darwin/Linux branches above.)
     heap.allow_interior_pointers = false
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
@@ -124,6 +123,9 @@ module GC
       # (bench/log/thr-abis). register() falls back to scan_cap for unsafe ivars;
       # alloc_size must match before precise/scan_cap (raw-buffer type_id collisions).
       # Escape when opted in: GCRY_DISABLE_AUTO_LAYOUTS=1.
+      # Curated HTTP::Headers::Key Hash as process default was measured: Kemal
+      # /json thr soft vs builtins-only — keep registration app-side
+      # (bench/nursery_headers.cr) or via GCRY_AUTO_LAYOUTS.
       if env_flag_one?("GCRY_AUTO_LAYOUTS") && !env_flag_one?("GCRY_DISABLE_AUTO_LAYOUTS")
         Gcry.register_layouts
       end
@@ -268,18 +270,24 @@ module GC
     if env_flag_one?("GCRY_DISABLE_MADVISE")
       heap.madvise_free_pages = false
     elsif env_flag_one?("GCRY_PAGE_DONTNEED")
-      # Sparse-chunk free-page release; raises STW, helps RSS when fragmented.
+      # Sparse-chunk free-page release (HOLED + post-STW madvise).
       heap.madvise_free_pages = true
     end
 
     {% if flag?(:darwin) %}
       # Darwin: MADV_FREE_REUSABLE drops RSS; enable free-page release.
       # (MADV_DONTNEED on Darwin does NOT drop RSS — advisory only.)
-      unless env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
+      if env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
+        heap.madvise_free_pages = false
+      else
         heap.madvise_free_pages = true
         # flush_pending_page_release_chunks also walks ALL chunks on Darwin
         # (not just HOLED) for more aggressive RSS recovery.
       end
+    {% elsif flag?(:linux) %}
+      # Linux HOLED free-page release stays OPT-IN (`GCRY_PAGE_DONTNEED=1`).
+      # Default-on was measured to regress Kemal and acik thr/RSS: HOLED freelist
+      # rebuild blows sweep cost and abandoned free pages cause chunk churn.
     {% end %}
 
     if env_flag_one?("GCRY_INTERIOR")
@@ -317,7 +325,8 @@ module GC
       Gcry::Platform.stw_sp_clamp_enabled = false
     end
 
-    # Free large-object bytes to retain after post-collect trim (default 8 MiB).
+    # Free large-object bytes to retain after post-collect trim
+    # (Linux process 4 MiB / Darwin 1 MiB; override via GCRY_LARGE_CACHE).
     if cache = env_u64("GCRY_LARGE_CACHE")
       heap.large_cache_retain = cache
     end
