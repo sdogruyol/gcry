@@ -72,6 +72,9 @@ Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC ge
 
 - Nursery / incremental as process default on this HTTP heap
 - Smaller `GCRY_CHUNK_BYTES` for RSS
+- Linux **HOLED** `GCRY_PAGE_DONTNEED` as process default — thr and RSS both worse (HOLED freelist rebuild blows sweep; free-only pages abandoned → chunk churn). Stay opt-in.
+- Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
+- Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
 - Expecting another shard filter to hit ≤1.5× Boehm RSS
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).

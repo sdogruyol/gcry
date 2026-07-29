@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Shard RSS A/B (process GC, defaults unchanged):** same-host Linux cuts rejected as defaults — Linux HOLED `GCRY_PAGE_DONTNEED` (Kemal `/json` and acik thr down; sweep p50 ~3→~70 ms; freelist abandon → chunk churn), process-default curated `HTTP::Headers::Key` Hash layout (Kemal `/json` soft vs builtins-only), collect-time mutator `clear_stack`, and Linux 1 MiB large-cache floor. Keep fiber scrub, Linux **4 MiB** large-cache, HOLED **opt-in**; Headers layout stays app-side / `GCRY_AUTO_LAYOUTS`. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) “Don’t bother”.
 - **acikturkiye Linux re-cut (measured):** `/api/v1/` **~90%** of Boehm thr @ **~2.54×** post-GC RSS (median-of-3, `wrk -c 100 -d 30`, scrub on). Session `bench/log/linux/2026-07-29-112202/` (`9decd01`). Replaces the v0.14.0 ~93% / ~2.65× *estimate*. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ### Fixed
@@ -19,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Process-GC STW MT property harness:** `bench/stw_mt_property_test.cr` (`-Dgc_none`) runs Parallel allocator workers while the default EC pins roots (ACK handshake) and `GC.collect`s under real STW. Closes the gap left by library-heap `mt_property_test` (`stop_the_world=false`). CI gates `--workers=2,4` and `--tlab --workers=2,4`. (`make stw-mt-property-test`)
 
+### Changed
+
+- **Docs / knobs:** Linux HOLED page release documented as **opt-in** (post-STW; not “STW-heavy”). Large-cache defaults clarified (Linux process **4 MiB**, Darwin **1 MiB**). Darwin `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1` explicitly clear `madvise_free_pages`.
 ## [0.14.0] - 2026-07-29
 
 Trust and tooling release: industry-style test suite, debug observability, and a

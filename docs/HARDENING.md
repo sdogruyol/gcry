@@ -24,8 +24,8 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
 - Fiber stack scrub **on** (Linux + Darwin; `GCRY_DISABLE_SCRUB_FIBERS=1` to opt out)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
-- Large-object freelist retain: Linux **8 MiB**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`)
-- **Linux + macOS** process GC: Darwin uses Mach STW + dyld roots; free-page physical release **on** (`MADV_FREE_REUSABLE` / host page size — 16 KiB on Apple Silicon)
+- Large-object freelist retain: Linux process **4 MiB**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive up to 32 MiB)
+- Free-page physical release: Darwin **on** (`MADV_FREE_REUSABLE`); Linux HOLED **opt-in** (`GCRY_PAGE_DONTNEED=1` — measured thr+RSS regression as default). Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.
@@ -53,9 +53,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **16 MiB**, Darwin **512 KiB**; library **0**) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux; Darwin process default-on) |
-| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default free-page reclaim |
-| `GCRY_LARGE_CACHE` | Large freelist retain (Linux default **8 MiB**; Darwin process **1 MiB**) |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
+| `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
+| `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **4 MiB**; Darwin **1 MiB**; adaptive) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
@@ -88,7 +88,7 @@ Conservative GC keeps any aligned word that **looks** like a heap pointer.
 
 Common sources: stale stack slots, integer bit patterns, broad static scans.
 
-Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout, SP clamp, blacklist, fiber scrub. Opt-in `GCRY_CLEAR_STACK=1` wipes **unused** stack on alloc — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
+Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout builtins, SP clamp, blacklist, fiber scrub. Linux HOLED page release is opt-in (`GCRY_PAGE_DONTNEED=1`). Opt-in `GCRY_CLEAR_STACK=1` wipes **unused** stack on alloc — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
 
 ### Diagnosing via `/gc-stats`
 
