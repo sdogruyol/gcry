@@ -75,24 +75,43 @@ module Gcry
             Roots.scan_range(low, high, safe: true) do |candidate|
               mark_root_candidate(candidate, source: RootSource::Thread)
             end
+            Platform.each_thread_greg(pthread) do |candidate|
+              mark_root_candidate(candidate, source: RootSource::Thread)
+            end
             next
           end
         end
 
-        # Skip PROT_NONE guard; prefer saved stack_top (used portion) when it
-        # sits above the guard — full 8 MiB scans kill STW under many fibers.
-        # If suspend SP falls inside this fiber stack, clamp further.
+        # Skip PROT_NONE guard. For a *running* fiber on another OS thread,
+        # `@context.stack_top` is stale (last yield). Never raise the scan start
+        # above hardware SP (`max(stack_top, sp)` skipped live frames — Parallel
+        # workers lost in-flight mallocs under collect). Prefer SP (+ red zone);
+        # with TLAB, scan the full fiber stack — SP/greg capture alone still
+        # flaked under Parallel>2 when majors mixed with minors.
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = fiber.@context.stack_top.address
         top = guard if top < guard
-        if (sp = Platform.thread_sp(pthread)) &&
-           sp.address >= stack.pointer.address && sp.address < stack.bottom.address
-          top = sp.address if sp.address > top
+        if @tlab_enabled
+          top = guard
+          @sp_clamp_fallbacks += 1
+        elsif (sp = Platform.thread_sp(pthread)) &&
+              sp.address >= stack.pointer.address && sp.address < stack.bottom.address
+          top = sp.address
+          {% if flag?(:x86_64) %}
+            top = top > 128 ? top - 128 : top
+          {% end %}
+          top = guard if top < guard
           @sp_clamp_hits += 1
+        else
+          @sp_clamp_fallbacks += 1
         end
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Thread)
+        end
+        # GP registers at suspend may hold the only copy of a live pointer.
+        Platform.each_thread_greg(pthread) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
       end

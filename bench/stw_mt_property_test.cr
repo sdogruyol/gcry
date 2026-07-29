@@ -13,8 +13,8 @@
 #
 # TLAB defaults OFF for the CI STW gate; pass `--tlab` to also stress
 # thread-local freelists (fixed under process STW — see CHANGELOG).
-# Pass `--nursery` to allocate in the young gen (majors still reclaim; Parallel
-# +TLAB+minor is a separate open bug — do not mix minor_collect here yet).
+# Pass `--nursery` to enable young-gen + mix minor/major collects (Parallel
+# worker STW scan: hardware SP + greg; TLAB forces full fiber-stack scan).
 #
 # Build: crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
 # Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab] [--nursery]
@@ -244,7 +244,12 @@ class StwMtPropertyTest
         end
       end
 
-      GC.collect
+      # Mix minors with majors when nursery is on (Parallel worker STW stack scan).
+      if Gcry.default_heap.nursery_enabled && (i % 3 != 0)
+        Gcry.default_heap.minor_collect
+      else
+        GC.collect
+      end
       @collects.add(1)
       unless verify("after collect ##{i + 1}")
         @running.set(false)

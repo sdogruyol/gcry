@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
-- **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark. (Parallel+TLAB+`minor_collect` still drops some explicit roots — tracked separately; `stw_mt --nursery` stresses nursery alloc under majors.)
+- **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
+- **Parallel worker STW stack scan:** `scan_other_thread_stacks` used `max(stack_top, sp)` for running fibers; stale `stack_top` above hardware SP skipped live frames, so Parallel+TLAB in-flight mallocs were swept (pin saw FREE). Prefer suspend SP (+ x86_64 red zone), mark saved GP registers from the suspend `ucontext`, and with TLAB scan the full fiber stack (SP/greg alone still flaked under Parallel>2). CI: `stw_mt_property_test --tlab --nursery` mixes minors.
 
 ## [0.15.0] - 2026-07-29
 
