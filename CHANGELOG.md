@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Process-GC STW MT property harness:** `bench/stw_mt_property_test.cr` (`-Dgc_none`) runs Parallel allocator workers while the default EC pins roots (ACK handshake) and `GC.collect`s under real STW. Closes the gap left by library-heap `mt_property_test` (`stop_the_world=false`). CI gates `--workers=2` with TLAB off; `--workers=4` and `--tlab` remain known process-GC gaps (see [TEST_PLAN.md](docs/TEST_PLAN.md)). (`make stw-mt-property-test`)
+
 ## [0.14.0] - 2026-07-29
 
 Trust and tooling release: industry-style test suite, debug observability, and a
