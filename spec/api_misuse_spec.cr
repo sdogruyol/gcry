@@ -9,10 +9,13 @@
 #   - add_root(null) → ignored
 #   - register_disappearing_link(null, ...) → ignored
 #   - GC.collect inside finalizer → reentrancy safety
-#   - push_stack with invalid bounds → ignored
+#   - Crystal Signal.trap deferred alloc (event loop — not async-signal-safe)
 #
 # All tests run under -Dgc_none (process GC), but the library-heap path
 # is also tested via the default Boehm-assisted spec run.
+#
+# See docs/POLICY.md: GC is not async-signal-safe. Do not call GC from a
+# POSIX signal handler.
 
 require "../src/gcry"
 require "spec"
@@ -71,12 +74,28 @@ describe "API misuse" do
     true.should be_true
   end
 
+  it "collect inside finalizer does not deadlock" do
+    heap = Gcry::Heap.new
+    ran = false
+    obj = heap.malloc(16)
+    heap.add_finalizer(obj) do
+      ran = true
+      heap.collect(scan_stack: false)
+    end
+    heap.collect(scan_stack: false)
+    heap.collect(scan_stack: false)
+    ran.should be_true
+    heap.destroy
+  end
+
   {% if flag?(:linux) %}
-    it "collect inside finalizer does not deadlock" do
+    # Crystal Signal.trap runs on the event loop (deferred), not in the async
+    # POSIX handler. This covers trap+alloc as a normal mutator; it does not
+    # claim async-signal safety (see POLICY.md).
+    it "Crystal Signal.trap deferred alloc does not crash" do
       reentered = false
 
       Signal::USR1.trap do
-        # GC.malloc inside signal handler (async-signal-safe)
         _ = GC.malloc_atomic(32)
         reentered = true
       end

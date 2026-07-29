@@ -35,7 +35,7 @@
 | **OOM / error path testing** | 🟡 High | `mmap` failure, heap full, threshold overflow scenarios untested. |
 | **Finalizer reentrancy / ordering** | 🟡 High | Finalizer-in-finalizer, cross-references, ordering dependencies untested. |
 | **Deterministic replay** | 🟡 High | Fuzz has a seed but no crash replay mechanism. |
-| **Signal safety / fork** | 🟡 High | Only 1 sample (`fork_reinit.cr`). Allocation inside signal handlers untested. |
+| **Signal safety / fork** | 🟡 High | Fork covered (`bench/fork_reinit.cr`). True async-signal GC is **forbidden** ([POLICY.md](POLICY.md)); do not claim handler-safe malloc. Crystal `Signal.trap` is deferred (event loop) — covered as mutator path, not async safety. |
 | **Benchmark variance** | 🟡 High | wrk results are noisy by nature. No protocol for run count, outlier elimination, or confidence intervals. |
 | **Perf regression alerting** | 🟡 High | Listed in ROADMAP but not yet implemented. |
 | **API misuse / hardening** | 🟢 Medium | Double-free test exists. Null pointer free, invalid pointer, use-after-free missing. |
@@ -140,7 +140,7 @@ Priority labels:
 |---|--------|------|-------------|
 | 3.1 | 2-3 weeks + infra | **24-hour soak test** — `bench/soak.cr`. Alloc storm (1000 obj/s), periodic collect (1 Hz), fiber spawn (10 Hz), thread spawn (0.1 Hz), finalizer load (100 obj/s), WeakRef load. Hourly telemetry: heap size, pause stats, live_objects, RSS. After 24h: live_objects == 0, RSS within 10% of start, no crash. Run weekly via CI cron. | Soak test, CI cron |
 | 3.2 | 1 week | **Alloc pattern fuzzing** — Zipfian distribution (real-world), bimodal (small + large), stride (array growth). For each: "pause < 2x baseline", "RSS growth < 10%". | Pattern fuzz suite |
-| 3.3 | 1 week | **Thread death / spawn storm** — Thread spawn during collect. Thread exit during STW suspend (signal safety). 1000 iterations. | Thread safety test |
+| 3.3 | 1 week | **Thread death / spawn storm** — Thread spawn during collect. Thread exit during STW suspend. Crystal `Signal.trap` deferred alloc (not async-signal-safe). 1000 iterations. | Thread safety test |
 | 3.4 | 1 week | **OOM scenarios** — `GCRY_HEAP_LIMIT=32MB` bounded heap. Graceful fallback on `mmap` failure. Finalizer execution under OOM pressure. Verify: no segfault, no infinite loop, deterministic error return. | OOM test suite |
 
 **What could go wrong:**
@@ -153,7 +153,7 @@ Priority labels:
 - [x] Soak runs on a weekly CI cron schedule
 - [x] Soak telemetry is logged to a file for post-hoc analysis
 - [x] Alloc pattern fuzz passes for 3 distributions (Zipfian, Bimodal, Stride) - verifies pause p99 < 8-10x baseline, RSS growth < 10%
-- [x] Thread spawn/exit during collect passes 1000 iterations (thread_storm.cr: spawn storm, rapid create/destroy, signal safety)
+- [x] Thread spawn/exit during collect passes 1000 iterations (thread_storm.cr: spawn storm, rapid create/destroy, Crystal `Signal.trap` deferred alloc)
 - [x] OOM test passes without segfault: bounded heap, mmap failure, finalizer under OOM
 
 **Success signal:** Soak test runs 24h without crash, OOM tests never segfault, thread spawn storm doesn't deadlock.
@@ -172,13 +172,13 @@ Priority labels:
 |---|--------|------|-------------|
 | 4.1 | 1 day + ongoing | **Test requirement per bug fix** — Add to `CONTRIBUTING.md`. Enforce via PR template (checkbox: "bug fix includes a reproducing test"). CI check: new files in `spec/regression/` or modifications to existing spec files. Run a **CHANGELOG audit**: for each entry in CHANGELOG that says "Fixed ...", verify there is a corresponding test. File issues for untested fixes. | Policy, PR template, regression dir, audit results |
 | 4.2 | 1 week | **API misuse test suite** — `GC.free(null)` → no-op, `GC.realloc(null, 0)` → `malloc(0)`, `GC.malloc(0)` → minimum size, `add_root(null)` → ignored, `register_disappearing_link(null, ...)` → ignored, `push_stack` with invalid bounds → ignored, `GC.collect` inside finalizer → reentrancy safety. | API hardening test |
-| 4.3 | 1-2 weeks | **Signal safety test** — `GC.malloc` inside signal handler (should be safe). `GC.collect` inside signal handler (forbidden → assertion). SIGSEGV handler + GC interaction. SIGPIPE during GC state. | Signal safety suite |
+| 4.3 | 1-2 weeks | **Signal policy alignment** — Document: GC is **not** async-signal-safe ([POLICY.md](POLICY.md)). Tests must not claim handler-safe `GC.malloc`/`GC.collect`. Crystal `Signal.trap` deferred alloc is OK (event-loop mutator). True POSIX-handler GC remains forbidden (no “should be safe” suite). | Policy + comment/test honesty |
 | 4.4 | 1 week | **Fork test suite** — Heap state before/after fork. `GC.init` (reinit) after fork. Child alloc + collect. Parent alloc + collect (unaffected). Multi-thread fork (Crystal forbids, but test graceful error). | Fork test suite |
 | 4.5 | 1-2 weeks | **Finalizer complex scenarios** — Finalizer chain, finalizer calling `GC.collect`, resurrection via add_root, finalizer + disappearing links interaction, finalizer under heavy allocation pressure, many disappearing links. | Finalizer edge case suite |
 
 **What could go wrong:**
 - **CHANGELOG audit reveals many untested fixes (4.1):** Could be demoralising. Mitigation: treat this as a backlog — file issues, don't block Phase 4. Prioritise recent regressions (v0.12+) over historical ones.
-- **Signal safety tests are platform-specific (4.3):`signal` handlers on macOS differ from Linux. Mitigation: mark signal safety tests as Linux-only initially, add Darwin variants when platform parity (Phase 6) begins.
+- **Signal tests confused with async safety (4.3):** Crystal `Signal.trap` is deferred; claiming “async-signal-safe GC.malloc” contradicts POLICY. Mitigation: align comments/CHANGELOG/TEST_PLAN with POLICY; keep trap tests as event-loop coverage only.
 - **Fork tests unreliable in CI (4.4):** Fork in CI containers can behave differently. Mitigation: run fork tests on a dedicated CI job with `process_spec/` (already uses `-Dgc_none`).
 
 **Definition of Done:**
@@ -187,10 +187,10 @@ Priority labels:
 - [x] `spec/regression/` directory exists with at least 5 entries
 - [ ] CHANGELOG audit is complete — issues filed for every untested fix
 - [x] API misuse tests pass: null free, null realloc, zero malloc, etc.
-- [ ] Signal safety tests pass on Linux
+- [x] Signal policy aligned with [POLICY.md](POLICY.md) — no “async-signal-safe GC” claims; Crystal `Signal.trap` tests labeled as deferred event-loop path
 - [x] Fork tests pass on Linux + macOS
 
-**Success signal:** Every CHANGELOG "Fixed" entry has a companion test. API misuse tests pass without crash. Signal handlers don't destabilise the heap.
+**Success signal:** Every CHANGELOG "Fixed" entry has a companion test. API misuse tests pass without crash. Docs forbid GC from true async signal handlers.
 
 ---
 

@@ -3,7 +3,7 @@
 # Exercises gcry under concurrent OS-thread create/destroy during GC cycles:
 #   1. Thread spawn storm — N threads created, each allocates/collects/frees
 #   2. Rapid thread create/destroy — threads created and joined in rapid succession
-#   3. Signal safety — GC allocation inside signal handlers
+#   3. Crystal Signal.trap deferred alloc (event loop — not async-signal-safe)
 #
 # 1000 iterations total across all phases.
 #
@@ -150,10 +150,10 @@ class ThreadStormTest
     error_count
   end
 
-  # Phase 3: Signal safety — GC alloc inside SIGUSR1 handler.
-  # Signals are delivered to the main event loop via Crystal's Signal.trap.
-  def phase3_signal_safety(iters : Int32) : Int32
-    puts "Phase 3: Signal safety — GC alloc in signal handler (#{iters} iterations)"
+  # Phase 3: Crystal Signal.trap deferred alloc (event loop).
+  # Not async-signal-safe — see docs/POLICY.md. Trap callbacks run as mutators.
+  def phase3_signal_trap(iters : Int32) : Int32
+    puts "Phase 3: Crystal Signal.trap deferred alloc (#{iters} iterations)"
 
     signaled = Atomic(UInt64).new(0_u64)
     handled = Atomic(UInt64).new(0_u64)
@@ -183,7 +183,7 @@ class ThreadStormTest
     puts "  Phase 3 done: #{iters} iterations, signals=#{signaled.get}, handled=#{handled.get}, #{elapsed.round(2)}s"
 
     if handled.get == 0 && iters > 0
-      record_error("Phase 3: Crystal signal handler never executed (handled=0)")
+      record_error("Phase 3: Crystal Signal.trap callback never executed (handled=0)")
     end
 
     report_errors
@@ -205,7 +205,7 @@ puts ""
 errs += test.phase2_rapid_create_destroy((iterations / 4).to_i)
 puts ""
 
-errs += test.phase3_signal_safety((iterations / 4).to_i)
+errs += test.phase3_signal_trap((iterations / 4).to_i)
 puts ""
 
 puts "=== Summary ==="
