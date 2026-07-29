@@ -90,6 +90,7 @@ module Gcry
     @tlab_steals = 0_u64
     @tlab_hits = 0_u64
     @tlabs_booted = false
+    @tlab_epoch = Atomic(UInt64).new(0_u64)
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
@@ -130,6 +131,7 @@ module Gcry
       @tlab_refills = 0_u64
       @tlab_steals = 0_u64
       @tlabs_booted = false
+      @tlab_epoch = Atomic(UInt64).new(0_u64)
       @alloc_lock = Crystal::SpinLock.new
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
@@ -668,7 +670,9 @@ module Gcry
       ptr = mmap_anonymous(bytes)
 
       # One emergency collect may free large objects (munmap) before failing hard.
-      if Gcry.mmap_failed?(ptr) && !@collecting && @enabled
+      # Never collect here under TLAB: refill holds @alloc_lock, and STW+collect
+      # while that lock is held deadlocks Parallel mutators spinning on it.
+      if Gcry.mmap_failed?(ptr) && !@collecting && @enabled && !@tlab_enabled
         collect(scan_stack: true)
         ptr = mmap_anonymous(bytes)
       end

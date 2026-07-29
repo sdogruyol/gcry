@@ -18,8 +18,7 @@
 # Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab]
 #
 # On failure the seed is printed for deterministic local replay.
-# CI gates `--workers=2,4` (no TLAB) and `--tlab --workers=2`; `--tlab --workers=4`
-# remains a known process-GC gap (see docs/TEST_PLAN.md).
+# CI gates `--workers=2,4` (no TLAB) and `--tlab --workers=2,4`.
 
 require "../src/gcry"
 require "wait_group"
@@ -130,7 +129,17 @@ class StwMtPropertyTest
   def worker_run(worker_id : Int32, rng_seed : Int64, out_ch : Channel(Void*), ack_ch : Channel(Nil))
     rng = Random.new(rng_seed + worker_id)
     while @running.get
-      ptr = GC.malloc_atomic(OBJ_BYTES)
+      ptr = Pointer(Void).null
+      # Retry OOM instead of dying — a dead worker leaves main blocked on receive.
+      64.times do
+        begin
+          ptr = GC.malloc_atomic(OBJ_BYTES)
+          break
+        rescue Gcry::OutOfMemoryError
+          Fiber.yield
+        end
+      end
+      break if ptr.null? || !@running.get
       serial = @serial.add(1)
       write_cookie(ptr, serial)
       @allocs.add(1)
@@ -144,7 +153,10 @@ class StwMtPropertyTest
       end
       Fiber.yield if rng.rand(0..15) == 0
     end
+  rescue Channel::ClosedError
+    # shutdown
   rescue ex
+    @running.set(false)
     record_error("worker #{worker_id}: #{ex.class}: #{ex.message || ex.inspect}")
   end
 

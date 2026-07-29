@@ -11,12 +11,14 @@ module Gcry
       Stack
       Static
       Thread
+      # Heap-to-heap edges — must not FREE-claim (would retain freelists).
+      Heap
     end
 
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
     private def mark_candidate(pointer : Void*) : Nil
-      mark_impl(pointer, gate_type_id: false, base_only: false, source: RootSource::Stack)
+      mark_impl(pointer, gate_type_id: false, base_only: false, source: RootSource::Heap)
     end
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
@@ -54,19 +56,25 @@ module Gcry
       header = find_block(pointer)
       return unless header
 
-      # Mid-`tlab_alloc_small` STW: mutator holds a FREE freelist node on-stack.
-      # find_object ignores FREE, so without claiming here empty-chunk release
-      # can munmap the block. Only under process STW+TLAB, and only Stack/Thread
-      # (not Static) — library collects must not retain freelist false roots.
+      # Mid-`tlab_alloc_small` STW: mutator holds FREE freelist nodes on-stack.
+      # find_object ignores FREE → empty-chunk munmap risk. Clear FREE but keep
+      # next_free so scrub can walk the chain (BlockHeader.set_used would null
+      # next_free and sever the freelist → OOM). Do not scan (uninit payload).
       if BlockHeader.free?(header)
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread
         if base_only && addr != BlockHeader.user_from(header).address
           return
         end
-        payload = header.value.size
-        flags = header.value.flags & ~BlockHeader::Flags::FREE
-        BlockHeader.set_used(header, payload, flags)
+        h = header.value
+        h.flags = h.flags & ~BlockHeader::Flags::FREE
+        header.value = h
+        return if heap_marked?(header)
+        if @minor_only && !BlockHeader.nursery?(header)
+          return
+        end
+        heap_set_mark(header)
+        return
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
         # inflate false retention. Heap marks must allow interiors (shift).
@@ -79,6 +87,8 @@ module Gcry
         when RootSource::Stack  then @type_id_stack_rejects += 1
         when RootSource::Static then @type_id_static_rejects += 1
         when RootSource::Thread then @type_id_thread_rejects += 1
+        when RootSource::Heap
+          # no dedicated counter
         end
         note_false_root(addr)
         return
@@ -197,7 +207,7 @@ module Gcry
             words = limit // word
             cursor = user.as(UInt64*)
             words.times do |i|
-              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false, source: RootSource::Stack)
+              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false, source: RootSource::Heap)
             end
             return
           elsif size_match
@@ -219,7 +229,7 @@ module Gcry
       words = size // word
       cursor = user.as(UInt64*)
       words.times do |i|
-        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Stack)
+        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
     end
 
