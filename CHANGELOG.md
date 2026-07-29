@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-29
+
+Correctness release: process-STW × TLAB freelist UAF class fixed and CI-gated;
+process-STW MT property harness; acikturkiye Linux re-cut measured; shard RSS
+dead-end defaults documented. Supported path remains EC parallelism **1**,
+`GCRY_TLAB` **off** (Parallel+TLAB stays experimental).
+
+### Performance
+
+- **Linux Kemal** (same-host median-of-3, `wrk -c 100 -d 30`, scrub on): `/json` **~86%** of Boehm @ **~0.77×** post-GC RSS; `/` **~86%** @ **~0.76×**. Session `bench/log/linux/2026-07-29-151144/` (`bebedae`). Collector defaults unchanged vs 0.14 — thr within host noise of the v0.14 ~89% cut. See [docs/PERF.md](docs/PERF.md) (Linux).
+- **acikturkiye Linux re-cut (measured):** `/api/v1/` **~90%** of Boehm thr @ **~2.54×** post-GC RSS (median-of-3, `wrk -c 100 -d 30`, scrub on). Session `bench/log/linux/2026-07-29-112202/` (`9decd01`). Replaces the v0.14.0 ~93% / ~2.65× *estimate*. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+- **Shard RSS A/B (defaults unchanged):** same-host cuts rejected as defaults — Linux HOLED `GCRY_PAGE_DONTNEED`, process-default curated `HTTP::Headers::Key` Hash layout, collect-time mutator `clear_stack`, Linux 1 MiB large-cache floor. Keep fiber scrub, Linux **4 MiB** large-cache, HOLED **opt-in**; Headers layout stays app-side / `GCRY_AUTO_LAYOUTS`. See [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md) “Don’t bother”.
+
+### Fixed
+
+- **Explicit-root list × process STW race:** `add_root`/`delete_root` could run concurrently with `stop_world`, freezing a mutator mid-list splice so `@roots.each` walked a freed/`next`-corrupt `RootNode` (SEGV at `run_collection` during `stw_mt_property_test`). Serialize mutations with `@roots_lock` acquired before STW; collector may mutate without the lock while `@world_stopped`.
+- **Parked-fiber scrub on thinly mapped stacks:** Cap wipe to the same 512 B fiber path as `clear_stack` and zero only readable pages via `Roots.clear_range_safe` (defense in depth; Crystal fiber stacks grow on demand).
+- **TLAB + Parallel under process STW:** mid-`tlab_alloc_small` STW could leave FREE freelist nodes only reachable from mutator stacks; mark ignored FREE, then empty-chunk release munmapped them (and `unlink_freelist_range` could coerce USED→FREE). Fix: claim FREE stack/thread roots when TLAB+STW (**clear FREE but keep `next_free`** so scrub can walk the chain — `set_used` was severing freelists → OOM), freelist scrub after flush/mark (TLAB-only), flush only FREE nodes, TLAB epoch + detach-before-claim (no dual-alloc after flush), no nested `collect` under `@alloc_lock` (deadlock), unlock-and-collect retry on refill miss, steal stranded TLAB freelists, skip nil `Thread#current_fiber` under Parallel. CI gates `stw_mt_property_test --tlab --workers=2,4`.
+
+### Added
+
+- **Process-GC STW MT property harness:** `bench/stw_mt_property_test.cr` (`-Dgc_none`) runs Parallel allocator workers while the default EC pins roots (ACK handshake) and `GC.collect`s under real STW. Closes the gap left by library-heap `mt_property_test` (`stop_the_world=false`). CI gates `--workers=2,4` and `--tlab --workers=2,4`. (`make stw-mt-property-test`)
+
+### Changed
+
+- **Docs / knobs:** Linux HOLED page release documented as **opt-in** (post-STW; not “STW-heavy”). Large-cache defaults clarified (Linux process **4 MiB**, Darwin **1 MiB**). Darwin `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1` explicitly clear `madvise_free_pages`.
+
 ## [0.14.0] - 2026-07-29
 
 Trust and tooling release: industry-style test suite, debug observability, and a
@@ -401,7 +428,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0

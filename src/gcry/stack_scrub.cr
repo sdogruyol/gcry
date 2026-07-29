@@ -3,7 +3,8 @@
 # clear_stack: zero unused words below SP so later root scans do not treat
 # stale stack slots as live. scrub_parked_fibers: same for parked fiber stacks.
 #
-# Opt-in: GCRY_CLEAR_STACK=1, GCRY_SCRUB_FIBERS=1 (process dogfood).
+# Alloc-path: GCRY_CLEAR_STACK=1. Parked-fiber collect scrub: process default;
+# escape GCRY_DISABLE_SCRUB_FIBERS=1.
 #
 # clear_stack must not call Fiber/Thread APIs — those malloc during early
 # Thread TLS publish and recurse into allocate. Bounds come from
@@ -116,33 +117,36 @@ module Gcry
     end
 
     # Zero a capped window below each parked fiber's saved SP — not the full
-    # [guard, SP) span (that faults in multi-MiB stacks and inflates RSS).
+    # [guard, SP) span (that faults pages in and inflates RSS). Cap matches
+    # clear_stack's fiber path: Crystal fiber stacks are thinly mapped, so a
+    # 4 KiB blind clear below SP can SEGV on an unmapped hole (CI flake under
+    # Parallel STW). Roots.clear_range_safe skips unreadables as a second belt.
     protected def scrub_parked_fiber_stacks : Nil
       return unless @scrub_fibers_enabled
 
       current = Fiber.current
       wipe = @clear_stack_bytes
-      wipe = DEFAULT_CLEAR_STACK_BYTES if wipe > DEFAULT_CLEAR_STACK_BYTES
+      wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
       scrubbed = 0_u64
       Fiber.unsafe_each do |fiber|
         next if fiber == current
         next if fiber.running?
 
         stack = fiber.@stack
-        guard = stack.pointer.address + Roots::PAGE_SIZE
+        base = stack.pointer.address
+        bottom = stack.bottom.address
+        next if base == 0 || bottom <= base + Roots::PAGE_SIZE
+
+        guard = base + Roots::PAGE_SIZE
         top = fiber.@context.stack_top.address
         top = guard if top < guard
-        next if top <= guard
+        next if top <= guard || top > bottom
 
         low = top > wipe ? top - wipe : guard
         low = guard if low < guard
         next if low >= top
 
-        len = top - low
-        next if len > Roots::MAX_SCAN_BYTES
-
-        Pointer(UInt8).new(low).clear(len)
-        scrubbed += len
+        scrubbed += Roots.clear_range_safe(low, top)
       end
       @fiber_scrub_bytes_total += scrubbed
       @fiber_scrub_runs += 1

@@ -70,7 +70,13 @@ module Gcry
                 while (cursor + block_bytes) <= limit
                   usable_payload += payload.to_u64
                   header = cursor.as(BlockHeader*)
-                  unless BlockHeader.free?(header)
+                  if BlockHeader.free?(header)
+                    # FREE + marked: mid-alloc claimed from a stack root.
+                    if heap_marked?(header)
+                      any_live = true
+                      live_payload += payload.to_u64
+                    end
+                  else
                     if heap_marked?(header)
                       any_live = true
                       live_payload += payload.to_u64
@@ -415,6 +421,8 @@ module Gcry
     end
 
     # Drop freelist nodes whose user pointer falls in [lo, hi).
+    # Never rewrite !free? headers: a USED object can still be linked on the
+    # freelist after a mid-`tlab_alloc_small` STW + flush (see scrub_freelists).
     private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
       head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
       new_head = Pointer(Void).null
@@ -423,7 +431,7 @@ module Gcry
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
         addr = user.address
-        if addr < lo || addr >= hi
+        if (addr < lo || addr >= hi) && BlockHeader.free?(header)
           payload = header.value.size
           header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, new_head)
           new_head = user

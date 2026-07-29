@@ -82,7 +82,11 @@ module Gcry
         end
         i += 1
       end
-      @alloc_lock.sync { current_tlab_under_lock(key) }
+      tlab = @alloc_lock.sync { current_tlab_under_lock(key) }
+      if tlab.null?
+        raise OutOfMemoryError.new("TLAB table full (#{MAX_TLABS} threads)")
+      end
+      tlab
     end
 
     # Caller must hold @alloc_lock (or be single-threaded).
@@ -104,45 +108,106 @@ module Gcry
         end
         i += 1
       end
-      @tlabs.to_unsafe
+      Pointer(Tlab).null
     end
 
-    # Steal a batch from the global freelist into the calling thread's TLAB.
     # Adaptive batch size: targets ~8 KiB per refill (per-class, clamped to [1, 256]).
+    # Skips !free? nodes (USED-on-freelist after mid-alloc STW). If skipping
+    # empties the list, force a fresh size-class chunk once.
+
+    # Like tlab_refill but if the freelist is empty after steal/map, drop the
+    # alloc lock and STW-collect once (map_chunk must not collect under TLAB
+    # lock — that deadlocks), then retry.
     protected def tlab_refill(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
+      head = tlab_refill_once(class_index, payload, nursery)
+      return head unless head.null?
+      return Pointer(Void).null if @collecting || !@enabled
+      collect(scan_stack: true)
+      tlab_refill_once(class_index, payload, nursery)
+    end
+
+    private def tlab_refill_once(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = Pointer(Void).null
       batch = (8192_u64 / payload.to_u64).to_i32.clamp(1, 256)
       @alloc_lock.sync do
-        if nursery
-          if @nursery_freelists[class_index].null?
-            refill_size_class(class_index, payload, nursery: true)
-          end
-        else
-          if @freelists[class_index].null?
-            refill_size_class(class_index, payload, nursery: false)
-          end
-        end
-
-        src = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
-        if @blacklist_enabled && !src.null?
-          taken = take_non_blacklisted(src, class_index, nursery)
-          unless taken.null?
-            # Put the good node back as freelist head so the batch steal below
-            # starts on a non-blacklisted page.
-            th = BlockHeader.from_user(taken)
-            tv = th.value
-            tv.next_free = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
-            th.value = tv
-            if nursery
-              @nursery_freelists[class_index] = taken
-            else
-              @freelists[class_index] = taken
+        2.times do |attempt|
+          if nursery
+            if @nursery_freelists[class_index].null?
+              refill_size_class(class_index, payload, nursery: true)
             end
-            src = taken
+          else
+            if @freelists[class_index].null?
+              refill_size_class(class_index, payload, nursery: false)
+            end
           end
-        end
 
-        unless src.null?
+          src = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+          skip_budget = 4096
+          while !src.null? && !BlockHeader.free?(BlockHeader.from_user(src)) && skip_budget > 0
+            src = BlockHeader.from_user(src).value.next_free
+            if nursery
+              @nursery_freelists[class_index] = src
+            else
+              @freelists[class_index] = src
+            end
+            skip_budget -= 1
+          end
+          if skip_budget == 0
+            if nursery
+              @nursery_freelists[class_index] = Pointer(Void).null
+            else
+              @freelists[class_index] = Pointer(Void).null
+            end
+            src = Pointer(Void).null
+          end
+
+          if src.null? && attempt == 0
+            refill_size_class(class_index, payload, nursery: nursery)
+            next
+          end
+
+          if src.null?
+            stolen = steal_from_other_tlabs(class_index, nursery)
+            unless stolen.null?
+              tlab = current_tlab_under_lock
+              if tlab.null?
+                if nursery
+                  @nursery_freelists[class_index] = splice_free_nodes(stolen, @nursery_freelists[class_index])
+                else
+                  @freelists[class_index] = splice_free_nodes(stolen, @freelists[class_index])
+                end
+                break
+              end
+              if nursery
+                tlab.value.nursery_freelists[class_index] = stolen
+              else
+                tlab.value.freelists[class_index] = stolen
+              end
+              head = stolen
+              @tlab_refills += 1
+              @tlab_steals += 1
+            end
+            break
+          end
+
+          if @blacklist_enabled
+            taken = take_non_blacklisted(src, class_index, nursery)
+            unless taken.null?
+              th = BlockHeader.from_user(taken)
+              tv = th.value
+              tv.next_free = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+              th.value = tv
+              if nursery
+                @nursery_freelists[class_index] = taken
+              else
+                @freelists[class_index] = taken
+              end
+              src = taken
+            end
+          end
+
+          break if src.null? || !BlockHeader.free?(BlockHeader.from_user(src))
+
           head = src
           tail = src
           count = 1
@@ -150,11 +215,15 @@ module Gcry
             h = BlockHeader.from_user(tail)
             nxt = h.value.next_free
             break if nxt.null?
+            break unless BlockHeader.free?(BlockHeader.from_user(nxt))
             tail = nxt
             count += 1
           end
           last = BlockHeader.from_user(tail)
           rest = last.value.next_free
+          while !rest.null? && !BlockHeader.free?(BlockHeader.from_user(rest))
+            rest = BlockHeader.from_user(rest).value.next_free
+          end
           lv = last.value
           lv.next_free = Pointer(Void).null
           last.value = lv
@@ -165,6 +234,19 @@ module Gcry
           end
 
           tlab = current_tlab_under_lock
+          if tlab.null?
+            lv2 = last.value
+            lv2.next_free = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+            last.value = lv2
+            if nursery
+              @nursery_freelists[class_index] = head
+            else
+              @freelists[class_index] = head
+            end
+            head = Pointer(Void).null
+            break
+          end
+
           if nursery
             tlab.value.nursery_freelists[class_index] = head
           else
@@ -172,41 +254,90 @@ module Gcry
           end
           @tlab_refills += 1
           @tlab_steals += count.to_u64
+          break
         end
       end
       head
     end
 
+    # Caller holds @alloc_lock. Take another live TLAB's freelist for this class.
+    private def steal_from_other_tlabs(class_index : Int32, nursery : Bool) : Void*
+      self_key = current_thread_key
+      i = 0
+      while i < MAX_TLABS
+        if @tlabs[i].live && @tlabs[i].owner != self_key
+          head = nursery ? @tlabs[i].nursery_freelists[class_index] : @tlabs[i].freelists[class_index]
+          unless head.null?
+            if nursery
+              @tlabs[i].nursery_freelists[class_index] = Pointer(Void).null
+            else
+              @tlabs[i].freelists[class_index] = Pointer(Void).null
+            end
+            while !head.null? && !BlockHeader.free?(BlockHeader.from_user(head))
+              head = BlockHeader.from_user(head).value.next_free
+            end
+            return head unless head.null?
+          end
+        end
+        i += 1
+      end
+      Pointer(Void).null
+    end
+
     protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool) : Void*
-      tlab = current_tlab
-      user = if nursery
-               tlab.value.nursery_freelists[class_index]
-             else
-               tlab.value.freelists[class_index]
-             end
+      # Epoch protocol: flush_all_tlabs bumps @tlab_epoch under STW. Detach while
+      # FREE, then set_used only if epoch is unchanged — otherwise claim the
+      # orphan (unique) so we never dual-alloc a node published to global.
+      32.times do
+        epoch = @tlab_epoch.get
+        tlab = current_tlab
 
-      if user.null?
-        user = tlab_refill(class_index, payload, nursery)
-        raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if user.null?
-      else
-        @tlab_hits += 1
-      end
+        user = if nursery
+                 tlab.value.nursery_freelists[class_index]
+               else
+                 tlab.value.freelists[class_index]
+               end
 
-      header = BlockHeader.from_user(user)
-      next_free = header.value.next_free
-      if nursery
-        tlab.value.nursery_freelists[class_index] = next_free
-      else
-        tlab.value.freelists[class_index] = next_free
-      end
-      BlockHeader.set_used(header, payload, flags)
-      heap_set_mark(header) if @incremental_marking || @collecting
+        if !user.null? && !BlockHeader.free?(BlockHeader.from_user(user))
+          if nursery
+            tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+          else
+            tlab.value.freelists[class_index] = Pointer(Void).null
+          end
+          user = Pointer(Void).null
+        end
 
-      with_alloc_lock do
-        @free_bytes -= payload if @free_bytes >= payload
-        @nursery_alloc_bytes += payload.to_u64 if nursery
+        if user.null?
+          user = tlab_refill(class_index, payload, nursery)
+          raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if user.null?
+          tlab = current_tlab
+          next if @tlab_epoch.get != epoch
+        else
+          @tlab_hits += 1
+        end
+
+        header = BlockHeader.from_user(user)
+        next unless BlockHeader.free?(header)
+        next_free = header.value.next_free
+
+        if nursery
+          next unless tlab.value.nursery_freelists[class_index] == user
+          tlab.value.nursery_freelists[class_index] = next_free
+        else
+          next unless tlab.value.freelists[class_index] == user
+          tlab.value.freelists[class_index] = next_free
+        end
+
+        # Detached: unique owner even if epoch advanced during STW.
+        BlockHeader.set_used(header, payload, flags)
+        heap_set_mark(header) if @incremental_marking || @collecting
+        with_alloc_lock do
+          @free_bytes -= payload if @free_bytes >= payload
+          @nursery_alloc_bytes += payload.to_u64 if nursery
+        end
+        return user
       end
-      user
+      raise OutOfMemoryError.new("failed to claim TLAB node size class #{payload}")
     end
 
     # Return a small object to the current thread's TLAB (no global lock).
@@ -226,45 +357,97 @@ module Gcry
     end
 
     # Flush TLAB freelists back to global (call under STW / before sweep / destroy).
+    # Bump epoch first so resumed mid-alloc abandons stale TLAB heads already
+    # published here. Walks each chain and splices only FREE nodes.
     protected def flush_all_tlabs : Nil
       return unless @tlabs_booted && @tlab_enabled
+      @tlab_epoch.add(1)
       MAX_TLABS.times do |i|
         next unless @tlabs[i].live
         SIZE_CLASS_COUNT.times do |c|
           head = @tlabs[i].freelists[c]
           unless head.null?
-            tail = head
-            loop do
-              h = BlockHeader.from_user(tail)
-              nxt = h.value.next_free
-              break if nxt.null?
-              tail = nxt
-            end
-            th = BlockHeader.from_user(tail)
-            tv = th.value
-            tv.next_free = @freelists[c]
-            th.value = tv
-            @freelists[c] = head
+            @freelists[c] = splice_free_nodes(head, @freelists[c])
             @tlabs[i].freelists[c] = Pointer(Void).null
           end
 
           head = @tlabs[i].nursery_freelists[c]
           unless head.null?
-            tail = head
-            loop do
-              h = BlockHeader.from_user(tail)
-              nxt = h.value.next_free
-              break if nxt.null?
-              tail = nxt
-            end
-            th = BlockHeader.from_user(tail)
-            tv = th.value
-            tv.next_free = @nursery_freelists[c]
-            th.value = tv
-            @nursery_freelists[c] = head
+            @nursery_freelists[c] = splice_free_nodes(head, @nursery_freelists[c])
             @tlabs[i].nursery_freelists[c] = Pointer(Void).null
           end
         end
+      end
+    end
+
+    # Prepend every FREE node in `head`'s chain onto `global_head`. USED nodes
+    # are skipped (left claimed by a suspended mid-alloc mutator).
+    private def splice_free_nodes(head : Void*, global_head : Void*) : Void*
+      user = head
+      while user
+        header = BlockHeader.from_user(user)
+        nxt = header.value.next_free
+        if BlockHeader.free?(header)
+          payload = header.value.size
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, global_head)
+          global_head = user
+        end
+        user = nxt
+      end
+      global_head
+    end
+
+    # Drop USED nodes that leaked onto global freelists (TLAB mid-alloc + STW).
+    # Call under STW immediately after flush_all_tlabs. No-op when TLAB is off —
+    # scrubbing a fuzz-corrupted freelist would SEGV on !free? / bad next_free.
+    protected def scrub_freelists : Nil
+      return unless @tlab_enabled
+      SIZE_CLASS_COUNT.times do |c|
+        scrub_one_freelist(c, false)
+        scrub_one_freelist(c, true)
+      end
+    end
+
+    private def scrub_one_freelist(class_index : Int32, nursery : Bool) : Nil
+      head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+      return if head.null?
+
+      user = head
+      found_used = false
+      while user
+        break unless find_block(user)
+        header = BlockHeader.from_user(user)
+        unless BlockHeader.free?(header)
+          found_used = true
+          break
+        end
+        nxt = header.value.next_free
+        break if !nxt.null? && !find_block(nxt)
+        user = nxt
+      end
+      return unless found_used
+
+      new_head = Pointer(Void).null
+      user = head
+      while user
+        break unless find_block(user)
+        header = BlockHeader.from_user(user)
+        nxt = header.value.next_free
+        if BlockHeader.free?(header)
+          payload = header.value.size
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, new_head)
+          new_head = user
+        end
+        break if !nxt.null? && !find_block(nxt)
+        user = nxt
+      end
+
+      if nursery
+        @nursery_freelists[class_index] = new_head
+        @nursery_freelist_clean[class_index] = false
+      else
+        @freelists[class_index] = new_head
+        @freelist_clean[class_index] = false
       end
     end
   end

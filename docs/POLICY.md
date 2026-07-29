@@ -12,7 +12,7 @@ Product rules for **Linux** (x86_64 + aarch64) and **macOS** (arm64 + x86_64), C
 
 No soft heap cap, no null-return malloc. Crystal expects raise / abort.
 
-Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`, default **8 MiB**). Empty size-class chunks: **munmap outside STW** by default (`GCRY_KEEP_CHUNKS=1` to retain).
+Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`, Linux process default **4 MiB** / Darwin **1 MiB**). Empty size-class chunks: **munmap outside STW** by default (`GCRY_KEEP_CHUNKS=1` to retain).
 
 ## Fork
 
@@ -51,7 +51,7 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 |------|----------------|
 | Large | Freelist + trim (`GCRY_LARGE_CACHE`) |
 | Size-class chunks | Empty → **munmap** (default); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes |
-| Sparse pages | `GCRY_PAGE_DONTNEED=1` (opt-in, STW-heavy) |
+| Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
 
 ## Incremental / barriers
 

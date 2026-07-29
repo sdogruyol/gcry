@@ -35,6 +35,24 @@ describe "Gcry stack scrub" do
     end
   end
 
+  it "scrub_parked_fiber_stacks is a no-op when scrub disabled" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.scrub_fibers_enabled = false
+      keep = heap.malloc(16)
+      heap.add_root(keep)
+      before_fiber = heap.fiber_scrub_runs
+      before_clear = heap.clear_stack_calls
+      heap.collect(scan_stack: true)
+      heap.fiber_scrub_runs.should eq before_fiber
+      heap.clear_stack_calls.should eq before_clear
+      heap.live?(keep).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
   it "maybe_clear_stack_on_alloc respects clear_stack_every" do
     heap = Gcry::Heap.new
     begin

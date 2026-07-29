@@ -27,7 +27,7 @@ RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on b
 
 ## Headline (v0.13.0 — current Darwin cut) — macOS aarch64
 
-macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Not re-cut for v0.14.0 — cite these numbers until a new Darwin session.
+macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Not re-cut for v0.15.0 — cite these numbers until a new Darwin session.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 

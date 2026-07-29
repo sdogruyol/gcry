@@ -15,7 +15,11 @@ module Gcry
     private def scan_thread_roots : Nil
       Thread.unsafe_each do |thread|
         mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
-        mark_root_candidate(Pointer(Void).new(thread.current_fiber.object_id), source: RootSource::Thread)
+        # Parallel EC can briefly have nil current_fiber while a worker OS
+        # thread is between fibers / during shutdown — skip rather than raise.
+        fiber = thread.@current_fiber
+        next unless fiber
+        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
       end
     end
 
@@ -52,7 +56,8 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        fiber = thread.current_fiber
+        fiber = thread.@current_fiber
+        next unless fiber
         stack = fiber.@stack
         pthread = thread.to_unsafe
 

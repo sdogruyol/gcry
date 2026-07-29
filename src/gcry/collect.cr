@@ -152,6 +152,9 @@ module Gcry
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
     @roots = Roots::Set.new
+    # Serializes Roots::Set mutate vs STW: stop_world must not freeze a thread
+    # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
+    @roots_lock = Crystal::SpinLock.new
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -189,11 +192,21 @@ module Gcry
     end
 
     def add_root(pointer : Void*) : Nil
-      @roots.add(pointer)
+      # World-stopped collector thread may mutate without the lock (single-threaded
+      # STW). Otherwise serialize against stop_world acquiring @roots_lock first.
+      if @world_stopped
+        @roots.add(pointer)
+      else
+        @roots_lock.sync { @roots.add(pointer) }
+      end
     end
 
     def delete_root(pointer : Void*) : Bool
-      @roots.delete(pointer)
+      if @world_stopped
+        @roots.delete(pointer)
+      else
+        @roots_lock.sync { @roots.delete(pointer) }
+      end
     end
 
     def set_stackbottom(stack_bottom : Void*) : Nil
@@ -307,7 +320,7 @@ module Gcry
       finished = false
       begin
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         mark_loop_budget(work_units)
         if @mark_stack.empty?
           # Sound termination: rematerialize edges from dirty pages, then continue.
@@ -398,7 +411,9 @@ module Gcry
       @expl_freed_bytes_since_gc += payload
     end
 
-    def find_object(pointer : Void*) : BlockHeader*?
+    # Block header for an address in a managed chunk, including FREE blocks.
+    # Prefer find_object for mutator-facing queries (rejects FREE).
+    def find_block(pointer : Void*) : BlockHeader*?
       return nil if pointer.null?
       addr = pointer.address
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
@@ -408,7 +423,6 @@ module Gcry
 
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        return nil if BlockHeader.free?(header)
         finish = BlockHeader.user_from(header).address + header.value.size
         return header if addr >= header.address && addr < finish
         return nil
@@ -425,7 +439,12 @@ module Gcry
       header_addr = data_start + (offset // block_bytes) * block_bytes
       return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
 
-      header = Pointer(BlockHeader).new(header_addr)
+      Pointer(BlockHeader).new(header_addr)
+    end
+
+    def find_object(pointer : Void*) : BlockHeader*?
+      header = find_block(pointer)
+      return nil unless header
       return nil if BlockHeader.free?(header)
       header
     end
@@ -484,7 +503,7 @@ module Gcry
       flush_pending_dormant_chunks
       flush_pending_page_release_chunks
       abort_incremental
-      @roots.clear
+      @roots_lock.sync { @roots.clear }
       @mark_stack.destroy
       @finalizers.clear
       @before_collect_callbacks.clear
@@ -692,9 +711,13 @@ module Gcry
         ensure_mark_worker_pool if @parallel_mark_workers > 1
 
         # Block fiber swaps, then suspend other OS threads.
+        # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         flush_all_tlabs
+        # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
+        # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
+        scrub_freelists
         note_collection_begin
         @mark_stack.clear
 
@@ -744,6 +767,10 @@ module Gcry
         mark_loop
         @last_phase_mark_ns = monotonic_ns - t0
 
+        # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
+        # drop them before sweep / empty-chunk unlink.
+        scrub_freelists
+
         # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
         enqueue_unreachable_finalizers
 
@@ -789,10 +816,9 @@ module Gcry
       flush_pending_empty_chunks
       # DORMANT madvise outside STW — kernel VM lock contention avoided.
       flush_pending_dormant_chunks
-      # Partial-chunk free-page madvise outside STW.
+      # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
       flush_pending_page_release_chunks
-      # Darwin: MADV_FREE_REUSABLE for cached large-object chunks. Linux keeps
-      # the mmap-resident for the `large_cache_retain` budget (cheaper fault).
+      # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
       release_large_freelist_pages
       trim_large_cache
 
@@ -950,7 +976,7 @@ module Gcry
       @minor_only = false
       begin
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         note_collection_begin
         @mark_stack.clear
         clear_all_marks

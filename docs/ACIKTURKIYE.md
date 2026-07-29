@@ -4,9 +4,22 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (v0.14.0) — Linux *(estimated; not re-cut)*
+## Verdict (0.15.0) — Linux *(measured)*
 
-Kemal Linux was **measured** for v0.14.0 (`docs/PERF.md`, session `2026-07-29-035426`). **acikturkiye was not re-cut** this release — still carry the scrub-on estimate **~2.65×** RSS / **~93%** thr from v0.13 notes (scrub-off measured median was **~3.0×** / **~93%**). Re-cut with `bash bench/run_all.sh acik` before tightening fat-app claims.
+Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), scrub **on**, auto-layouts **off**, median of 3. Session: `bench/log/linux/2026-07-29-112202/` (`git` `9decd01`, post-TLAB+STW MT fix).
+
+| | thr (trial median) | post-GC RSS × |
+|--|-------------------:|--------------:|
+| **gcry vs Boehm** | **~90%** | **~2.54×** |
+
+| Trial | thr % Boehm | post-GC RSS × | gcry / Boehm req/s |
+|------:|------------:|--------------:|-------------------:|
+| 1 | 119.0% | 2.42× | 121 / 102 |
+| 2 | 90.0% | 2.54× | 124 / 138 |
+| 3 | 92.9% | 2.88× | 130 / 140 |
+| **median** | **90.0%** | **2.54×** | — |
+
+Kemal Linux: v0.15.0 measured cut in [PERF.md](PERF.md) (`2026-07-29-151144`, `/json` ~86% @ ~0.77×). Script: `bash bench/run_all.sh acik`.
 
 ## v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
@@ -27,16 +40,14 @@ Back near the 0.9.0 Linux cut once side bitmap is no longer default. Prefer this
 | 3 | 89.5% | 3.41× | 116 / 130 |
 | **median** | **92.8%** | **3.00×** | — |
 
-Script: `gcry/bench/median_acikturkiye_boehm.sh` or `bash bench/run_all.sh acik` (tag runs with `LABEL=linux-…`).
+Script: `bash bench/run_all.sh acik`.
 
 ## How to measure
 
 ```sh
-# from acikturkiye (sibling ../gcry)
-make run-demo-gcry    # or run-demo-boehm
-# release A/B:
-ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry
-LABEL=linux-$(date +%Y%m%d) ../gcry/bench/median_acikturkiye_boehm.sh
+# from gcry (sibling ../acikturkiye with .env.demo)
+FORCE_REBUILD=1 TRIALS=3 WRK_DURATION=30 WRK_CONNECTIONS=100 GC=both \
+  bash bench/run_all.sh acik
 ```
 
 - Always **`--release`** — debug mutator swamps GC.
@@ -53,7 +64,7 @@ Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC ge
 | STW pauses ≪ wall | Thr gaps were mostly mutator / retention / VMA — fixed those first |
 | Empty-chunk release | Kemal RSS ≈ Boehm (0.9 era); acikturkiye chunks are **dense live** (~noop for RSS) |
 | Layout / type_id / SP clamp | Correct; ~no RSS move on this app |
-| Stack scrub (default-on since v0.13.0) | Kemal RSS measured **0.79×** in v0.14.0 (was 0.99× scrub-off); acikturkiye still ~2.65× *est.*; no thr cost. Not a substitute for stack maps |
+| Stack scrub (default-on since v0.13.0) | Kemal RSS measured **0.77×** in v0.15.0 (was 0.99× scrub-off); acikturkiye measured **~2.54×** (2026-07-29); no thr cost. Not a substitute for stack maps |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 
@@ -61,6 +72,9 @@ Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC ge
 
 - Nursery / incremental as process default on this HTTP heap
 - Smaller `GCRY_CHUNK_BYTES` for RSS
+- Linux **HOLED** `GCRY_PAGE_DONTNEED` as process default — thr and RSS both worse (HOLED freelist rebuild blows sweep; free-only pages abandoned → chunk churn). Stay opt-in.
+- Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
+- Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
 - Expecting another shard filter to hit ≤1.5× Boehm RSS
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).

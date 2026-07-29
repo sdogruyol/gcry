@@ -259,5 +259,36 @@ module Gcry
         false
       end
     end
+
+    # Zero [low, high) only on pages the kernel will let us read — fiber stacks
+    # are thinly mapped; a blind Pointer.clear below SP can SEGV on a hole.
+    def self.clear_range_safe(low : UInt64, high : UInt64) : UInt64
+      return 0_u64 if low >= high
+      return 0_u64 if (high - low) > MAX_SCAN_BYTES
+
+      ensure_probe_pipe
+      return 0_u64 if @@probe_wr < 0
+
+      cleared = 0_u64
+      page = low & ~(PAGE_SIZE - 1)
+      while page < high
+        run_lo = page
+        while page < high && page_readable?(page)
+          page += PAGE_SIZE
+        end
+        if page > run_lo
+          start = low > run_lo ? low : run_lo
+          finish = page < high ? page : high
+          if start < finish
+            len = finish - start
+            Pointer(UInt8).new(start).clear(len)
+            cleared += len
+          end
+        else
+          page += PAGE_SIZE
+        end
+      end
+      cleared
+    end
   end
 end

@@ -22,7 +22,7 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 
 ## Verdict (v0.13.0 — current Darwin cut) — macOS aarch64
 
-`small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, 0 crashes. **Not re-cut for v0.14.0.**
+`small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, 0 crashes. **Not re-cut for v0.15.0.**
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
