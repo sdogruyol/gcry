@@ -18,8 +18,8 @@
 # Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab]
 #
 # On failure the seed is printed for deterministic local replay.
-# CI gates `--workers=2` (with and without `--tlab`); `--workers=4` is a known
-# process-GC gap (see docs/TEST_PLAN.md).
+# CI gates `--workers=2,4` (no TLAB) and `--tlab --workers=2`; `--tlab --workers=4`
+# remains a known process-GC gap (see docs/TEST_PLAN.md).
 
 require "../src/gcry"
 require "wait_group"
