@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **TLAB + Parallel under process STW:** mid-`tlab_alloc_small` STW could leave FREE freelist nodes only reachable from mutator stacks; mark ignored FREE, then empty-chunk release munmapped them (and `unlink_freelist_range` could coerce USED→FREE). Fix: claim FREE stack/thread roots when TLAB+STW, freelist scrub after flush/mark, flush only FREE nodes, `set_used` before unlink with flush-aware head check. Gated by `stw_mt_property_test --tlab`.
+- **TLAB + Parallel under process STW:** mid-`tlab_alloc_small` STW could leave FREE freelist nodes only reachable from mutator stacks; mark ignored FREE, then empty-chunk release munmapped them (and `unlink_freelist_range` could coerce USED→FREE). Fix: claim FREE stack/thread roots when TLAB+STW, freelist scrub after flush/mark (TLAB-only — avoids walking corrupted freelists on library fuzz), flush only FREE nodes, `set_used` before unlink with flush-aware head check. Gated by `stw_mt_property_test --tlab`.
 
 ### Added
 

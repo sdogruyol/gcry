@@ -295,9 +295,10 @@ module Gcry
     end
 
     # Drop USED nodes that leaked onto global freelists (TLAB mid-alloc + STW).
-    # Call under STW immediately after flush_all_tlabs. Does not rewrite !free?
-    # headers — only unlinks them from the freelist.
+    # Call under STW immediately after flush_all_tlabs. No-op when TLAB is off —
+    # scrubbing a fuzz-corrupted freelist would SEGV on !free? / bad next_free.
     protected def scrub_freelists : Nil
+      return unless @tlab_enabled
       SIZE_CLASS_COUNT.times do |c|
         scrub_one_freelist(c, false)
         scrub_one_freelist(c, true)
@@ -311,18 +312,22 @@ module Gcry
       user = head
       found_used = false
       while user
+        break unless find_block(user)
         header = BlockHeader.from_user(user)
         unless BlockHeader.free?(header)
           found_used = true
           break
         end
-        user = header.value.next_free
+        nxt = header.value.next_free
+        break if !nxt.null? && !find_block(nxt)
+        user = nxt
       end
       return unless found_used
 
       new_head = Pointer(Void).null
       user = head
       while user
+        break unless find_block(user)
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
         if BlockHeader.free?(header)
@@ -330,6 +335,7 @@ module Gcry
           header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, new_head)
           new_head = user
         end
+        break if !nxt.null? && !find_block(nxt)
         user = nxt
       end
 
