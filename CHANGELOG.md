@@ -22,6 +22,8 @@ dead-end defaults documented. Supported path remains EC parallelism **1**,
 
 ### Fixed
 
+- **Explicit-root list × process STW race:** `add_root`/`delete_root` could run concurrently with `stop_world`, freezing a mutator mid-list splice so `@roots.each` walked a freed/`next`-corrupt `RootNode` (SEGV at `run_collection` during `stw_mt_property_test`). Serialize mutations with `@roots_lock` acquired before STW; collector may mutate without the lock while `@world_stopped`.
+- **Parked-fiber scrub on thinly mapped stacks:** Cap wipe to the same 512 B fiber path as `clear_stack` and zero only readable pages via `Roots.clear_range_safe` (defense in depth; Crystal fiber stacks grow on demand).
 - **TLAB + Parallel under process STW:** mid-`tlab_alloc_small` STW could leave FREE freelist nodes only reachable from mutator stacks; mark ignored FREE, then empty-chunk release munmapped them (and `unlink_freelist_range` could coerce USED→FREE). Fix: claim FREE stack/thread roots when TLAB+STW (**clear FREE but keep `next_free`** so scrub can walk the chain — `set_used` was severing freelists → OOM), freelist scrub after flush/mark (TLAB-only), flush only FREE nodes, TLAB epoch + detach-before-claim (no dual-alloc after flush), no nested `collect` under `@alloc_lock` (deadlock), unlock-and-collect retry on refill miss, steal stranded TLAB freelists, skip nil `Thread#current_fiber` under Parallel. CI gates `stw_mt_property_test --tlab --workers=2,4`.
 
 ### Added

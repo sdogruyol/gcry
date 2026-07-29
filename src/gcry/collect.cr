@@ -152,6 +152,9 @@ module Gcry
     # High end of the stack (stack grows down). Null disables stack scanning.
     @stack_bottom : Void* = Pointer(Void).null
     @roots = Roots::Set.new
+    # Serializes Roots::Set mutate vs STW: stop_world must not freeze a thread
+    # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
+    @roots_lock = Crystal::SpinLock.new
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -189,11 +192,21 @@ module Gcry
     end
 
     def add_root(pointer : Void*) : Nil
-      @roots.add(pointer)
+      # World-stopped collector thread may mutate without the lock (single-threaded
+      # STW). Otherwise serialize against stop_world acquiring @roots_lock first.
+      if @world_stopped
+        @roots.add(pointer)
+      else
+        @roots_lock.sync { @roots.add(pointer) }
+      end
     end
 
     def delete_root(pointer : Void*) : Bool
-      @roots.delete(pointer)
+      if @world_stopped
+        @roots.delete(pointer)
+      else
+        @roots_lock.sync { @roots.delete(pointer) }
+      end
     end
 
     def set_stackbottom(stack_bottom : Void*) : Nil
@@ -307,7 +320,7 @@ module Gcry
       finished = false
       begin
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         mark_loop_budget(work_units)
         if @mark_stack.empty?
           # Sound termination: rematerialize edges from dirty pages, then continue.
@@ -490,7 +503,7 @@ module Gcry
       flush_pending_dormant_chunks
       flush_pending_page_release_chunks
       abort_incremental
-      @roots.clear
+      @roots_lock.sync { @roots.clear }
       @mark_stack.destroy
       @finalizers.clear
       @before_collect_callbacks.clear
@@ -698,8 +711,9 @@ module Gcry
         ensure_mark_worker_pool if @parallel_mark_workers > 1
 
         # Block fiber swaps, then suspend other OS threads.
+        # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         flush_all_tlabs
         # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
         # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
@@ -962,7 +976,7 @@ module Gcry
       @minor_only = false
       begin
         lock_write
-        stop_world
+        stop_world_quiescing_roots
         note_collection_begin
         @mark_stack.clear
         clear_all_marks

@@ -64,6 +64,16 @@ module Gcry
       @world_stopped = true
     end
 
+    # stop_world only after root-list mutators finish add/delete (see @roots_lock).
+    private def stop_world_quiescing_roots : Nil
+      @roots_lock.lock
+      begin
+        stop_world
+      ensure
+        @roots_lock.unlock
+      end
+    end
+
     def start_world : Nil
       return unless @world_stopped
 
@@ -89,6 +99,7 @@ module Gcry
       @inc_active = false
       @gc_lock = Crystal::RWLock.new
       @alloc_lock = Crystal::SpinLock.new
+      @roots_lock = Crystal::SpinLock.new
       @tlabs_booted = false
       @soft_dirty_armed = false
       @soft_dirty_probed = false
