@@ -113,62 +113,47 @@ describe "process GC (-Dgc_none)" do
     h.tlab_refills.should eq(0)
   end
 
-  it "process parallel mark steals grey work via STW-exempt pthreads" do
-    h = Gcry.default_heap.not_nil!
-    h.stop_the_world.should be_true
-    old = h.parallel_mark_workers
-    begin
-      h.parallel_mark_workers = 4
-      before_runs = h.parallel_mark_runs
-      before_stolen = h.parallel_mark_stolen
-
-      # Alloc-heavy graph kept in a local Array (stack root during collect).
-      keep = Array(String).new(64) { |i| "pm-keep-#{i}-#{"y" * 32}" }
-      8.times do
-        nest = Array(String).new(16) { |j| "nest-#{j}-#{"z" * 24}" }
-        keep << nest.join(",")
-      end
-
-      GC.collect
-      GC.collect
-
-      h.parallel_mark_runs.should be > before_runs
-      h.parallel_mark_stolen.should be > before_stolen
-      keep.size.should be > 60
-    ensure
-      h.parallel_mark_workers = old
-    end
-  end
-
   it "registers pthread_atfork by default" do
     Gcry::Platform.atfork_installed?.should be_true
   end
+end
 
-  # Regression: OverflowError/SEGV in HTTP keep-alive Hash lookup when minor GC
-  # swept nursery String keys that lived only inside an old Hash.@entries blob.
-  it "minor GC keeps nursery keys inside old HTTP::Headers Hash" do
-    h = Gcry.default_heap
-    old_soft = h.soft_dirty_max_pct
-    old_nursery = h.nursery_enabled
-    begin
-      h.nursery_enabled = true
-      h.soft_dirty_max_pct = 0 # force scan_object_for_nursery fallback
-      Gcry.register_hash(HTTP::Headers::Key, String | Array(String))
+{% if flag?(:darwin) %}
+  describe "process GC Darwin Mach STW" do
+    it "stop_world_threads / start_world_threads round-trip" do
+      # Wake ExecutionContext Monitor so STW has another OS thread.
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
 
-      headers = HTTP::Headers.new
-      headers["Connection"] = "keep-alive"
-      # Promote Hash + entries out of nursery.
+      Gcry::Platform.install_stw_sp_capture
+      Gcry::Platform.stw_sp_capture_installed?.should be_true
+
+      current = Thread.current
+      Gcry::Platform.stop_world_threads(current)
+      begin
+        # World is stopped; do not allocate. Resume must succeed.
+      ensure
+        Gcry::Platform.start_world_threads(current)
+        Gcry::Platform.clear_thread_sps
+      end
+
+      # Alloc + collect after resume proves threads are live again.
+      p = GC.malloc(32)
+      GC.is_heap_ptr(p).should be_true
+      GC.free(p)
       GC.collect
-      headers["X-Nursery"] = "young-#{Random.rand(1_000_000)}"
-      young = headers["X-Nursery"]
-      h.minor_collect(scan_stack: true)
+    end
+
+    it "GC.collect exercises Mach STW SP clamp" do
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
+
       GC.collect
-      headers["Connection"].should eq("keep-alive")
-      headers["X-Nursery"].should eq(young)
-      HTTP.keep_alive?(HTTP::Request.new("GET", "/", headers)).should be_true
-    ensure
-      h.soft_dirty_max_pct = old_soft
-      h.nursery_enabled = old_nursery
+      Gcry::Platform.stw_sp_capture_installed?.should be_true
+      h = Gcry.default_heap
+      (h.sp_clamp_hits + h.sp_clamp_fallbacks).should be > 0
     end
   end
-end
+{% end %}

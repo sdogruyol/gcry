@@ -29,6 +29,8 @@ module Gcry
     # cycling; the process GC bumps this to 64 MiB (see gc_override.cr).
     DEFAULT_EMPTY_CHUNK_RETAIN = 0_u64
 
+    getter chunk_index_count : Int32 = 0
+
     getter heap_size : UInt64 = 0_u64
     getter free_bytes : UInt64 = 0_u64
     getter total_bytes : UInt64 = 0_u64
@@ -219,11 +221,17 @@ module Gcry
     end
 
     def malloc(size : Int) : Void*
-      allocate(size.to_u64, atomic: false, clear: true)
+      ptr = allocate(size.to_u64, atomic: false, clear: true)
+      Invariant.after_malloc(self, ptr, size.to_u64)
+      Trace.after_malloc(ptr, size.to_u64, atomic: false)
+      ptr
     end
 
     def malloc_atomic(size : Int) : Void*
-      allocate(size.to_u64, atomic: true, clear: false)
+      ptr = allocate(size.to_u64, atomic: true, clear: false)
+      Invariant.after_malloc(self, ptr, size.to_u64)
+      Trace.after_malloc(ptr, size.to_u64, atomic: true)
+      ptr
     end
 
     def realloc(pointer : Void*, size : Int) : Void*
@@ -278,6 +286,8 @@ module Gcry
         @finalizers.notice_reclaim(pointer)
         with_alloc_lock { cache_large_chunk(chunk, header) }
         trim_large_cache
+        Invariant.after_free(self, pointer)
+        Trace.after_free(pointer)
         return
       end
 
@@ -319,6 +329,8 @@ module Gcry
           @live_objects -= 1 if @live_objects > 0
         end
       end
+      Invariant.after_free(self, pointer)
+      Trace.after_free(pointer)
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -718,12 +730,25 @@ module Gcry
       end
     end
 
-    protected def each_chunk(& : ChunkHeader* ->) : Nil
+    # Public for the invariant checker — walks the chunk linked list.
+    def each_chunk(& : ChunkHeader* ->) : Nil
       chunk = @chunks
       while chunk
         yield chunk
         chunk = chunk.value.next
       end
+    end
+
+    # Public for the invariant checker — returns the head of a size-class freelist.
+    def freelist_for(class_index : Int32) : Void*
+      return Pointer(Void).null if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      @freelists[class_index]
+    end
+
+    # Public for the invariant checker — returns the head of a nursery freelist.
+    def nursery_freelist_for(class_index : Int32) : Void*
+      return Pointer(Void).null if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      @nursery_freelists[class_index]
     end
 
     # Binary search over address-sorted chunk index, with a single-slot
@@ -962,3 +987,6 @@ require "./collect"
 require "./tlab"
 require "./parallel_mark"
 require "./stack_scrub"
+require "./invariant"
+require "./trace"
+require "./heap_dump"

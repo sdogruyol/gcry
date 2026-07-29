@@ -71,8 +71,12 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
+| `GCRY_DEBUG_INVARIANTS=1` | Runtime heap invariant checks |
+| `GCRY_TRACE=1` | NDJSON GC event log (stderr or `GCRY_TRACE_FILE`) |
+| `GCRY_TRACE_FILE` | Trace output path |
+| `GCRY_TRACE_ALLOC_SAMPLE` | Log 1/N alloc/free lines (default **1000**; `0` = off) |
 
-OOM / fork / signals: [POLICY.md](POLICY.md).
+OOM / fork / signals: [POLICY.md](POLICY.md). Trace / heap dump: [API.md](API.md), `make trace-smoke`. Mutation scoring: [MUTATION.md](MUTATION.md).
 
 ## False retention
 

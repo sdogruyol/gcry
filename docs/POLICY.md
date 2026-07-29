@@ -26,7 +26,13 @@ Prefer fork+exec. Single-threaded children can keep allocating after reinit.
 
 ## Signals
 
-**Not async-signal-safe.** Do not call `GC.malloc` / `GC.collect` from a handler. Set a flag / write a pipe; allocate on normal fibers.
+**Not async-signal-safe.** Do not call `GC.malloc` / `GC.collect` from a POSIX
+signal handler (or any async-signal context). Set a flag / write a pipe;
+allocate on normal fibers.
+
+Crystal `Signal.trap` callbacks run on the event loop (deferred), not inside
+the async handler — allocating there is the normal mutator path. That does
+**not** make the GC async-signal-safe.
 
 ## Threading
 

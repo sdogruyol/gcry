@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre-commit hook: block commit if Crystal formatting is off.
+# Installed via git config core.hooksPath .githooks
+
+set -o pipefail
+
+# Sanitize locale: git/bash may set LC_ALL=en_US.UTF-8 which is
+# commonly missing on WSL/musl hosts. Fall back to C.UTF-8.
+if ! locale -a 2>/dev/null | grep -qx "$LC_ALL"; then
+  export LC_ALL=C.UTF-8
+fi
+
+echo "🔍 Checking Crystal formatting..."
+if ! crystal tool format --check 2>&1; then
+  cat <<'EOF'
+
+❌ Formatting check failed!
+
+Run the following to fix:
+  crystal tool format
+
+Then stage the changes and try again.
+EOF
+  exit 1
+fi
+
+echo "✅ Crystal formatting looks good."

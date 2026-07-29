@@ -85,8 +85,8 @@ module Gcry
 
       # Drop physical pages while keeping the VA reserved.
       # On Darwin uses MADV_FREE_REUSABLE (one madvise syscall) which drops RSS
-      # and zero-fills pages on next fault — cheaper than the old 3-syscall
-      # mach_vm_deallocate + allocate + protect.
+      # when the kernel reclaims; next fault zero-fills if reclaimed (content may
+      # linger until pressure — do not rely on immediate zeroing).
       # Ranges must be host-page aligned (16 KiB on Apple Silicon).
       def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
         return false if len == 0

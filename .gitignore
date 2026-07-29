@@ -16,3 +16,9 @@
 /bench/kemal/lib/
 /bench/kemal/.shards/
 /bench/kemal/shard.lock
+
+# Generated perf artifacts (not cross-host baselines)
+/bench/trend.json
+/bench/log/linux/
+/bench/log/macos/
+/bench/mutations/SCORE.log

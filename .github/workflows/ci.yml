@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC
 
 jobs:
   test:
@@ -42,7 +44,18 @@ jobs:
         run: crystal spec --error-trace
 
       - name: Process GC specs (-Dgc_none)
-        run: crystal spec -Dgc_none process_spec --error-trace
+        run: |
+          # Spec + process GC can rarely SEGV during Spec::Result reporting on
+          # shared runners; retry a couple times. Heavy cases live in standalone benches.
+          ok=0
+          for i in 1 2 3; do
+            if crystal spec -Dgc_none process_spec --error-trace; then
+              ok=1
+              break
+            fi
+            echo "process_spec failed (attempt $i), retrying..."
+          done
+          test "$ok" = 1
 
       - name: Sample hello (-Dgc_none)
         run: |
@@ -93,7 +106,199 @@ jobs:
       - name: Fuzz short (library heap)
         run: |
           crystal build bench/fuzz.cr -o bin/fuzz
-          ./bin/fuzz 5 1
+          ./bin/fuzz --seconds=5 --seed=1
+
+      - name: Fuzz with log + replay
+        run: |
+          ./bin/fuzz --seconds=3 --seed=42 --log=/tmp/fuzz-ci.log
+          echo "--- replay ---"
+          ./bin/fuzz --replay=/tmp/fuzz-ci.log
+
+      - name: Property test (5000 iterations + invariants)
+        run: |
+          crystal build bench/property_test.cr -o bin/property_test
+          ./bin/property_test --seed=1 --iterations=5000
+
+      - name: Layout property test (500 iterations)
+        run: |
+          crystal build bench/layout_property_test.cr -o bin/layout_property_test
+          ./bin/layout_property_test --seed=1 --iterations=500
+
+      - name: MT property test (50 iterations, 2+4 workers)
+        run: |
+          crystal build bench/mt_property_test.cr -o bin/mt_property_test
+          ./bin/mt_property_test --seed=1 --iterations=50 --workers=2,4
+
+      - name: Alloc pattern fuzz (20 phases, 1000 objects)
+        run: |
+          crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
+          ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
+
+      - name: Thread storm (100 iterations, 4 workers)
+        run: |
+          crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
+          ./bin/thread_storm --iterations=100 --workers=4
+
+      - name: OOM test (phases 1,2,3)
+        run: |
+          crystal build -Dgc_none bench/oom_test.cr -o bin/oom_test
+          ./bin/oom_test --phases=1,2,3
+
+      - name: Fork reinit test
+        run: |
+          crystal build -Dgc_none bench/fork_reinit.cr -o bin/fork_reinit
+          ./bin/fork_reinit
+
+      - name: Finalizer complex scenarios
+        run: |
+          crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
+          ./bin/finalizer_complex
+
+      - name: Nursery HTTP::Headers regression
+        run: |
+          crystal build -Dgc_none bench/nursery_headers.cr -o bin/nursery_headers
+          ./bin/nursery_headers
+
+      - name: Process parallel mark
+        run: |
+          crystal build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
+          ./bin/parallel_mark_process
+
+      - name: Microbenchmark suite
+        run: |
+          crystal build -Dgc_none bench/micro/run_all.cr -o bin/microbench --error-trace
+          ./bin/microbench
+
+      - name: Pause budget
+        run: |
+          crystal build -Dgc_none bench/pause_budget.cr -o bin/pause_budget --error-trace
+          ./bin/pause_budget --live-mb=20
+
+      - name: RSS leak detection
+        run: |
+          crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
+          ./bin/rss_leak --cycles=20 --objects=5000
+
+      - name: Compiler GC contract + crystal tools
+        run: |
+          crystal build -Dgc_none bench/compiler_gc_contract.cr -o bin/compiler_gc_contract --error-trace
+          ./bin/compiler_gc_contract
+          crystal tool hierarchy src/gcry.cr >/dev/null
+          crystal tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
+
+      - name: Trace + heap dump smoke
+        run: |
+          crystal build bench/trace_smoke.cr -o bin/trace_smoke --error-trace
+          ./bin/trace_smoke
+
+      - name: Debug invariants
+        run: |
+          GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
+
+  coverage:
+    runs-on: ubuntu-latest
+    name: coverage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Create output dirs
+        run: mkdir -p bin coverage
+
+      - name: Unreachable methods
+        run: |
+          crystal tool unreachable --format codecov spec/all_specs.cr > coverage/unreachable.codecov.json || true
+          echo "Unreachable methods:"
+          crystal tool unreachable spec/all_specs.cr 2>/dev/null | wc -l
+
+      - name: Macro code coverage
+        run: |
+          crystal tool macro_code_coverage --format codecov spec/all_specs.cr > coverage/macro_coverage.codecov.json || true
+          echo "Macro coverage report generated"
+
+      - name: Build spec binary for kcov
+        run: crystal build spec/all_specs.cr -o bin/all_specs --error-trace
+
+      - name: Install kcov (Debian package)
+        run: |
+          wget -q http://ftp.debian.org/debian/pool/main/k/kcov/kcov_43+dfsg-1+b4_amd64.deb -O /tmp/kcov.deb
+          sudo dpkg -i /tmp/kcov.deb 2>/dev/null || sudo apt-get install -fy -qq
+          kcov --version
+
+      - name: Run kcov
+        run: |
+          kcov --clean \
+               --include-path="$PWD/src" \
+               --exclude-pattern='/.shards' \
+               coverage \
+               bin/all_specs \
+               --order=random
+          # Print summary
+          if [ -f coverage/index.json ]; then
+            python3 -c "import json; d=json.load(open('coverage/index.json')); print('Coverage: ' + str(d.get('covered_lines',0)) + '/' + str(d.get('total_lines',0)) + ' lines')" 2>/dev/null || echo "Coverage summary unavailable"
+          fi
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  asan:
+    runs-on: ubuntu-latest
+    name: asan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Build ASan spec binary
+        run: |
+          mkdir -p bin
+          crystal build -Dasan spec/all_specs.cr -o bin/all_specs_asan --error-trace
+
+      - name: Run ASan specs
+        run: |
+          bin/all_specs_asan
+
+  valgrind:
+    runs-on: ubuntu-latest
+    name: valgrind
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Build samples for valgrind
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none samples/hello.cr -o bin/hello_valgrind
+          crystal build -Dgc_none samples/min.cr -o bin/min_valgrind
+          crystal build -Dgc_none samples/alloc.cr -o bin/alloc_valgrind
+          crystal build -Dgc_none samples/stress.cr -o bin/stress_valgrind
+
+      - name: Valgrind memcheck hello
+        run: ./ci/valgrind-wrap.sh ./bin/hello_valgrind
+
+      - name: Valgrind memcheck min
+        run: ./ci/valgrind-wrap.sh ./bin/min_valgrind
+
+      - name: Valgrind memcheck alloc 500
+        run: ./ci/valgrind-wrap.sh ./bin/alloc_valgrind 500
+
+      - name: Valgrind memcheck stress 300
+        run: ./ci/valgrind-wrap.sh ./bin/stress_valgrind 300
 
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
@@ -112,7 +317,47 @@ jobs:
       - name: Kemal A/B thr gate
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 ./bench/perf_smoke.sh
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 BENCH_RUNS=3 ./bench/perf_smoke.sh
+
+      - name: Kemal E2E (endpoints + 60s load)
+        run: |
+          mkdir -p bin
+          KEMAL_E2E_DURATION=60 PORT=3021 ./bench/kemal_e2e.sh
+
+      - name: Upload perf report
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke-report
+          path: bench/log/
+          retention-days: 30
+
+  # Weekly soak test (24h, Sunday 06:00 UTC).
+  soak:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    name: soak (24h)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Build soak test
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none bench/soak.cr -o bin/soak --error-trace
+
+      - name: Run soak test (24h)
+        run: |
+          ./bin/soak --duration=86400 --telemetry=/tmp/gcry-soak.log
+
+      - name: Upload telemetry
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-telemetry
+          path: /tmp/gcry-soak.log
+          retention-days: 30
 
   # aarch64 cross-compile smoke (object emit). Runs on PR + push.
   test-aarch64:

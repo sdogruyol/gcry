@@ -69,6 +69,7 @@ module Gcry
       else
         @soft_dirty_armed = false
       end
+      Trace.barrier_arm(barrier_backend_name) unless @barrier_backend.none?
     end
 
     private def arm_mprotect_on_old_chunks : Nil

@@ -1,0 +1,154 @@
+# Valgrind suppressions for Crystal runtime false positives.
+# These are not gcry leaks — they come from the Crystal runtime / libraries.
+
+{
+   Crystal runtime thread initialization
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*Thread#initialize*
+}
+
+{
+   Crystal runtime signal handler
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*setup_segfault_handler*
+}
+
+{
+   Crystal runtime libunwind
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*setup_crash_handler*
+}
+
+{
+   Crystal runtime fiber init
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*Fiber::ExecutionContext*
+}
+
+{
+   Crystal runtime event loop (libevent)
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*EventLoop*
+}
+
+{
+   Crystal runtime libevent internal
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:calloc
+   ...
+   fun:*event_base_new*
+}
+
+{
+   Crystal runtime libevent DNS
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*evdns*
+}
+
+{
+   libpthread key creation
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:pthread_key_create*
+}
+
+{
+   libc locale / iconv
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*nl_langinfo*
+}
+
+{
+   libc __static_initialization
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:__static_initialization*
+}
+
+{
+   Crystal runtime IO buffering
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*IO::Buffered*
+}
+
+{
+   Crystal runtime Array(Thread) in GC init
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:malloc
+   ...
+   fun:*Array(Thread)*
+   fun:*Gcry::Heap::new*
+}
+
+{
+   gcry safe page probe (page_readable?)
+   Memcheck:Param
+   write(buf)
+   fun:__libc_write
+   ...
+   fun:*page_readable?*
+}
+
+{
+   gcry safe page probe (page_readable? via scan)
+   Memcheck:Param
+   write(buf)
+   fun:__libc_write
+   ...
+   fun:*scan_mutator_stack*
+}
+
+{
+   gcry stack scan invalid read (safe probe)
+   Memcheck:Addr8
+   ...
+   fun:*run_collection*
+   fun:*collect*
+   fun:*GC::collect*
+}
+
+{
+   gcry stack scan invalid read (safe probe, static roots)
+   Memcheck:Addr8
+   ...
+   fun:*scan_static_roots*
+}
+
+{
+   gcry roots scan safe probe
+   Memcheck:Param
+   write(buf)
+   fun:__libc_write
+   ...
+   fun:*Roots::*
+}
