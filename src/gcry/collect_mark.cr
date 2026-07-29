@@ -51,11 +51,23 @@ module Gcry
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
       return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
-      header = find_object(pointer)
+      header = find_block(pointer)
       return unless header
-      return if BlockHeader.free?(header)
 
-      if base_only
+      # Mid-`tlab_alloc_small` STW: mutator holds a FREE freelist node on-stack.
+      # find_object ignores FREE, so without claiming here empty-chunk release
+      # can munmap the block. Only under process STW+TLAB, and only Stack/Thread
+      # (not Static) — library collects must not retain freelist false roots.
+      if BlockHeader.free?(header)
+        return unless @tlab_enabled && @stop_the_world
+        return unless source == RootSource::Stack || source == RootSource::Thread
+        if base_only && addr != BlockHeader.user_from(header).address
+          return
+        end
+        payload = header.value.size
+        flags = header.value.flags & ~BlockHeader::Flags::FREE
+        BlockHeader.set_used(header, payload, flags)
+      elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
         # inflate false retention. Heap marks must allow interiors (shift).
         return if addr != BlockHeader.user_from(header).address

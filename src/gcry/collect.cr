@@ -398,7 +398,9 @@ module Gcry
       @expl_freed_bytes_since_gc += payload
     end
 
-    def find_object(pointer : Void*) : BlockHeader*?
+    # Block header for an address in a managed chunk, including FREE blocks.
+    # Prefer find_object for mutator-facing queries (rejects FREE).
+    def find_block(pointer : Void*) : BlockHeader*?
       return nil if pointer.null?
       addr = pointer.address
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
@@ -408,7 +410,6 @@ module Gcry
 
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        return nil if BlockHeader.free?(header)
         finish = BlockHeader.user_from(header).address + header.value.size
         return header if addr >= header.address && addr < finish
         return nil
@@ -425,7 +426,12 @@ module Gcry
       header_addr = data_start + (offset // block_bytes) * block_bytes
       return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
 
-      header = Pointer(BlockHeader).new(header_addr)
+      Pointer(BlockHeader).new(header_addr)
+    end
+
+    def find_object(pointer : Void*) : BlockHeader*?
+      header = find_block(pointer)
+      return nil unless header
       return nil if BlockHeader.free?(header)
       header
     end
@@ -695,6 +701,9 @@ module Gcry
         lock_write
         stop_world
         flush_all_tlabs
+        # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
+        # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
+        scrub_freelists
         note_collection_begin
         @mark_stack.clear
 
@@ -743,6 +752,10 @@ module Gcry
         t0 = monotonic_ns
         mark_loop
         @last_phase_mark_ns = monotonic_ns - t0
+
+        # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
+        # drop them before sweep / empty-chunk unlink.
+        scrub_freelists
 
         # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
         enqueue_unreachable_finalizers

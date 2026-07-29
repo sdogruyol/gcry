@@ -134,6 +134,11 @@ jobs:
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2
 
+      - name: Process-GC STW MT property test with TLAB (50 iterations, 2 workers)
+        run: |
+          crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+          ./bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2
+
       - name: Alloc pattern fuzz (20 phases, 1000 objects)
         run: |
           crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz

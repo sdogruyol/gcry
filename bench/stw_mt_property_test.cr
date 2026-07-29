@@ -11,16 +11,15 @@
 # ACKs (so the worker keeps `ptr` on-stack until rooted), collects, and verifies.
 # That still STW-suspends mutators mid-`malloc`.
 #
-# TLAB defaults OFF here: with `tlab_enabled=true`, Parallel alloc + explicit
-# roots lose objects under STW (`live?` false after collect) — tracked in
-# docs/TEST_PLAN.md. Pass `--tlab` to exercise that path locally (expect fail).
+# TLAB defaults OFF for the CI STW gate; pass `--tlab` to also stress
+# thread-local freelists (fixed under process STW — see CHANGELOG).
 #
 # Build: crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
-# Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2]
+# Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab]
 #
 # On failure the seed is printed for deterministic local replay.
-# CI gates `--workers=2` only; `--workers=4` is a known process-GC gap
-# (see docs/TEST_PLAN.md).
+# CI gates `--workers=2` (with and without `--tlab`); `--workers=4` is a known
+# process-GC gap (see docs/TEST_PLAN.md).
 
 require "../src/gcry"
 require "wait_group"
@@ -257,7 +256,7 @@ puts "  seed=#{seed} iterations=#{iterations} workers=#{worker_counts}"
 puts "  stop_the_world=#{Gcry.default_heap.stop_the_world}"
 
 Gcry.default_heap.tlab_enabled = enable_tlab
-puts "  tlab_enabled=#{Gcry.default_heap.tlab_enabled?}#{enable_tlab ? " (expect known fail path)" : ""}"
+puts "  tlab_enabled=#{Gcry.default_heap.tlab_enabled?}"
 puts ""
 
 if !Gcry.default_heap.stop_the_world

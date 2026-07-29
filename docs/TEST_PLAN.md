@@ -21,7 +21,7 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 | **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (≥70% Boehm), nightly fuzz/soak. |
 | **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
 | **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak. |
-| **Multi-thread test** | B+ | Library-heap MT property + thread storm + **process-STW MT property** (`bench/stw_mt_property_test.cr`, Parallel=2). |
+| **Multi-thread test** | B+ | Library-heap MT property + thread storm + **process-STW MT property** (`bench/stw_mt_property_test.cr`, Parallel=2, with/without TLAB). |
 | **Platform test** | B+ | Darwin stubs + Mach STW in CI; Windows still blocked. |
 
 ### Remaining gaps
@@ -29,7 +29,6 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 | Gap | Severity | Detail |
 |-----|----------|--------|
 | **Parallel EC >2 under process STW** | 🟡 High | `stw_mt_property_test --workers=4` loses kept fiber-stack roots / double-free. Harness CI uses `--workers=2`. Likely incomplete other-thread / Parallel fiber stack scan. |
-| **TLAB + Parallel + process STW** | 🟡 High | With `tlab_enabled=true`, Parallel `malloc` + main `add_root` loses rooted objects after `GC.collect` (`is_heap_ptr` true, `live?` false). Harness CI uses `--no-tlab` (default). Repro: `./bin/stw_mt_property_test --tlab`. |
 | **CHANGELOG audit backlog** | 🟢 Medium | Older Fixed entries lack dedicated regressions (issues, not blockers). |
 | **PR auto-perf comments** | 🟢 Medium | Variance protocol exists; auto PR comment still open. |
 | **WeakRef / large-heap edge cases** | 🟢 Medium | Cycles, resurrection, multi-GB heaps lightly covered. |
@@ -293,9 +292,8 @@ For each workload (same host, same job):
 ### Top 3 Short-Term Priorities
 
 1. **Fix Parallel EC >2 under process STW** — `stw_mt_property_test --workers=4` lost-root / double-free.
-2. **Fix TLAB + Parallel under process STW** — rooted objects swept despite `add_root` (`stw_mt_property_test --tlab`).
-3. **Fat-app (acikturkiye) Linux re-cut** — replace ~2.65× *est.* with measured numbers.
-4. **Compiler stack maps** — product lever for fat-app RSS (not more suite polish).
+2. **Fat-app (acikturkiye) Linux re-cut** — replace ~2.65× *est.* with measured numbers.
+3. **Compiler stack maps** — product lever for fat-app RSS (not more suite polish).
 
 ---
 

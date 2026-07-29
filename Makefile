@@ -62,11 +62,12 @@ mt-property-test-short: $(BIN)
 
 stw-mt-property-test: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test
-	$(BIN)/stw_mt_property_test --seed=$${STW_MT_SEED:-1} --iterations=$${STW_MT_ITERATIONS:-200} --workers=$${STW_MT_WORKERS:-2}
+	$(BIN)/stw_mt_property_test --seed=$${STW_MT_SEED:-1} --iterations=$${STW_MT_ITERATIONS:-200} --workers=$${STW_MT_WORKERS:-2} $${STW_MT_TLAB:+--tlab}
 
 stw-mt-property-test-short: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test
 	$(BIN)/stw_mt_property_test --seed=1 --iterations=50 --workers=2
+	$(BIN)/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2
 
 pattern-fuzz: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/pattern_fuzz.cr -o $(BIN)/pattern_fuzz

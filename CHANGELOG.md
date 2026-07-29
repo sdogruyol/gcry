@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **TLAB + Parallel under process STW:** mid-`tlab_alloc_small` STW could leave FREE freelist nodes only reachable from mutator stacks; mark ignored FREE, then empty-chunk release munmapped them (and `unlink_freelist_range` could coerce USED→FREE). Fix: claim FREE stack/thread roots when TLAB+STW, freelist scrub after flush/mark, flush only FREE nodes, `set_used` before unlink with flush-aware head check. Gated by `stw_mt_property_test --tlab`.
+
 ### Added
 
-- **Process-GC STW MT property harness:** `bench/stw_mt_property_test.cr` (`-Dgc_none`) runs Parallel allocator workers while the default EC pins roots (ACK handshake) and `GC.collect`s under real STW. Closes the gap left by library-heap `mt_property_test` (`stop_the_world=false`). CI gates `--workers=2` with TLAB off; `--workers=4` and `--tlab` remain known process-GC gaps (see [TEST_PLAN.md](docs/TEST_PLAN.md)). (`make stw-mt-property-test`)
+- **Process-GC STW MT property harness:** `bench/stw_mt_property_test.cr` (`-Dgc_none`) runs Parallel allocator workers while the default EC pins roots (ACK handshake) and `GC.collect`s under real STW. Closes the gap left by library-heap `mt_property_test` (`stop_the_world=false`). CI gates `--workers=2` with and without `--tlab`; `--workers=4` remains a known Parallel-stack scan gap (see [TEST_PLAN.md](docs/TEST_PLAN.md)). (`make stw-mt-property-test`)
 
 ## [0.14.0] - 2026-07-29
 
