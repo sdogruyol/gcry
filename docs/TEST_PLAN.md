@@ -290,9 +290,9 @@ For each workload (same host, same job):
 
 ### Top 3 Short-Term Priorities
 
-1. **Fat-app (acikturkiye) Linux re-cut** — replace ~2.65× *est.* with measured numbers.
-2. **Compiler stack maps** — product lever for fat-app RSS (not more suite polish).
-3. **CHANGELOG audit backlog** — older Fixed entries without dedicated regressions.
+1. **Compiler stack maps** — product lever for fat-app RSS (Linux ~2.54× measured).
+2. **CHANGELOG audit backlog** — older Fixed entries without dedicated regressions.
+3. **0.15.0 Kemal version cut** — optional; TLAB+STW + acik re-cut already on tip (`9decd01`).
 
 ---
 

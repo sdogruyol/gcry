@@ -14,7 +14,7 @@ Trust and tooling release: invariant checker, property tests, ASan/Valgrind CI, 
 
 Cite [PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**.
 
-**v0.14.0** (measured): `/json` ~**89%** of Boehm thr @ ~**0.79×** post-GC RSS; `/` ~**89%** @ ~**0.78×**. Fat-app (acikturkiye) ~**93%** thr / ~**2.65×** RSS *estimated* (not re-cut) — [ACIKTURKIYE.md](ACIKTURKIYE.md).
+**v0.14.0** (measured): `/json` ~**89%** of Boehm thr @ ~**0.79×** post-GC RSS; `/` ~**89%** @ ~**0.78×**. Fat-app (acikturkiye) later re-cut on tip: ~**90%** thr / ~**2.54×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 ## macOS numbers
 

@@ -178,10 +178,10 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 | Kemal `/json` throughput | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
 | Kemal `/json` post-GC RSS | **~0.79x** |
 | Kemal `/` throughput | **~89%** |
-| Fat app `/api/v1/` throughput | **~93%** *(est., not re-cut)* |
-| Fat app `/api/v1/` RSS | **~2.65x** *(est., not re-cut)* |
+| Fat app `/api/v1/` throughput | **~90%** |
+| Fat app `/api/v1/` RSS | **~2.54x** |
 
-\*Kemal: measured `bench/log/linux/2026-07-29-035426/` (median-of-3, scrub on). See [PERF.md](docs/PERF.md).
+\*Kemal: measured `bench/log/linux/2026-07-29-035426/` (median-of-3, scrub on). Fat app: `2026-07-29-112202/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ### macOS (Apple Silicon)
 
@@ -194,7 +194,7 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-That fat-app RSS (2.65x) is an honest number. Stack maps will bring it to ~1.2x.
+That fat-app RSS (~2.54x, measured) is an honest number. Stack maps will bring it to ~1.2x.
 Until then, we live with this reality. We don't hide our numbers.
 
 ### Pause distribution (Kemal `/json`, Linux)

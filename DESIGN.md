@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.14.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (measured): **`/json` ~89% of Boehm thr**, post-GC RSS **~0.79×**. macOS Kemal (v0.13.0 cut, not re-cut for 0.14): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~2.65× Linux *est.*) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+As of **v0.14.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (measured): **`/json` ~89% of Boehm thr**, post-GC RSS **~0.79×**. macOS Kemal (v0.13.0 cut, not re-cut for 0.14): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**2.54×** Linux, measured 2026-07-29) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## Goals
 
@@ -163,7 +163,7 @@ Shipped and dogfooded on Linux + macOS; **v0.14.0** is a trust/tooling release w
 
 **Kemal macOS (v0.13.0 cut):** `/` ~**93%**, `/json` ~**84%**, post-GC RSS ~**0.93–1.06×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux thr ~**93%**, RSS ~**2.65×** *est.* — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**78%**, RSS ~**15.8×** (v0.13 cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux thr ~**90%**, RSS ~**2.54×** (measured) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**78%**, RSS ~**15.8×** (v0.13 cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
@@ -183,7 +183,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.65× *est.* / Darwin ~15×) |
+| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |

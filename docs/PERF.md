@@ -17,7 +17,7 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 | `/json` | **~89%** | **~0.79×** |
 | `/` | **~89%** | **~0.78×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. Throughput unchanged vs the v0.12/0.13 carry; **Kemal post-GC RSS improved** vs the scrub-off 0.99× cut (scrub default-on now measured, not estimated). Fat-app (acikturkiye) **not** re-cut this session — still [ACIKTURKIYE.md](ACIKTURKIYE.md) ~2.65× est.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. Throughput unchanged vs the v0.12/0.13 carry; **Kemal post-GC RSS improved** vs the scrub-off 0.99× cut (scrub default-on now measured, not estimated). Fat-app (acikturkiye) re-cut 2026-07-29: **~90%** thr @ **~2.54×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`bench/log/linux/2026-07-29-112202/`).
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
