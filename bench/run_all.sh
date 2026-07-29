@@ -6,11 +6,14 @@
 #         COUNT=5 bash bench/run_all.sh kemal   # repeat full suite 5×
 #         GC=gcry bash bench/run_all.sh kemal  # only gcry (boehm|gcry|both)
 #         GCRY_FLAGS="GCRY_NURSERY=1 GCRY_INCREMENTAL=1" GC=gcry bash bench/run_all.sh kemal
+#         EC_PARALLELISM=4 GCRY_FLAGS="GCRY_TLAB=1" bash bench/run_all.sh kemal
 #         CRYSTAL_FLAGS="--release --debug --error-trace" bash bench/run_all.sh kemal  # SEGV symbols
 #
 # GCRY_FLAGS — space-separated KEY=VALUE applied only to gcry server processes
 # (boehm runs stay clean). Ambient GCRY_* in the shell are also inherited by
 # gcry; GCRY_FLAGS wins on duplicate keys. Recorded in metadata.yaml.
+# EC_PARALLELISM — ambient; kemal server calls ExecutionContext.default.resize(N)
+# (both gcry and boehm). Do not use CRYSTAL_WORKERS for this.
 #
 # CRYSTAL_FLAGS — space-separated `crystal build` flags (overrides DEBUG presets).
 #   default / unset + DEBUG=0  — --release   (PERF.md methodology)
@@ -201,6 +204,7 @@ wrk_duration_seconds: $WRK_DURATION
 trials: $TRIALS
 gc: "${GC_TAGS[*]}"
 gcry_flags: "${GCRY_FLAGS:-}"
+ec_parallelism: "${EC_PARALLELISM:-}"
 ambient_gcry: |
 $(ambient_gcry_env | sed 's/^/  /')
 build_mode: "$BUILD_MODE"
@@ -491,6 +495,7 @@ case "$cmd" in
     echo "Usage: bash bench/run_all.sh [kemal|acik|all]"
     echo "  GC=boehm|gcry|both  — which collector(s) to build/run (default: both)"
     echo "  GCRY_FLAGS=\"GCRY_NURSERY=1 …\"  — env knobs for gcry servers only"
+    echo "  EC_PARALLELISM=N    — resize default ExecutionContext (kemal; both GCs)"
     echo "  CRYSTAL_FLAGS=\"--release --debug …\"  — crystal build flags (overrides DEBUG)"
     echo "  DEBUG=1             — --debug --error-trace (no --release); forces rebuild"
     echo "  COUNT=N             — repeat suite N times → log/.../run-01 .. run-NN"
@@ -564,6 +569,7 @@ echo "╚═══════════════════════�
 echo "  Build: $BUILD_MODE (${CRYSTAL_BUILD_FLAGS[*]})"
 echo "  GC: ${GC_TAGS[*]}"
 [[ ${#GCRY_ENV_ARGS[@]} -gt 0 ]] && echo "  GCRY_FLAGS: ${GCRY_ENV_ARGS[*]}"
+[[ -n "${EC_PARALLELISM:-}" ]] && echo "  EC_PARALLELISM: $EC_PARALLELISM"
 echo "  COUNT: $COUNT"
 echo "  Session: $LOG_ROOT/"
 ls -lh "$LOG_ROOT"/

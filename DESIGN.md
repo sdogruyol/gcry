@@ -185,7 +185,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | Track | Why it matters |
 |-------|----------------|
 | **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
-| **Parallel+TLAB supported defaults** | Correctness gates closed (steal, FREE-claim×minor, STW SP/greg + TLAB full-stack; CI `--tlab --nursery`); need thr evidence before EC>1 / `GCRY_TLAB` default |
+| **Parallel+TLAB supported defaults** | STW property gates closed; **Kemal HTTP still crashes** (`GCRY_TLAB=1` @ EC1 SEGV; `EC_PARALLELISM>1` `realloc` abort) — see `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`; thr blocked until HTTP-stable |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |
