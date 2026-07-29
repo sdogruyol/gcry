@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-29
+
+Trust and tooling release: industry-style test suite, debug observability, and a
+measured Linux Kemal re-cut. Collector throughput unchanged; Kemal post-GC RSS
+now measured (not estimated).
+
+### Performance
+
+- **Linux Kemal** (same-host median-of-3, `wrk -c 100 -d 30`, scrub on): `/json` **~89%** of Boehm @ **~0.79×** post-GC RSS; `/` **~89%** @ **~0.78×**. Session `bench/log/linux/2026-07-29-035426/`. See [docs/PERF.md](docs/PERF.md) (Linux). Fat-app (acikturkiye) not re-cut — still ~93% thr / ~2.65× RSS *est.* ([ACIKTURKIYE.md](docs/ACIKTURKIYE.md)).
+
 ### Added
 
-- **Debug invariant checker (`GCRY_DEBUG_INVARIANTS=1`):** validates heap invariants at runtime -- `live_objects` counter accuracy, freelist cycle/consistency checks, chunk index integrity, and block overlap detection. Hooks into `malloc`, `free`, and `collect`. Signal-safe stderr output; `-Dgcry_invariant_abort` for core dumps. Exposed `Heap#each_chunk`, `#freelist_for`, `#nursery_freelist_for` for the checker. CI runs invariants on every PR. (`spec/invariant_spec.cr`, `make invariants`, CI `Debug invariants` step.)
+- **Debug invariant checker (`GCRY_DEBUG_INVARIANTS=1`):** validates heap invariants at runtime -- `live_objects` counter accuracy, freelist cycle/consistency checks, chunk index integrity, and block overlap detection. Hooks into `malloc`, `free`, and `collect`. Diagnostics use `write(2)` / no managed-heap alloc (not a claim that GC is async-signal-safe). `-Dgcry_invariant_abort` for core dumps. Exposed `Heap#each_chunk`, `#freelist_for`, `#nursery_freelist_for` for the checker. CI runs invariants on every PR. (`spec/invariant_spec.cr`, `make invariants`, CI `Debug invariants` step.)
 - **Coverage infrastructure:** `spec/all_specs.cr` entrypoint for kcov (DWARF-based line/branch coverage). `ci/coverage.sh` wrapper runs kcov + `crystal tool unreachable` + `crystal tool macro_code_coverage`. `make coverage` / `coverage-kcov` / `coverage-unreachable` / `coverage-macro` targets. CI `coverage` job builds the spec binary, installs kcov from Debian, and uploads the report. (`ci/coverage.sh`, `Makefile`, `.github/workflows/ci.yml`)
 - **Memory safety CI:** `make asan` builds and runs specs with AddressSanitizer (`-Dasan`). `make valgrind-samples` runs samples under Valgrind memcheck (`--leak-check=full`). CI `asan` and `valgrind` jobs on every PR. (`Makefile`, `.github/workflows/ci.yml`)
 - **Deterministic replay fuzzing:** `bench/fuzz.cr` rewritten with `--seed=`, `--seconds=`, `--log=`, and `--replay=` flags. Fuzz logs every operation to a replayable log file (opcode + args). Replay mode reads the log and replays the exact sequence of heap operations. Op 9 (spawn + Channel) excluded from logs as non-deterministic Crystal runtime. CI runs fuzz + replay on every PR. (`make fuzz-replay FUZZ_LOG=path`, CI `Fuzz with log + replay` step.)
@@ -20,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Alloc pattern fuzzing:** `bench/pattern_fuzz.cr` -- 3 allocation distributions (Zipfian power-law, bimodal small+large, stride array-growth) each checked against baseline uniform-random. Verifies pause p99 < 8-10x baseline and RSS growth < 10%. 200 phases × 5000 objects per phase. (`make pattern-fuzz`, CI `Alloc pattern fuzz` step.)
 - **Thread storm test:** `bench/thread_storm.cr` -- 3 phases: thread spawn storm (OS threads doing alloc/free/collect in batches), rapid thread create/destroy (250 short-lived threads), Crystal `Signal.trap` deferred alloc (event-loop mutator path; GC is **not** async-signal-safe — see POLICY.md). 1000+ iterations total, 0 errors. (`make thread-storm`, CI `Thread storm` step.)
 - **OOM scenarios:** `bench/oom_test.cr` -- 3 phases: bounded heap (low gc_threshold, 500 iterations, no crash), mmap failure (graceful OutOfMemoryError), finalizer under OOM (no crash under pressure). (`make oom-test`, CI `OOM test` step.)
-- **Bug-fix test policy:** `CONTRIBUTING.md` with "bug fix must include test" rule, `.github/PULL_REQUEST_TEMPLATE.md` with reproducing test checkbox, and `spec/regression/` directory with 4 regression tests (live_objects dormant chunk, hash_layout entries_size, scan_cap alloc_size mismatch, signal_stack false root). (`spec/regression/`, `process_spec/regression/`, CI regression jobs.)
+- **Bug-fix test policy:** `CONTRIBUTING.md` with "bug fix must include test" rule, `.github/PULL_REQUEST_TEMPLATE.md` with reproducing test checkbox, and `spec/regression/` directory with 4 regression tests (live_objects dormant chunk, hash_layout entries_size, scan_cap alloc_size mismatch, signal_stack false root). (`spec/regression/`, CI regression jobs.)
 - **API misuse test suite:** `spec/api_misuse_spec.cr` -- tests covering `GC.free(null)`, `GC.realloc(null, 0)`, `GC.malloc(0)`, `GC.malloc_atomic(0)`, `Gcry.add_root(null)`, `Gcry.register_disappearing_link(null, ...)`, `collect` inside finalizer (no deadlock), Crystal `Signal.trap` deferred alloc (Linux; not async-signal-safe), `add_root` with large pointer, alternating malloc/free. (`make spec`, CI `spec` step.)
 - **Fork reinit test:** `bench/fork_reinit.cr` -- standalone `LibC.fork` + `after_fork_child_reinit` + alloc in child + parent continues allocating after collect. 3 assertions, all pass. (`make fork-test`, CI `Fork reinit test` step.)
 - **Finalizer complex scenarios:** `bench/finalizer_complex.cr` -- 7 phases: finalizer chain, finalizer calling `GC.collect`, finalizer adding root (resurrection), finalizer + disappearing links interaction, finalizer under heavy allocation pressure (500 objects), finalizer creating 1000 objects, and many disappearing links (200). 8/8 assertions pass. (`make finalizer-complex`, CI `Finalizer complex scenarios` step.)
@@ -44,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`live_objects` counter drift on dormant chunks:** the counter was not updated when a fully-free chunk was marked DORMANT during sweep, causing the invariant checker to flag a mismatch (actual=6502, reported=1). *Discovered by the new invariant checker. Covered by `spec/regression/1_live_objects_dormant.cr`.*
 - **`after_fork_child_reinit` stability:** `LibC.fork` + reinit + alloc in child, parent continues after collect. Covered by `bench/fork_reinit.cr`.
+
+### Changed
+
+- **Signal policy clarity:** GC is **not** async-signal-safe ([POLICY.md](docs/POLICY.md)). Crystal `Signal.trap` is deferred (event loop); tests/docs no longer claim handler-safe `GC.malloc`.
 
 ## [0.13.0] - 2026-07-27
 
@@ -387,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sdogruyol/gcry/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sdogruyol/gcry/compare/v0.10.0...v0.11.0

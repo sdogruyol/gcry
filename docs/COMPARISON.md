@@ -6,12 +6,12 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-| | gcry (0.10.0) | Boehm (Crystal default) |
+| | gcry (0.14.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
-| Fibers | STW + fiber / stack roots + SP clamp | LibGC + thread bottoms |
+| Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
 | Parallel OS threads | Experimental (measure — HTTP thr can drop) | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
@@ -19,9 +19,8 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
-| Kemal `/json` (Linux v0.9.0) | thr ~**92%**, post-GC RSS ~**0.97×** — [PERF.md](PERF.md) | baseline |
-| Kemal `/json` (macOS v0.10.0) | thr ~**90%**, post-GC RSS ~**0.97×** — [PERF-macos.md](PERF-macos.md) | baseline |
-
+| Kemal `/json` (Linux v0.14.0) | thr ~**89%**, post-GC RSS ~**0.79×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (macOS v0.13.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when
 
@@ -50,4 +49,4 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **Boehm-class RSS on Kemal**. Dense live heaps (e.g. acikturkiye ~**2.8×** post-GC RSS) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.79× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**2.65×** post-GC RSS *est.* on Linux) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md).

@@ -6,17 +6,19 @@ Crystal-native conservative mark–sweep GC as a **shard** — `require "gcry"` 
 
 Boehm-class collector you can read and change in Crystal; **Linux + macOS**; fibers OK; parallelism 1.
 
-## macOS (v0.10.0)
+## v0.14.0 highlight
 
-Process GC on Darwin is real: Mach STW, dyld roots, host-page reclaim. Crystal **≥ 1.21**.
-
-Same-host Kemal on Apple Silicon (`wrk -c 100 -d 30`, median of 3): `/` ~**97%**, `/json` ~**90%**, post-GC RSS ~**0.97×** — [PERF-macos.md](PERF-macos.md).
+Trust and tooling release: invariant checker, property tests, ASan/Valgrind CI, soak/OOM/thread-storm, `GCRY_TRACE` + heap dump — plus a measured Linux Kemal re-cut.
 
 ## Linux numbers
 
 Cite [PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**.
 
-As of last Linux cut (**v0.9.0**): `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~**0.97×** Boehm. (v0.10.0 did not re-cut Linux on the Darwin release host.)
+**v0.14.0** (measured): `/json` ~**89%** of Boehm thr @ ~**0.79×** post-GC RSS; `/` ~**89%** @ ~**0.78×**. Fat-app (acikturkiye) ~**93%** thr / ~**2.65×** RSS *estimated* (not re-cut) — [ACIKTURKIYE.md](ACIKTURKIYE.md).
+
+## macOS numbers
+
+Cite [PERF-macos.md](PERF-macos.md). Last Darwin Kemal cut is **v0.13.0** (not re-cut for 0.14): `/` ~**93%**, `/json` ~**84%**, post-GC RSS ~**0.93–1.06×**.
 
 ## When to try gcry
 
@@ -38,7 +40,7 @@ As of last Linux cut (**v0.9.0**): `/` ~**89%**, `/json` ~**92%**, post-GC RSS ~
 
 ## Checklist before posting
 
-- [ ] Tag `v0.10.0`; PERF-macos.md + README refreshed same day
+- [ ] Tag `v0.14.0`; PERF.md + README refreshed same day
 - [ ] CI green on x86_64 + aarch64 + macOS
-- [ ] Link COMPARISON.md + POLICY.md
-- [ ] Call out **macOS process GC** in the title / first paragraph
+- [ ] Link COMPARISON.md + POLICY.md + TEST_PLAN.md
+- [ ] Lead with **test/hardening + measured Linux RSS**, not a thr miracle

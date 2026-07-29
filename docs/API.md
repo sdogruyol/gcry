@@ -52,8 +52,8 @@ Notable knobs (also via `GCRY_*` env on process GC): `gc_threshold`, `nursery_en
 The nursery is a young-object space (size-class chunks tagged `NURSERY`). Allocations go there when `nursery_enabled` is true. A minor collection walks roots + old→young edges (via page-dirty barrier on Linux, full old scan on Darwin) and promotes survivors to old-space.
 
 **Process GC defaults:**
-- **Linux:** nursery enabled, threshold 512 KiB, adaptive threshold on.
-- **Darwin:** nursery disabled (no barrier backend yet; opt in via `GCRY_NURSERY=1`).
+- **Linux + Darwin:** nursery **disabled** (soft-dirty false negatives on HTTP made default-on unsafe). Opt in with `GCRY_NURSERY=1` (adaptive threshold still applies when enabled).
+- Soft-dirty / mprotect barrier backends remain **Linux-only**; Darwin nursery uses full old→young scan if enabled.
 
 ### Adaptive threshold
 

@@ -1,9 +1,9 @@
 # Regression test for live_objects counter drift on dormant chunks.
 #
-# Fixed in v0.13.0: the counter was not updated when a fully-free chunk
+# Fixed in v0.14.0: the counter was not updated when a fully-free chunk
 # was marked DORMANT during sweep, causing the invariant checker to flag
 # a mismatch (actual=6502, reported=1).
-# See CHANGELOG v0.13.0 Fixed.
+# See CHANGELOG v0.14.0 Fixed.
 #
 # Trigger: allocate, free everything, collect. After sweep, the empty chunk
 # goes DORMANT and live_objects must be 0 (or the runtime baseline).

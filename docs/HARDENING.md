@@ -18,11 +18,14 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 ## Defaults that matter (process GC)
 
 - Marks live in the **BlockHeader** (`MARK` flag). Side `MarkBitmap` mmap is **opt-in** (`-Dgcry_side_bitmap`) — Linux HTTP A/B: ~9× Kemal RSS vs ~1× header marks
-- Majors at **32 MiB**, **full STW**; nursery / incremental **off** for process GC (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
+- Majors: Linux **32 MiB**, Darwin **16 MiB**; **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
-- Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain)
-- Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux; Darwin default **off** — freelist abandonment grew fat-app heaps)
-- **Linux + macOS** process GC (v0.10+): Darwin uses Mach STW + dyld roots; free-page physical release **on** (`mach_vm` at **host** page size — 16 KiB on Apple Silicon; `MADV_DONTNEED` does not drop RSS there); large-object freelist retain **0** (Linux keeps **8 MiB**)
+- Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **16 MiB**, Darwin **512 KiB**
+- Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
+- Fiber stack scrub **on** (Linux + Darwin; `GCRY_DISABLE_SCRUB_FIBERS=1` to opt out)
+- Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
+- Large-object freelist retain: Linux **8 MiB**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`)
+- **Linux + macOS** process GC: Darwin uses Mach STW + dyld roots; free-page physical release **on** (`MADV_FREE_REUSABLE` / host page size — 16 KiB on Apple Silicon)
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.
@@ -33,9 +36,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major (default **32 MiB**) |
+| `GCRY_THRESHOLD` | Bytes since last major (Linux default **32 MiB**; Darwin process **16 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (bytes; default **512 KiB**; Linux process GC default-on) |
+| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
 | `GCRY_DISABLE_ADAPTIVE_NURSERY=1` | Use fixed nursery threshold (no auto-tuning) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty/total % cap for soft-dirty scan (default **25**) |
@@ -48,26 +51,27 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
-| `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty bytes via `MADV_DONTNEED` (default **0**) |
+| `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **16 MiB**, Darwin **512 KiB**; library **0**) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux; Darwin process default-on) |
-| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default free-page `mach_vm` release |
-| `GCRY_LARGE_CACHE` | Large freelist retain (default **8 MiB**; Darwin process default **0**) |
-| `GCRY_CHUNK_BYTES` | Chunk mmap size (default **256 KiB**) |
+| `GCRY_DISABLE_PAGE_RELEASE=1` | Darwin: disable default free-page reclaim |
+| `GCRY_LARGE_CACHE` | Large freelist retain (Linux default **8 MiB**; Darwin process **1 MiB**) |
+| `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
 | `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
 | `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program precise layouts (Linux Kemal `/json` thr cost ~7pp) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
-| `GCRY_BLACKLIST=1` | Opt-in page blacklist (Darwin default off) |
+| `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
 | `GCRY_TLAB=1` | Thread-local freelists (parallel contexts) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
-| `GCRY_SCRUB_FIBERS=1` | Capped parked-fiber wipe before mark |
+| `GCRY_SCRUB_FIBERS=1` | Force fiber scrub on (already process default) |
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
@@ -84,7 +88,7 @@ Conservative GC keeps any aligned word that **looks** like a heap pointer.
 
 Common sources: stale stack slots, integer bit patterns, broad static scans.
 
-Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout, SP clamp, blacklist. Opt-in scrub (`GCRY_CLEAR_STACK` / `GCRY_SCRUB_FIBERS`) wipes **unused** stack only — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
+Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout, SP clamp, blacklist, fiber scrub. Opt-in `GCRY_CLEAR_STACK=1` wipes **unused** stack on alloc — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
 
 ### Diagnosing via `/gc-stats`
 

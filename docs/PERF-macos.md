@@ -25,9 +25,9 @@ After **reverting side bitmap as default**, making **in-header MARK the standard
 
 RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on both paths — the in-header MARK trades some throughput for a dramatic RSS recovery. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
 
-## Headline (current, macOS process GC — 256 KiB chunk default)
+## Headline (v0.13.0 — current Darwin cut) — macOS aarch64
 
-macOS `gc_override.cr` now sets `small_chunk_bytes = 262144` (256 KiB, up from 128 KiB). The 128 KiB chunk inflated collection count and crushed acikturkiye throughput; 256 KiB recovers it without meaningful Kemal RSS cost.
+macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Not re-cut for v0.14.0 — cite these numbers until a new Darwin session.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 

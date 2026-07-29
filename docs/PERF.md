@@ -8,7 +8,7 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (Unreleased / pre-0.14.0) — Linux *(measured)*
+## Headline (v0.14.0) — Linux *(measured)*
 
 Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on** (process default since v0.13), auto-layouts **off**. Session: `bench/log/linux/2026-07-29-035426/` (`git` `015d66d`, post-PR#9).
 
@@ -44,10 +44,10 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | **0.9.0** | **~89%** | **~92%** | **~0.97×** | stack scrub (opt-in); parallel-mark experimental; observability |
 | 0.10.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | **macOS process GC** — Linux not re-cut this release; see [PERF-macos.md](PERF-macos.md) |
 | 0.11.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | side mark bitmap landed on Darwin host; Linux not re-cut at tag |
-| Unreleased (bitmap) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
-| **Unreleased** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
+| pre-0.12 (bitmap A/B) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
+| **0.12.0** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
 | **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
-| **Unreleased** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than est. Fat-app not re-cut. |
+| **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
 
 **Escape knobs (same era, not defaults):**
 
@@ -57,8 +57,8 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure on Unreleased |
-| `-Dgcry_side_bitmap` (Unreleased A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
+| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.14.0** cut |
+| `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
 

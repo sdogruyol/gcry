@@ -20,19 +20,17 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
-## Verdict (v0.10.0) — macOS aarch64
+## Verdict (v0.13.0 — current Darwin cut) — macOS aarch64
 
-Same host, Crystal 1.21.0, Apple Silicon, `wrk -c 100 -d 30`, median of 3, scrub **off** (`LABEL=macos-aarch64-v0.10.0`):
+`small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, 0 crashes. **Not re-cut for v0.14.0.**
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
-| **gcry vs Boehm** | **~80%** | **~11.8×** |
+| **gcry vs Boehm** | **~78%** | **~15.8×** |
 
-Throughput is usable (Mach STW). RSS is not Boehm-class — dense conservative-live (`size_class_live_bytes` ~0.7–0.9 GiB). Free-page reclaim works (`free_bytes` small after collect). **Shard-only heuristics do not close 5×.** Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
+Throughput usable (Mach STW). RSS is not Boehm-class — dense conservative-live. Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
-## Current benchmark (macOS process GC — 256 KiB chunk default) — macOS aarch64
-
-`small_chunk_bytes` bumped to 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, 0 crashes:
+### Trial detail (256 KiB chunk)
 
 | Trial | Boehm req/s | gcry req/s | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
 |------:|-----------:|----------:|-------:|----------------:|---------------:|------:|

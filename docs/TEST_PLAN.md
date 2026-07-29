@@ -7,44 +7,32 @@
 
 ## Current State Assessment
 
-**Grade: B+ / "Solid, but not industry-leading."**
+**Grade: B+ / "Solid, but not industry-leading."** *(post-PR#9 / v0.14.0)*
+
+Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrower than the original Critical list.
 
 ### Strengths
 
 | Area | Grade | Notes |
 |------|-------|-------|
-| **Unit test coverage** | A | 17 files covering every module (heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate). Focused assertions, proper `ensure` cleanup. |
-| **Integration test** | A- | `process_spec/` runs under `-Dgc_none` as real process GC. HTTP::Headers nursery regression in `bench/nursery_headers.cr`. |
-| **Fuzz test** | B+ | Nightly 30-minute fuzz (`bench/fuzz.cr`), deterministic seed 42. Good start but duration is insufficient. |
-| **CI infrastructure** | A- | 6 jobs: Linux x86_64, aarch64, macOS, perf-smoke gate, nightly fuzz. Runs under both Boehm and `-Dgc_none`. |
-| **Regression tests** | B+ | `array_shift_spec`, `phase6` nursery regression, barrier graceful skip, hash entries_size SEGV regression. |
-| **Performance test** | A- | Kemal A/B wrk, perf-smoke CI gate (70% of Boehm), churn benchmark, pause histograms, Prometheus metrics. |
-| **Multi-thread test** | B | TLAB, parallel mark, alloc storm. No concurrent mutation testing under STW. |
-| **Platform test** | B | Linux x86_64 + aarch64, macOS arm64 + x86_64. Darwin tests are lighter. |
+| **Unit test coverage** | A | Specs across heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate. |
+| **Integration test** | A- | `process_spec/` under `-Dgc_none`. Nursery HTTP regression in `bench/nursery_headers.cr`. |
+| **Fuzz / property** | A- | Deterministic fuzz + replay; heap/layout/MT property tests in CI. |
+| **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (≥70% Boehm), nightly fuzz/soak. |
+| **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
+| **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak. |
+| **Multi-thread test** | B | Library-heap MT property + thread storm. **No** process-STW concurrent mutation property yet. |
+| **Platform test** | B+ | Darwin stubs + Mach STW in CI; Windows still blocked. |
 
-### Gaps & Weaknesses
+### Remaining gaps
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
-| **Property-based testing** | 🔴 Critical | No QuickCheck-style random heap graph generation. Existing fuzz is single-pattern. |
-| **Coverage measurement** | 🔴 Critical | No coverage tooling in CI. No branch coverage, no mutation testing. |
-| **Memory safety tooling** | 🔴 Critical | Valgrind, ASan, UBSan absent from CI. Memory bugs in a GC are silent death. |
-| **Invariant checker** | 🔴 Critical | No runtime debug mode to validate heap invariants. |
-| **Long-duration soak test** | 🟡 High | 30 min fuzz is good but no 24h+ soak. |
-| **STW + concurrent mutation** | 🟡 High | No test for threads writing while others are suspended during STW. |
-| **OOM / error path testing** | 🟡 High | `mmap` failure, heap full, threshold overflow scenarios untested. |
-| **Finalizer reentrancy / ordering** | 🟡 High | Finalizer-in-finalizer, cross-references, ordering dependencies untested. |
-| **Deterministic replay** | 🟡 High | Fuzz has a seed but no crash replay mechanism. |
-| **Signal safety / fork** | 🟡 High | Fork covered (`bench/fork_reinit.cr`). True async-signal GC is **forbidden** ([POLICY.md](POLICY.md)); do not claim handler-safe malloc. Crystal `Signal.trap` is deferred (event loop) — covered as mutator path, not async safety. |
-| **Benchmark variance** | 🟡 High | wrk results are noisy by nature. No protocol for run count, outlier elimination, or confidence intervals. |
-| **Perf regression alerting** | 🟡 High | Listed in ROADMAP but not yet implemented. |
-| **API misuse / hardening** | 🟢 Medium | Double-free test exists. Null pointer free, invalid pointer, use-after-free missing. |
-| **WeakRef edge cases** | 🟢 Medium | Only disappearing link tests. Cycles, resurrection, phantom references missing. |
-| **Large heap (>GB)** | 🟢 Medium | Large alloc tested but GC behavior under very large heaps untested. |
-| **Compiler integration** | 🟢 Medium | `-Dgc_none` build tested. Correctness of compiler-generated GC calls untested. |
-| **STW suspend/resume cost** | 🟢 Medium | No microbenchmark for thread suspend/resume overhead during STW. |
-| **GC safepoint overhead** | 🟢 Medium | No measurement of safepoint check cost in hot paths. |
-
+| **STW + concurrent mutation** | 🟡 High | Library MT property uses `stop_the_world=false`. Need process-GC harness. |
+| **CHANGELOG audit backlog** | 🟢 Medium | Older Fixed entries lack dedicated regressions (issues, not blockers). |
+| **PR auto-perf comments** | 🟢 Medium | Variance protocol exists; auto PR comment still open. |
+| **WeakRef / large-heap edge cases** | 🟢 Medium | Cycles, resurrection, multi-GB heaps lightly covered. |
+| **Windows process GC** | 🟢 Medium | Blocked — see [INTEGRATION.md](INTEGRATION.md). |
 ---
 
 ## 7-Phase Improvement Plan
@@ -184,7 +172,7 @@ Priority labels:
 **Definition of Done:**
 - [x] `CONTRIBUTING.md` has "bug fix must include test" policy
 - [x] PR template has the reproducing test checkbox
-- [x] `spec/regression/` directory exists with at least 5 entries
+- [x] `spec/regression/` directory exists with **4** entries
 - [ ] CHANGELOG audit is complete — issues filed for every untested fix
 - [x] API misuse tests pass: null free, null realloc, zero malloc, etc.
 - [x] Signal policy aligned with [POLICY.md](POLICY.md) — no “async-signal-safe GC” claims; Crystal `Signal.trap` tests labeled as deferred event-loop path
@@ -303,9 +291,9 @@ For each workload (same host, same job):
 
 ### Top 3 Short-Term Priorities
 
-1. **Coverage + invariant checker** — if you don't know what's untested, you're not testing.
-2. **Property-based testing** — random generation finds what hand-written tests miss.
-3. **Memory safety CI (Valgrind/ASan)** — a memory bug in a GC is silent death. Valgrind catches it.
+1. **Process-GC STW + concurrent mutation property harness** — close the library-vs-process gap.
+2. **CHANGELOG Fixed → regression backlog** — file issues for older untested fixes.
+3. **Compiler stack maps** — product lever for fat-app RSS (not more suite polish).
 
 ---
 
@@ -329,7 +317,7 @@ For each workload (same host, same job):
 
 Audit completed during Phase 4.1. Key "Fixed" entries now have regression tests:
 
-- **v0.13.0 — `live_objects` counter drift on dormant chunks** → `spec/regression/1_live_objects_dormant.cr` ✅
+- **v0.14.0 — `live_objects` counter drift on dormant chunks** → `spec/regression/1_live_objects_dormant.cr` ✅
 - **v0.12.0 — Hash layout entries_size SEGV** → `spec/regression/2_hash_layout_entries_size.cr` ✅
 - **v0.12.0 — Layout scan_cap alloc_size mismatch** → `spec/regression/3_scan_cap_alloc_size_mismatch.cr` ✅
 - **v0.8.0 — Fork reinit after fork** → `bench/fork_reinit.cr` ✅

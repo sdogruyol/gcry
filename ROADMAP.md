@@ -4,19 +4,21 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-## Current (v0.13.0) — "It works, you can use it"
+## Current (v0.14.0) — "It works, you can use it"
 
 - [x] Conservative mark-sweep, stop-the-world
 - [x] Linux + macOS process GC (x86_64 + ARM64)
 - [x] Kemal `/json`: **~89%** Boehm throughput (~95% with `GCRY_KEEP_CHUNKS=1`)
-- [x] Post-GC RSS: **~0.79×** Linux (measured pre-0.14), **~0.93×** macOS (Kemal)
+- [x] Post-GC RSS: **~0.79×** Linux (measured), **~0.93×** macOS (Kemal)
 - [x] Fat app (acikturkiye): ~93% thr, ~2.65× RSS (Linux; *est.*, not re-cut)
 - [x] HDR pause histograms, Prometheus metrics, `/gc-stats` observability
 - [x] Layout-precise scanning, type_id gate, SP clamp
-- [x] macOS Darwin RSS at 1.04× Boehm (MADV_FREE_REUSABLE, 256 KiB chunks)
+- [x] macOS Darwin Kemal RSS ~**0.93–1.06×** Boehm (v0.13 cut; MADV_FREE_REUSABLE, 256 KiB chunks)
 - [x] Shard-based integration: `require "gcry"` + `-Dgc_none`
-- [x] Fiber stack scrubbing (default-on in v0.13.0)
-- [x] 16-byte object header, deferrred madvise (pause tail eliminated)
+- [x] Fiber stack scrubbing (default-on since v0.13.0)
+- [x] 16-byte object header, deferred madvise (pause tail eliminated)
+- [x] Test suite hardening (invariants, property tests, ASan/Valgrind, soak)
+- [x] `GCRY_TRACE` + heap dump observability
 
 ---
 
