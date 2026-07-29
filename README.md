@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs at ~89% of Boehm's throughput with ~0.95x the RSS (Linux).</b>
+  <b>gcry runs at ~89% of Boehm's throughput with ~0.79x the RSS (Linux).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Near-Boehm performance: ~89% throughput at ~0.95x RSS (Linux).**
+**Near-Boehm performance: ~89% throughput at ~0.79x RSS (Linux).**
 
 ---
 
@@ -173,13 +173,15 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.13.0) |
+| Workload | gcry vs Boehm (Unreleased / pre-0.14)* |
 |----------|------------------------:|
 | Kemal `/json` throughput | **~89%** (~95% with `GCRY_KEEP_CHUNKS=1`) |
-| Kemal `/json` post-GC RSS | **~0.95x** |
-| Kemal `/` throughput | **~90%** |
-| Fat app `/api/v1/` throughput | **~93%** |
-| Fat app `/api/v1/` RSS | **~2.65x** |
+| Kemal `/json` post-GC RSS | **~0.79x** |
+| Kemal `/` throughput | **~89%** |
+| Fat app `/api/v1/` throughput | **~93%** *(est., not re-cut)* |
+| Fat app `/api/v1/` RSS | **~2.65x** *(est., not re-cut)* |
+
+\*Kemal: measured `bench/log/linux/2026-07-29-035426/` (median-of-3, scrub on). See [PERF.md](docs/PERF.md).
 
 ### macOS (Apple Silicon)
 

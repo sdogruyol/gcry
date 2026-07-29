@@ -8,27 +8,27 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (v0.13.0) — Linux *(estimated; scrub default-on)*
+## Headline (Unreleased / pre-0.14.0) — Linux *(measured)*
 
-v0.13.0 enables `scrub_fibers_enabled = true` on Linux (same as macOS). Parked fiber-stack scrubbing cuts false roots from stale pointer values, reducing post-GC RSS without throughput loss. **Kemal RSS estimated ~0.95×** (down from 0.99× in v0.12.0); **acikturkiye RSS estimated ~2.65×** (down from 3.00×). Re-cut before v0.14.0 if kernel/libc changes.
-
-### v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
-
-Same host, Crystal 1.21, WSL2 x86_64, median of 3, pure `--release`, **in-header MARK** (default), scrub **off**, auto-layouts **off**. Session: `bench/log/linux/2026-07-26-173602/`.
+Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on** (process default since v0.13), auto-layouts **off**. Session: `bench/log/linux/2026-07-29-035426/` (`git` `015d66d`, post-PR#9).
 
 | Path | % of Boehm | post-GC RSS × |
 |------|----------:|--------------:|
-| `/json` | **~89%** | **~0.99×** |
-| `/` | **~90%** | **~0.99×** |
+| `/json` | **~89%** | **~0.79×** |
+| `/` | **~89%** | **~0.78×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. Near-Boehm thr and RSS again after reverting side-bitmap as default.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. Throughput unchanged vs the v0.12/0.13 carry; **Kemal post-GC RSS improved** vs the scrub-off 0.99× cut (scrub default-on now measured, not estimated). Fat-app (acikturkiye) **not** re-cut this session — still [ACIKTURKIYE.md](ACIKTURKIYE.md) ~2.65× est.
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
-| `/` | 83891 | 75797 | **90.4%** | **0.99×** |
-| `/json` | 37675 | 33450 | **88.8%** | **0.99×** |
+| `/` | 86159 | 76631 | **88.9%** | **0.78×** |
+| `/json` | 36724 | 32729 | **89.1%** | **0.79×** |
 
 `GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+
+### v0.12.0-era Linux cut (scrub off; superseded)
+
+Same host method, scrub **off**. Session: `bench/log/linux/2026-07-26-173602/`. `/json` **88.8%** @ **0.99×** RSS; `/` **90.4%** @ **0.99×**.
 
 ## History (Linux)
 
@@ -46,7 +46,8 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.11.0 | *(carry 0.9.0)* | *(carry 0.9.0)* | *(carry)* | side mark bitmap landed on Darwin host; Linux not re-cut at tag |
 | Unreleased (bitmap) | ~78% | ~82% | ~9.2× | Linux A/B with side bitmap still default (`2026-07-26-171942`) |
 | **Unreleased** | **~90%** | **~89%** | **~0.99×** | in-header MARK default again; side bitmap opt-in (`-Dgcry_side_bitmap`) |
-| **0.13.0** | **~90%** | **~89%** | **~0.95×** | **Linux: scrub default-on** — Kemal RSS 0.99×→0.95×, acik RSS 3.00×→2.65×. Re-cut needed. macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
+| **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
+| **Unreleased** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than est. Fat-app not re-cut. |
 
 **Escape knobs (same era, not defaults):**
 

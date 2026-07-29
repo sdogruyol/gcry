@@ -9,8 +9,8 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Conservative mark-sweep, stop-the-world
 - [x] Linux + macOS process GC (x86_64 + ARM64)
 - [x] Kemal `/json`: **~89%** Boehm throughput (~95% with `GCRY_KEEP_CHUNKS=1`)
-- [x] Post-GC RSS: **~0.95×** Linux, **~0.93×** macOS (Kemal)
-- [x] Fat app (acikturkiye): ~93% thr, ~2.65× RSS (Linux)
+- [x] Post-GC RSS: **~0.79×** Linux (measured pre-0.14), **~0.93×** macOS (Kemal)
+- [x] Fat app (acikturkiye): ~93% thr, ~2.65× RSS (Linux; *est.*, not re-cut)
 - [x] HDR pause histograms, Prometheus metrics, `/gc-stats` observability
 - [x] Layout-precise scanning, type_id gate, SP clamp
 - [x] macOS Darwin RSS at 1.04× Boehm (MADV_FREE_REUSABLE, 256 KiB chunks)

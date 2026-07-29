@@ -4,9 +4,9 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (v0.13.0) — Linux *(estimated; scrub default-on)*
+## Verdict (Unreleased / pre-0.14.0) — Linux *(estimated; not re-cut)*
 
-v0.13.0 enables `scrub_fibers_enabled = true` on Linux. Parked fiber-stack scrubbing cuts false roots — **acikturkiye RSS estimated ~2.65×** (down from 3.00× in v0.12.0). Re-cut before v0.14.0.
+Kemal Linux was **measured** for pre-0.14 (`docs/PERF.md`, session `2026-07-29-035426`). **acikturkiye was not re-cut** this session — still carry the scrub-on estimate **~2.65×** RSS / **~93%** thr from v0.13 notes (scrub-off measured median was **~3.0×** / **~93%**). Re-cut with `bash bench/run_all.sh acik` before citing fat-app in a tagged release.
 
 ## v0.12.0-era Linux cut (carried into v0.13.0, scrub off)
 
