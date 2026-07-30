@@ -44,24 +44,34 @@ module Gcry
     # Match Crystal `gc/none` STW on Linux (signal-suspend). Darwin uses Mach
     # thread_suspend instead — SIGXFSZ never interrupts kevent waits under HTTP.
     #
-    # Do not hold Thread.lock across suspend/mark — another thread may allocate
-    # while mutating the thread list and deadlock on @gc_lock.
+    # Hold `Thread.lock` for the whole stop→start window (same as Crystal
+    # `gc/none`). Parallel ExecutionContext starts worker threads lazily under
+    # load; without the list mutex a new thread can `threads.push` + allocate
+    # during mark/sweep (Kemal EC>1: realloc "not a gcry allocation" / SEGV).
+    # Do not allocate while this lock is held.
     def stop_world : Nil
       return unless @stop_the_world
       return if @world_stopped
 
       current_thread = Thread.current
-      {% if flag?(:darwin) %}
-        Platform.stop_world_threads(current_thread)
-      {% else %}
-        Thread.unsafe_each do |thread|
-          thread.suspend unless thread == current_thread
-        end
-        Thread.unsafe_each do |thread|
-          thread.wait_suspended unless thread == current_thread
-        end
-      {% end %}
-      @world_stopped = true
+      Thread.lock
+      begin
+        {% if flag?(:darwin) %}
+          Platform.stop_world_threads(current_thread)
+        {% else %}
+          Thread.unsafe_each do |thread|
+            thread.suspend unless thread == current_thread
+          end
+          Thread.unsafe_each do |thread|
+            thread.wait_suspended unless thread == current_thread
+          end
+        {% end %}
+        @world_stopped = true
+      rescue ex
+        # If suspend fails mid-way, unlock so the process can still unwind.
+        Thread.unlock
+        raise ex
+      end
     end
 
     # stop_world only after root-list mutators finish add/delete (see @roots_lock).
@@ -70,6 +80,9 @@ module Gcry
       begin
         stop_world
       ensure
+        # If stop_world raised before setting @world_stopped, unlock roots only;
+        # Thread.lock is released in the rescue above. On success Thread.lock
+        # stays held until start_world.
         @roots_lock.unlock
       end
     end
@@ -78,15 +91,19 @@ module Gcry
       return unless @world_stopped
 
       current_thread = Thread.current
-      {% if flag?(:darwin) %}
-        Platform.start_world_threads(current_thread)
-      {% else %}
-        Thread.unsafe_each do |thread|
-          thread.resume unless thread == current_thread
-        end
-      {% end %}
-      Platform.clear_thread_sps
-      @world_stopped = false
+      begin
+        {% if flag?(:darwin) %}
+          Platform.start_world_threads(current_thread)
+        {% else %}
+          Thread.unsafe_each do |thread|
+            thread.resume unless thread == current_thread
+          end
+        {% end %}
+        Platform.clear_thread_sps
+        @world_stopped = false
+      ensure
+        Thread.unlock
+      end
     end
 
     # Child after fork: only this OS thread survives. Reset locks / STW / caches

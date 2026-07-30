@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parallel mutator heap-index races (partial):** under `EC_PARALLELISM>1`, `chunk_containing` / last-chunk cache raced `index_insert` (false `owns_user_pointer?` / corruption). Added `@index_lock`; `with_alloc_lock` always locks (was a no-op when TLAB off); `ensure_tlabs` boots under `@alloc_lock`. Process-STW other-thread fiber stacks always full-scan. Kemal `EC>1` HTTP still fails — see FINDINGS.
 - **TLAB per-slot freelist locks:** Parallel dual-alloc on lock-free TLAB heads (`ec_alloc_stress` double-free / `not a gcry allocation`). Per-slot `Crystal::SpinLock` (StaticArray — no GC malloc under `@alloc_lock` at boot). STW `flush_all_tlabs` must not take slot locks (suspended mutator may hold them). Refill always re-claims under the slot lock. Kemal `EC>1` still open.
 - **STW running-fiber scan:** `scan_all_fiber_roots` skipped `fiber.running?`, relying on `thread.@current_fiber`; under Parallel that TLS can be briefly nil so stacks were missed. Under process STW, scan running fiber stacks too; if `current_fiber` is nil, fall back to pthread stack bounds + greg.
+- **STW holds `Thread.lock`:** match Crystal `gc/none` — keep the thread-list mutex for the whole stop→start window so Parallel EC cannot `threads.push` + allocate mid-mark/sweep. Necessary, not sufficient; Kemal `EC>1` still flakes (~5/20).
 
 ## [0.15.0] - 2026-07-29
 

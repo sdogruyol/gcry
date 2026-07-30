@@ -16,45 +16,38 @@ Session `2026-07-29-200917/`: `/json` **83.1%** Boehm, `/` **87.7%**.
 
 FREE-claim marks `next_free` tails; Kemal `GCRY_TLAB=1` @ EC1 OK.
 
-## TLAB@Parallel allocator (fixed in tree)
+## TLAB@Parallel allocator (mostly fixed)
 
 Per-TLAB-slot `Crystal::SpinLock` around freelist claim / free / refill install.
 
-Pitfalls closed while landing:
-
-| Bug | Symptom | Fix |
-|-----|---------|-----|
-| `Pointer(Atomic).malloc` under `@alloc_lock` | Boot hang with `GCRY_TLAB=1` (GC.malloc → re-enter SpinLock) | `StaticArray(Crystal::SpinLock, MAX_TLABS)` — no GC alloc in boot |
-| `flush_all_tlabs` took slot locks under STW | Livelock when suspended mutator held the slot | Flush unlocked under STW only |
-| Refill returned head without re-claim | Dual-alloc / wrong USED state | Always `next` after refill and claim under slot lock |
-| Stress harness | Raise without `wg.done` hung WaitGroup | `ensure { wg.done }` |
-
-`ec_alloc_stress` `GCRY_TLAB=1 EC=4`:
-
 | Mode | Result |
 |------|--------|
-| no auto-GC (`GCRY_DISABLE_AUTO` / thr=MAX) | **25/25 OK** |
-| `GCRY_THRESHOLD=65536` | **22/25 OK** (remaining: SEGV / silent abort under collect) |
+| no auto-GC | **25/25 OK** |
+| `GCRY_THRESHOLD=65536` | **22/25 OK** (remaining collect-time flakes) |
 
 ## EC>1 Kemal HTTP (still open)
 
-Kemal `EC_PARALLELISM=2/4` still flakes under `/json`:
+Boehm control: `EC_PARALLELISM=4` Kemal `/json` **0/8 fail** — Parallel HTTP is fine under Boehm; gcry-specific.
+
+Gcry symptoms under `/json`:
 
 - `pointer is not a gcry allocation` (String::Builder `realloc`)
-- `realloc(): invalid pointer`
-- SEGV (sometimes at ASCII-looking addrs e.g. `0x6e6f736a` == `"json"`)
+- `realloc(): invalid pointer` / `double free` in `Heap#realloc`
+- SEGV (sometimes ASCII-looking addrs e.g. `0x6e6f736a` == `"json"`)
 
-Debug stack (dbg binary): `Heap#realloc` ← `String::Builder#resize` ← `/json` handler.
+### Knob matrix (EC4, 8–10× ~10s wrk)
 
-### Evidence
+| Config | Result |
+|--------|--------|
+| default | flakes (~1/10–5/20) |
+| `GCRY_KEEP_CHUNKS=1` | still flakes (not only empty-chunk munmap) |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | still flakes |
+| `GCRY_INTERIOR=1` | still flakes |
+| `GCRY_DISABLE_AUTO=1` | **0/8 fail** — GC-triggered |
+| `GCRY_DISABLE_NURSERY=1` | still flakes |
+| Boehm EC4 | **0/8 fail** |
 
-| Probe | Result |
-|-------|--------|
-| `GCRY_KEEP_CHUNKS=1` EC4 | Can survive multi-×10s wrk with real thr (munmap masking) |
-| EC4 plain, 8×10s wrk (post scan tweak) | **3/8 fail** |
-| EC2+TLAB 8×8s (earlier) | 8/8 ok (lucky / lower pressure) |
-| EC4+TLAB | Still intermittent SEGV |
-| `ec_alloc_stress` EC4 TLAB off, no auto-GC | OK |
+So: premature reclaim / UAF under collect (freelist reuse or munmap), not fixed by interior/type_id/keep-chunks alone.
 
 ### Landed while investigating
 
@@ -62,13 +55,16 @@ Debug stack (dbg binary): `Heap#realloc` ← `String::Builder#resize` ← `/json
 |-----|-----|
 | `@index_lock` + always `with_alloc_lock` | Parallel chunk-index / counter races |
 | TLAB per-slot locks | Parallel dual-alloc on freelist head |
-| STW: scan running fibers in `scan_all_fiber_roots`; nil `current_fiber` → pthread stack | Mark miss when TLS briefly nil / running fiber skipped |
+| STW: scan running fibers; nil `current_fiber` → pthread stack | Mark miss when TLS briefly nil |
+| **STW holds `Thread.lock`** (match Crystal `gc/none`) | Parallel EC lazy `threads.push` + alloc mid-mark/sweep |
 | Full fiber stack + greg on other STW threads | Prior SP-only miss |
+
+Post-`Thread.lock`: Kemal EC4 still **~5/20** fail on 10s `/json` wrk — necessary, not sufficient.
 
 ### Next
 
-1. Bisect remaining EC>1 mark miss vs allocator race (KEEP_CHUNKS narrows toward mark/sweep+munmap).
-2. Consider interior-pointer / `String::Builder` buffer reachability under Parallel (realloc pin exists; ambient stack may still drop raw buffers if owner missed).
+1. Diff Boehm’s per-thread `set_stackbottom(fiber.@stack.bottom)` path vs gcry fiber/thread scan under Parallel migration.
+2. Harden `realloc` pin (explicit root should keep the buffer; still seeing double-free → mark miss of pinned / owner).
 3. Only then thr A/B → 0.16.0 cut.
 
 Supported product path remains EC parallelism **1**, `GCRY_TLAB` **off**.
