@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skip fiber scrub when SP still on stack:** parked-fiber scrub used `stack_top` while Parallel mid-swap left the OS thread SP on that stack — wiping live frames before mark.
 - **Historic heap span for realloc/free:** `@heap_min/@heap_max` tighten after munmap, so a dangling gcry pointer fell outside the live span and `GC.realloc`/`free` called LibC (`realloc(): invalid pointer`). Keep a monotonic `@heap_span_*` for the LibC-fallback guard.
 - **Mutator stack scan from hardware SP:** `scan_mutator` used `pointerof(local)` (mid-frame), skipping the leaf/red-zone window on the collecting worker under Parallel.
+- **Hash `@entries` grey-scan:** precise `register_hash` kept `@entries` noscan (alive but unscanned); if the Entry walk under-counted, key/value refs died while the blob lived (Headers UAF / `…0008`). Mark `@entries` via `mark_candidate`; keep `@indices` noscan. Skip the walk when `@entries` is not a live gcry user pointer.
 
 ## [0.15.0] - 2026-07-29
 

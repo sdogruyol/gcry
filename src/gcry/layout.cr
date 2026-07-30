@@ -432,14 +432,17 @@ module Gcry
     def self.register_hash(key_type : K.class, value_type : V.class) forall K, V
       {% begin %}
         # @block is Proc? (multi-word) — word-scanned via hash_block_*; not a single ptr.
+        # @entries: mark_candidate (grey-scan) so Entry key/value pointers stay
+        # reachable even if the precise walk under-counts (corrupt size/pow2 or
+        # early return). @indices stays noscan (Int32 index table, not refs).
         scan = StaticArray(UInt16, 1).new(0)
-        noscan = StaticArray(UInt16, 2).new(0)
+        noscan = StaticArray(UInt16, 1).new(0)
         n_scan = 0
         n_noscan = 0
 
+        scan[n_scan] = UInt16.new(offsetof(Hash({{K}}, {{V}}), @entries))
+        n_scan += 1
         noscan[n_noscan] = UInt16.new(offsetof(Hash({{K}}, {{V}}), @indices))
-        n_noscan += 1
-        noscan[n_noscan] = UInt16.new(offsetof(Hash({{K}}, {{V}}), @entries))
         n_noscan += 1
 
         {% if K < Reference %}
