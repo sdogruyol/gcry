@@ -4,54 +4,67 @@ Date: 2026-07-29/30 · host: WSL2 i3-12100F · Crystal 1.21.0
 
 ## Method
 
-- Kemal `bench/kemal`, `wrk -c 100 -d 10..30`.
+- Kemal `bench/kemal`, `wrk -c 100 -d 8..30`.
 - Parallelism: `EC_PARALLELISM=N` → `Fiber::ExecutionContext.default.resize(N)`.
-- Allocator micro: `bench/ec_alloc_stress.cr`.
 
 ## Baseline (EC1, TLAB off)
 
-Session `2026-07-29-200917/`: `/json` **83.1%** Boehm, `/` **87.7%**.
+Session `2026-07-29-200917/`: `/json` **83.1%** Boehm.
 
-## Status summary
+## Mark-miss isolation (this session)
 
-| Path | Status |
-|------|--------|
-| EC1, TLAB off | Supported |
-| TLAB@EC1 | Fixed (FREE-claim tails) |
-| TLAB@Parallel alloc (no auto-GC) | Solid (per-slot locks) |
-| TLAB@Parallel + GC | Mostly OK (~1/12 stress fail) |
-| **Kemal EC>1 + collect** | **Still open** (~3/20 on 10s `/json`) |
-| Boehm EC4 | **0/8** — Parallel HTTP fine under Boehm |
+### Repro
 
-## EC>1 evidence
+`GCRY_THRESHOLD=32768` → even **EC1** dies at Kemal boot in `Log::AsyncDispatcher#write_logs` (`SIGSEGV @ 0x100000009`). Scrub on/off irrelevant.
 
-`GCRY_DISABLE_AUTO=1` → 0 fail (GC-triggered). KEEP_CHUNKS / type_id / interior do not close flakes.
+### Knob matrix (EC1 thr=32KiB, 5×2s boot)
 
-Hot crash: `Heap#realloc` ← `String::Builder#resize` ← `/json` (double-free / not a gcry / SEGV).
+| Config | Survive |
+|--------|---------|
+| default (old: gate stacks) | 0/5 |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | **5/5** |
+| `GCRY_INTERIOR=1` | 0/5 |
+| `GCRY_DISABLE_NURSERY=1` | 0/5 |
+| `GCRY_KEEP_CHUNKS=1` | 0/5 |
+| `GCRY_DISABLE_LAYOUT=1` | 0/5 |
 
-### Latest after realloc suppress + Boehm-like scan (this session)
+**Root cause:** `type_id_gate` on **stack** ambient roots rejected live Channel/Deque raw buffers (first word ≠ Crystal type_id). Dispatcher fiber then used a swept Channel.
+
+### Fix
+
+Gate **static** roots only by default. Stack/thread ungated (Boehm-like). Opt into old stack gating: `GCRY_TYPE_ID_GATE=1`.
+
+### After fix
 
 | Test | Result |
 |------|--------|
-| EC4 default, 20×10s wrk | **3/20 fail** (was ~5/20) |
-| EC4 single process 6×15s | **LONG_OK** |
-| EC4 + `GCRY_DISABLE_SCRUB_FIBERS` | still flakes (scrub not the sole cause) |
-| EC1 regression | OK |
+| EC1 thr=32KiB boot | **8/8 OK** |
+| EC1 thr=32KiB + wrk `/json` 8×8s | **0/8 fail** |
+| EC4 default 20×10s (post-fix) | **2/20** |
+| EC4 `GCRY_DISABLE_TYPE_ID_GATE=1` | **4/20** — gate not the residual |
+| EC4 `GCRY_DISABLE_AUTO=1` | **0/20** — still collect/mark class |
+| Boehm EC4 | 0/8 (earlier) |
 
-### Landed
+## Still open / Parallel residual
 
-| Fix | Note |
-|-----|------|
-| `@index_lock`, always `with_alloc_lock` | Chunk index races |
-| TLAB per-slot locks | Dual-alloc |
-| STW `Thread.lock` | Match Crystal `gc/none` |
-| Running-fiber STW scan | TLS nil / skipped running |
-| **`@suppress_collect` in growing realloc** | Pin window: no collect mid-copy |
-| **Always scan fiber stack** (drop `name=="main"` early-out) | Every Thread main fiber is named `"main"` |
-| **`String::Builder` layout** | `@buffer` noscan |
+Symptom after type_id_gate fix: `realloc(): invalid pointer` (glibc) under EC4.
 
-### Next
+GDB (SIGINT mid-load): **DEFAULT-1** in `flush_pending_empty_chunks`→`munmap` while **DEFAULT-3** in STW `sweep`/`index_remove`, and **DEFAULT-2** suspended in `GC.realloc`→`is_heap_ptr`. Cause: `@collecting` cleared before post-STW munmap → peer collect STW mid-flush.
 
-1. Remaining EC>1 SEGV under collect (not only realloc) — mark miss of live HTTP objects.
-2. Compare Boehm suspend-time stack walk vs gcry `safe:` holes / scrub interaction under Parallel.
-3. Stability gate then thr A/B → 0.16.0.
+### Fix (this session)
+
+1. **type_id_gate stacks off** — EC1 thr=32KiB boot+wrk green.
+2. **`@post_stw_lock`** — next collect waits for prior post-STW munmap (gdb showed STW mid-flush). Holding `@collecting` through flush made flakes *worse* (7/20); lock-without-suppressing-alloc is the right shape.
+3. **`GC.realloc` span guard** — raise instead of `LibC.realloc` when address is in historic heap span but not in chunk index.
+
+### EC4 matrix
+
+| Config | fail |
+|--------|-----:|
+| pre type_id fix (approx) | ~4/20 |
+| stacks ungated only | 2/20 |
+| hold `@collecting` through flush | **7/20** (regressed) |
+| `@post_stw_lock` (post-fix) | **1/20** |
+| `DISABLE_AUTO` | **0/20** |
+
+Residual still collect/mark class under Parallel. Supported path: EC1, TLAB off.

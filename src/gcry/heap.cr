@@ -87,6 +87,7 @@ module Gcry
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
     @alloc_lock = Crystal::SpinLock.new
     @index_lock = Crystal::SpinLock.new
+    @post_stw_lock = Crystal::SpinLock.new
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
@@ -140,6 +141,7 @@ module Gcry
       @suppress_collect = 0
       @alloc_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
+      @post_stw_lock = Crystal::SpinLock.new
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
@@ -354,6 +356,14 @@ module Gcry
     def is_heap_ptr(pointer : Void*) : Bool
       return false if pointer.null?
       !chunk_containing(pointer.address).nil?
+    end
+
+    # Address in [@heap_min, @heap_max) even if the chunk was already
+    # index-removed / munmapped. Used to refuse LibC.realloc fallback.
+    def in_heap_span?(pointer : Void*) : Bool
+      return false if pointer.null? || @heap_max == 0 || @heap_min == UInt64::MAX
+      addr = pointer.address
+      addr >= @heap_min && addr < @heap_max
     end
 
     def self.round_size(size : UInt64) : UInt64

@@ -81,9 +81,13 @@ module GC
       # Linux floor was tried with HOLED default-on and did not help; adaptive
       # still grows on high hit-rate. Escape: GCRY_LARGE_CACHE=<bytes>.
     {% end %}
-    # type_id_gate on ambient roots only (stack/static). Heap scan must still
-    # mark raw Array/Hash buffers that lack a Crystal type_id header.
+    # type_id_gate on *static* ambient roots (BSS false hits). Stack/thread
+    # roots stay ungated: Channel/Deque buffers and similar raw allocations
+    # fail the type_id heuristic and were dropped → Log::AsyncDispatcher SEGV
+    # under frequent collect. Escape to also gate stacks: GCRY_TYPE_ID_GATE=1.
+    # Heap scan still uses mark_candidate (no gate) for Array/Hash buffers.
     heap.type_id_gate = true
+    heap.type_id_gate_stacks = false
     # Page blacklist: previously off on Darwin (freelist abandonment spiral under
     # all-conservative scanning). Re-enabled in P2.3 era now that layout-precise
     # scans cut false root hits sharply — the abandon spiral is unlikely.
@@ -295,11 +299,14 @@ module GC
     end
 
     if env_flag_one?("GCRY_TYPE_ID_GATE")
+      # Opt into pre-fix behavior: gate stack/thread ambient roots too.
       heap.type_id_gate = true
+      heap.type_id_gate_stacks = true
     end
 
     if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
       heap.type_id_gate = false
+      heap.type_id_gate_stacks = false
     end
 
     if env_flag_one?("GCRY_DISABLE_STATIC_ROOTS")
@@ -421,6 +428,12 @@ module GC
     if @@gcry_ready
       # Pointers from the LibC bootstrap era are not on the gcry heap.
       if !pointer.null? && !Gcry.default_heap.is_heap_ptr(pointer)
+        # Emptied chunks are index-removed then munmapped post-STW. A mark miss
+        # (or racing flush) makes is_heap_ptr false while the address is still
+        # in the historic heap span — LibC.realloc aborts "invalid pointer".
+        if Gcry.default_heap.in_heap_span?(pointer)
+          raise ArgumentError.new("GC.realloc: not a live gcry allocation")
+        end
         return bootstrap_realloc(pointer, size)
       end
       Gcry.default_heap.realloc(pointer, size)

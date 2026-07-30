@@ -23,8 +23,16 @@ module Gcry
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
     # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
+    #
+    # type_id_gate applies to *static* roots only by default. Applying it to
+    # stacks rejected live Channel/Deque buffers and similar raw allocations
+    # whose first word is not a Crystal type_id — Log::AsyncDispatcher then
+    # SEGVd under frequent collect (EC1 + GCRY_THRESHOLD=32KiB boot; also
+    # amplified Parallel HTTP pressure). Heap edges still use mark_candidate
+    # (no gate). Opt back into stack gating with GCRY_TYPE_ID_GATE=1.
     private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
-      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers, source: source)
+      gate = @type_id_gate && (source == RootSource::Static || @type_id_gate_stacks)
+      mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
     end
 
     # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash

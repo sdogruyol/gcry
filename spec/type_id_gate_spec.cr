@@ -1,10 +1,41 @@
 require "./spec_helper"
 
+it "default type_id_gate leaves stack decoys live (Channel-buffer class)" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.type_id_gate = true
+    heap.type_id_gate_stacks = false # process default
+    heap.allow_interior_pointers = false
+    heap.layout_precise = false
+
+    decoy = heap.malloc(32)
+    decoy.as(UInt8*).clear(32)
+    decoy.as(UInt64*).value = 0x0000555555555400_u64 # absurd type_id
+
+    root_words = heap.malloc(16)
+    root_words.as(UInt8*).clear(16)
+    root_words.as(Void**).value = decoy
+
+    heap.before_collect do
+      heap.push_stack(root_words, Pointer(Void).new(root_words.address + 16))
+    end
+    heap.collect(scan_stack: false)
+
+    heap.live?(decoy).should be_true
+    heap.type_id_stack_rejects.should eq(0)
+  ensure
+    heap.destroy
+  end
+end
+
 it "root type_id gate rejects ambient buffer; heap scan still marks children" do
   heap = Gcry::Heap.new
   begin
     heap.gc_threshold = UInt64::MAX
     heap.type_id_gate = true
+    # Spec exercises gated stack roots (process default gates Static only).
+    heap.type_id_gate_stacks = true
     heap.allow_interior_pointers = false
     heap.layout_precise = false
 
@@ -50,6 +81,7 @@ it "per-source reject counters attribute to stack scan (P2.2)" do
   begin
     heap.gc_threshold = UInt64::MAX
     heap.type_id_gate = true
+    heap.type_id_gate_stacks = true
     heap.allow_interior_pointers = false
     heap.layout_precise = false
 
