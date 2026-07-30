@@ -154,7 +154,7 @@ Shipped and dogfooded on Linux + macOS; **v0.15.0** is a correctness release (pr
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ✅ fiber scrub **default-on**; `GCRY_CLEAR_STACK` still opt-in |
-| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF, live steal, FREE-claim×minor, Parallel STW SP/greg + TLAB full-stack scan fixed; still measure before default-on |
+| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF, live steal, FREE-claim×minor/chain, Parallel STW SP/greg + TLAB full-stack fixed; Kemal TLAB@EC1 OK; EC>1 HTTP still broken |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
@@ -185,7 +185,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | Track | Why it matters |
 |-------|----------------|
 | **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
-| **Parallel+TLAB supported defaults** | STW property gates closed; **Kemal HTTP still crashes** (`GCRY_TLAB=1` @ EC1 SEGV; `EC_PARALLELISM>1` `realloc` abort) — see `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`; thr blocked until HTTP-stable |
+| **Parallel+TLAB supported defaults** | TLAB@EC1 Kemal SEGV fixed (FREE-claim `next_free` chain mark); **EC>1 still aborts** under Kemal — see `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`; thr blocked until Parallel HTTP-stable |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |

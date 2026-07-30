@@ -61,6 +61,12 @@ module Gcry
       # next_free so scrub can walk the chain (BlockHeader.set_used would null
       # next_free and sever the freelist → OOM). Do not scan (uninit payload).
       #
+      # Also mark the rest of the freelist chain reachable via next_free while
+      # leaving those nodes FREE. Stack roots usually hold only the current
+      # `user`; TLAB batches the tail. Unmarked FREE tails make all-free chunks
+      # look empty → munmap → SEGV in free? when the mutator resumes
+      # (Kemal + GCRY_TLAB=1 @ EC1).
+      #
       # Minor × old: never claim. Minor does not munmap old chunks, and clearing
       # FREE on an old freelist node (then skipping mark) leaves USED-on-freelist
       # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
@@ -76,8 +82,15 @@ module Gcry
         h = header.value
         h.flags = h.flags & ~BlockHeader::Flags::FREE
         header.value = h
-        return if heap_marked?(header)
-        heap_set_mark(header)
+        heap_set_mark(header) unless heap_marked?(header)
+        walk = h.next_free
+        while walk
+          break unless find_block(walk)
+          wh = BlockHeader.from_user(walk)
+          break unless BlockHeader.free?(wh)
+          heap_set_mark(wh) unless heap_marked?(wh)
+          walk = wh.value.next_free
+        end
         return
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers

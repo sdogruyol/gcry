@@ -256,6 +256,16 @@ module Gcry
                  tlab.value.freelists[class_index]
                end
 
+        # Stale head after empty-chunk munmap (or freelist corruption): abandon.
+        if !user.null? && !find_block(user)
+          if nursery
+            tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+          else
+            tlab.value.freelists[class_index] = Pointer(Void).null
+          end
+          user = Pointer(Void).null
+        end
+
         if !user.null? && !BlockHeader.free?(BlockHeader.from_user(user))
           if nursery
             tlab.value.nursery_freelists[class_index] = Pointer(Void).null

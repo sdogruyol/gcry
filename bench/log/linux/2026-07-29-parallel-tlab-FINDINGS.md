@@ -1,6 +1,6 @@
-# Parallel + TLAB thr A/B (blocked)
+# Parallel + TLAB thr A/B
 
-Date: 2026-07-29 · host: WSL2 i3-12100F · Crystal 1.21.0 · git `351745e`
+Date: 2026-07-29 · host: WSL2 i3-12100F · Crystal 1.21.0
 
 ## Method
 
@@ -17,21 +17,30 @@ Session: `bench/log/linux/2026-07-29-200917/`
 | `/` | **87.7%** | **0.78×** |
 | `/json` | **83.1%** | **0.79×** |
 
-## Parallel+TLAB thr
+## HTTP crash matrix (pre-fix)
 
-**Not measured** — server dies under `/json` load before a stable wrk median.
-
-Short smoke (`wrk -c 100 -d 10 /json`, release `kemal-gcry`):
+Short smoke (`wrk -c 100 -d 10 /json`):
 
 | Config | Alive? | Notes |
 |--------|:------:|-------|
 | baseline | yes | ~37k req/s |
-| `GCRY_TLAB=1` only | **no** | SEGV mid-load |
+| `GCRY_TLAB=1` only | **no** | SEGV in `tlab_alloc_small` / `BlockHeader.free?` |
 | `EC_PARALLELISM=4` only | **no** | `realloc(): invalid pointer` (libc abort) |
 | EC=4 + TLAB | **no** | JSON builder corruption → SEGV |
 
-Debug build (`--release --debug --error-trace`) under EC=4+TLAB also raised `pointer is not a gcry allocation` in `Heap#realloc` (String::Builder / Path / StaticFileHandler) before the SEGV while logging.
+`GCRY_KEEP_CHUNKS=1` + TLAB survived → empty-chunk munmap of unmarked TLAB freelist tails.
 
-## Verdict
+## TLAB@EC1 fix
 
-Property-test gates (steal / FREE-claim×minor / STW SP+greg+TLAB full-stack) are necessary but **not sufficient** for HTTP. Both **TLAB@EC1** and **EC>1 without TLAB** still corrupt under Kemal. Do not flip Parallel / `GCRY_TLAB` defaults; next gate is HTTP-stable Parallel and/or TLAB, then re-cut thr.
+FREE-claim now marks the `next_free` chain (tails stay FREE; sweep treats FREE+marked as live for empty-chunk retention). `tlab_alloc_small` abandons heads that fail `find_block`.
+
+Verify: 5× `wrk -c 100 -d 30 /json` with `GCRY_TLAB=1` → **0/5** crashes (~23–27k req/s). `stw_mt --tlab` / `--tlab --nursery` + `nursery_tlab_smoke` OK.
+
+## Still open
+
+| Config | Status |
+|--------|--------|
+| `EC_PARALLELISM>1` (TLAB off) | still aborts (`realloc(): invalid pointer`) |
+| EC>1 + TLAB thr vs Boehm | blocked on EC>1 stability |
+
+Do not default-on Parallel / TLAB until EC>1 is HTTP-stable and thr is re-cut.
