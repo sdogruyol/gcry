@@ -79,3 +79,17 @@ GDB (SIGINT mid-load): **DEFAULT-1** in `flush_pending_empty_chunks`→`munmap` 
 Residual ~1–3/60 still collect/mark class (SEGV @ `0x…0008`). Also: monotonic `@heap_span_*` for LibC realloc/free guard; mutator scan from hardware SP−red zone; invalidate last-chunk cache at `start_world`.
 
 Supported path: EC1, TLAB off.
+
+## Long GDB hang (2026-07-30)
+
+Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
+No SEGV in ~37m; process wedged ~100% CPU, HTTP dead.
+
+SIGINT dump: **DEFAULT-1** in `unlink_freelist_range` (`collect_sweep.cr:434`) during
+major `sweep` ← `allocate` ← Kemal `ParamParser.new`. Other DEFAULT threads in
+STW `sigsuspend`. Thread 1 mid `HTTP::Headers#[]=` / Hash upsert when stopped.
+
+Diagnosis: freelist `next_free` cycle → unlink never returns → world never restarts.
+Mitigation: bound unlink walk + break self-loops (CHANGELOG Unreleased).
+
+Log: `/tmp/longgdb.log` (also copied if path writable).

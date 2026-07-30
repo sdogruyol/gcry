@@ -423,13 +423,29 @@ module Gcry
     # Drop freelist nodes whose user pointer falls in [lo, hi).
     # Never rewrite !free? headers: a USED object can still be linked on the
     # freelist after a mid-`tlab_alloc_small` STW + flush (see scrub_freelists).
+    #
+    # Parallel EC can corrupt next_free into a cycle (long GDB: DEFAULT-1 stuck
+    # here under major sweep while peers sit in STW sigsuspend — world never
+    # restarts). Bound the walk; on runaway install the partial new_head and
+    # stop (do not rebuild mid-sweep — @chunks is being relinked). Orphaned
+    # FREE blocks are recovered by a later rebuild_size_class_freelist.
     private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
       head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
       new_head = Pointer(Void).null
       user = head
+      # Hard ceiling: a sane freelist cannot exceed mapped heap / min header.
+      max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
+      max_steps = 1024_u64 if max_steps < 1024_u64
+      steps = 0_u64
       while user
+        steps &+= 1
+        if steps > max_steps
+          break
+        end
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
+        # Break obvious self-loops early (cycle of length 1).
+        nxt = Pointer(Void).null if nxt == user
         addr = user.address
         if (addr < lo || addr >= hi) && BlockHeader.free?(header)
           payload = header.value.size
