@@ -265,12 +265,19 @@ module Gcry
       # Pin across allocate: process-GC type_id_gate rejects raw Pointer buffers
       # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
       # not re-scan an old-gen owner — without an explicit root, collect would
-      # reclaim `pointer` before we copy/free → double-free / UAF (Kemal HTTP).
+      # reclaim `pointer` before we copy → UAF (Kemal HTTP).
       #
       # Also suppress auto-collect for the fresh allocate: under Parallel EC a
       # mark miss on the pin still let sweep free `pointer`, then allocate
-      # handed the same block back as `fresh` → copy + free = double free
+      # handed the same block back as `fresh` → copy of freed memory
       # (String::Builder#resize on /json).
+      #
+      # Do NOT free `pointer` here. Crystal updates owners after realloc
+      # returns (`@indices = @indices.realloc(n)`): until that store, the ivar
+      # still holds `pointer`. Freeing immediately lets a peer Parallel collect
+      # reuse the block (e.g. as a String) while Hash.@indices still points at
+      # it → Headers#[]? / keep_alive? SEGV with ASCII garbage @indices (GDB
+      # EC4). Leave the old block for the next sweep once the caller drops it.
       add_root(pointer)
       begin
         @suppress_collect += 1
@@ -280,7 +287,6 @@ module Gcry
           @suppress_collect -= 1 if @suppress_collect > 0
         end
         fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
-        free(pointer)
         fresh
       ensure
         delete_root(pointer)
