@@ -474,6 +474,9 @@ module GC
     return if pointer.null?
     if @@gcry_ready && Gcry.default_heap.is_heap_ptr(pointer)
       Gcry.default_heap.free(pointer)
+    elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
+      # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
+      raise ArgumentError.new("GC.free: not a live gcry allocation")
     else
       LibC.free(pointer)
     end

@@ -69,11 +69,13 @@ GDB (SIGINT mid-load): **DEFAULT-1** in `flush_pending_empty_chunks`→`munmap` 
 | + SP-containing stack scan | **0/40** then **5/60** (noise) |
 | + full fiber scan under STW | **1/60** |
 | + scrub skip if SP on fiber | **2/60** |
+| historic span + mutator HW SP | **2/60** (thr=64k **0/30**) |
+| + start_world cache invalidate | **4/80** (~same class) |
 | `DISABLE_SCRUB_FIBERS` | **4/40** (worse — scrub not root cause) |
 | `DISABLE_LAYOUT` | **7/40** (worse) |
 | `KEEP_CHUNKS` | **6/40** (worse) |
 | `DISABLE_AUTO` | **0/20** |
 
-Residual ~1–3/60 still collect/mark class (SEGV @ `0x4` / `0x…0008` / `realloc(): invalid pointer`). Stack under-scan heuristics closed most of the gap; a thinner Parallel-only hole remains.
+Residual ~1–3/60 still collect/mark class (SEGV @ `0x…0008`). Also: monotonic `@heap_span_*` for LibC realloc/free guard; mutator scan from hardware SP−red zone; invalidate last-chunk cache at `start_world`.
 
 Supported path: EC1, TLAB off.

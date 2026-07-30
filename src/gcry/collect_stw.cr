@@ -90,6 +90,10 @@ module Gcry
     def start_world : Nil
       return unless @world_stopped
 
+      # Drop last-chunk cache before mutators resume — index_remove already
+      # invalidates, but a mark-time cache entry must not outlive STW.
+      invalidate_chunk_cache
+
       current_thread = Thread.current
       begin
         {% if flag?(:darwin) %}

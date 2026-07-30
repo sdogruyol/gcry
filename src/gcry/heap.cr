@@ -358,12 +358,13 @@ module Gcry
       !chunk_containing(pointer.address).nil?
     end
 
-    # Address in [@heap_min, @heap_max) even if the chunk was already
-    # index-removed / munmapped. Used to refuse LibC.realloc fallback.
+    # Address in the historic mmap span even if the chunk was already
+    # index-removed / munmapped and @heap_min/@heap_max were tightened.
+    # Used to refuse LibC.realloc/free fallback (glibc "invalid pointer").
     def in_heap_span?(pointer : Void*) : Bool
-      return false if pointer.null? || @heap_max == 0 || @heap_min == UInt64::MAX
+      return false if pointer.null? || @heap_span_hi == 0 || @heap_span_lo == UInt64::MAX
       addr = pointer.address
-      addr >= @heap_min && addr < @heap_max
+      addr >= @heap_span_lo && addr < @heap_span_hi
     end
 
     def self.round_size(size : UInt64) : UInt64

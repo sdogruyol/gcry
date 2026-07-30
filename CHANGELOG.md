@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **STW scan stack that holds SP:** `Scheduler#swapcontext` sets `current_fiber` before saving the previous SP. Mid-swap STW then scanned the next fiber / stale `stack_top` and missed live frames on the previous stack (SEGV @ `0x4`). Also scan `[SP−red_zone, bottom)` of whichever fiber stack contains the suspend SP.
 - **Process-STW full fiber stack scan:** under `@world_stopped`, scan every fiber from guard→bottom (ignore parked `stack_top`). Parallel EC4 still flaked with SP/current_fiber heuristics alone.
 - **Skip fiber scrub when SP still on stack:** parked-fiber scrub used `stack_top` while Parallel mid-swap left the OS thread SP on that stack — wiping live frames before mark.
+- **Historic heap span for realloc/free:** `@heap_min/@heap_max` tighten after munmap, so a dangling gcry pointer fell outside the live span and `GC.realloc`/`free` called LibC (`realloc(): invalid pointer`). Keep a monotonic `@heap_span_*` for the LibC-fallback guard.
+- **Mutator stack scan from hardware SP:** `scan_mutator` used `pointerof(local)` (mid-frame), skipping the leaf/red-zone window on the collecting worker under Parallel.
 
 ## [0.15.0] - 2026-07-29
 

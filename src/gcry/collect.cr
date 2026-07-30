@@ -174,6 +174,11 @@ module Gcry
     @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
+    # Monotonic span of every address ever mapped — never shrinks on munmap.
+    # Used by GC.realloc/free to refuse LibC fallback after empty-chunk release
+    # tightened @heap_min/@heap_max around a dangling pointer.
+    @heap_span_lo : UInt64 = UInt64::MAX
+    @heap_span_hi : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -525,6 +530,8 @@ module Gcry
       @before_collect_callbacks.clear
       @heap_min = UInt64::MAX
       @heap_max = 0_u64
+      @heap_span_lo = UInt64::MAX
+      @heap_span_hi = 0_u64
       @collections = 0_u64
       @minor_collections = 0_u64
       @major_collections = 0_u64
@@ -564,6 +571,8 @@ module Gcry
       finish = base + chunk.value.mapped_bytes
       @heap_min = base if base < @heap_min
       @heap_max = finish if finish > @heap_max
+      @heap_span_lo = base if base < @heap_span_lo
+      @heap_span_hi = finish if finish > @heap_span_hi
       ensure_bitmap_covers(@heap_min, @heap_max)
     end
 
