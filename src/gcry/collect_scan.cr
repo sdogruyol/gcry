@@ -34,28 +34,34 @@ module Gcry
         # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
         # only on conservative Thread body scan missed them when layout/scan_cap
         # truncated the object (Kemal EC4 SEGV @ …0008).
-        mark_ref_slot(pointerof(thread.@scheduler).address)
-        mark_ref_slot(pointerof(thread.@execution_context).address)
+        # Same flag gate as Crystal Thread: under `-Dwithout_mt` these ivars and
+        # Fiber::ExecutionContext do not exist (CI fork_reinit / Darwin samples).
+        {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+          mark_ref_slot(pointerof(thread.@scheduler).address)
+          mark_ref_slot(pointerof(thread.@execution_context).address)
+        {% end %}
       end
 
-      # Global EC list (not thread-local) — keeps contexts that temporarily have
-      # no worker with them pinned via Thread.@execution_context.
-      Fiber::ExecutionContext.unsafe_each do |ec|
-        mark_ref_slot(pointerof(ec).address)
-        # Parallel: also pin queues / event loop / schedulers explicitly. Body
-        # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
-        if ec.is_a?(Fiber::ExecutionContext::Parallel)
-          mark_root_candidate(Pointer(Void).new(ec.@global_queue.object_id), source: RootSource::Thread)
-          mark_root_candidate(Pointer(Void).new(ec.@event_loop.object_id), source: RootSource::Thread)
-          mark_root_candidate(Pointer(Void).new(ec.@stack_pool.object_id), source: RootSource::Thread)
-          mark_root_candidate(Pointer(Void).new(ec.@schedulers.object_id), source: RootSource::Thread)
-          ec.@schedulers.each do |sched|
-            mark_root_candidate(Pointer(Void).new(sched.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(sched.@runnables.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(sched.@main_fiber.object_id), source: RootSource::Thread)
+      {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+        # Global EC list (not thread-local) — keeps contexts that temporarily have
+        # no worker with them pinned via Thread.@execution_context.
+        Fiber::ExecutionContext.unsafe_each do |ec|
+          mark_ref_slot(pointerof(ec).address)
+          # Parallel: also pin queues / event loop / schedulers explicitly. Body
+          # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
+          if ec.is_a?(Fiber::ExecutionContext::Parallel)
+            mark_root_candidate(Pointer(Void).new(ec.@global_queue.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@event_loop.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@stack_pool.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@schedulers.object_id), source: RootSource::Thread)
+            ec.@schedulers.each do |sched|
+              mark_root_candidate(Pointer(Void).new(sched.object_id), source: RootSource::Thread)
+              mark_root_candidate(Pointer(Void).new(sched.@runnables.object_id), source: RootSource::Thread)
+              mark_root_candidate(Pointer(Void).new(sched.@main_fiber.object_id), source: RootSource::Thread)
+            end
           end
         end
-      end
+      {% end %}
     end
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.
