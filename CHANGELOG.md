@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Freelist unlink cycle guard:** `unlink_freelist_range` could spin forever on a corrupted `next_free` cycle (Parallel EC4 long-GDB hang: DEFAULT-1 in sweep while peers stuck in STW). Bound the walk and break self-loops; install the partial freelist instead of hanging the stopped world. Skip precise Hash entry walk when `@entries` is not a live heap pointer.
 - **Revert Hash `@entries` grey-scan:** marking `@entries` via `mark_candidate` false-retained capacity-slot garbage (layout_spec) and collapsed Kemal `/json` thr (~36% of Boehm). `@entries`/`@indices` stay noscan; Entry walk remains authoritative.
 - **`-Dwithout_mt` compile:** Parallel EC root pins (`Thread.@execution_context` / `Fiber::ExecutionContext`) are gated with the same Crystal flag condition so `fork_reinit` and Darwin/aarch64 sample builds compile.
+- **STW fiber full-scan only with multi-mutator:** process-STW always full-scanning every parked fiber (Parallel mid-swap hardening) crushed CI Kemal `/json` thr (~78%→~48% Boehm). Restore `stack_top` clamp when only main+Monitor threads exist; keep full-scan when `Thread` count > 2.
 
 ## [0.15.0] - 2026-07-29
 

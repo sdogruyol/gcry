@@ -73,8 +73,24 @@ module Gcry
       end
     end
 
+    # True when more than the usual main + ExecutionContext Monitor threads
+    # exist. Parallel EC workers and Thread.new storms need aggressive STW
+    # stack scans; EC1/default must keep the cheap stack_top clamp or Kemal
+    # /json thr collapses (~78%→~48% Boehm on CI after always-full-scan).
+    private def multi_mutator_threads? : Bool
+      n = 0
+      Thread.unsafe_each do
+        n += 1
+        return true if n > 2
+      end
+      false
+    end
+
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
+      # Parallel / multi-thread STW: full-scan parked fibers (stack_top lags
+      # mid-swap). Single-mutator process STW: stack_top clamp (thr path).
+      stw_full = @world_stopped && multi_mutator_threads?
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
@@ -93,10 +109,7 @@ module Gcry
         bottom = stack.bottom.address
         next unless guard < bottom
 
-        # Process STW: always full-scan. Parked `stack_top` and mid-swap
-        # (current_fiber flipped before SP save) both under-scanned under
-        # Parallel EC (Kemal EC4 SEGV). Library heaps keep the stack_top clamp.
-        top = if @world_stopped || fiber.running?
+        top = if fiber.running? || stw_full
                 guard
               else
                 t = fiber.@context.stack_top.address
