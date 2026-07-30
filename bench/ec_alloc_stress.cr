@@ -15,19 +15,30 @@ end
 puts "ec_capacity=#{Fiber::ExecutionContext.default.capacity} tlab=#{Gcry.default_heap.tlab_enabled?} thr=#{Gcry.default_heap.gc_threshold}"
 
 wg = WaitGroup.new(n)
+failed = Atomic(Int32).new(0)
 n.times do |t|
   spawn(name: "w#{t}") do
-    iters.times do |i|
-      buf = GC.malloc_atomic((64 + (i % 200)).to_u64).as(UInt8*)
-      buf[0] = 1_u8
-      if i % 3 == 0
-        buf = GC.realloc(buf.as(Void*), (128 + (i % 100)).to_u64).as(UInt8*)
-        buf[0] = 2_u8
+    begin
+      iters.times do |i|
+        buf = GC.malloc_atomic((64 + (i % 200)).to_u64).as(UInt8*)
+        buf[0] = 1_u8
+        if i % 3 == 0
+          buf = GC.realloc(buf.as(Void*), (128 + (i % 100)).to_u64).as(UInt8*)
+          buf[0] = 2_u8
+        end
       end
+    rescue e
+      failed.add(1)
+      STDERR.puts "worker=#{t} #{e.class}: #{e.message}"
+    ensure
+      wg.done
     end
-    wg.done
   end
 end
 wg.wait
 GC.collect
+if failed.get != 0
+  STDERR.puts "FAIL workers=#{failed.get} collections=#{Gcry.default_heap.collections}"
+  exit 1
+end
 puts "OK collections=#{Gcry.default_heap.collections}"

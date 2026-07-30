@@ -37,13 +37,26 @@ module Gcry
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
-        next if fiber.running?
-        # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
-        # safe:true: reported ranges can still contain holes on some kernels.
+
+        # Without STW we must not touch another thread's live stack. With process
+        # STW every other OS thread is frozen — scan running fibers here too.
+        # Relying only on thread.@current_fiber missed stacks when that TLS was
+        # briefly nil under Parallel EC (Kemal realloc "not a gcry allocation";
+        # GCRY_KEEP_CHUNKS masked the subsequent empty-chunk munmap).
+        if fiber.running? && !@world_stopped
+          next
+        end
+
         stack = fiber.@stack
-        top = fiber.@context.stack_top.address
         guard = stack.pointer.address + Roots::PAGE_SIZE
-        top = guard if top < guard
+        # Running fiber: @context.stack_top is stale (last yield). Full scan.
+        # Parked fiber: clamp reported top below the guard page.
+        top = if fiber.running?
+                guard
+              else
+                t = fiber.@context.stack_top.address
+                t < guard ? guard : t
+              end
         Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
@@ -56,10 +69,34 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        fiber = thread.@current_fiber
-        next unless fiber
-        stack = fiber.@stack
         pthread = thread.to_unsafe
+        fiber = thread.@current_fiber
+
+        # Always spill GP registers at suspend — may hold the only live copy.
+        Platform.each_thread_greg(pthread) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Thread)
+        end
+
+        if fiber.nil?
+          # Between fibers / shutdown: scan the OS thread stack if we can.
+          if bounds = Platform.pthread_stack_bounds(pthread)
+            low = bounds[0]
+            high = bounds[1]
+            if (sp = Platform.thread_sp(pthread)) &&
+               sp.address >= low.address && sp.address < high.address
+              low = sp
+              @sp_clamp_hits += 1
+            else
+              @sp_clamp_fallbacks += 1
+            end
+            Roots.scan_range(low, high, safe: true) do |candidate|
+              mark_root_candidate(candidate, source: RootSource::Thread)
+            end
+          end
+          next
+        end
+
+        stack = fiber.@stack
 
         if fiber.name == "main"
           if bounds = Platform.pthread_stack_bounds(pthread)
@@ -75,31 +112,19 @@ module Gcry
             Roots.scan_range(low, high, safe: true) do |candidate|
               mark_root_candidate(candidate, source: RootSource::Thread)
             end
-            Platform.each_thread_greg(pthread) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Thread)
-            end
             next
           end
         end
 
-        # Skip PROT_NONE guard. For a *running* fiber on another OS thread,
-        # `@context.stack_top` is stale (last yield). Never raise the scan start
-        # above hardware SP (`max(stack_top, sp)` skipped live frames).
-        #
-        # Always scan the full fiber stack under process STW: SP/greg alone still
-        # dropped live buffers under EC_PARALLELISM>1 (realloc "not a gcry
-        # allocation" / SEGV). TLAB had the same class; KEEP_CHUNKS only masked
-        # munmap at low parallelism.
+        # Worker running fiber: full fiber stack (SP/greg alone was insufficient
+        # under EC_PARALLELISM>1). scan_all_fiber_roots also covers this under
+        # STW; keep a belt-and-suspenders scan keyed by current_fiber.
         guard = stack.pointer.address + Roots::PAGE_SIZE
         top = guard
         @sp_clamp_fallbacks += 1
         low = Pointer(Void).new(top)
         next if low.address >= stack.bottom.address
         Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
-          mark_root_candidate(candidate, source: RootSource::Thread)
-        end
-        # GP registers at suspend may hold the only copy of a live pointer.
-        Platform.each_thread_greg(pthread) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
       end
