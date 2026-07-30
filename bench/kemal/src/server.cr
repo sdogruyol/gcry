@@ -22,6 +22,14 @@
 require "kemal"
 require "json"
 
+{% if flag?(:gc_none) %}
+  # Precise Hash layout for HTTP::Headers — without it, @indices/@entries blobs
+  # are only word-scanned via the Hash shell; under Parallel EC that still UAFs
+  # in Headers#[]? / keep_alive? (GDB: Pointer#[] on garbage @indices ≈ ASCII).
+  # See bench/nursery_headers.cr.
+  Gcry.register_hash(HTTP::Headers::Key, String | Array(String))
+{% end %}
+
 logging false
 
 # Default Parallel EC capacity is 1; raise max parallelism before Kemal binds.

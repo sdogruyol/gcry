@@ -237,11 +237,20 @@ module Gcry
             return
           elsif size_match
             # Leaf / value-only type: nothing to mark in the body.
-            @layout_precise_scans += 1
-            return
+            # Exception: raw pointer buffers (Array/Deque payloads) have no
+            # Crystal header — first UInt64 is a heap pointer (high half ≠ 0).
+            # Real References put type_id at 0 and usually padding at 4..7.
+            # Colliding with a leaf type_id + alloc_size would skip scanning
+            # every element → UAF (Kemal EC4 …0008 class).
+            if size >= 8 && (user.as(UInt64*).value >> 32) != 0
+              # fall through to full conservative
+            else
+              @layout_precise_scans += 1
+              return
+            end
           end
-          # size mismatch: ignore the layout entry (likely a raw buffer whose
-          # leading word collided with a Crystal type_id) → full conservative.
+          # size mismatch (or leaf+pointer-shaped header): ignore the layout
+          # entry → full conservative.
         end
       end
 
