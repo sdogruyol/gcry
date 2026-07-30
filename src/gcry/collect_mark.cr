@@ -267,10 +267,8 @@ module Gcry
       end
     end
 
-    # Precise Hash: @entries is in scan_offsets (grey-scan buffer as belt-and-
-    # suspenders); @indices is noscan (Int32 table). Still walk Entry slots for
-    # key/value — the grey-scan of a raw entries blob is base_only and may miss
-    # tagged union interiors; the walk is authoritative for live slots.
+    # Precise Hash: keep @indices/@entries blobs alive without scanning them as
+    # pointer arrays; walk Entry slots and mark key/value only.
     # Live range is Crystal `@size + @deleted_count` (entries_size), NOT
     # entries_capacity from `@indices_size_pow2` — capacity slots after realloc
     # are uninitialized and must not be treated as Entry records.
