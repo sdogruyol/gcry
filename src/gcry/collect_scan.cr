@@ -77,13 +77,15 @@ module Gcry
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
 
+        sp = Platform.thread_sp(pthread)
+        pthread_bounds = Platform.pthread_stack_bounds(pthread)
+
         if fiber.nil?
           # Between fibers / shutdown: scan the OS thread stack if we can.
-          if bounds = Platform.pthread_stack_bounds(pthread)
-            low = bounds[0]
-            high = bounds[1]
-            if (sp = Platform.thread_sp(pthread)) &&
-               sp.address >= low.address && sp.address < high.address
+          if pthread_bounds
+            low = pthread_bounds[0]
+            high = pthread_bounds[1]
+            if sp && sp.address >= low.address && sp.address < high.address
               low = sp
               @sp_clamp_hits += 1
             else
@@ -96,36 +98,45 @@ module Gcry
           next
         end
 
+        # Boehm sets per-thread stackbottom to fiber.@stack.bottom so the OS
+        # thread scan covers the *fiber* stack. Every Thread main fiber is
+        # named "main" and lives on the pthread stack — but under Parallel EC
+        # current_fiber is usually a pool fiber. Always scan the fiber stack;
+        # also scan the pthread stack when SP lies there (scheduler / main).
+        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
         stack = fiber.@stack
-
-        if fiber.name == "main"
-          if bounds = Platform.pthread_stack_bounds(pthread)
-            low = bounds[0]
-            high = bounds[1]
-            if (sp = Platform.thread_sp(pthread)) &&
-               sp.address >= low.address && sp.address < high.address
-              low = sp
-              @sp_clamp_hits += 1
-            else
-              @sp_clamp_fallbacks += 1
-            end
-            Roots.scan_range(low, high, safe: true) do |candidate|
+        guard = stack.pointer.address + Roots::PAGE_SIZE
+        bottom = stack.bottom
+        if guard < bottom.address
+          if fiber.running?
+            # Full scan: @context.stack_top is stale while running.
+            @sp_clamp_fallbacks += 1
+            Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
               mark_root_candidate(candidate, source: RootSource::Thread)
             end
-            next
+          else
+            top = fiber.@context.stack_top.address
+            top = guard if top < guard
+            if top < bottom.address
+              Roots.scan_range(Pointer(Void).new(top), bottom, safe: true) do |candidate|
+                mark_root_candidate(candidate, source: RootSource::Thread)
+              end
+            end
           end
         end
 
-        # Worker running fiber: full fiber stack (SP/greg alone was insufficient
-        # under EC_PARALLELISM>1). scan_all_fiber_roots also covers this under
-        # STW; keep a belt-and-suspenders scan keyed by current_fiber.
-        guard = stack.pointer.address + Roots::PAGE_SIZE
-        top = guard
-        @sp_clamp_fallbacks += 1
-        low = Pointer(Void).new(top)
-        next if low.address >= stack.bottom.address
-        Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
-          mark_root_candidate(candidate, source: RootSource::Thread)
+        if pthread_bounds && sp
+          plo = pthread_bounds[0].address
+          phi = pthread_bounds[1].address
+          spa = sp.address
+          on_pthread = spa >= plo && spa < phi
+          on_fiber = spa >= stack.pointer.address && spa < bottom.address
+          if on_pthread && !on_fiber
+            @sp_clamp_hits += 1
+            Roots.scan_range(sp, pthread_bounds[1], safe: true) do |candidate|
+              mark_root_candidate(candidate, source: RootSource::Thread)
+            end
+          end
         end
       end
     end

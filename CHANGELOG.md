@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TLAB per-slot freelist locks:** Parallel dual-alloc on lock-free TLAB heads (`ec_alloc_stress` double-free / `not a gcry allocation`). Per-slot `Crystal::SpinLock` (StaticArray — no GC malloc under `@alloc_lock` at boot). STW `flush_all_tlabs` must not take slot locks (suspended mutator may hold them). Refill always re-claims under the slot lock. Kemal `EC>1` still open.
 - **STW running-fiber scan:** `scan_all_fiber_roots` skipped `fiber.running?`, relying on `thread.@current_fiber`; under Parallel that TLS can be briefly nil so stacks were missed. Under process STW, scan running fiber stacks too; if `current_fiber` is nil, fall back to pthread stack bounds + greg.
 - **STW holds `Thread.lock`:** match Crystal `gc/none` — keep the thread-list mutex for the whole stop→start window so Parallel EC cannot `threads.push` + allocate mid-mark/sweep. Necessary, not sufficient; Kemal `EC>1` still flakes (~5/20).
+- **realloc suppress-collect + Boehm-like thread stacks:** growing `realloc` sets `@suppress_collect` around the fresh allocate so a mark miss cannot free-then-reuse the pinned buffer mid-copy (String::Builder `/json` double-free). `scan_other_thread_stacks` always scans `current_fiber`'s stack (no `name=="main"` early-out — every Thread main fiber is named `"main"`); also scans the pthread stack when suspend SP lies there. Register `String::Builder` layout (`@buffer` noscan).
 
 ## [0.15.0] - 2026-07-29
 

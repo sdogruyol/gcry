@@ -108,6 +108,9 @@ module Gcry
     # HDR pause histogram (logarithmic, power-of-two buckets, 1ns..~1s).
     # PAUSE_HDR_BUCKETS = 32 → bucket `i` covers [2^i, 2^(i+1)) ns.
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
+    # Nesting depth: realloc (and similar) suppress auto-collect while a block
+    # is only kept alive via add_root / in-flight copy.
+    @suppress_collect = 0
 
     def initialize
       {% if flag?(:gcry_side_bitmap) %}
@@ -134,6 +137,7 @@ module Gcry
       @tlab_steals = 0_u64
       @tlabs_booted = false
       @tlab_epoch = Atomic(UInt64).new(0_u64)
+      @suppress_collect = 0
       @alloc_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
       @parallel_mark_workers = 1
@@ -260,9 +264,19 @@ module Gcry
       # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
       # not re-scan an old-gen owner — without an explicit root, collect would
       # reclaim `pointer` before we copy/free → double-free / UAF (Kemal HTTP).
+      #
+      # Also suppress auto-collect for the fresh allocate: under Parallel EC a
+      # mark miss on the pin still let sweep free `pointer`, then allocate
+      # handed the same block back as `fresh` → copy + free = double free
+      # (String::Builder#resize on /json).
       add_root(pointer)
       begin
-        fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        @suppress_collect += 1
+        begin
+          fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        ensure
+          @suppress_collect -= 1 if @suppress_collect > 0
+        end
         fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
         free(pointer)
         fresh

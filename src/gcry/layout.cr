@@ -544,6 +544,8 @@ module Gcry
 
       register(Exception)
       register(IO::Memory)
+      # JSON / HTTP hot path — @buffer is Pointer(UInt8) (malloc_atomic, noscan).
+      register(String::Builder)
 
       register(Deque(String))
       register(Deque(Int32))

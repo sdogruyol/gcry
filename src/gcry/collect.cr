@@ -453,6 +453,7 @@ module Gcry
       return unless @enabled
       return if @collecting
       return if @running_finalizers
+      return if @suppress_collect > 0
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
