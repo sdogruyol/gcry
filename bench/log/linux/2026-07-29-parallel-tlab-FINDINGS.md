@@ -1,46 +1,40 @@
 # Parallel + TLAB thr A/B
 
-Date: 2026-07-29 · host: WSL2 i3-12100F · Crystal 1.21.0
+Date: 2026-07-29/30 · host: WSL2 i3-12100F · Crystal 1.21.0
 
 ## Method
 
-- Kemal `bench/kemal`, `wrk -c 100 -d 30`, median-of-3 (`bench/run_all.sh kemal`).
-- Parallelism: `EC_PARALLELISM=N` → `Fiber::ExecutionContext.default.resize(N)` in `server.cr` (not `CRYSTAL_WORKERS`).
-- TLAB: `GCRY_FLAGS=GCRY_TLAB=1`.
+- Kemal `bench/kemal`, `wrk -c 100 -d 30` (or shorter smokes).
+- Parallelism: `EC_PARALLELISM=N` → `Fiber::ExecutionContext.default.resize(N)`.
+- Allocator micro: `bench/ec_alloc_stress.cr` (`EC=4`, optional `GCRY_TLAB=1`).
 
-## Same-day baseline (EC capacity 1, TLAB off)
+## Baseline (EC capacity 1, TLAB off)
 
-Session: `bench/log/linux/2026-07-29-200917/`
+Session `2026-07-29-200917/`: `/json` **83.1%** Boehm, `/` **87.7%**.
 
-| Path | % of Boehm | RSS × |
-|------|----------:|------:|
-| `/` | **87.7%** | **0.78×** |
-| `/json` | **83.1%** | **0.79×** |
+## TLAB@EC1 (fixed)
 
-## HTTP crash matrix (pre-fix)
+FREE-claim marks `next_free` tails; 5×30s `/json` with `GCRY_TLAB=1` OK. Still green after Parallel index-lock work.
 
-Short smoke (`wrk -c 100 -d 10 /json`):
+## EC>1 status (open)
 
-| Config | Alive? | Notes |
-|--------|:------:|-------|
-| baseline | yes | ~37k req/s |
-| `GCRY_TLAB=1` only | **no** | SEGV in `tlab_alloc_small` / `BlockHeader.free?` |
-| `EC_PARALLELISM=4` only | **no** | `realloc(): invalid pointer` (libc abort) |
-| EC=4 + TLAB | **no** | JSON builder corruption → SEGV |
+Kemal `EC_PARALLELISM=2/4` still dies under `/json` (`not a gcry allocation` / SEGV / `realloc(): invalid pointer`).
 
-`GCRY_KEEP_CHUNKS=1` + TLAB survived → empty-chunk munmap of unmarked TLAB freelist tails.
+### Landed while investigating
 
-## TLAB@EC1 fix
+| Fix | Why |
+|-----|-----|
+| `@index_lock` around chunk index + mutator `chunk_containing` | Parallel raced `index_insert` vs lookups / last-chunk cache |
+| `with_alloc_lock` always locks | Was a no-op when TLAB off (large/chunk/counters) |
+| `ensure_tlabs` under `@alloc_lock` (+ non-recursive under_lock boot) | Parallel TLAB table init race |
+| Full fiber stack scan for other STW threads | SP/greg alone insufficient under Parallel |
 
-FREE-claim now marks the `next_free` chain (tails stay FREE; sweep treats FREE+marked as live for empty-chunk retention). `tlab_alloc_small` abandons heads that fail `find_block`.
+### Still failing
 
-Verify: 5× `wrk -c 100 -d 30 /json` with `GCRY_TLAB=1` → **0/5** crashes (~23–27k req/s). `stw_mt --tlab` / `--tlab --nursery` + `nursery_tlab_smoke` OK.
+| Config | Note |
+|--------|------|
+| Kemal EC>1 (TLAB off) | Still crashes under wrk |
+| `ec_alloc_stress` + `GCRY_TLAB=1` + EC=4, no auto-GC | Intermittent **double free** / `not a gcry allocation` on realloc — lock-free TLAB claim still races under Parallel |
+| `ec_alloc_stress` EC=4, TLAB off, no auto-GC | OK |
 
-## Still open
-
-| Config | Status |
-|--------|--------|
-| `EC_PARALLELISM>1` (TLAB off) | still aborts (`realloc(): invalid pointer`) |
-| EC>1 + TLAB thr vs Boehm | blocked on EC>1 stability |
-
-Do not default-on Parallel / TLAB until EC>1 is HTTP-stable and thr is re-cut.
+Next: make TLAB freelist head claim atomic (or serialize) under Parallel; re-bisect Kemal EC>1 without TLAB once alloc stress is green with GC on.

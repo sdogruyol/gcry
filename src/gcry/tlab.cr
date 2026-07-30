@@ -48,18 +48,23 @@ module Gcry
 
     protected def ensure_tlabs : Nil
       return if @tlabs_booted
+      @alloc_lock.sync { ensure_tlabs_under_lock }
+    end
+
+    # Caller holds @alloc_lock.
+    private def ensure_tlabs_under_lock : Nil
+      return if @tlabs_booted
       MAX_TLABS.times do |i|
         @tlabs[i] = Tlab.new
       end
       @tlabs_booted = true
     end
 
+    # Always take @alloc_lock. Skipping when TLAB was off was an EC1 thr
+    # micro-opt; under EC_PARALLELISM>1 it raced alloc_large / chunk index /
+    # counters ("pointer is not a gcry allocation" on Kemal).
     protected def with_alloc_lock(&)
-      if @tlab_enabled
-        @alloc_lock.sync { yield }
-      else
-        yield
-      end
+      @alloc_lock.sync { yield }
     end
 
     private def current_thread_key : UInt64
@@ -91,7 +96,7 @@ module Gcry
 
     # Caller must hold @alloc_lock (or be single-threaded).
     protected def current_tlab_under_lock(key : UInt64 = current_thread_key) : Tlab*
-      ensure_tlabs
+      ensure_tlabs_under_lock
       i = 0
       while i < MAX_TLABS
         if @tlabs[i].live && @tlabs[i].owner == key

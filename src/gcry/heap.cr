@@ -86,6 +86,7 @@ module Gcry
     @pause_ring_pos = 0
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
     @alloc_lock = Crystal::SpinLock.new
+    @index_lock = Crystal::SpinLock.new
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
@@ -134,6 +135,7 @@ module Gcry
       @tlabs_booted = false
       @tlab_epoch = Atomic(UInt64).new(0_u64)
       @alloc_lock = Crystal::SpinLock.new
+      @index_lock = Crystal::SpinLock.new
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
@@ -312,8 +314,7 @@ module Gcry
           @live_objects -= 1 if @live_objects > 0
         end
       else
-        # Non-TLAB path: global freelist + counters must be serialised with
-        # @alloc_lock (with_alloc_lock skips locking when TLAB is disabled).
+        # Non-TLAB path: global freelist + counters must be serialised.
         @alloc_lock.sync do
           if BlockHeader.nursery?(header)
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
@@ -758,7 +759,20 @@ module Gcry
 
     # Binary search over address-sorted chunk index, with a single-slot
     # last-chunk cache (pointer chasing in mark drains one chunk at a time).
+    #
+    # Mutators race `index_insert` / last-chunk cache under Parallel EC —
+    # serialize with @index_lock (separate from @alloc_lock to avoid deadlock
+    # when refill holds @alloc_lock and a concurrent realloc looks up a chunk).
+    # During STW/collect the world is quiet — skip the lock.
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
+      if @world_stopped || @collecting
+        chunk_containing_unlocked(addr)
+      else
+        @index_lock.sync { chunk_containing_unlocked(addr) }
+      end
+    end
+
+    private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
       # Last-chunk fast path: most lookups during mark hit the same chunk
@@ -920,31 +934,34 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
-      invalidate_chunk_cache
-      index_ensure_cap(@chunk_index_count + 1)
-      pos = index_lower_bound(chunk.address)
-      i = @chunk_index_count
-      while i > pos
-        (@chunk_index + i).value = (@chunk_index + (i - 1)).value
-        i -= 1
+      @index_lock.sync do
+        invalidate_chunk_cache
+        index_ensure_cap(@chunk_index_count + 1)
+        pos = index_lower_bound(chunk.address)
+        i = @chunk_index_count
+        while i > pos
+          (@chunk_index + i).value = (@chunk_index + (i - 1)).value
+          i -= 1
+        end
+        (@chunk_index + pos).value = chunk
+        @chunk_index_count += 1
       end
-      (@chunk_index + pos).value = chunk
-      @chunk_index_count += 1
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
-      invalidate_chunk_cache
-      pos = index_lower_bound(chunk.address)
-      return if pos >= @chunk_index_count
-      return if (@chunk_index + pos).value != chunk
-
-      i = pos
-      last = @chunk_index_count - 1
-      while i < last
-        (@chunk_index + i).value = (@chunk_index + (i + 1)).value
-        i += 1
+      @index_lock.sync do
+        invalidate_chunk_cache
+        pos = index_lower_bound(chunk.address)
+        unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
+          i = pos
+          last = @chunk_index_count - 1
+          while i < last
+            (@chunk_index + i).value = (@chunk_index + (i + 1)).value
+            i += 1
+          end
+          @chunk_index_count -= 1
+        end
       end
-      @chunk_index_count -= 1
     end
 
     private def chunk_for(user : Void*) : ChunkHeader*?
