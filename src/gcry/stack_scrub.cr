@@ -131,6 +131,10 @@ module Gcry
       Fiber.unsafe_each do |fiber|
         next if fiber == current
         next if fiber.running?
+        # Mid-swap under Parallel: current_fiber already points at the next
+        # fiber while SP (and live frames) remain on this "parked" stack.
+        # Scrubbing with a stale stack_top would zero live roots.
+        next if fiber_stack_holds_foreign_sp?(fiber)
 
         stack = fiber.@stack
         base = stack.pointer.address
@@ -150,6 +154,26 @@ module Gcry
       end
       @fiber_scrub_bytes_total += scrubbed
       @fiber_scrub_runs += 1
+    end
+
+    # True when a suspended OS thread's SP still lies on *fiber*'s stack.
+    private def fiber_stack_holds_foreign_sp?(fiber : Fiber) : Bool
+      return false unless @world_stopped
+
+      stack = fiber.@stack
+      base = stack.pointer.address
+      bottom = stack.bottom.address
+      return false if bottom <= base
+
+      current = Thread.current
+      Thread.unsafe_each do |thread|
+        next if thread == current
+        sp = Platform.thread_sp(thread.to_unsafe)
+        next unless sp
+        spa = sp.address
+        return true if spa >= base && spa < bottom
+      end
+      false
     end
 
     protected def maybe_clear_stack_on_alloc : Nil

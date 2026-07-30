@@ -49,15 +49,21 @@ module Gcry
 
         stack = fiber.@stack
         guard = stack.pointer.address + Roots::PAGE_SIZE
-        # Running fiber: @context.stack_top is stale (last yield). Full scan.
-        # Parked fiber: clamp reported top below the guard page.
-        top = if fiber.running?
+        bottom = stack.bottom.address
+        next unless guard < bottom
+
+        # Process STW: always full-scan. Parked `stack_top` and mid-swap
+        # (current_fiber flipped before SP save) both under-scanned under
+        # Parallel EC (Kemal EC4 SEGV). Library heaps keep the stack_top clamp.
+        top = if @world_stopped || fiber.running?
                 guard
               else
                 t = fiber.@context.stack_top.address
                 t < guard ? guard : t
               end
-        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
+        next unless top < bottom
+
+        Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end
@@ -80,64 +86,98 @@ module Gcry
         sp = Platform.thread_sp(pthread)
         pthread_bounds = Platform.pthread_stack_bounds(pthread)
 
-        if fiber.nil?
-          # Between fibers / shutdown: scan the OS thread stack if we can.
-          if pthread_bounds
-            low = pthread_bounds[0]
-            high = pthread_bounds[1]
-            if sp && sp.address >= low.address && sp.address < high.address
-              low = sp
-              @sp_clamp_hits += 1
-            else
-              @sp_clamp_fallbacks += 1
-            end
-            Roots.scan_range(low, high, safe: true) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Thread)
-            end
-          end
-          next
+        if fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+          scan_fiber_stack(fiber)
         end
 
-        # Boehm sets per-thread stackbottom to fiber.@stack.bottom so the OS
-        # thread scan covers the *fiber* stack. Every Thread main fiber is
-        # named "main" and lives on the pthread stack — but under Parallel EC
-        # current_fiber is usually a pool fiber. Always scan the fiber stack;
-        # also scan the pthread stack when SP lies there (scheduler / main).
-        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+        # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
+        # swapcontext saves the previous SP. If we only trust current_fiber +
+        # stack_top, live frames below a stale top (still holding SP) are
+        # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
+        # the suspend SP (red zone included).
+        scan_stack_containing_sp(sp)
+
+        # Pthread mapping: scheduler/main frames remain here while SP sits on
+        # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
+        scan_pthread_stack(pthread_bounds, sp)
+      end
+    end
+
+    private def scan_fiber_stack(fiber : Fiber) : Nil
+      stack = fiber.@stack
+      guard = stack.pointer.address + Roots::PAGE_SIZE
+      bottom = stack.bottom
+      return unless guard < bottom.address
+
+      # Always full-scan under process STW (caller). stack_top is stale for
+      # running fibers and can lag mid-swap for "parked" ones.
+      @sp_clamp_fallbacks += 1
+      Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Thread)
+      end
+    end
+
+    # Scan [SP−red_zone, bottom) of whichever fiber stack holds *sp*.
+    private def scan_stack_containing_sp(sp : Void*?) : Nil
+      return unless sp
+
+      spa = sp.address
+      Fiber.unsafe_each do |fiber|
         stack = fiber.@stack
-        guard = stack.pointer.address + Roots::PAGE_SIZE
-        bottom = stack.bottom
-        if guard < bottom.address
-          if fiber.running?
-            # Full scan: @context.stack_top is stale while running.
-            @sp_clamp_fallbacks += 1
-            Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Thread)
-            end
-          else
-            top = fiber.@context.stack_top.address
-            top = guard if top < guard
-            if top < bottom.address
-              Roots.scan_range(Pointer(Void).new(top), bottom, safe: true) do |candidate|
-                mark_root_candidate(candidate, source: RootSource::Thread)
-              end
-            end
-          end
-        end
+        base = stack.pointer.address
+        bottom = stack.bottom.address
+        next unless spa >= base && spa < bottom
 
-        if pthread_bounds && sp
-          plo = pthread_bounds[0].address
-          phi = pthread_bounds[1].address
-          spa = sp.address
-          on_pthread = spa >= plo && spa < phi
-          on_fiber = spa >= stack.pointer.address && spa < bottom.address
-          if on_pthread && !on_fiber
-            @sp_clamp_hits += 1
-            Roots.scan_range(sp, pthread_bounds[1], safe: true) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Thread)
-            end
-          end
+        guard = base + Roots::PAGE_SIZE
+        next unless guard < bottom
+
+        low = stack_scan_low(spa, guard)
+        @sp_clamp_hits += 1
+        Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(bottom), safe: true) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Thread)
         end
+        return
+      end
+    end
+
+    # SysV x86_64 red zone: callees may store below SP without adjusting it.
+    {% if flag?(:x86_64) %}
+      STACK_SCAN_RED_ZONE = 128_u64
+    {% else %}
+      STACK_SCAN_RED_ZONE = 0_u64
+    {% end %}
+
+    private def stack_scan_low(sp_addr : UInt64, floor : UInt64) : UInt64
+      low = sp_addr > STACK_SCAN_RED_ZONE ? sp_addr - STACK_SCAN_RED_ZONE : 0_u64
+      low < floor ? floor : low
+    end
+
+    # Scan [low, high) of the OS thread stack. When SP is inside the mapping,
+    # clamp to SP−red_zone (still covers live frames). When SP is on a fiber
+    # stack, scan the full pthread mapping — Parallel workers leave scheduler
+    # frames there after switching onto a pool fiber.
+    private def scan_pthread_stack(pthread_bounds : {Void*, Void*}?, sp : Void*?) : Nil
+      return unless pthread_bounds
+
+      low = pthread_bounds[0].address
+      high = pthread_bounds[1].address
+      return unless low < high
+
+      if sp
+        spa = sp.address
+        if spa >= low && spa < high
+          low = stack_scan_low(spa, low)
+          @sp_clamp_hits += 1
+        else
+          @sp_clamp_fallbacks += 1
+        end
+      else
+        @sp_clamp_fallbacks += 1
+      end
+
+      Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Thread)
       end
     end
 

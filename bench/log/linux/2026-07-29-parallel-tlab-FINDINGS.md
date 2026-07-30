@@ -65,6 +65,15 @@ GDB (SIGINT mid-load): **DEFAULT-1** in `flush_pending_empty_chunks`→`munmap` 
 | stacks ungated only | 2/20 |
 | hold `@collecting` through flush | **7/20** (regressed) |
 | `@post_stw_lock` (post-fix) | **1/20** |
+| pthread always-scan | **1/40 … 2/60** |
+| + SP-containing stack scan | **0/40** then **5/60** (noise) |
+| + full fiber scan under STW | **1/60** |
+| + scrub skip if SP on fiber | **2/60** |
+| `DISABLE_SCRUB_FIBERS` | **4/40** (worse — scrub not root cause) |
+| `DISABLE_LAYOUT` | **7/40** (worse) |
+| `KEEP_CHUNKS` | **6/40** (worse) |
 | `DISABLE_AUTO` | **0/20** |
 
-Residual still collect/mark class under Parallel. Supported path: EC1, TLAB off.
+Residual ~1–3/60 still collect/mark class (SEGV @ `0x4` / `0x…0008` / `realloc(): invalid pointer`). Stack under-scan heuristics closed most of the gap; a thinner Parallel-only hole remains.
+
+Supported path: EC1, TLAB off.
