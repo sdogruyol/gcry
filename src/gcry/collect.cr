@@ -138,6 +138,15 @@ module Gcry
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
     getter last_phase_sweep_ns : UInt64 = 0_u64
+    # Collect orchestration (ns) — EC>1 thr outliers: SpinLock wait / STW stop-start / flush.
+    getter last_phase_post_stw_wait_ns : UInt64 = 0_u64
+    getter last_phase_stw_stop_ns : UInt64 = 0_u64
+    getter last_phase_stw_start_ns : UInt64 = 0_u64
+    getter last_phase_flush_ns : UInt64 = 0_u64
+    getter max_post_stw_wait_ns : UInt64 = 0_u64
+    getter post_stw_wait_total_ns : UInt64 = 0_u64
+    getter post_stw_wait_count : UInt64 = 0_u64
+    getter collect_coalesced : UInt64 = 0_u64
     # Other-thread stack scans clamped to captured RSP (vs full pthread range).
     getter sp_clamp_hits : UInt64 = 0_u64
     getter sp_clamp_fallbacks : UInt64 = 0_u64
@@ -159,9 +168,10 @@ module Gcry
     # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
     @roots_lock = Crystal::SpinLock.new
     # Serializes post-STW munmap/madvise vs the next collect's stop_world.
-    # Without this, Parallel EC can suspend a flusher mid-munmap while a peer
-    # sweeps (Kemal EC>1 realloc / index races).
-    @post_stw_lock = Crystal::SpinLock.new
+    # pthread mutex (not SpinLock): under Parallel, SpinLock waiters burned a
+    # whole EC worker for hundreds of ms while another flushes — ~8–11s of
+    # wait in a 20s Kemal /json run. Embedded LibC mutex — no GC malloc at boot.
+    @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -308,7 +318,9 @@ module Gcry
     end
 
     # Full major collection (resets any in-progress incremental cycle).
-    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    # `coalesce`: if true and a peer collect already cleared the debt while we
+    # waited on the post-STW mutex, skip (Parallel EC alloc storms).
+    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
       return if @collecting
       return if monitor_thread?
@@ -316,14 +328,14 @@ module Gcry
 
       abort_incremental
       Trace.collect_start(major: true)
-      run_collection(major: true, scan_stack: scan_stack, roots: roots)
+      run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: true)
       Invariant.after_collect(self)
     end
 
     # Young-generation collection. Scans roots + old objects for nursery pointers
     # (no compiler write barrier required).
-    def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
       return if @collecting
       return if monitor_thread?
@@ -332,7 +344,7 @@ module Gcry
 
       abort_incremental
       Trace.collect_start(major: false)
-      run_collection(major: false, scan_stack: scan_stack, roots: roots)
+      run_collection(major: false, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: false)
     end
 
@@ -356,7 +368,7 @@ module Gcry
       # and we bail out so the alloc path falls through to a full STW collect.
       return false unless @inc_active
 
-      @post_stw_lock.lock
+      lock_post_stw
       finished = false
       begin
         @collecting = true
@@ -411,7 +423,7 @@ module Gcry
       ensure
         # Ensure flag clears even if flush raised.
         @collecting = false
-        @post_stw_lock.unlock
+        unlock_post_stw
       end
 
       if finished
@@ -515,12 +527,12 @@ module Gcry
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
-        collect
+        collect(coalesce: true)
         return
       end
 
       if @nursery_enabled && @nursery_alloc_bytes >= @nursery_threshold
-        minor_collect
+        minor_collect(coalesce: true)
         return
       end
 
@@ -554,7 +566,7 @@ module Gcry
         return
       end
 
-      collect
+      collect(coalesce: true)
     end
 
     protected def destroy_collector : Nil
@@ -760,12 +772,48 @@ module Gcry
       end
     end
 
-    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?) : Nil
-      started = monotonic_ns
+    private def init_post_stw_mutex : Nil
+      # Fresh mutex (also used after fork — parent copy may be locked/undefined).
+      LibC.pthread_mutex_init(pointerof(@post_stw_mutex), Pointer(LibC::PthreadMutexattrT).null)
+    end
+
+    private def lock_post_stw : Nil
+      LibC.pthread_mutex_lock(pointerof(@post_stw_mutex))
+    end
+
+    private def unlock_post_stw : Nil
+      LibC.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+    end
+
+    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+      cols_before = @collections
       # Wait for any prior post-STW flush, then hold until our flush completes
       # so Parallel EC cannot stop_world mid-munmap.
-      @post_stw_lock.lock
+      # Blocking mutex: waiters sleep (SpinLock burned EC workers — see FINDINGS).
+      t_wait = monotonic_ns
+      lock_post_stw
+      wait_ns = monotonic_ns - t_wait
+      @last_phase_post_stw_wait_ns = wait_ns
+      @post_stw_wait_total_ns += wait_ns
+      @post_stw_wait_count += 1
+      @max_post_stw_wait_ns = wait_ns if wait_ns > @max_post_stw_wait_ns
       begin
+        # Auto-collect coalescing: peer finished a collect while we queued and
+        # debt is back under threshold — skip a redundant STW (EC4 pause storms).
+        if coalesce && @collections > cols_before
+          under = if major
+                    @bytes_since_gc < @gc_threshold
+                  else
+                    @nursery_alloc_bytes < @nursery_threshold
+                  end
+          if under
+            @collect_coalesced += 1
+            return
+          end
+        end
+
+        # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
+        started = monotonic_ns
         @collecting = true
         # Generational mark skips old objects; old→young edges come from
         # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
@@ -780,7 +828,9 @@ module Gcry
           # Block fiber swaps, then suspend other OS threads.
           # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
           lock_write
+          t0 = monotonic_ns
           stop_world_quiescing_roots
+          @last_phase_stw_stop_ns = monotonic_ns - t0
           flush_all_tlabs
           # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
@@ -871,7 +921,9 @@ module Gcry
           end
           @collections += 1
         ensure
+          t0 = monotonic_ns
           start_world
+          @last_phase_stw_start_ns = monotonic_ns - t0
           unlock_write
           @minor_only = false
           @mark_stack.clear
@@ -879,12 +931,13 @@ module Gcry
         end
 
         # Keep @collecting true through post-STW flush so GCRY_STRESS / auto
-        # collect cannot re-enter while we still hold @post_stw_lock (non-
-        # recursive SpinLock self-deadlock) or munmap mid-peer-collect.
+        # collect cannot re-enter while we still hold the post-STW mutex (non-
+        # recursive) or munmap mid-peer-collect.
         @suppress_collect += 1
         begin
+          t_flush = monotonic_ns
           # Munmap outside STW — empty chunks + excess large freelist (reuse common).
-          # Still under @post_stw_lock so the next collect cannot stop_world here.
+          # Still under post-STW mutex so the next collect cannot stop_world here.
           flush_pending_empty_chunks
           # DORMANT madvise outside STW — kernel VM lock contention avoided.
           flush_pending_dormant_chunks
@@ -893,6 +946,7 @@ module Gcry
           # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
           release_large_freelist_pages
           trim_large_cache
+          @last_phase_flush_ns = monotonic_ns - t_flush
 
           # After a major collect, record the heap range observation so the
           # adaptive headroom in `ensure_bitmap_covers` stays tight.
@@ -924,7 +978,7 @@ module Gcry
         end
       ensure
         @collecting = false
-        @post_stw_lock.unlock
+        unlock_post_stw
       end
 
       @running_finalizers = true

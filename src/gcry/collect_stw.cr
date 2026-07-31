@@ -166,7 +166,7 @@ module Gcry
       @alloc_lock = Crystal::SpinLock.new
       @roots_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
-      @post_stw_lock = Crystal::SpinLock.new
+      init_post_stw_mutex
       @tlabs_booted = false
       @soft_dirty_armed = false
       @soft_dirty_probed = false

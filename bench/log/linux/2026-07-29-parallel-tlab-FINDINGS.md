@@ -208,6 +208,33 @@ One EC4 `/json` trial collapsed (~8.5k); median still ~28k. EC>1 remains experim
 
 **Verdict:** TLAB@EC4 is **not** a thr win over good LAG TLAB-off runs (~26–30k) and soak is worse than TLAB-off 0/30. Keep `GCRY_TLAB=1` opt-in/experimental for Parallel. Next Parallel lever: alloc-path contention / pause variance (outlier trials), not TLAB default.
 
+## 2026-07-31 — EC4 pause/thr variance (post-STW mutex + coalesce)
+
+### Diagnosis
+
+15× EC4 `/json` `d=20` with new `/gc-stats` wait timers (SpinLock + LAG):
+
+- Healthy runs (~22k): **`post_stw_wait_total` ~8–11s** per 20s — collect queue on SpinLock dominates; waiters burn an EC core.
+- Outliers (~1.5–11k, 3/15): SEGV / mark-miss (`pointer is not a gcry allocation`); empty stats.
+
+STW phase work (roots/sweep) after LAG is small vs queue time.
+
+### Fixes
+
+1. Replace `@post_stw` SpinLock with embedded **`pthread_mutex`** (no GC alloc at boot).
+2. **`collect(coalesce: true)`** from `maybe_collect`: if peer collect cleared debt while waiting, skip (`collect_coalesced`).
+3. Pause ring starts **after** mutex wait; expose wait/stop/start/flush + coalesced in `/gc-stats`.
+
+### Results
+
+| Build | `/json` med d=20 | Soak |
+|-------|-----------------:|------|
+| SpinLock baseline | ~22.5k (3/15 crash) | — |
+| Mutex only | ~20.8k | 15/15 alive |
+| Mutex + coalesce | **~40.1k** (5× 39.6–41.3k) | **20/20** |
+
+EC1 smoke ~34k. Session: `bench/log/linux/2026-07-31-ec4-post-stw-mutex-coalesce/`. Still experimental; no `PERF.md` fold-in. Next: longer soak + quiet Boehm EC4 re-cut with coalesce.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

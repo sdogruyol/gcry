@@ -2,6 +2,7 @@ require "./block"
 require "./size_classes"
 require "./mark_bitmap"
 require "crystal/spin_lock"
+require "c/pthread"
 
 module Gcry
   # mmap-backed allocator with size classes and conservative mark–sweep.
@@ -87,7 +88,7 @@ module Gcry
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
     @alloc_lock = Crystal::SpinLock.new
     @index_lock = Crystal::SpinLock.new
-    @post_stw_lock = Crystal::SpinLock.new
+    @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
@@ -141,7 +142,7 @@ module Gcry
       @suppress_collect = 0
       @alloc_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
-      @post_stw_lock = Crystal::SpinLock.new
+      init_post_stw_mutex
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
