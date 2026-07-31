@@ -164,6 +164,7 @@ module Gcry
       @inc_active = false
       @gc_lock = Crystal::RWLock.new
       @alloc_lock = Crystal::SpinLock.new
+      init_freelist_locks
       @roots_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
       init_post_stw_mutex

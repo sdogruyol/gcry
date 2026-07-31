@@ -409,6 +409,19 @@ After fix (`v2-*`, d=20 med-of-3):
 Soft 0. TLAB still loses (hit path `find_block` + slot lock). Keep opt-in.
 No `PERF.md` fold-in. Next: per-size-class freelist locks, or EC1 0.16 cut.
 
+## 2026-07-31 — Per-size-class freelist SpinLocks
+
+Session `bench/log/linux/2026-07-31-ec4-sizeclass-locks/`.
+
+TLAB-off alloc/free take `@freelist_locks[class]` (nursery twin for nursery
+lists). `@alloc_lock` remains for large + TLAB boot. **TLAB refill stays on
+`@alloc_lock`**: moving it to per-class locks let Parallel refill×mmap contend
+on `@index_lock` with TLAB hit `find_block` → TLAB-on thr **~26k→~15k**;
+reverted refill only.
+
+Quiet EC4 TLAB-off med-of-5: **~55k** (prior atomic baseline ~51k). TLAB-on
+v2 **~26k**. Soft 0. No `PERF.md` fold-in. Next: EC1 0.16 release cut.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

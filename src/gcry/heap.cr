@@ -107,9 +107,15 @@ module Gcry
     @pause_ring_pos = 0
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
     # Must stay SpinLock (not pthread_mutex): STW can suspend a mutator that
-    # holds the freelist lock; a sleeping mutex then deadlocks the collector /
+    # holds a freelist lock; a sleeping mutex then deadlocks the collector /
     # peers (seen: collections=0, heap growth unbounded, thr ~12k).
+    # @alloc_lock: large objects + TLAB table boot. Per-size-class freelist
+    # heads use @freelist_locks / @nursery_freelist_locks so Parallel workers
+    # allocating different sizes do not serialise on one lock.
+    # STW sweep must not take freelist locks (suspended mutator may hold them).
     @alloc_lock = Crystal::SpinLock.new
+    @freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
+    @nursery_freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
     @index_lock = Crystal::SpinLock.new
     @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
@@ -166,6 +172,7 @@ module Gcry
       @tlab_epoch = Atomic(UInt64).new(0_u64)
       @suppress_collect = Atomic(Int32).new(0)
       @alloc_lock = Crystal::SpinLock.new
+      init_freelist_locks
       @index_lock = Crystal::SpinLock.new
       init_post_stw_mutex
       @parallel_mark_workers = 1
@@ -361,9 +368,10 @@ module Gcry
         note_explicit_free(payload.to_u64)
         live_objects_dec
       else
-        # Non-TLAB: freelist head needs @alloc_lock; counters are Atomic.
-        with_alloc_lock do
-          if BlockHeader.nursery?(header)
+        # Non-TLAB: per-size-class freelist lock; counters are Atomic.
+        nursery = BlockHeader.nursery?(header)
+        with_freelist_lock(class_index, nursery) do
+          if nursery
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
             @nursery_freelists[class_index] = pointer
             @nursery_freelist_clean[class_index] = false
@@ -482,7 +490,7 @@ module Gcry
     end
 
     private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      user = with_alloc_lock do
+      user = with_freelist_lock(index, true) do
         u = @nursery_freelists[index]
 
         if u.null?
@@ -518,7 +526,7 @@ module Gcry
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      user = with_alloc_lock do
+      user = with_freelist_lock(index, false) do
         u = @freelists[index]
 
         if u.null?
@@ -764,8 +772,9 @@ module Gcry
       ptr = mmap_anonymous(bytes)
 
       # One emergency collect may free large objects (munmap) before failing hard.
-      # Never collect here under TLAB: refill holds @alloc_lock, and STW+collect
-      # while that lock is held deadlocks Parallel mutators spinning on it.
+      # Never collect here under TLAB: refill holds a freelist SpinLock, and
+      # STW+collect while that lock is held deadlocks Parallel mutators spinning
+      # on it.
       if Gcry.mmap_failed?(ptr) && !@collecting && @enabled && !@tlab_enabled
         collect(scan_stack: true)
         ptr = mmap_anonymous(bytes)
@@ -789,8 +798,9 @@ module Gcry
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
       # Inline insert into sorted chunk index. Under TLAB MT this is called
-      # from refill_size_class which already holds @alloc_lock (via
-      # with_alloc_lock), so index_insert is serialised. Under Boehm (library
+      # from refill_size_class which already holds the size-class freelist
+      # lock (via with_freelist_lock), so index_insert is serialised per class.
+      # Under Boehm (library
       # heap) there is no contention.
       index_insert(chunk)
       invalidate_chunk_cache

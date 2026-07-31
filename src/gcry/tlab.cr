@@ -1,8 +1,9 @@
 # Thread-local allocation buffers (TLAB): each mutator OS thread takes a private
 # freelist head per size-class so parallel ExecutionContexts can allocate without
-# racing on the global freelist. Chunk refill still serializes on @alloc_lock.
+# racing on the global freelist. Chunk refill takes the per-size-class freelist
+# SpinLock (not the global @alloc_lock).
 #
-# Fields (@alloc_lock, @tlab_enabled, …) are declared/initialized in heap.cr.
+# Fields (@alloc_lock, @freelist_locks, @tlab_enabled, …) are in heap.cr.
 
 require "c/pthread"
 
@@ -77,12 +78,38 @@ module Gcry
       (@tlab_slot_locks.to_unsafe + slot).value.unlock
     end
 
-    # Always take @alloc_lock. Skipping when TLAB was off was an EC1 thr
-    # micro-opt; under EC_PARALLELISM>1 it raced alloc_large / chunk index /
-    # counters ("pointer is not a gcry allocation" on Kemal).
-    # SpinLock only — pthread_mutex × STW suspend-while-holding deadlocks.
+    # Large-object path + TLAB table boot. SpinLock only — pthread_mutex ×
+    # STW suspend-while-holding deadlocks.
     protected def with_alloc_lock(&)
       @alloc_lock.sync { yield }
+    end
+
+    # Per-size-class global freelist (old or nursery). STW sweep must not take
+    # these (suspended mutator may hold one). Lock order: freelist → @alloc_lock
+    # (never reverse).
+    private def init_freelist_locks : Nil
+      SIZE_CLASS_COUNT.times do |i|
+        @freelist_locks[i] = Crystal::SpinLock.new
+        @nursery_freelist_locks[i] = Crystal::SpinLock.new
+      end
+    end
+
+    private def freelist_lock_ptr(index : Int32, nursery : Bool) : Crystal::SpinLock*
+      if nursery
+        @nursery_freelist_locks.to_unsafe + index
+      else
+        @freelist_locks.to_unsafe + index
+      end
+    end
+
+    protected def with_freelist_lock(index : Int32, nursery : Bool, &)
+      lock = freelist_lock_ptr(index, nursery)
+      lock.value.lock
+      begin
+        yield
+      ensure
+        lock.value.unlock
+      end
     end
 
     private def current_thread_key : UInt64
@@ -153,6 +180,10 @@ module Gcry
       tlab_refill_once(class_index, payload, nursery)
     end
 
+    # Refill keeps @alloc_lock (not per-class freelist locks): Parallel TLAB
+    # hit path does find_block→@index_lock; concurrent per-class refill×mmap
+    # amplified index contention and crushed Kemal TLAB-on thr (~26k→~15k).
+    # TLAB-off alloc/free still use with_freelist_lock.
     private def tlab_refill_once(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = Pointer(Void).null
       batch = (8192_u64 / payload.to_u64).to_i32.clamp(1, 256)

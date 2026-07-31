@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   etc. are `Atomic` so TLAB hits need no `@alloc_lock` for accounting. EC4
   TLAB-off thr unchanged (~51k); TLAB-on still ~52% of off. Session
   `2026-07-31-ec4-atomic-counters`. No `PERF.md` fold-in. See FINDINGS.
+- **Per-size-class freelist SpinLocks:** TLAB-off small alloc/free lock only
+  that size class (not global `@alloc_lock`). Large + TLAB table/refill keep
+  `@alloc_lock` (per-class refill hurt TLAB-on via `@index_lock`×`find_block`).
+  Quiet EC4 `/json` ~**55k** (was ~51k). Session
+  `2026-07-31-ec4-sizeclass-locks`. No `PERF.md` fold-in. See FINDINGS.
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
