@@ -235,6 +235,33 @@ STW phase work (roots/sweep) after LAG is small vs queue time.
 
 EC1 smoke ~34k. Session: `bench/log/linux/2026-07-31-ec4-post-stw-mutex-coalesce/`. Still experimental; no `PERF.md` fold-in. Next: longer soak + quiet Boehm EC4 re-cut with coalesce.
 
+## 2026-07-31 — Boehm re-cut (LAG + mutex + coalesce)
+
+Session `bench/log/linux/2026-07-31-123742-ec-parallel-coalesce-thr/` (`4d78af0`),
+`wrk -c 100 -d 30`, median-of-3, TLAB **off**.
+
+| Config | `/json` med | `/` med |
+|--------|------------:|--------:|
+| Boehm EC1 | 37286 | 80133 |
+| Boehm EC4 | 69910 | 116713 |
+| gcry EC1 | 31123 | 65423 |
+| gcry EC4 | 36447 | 74804 |
+
+| Compare | `/json` | `/` |
+|---------|--------:|----:|
+| gcry EC1 % Boehm EC1 | **83.5%** | **81.6%** |
+| gcry EC4 % Boehm EC4 | **52.1%** | **64.1%** |
+| Boehm EC4/EC1 | **1.87×** | **1.46×** |
+| gcry EC4/EC1 | **1.17×** | **1.14×** |
+
+| Session | EC4 % Boehm `/json` | EC4/EC1 `/json` |
+|---------|--------------------:|----------------:|
+| pre-LAG | ~23% | ~0.52× |
+| LAG only | ~37% | ~0.87× |
+| **LAG+mutex+coalesce** | **~52%** | **~1.17×** |
+
+gcry EC4 now **scales above EC1** on `/json` (no longer anti-scales). Residual: ~half Boehm EC4; ~17s post_stw wait_total / 30s; RSS ~2× Boehm. No `PERF.md` fold-in. Next: longer soak; then shrink remaining queue / alloc gap.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

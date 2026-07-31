@@ -1,0 +1,9 @@
+config	path	med_req_s	trials	rss_med	cols_med	coal_med	p99_med	wait_med
+boehm-ec1	/	80132.59	3	16684	0	0	0.0	0.0
+boehm-ec1	/json	37285.50	3	16592	0	0	0.0	0.0
+boehm-ec4	/	116713.33	3	16788	0	0	0.0	0.0
+boehm-ec4	/json	69909.78	3	16760	0	0	0.0	0.0
+gcry-ec1	/	65423.11	3	35620	112	0	45.5	0.0
+gcry-ec1	/json	31122.53	3	44880	168	0	26.1	0.1
+gcry-ec4	/	74804.47	3	26792	129	126	79.4	6096.0
+gcry-ec4	/json	36447.22	3	39400	182	328	107.2	17131.7
