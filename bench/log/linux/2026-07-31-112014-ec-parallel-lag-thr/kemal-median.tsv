@@ -1,0 +1,9 @@
+config	path	med_req_s	trials	rss_med
+boehm-ec1	/	76890.14	3	11796
+boehm-ec1	/json	38195.76	3	11796
+boehm-ec4	/	105771.38	3	11796
+boehm-ec4	/json	76446.73	3	11796
+gcry-ec1	/	61883.33	3	11796
+gcry-ec1	/json	32272.26	3	11796
+gcry-ec4	/	68102.41	3	11796
+gcry-ec4	/json	28084.61	3	11796

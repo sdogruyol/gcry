@@ -1,0 +1,264 @@
+2026-07-31T08:38:24.329483Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3811
+2026-07-31T08:38:26.614244Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:26.737286Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:26.738155Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:30.686249Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:31.625261Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:32.439880Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:33.075477Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:34.107340Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:34.349834Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:34.886844Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:35.670213Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:36.784989Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:37.647654Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:39.964643Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:40.519897Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:42.271586Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:42.346831Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:42.802490Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+
+2026-07-31T08:38:43.740414Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???
+

@@ -1,0 +1,241 @@
+2026-07-31T08:37:03.470243Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3812
+2026-07-31T08:37:05.310318Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from bench/kemal/src/server.cr:90:35 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:07.790497Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from bench/kemal/src/server.cr:90:35 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343116Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343120Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343147Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from /usr/share/crystal/src/json/builder.cr:281:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343172Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:27:5 in 'normalize'
+  from /usr/share/crystal/src/path.cr:984:12 in 'printable_backtrace'
+  from bench/kemal/lib/exception_page/src/exception_page.cr:74:18 in 'render_500'
+  from bench/kemal/lib/kemal/src/kemal/exception_handler.cr:34:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343180Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343184Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343215Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343220Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343226Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.343248Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string.cr:5605:15 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:09.716431Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/array.cr:2153:17 in 'check_needs_resize'
+  from /usr/share/crystal/src/array.cr:1415:5 in 'start_object'
+  from /usr/share/crystal/src/json/builder.cr:281:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:12.160653Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from bench/kemal/src/server.cr:90:35 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:12.784542Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/io.cr:179:5 in 'end_scalar'
+  from /usr/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from /usr/share/crystal/src/json/to_json.cr:65:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:15.525999Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/json/builder.cr:134:7 in 'string'
+  from bench/kemal/src/server.cr:91:34 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:16.705664Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from bench/kemal/src/server.cr:90:35 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:16.705697Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/json/builder.cr:134:7 in 'string'
+  from bench/kemal/src/server.cr:91:34 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:17.572211Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/io.cr:179:5 in 'end_scalar'
+  from /usr/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from /usr/share/crystal/src/json/to_json.cr:65:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T08:37:21.102632Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from /usr/share/crystal/src/json/builder.cr:281:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+

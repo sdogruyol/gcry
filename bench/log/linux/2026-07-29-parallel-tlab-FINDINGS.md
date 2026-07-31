@@ -173,7 +173,40 @@ EC1 / single-mutator path unchanged (`stack_top` clamp). `scan_other_thread_stac
 | A/B `/json` `wrk -c 100 -d 20` median-of-5 | LAG **30009** vs stw_full **15676** (**~1.91×**) |
 | EC1 `/json` smoke (15s×3) | ~31–34k (no regression) |
 
-Session notes: `bench/log/linux/2026-07-31-ec4-stw-lag/`. Still below Boehm EC4 (~80k) and noisy under load; do **not** fold into Linux `docs/PERF.md` (EC1 headline). Next: quiet-session re-cut vs Boehm EC4 with LAG; then `GCRY_TLAB=1` @ EC4.
+Session notes: `bench/log/linux/2026-07-31-ec4-stw-lag/`. Still below Boehm EC4 (~80k) and noisy under load; do **not** fold into Linux `docs/PERF.md` (EC1 headline).
+
+## 2026-07-31 — LAG re-cut vs Boehm + TLAB@EC4
+
+Session `bench/log/linux/2026-07-31-112014-ec-parallel-lag-thr/` (`94aadaf`),
+`wrk -c 100 -d 30`, median-of-3, TLAB **off** unless noted.
+
+### Thr vs Boehm (LAG, TLAB off)
+
+| Config | `/json` med | `/` med |
+|--------|------------:|--------:|
+| Boehm EC1 | 38196 | 76890 |
+| Boehm EC4 | 76447 | 105771 |
+| gcry EC1 | 32272 | 61883 |
+| gcry EC4 | 28085 | 68102 |
+
+| Compare | `/json` | `/` |
+|---------|--------:|----:|
+| gcry EC1 % Boehm EC1 | **84.5%** | **80.5%** |
+| gcry EC4 % Boehm EC4 | **36.7%** | **64.4%** |
+| Boehm EC4/EC1 | **2.00×** | **1.38×** |
+| gcry EC4/EC1 | **0.87×** | **1.10×** |
+
+vs pre-LAG (`2026-07-31-100844`): EC4 `/json` **~23%→~37%** Boehm; gcry EC4/EC1 **~0.52×→~0.87×**.
+One EC4 `/json` trial collapsed (~8.5k); median still ~28k. EC>1 remains experimental; no `PERF.md` fold-in.
+
+### TLAB@EC4 (LAG on)
+
+| Check | Result |
+|-------|--------|
+| Soak 20×8s `/json` `GCRY_TLAB=1` | **3/20** fail (DIE) |
+| `/json` `wrk -c 100 -d 20` med-of-5 | TLAB-off **17844** (noisy; one ~524) / TLAB-on **18280** (tighter 14–20k) |
+
+**Verdict:** TLAB@EC4 is **not** a thr win over good LAG TLAB-off runs (~26–30k) and soak is worse than TLAB-off 0/30. Keep `GCRY_TLAB=1` opt-in/experimental for Parallel. Next Parallel lever: alloc-path contention / pause variance (outlier trials), not TLAB default.
 
 ## Long GDB hang (2026-07-30)
 
