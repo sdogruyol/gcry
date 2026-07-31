@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`chunk_containing` lock during post-STW:** skipped `@index_lock` whenever
+  `@collecting` (not only `@world_stopped`). Flush keeps `@collecting` after
+  `start_world`, so Parallel mutators `index_insert` while peers realloc
+  unlocked → false `owns_user_pointer?` (`pointer is not a gcry allocation` on
+  String::Builder). Lock skip only under true STW. Soft errors **0/60** after
+  empty-chunk gate (was 2–3/60). See FINDINGS.
 - **Parallel empty-chunk release off:** under multi-mutator STW, skip empty-chunk
   munmap even when `release_empty_chunks` is on (EC1 unchanged). Residual
   mark-miss × post-STW munmap surfaced as Kemal `/json` soft

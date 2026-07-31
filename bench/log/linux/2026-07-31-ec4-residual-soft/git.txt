@@ -1,0 +1,1 @@
+991842c Cut Parallel empty-chunk munmap: soft realloc miss 22/40 → 3/40. EC1 still releases empties; residual soft errors are true mark-miss.

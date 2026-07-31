@@ -799,9 +799,12 @@ module Gcry
     # Mutators race `index_insert` / last-chunk cache under Parallel EC —
     # serialize with @index_lock (separate from @alloc_lock to avoid deadlock
     # when refill holds @alloc_lock and a concurrent realloc looks up a chunk).
-    # During STW/collect the world is quiet — skip the lock.
+    # Skip the lock only while the world is stopped (true STW). Do NOT skip
+    # for `@collecting` alone: post-STW flush keeps `@collecting` with the
+    # world restarted so mutators mmap/index_insert while peers realloc —
+    # unlocked lookup → false `owns_user_pointer?` ("not a gcry allocation").
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
-      if @world_stopped || @collecting
+      if @world_stopped
         chunk_containing_unlocked(addr)
       else
         @index_lock.sync { chunk_containing_unlocked(addr) }

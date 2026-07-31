@@ -1,0 +1,1 @@
+residual60 ok=60 fail=0 soft=2 hard=0 /60

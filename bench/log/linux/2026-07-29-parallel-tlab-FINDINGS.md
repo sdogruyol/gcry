@@ -301,6 +301,22 @@ a miss is the main amplifier — disable under Parallel by default (EC1 still
 releases). Residual soft ~KEEP_CHUNKS level remains true mark-miss (stack/roots),
 not release. EC>1 stays experimental; no `PERF.md` fold-in.
 
+## 2026-07-31 — Residual soft = post-STW index lock skip
+
+Gate soak still had soft realloc (~2–3/60). Stacks: `Heap#realloc` ←
+`String::Builder` ← Kemal `/json` (same site). Error is `owns_user_pointer?`
+false after `is_heap_ptr` true — not munmap.
+
+Root cause: `chunk_containing` skipped `@index_lock` when `@collecting`.
+Post-STW flush keeps that flag with the world **restarted**, so mutators
+`index_insert` while peers walk the sorted index unlocked → torn lookup /
+false ownership.
+
+Fix: lock skip only when `@world_stopped`. Session
+`bench/log/linux/2026-07-31-ec4-index-lock-collecting/`: **soft 0/60**, hard 0,
+OK 60/60, thr med ~44k. EC>1 still experimental (thr gap vs Boehm); no
+`PERF.md` fold-in.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
