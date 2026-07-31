@@ -262,6 +262,20 @@ Session `bench/log/linux/2026-07-31-123742-ec-parallel-coalesce-thr/` (`4d78af0`
 
 gcry EC4 now **scales above EC1** on `/json` (no longer anti-scales). Residual: ~half Boehm EC4; ~17s post_stw wait_total / 30s; RSS ~2× Boehm. No `PERF.md` fold-in. Next: longer soak; then shrink remaining queue / alloc gap.
 
+## 2026-07-31 — EC4 long soak 100×
+
+Session `bench/log/linux/2026-07-31-ec4-soak-100/`, TLAB off, LAG+mutex+coalesce,
+`wrk -c 100 -d 8` `/json`, fresh process/trial.
+
+| | |
+|--|--:|
+| ok | **96/100** |
+| fail | **4** (SEGV×2, MARK_MISS×2) |
+| boot fail | 0 |
+| OK thr med | **~36.5k** (min ~27k, max ~43k) |
+
+~**4%** residual HTTP fail — mark/SEGV class, not boot. EC>1 stays experimental. Next: triage mark-miss/SEGV or thr-gap work.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

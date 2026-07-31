@@ -1,0 +1,10 @@
+2026-07-31T09:56:32.456431Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4500
+Failed to raise an exception: END_OF_STACK
+[0x63c33ecaaf26] ?? +109690223243046 in ./bin/kemal-gcry
+[0x63c33ec32e58] ?? +109690222751320 in ./bin/kemal-gcry
+[0x63c33ec74bd1] ?? +109690223021009 in ./bin/kemal-gcry
+[0x63c33ec71733] ?? +109690223007539 in ./bin/kemal-gcry
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+Error while trying to dump the backtrace: pointer is not a gcry allocation (ArgumentError)

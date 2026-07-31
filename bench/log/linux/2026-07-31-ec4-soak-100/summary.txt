@@ -1,0 +1,1 @@
+soak ok=96 fail=4 /100 (boot=0 die=4 timeout=0)

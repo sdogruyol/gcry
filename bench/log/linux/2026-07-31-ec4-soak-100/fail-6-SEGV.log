@@ -1,0 +1,19 @@
+2026-07-31T09:55:59.864094Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4500
+Failed to raise an exception: END_OF_STACK
+[0x5a8cd63abf26] ?? +99560936095526 in ./bin/kemal-gcry
+[0x5a8cd6333e58] ?? +99560935603800 in ./bin/kemal-gcry
+[0x5a8cd6375bd1] ?? +99560935873489 in ./bin/kemal-gcry
+[0x5a8cd6372733] ?? +99560935860019 in ./bin/kemal-gcry
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+2026-07-31T09:56:01.801345Z  ERROR - http.server: Unhandled exception on HTTP::Handler
+pointer is not a gcry allocation (ArgumentError)
+Invalid memory access (signal 11) at address 0xfffffffffffffff0
+[0x5a8cd63abf26] ?? +99560936095526 in ./bin/kemal-gcry
+[0x5a8cd63abb04] ?? +99560936094468 in ./bin/kemal-gcry
+[0x73f84e445330] ?? +127510302184240 in /lib/x86_64-linux-gnu/libc.so.6
+[0x5a8cd63af512] ?? +99560936109330 in ./bin/kemal-gcry
+[0x5a8cd6414e89] ?? +99560936525449 in ./bin/kemal-gcry
+[0x5a8cd637258d] ?? +99560935859597 in ./bin/kemal-gcry
+[0x0] ???
