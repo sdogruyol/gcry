@@ -422,6 +422,28 @@ reverted refill only.
 Quiet EC4 TLAB-off med-of-5: **~55k** (prior atomic baseline ~51k). TLAB-on
 v2 **~26k**. Soft 0. No `PERF.md` fold-in. Next: EC1 0.16 release cut.
 
+## 2026-07-31 — Parallel thr levers (reject)
+
+Sessions `2026-07-31-ec4-chunk256/`, `…-ec4-allfree-skip/`, `…-ec4-park-empty/`.
+Baseline after size-class locks: quiet EC4 `/json` ~**55k**; pause p50 ~47ms with
+`phase_sweep`≈`phase_roots`≈`phase_stacks`≈13ms; ~744×128 KiB chunks, ~76 MiB
+`fully_free` under reclaim-off.
+
+| Lever | Result | Verdict |
+|-------|--------|---------|
+| Parallel default **256 KiB** chunks | thr noise (~48k med both); chunks ~½; sweep_ms flat | **no ship** |
+| **ALL_FREE** sweep skip (aligned mmap, O(1) clear) | `all_free_sweep_skips`≈**2**/major despite ~300 empty chunks | **reject** |
+| **Park** empty freelist (unlink, no DONTNEED) | thr **~39k**, sweep **~18ms**, skips still ~2 | **reject** |
+
+Why skip/park fail: under reclaim-off the empty chunks **are** the freelist.
+Each major allocates ~threshold (64 MiB) → mutators drain into empties (or
+revive parked) → ALL_FREE does not survive an epoch. Parking just adds STW
+freelist filter + revive traffic.
+
+Residual gap vs Boehm is STW (**roots/stacks/scrub** ≈ half of pause), not
+size-class alloc locks. Next Parallel thr: stack/scrub cost, or concurrent
+work; else **EC1 0.16 release cut**. Code reverted; no `PERF.md` fold-in.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
