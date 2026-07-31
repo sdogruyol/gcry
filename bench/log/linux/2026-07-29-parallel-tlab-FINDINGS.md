@@ -276,6 +276,31 @@ Session `bench/log/linux/2026-07-31-ec4-soak-100/`, TLAB off, LAG+mutex+coalesce
 
 ~**4%** residual HTTP fail — mark/SEGV class, not boot. EC>1 stays experimental. Next: triage mark-miss/SEGV or thr-gap work.
 
+## 2026-07-31 — Mark-miss triage (empty-chunk munmap)
+
+All residual fails start as soft `ArgumentError: pointer is not a gcry allocation`
+at `Heap#realloc` ← `String::Builder` ← Kemal `/json`. SEGV is often secondary
+(exception/backtrace). Hard-alive soak undercounts these (Kemal catches; wrk OK).
+
+A/B soft-error rate (40× each, `wrk -c100 -d8` `/json`, TLAB off, LAG 512K default):
+
+| Config | Soft `/40` | Hard death |
+|--------|----------:|----------:|
+| default empty-chunk release | **22** | 1 |
+| `GCRY_STW_STACK_LAG=2MiB` | **24** | 1 |
+| `GCRY_KEEP_CHUNKS=1` | **5** | 0 |
+| **gate: no empty release when multi-mutator** | **3** | **0** |
+
+Session A/B logs: `bench/log/linux/2026-07-31-ec4-markmiss-ab/`.
+Gate soak: `bench/log/linux/2026-07-31-ec4-no-release-parallel/` — **40/40** process-OK,
+thr med **~43k** (d=8); d=20 smoke ~**43k**, `released_chunk_bytes=0`,
+`fully_free_chunk_bytes` ~55 MiB (RSS tradeoff vs KEEP_CHUNKS-equivalent).
+
+**Verdict:** Increasing LAG does **not** fix mark-miss. Empty-chunk munmap after
+a miss is the main amplifier — disable under Parallel by default (EC1 still
+releases). Residual soft ~KEEP_CHUNKS level remains true mark-miss (stack/roots),
+not release. EC>1 stays experimental; no `PERF.md` fold-in.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

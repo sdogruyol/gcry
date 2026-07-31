@@ -86,13 +86,22 @@ module Gcry
       false
     end
 
+    # Empty-chunk munmap after major. Disabled under multi-mutator even when
+    # `release_empty_chunks` is on: Parallel residual mark-miss × post-STW
+    # munmap → String::Builder realloc "not a gcry allocation" (Kemal /json).
+    # A/B soft errors /40: default release 22, KEEP_CHUNKS 5, this gate 3;
+    # hard deaths 1→0. EC1 still releases empties (multi_mutator? false).
+    private def release_empty_chunks_this_collect? : Bool
+      @release_empty_chunks && !multi_mutator_threads?
+    end
+
     # How far below parked stack_top to scan under multi-mutator STW.
     # Full guard→bottom × N fibers faults/scans historical high-water and
     # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
     # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
-    # this lag catches stack_top that lags without a visible SP ( empirically
-    # needed beyond SP/current_fiber alone — see CHANGELOG Parallel STW).
-    STW_MULTI_STACK_LAG = 512_u64 * 1024
+    # this lag catches stack_top that lags without a visible SP. Override via
+    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 512 KiB.
+    property stw_multi_stack_lag : UInt64 = 512_u64 * 1024
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
@@ -128,8 +137,11 @@ module Gcry
       t = guard if t < guard
       return t unless stw_multi
 
-      # Extend below stack_top by LAG (not all the way to guard).
-      lagged = t > STW_MULTI_STACK_LAG ? t - STW_MULTI_STACK_LAG : guard
+      lag = @stw_multi_stack_lag
+      # 0 ⇒ classic full parked-fiber scan (correctness A/B; thr regresses).
+      return guard if lag == 0
+
+      lagged = t > lag ? t - lag : guard
       lagged < guard ? guard : lagged
     end
 

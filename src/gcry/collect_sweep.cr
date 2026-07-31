@@ -65,7 +65,7 @@ module Gcry
               limit = ChunkHeader.data_end(chunk).as(UInt8*)
               # When releasing empties: discover live first so fully-dead chunks
               # skip freelist link (unlink-only for pre-existing free blocks).
-              defer_reclaim = major && @release_empty_chunks
+              defer_reclaim = major && release_empty_chunks_this_collect?
               if defer_reclaim
                 while (cursor + block_bytes) <= limit
                   usable_payload += payload.to_u64
@@ -142,7 +142,7 @@ module Gcry
                 mapped = chunk.value.mapped_bytes
                 @fully_free_chunk_bytes += mapped
                 ChunkHeader.set_holed(chunk, false)
-                if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
+                if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
                   if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
                     # Optional: keep VA with DONTNEED when retain > 0.
                     # Set DORMANT flag but defer madvise to post-STW

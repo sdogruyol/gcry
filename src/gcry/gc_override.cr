@@ -359,6 +359,11 @@ module GC
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
+    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
+    # 512KiB; 0 = full guard→bottom (thr regresses). Triage residual EC4 mark-miss.
+    if lag = env_u64("GCRY_STW_STACK_LAG")
+      heap.stw_multi_stack_lag = lag
+    end
 
     # Boehm-style stack hygiene (no compiler maps). Opt-in; measure RSS/thr.
     if env_flag_one?("GCRY_CLEAR_STACK")

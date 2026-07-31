@@ -1,0 +1,1 @@
+gate40 ok=40 fail=0 soft=3 hard=0 boot=0 /40
