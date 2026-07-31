@@ -1,0 +1,1 @@
+af1a74a Cut EC4 thr gap: post-STW trylock-skip + 64MiB Parallel threshold. Auto-collect no longer piles onto the flush mutex; EC>1 defaults to a higher major threshold. Kemal /json ~68% of Boehm EC4 (~53k abs).

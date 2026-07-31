@@ -340,6 +340,22 @@ Host Boehm EC-scaling was flat this pass (noise); cite absolute + %. Soak
 **20/20** soft=0. Still experimental; no `PERF.md` fold-in. Next: alloc-path
 contention / RSS (empty-chunk gate) if chasing Boehm further.
 
+## 2026-07-31 — EC4 long soak 100× (post thr-gap)
+
+Session `bench/log/linux/2026-07-31-ec4-soak-100-post-thr/` (`af1a74a`),
+soft+hard counted, `wrk -c100 -d8` `/json`.
+
+| | |
+|--|--:|
+| process OK | **100/100** |
+| soft | **0/100** |
+| hard | **0** |
+| OK thr med | **~46.2k** |
+
+Prior 100× (pre mark-miss/index/thr fixes): **96/100** hard-alive. Short HTTP
+soak is green; EC>1 still experimental (thr/RSS). Next: RSS reclaim under
+Parallel, or EC1 0.16 release cut.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
