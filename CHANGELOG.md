@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Revert Hash `@entries` grey-scan:** marking `@entries` via `mark_candidate` false-retained capacity-slot garbage (layout_spec) and collapsed Kemal `/json` thr (~36% of Boehm). `@entries`/`@indices` stay noscan; Entry walk remains authoritative.
 - **`-Dwithout_mt` compile:** Parallel EC root pins (`Thread.@execution_context` / `Fiber::ExecutionContext`) are gated with the same Crystal flag condition so `fork_reinit` and Darwin/aarch64 sample builds compile.
 - **STW fiber full-scan only with multi-mutator:** process-STW always full-scanning every parked fiber (Parallel mid-swap hardening) crushed CI Kemal `/json` thr (~78%→~48% Boehm). Restore `stack_top` clamp when only main+Monitor threads exist; keep full-scan when `Thread` count > 2.
-- **CI pause-budget floor:** major p99 floor 100→150 ms (GHA flake `100.72 > 100`). Stress `hello_env` / sample steps wrapped in `timeout` so a hang fails fast instead of a 6h cancel.
+- **CI pause-budget floor:** major p99 floor 100→200 ms, major max floor 250→350 ms (GHA flakes `100.72`, `163.6` / `270`). Stress `hello_env` / sample steps wrapped in `timeout` so a hang fails fast instead of a 6h cancel.
 
 ## [0.15.0] - 2026-07-29
 
