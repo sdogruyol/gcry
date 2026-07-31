@@ -80,6 +80,29 @@ Residual ~1–3/60 still collect/mark class (SEGV @ `0x…0008`). Also: monotoni
 
 Supported path: EC1, TLAB off.
 
+## 2026-07-31 — thread bootstrap collect + re-measure
+
+### Boot crash (symbolized)
+
+`GCRY_THRESHOLD=32768` EC4 died at Kemal “ready” with `END_OF_STACK` /
+`Thread#current_fiber cannot be nil`. nm stack:
+
+`Thread#start` → `Fiber::new` → `GC.malloc` → `maybe_collect` → `run_collection`
+
+Worker OS thread allocates its main fiber **before** `@current_fiber` is set.
+Fix: skip process collect while `Thread.current.@current_fiber` is nil
+(CHANGELOG Unreleased).
+
+### After fix (same host)
+
+| Config | Result |
+|--------|--------|
+| EC4 thr=32KiB boot+wrk | still bad — mostly boot hang / occasional SEGV @ `pthread_getattr_np` during further `Thread#start` under extreme collect rate |
+| EC4 **default** threshold, 15×8s `/json` | **0/15** fail |
+| EC4 **default** threshold, 40×8s `/json` | **0/40** fail |
+
+Was ~1–3/60 before this session’s bootstrap guard (+ prior STW/SYSMON hardening on the branch). Torture thr=32KiB remains a stress tool, not the supported Parallel bar. Next: longer default soaks / thr=64k / TLAB@EC1.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

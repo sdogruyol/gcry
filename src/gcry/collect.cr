@@ -297,11 +297,22 @@ module Gcry
       !name.nil? && name == "SYSMON"
     end
 
+    # Parallel worker bootstrap: `Thread#start` → `Fiber::new` → malloc before
+    # `@current_fiber` is installed. Collecting on that thread raises
+    # `Thread#current_fiber cannot be nil` inside Crystal's raise path
+    # (Kemal EC4 + low GCRY_THRESHOLD: END_OF_STACK at boot).
+    private def thread_not_ready_for_collect? : Bool
+      thread = Thread.current?
+      return true unless thread
+      thread.@current_fiber.nil?
+    end
+
     # Full major collection (resets any in-progress incremental cycle).
     def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
       return if @destroyed
       return if @collecting
       return if monitor_thread?
+      return if thread_not_ready_for_collect?
 
       abort_incremental
       Trace.collect_start(major: true)
@@ -316,6 +327,7 @@ module Gcry
       return if @destroyed
       return if @collecting
       return if monitor_thread?
+      return if thread_not_ready_for_collect?
       return unless @nursery_enabled
 
       abort_incremental
@@ -333,6 +345,7 @@ module Gcry
       return false if @collecting
       return false if @running_finalizers
       return false if monitor_thread?
+      return false if thread_not_ready_for_collect?
 
       started = monotonic_ns
       unless @inc_active
@@ -498,6 +511,7 @@ module Gcry
       return if @running_finalizers
       return if @suppress_collect > 0
       return if monitor_thread?
+      return if thread_not_ready_for_collect?
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
