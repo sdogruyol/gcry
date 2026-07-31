@@ -154,7 +154,7 @@ Shipped and dogfooded on Linux + macOS; **v0.15.0** is a correctness release (pr
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ✅ fiber scrub **default-on**; `GCRY_CLEAR_STACK` still opt-in |
-| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF, live steal, FREE-claim×minor/chain, Parallel STW SP/greg + TLAB full-stack fixed; **Kemal TLAB@EC1 correctness OK, thr ~75% of TLAB-off (opt-in only)**; EC>1 HTTP much quieter (0/40 default) — thr vs Boehm next |
+| TLAB / Parallel EC | ⚠️ experimental — TLAB@EC1 correctness OK thr~75% of off; EC4 HTTP **anti-scales** (~23% Boehm EC4 `/json`, ~0.52× gcry EC1) — FINDINGS `2026-07-31-100844` |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |

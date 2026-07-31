@@ -1,0 +1,21 @@
+label        path      med_rps med_rss_kb
+boehm-ec1    /         84235.1      16728
+boehm-ec1    /json     39680.5      16696
+boehm-ec4    /         93809.8      15780
+boehm-ec4    /json     72810.7      16680
+gcry-ec1     /         73117.0      13140
+gcry-ec1     /json     31698.6      13108
+gcry-ec4     /         33752.6      19880
+gcry-ec4     /json     16426.2      23244
+
+% of Boehm (same EC):
+  gcry-ec1 /json: 79.9% thr, 0.79× RSS
+  gcry-ec4 /json: 22.6% thr, 1.39× RSS
+  gcry-ec1 /: 86.8% thr, 0.79× RSS
+  gcry-ec4 /: 36.0% thr, 1.26× RSS
+
+Scaling (EC4 / EC1):
+  boehm /json: 1.83× thr
+  boehm /: 1.11× thr
+  gcry /json: 0.52× thr
+  gcry /: 0.46× thr

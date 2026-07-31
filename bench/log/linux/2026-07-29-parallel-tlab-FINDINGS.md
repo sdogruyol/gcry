@@ -125,7 +125,26 @@ Was ~1–3/60 before this session’s bootstrap guard (+ prior STW/SYSMON harden
 
 **Decision:** TLAB@EC1 is **correctness-supported opt-in** (`GCRY_TLAB=1`), **not** a thr default. Keep TLAB off on the supported EC1 path. TLAB remains for Parallel prep.
 
-Next: EC>1 thr vs Boehm (default threshold; Parallel residual much quieter after bootstrap fix).
+## 2026-07-31 — EC>1 thr vs Boehm
+
+Session `bench/log/linux/2026-07-31-100844-ec-parallel-thr/` (`019b003`), Crystal 1.21.0,
+WSL2 i3-12100F, `wrk -c 100 -d 30`, median-of-3, TLAB **off**, fresh process per trial.
+
+| Config | `/json` med req/s | `/` med req/s | post-GC RSS kb |
+|--------|------------------:|--------------:|---------------:|
+| Boehm EC1 | 39681 | 84235 | ~16700 |
+| Boehm EC4 | 72811 | 93810 | ~16000 |
+| gcry EC1 | 31699 | 73117 | ~13100 |
+| gcry EC4 | 16426 | 33753 | ~20–23k |
+
+| Compare | `/json` | `/` |
+|---------|--------:|----:|
+| gcry EC1 % of Boehm EC1 | **79.9%** | **86.8%** |
+| gcry EC4 % of Boehm EC4 | **22.6%** | **36.0%** |
+| Boehm EC4 / EC1 | **1.83×** | **1.11×** |
+| gcry EC4 / EC1 | **0.52×** | **0.46×** |
+
+**Verdict:** Parallel EC4 is correctness-quieter than before (0/40 soak) but **anti-scales** under HTTP — about half of EC1 thr and ~23% of Boehm EC4 on `/json`, with higher RSS and ~50–100ms latency. STW / multi-mutator full fiber scan / lock hold across stop→start dominate. Keep EC>1 **experimental**; supported path stays EC1 + TLAB off. Next lever for Parallel thr: shrink STW work when `Thread` count > 2 (full-scan cost), measure with `GCRY_TLAB=1` only after EC4 TLAB-off is closer to EC1.
 
 ## Long GDB hang (2026-07-30)
 
