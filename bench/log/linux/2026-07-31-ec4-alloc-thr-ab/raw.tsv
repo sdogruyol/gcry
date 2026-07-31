@@ -1,0 +1,7 @@
+config	trial	req_s	soft	cols	tlab_hits	tlab_refills	pause_tot_ms	wait_ms
+tlab_off	1	41262.51	0	55	0	0	4046	0.1
+tlab_off	2	45299.00	0	60	0	0	3794	0.1
+tlab_off	3	42123.38	0	68	0	0	3677	45.6
+tlab_on	1	23456.18	0	41	36229616	391419	2877	0.1
+tlab_on	2	23978.31	0	40	37049128	400829	2884	0.1
+tlab_on	3	27079.35	0	47	41773529	458709	3128	0.1

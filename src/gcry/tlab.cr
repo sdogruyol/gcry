@@ -80,6 +80,7 @@ module Gcry
     # Always take @alloc_lock. Skipping when TLAB was off was an EC1 thr
     # micro-opt; under EC_PARALLELISM>1 it raced alloc_large / chunk index /
     # counters ("pointer is not a gcry allocation" on Kemal).
+    # SpinLock only — pthread_mutex × STW suspend-while-holding deadlocks.
     protected def with_alloc_lock(&)
       @alloc_lock.sync { yield }
     end
@@ -270,7 +271,7 @@ module Gcry
       head
     end
 
-    protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool) : Void*
+    protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool, rounded : UInt64) : Void*
       # Per-slot lock closes Parallel dual-alloc on freelist head (TOCTOU on the
       # lock-free load/store, or two OS threads briefly sharing a slot). Epoch
       # protocol still applies across STW flush.
@@ -333,9 +334,12 @@ module Gcry
           next # claim the freshly installed batch under the slot lock
         end
 
+        # Single @alloc_lock: free_bytes + alloc counters (was a second lock in
+        # allocate() after return — serialised every TLAB hit twice under EC>1).
         with_alloc_lock do
           @free_bytes -= payload if @free_bytes >= payload
           @nursery_alloc_bytes += payload.to_u64 if nursery
+          note_alloc_bytes(rounded)
         end
         return user
       end

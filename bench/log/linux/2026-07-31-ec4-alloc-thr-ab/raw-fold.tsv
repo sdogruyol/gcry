@@ -1,0 +1,7 @@
+config	trial	req_s	soft	cols
+fold_off	1	52959.89	0	94
+fold_off	2	60186.46	0	108
+fold_off	3	47517.16	0	84
+fold_on	1	25729.11	0	46
+fold_on	2	26665.35	0	47
+fold_on	3	25571.53	0	45

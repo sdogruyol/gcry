@@ -1,0 +1,4 @@
+config	trial	req_s	soft	cols	pause_tot_ms
+mutex	1	11934.23	0	0	0
+mutex	2	11996.12	0	0	0
+mutex	3	12546.80	0	0	0

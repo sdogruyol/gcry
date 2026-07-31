@@ -86,6 +86,9 @@ module Gcry
     @pause_ring_len = 0
     @pause_ring_pos = 0
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
+    # Must stay SpinLock (not pthread_mutex): STW can suspend a mutator that
+    # holds the freelist lock; a sleeping mutex then deadlocks the collector /
+    # peers (seen: collections=0, heap growth unbounded, thr ~12k).
     @alloc_lock = Crystal::SpinLock.new
     @index_lock = Crystal::SpinLock.new
     @post_stw_mutex = uninitialized LibC::PthreadMutexT
@@ -338,7 +341,7 @@ module Gcry
         end
       else
         # Non-TLAB path: global freelist + counters must be serialised.
-        @alloc_lock.sync do
+        with_alloc_lock do
           if BlockHeader.nursery?(header)
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
             @nursery_freelists[class_index] = pointer
@@ -401,35 +404,42 @@ module Gcry
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
-        user, from_cache = with_alloc_lock { alloc_large(rounded, flags) }
+        user, from_cache = with_alloc_lock do
+          u, fc = alloc_large(rounded, flags)
+          note_alloc_bytes(rounded)
+          {u, fc}
+        end
         needs_clear = clear && from_cache
       elsif @nursery_enabled
         user = if @tlab_enabled
-                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true)
+                 # Counters updated inside tlab_alloc_small (one @alloc_lock).
+                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded)
                else
-                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index)
+                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
                end
         needs_clear = clear && !@nursery_freelist_clean[class_index]
       else
         user = if @tlab_enabled
-                 tlab_alloc_small(rounded.to_u32, flags, class_index, false)
+                 tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded)
                else
-                 alloc_old_small(rounded.to_u32, flags, class_index)
+                 alloc_old_small(rounded.to_u32, flags, class_index, rounded)
                end
         needs_clear = clear && !@freelist_clean[class_index]
       end
 
       user.as(UInt8*).clear(rounded) if needs_clear
-      with_alloc_lock do
-        @total_bytes += rounded
-        @bytes_since_gc += rounded
-        @live_objects += 1
-      end
       user
     end
 
-    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      @alloc_lock.sync do
+    # Caller holds @alloc_lock.
+    private def note_alloc_bytes(rounded : UInt64) : Nil
+      @total_bytes += rounded
+      @bytes_since_gc += rounded
+      @live_objects += 1
+    end
+
+    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      with_alloc_lock do
         user = @nursery_freelists[index]
 
         if user.null?
@@ -459,12 +469,13 @@ module Gcry
 
         @free_bytes -= payload if @free_bytes >= payload
         @nursery_alloc_bytes += payload.to_u64
+        note_alloc_bytes(rounded)
         user
       end
     end
 
-    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      @alloc_lock.sync do
+    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      with_alloc_lock do
         user = @freelists[index]
 
         if user.null?
@@ -491,6 +502,7 @@ module Gcry
         heap_set_mark(header) if @incremental_marking || @collecting
 
         @free_bytes -= payload if @free_bytes >= payload
+        note_alloc_bytes(rounded)
         user
       end
     end

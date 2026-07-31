@@ -1,0 +1,4 @@
+config	trial	req_s	soft	cols
+spin	1	58001.14	0	103
+spin	2	57068.63	0	101
+spin	3	54888.14	0	98

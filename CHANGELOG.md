@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empty chunks (RSS ~3× better, thr ~25%
   down on Kemal EC4). `GCRY_PARALLEL_RELEASE=1` adds munmap excess (hung in
   A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
+- **EC>1 alloc-path A/B:** `GCRY_TLAB=1` @ EC4 still ~½ of TLAB-off thr (soft 0
+  — keep opt-in). `@alloc_lock` as `pthread_mutex` deadlocks under STW
+  (collections=0) — rejected; stay on `Crystal::SpinLock`. Fold
+  `note_alloc_bytes` into the freelist lock (one acquire per small alloc /
+  TLAB hit). Session `2026-07-31-ec4-alloc-thr-ab`. No `PERF.md` fold-in.
+  See FINDINGS.
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.

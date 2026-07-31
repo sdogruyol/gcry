@@ -367,6 +367,25 @@ trial. Soft 0 in completed runs.
 No `PERF.md` fold-in. Next: EC1 0.16 release cut, or further Parallel thr/RSS
 without dormant-all default.
 
+## 2026-07-31 — Alloc-path contention (roadmap #2)
+
+Session `bench/log/linux/2026-07-31-ec4-alloc-thr-ab/` (+ mutex reject
+`2026-07-31-ec4-alloc-mutex/`). `wrk -c100 -d20` `/json` med-of-3.
+
+| Lever | `/json` med | Verdict |
+|-------|------------:|---------|
+| TLAB off | ~42–53k | baseline (host noise; quiet ~53k) |
+| `GCRY_TLAB=1` | **~24–26k** (~½) | soft 0; keep **opt-in** |
+| `@alloc_lock` = `pthread_mutex` | **~12k**, cols=0 | **reject** — STW suspend-while-holding deadlocks collector |
+| Fold counters into freelist SpinLock | off ~53k; on ~26k | ship fold; TLAB still loses |
+
+Why TLAB loses under EC4: every hit still takes global `@alloc_lock` for
+`free_bytes` / `bytes_since_gc` / `live_objects`, plus per-slot lock +
+`find_block`. Folding removed a *second* lock; contention remains.
+
+**Keep SpinLock** (commented). Next thr levers: atomic alloc counters, or
+per-size-class SpinLocks (never sleep under STW). No `PERF.md` fold-in.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
