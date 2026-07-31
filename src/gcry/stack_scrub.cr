@@ -134,7 +134,10 @@ module Gcry
         # Mid-swap under Parallel: current_fiber already points at the next
         # fiber while SP (and live frames) remain on this "parked" stack.
         # Scrubbing with a stale stack_top would zero live roots.
-        next if fiber_stack_holds_foreign_sp?(fiber)
+        # EC1: SYSMON is always suspended on its fiber during our STW — the
+        # foreign-SP skip would never scrub it and inflated retention/GC rate
+        # (~82% vs ~86% Boehm after stack-scan fix). Only skip under Parallel.
+        next if multi_mutator_threads? && fiber_stack_holds_foreign_sp?(fiber)
 
         stack = fiber.@stack
         base = stack.pointer.address

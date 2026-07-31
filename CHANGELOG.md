@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **EC1 STW stack scan thr regression (Parallel fallout):** process-STW full
+  fiber/pthread scans added for EC>1 mid-swap were also applied on EC1
+  (main+SYSMON). Every Thread root fiber is named `"main"`, so SYSMON hit a
+  full pthread map scan (`phase_stacks` ~0.02→~3ms; Kemal `/json` ~86%→~80%
+  Boehm). Restore cheap SP/`stack_top` other-thread scans when
+  `!multi_mutator_threads?`; keep aggressive Parallel path. Limit
+  foreign-SP scrub skip to Parallel only. Re-cut `/json` ~**82.5%** Boehm
+  (stacks back to ~0.02ms); residual vs 0.15 still open. Sessions
+  `2026-07-31-164302` (regress), `2026-07-31-173530` (fix).
 - **Parallel `@suppress_collect` race:** plain `Int` `+=`/`-=` under concurrent
   `realloc` lost decrements so suppress stuck high (≈4607) and auto-collect
   never ran (`collections=0`, thr collapsed). Use `Atomic(Int32)`. Exposed when
