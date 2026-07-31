@@ -210,6 +210,11 @@ module GC
       {% else %}
         heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
       {% end %}
+      # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
+      # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
+      if (ec = env_u64("EC_PARALLELISM")) && ec > 1
+        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
+      end
     end
 
     if env_flag_one?("GCRY_DISABLE_NURSERY")

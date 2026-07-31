@@ -18,8 +18,11 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD           =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD           = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_GC_THRESHOLD =  4194304_u64 # 4 MiB — library / conservative
+    PROCESS_GC_THRESHOLD = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    # EC_PARALLELISM>1: 32 MiB majors storm under HTTP (~150+/20s). 64 MiB
+    # cut Kemal EC4 /json ~47k→~53k (d=20); 128 MiB no further win.
+    PROCESS_GC_THRESHOLD_PARALLEL  = 67108864_u64 # 64 MiB
     DEFAULT_NURSERY_THRESHOLD      =   524288_u64 # 512 KiB minor
     MIN_ADAPTIVE_NURSERY_THRESHOLD =    65536_u64 # 64 KiB floor
     MAX_ADAPTIVE_NURSERY_THRESHOLD =  8388608_u64 # 8 MiB cap — prevents unbounded growth
@@ -781,35 +784,60 @@ module Gcry
       LibC.pthread_mutex_lock(pointerof(@post_stw_mutex))
     end
 
+    private def try_lock_post_stw : Bool
+      LibC.pthread_mutex_trylock(pointerof(@post_stw_mutex)) == 0
+    end
+
     private def unlock_post_stw : Nil
       LibC.pthread_mutex_unlock(pointerof(@post_stw_mutex))
     end
 
-    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
-      cols_before = @collections
-      # Wait for any prior post-STW flush, then hold until our flush completes
-      # so Parallel EC cannot stop_world mid-munmap.
-      # Blocking mutex: waiters sleep (SpinLock burned EC workers — see FINDINGS).
-      t_wait = monotonic_ns
-      lock_post_stw
-      wait_ns = monotonic_ns - t_wait
+    private def debt_under_threshold?(major : Bool) : Bool
+      if major
+        @bytes_since_gc < @gc_threshold
+      else
+        @nursery_alloc_bytes < @nursery_threshold
+      end
+    end
+
+    private def note_post_stw_wait(wait_ns : UInt64) : Nil
       @last_phase_post_stw_wait_ns = wait_ns
       @post_stw_wait_total_ns += wait_ns
       @post_stw_wait_count += 1
       @max_post_stw_wait_ns = wait_ns if wait_ns > @max_post_stw_wait_ns
+    end
+
+    # Acquire post-STW mutex. When *coalesce*, never sleep on the mutex: the
+    # `@collecting=false`→`unlock` window lets every EC worker enter
+    # `run_collection` and pile up (~11s wait / 20s wrk). Failed trylock →
+    # skip; next `maybe_collect` retries after the holder finishes. Returns
+    # false if skipped without holding the lock.
+    private def acquire_post_stw(coalesce : Bool, cols_before : UInt64, major : Bool) : Bool
+      t_wait = monotonic_ns
+      if coalesce
+        unless try_lock_post_stw
+          @collect_coalesced += 1
+          note_post_stw_wait(monotonic_ns - t_wait)
+          return false
+        end
+      else
+        lock_post_stw
+      end
+      note_post_stw_wait(monotonic_ns - t_wait)
+      true
+    end
+
+    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+      cols_before = @collections
+      # Hold post-STW mutex through flush so Parallel EC cannot stop_world
+      # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
+      return unless acquire_post_stw(coalesce, cols_before, major)
+
       begin
-        # Auto-collect coalescing: peer finished a collect while we queued and
-        # debt is back under threshold — skip a redundant STW (EC4 pause storms).
-        if coalesce && @collections > cols_before
-          under = if major
-                    @bytes_since_gc < @gc_threshold
-                  else
-                    @nursery_alloc_bytes < @nursery_threshold
-                  end
-          if under
-            @collect_coalesced += 1
-            return
-          end
+        # Auto-collect coalescing: peer finished while we acquired — skip STW.
+        if coalesce && @collections > cols_before && debt_under_threshold?(major)
+          @collect_coalesced += 1
+          return
         end
 
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.

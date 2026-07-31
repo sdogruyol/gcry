@@ -317,6 +317,29 @@ Fix: lock skip only when `@world_stopped`. Session
 OK 60/60, thr med ~44k. EC>1 still experimental (thr gap vs Boehm); no
 `PERF.md` fold-in.
 
+## 2026-07-31 — EC4 thr gap: trylock-skip + 64 MiB Parallel threshold
+
+Bottleneck was not STW phase work — `post_stw_wait_total` ~11s/20s from workers
+sleeping on the mutex in the `@collecting=false`→`unlock` window (then
+coalescing after the wait). Yield-loop trylock **hurt** thr; **trylock-or-skip**
+drops wait to ~0 without burning cores.
+
+Threshold A/B (d=20, skip build): 32 MiB ~**47k**, **64 MiB ~53k**, 128 MiB ~51k.
+Default: `PROCESS_GC_THRESHOLD_PARALLEL` (64 MiB) when `EC_PARALLELISM>1` and
+no `GCRY_THRESHOLD`. Fiber scrub off regresses — keep on.
+
+Quiet Boehm re-cut `2026-07-31-ec4-thr-gap-recut/` (`wrk -c100 -d30` med-of-3):
+
+| Compare | `/json` | `/` |
+|---------|--------:|----:|
+| gcry EC4 % Boehm EC4 | **~68%** | **~75%** |
+| gcry EC4 abs | **~53k** | **~83k** |
+| Prior coalesce cut | ~52% @ ~36k | — |
+
+Host Boehm EC-scaling was flat this pass (noise); cite absolute + %. Soak
+**20/20** soft=0. Still experimental; no `PERF.md` fold-in. Next: alloc-path
+contention / RSS (empty-chunk gate) if chasing Boehm further.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

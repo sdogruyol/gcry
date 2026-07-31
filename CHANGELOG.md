@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pointer is not a gcry allocation` (22/40 → **3/40** with the gate; hard
   deaths 0/40). `GCRY_STW_STACK_LAG` env for LAG A/B (default 512 KiB). See
   FINDINGS mark-miss triage.
+
+### Performance
+
+- **EC>1 thr gap (experimental):** auto-collect **trylock-or-skip** on
+  `@post_stw` (no waiter pile-up; wait_total ~11s/20s → ~0). Default major
+  threshold **64 MiB** when `EC_PARALLELISM>1` (`GCRY_THRESHOLD` still wins;
+  EC1 stays 32 MiB). Same-host re-cut: gcry EC4 `/json` **~68%** of Boehm EC4
+  @ **~53k** abs (was ~52% @ ~36k). Soak 20/20 soft=0. No `PERF.md` fold-in.
+  See FINDINGS.
+
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
 - **Parallel worker STW stack scan:** `scan_other_thread_stacks` used `max(stack_top, sp)` for running fibers; stale `stack_top` above hardware SP skipped live frames, so Parallel+TLAB in-flight mallocs were swept (pin saw FREE). Prefer suspend SP (+ x86_64 red zone), mark saved GP registers from the suspend `ucontext`, and with TLAB scan the full fiber stack (SP/greg alone still flaked under Parallel>2). CI: `stw_mt_property_test --tlab --nursery` mixes minors.
