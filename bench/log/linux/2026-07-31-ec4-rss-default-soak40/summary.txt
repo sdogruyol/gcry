@@ -1,0 +1,1 @@
+default40 ok=40/40 soft=0 hard=0

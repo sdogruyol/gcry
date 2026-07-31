@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EC1 stays 32 MiB). Same-host re-cut: gcry EC4 `/json` **~68%** of Boehm EC4
   @ **~53k** abs (was ~52% @ ~36k). Long soak **100/100** soft=0 hard=0
   (`2026-07-31-ec4-soak-100-post-thr`). No `PERF.md` fold-in. See FINDINGS.
+- **Parallel empty-chunk reclaim opt-in:** default stays off under EC>1 (thr).
+  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empty chunks (RSS ~3× better, thr ~25%
+  down on Kemal EC4). `GCRY_PARALLEL_RELEASE=1` adds munmap excess (hung in
+  A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.

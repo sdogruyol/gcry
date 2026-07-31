@@ -356,6 +356,17 @@ Prior 100× (pre mark-miss/index/thr fixes): **96/100** hard-alive. Short HTTP
 soak is green; EC>1 still experimental (thr/RSS). Next: RSS reclaim under
 Parallel, or EC1 0.16 release cut.
 
+## 2026-07-31 — Parallel RSS / empty-chunk A/B
+
+Session `bench/log/linux/2026-07-31-ec4-rss-ab/`. Dormant-all under Parallel
+cuts RSS ~**3×** (~141MB→~46MB) but thr ~**42k→~32k**. Full munmap hung a
+trial. Soft 0 in completed runs.
+
+**Default stays reclaim-off** for Parallel (thr). Opt-in:
+`GCRY_PARALLEL_DORMANT=1`, `GCRY_PARALLEL_RELEASE=1` (risky). EC1 unchanged.
+No `PERF.md` fold-in. Next: EC1 0.16 release cut, or further Parallel thr/RSS
+without dormant-all default.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

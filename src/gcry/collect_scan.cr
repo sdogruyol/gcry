@@ -86,13 +86,24 @@ module Gcry
       false
     end
 
-    # Empty-chunk munmap after major. Disabled under multi-mutator even when
-    # `release_empty_chunks` is on: Parallel residual mark-miss × post-STW
-    # munmap → String::Builder realloc "not a gcry allocation" (Kemal /json).
-    # A/B soft errors /40: default release 22, KEEP_CHUNKS 5, this gate 3;
-    # hard deaths 1→0. EC1 still releases empties (multi_mutator? false).
+    # Empty-chunk reclaim after major.
+    # - EC1: dormant (DONTNEED within retain) + munmap excess (default).
+    # - Parallel default: no empty reclaim (munmap amplified soft realloc;
+    #   dormant-all cuts RSS ~3× but thr ~42k→~32k on Kemal EC4). Opt in:
+    #   GCRY_PARALLEL_DORMANT=1 (DONTNEED all empties, keep VA) or
+    #   GCRY_PARALLEL_RELEASE=1 (EC1-style munmap excess; can hang/soft).
+    property parallel_empty_chunk_dormant : Bool = false
+    property parallel_empty_chunk_munmap : Bool = false
+
     private def release_empty_chunks_this_collect? : Bool
-      @release_empty_chunks && !multi_mutator_threads?
+      return false unless @release_empty_chunks
+      return true unless multi_mutator_threads?
+      @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
+    end
+
+    private def munmap_empty_chunks_this_collect? : Bool
+      return false unless @release_empty_chunks
+      !multi_mutator_threads? || @parallel_empty_chunk_munmap
     end
 
     # How far below parked stack_top to scan under multi-mutator STW.

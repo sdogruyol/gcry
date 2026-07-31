@@ -143,16 +143,19 @@ module Gcry
                 @fully_free_chunk_bytes += mapped
                 ChunkHeader.set_holed(chunk, false)
                 if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                  if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
-                    # Optional: keep VA with DONTNEED when retain > 0.
-                    # Set DORMANT flag but defer madvise to post-STW
-                    # `flush_pending_dormant_chunks` (kernel VM lock outside STW).
+                  can_dormant = @empty_chunk_retain > 0 &&
+                                (dormant_budget_used + mapped <= @empty_chunk_retain || !munmap_empty_chunks_this_collect?)
+                  if can_dormant
+                    # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
+                    # Parallel — munmap was the soft-realloc amplifier).
+                    # When munmap is allowed, only dormant within retain; when
+                    # not (Parallel default), dormant all empties.
                     ChunkHeader.set_dormant(chunk, true)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
                     unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
                       ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
-                  else
+                  elsif munmap_empty_chunks_this_collect?
                     @heap_size -= mapped if @heap_size >= mapped
                     @bytes_reclaimed_since_gc += mapped
                     @released_chunk_bytes += mapped

@@ -1,0 +1,7 @@
+config	trial	req_s	rss_kb	heap_mb	fully_free_mb	released_mb	dormant_mb	soft	cols
+default	1	43696.65	240068	250.0	203.3	0.0	0.0	0	68
+default	2	48533.07	125972	133.1	91.2	0.0	0.0	0	84
+default	3	44766.83	276752	287.8	237.2	0.0	0.0	0	61
+dormant_opt	1	34638.65	64484	124.0	77.1	0.0	55.6	0	60
+dormant_opt	2	34829.10	57328	115.8	70.9	0.0	54.7	0	61
+dormant_opt	3	26952.17	42660	188.7	146.1	0.0	145.4	0	45
