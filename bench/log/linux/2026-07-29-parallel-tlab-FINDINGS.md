@@ -146,6 +146,35 @@ WSL2 i3-12100F, `wrk -c 100 -d 30`, median-of-3, TLAB **off**, fresh process per
 
 **Verdict:** Parallel EC4 is correctness-quieter than before (0/40 soak) but **anti-scales** under HTTP — about half of EC1 thr and ~23% of Boehm EC4 on `/json`, with higher RSS and ~50–100ms latency. STW / multi-mutator full fiber scan / lock hold across stop→start dominate. Keep EC>1 **experimental**; supported path stays EC1 + TLAB off. Next lever for Parallel thr: shrink STW work when `Thread` count > 2 (full-scan cost), measure with `GCRY_TLAB=1` only after EC4 TLAB-off is closer to EC1.
 
+## 2026-07-31 — multi-mutator STW stack LAG (512 KiB)
+
+### Profile
+
+EC4 Kemal `/json` `wrk -c 100 -d 12`: last-collect `phase_roots` was **~65–80%** of timed phases (~100–250ms) with classic `stw_full` (every parked fiber `guard→bottom`). EC1 `phase_roots` ~2–3ms.
+
+Blanket clamp to `stack_top` (no lag) → soak fail class `pointer is not a gcry allocation` (4–9/30). `scan_range_safe` run-walking all pages made pauses **worse** (pipe probe × deep contiguous stacks).
+
+### Change
+
+`scan_all_fiber_roots` when `@world_stopped && multi_mutator_threads?`:
+
+1. If a suspended thread SP sits on the fiber → scan from SP−red_zone.
+2. Else if `fiber.running?` → still `guard` (no SP visible).
+3. Else → `max(guard, stack_top − 512KiB)` (not full guard).
+
+EC1 / single-mutator path unchanged (`stack_top` clamp). `scan_other_thread_stacks` unchanged (greg / current_fiber / SP / pthread).
+
+### Results (same host, TLAB off)
+
+| Check | Result |
+|-------|--------|
+| `stw_mt_property_test` plain + `--tlab` | PASS |
+| EC4 soak 30×8s `/json` | **0/30** fail |
+| A/B `/json` `wrk -c 100 -d 20` median-of-5 | LAG **30009** vs stw_full **15676** (**~1.91×**) |
+| EC1 `/json` smoke (15s×3) | ~31–34k (no regression) |
+
+Session notes: `bench/log/linux/2026-07-31-ec4-stw-lag/`. Still below Boehm EC4 (~80k) and noisy under load; do **not** fold into Linux `docs/PERF.md` (EC1 headline). Next: quiet-session re-cut vs Boehm EC4 with LAG; then `GCRY_TLAB=1` @ EC4.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).
