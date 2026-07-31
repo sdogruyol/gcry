@@ -389,8 +389,8 @@ module Gcry
           if @mark_stack.empty?
             enqueue_unreachable_finalizers
             sweep(major: true)
-            @bytes_since_gc = 0_u64
-            @nursery_alloc_bytes = 0_u64
+            @bytes_since_gc.set(0_u64)
+            @nursery_alloc_bytes.set(0_u64)
             @expl_freed_bytes_since_gc = 0_u64
             @collections += 1
             @major_collections += 1
@@ -414,12 +414,12 @@ module Gcry
         end
 
         if finished
-          @suppress_collect += 1
+          @suppress_collect.add(1)
           begin
             flush_pending_empty_chunks
             trim_large_cache
           ensure
-            @suppress_collect -= 1
+            @suppress_collect.sub(1)
           end
         end
         @collecting = false
@@ -524,7 +524,7 @@ module Gcry
       return unless @enabled
       return if @collecting
       return if @running_finalizers
-      return if @suppress_collect > 0
+      return if @suppress_collect.get > 0
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
@@ -534,7 +534,7 @@ module Gcry
         return
       end
 
-      if @nursery_enabled && @nursery_alloc_bytes >= @nursery_threshold
+      if @nursery_enabled && @nursery_alloc_bytes.get >= @nursery_threshold
         minor_collect(coalesce: true)
         return
       end
@@ -553,14 +553,15 @@ module Gcry
       # Guarded by `bytes_since_gc >= gc_threshold / 4` so an idle path that
       # just happened to cross 75% doesn't repeatedly enter a barely-empty
       # incremental cycle.
+      bsg = @bytes_since_gc.get
       if @incremental_auto &&
-         @bytes_since_gc >= (@gc_threshold >> 2) &&
-         @bytes_since_gc >= (@gc_threshold - (@gc_threshold >> 2))
+         bsg >= (@gc_threshold >> 2) &&
+         bsg >= (@gc_threshold - (@gc_threshold >> 2))
         collect_a_little(@incremental_work)
         return
       end
 
-      return if @bytes_since_gc < @gc_threshold
+      return if bsg < @gc_threshold
 
       # Threshold crossed: try incremental one more time. If the cycle
       # finishes here we skip STW entirely; otherwise only the final sweep
@@ -589,7 +590,8 @@ module Gcry
       @minor_collections = 0_u64
       @major_collections = 0_u64
       @stack_bottom = Pointer(Void).null
-      @nursery_alloc_bytes = 0_u64
+      @nursery_alloc_bytes.set(0_u64)
+      @bytes_since_gc.set(0_u64)
       @unmapped_bytes = 0_u64
       @bytes_before_gc = 0_u64
       @bytes_reclaimed_since_gc = 0_u64
@@ -794,9 +796,9 @@ module Gcry
 
     private def debt_under_threshold?(major : Bool) : Bool
       if major
-        @bytes_since_gc < @gc_threshold
+        @bytes_since_gc.get < @gc_threshold
       else
-        @nursery_alloc_bytes < @nursery_threshold
+        @nursery_alloc_bytes.get < @nursery_threshold
       end
     end
 
@@ -923,15 +925,15 @@ module Gcry
           # For minor collections, snapshot nursery alloc bytes and reset survival
           # counter before sweep accumulates surviving nursery payload.
           if !major
-            @nursery_alloc_before_minor = @nursery_alloc_bytes
+            @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
           end
           sweep(major: major)
           @last_phase_sweep_ns = monotonic_ns - t0
 
           if major
-            @bytes_since_gc = 0_u64
-            @nursery_alloc_bytes = 0_u64
+            @bytes_since_gc.set(0_u64)
+            @nursery_alloc_bytes.set(0_u64)
             @expl_freed_bytes_since_gc = 0_u64
             @major_collections += 1
             if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
@@ -941,7 +943,7 @@ module Gcry
             @soft_dirty_skip_until_major = false
             arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
           else
-            @nursery_alloc_bytes = 0_u64
+            @nursery_alloc_bytes.set(0_u64)
             @minor_collections += 1
             # Record nursery survival statistics for adaptive threshold.
             note_nursery_survival
@@ -961,7 +963,7 @@ module Gcry
         # Keep @collecting true through post-STW flush so GCRY_STRESS / auto
         # collect cannot re-enter while we still hold the post-STW mutex (non-
         # recursive) or munmap mid-peer-collect.
-        @suppress_collect += 1
+        @suppress_collect.add(1)
         begin
           t_flush = monotonic_ns
           # Munmap outside STW — empty chunks + excess large freelist (reuse common).
@@ -1002,7 +1004,7 @@ module Gcry
             @large_cache_misses = 0_u64
           end
         ensure
-          @suppress_collect -= 1
+          @suppress_collect.sub(1)
         end
       ensure
         @collecting = false
@@ -1101,7 +1103,7 @@ module Gcry
 
     private def note_collection_begin : Nil
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
-      @bytes_before_gc = @bytes_since_gc
+      @bytes_before_gc = @bytes_since_gc.get
       @bytes_reclaimed_since_gc = 0_u64
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64

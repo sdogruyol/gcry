@@ -46,7 +46,7 @@ module Gcry
     end
 
     def tlab_hits : UInt64
-      @tlab_hits
+      @tlab_hits.get
     end
 
     protected def ensure_tlabs : Nil
@@ -318,7 +318,7 @@ module Gcry
               end
               BlockHeader.set_used(header, payload, flags)
               heap_set_mark(header) if @incremental_marking || @collecting
-              @tlab_hits += 1
+              @tlab_hits.add(1_u64)
             else
               user = Pointer(Void).null
             end
@@ -334,13 +334,10 @@ module Gcry
           next # claim the freshly installed batch under the slot lock
         end
 
-        # Single @alloc_lock: free_bytes + alloc counters (was a second lock in
-        # allocate() after return — serialised every TLAB hit twice under EC>1).
-        with_alloc_lock do
-          @free_bytes -= payload if @free_bytes >= payload
-          @nursery_alloc_bytes += payload.to_u64 if nursery
-          note_alloc_bytes(rounded)
-        end
+        # Atomic counters — no @alloc_lock on the TLAB hit path (Parallel thr).
+        free_bytes_sub(payload.to_u64)
+        @nursery_alloc_bytes.add(payload.to_u64) if nursery
+        note_alloc_bytes(rounded)
         return user
       end
       raise OutOfMemoryError.new("failed to claim TLAB node size class #{payload}")
@@ -363,9 +360,7 @@ module Gcry
       ensure
         unlock_tlab_slot(slot)
       end
-      with_alloc_lock do
-        @free_bytes += payload.to_u64
-      end
+      @free_bytes.add(payload.to_u64)
     end
 
     # Flush TLAB freelists back to global (call under STW / before sweep / destroy).

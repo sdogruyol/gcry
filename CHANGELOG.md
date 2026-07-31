@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Parallel `@suppress_collect` race:** plain `Int` `+=`/`-=` under concurrent
+  `realloc` lost decrements so suppress stuck high (≈4607) and auto-collect
+  never ran (`collections=0`, thr collapsed). Use `Atomic(Int32)`. Exposed when
+  alloc counters left `@alloc_lock` (shorter critical section). See FINDINGS.
 - **`chunk_containing` lock during post-STW:** skipped `@index_lock` whenever
   `@collecting` (not only `@world_stopped`). Flush keeps `@collecting` after
   `start_world`, so Parallel mutators `index_insert` while peers realloc
@@ -40,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `note_alloc_bytes` into the freelist lock (one acquire per small alloc /
   TLAB hit). Session `2026-07-31-ec4-alloc-thr-ab`. No `PERF.md` fold-in.
   See FINDINGS.
+- **Atomic alloc counters:** `bytes_since_gc` / `live_objects` / `free_bytes` /
+  etc. are `Atomic` so TLAB hits need no `@alloc_lock` for accounting. EC4
+  TLAB-off thr unchanged (~51k); TLAB-on still ~52% of off. Session
+  `2026-07-31-ec4-atomic-counters`. No `PERF.md` fold-in. See FINDINGS.
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.

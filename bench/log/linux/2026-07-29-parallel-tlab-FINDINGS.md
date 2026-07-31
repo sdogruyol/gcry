@@ -386,6 +386,29 @@ Why TLAB loses under EC4: every hit still takes global `@alloc_lock` for
 **Keep SpinLock** (commented). Next thr levers: atomic alloc counters, or
 per-size-class SpinLocks (never sleep under STW). No `PERF.md` fold-in.
 
+## 2026-07-31 — Atomic alloc counters (+ suppress race)
+
+Session `bench/log/linux/2026-07-31-ec4-atomic-counters/`.
+
+Unlock TLAB hit path: `bytes_since_gc` / `total_bytes` / `live_objects` /
+`free_bytes` / `nursery_alloc_bytes` / `tlab_hits` → `Atomic(UInt64)`.
+
+First Kemal EC4 cut after unlock: **collections=0**, thr ~13k. Root cause was
+not the atomics — Parallel `realloc` races on non-atomic `@suppress_collect`
+(`+=`/`-=`) left it stuck ≈4607 so `maybe_collect` always returned early.
+Shorter freelist critical sections (counters outside `@alloc_lock`) made the
+race frequent. Fix: `Atomic(Int32)` suppress.
+
+After fix (`v2-*`, d=20 med-of-3):
+
+| Config | `/json` med | vs off |
+|--------|------------:|-------:|
+| TLAB off | **~51k** | — |
+| TLAB on | **~26k** | **~52%** |
+
+Soft 0. TLAB still loses (hit path `find_block` + slot lock). Keep opt-in.
+No `PERF.md` fold-in. Next: per-size-class freelist locks, or EC1 0.16 cut.
+
 ## Long GDB hang (2026-07-30)
 
 Single-process EC4 + `GCRY_THRESHOLD=32768` under gdb (`SIGSEGV nopass`, `SIGPWR` pass).

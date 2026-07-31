@@ -48,7 +48,7 @@ module Gcry
                 mapped = chunk.value.mapped_bytes
                 cache_large_chunk(chunk, header)
                 @bytes_reclaimed_since_gc += mapped
-                @live_objects -= 1 if @live_objects > 0
+                live_objects_dec
               end
             end
           else
@@ -102,7 +102,7 @@ module Gcry
                   while (cursor + block_bytes) <= limit
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      @live_objects -= 1 if @live_objects > 0
+                      live_objects_dec
                     end
                     cursor += block_bytes
                   end
@@ -637,7 +637,7 @@ module Gcry
           end
         end
       end
-      @free_bytes = total
+      @free_bytes.set(total)
     end
 
     private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32 = 0_u32) : Nil
@@ -657,9 +657,9 @@ module Gcry
         @freelist_clean[class_index] = false
       end
 
-      @free_bytes += payload.to_u64
+      @free_bytes.add(payload.to_u64)
       @bytes_reclaimed_since_gc += payload.to_u64
-      @live_objects -= 1 if @live_objects > 0
+      live_objects_dec
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.
@@ -669,7 +669,7 @@ module Gcry
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
       @bytes_reclaimed_since_gc += payload
-      @live_objects -= 1 if @live_objects > 0
+      live_objects_dec
     end
 
     private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
