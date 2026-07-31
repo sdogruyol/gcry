@@ -170,6 +170,9 @@ module Gcry
     @incremental_marking = false
     @inc_active = false
     @world_stopped = false
+    # Thread that called stop_world — may allocate / take GC locks during STW.
+    # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
+    @stw_owner : Thread? = nil
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
@@ -284,10 +287,21 @@ module Gcry
       !BlockHeader.free?(header)
     end
 
+    # ExecutionContext Monitor must not run process STW — it would signal-suspend
+    # the mutator and re-introduce GCRY_STRESS resume deadlocks.
+    # Compare via `@name` ivar (no String alloc); Thread.current? for early boot.
+    private def monitor_thread? : Bool
+      thread = Thread.current?
+      return false unless thread
+      name = thread.@name
+      !name.nil? && name == "SYSMON"
+    end
+
     # Full major collection (resets any in-progress incremental cycle).
     def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
       return if @destroyed
       return if @collecting
+      return if monitor_thread?
 
       abort_incremental
       Trace.collect_start(major: true)
@@ -301,6 +315,7 @@ module Gcry
     def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
       return if @destroyed
       return if @collecting
+      return if monitor_thread?
       return unless @nursery_enabled
 
       abort_incremental
@@ -317,6 +332,7 @@ module Gcry
       return false if @destroyed
       return false if @collecting
       return false if @running_finalizers
+      return false if monitor_thread?
 
       started = monotonic_ns
       unless @inc_active
@@ -362,7 +378,6 @@ module Gcry
         ensure
           start_world
           unlock_write
-          @collecting = false
           unless @inc_active
             @mark_stack.clear
             @incremental_marking = false
@@ -371,10 +386,18 @@ module Gcry
         end
 
         if finished
-          flush_pending_empty_chunks
-          trim_large_cache
+          @suppress_collect += 1
+          begin
+            flush_pending_empty_chunks
+            trim_large_cache
+          ensure
+            @suppress_collect -= 1
+          end
         end
+        @collecting = false
       ensure
+        # Ensure flag clears even if flush raised.
+        @collecting = false
         @post_stw_lock.unlock
       end
 
@@ -474,6 +497,7 @@ module Gcry
       return if @collecting
       return if @running_finalizers
       return if @suppress_collect > 0
+      return if monitor_thread?
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
@@ -835,49 +859,57 @@ module Gcry
         ensure
           start_world
           unlock_write
-          @collecting = false
           @minor_only = false
           @mark_stack.clear
           record_pause(started)
         end
 
-        # Munmap outside STW — empty chunks + excess large freelist (reuse common).
-        # Still under @post_stw_lock so the next collect cannot stop_world here.
-        flush_pending_empty_chunks
-        # DORMANT madvise outside STW — kernel VM lock contention avoided.
-        flush_pending_dormant_chunks
-        # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
-        flush_pending_page_release_chunks
-        # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-        release_large_freelist_pages
-        trim_large_cache
+        # Keep @collecting true through post-STW flush so GCRY_STRESS / auto
+        # collect cannot re-enter while we still hold @post_stw_lock (non-
+        # recursive SpinLock self-deadlock) or munmap mid-peer-collect.
+        @suppress_collect += 1
+        begin
+          # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+          # Still under @post_stw_lock so the next collect cannot stop_world here.
+          flush_pending_empty_chunks
+          # DORMANT madvise outside STW — kernel VM lock contention avoided.
+          flush_pending_dormant_chunks
+          # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
+          flush_pending_page_release_chunks
+          # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+          release_large_freelist_pages
+          trim_large_cache
 
-        # After a major collect, record the heap range observation so the
-        # adaptive headroom in `ensure_bitmap_covers` stays tight.
-        # We record the raw range_bytes (not headroom-inflated) to avoid a
-        # positive-feedback loop where headroom drives up the running average.
-        if major
-          range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
-          note_bitmap_growth(range_bytes)
+          # After a major collect, record the heap range observation so the
+          # adaptive headroom in `ensure_bitmap_covers` stays tight.
+          # We record the raw range_bytes (not headroom-inflated) to avoid a
+          # positive-feedback loop where headroom drives up the running average.
+          if major
+            range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
+            note_bitmap_growth(range_bytes)
 
-          # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
-          # Resets counters each major so the policy tracks the current working set.
-          total_large = @large_cache_hits + @large_cache_misses
-          if total_large > 0
-            hit_pct = (@large_cache_hits * 100) // total_large
-            current = @large_cache_retain
-            if hit_pct > 50 && current < LARGE_CACHE_LIMIT
-              # Good reuse: double retain (capped at limit).
-              @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
-            elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
-              # Poor reuse: halve retain (floor at 1 MiB).
-              @large_cache_retain = {current >> 1, 1048576_u64}.max
+            # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
+            # Resets counters each major so the policy tracks the current working set.
+            total_large = @large_cache_hits + @large_cache_misses
+            if total_large > 0
+              hit_pct = (@large_cache_hits * 100) // total_large
+              current = @large_cache_retain
+              if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+                # Good reuse: double retain (capped at limit).
+                @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
+              elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
+                # Poor reuse: halve retain (floor at 1 MiB).
+                @large_cache_retain = {current >> 1, 1048576_u64}.max
+              end
             end
+            @large_cache_hits = 0_u64
+            @large_cache_misses = 0_u64
           end
-          @large_cache_hits = 0_u64
-          @large_cache_misses = 0_u64
+        ensure
+          @suppress_collect -= 1
         end
       ensure
+        @collecting = false
         @post_stw_lock.unlock
       end
 

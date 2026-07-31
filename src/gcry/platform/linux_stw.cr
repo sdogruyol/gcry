@@ -215,15 +215,23 @@ module Gcry
         sp = Platform.sp_from_ucontext(uctx)
         Platform.record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
 
-        # Mirror Crystal::System::Thread suspend handler.
-        ::Thread.current.@suspended.set(true)
+        # Mirror Crystal::System::Thread suspend handler, but clear
+        # `@suspended` after SIG_RESUME so start_world can confirm wake.
+        thread = ::Thread.current
+        thread.@suspended.set(true)
 
         mask = uninitialized LibC::SigsetT
         LibC.sigfillset(pointerof(mask))
         LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
+        # sa_mask blocks SIG_RESUME during this handler until sigsuspend
+        # atomically unblocks it — otherwise a fast resume is consumed by the
+        # empty SIG_RESUME handler and sigsuspend waits forever (GCRY_STRESS).
         LibC.sigsuspend(pointerof(mask))
+        thread.@suspended.set(false)
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
+      # Block resume for the whole SIGPWR handler except inside sigsuspend.
+      LibC.sigaddset(pointerof(action.@sa_mask), STW_SIG_RESUME)
       LibC.sigaction(STW_SIG_SUSPEND, pointerof(action), nil)
       @@stw_installed = true
     end

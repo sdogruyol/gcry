@@ -16,6 +16,7 @@ module Gcry
     def lock_read : Nil
       {% unless flag?(:darwin) %}
         return unless @stop_the_world
+        wait_if_world_stopped_other_thread
         @gc_lock.read_lock
       {% end %}
     end
@@ -41,37 +42,67 @@ module Gcry
       {% end %}
     end
 
+    # Non-collector threads must not mutate the heap or take GC.lock_read while
+    # STW is active (SYSMON is signal-exempt — see stop_world).
+    private def wait_if_world_stopped_other_thread : Nil
+      return unless @world_stopped
+      owner = @stw_owner
+      return if owner && Thread.current == owner
+      until !@world_stopped
+        Intrinsics.pause
+      end
+    end
+
     # Match Crystal `gc/none` STW on Linux (signal-suspend). Darwin uses Mach
     # thread_suspend instead — SIGXFSZ never interrupts kevent waits under HTTP.
     #
-    # Hold `Thread.lock` for the whole stop→start window (same as Crystal
-    # `gc/none`). Parallel ExecutionContext starts worker threads lazily under
-    # load; without the list mutex a new thread can `threads.push` + allocate
-    # during mark/sweep (Kemal EC>1: realloc "not a gcry allocation" / SEGV).
-    # Do not allocate while this lock is held.
+    # Linux ExecutionContext (`GCRY_STRESS` hang: main=`futex_do_wait`,
+    # SYSMON=`sigsuspend`):
+    # - Never call `Thread#wait_suspended` (`yield_current` parks on SYSMON).
+    # - Do not SIGPWR-suspend the Monitor (`SYSMON`): resume races leave it in
+    #   `sigsuspend` forever. Instead mark `@world_stopped` and make
+    #   allocate/lock_read spin until start_world (cooperative STW).
+    # - Still signal-suspend other mutator threads; busy-wait `@suspended`.
+    # - Hold `Thread.lock` for stop→start (Crystal list-mutex protocol).
     def stop_world : Nil
       return unless @stop_the_world
       return if @world_stopped
 
       current_thread = Thread.current
-      Thread.lock
-      begin
-        {% if flag?(:darwin) %}
-          Platform.stop_world_threads(current_thread)
-        {% else %}
-          Thread.unsafe_each do |thread|
-            thread.suspend unless thread == current_thread
-          end
-          Thread.unsafe_each do |thread|
-            thread.wait_suspended unless thread == current_thread
-          end
-        {% end %}
+      @stw_owner = current_thread
+      {% if flag?(:darwin) %}
+        Platform.stop_world_threads(current_thread)
         @world_stopped = true
-      rescue ex
-        # If suspend fails mid-way, unlock so the process can still unwind.
-        Thread.unlock
-        raise ex
-      end
+      {% else %}
+        Thread.lock
+        begin
+          Thread.unsafe_each do |thread|
+            next if thread == current_thread
+            next if stw_signal_exempt?(thread)
+            thread.suspend
+          end
+          Thread.unsafe_each do |thread|
+            next if thread == current_thread
+            next if stw_signal_exempt?(thread)
+            until thread.@suspended.get
+              Intrinsics.pause
+            end
+          end
+          @world_stopped = true
+        rescue ex
+          @world_stopped = false
+          @stw_owner = nil
+          Thread.unlock
+          raise ex
+        end
+      {% end %}
+    end
+
+    # ExecutionContext Monitor — signal-exempt; cooperates via @world_stopped.
+    # Use `@name` (not `#name`) to avoid getter side effects under `-Dgc_none`.
+    private def stw_signal_exempt?(thread : Thread) : Bool
+      name = thread.@name
+      !name.nil? && name == "SYSMON"
     end
 
     # stop_world only after root-list mutators finish add/delete (see @roots_lock).
@@ -80,9 +111,6 @@ module Gcry
       begin
         stop_world
       ensure
-        # If stop_world raised before setting @world_stopped, unlock roots only;
-        # Thread.lock is released in the rescue above. On success Thread.lock
-        # stays held until start_world.
         @roots_lock.unlock
       end
     end
@@ -95,25 +123,41 @@ module Gcry
       invalidate_chunk_cache
 
       current_thread = Thread.current
-      begin
-        {% if flag?(:darwin) %}
-          Platform.start_world_threads(current_thread)
-        {% else %}
-          Thread.unsafe_each do |thread|
-            thread.resume unless thread == current_thread
-          end
-        {% end %}
+      {% if flag?(:darwin) %}
+        Platform.start_world_threads(current_thread)
         Platform.clear_thread_sps
         @world_stopped = false
-      ensure
-        Thread.unlock
-      end
+        @stw_owner = nil
+      {% else %}
+        begin
+          Thread.unsafe_each do |thread|
+            next if thread == current_thread
+            next if stw_signal_exempt?(thread)
+            thread.resume
+            spins = 0
+            until !thread.@suspended.get
+              Intrinsics.pause
+              spins += 1
+              if spins == 10_000
+                thread.resume
+                spins = 0
+              end
+            end
+          end
+          Platform.clear_thread_sps
+          @world_stopped = false
+          @stw_owner = nil
+        ensure
+          Thread.unlock
+        end
+      {% end %}
     end
 
     # Child after fork: only this OS thread survives. Reset locks / STW / caches
     # so GC can run again (heap mappings are inherited).
     def after_fork_child_reinit : Nil
       @world_stopped = false
+      @stw_owner = nil
       @collecting = false
       @running_finalizers = false
       @incremental_marking = false

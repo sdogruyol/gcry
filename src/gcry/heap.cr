@@ -384,6 +384,10 @@ module Gcry
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
+      # Cooperative STW for signal-exempt threads (SYSMON): do not mutate the
+      # heap while the collector holds the world stopped.
+      wait_if_world_stopped_other_thread
+
       maybe_collect
       maybe_clear_stack_on_alloc
 
