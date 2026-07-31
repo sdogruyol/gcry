@@ -101,7 +101,31 @@ Fix: skip process collect while `Thread.current.@current_fiber` is nil
 | EC4 **default** threshold, 15×8s `/json` | **0/15** fail |
 | EC4 **default** threshold, 40×8s `/json` | **0/40** fail |
 
-Was ~1–3/60 before this session’s bootstrap guard (+ prior STW/SYSMON hardening on the branch). Torture thr=32KiB remains a stress tool, not the supported Parallel bar. Next: longer default soaks / thr=64k / TLAB@EC1.
+Was ~1–3/60 before this session’s bootstrap guard (+ prior STW/SYSMON hardening on the branch). Torture thr=32KiB remains a stress tool, not the supported Parallel bar.
+
+## 2026-07-31 — TLAB@EC1
+
+### Correctness
+
+| Config | Result |
+|--------|--------|
+| `GCRY_TLAB=1` EC1 default thr, 20×8s `/json` | **0/20** fail |
+| `GCRY_TLAB=1` EC1 thr=32KiB, 20×8s `/json` | **0/20** fail |
+| `stw_mt_property_test --tlab --workers=2,4` | PASS |
+| `nursery_tlab_smoke` | PASS |
+
+### Throughput (same host, `wrk -c 100 -d 15..20` `/json`)
+
+| Build | req/s (approx) | vs TLAB-off |
+|-------|----------------:|------------:|
+| TLAB off | ~33–34k | 100% |
+| TLAB on | ~24–26k | **~71–77%** |
+
+`/gc-stats` under load: TLAB hit rate ~98%, but each hit still does `find_block` (chunk index) + per-slot lock + `@alloc_lock` for counters — dominates EC1. Removing `find_block` from the hit path SEGVs (stale FREE heads after empty-chunk release). Epoch-gated `find_block` / EC1 lock elision also SEGVd in this session — left unreverted; needs a careful follow-up.
+
+**Decision:** TLAB@EC1 is **correctness-supported opt-in** (`GCRY_TLAB=1`), **not** a thr default. Keep TLAB off on the supported EC1 path. TLAB remains for Parallel prep.
+
+Next: EC>1 thr vs Boehm (default threshold; Parallel residual much quieter after bootstrap fix).
 
 ## Long GDB hang (2026-07-30)
 
