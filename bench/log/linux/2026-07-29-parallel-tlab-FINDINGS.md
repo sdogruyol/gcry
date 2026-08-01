@@ -527,3 +527,21 @@ flags bits 8–15; `clear_all_marks` bumps gen (wrap@255 → full clear). Soft
 Experimental; no PERF. Residual: sweep (~5–7 ms) + RSS.
 
 Detail: [`2026-08-01-ec4-mark-gen/summary.md`](2026-08-01-ec4-mark-gen/summary.md).
+
+## 2026-08-01 — used_count all-free sweep skip (REJECT)
+
+Sessions `2026-08-01-ec4-used-count/` (v1), `…-ec4-used-count-v2/` (v2).
+
+Maintained USED-block count to skip all-FREE chunk walks (unlike sticky
+ALL_FREE, which only skipped ~2/major). Soft **0/40** both variants; skips
+fire (`phase_sweep` ~7→~1 ms). Quiet thr **regressed** vs mark-gen **76.6%**:
+
+| Variant | `/json` % Boehm | Cause |
+|---------|----------------:|-------|
+| v1 SIZE=32 + `chunk_containing`/alloc | **56.3%** | mutator lookup |
+| v2 flags[16:31] + tip + invalidate | **69.2%** @ ~60k | tip/count RMW still costs |
+
+**Reject** (code reverted). Ship bar was ≥ mark-gen baseline. Next: STW
+parallel sweep or RSS — not used_count skip.
+
+Detail: [`2026-08-01-ec4-used-count-v2/summary.md`](2026-08-01-ec4-used-count-v2/summary.md).
