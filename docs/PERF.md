@@ -8,23 +8,27 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (v0.15.0) — Linux *(measured)*
+## Headline (v0.16.0) — Linux *(measured)*
 
-Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on**, auto-layouts **off**. Session: `bench/log/linux/2026-07-29-151144/` (`git` `bebedae`, pre-tag tip).
+Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on** (EC1 **4 KiB** blind parked-fiber clear), auto-layouts **off**, EC1 non-atomic heap counters. Session: `bench/log/linux/2026-08-01-093130/` (`cb4d7f2`); idle `/` from `slash-recut/` (same binaries; first `/` pass noisy).
 
 | Path | % of Boehm | post-GC RSS × |
 |------|----------:|--------------:|
-| `/json` | **~86%** | **~0.77×** |
-| `/` | **~86%** | **~0.76×** |
+| `/json` | **~87%** | **~0.80×** |
+| `/` | **~82%** | **~0.79×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.15.0 is a correctness release** (TLAB+process STW); collector defaults unchanged vs 0.14 — thr within host noise of the v0.14 ~89% cut; RSS still under Boehm. Fat-app (acikturkiye): **~90%** thr @ **~2.54×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`bench/log/linux/2026-07-29-112202/`).
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). Parallel EC stays experimental — not in this headline. Fat-app (acikturkiye) not re-cut this release — carry [ACIKTURKIYE.md](ACIKTURKIYE.md) v0.15 (~90% / ~2.54×).
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
-| `/` | 85246 | 73495 | **86.2%** | **0.76×** |
-| `/json` | 38398 | 33154 | **86.3%** | **0.77×** |
+| `/` | 81846 | 66841 | **81.7%** | **0.79×** |
+| `/json` | 35780 | 31067 | **86.8%** | **0.80×** |
 
 `GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+
+### v0.15.0 Linux cut (superseded headline)
+
+Same host method. Session: `bench/log/linux/2026-07-29-151144/` (`bebedae`). `/json` **86.3%** @ **0.77×** RSS; `/` **86.2%** @ **0.76×**. Correctness release (TLAB+process STW); thr within host noise of v0.14.
 
 ### v0.14.0 Linux cut (superseded headline)
 
@@ -33,7 +37,6 @@ Same host method. Session: `bench/log/linux/2026-07-29-035426/` (`015d66d`). `/j
 ### v0.12.0-era Linux cut (scrub off; superseded)
 
 Same host method, scrub **off**. Session: `bench/log/linux/2026-07-26-173602/`. `/json` **88.8%** @ **0.99×** RSS; `/` **90.4%** @ **0.99×**.
-
 ## History (Linux)
 
 Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS column is post-`GC.collect` where recorded.
@@ -53,6 +56,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
 | **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
 | **0.15.0** | **~86%** | **~86%** | **~0.77×** | Correctness: TLAB+process STW freelist fix + STW MT harness. Kemal re-cut `2026-07-29-151144`; acik ~90% / ~2.54× (`112202`). |
+| **0.16.0** | **~82%** | **~87%** | **~0.80×** | EC1 thr recover after Parallel fallout (cheap STW scans, 4 KiB scrub, non-atomic counters, sweep batch). Cut `2026-08-01-093130` (+ `/` slash-recut). Parallel experimental — FINDINGS only. |
 
 **Escape knobs (same era, not defaults):**
 
@@ -62,7 +66,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.15.0** cut |
+| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.16.0** cut |
 | `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).

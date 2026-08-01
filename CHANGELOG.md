@@ -7,42 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.16.0] - 2026-08-01
 
-- **EC1 STW stack scan thr regression (Parallel fallout):** process-STW full
-  fiber/pthread scans added for EC>1 mid-swap were also applied on EC1
-  (main+SYSMON). Every Thread root fiber is named `"main"`, so SYSMON hit a
-  full pthread map scan (`phase_stacks` ~0.02→~3ms; Kemal `/json` ~86%→~80%
-  Boehm). Restore cheap SP/`stack_top` other-thread scans when
-  `!multi_mutator_threads?`; keep aggressive Parallel path. Limit
-  foreign-SP scrub skip to Parallel only. Re-cut `/json` ~**82.5%** Boehm
-  (stacks back to ~0.02ms); residual vs 0.15 still open. Sessions
-  `2026-07-31-164302` (regress), `2026-07-31-173530` (fix).
-- **Parallel `@suppress_collect` race:** plain `Int` `+=`/`-=` under concurrent
-  `realloc` lost decrements so suppress stuck high (≈4607) and auto-collect
-  never ran (`collections=0`, thr collapsed). Use `Atomic(Int32)`. Exposed when
-  alloc counters left `@alloc_lock` (shorter critical section). See FINDINGS.
-- **`chunk_containing` lock during post-STW:** skipped `@index_lock` whenever
-  `@collecting` (not only `@world_stopped`). Flush keeps `@collecting` after
-  `start_world`, so Parallel mutators `index_insert` while peers realloc
-  unlocked → false `owns_user_pointer?` (`pointer is not a gcry allocation` on
-  String::Builder). Lock skip only under true STW. Soft errors **0/60** after
-  empty-chunk gate (was 2–3/60). See FINDINGS.
-- **Parallel empty-chunk release off:** under multi-mutator STW, skip empty-chunk
-  munmap even when `release_empty_chunks` is on (EC1 unchanged). Residual
-  mark-miss × post-STW munmap surfaced as Kemal `/json` soft
-  `pointer is not a gcry allocation` (22/40 → **3/40** with the gate; hard
-  deaths 0/40). `GCRY_STW_STACK_LAG` env for LAG A/B (default 512 KiB). See
-  FINDINGS mark-miss triage.
+EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Supported
+path remains EC parallelism **1**, `GCRY_TLAB` **off** (Parallel+TLAB stays
+experimental — FINDINGS only, not folded into PERF).
 
 ### Performance
 
-- **EC1 thr toward 0.16 (Boehm ~40k fair):** restore v0.15 parked-fiber scrub
-  on EC1 (**4 KiB blind** clear; Parallel keeps 512 B + `clear_range_safe`).
-  Tip with 512 B + safe retained ~4× more `live_objects` than bebedae. EC1
-  alloc/free counters use plain get/set (`heap_counters_atomic` only when
-  `EC_PARALLELISM>1`) — avoid LOCK XADD/CAS on the hot path. Quiet cut
-  `2026-08-01-093130`: `/json` **~87%** of Boehm @ **~0.80×** RSS (soft=0).
+- **Linux Kemal** (same-host median-of-3, `wrk -c 100 -d 30`, scrub on): `/json`
+  **~87%** of Boehm @ **~0.80×** post-GC RSS; `/` **~82%** @ **~0.79×**. Session
+  `bench/log/linux/2026-08-01-093130/` (`cb4d7f2`; idle `/` from `slash-recut/`).
+  Fair Boehm ~40k baseline. See [docs/PERF.md](docs/PERF.md) (Linux).
+- **EC1 thr levers (Boehm ~40k fair):** restore v0.15 parked-fiber scrub on EC1
+  (**4 KiB blind** clear; Parallel keeps 512 B + `clear_range_safe`). Tip with
+  512 B + safe retained ~4× more `live_objects` than bebedae. EC1 alloc/free
+  counters use plain get/set (`heap_counters_atomic` only when
+  `EC_PARALLELISM>1`) — avoid LOCK XADD/CAS on the hot path.
 - **EC1 sweep pause:** STW `live_objects` / `free_bytes` updates no longer
   CAS-loop per dead object. Empty dormant/munmap freelist cleanup batches
   into one `rebuild_size_class_freelist` per size class. Dormant post-STW
@@ -72,6 +53,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@alloc_lock` (per-class refill hurt TLAB-on via `@index_lock`×`find_block`).
   Quiet EC4 `/json` ~**55k** (was ~51k). Session
   `2026-07-31-ec4-sizeclass-locks`. No `PERF.md` fold-in. See FINDINGS.
+
+### Fixed
+
+- **EC1 STW stack scan thr regression (Parallel fallout):** process-STW full
+  fiber/pthread scans added for EC>1 mid-swap were also applied on EC1
+  (main+SYSMON). Every Thread root fiber is named `"main"`, so SYSMON hit a
+  full pthread map scan (`phase_stacks` ~0.02→~3ms; Kemal `/json` ~86%→~80%
+  Boehm). Restore cheap SP/`stack_top` other-thread scans when
+  `!multi_mutator_threads?`; keep aggressive Parallel path. Limit
+  foreign-SP scrub skip to Parallel only. Sessions `2026-07-31-164302`
+  (regress), `2026-07-31-173530` (fix); final cut above.
+- **Parallel `@suppress_collect` race:** plain `Int` `+=`/`-=` under concurrent
+  `realloc` lost decrements so suppress stuck high (≈4607) and auto-collect
+  never ran (`collections=0`, thr collapsed). Use `Atomic(Int32)`. Exposed when
+  alloc counters left `@alloc_lock` (shorter critical section). See FINDINGS.
+- **`chunk_containing` lock during post-STW:** skipped `@index_lock` whenever
+  `@collecting` (not only `@world_stopped`). Flush keeps `@collecting` after
+  `start_world`, so Parallel mutators `index_insert` while peers realloc
+  unlocked → false `owns_user_pointer?` (`pointer is not a gcry allocation` on
+  String::Builder). Lock skip only under true STW. Soft errors **0/60** after
+  empty-chunk gate (was 2–3/60). See FINDINGS.
+- **Parallel empty-chunk release off:** under multi-mutator STW, skip empty-chunk
+  munmap even when `release_empty_chunks` is on (EC1 unchanged). Residual
+  mark-miss × post-STW munmap surfaced as Kemal `/json` soft
+  `pointer is not a gcry allocation` (22/40 → **3/40** with the gate; hard
+  deaths 0/40). `GCRY_STW_STACK_LAG` env for LAG A/B (default 512 KiB). See
+  FINDINGS mark-miss triage.
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
@@ -522,7 +530,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0
