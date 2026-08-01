@@ -569,3 +569,14 @@ off → dormant-all. **Ship:** honor retain; excess → freelist reserve.
 Thr &lt; 76.6% bar → **not** Parallel default. Opt-in for RSS-sensitive apps.
 
 Detail: [`2026-08-01-ec4-rss-bounded/summary.md`](2026-08-01-ec4-rss-bounded/summary.md).
+
+## 2026-08-01 — Stretch ~80% (LAG + ALL_FREE v2 REJECT)
+
+Sessions `2026-08-01-ec4-stretch-lag/`, `2026-08-01-ec4-allfree-v2/`.
+
+Env LAG 128/64: roots↓ but thr ≤ default 256. ALL_FREE sticky + tip clear:
+soft **0/40**, skips fire, `phase_sweep` still ~12 ms, thr **~63k** &lt;
+mark-gen ~67k. **Reject** (reverted). Stretch ~80% remains open; bar stays
+**76.6%**.
+
+Detail: [`2026-08-01-ec4-allfree-v2/summary.md`](2026-08-01-ec4-allfree-v2/summary.md).
