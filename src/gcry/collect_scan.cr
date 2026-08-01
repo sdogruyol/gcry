@@ -111,8 +111,9 @@ module Gcry
     # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
     # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
     # this lag catches stack_top that lags without a visible SP. Override via
-    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 512 KiB.
-    property stw_multi_stack_lag : UInt64 = 512_u64 * 1024
+    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 256 KiB
+    # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
+    property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
@@ -219,9 +220,12 @@ module Gcry
           next
         end
 
+        # Running/parked fiber stacks are already covered by scan_all_fiber_roots
+        # under stw_multi (full guard→bottom for running; LAG for parked). Dual
+        # scan_fiber_stack_full here was thr-only cost (~phase_stacks half).
+        # Keep fiber object pin + mid-swap SP stack + pthread (scheduler frames).
         if fiber
           mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-          scan_fiber_stack_full(fiber)
         end
 
         # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
@@ -278,20 +282,6 @@ module Gcry
       return unless top < bottom
       @sp_clamp_fallbacks += 1
       Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Thread)
-      end
-    end
-
-    private def scan_fiber_stack_full(fiber : Fiber) : Nil
-      stack = fiber.@stack
-      guard = stack.pointer.address + Roots::PAGE_SIZE
-      bottom = stack.bottom
-      return unless guard < bottom.address
-
-      # Parallel process STW: full span. stack_top is stale for running fibers
-      # and can lag mid-swap for "parked" ones.
-      @sp_clamp_fallbacks += 1
-      Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
       end
     end

@@ -63,6 +63,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
 | `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program precise layouts (Linux Kemal `/json` thr cost ~7pp) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
+| `GCRY_STW_STACK_LAG` | Multi-mutator parked-fiber scan depth below `stack_top` (bytes; default **256 KiB**; `0` = full guard→bottom) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |

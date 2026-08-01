@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Parallel STW stack dedupe (experimental EC>1):** drop dual
+  `scan_fiber_stack_full` in `scan_other_thread_stacks` — running fibers are
+  already full-scanned by `scan_all_fiber_roots` under multi-mutator STW. Keep
+  greg + SP-containing stack + pthread scans. EC4 pause phases cut (roots
+  ~12.5→~2.2 ms, stacks ~12.5→~6.5 ms, p50 ~48→~37 ms vs prior sizeclass cut).
+  Soft soak **0/40**. Session `bench/log/linux/2026-08-01-ec4-stw-dedupe/`.
+  No `PERF.md` fold-in.
+- **Parallel parked-fiber LAG default 256 KiB** (was 512; `GCRY_STW_STACK_LAG`
+  still overrides; `0` = full guard→bottom). Soft **0/40**; quiet EC4 `/json`
+  med ~**58k** ≥ 512 KiB cut ~**51k**. See FINDINGS.
+- **`phase_scrub_ns`:** parked-fiber scrub timed separately on `/gc-stats`
+  (excluded from `phase_roots_ns`) for Parallel A/B.
 
 ## [0.16.0] - 2026-08-01
 

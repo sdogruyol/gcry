@@ -376,7 +376,7 @@ module GC
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
     # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
-    # 512KiB; 0 = full guard→bottom (thr regresses). Triage residual EC4 mark-miss.
+    # 256 KiB (was 512); 0 = full guard→bottom (thr regresses).
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end

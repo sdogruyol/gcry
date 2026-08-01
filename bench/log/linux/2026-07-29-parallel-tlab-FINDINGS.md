@@ -466,3 +466,23 @@ Absolute % of Boehm still host-noisy (Boehm ~41k → both ~78–80%; v0.15 cut
 had ~86% at Boehm ~38k). Soft 0/10. **Re-cut on quiet host before 0.16 tag.**
 
 Detail: [`2026-07-31-ec1-bebedae-ab/summary.md`](2026-07-31-ec1-bebedae-ab/summary.md).
+
+## 2026-08-01 — Parallel STW scan dedupe + LAG 256
+
+Session `bench/log/linux/2026-08-01-ec4-stw-dedupe/`. Post-v0.16.0 tip.
+
+1. **`phase_scrub_ns`** on `/gc-stats` (scrub excluded from `phase_roots_ns`).
+2. **Drop Parallel `scan_fiber_stack_full`** — dual full-span with
+   `scan_all_fiber_roots` was thr-only; keep greg + SP-containing stack +
+   pthread scan. Soft soak **0/40**. Pause: roots ~12.5→~2.2 ms, stacks
+   ~12.5→~6.5 ms, p50 ~48→~37 ms (vs sizeclass `v2-off-t1`).
+3. **LAG 256 KiB default** (was 512): soft **0/40**; quiet `/json` med
+   **~58.3k** ≥ LAG 512 cut **~50.6k** (same campaign). Soak d=8 med was
+   slightly lower at 256 (~49.7k vs ~53.7k) — quiet thr wins the ship rule.
+
+Same-host LAG 512 vs Boehm EC4: `/json` **66.5%** @ ~50.6k (Boehm ~76k).
+LAG 256 abs ~58.3k ≈ **~77%** of that Boehm med (cross-session; re-cut
+before citing). EC1 smoke `/json` ~31.4k (0.16 band). `stw_mt_property_test`
+PASS. EC>1 still experimental; no `PERF.md` fold-in.
+
+Detail: [`2026-08-01-ec4-stw-dedupe/summary.md`](2026-08-01-ec4-stw-dedupe/summary.md).

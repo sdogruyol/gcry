@@ -136,6 +136,8 @@ module Gcry
     getter unmapped_bytes : UInt64 = 0_u64
     # Last major STW phase timings (ns) — for /gc-stats and tuning.
     getter last_phase_clear_ns : UInt64 = 0_u64
+    # Parked-fiber stack scrub (inside STW roots window; split for Parallel A/B).
+    getter last_phase_scrub_ns : UInt64 = 0_u64
     getter last_phase_roots_ns : UInt64 = 0_u64
     getter last_phase_static_ns : UInt64 = 0_u64
     getter last_phase_stacks_ns : UInt64 = 0_u64
@@ -883,11 +885,15 @@ module Gcry
           @roots.each { |ptr| mark_explicit_root(ptr) }
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
-          # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+          # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
+          t_scrub = monotonic_ns
           scrub_parked_fiber_stacks if scan_stack
+          scrub_ns = monotonic_ns - t_scrub
+          @last_phase_scrub_ns = scrub_ns
+          # Fiber objects + suspended stacks (once; not also via push_gc_roots).
           scan_all_fiber_roots if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
-          @last_phase_roots_ns = monotonic_ns - t0
+          @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
 
           t0 = monotonic_ns
           if @scan_static_roots

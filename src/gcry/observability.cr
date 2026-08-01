@@ -34,6 +34,7 @@ module Gcry
         pause_max_ns:                 p.max_ns,
         pause_total_ns:               p.total_ns,
         phase_clear_ns:               heap.last_phase_clear_ns,
+        phase_scrub_ns:               heap.last_phase_scrub_ns,
         phase_roots_ns:               heap.last_phase_roots_ns,
         phase_static_ns:              heap.last_phase_static_ns,
         phase_stacks_ns:              heap.last_phase_stacks_ns,

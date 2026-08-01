@@ -1,0 +1,3 @@
+soak40 lag512 (default) dedupe
+process OK 40/40 fail=0 soft=0 hard=0
+OK thr med ~53695.15
