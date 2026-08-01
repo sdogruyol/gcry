@@ -116,6 +116,10 @@ module Gcry
     @alloc_lock = Crystal::SpinLock.new
     @freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
     @nursery_freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
+    # Parallel: Atomic RMW on every alloc/free. EC1 default off — LOCK XADD /
+    # CAS on the hot path costs Kemal thr; single mutator + rare SYSMON is
+    # fine with plain get/set. Set true when EC_PARALLELISM>1 (gc_override).
+    property heap_counters_atomic : Bool = false
     @index_lock = Crystal::SpinLock.new
     @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
@@ -381,7 +385,7 @@ module Gcry
             @freelist_clean[class_index] = false
           end
         end
-        @free_bytes.add(payload.to_u64)
+        free_bytes_add(payload.to_u64)
         bytes_since_gc_sub(payload.to_u64)
         note_explicit_free(payload.to_u64)
         live_objects_dec
@@ -458,26 +462,42 @@ module Gcry
       user
     end
 
-    # Lock-free — safe under Parallel / TLAB hit path.
+    # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
     private def note_alloc_bytes(rounded : UInt64) : Nil
-      @total_bytes.add(rounded)
-      @bytes_since_gc.add(rounded)
-      @live_objects.add(1_u64)
+      if @heap_counters_atomic
+        @total_bytes.add(rounded)
+        @bytes_since_gc.add(rounded)
+        @live_objects.add(1_u64)
+      else
+        @total_bytes.set(@total_bytes.get &+ rounded)
+        @bytes_since_gc.set(@bytes_since_gc.get &+ rounded)
+        @live_objects.set(@live_objects.get &+ 1_u64)
+      end
     end
 
     private def free_bytes_sub(n : UInt64) : Nil
-      loop do
+      if @heap_counters_atomic
+        loop do
+          cur = @free_bytes.get
+          nxt = cur >= n ? cur - n : 0_u64
+          break if @free_bytes.compare_and_set(cur, nxt)[1]
+        end
+      else
         cur = @free_bytes.get
-        nxt = cur >= n ? cur - n : 0_u64
-        break if @free_bytes.compare_and_set(cur, nxt)[1]
+        @free_bytes.set(cur >= n ? cur - n : 0_u64)
       end
     end
 
     private def bytes_since_gc_sub(n : UInt64) : Nil
-      loop do
+      if @heap_counters_atomic
+        loop do
+          cur = @bytes_since_gc.get
+          nxt = cur > n ? cur - n : 0_u64
+          break if @bytes_since_gc.compare_and_set(cur, nxt)[1]
+        end
+      else
         cur = @bytes_since_gc.get
-        nxt = cur > n ? cur - n : 0_u64
-        break if @bytes_since_gc.compare_and_set(cur, nxt)[1]
+        @bytes_since_gc.set(cur > n ? cur - n : 0_u64)
       end
     end
 
@@ -490,7 +510,7 @@ module Gcry
 
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0
-      if @collecting
+      if @collecting || !@heap_counters_atomic
         cur = @live_objects.get
         @live_objects.set(cur > n ? cur - n : 0_u64)
         return
@@ -503,7 +523,7 @@ module Gcry
     end
 
     private def free_bytes_add(n : UInt64) : Nil
-      if @collecting
+      if @collecting || !@heap_counters_atomic
         @free_bytes.set(@free_bytes.get &+ n)
       else
         @free_bytes.add(n)

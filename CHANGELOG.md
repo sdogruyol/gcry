@@ -37,14 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **EC1 sweep pause (0.16 thr):** STW `live_objects` / `free_bytes` updates no
-  longer CAS-loop per dead object (world is stopped). Empty dormant/munmap
-  freelist cleanup batches into one `rebuild_size_class_freelist` per size
-  class instead of `unlink_freelist_range` per empty chunk. Dormant post-STW
-  flush early-outs when `dormant_chunk_bytes == 0`. Kemal pause p50 back to
-  bebedae band (stacks already fixed in `cfa6435`); `/json` ≈ **~97–98%** of
-  v0.15 bebedae same-host. Absolute % of Boehm still host-noisy — re-cut
-  before tag. Session `2026-07-31-ec1-bebedae-ab/`.
+- **EC1 thr toward 0.16 (Boehm ~40k fair):** restore v0.15 parked-fiber scrub
+  on EC1 (**4 KiB blind** clear; Parallel keeps 512 B + `clear_range_safe`).
+  Tip with 512 B + safe retained ~4× more `live_objects` than bebedae. EC1
+  alloc/free counters use plain get/set (`heap_counters_atomic` only when
+  `EC_PARALLELISM>1`) — avoid LOCK XADD/CAS on the hot path. Quiet cut
+  `2026-08-01-093130`: `/json` **~87%** of Boehm @ **~0.80×** RSS (soft=0).
+- **EC1 sweep pause:** STW `live_objects` / `free_bytes` updates no longer
+  CAS-loop per dead object. Empty dormant/munmap freelist cleanup batches
+  into one `rebuild_size_class_freelist` per size class. Dormant post-STW
+  flush early-outs when `dormant_chunk_bytes == 0`.
 - **EC>1 thr gap (experimental):** auto-collect **trylock-or-skip** on
   `@post_stw` (no waiter pile-up; wait_total ~11s/20s → ~0). Default major
   threshold **64 MiB** when `EC_PARALLELISM>1` (`GCRY_THRESHOLD` still wins;

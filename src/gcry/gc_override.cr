@@ -214,6 +214,8 @@ module GC
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
         heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
+        # Contended alloc/free counters need Atomic RMW.
+        heap.heap_counters_atomic = true
       end
     end
 
