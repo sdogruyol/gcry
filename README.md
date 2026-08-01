@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Near-Boehm performance: ~89% throughput at ~0.79x RSS (Linux).**
+**Near-Boehm performance: ~87% throughput at ~0.80x RSS (Linux).**
 
 ---
 
