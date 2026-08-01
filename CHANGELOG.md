@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **EC1 sweep pause (0.16 thr):** STW `live_objects` / `free_bytes` updates no
+  longer CAS-loop per dead object (world is stopped). Empty dormant/munmap
+  freelist cleanup batches into one `rebuild_size_class_freelist` per size
+  class instead of `unlink_freelist_range` per empty chunk. Dormant post-STW
+  flush early-outs when `dormant_chunk_bytes == 0`. Kemal pause p50 back to
+  bebedae band (stacks already fixed in `cfa6435`); `/json` ≈ **~97–98%** of
+  v0.15 bebedae same-host. Absolute % of Boehm still host-noisy — re-cut
+  before tag. Session `2026-07-31-ec1-bebedae-ab/`.
 - **EC>1 thr gap (experimental):** auto-collect **trylock-or-skip** on
   `@post_stw` (no waiter pile-up; wait_total ~11s/20s → ~0). Default major
   threshold **64 MiB** when `EC_PARALLELISM>1` (`GCRY_THRESHOLD` still wins;

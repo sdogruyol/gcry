@@ -98,14 +98,18 @@ module Gcry
                     cursor += block_bytes
                   end
                 else
+                  # Fully-dead chunk: batch the live_objects accounting (one
+                  # store under STW) instead of a CAS per block.
+                  dead = 0_u64
                   cursor = ChunkHeader.data_start(chunk).as(UInt8*)
                   while (cursor + block_bytes) <= limit
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      live_objects_dec
+                      dead &+= 1
                     end
                     cursor += block_bytes
                   end
+                  live_objects_sub(dead)
                 end
               else
                 while (cursor + block_bytes) <= limit
@@ -145,6 +149,11 @@ module Gcry
                 if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
                   can_dormant = @empty_chunk_retain > 0 &&
                                 (dormant_budget_used + mapped <= @empty_chunk_retain || !munmap_empty_chunks_this_collect?)
+                  # Drop freelist nodes via one rebuild_size_class_freelist per
+                  # class at end of sweep (rebuild skips DORMANT / dropped
+                  # chunks). Per-empty unlink_freelist_range was O(freelist ×
+                  # empties) and dominated phase_sweep under HTTP churn.
+                  bit = 1_u64 << class_index
                   if can_dormant
                     # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                     # Parallel — munmap was the soft-realloc amplifier).
@@ -153,15 +162,21 @@ module Gcry
                     ChunkHeader.set_dormant(chunk, true)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
-                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
-                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
+                    if ChunkHeader.nursery?(chunk)
+                      rebuild_nursery_mask |= bit
+                    else
+                      rebuild_mask |= bit
+                    end
                   elsif munmap_empty_chunks_this_collect?
                     @heap_size -= mapped if @heap_size >= mapped
                     @bytes_reclaimed_since_gc += mapped
                     @released_chunk_bytes += mapped
                     index_remove(chunk)
-                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
-                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
+                    if ChunkHeader.nursery?(chunk)
+                      rebuild_nursery_mask |= bit
+                    else
+                      rebuild_mask |= bit
+                    end
                     chunk.value.next = to_unmap
                     to_unmap = chunk
                     drop = true
@@ -216,7 +231,7 @@ module Gcry
         @pending_empty_chunks = to_unmap
       end
 
-      # Page-HOLED freelist rebuild (empty-chunk release uses unlink_freelist_range).
+      # Page-HOLED + empty dormant/munmap: one freelist rebuild per touched class.
       if rebuild_mask != 0 || rebuild_nursery_mask != 0
         SIZE_CLASS_COUNT.times do |i|
           bit = 1_u64 << i
@@ -277,6 +292,8 @@ module Gcry
     # physical pages are released outside STW (kernel VM lock avoided).
     # Coalesces contiguous dormant ranges into a single madvise.
     private def flush_pending_dormant_chunks : Nil
+      return if @dormant_chunk_bytes == 0
+
       data_lo = UInt64::MAX
       data_hi = 0_u64
       page = Platform.host_page_size
@@ -657,7 +674,7 @@ module Gcry
         @freelist_clean[class_index] = false
       end
 
-      @free_bytes.add(payload.to_u64)
+      free_bytes_add(payload.to_u64)
       @bytes_reclaimed_since_gc += payload.to_u64
       live_objects_dec
     end

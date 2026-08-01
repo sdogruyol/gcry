@@ -481,11 +481,32 @@ module Gcry
       end
     end
 
+    # Mutator free / Parallel: CAS. STW sweep is single-threaded (world
+    # stopped) — plain set matches pre-atomic bebedae and avoids a CAS per
+    # dead object (was ~half of phase_sweep on Kemal EC1).
     private def live_objects_dec : Nil
+      live_objects_sub(1_u64)
+    end
+
+    private def live_objects_sub(n : UInt64) : Nil
+      return if n == 0
+      if @collecting
+        cur = @live_objects.get
+        @live_objects.set(cur > n ? cur - n : 0_u64)
+        return
+      end
       loop do
         cur = @live_objects.get
-        break if cur == 0
-        break if @live_objects.compare_and_set(cur, cur - 1)[1]
+        nxt = cur > n ? cur - n : 0_u64
+        break if @live_objects.compare_and_set(cur, nxt)[1]
+      end
+    end
+
+    private def free_bytes_add(n : UInt64) : Nil
+      if @collecting
+        @free_bytes.set(@free_bytes.get &+ n)
+      else
+        @free_bytes.add(n)
       end
     end
 

@@ -457,3 +457,12 @@ Diagnosis: freelist `next_free` cycle → unlink never returns → world never r
 Mitigation: bound unlink walk + break self-loops (CHANGELOG Unreleased).
 
 Log: `/tmp/longgdb.log` (also copied if path writable).
+
+## EC1 thr vs v0.15 bebedae (2026-07-31 / 2026-08-01)
+
+After `cfa6435` (stacks) + sweep accounting/rebuild batch (working tree):
+Kemal `/json` ≈ **~97–98%** of bebedae same-host; pause p50 ≤ bebedae band.
+Absolute % of Boehm still host-noisy (Boehm ~41k → both ~78–80%; v0.15 cut
+had ~86% at Boehm ~38k). Soft 0/10. **Re-cut on quiet host before 0.16 tag.**
+
+Detail: [`2026-07-31-ec1-bebedae-ab/summary.md`](2026-07-31-ec1-bebedae-ab/summary.md).
