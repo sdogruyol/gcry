@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **EC1 `stw_sp_clamp` counters:** idle/`stack_top` other-thread scan now
+  increments `sp_clamp_fallbacks` (missed after cheap-scan restore; aarch64 /
+  Darwin CI `samples/stw_sp_clamp` saw hits=0 fallbacks=0).
+
 ## [0.16.0] - 2026-08-01
 
 EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Supported

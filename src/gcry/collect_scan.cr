@@ -269,10 +269,14 @@ module Gcry
       end
 
       # Idle / SP unknown: cheap stack_top clamp (not full 8 MiB).
+      # Count as fallback so samples/stw_sp_clamp (and metrics) see the scan —
+      # aarch64/Darwin often land here when suspend SP is outside fiber/pthread
+      # bounds; skipping the counter made CI abort after the EC1 cheap path.
       return unless guard < bottom
       top = fiber.@context.stack_top.address
       top = guard if top < guard
       return unless top < bottom
+      @sp_clamp_fallbacks += 1
       Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)
       end
