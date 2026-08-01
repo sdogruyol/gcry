@@ -6,9 +6,9 @@ Parent FINDINGS: `../2026-07-29-parallel-tlab-FINDINGS.md`.
 
 ## Lever (reverted)
 
-Go span-style: power-of-two **aligned** small mmaps → O(1) `user→chunk`;
-`NEEDS_SWEEP` on alloc (no `chunk_containing`) + mark; major reclaim-off
-skips clean chunks without freelist lock.
+Power-of-two **aligned** small mmaps → O(1) `user→chunk`; `NEEDS_SWEEP`
+on alloc (no `chunk_containing`) + mark; major reclaim-off skips clean
+chunks without freelist lock.
 
 ## Soft soak (`wrk -c100 -d8` `/json` ×40)
 

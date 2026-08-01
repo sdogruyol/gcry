@@ -8,9 +8,9 @@ module Gcry
       # then rebuilt/sorted the index (O(n²) insertion sort) — that made sweep
       # multi-second on HTTP apps with many large allocs (see unmapped_bytes).
       #
-      # after_world (Go-style lazy sweep): mutators are running; take per-class
-      # freelist / alloc locks around reclaim. Do not relink `@chunks` (would
-      # race map_chunk). Eligible only when empty-reclaim/HOLED rebuild is off.
+      # after_world (lazy sweep): mutators are running; take per-class freelist /
+      # alloc locks around reclaim. Do not relink `@chunks` (would race
+      # map_chunk). Eligible only when empty-reclaim/HOLED rebuild is off.
       kept = Pointer(ChunkHeader).null
       # Fully free size-class chunks: queue here, munmap after start_world.
       to_unmap = Pointer(ChunkHeader).null

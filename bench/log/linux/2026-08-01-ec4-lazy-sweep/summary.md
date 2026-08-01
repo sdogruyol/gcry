@@ -1,4 +1,4 @@
-# EC4 Go-style lazy (post-STW) sweep — stretch thr
+# EC4 lazy (post-STW) sweep — stretch thr
 
 Tip after mark-gen **76.6%** `/json`. Residual: `phase_sweep` ~6–12 ms
 inside STW walking mostly-empty reclaim-off heap.
@@ -6,9 +6,9 @@ Parent FINDINGS: `../2026-07-29-parallel-tlab-FINDINGS.md`.
 
 ## Lever
 
-Inspired by Go’s sweep-outside-STW / span ownership: end STW after mark;
-reclaim under per-size-class freelist locks while mutators run. Pause no
-longer includes O(heap) sweep. Gates (`sweep_after_world?`):
+End STW after mark; reclaim under per-size-class freelist locks while
+mutators run. Pause no longer includes O(heap) sweep. Gates
+(`sweep_after_world?`):
 
 - `lazy_sweep` (default on; `GCRY_DISABLE_LAZY_SWEEP=1` escapes)
 - multi-mutator (Parallel)

@@ -936,8 +936,8 @@ module Gcry
             @nursery_survival_bytes = 0_u64
           end
 
-          # Go-style lazy sweep (Parallel reclaim-off): end STW before reclaim so
-          # pause excludes O(heap) phase_sweep; sweep runs under freelist locks.
+          # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
+          # excludes O(heap) phase_sweep; sweep runs under freelist locks.
           @lazy_sweep_pending = sweep_after_world?
           unless @lazy_sweep_pending
             t0 = monotonic_ns

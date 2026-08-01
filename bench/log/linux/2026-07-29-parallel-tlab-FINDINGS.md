@@ -581,14 +581,14 @@ mark-gen ~67k. **Reject** (reverted). Stretch ~80% remains open; bar stays
 
 Detail: [`2026-08-01-ec4-allfree-v2/summary.md`](2026-08-01-ec4-allfree-v2/summary.md).
 
-## 2026-08-01 — Go-style lazy (post-STW) sweep (SHIP)
+## 2026-08-01 — Lazy (post-STW) sweep (SHIP)
 
 Session `2026-08-01-ec4-lazy-sweep/`.
 
 Prior stretch rejects (used_count / STW parallel sweep / ALL_FREE) paid
 mutator tax or stole EC cores while still walking empties inside pause.
-**Ship:** end STW after mark; reclaim under per-class freelist locks
-(Go sweep-outside-STW). Parallel reclaim-off + TLAB-off only;
+**Ship:** end STW after mark; reclaim under per-class freelist locks while
+mutators run. Parallel reclaim-off + TLAB-off only;
 `GCRY_DISABLE_LAZY_SWEEP=1` escapes. Soft **0/40**. Quiet same-host:
 `/json` **78.8%** Boehm @ ~**69k** (was 76.6% @ ~67k); pause p50
 ~20→**~8.5 ms**. EC1 smoke ~34.7k. Stretch ~80% nearly met; bar →
@@ -603,12 +603,18 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | dirty∪marked clean skip (aligned mmap) | 0/40 | **72.6%** | ~5 skips/745; freelist churn; reverted |
 | `GCRY_CHUNK_BYTES=256KiB` | 0/40 | **78.7%** | abs ↑; % flat — not Parallel default |
 | lazy freelist lock elision | 0/40 | **76.3%** | classify+reclaim tax; reverted |
+| alloc-bitmap sweep skip | 0 smoke | thr **~44k** | skips~0; dense death; reverted |
+| on-demand span reclaim (sweep gen) | 0/40 | **71.9%** | ~53k; mark tax + finish; reverted |
+| parallel post-STW lazy (4 EC fibers) | 0/40 | **73.6%** | steals mutator cores; reverted |
 
 Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
-empties are the hot freelist — skip sets stay tiny; next real lever is
-Go **allocBits** (sweep cost ∝ allocated slots) or RSS reclaim that
-shrinks chunk count without thr cliff.
+empties **are** the alloc freelist — rearranging/parallelizing the same
+O(heap) walk taxes mutators. Need work reduction (RSS/chunk count) or
+accept ~79% and promote Parallel TLAB-off as supported opt-in.
 
 Detail: [`2026-08-01-ec4-sweep-skip/summary.md`](2026-08-01-ec4-sweep-skip/summary.md),
 [`2026-08-01-ec4-chunk256/summary.md`](2026-08-01-ec4-chunk256/summary.md),
-[`2026-08-01-ec4-sweep-elide/summary.md`](2026-08-01-ec4-sweep-elide/summary.md).
+[`2026-08-01-ec4-sweep-elide/summary.md`](2026-08-01-ec4-sweep-elide/summary.md),
+[`2026-08-01-ec4-alloc-bits/summary.md`](2026-08-01-ec4-alloc-bits/summary.md),
+[`2026-08-01-ec4-sweepgen/summary.md`](2026-08-01-ec4-sweepgen/summary.md),
+[`2026-08-01-ec4-parallel-lazy/summary.md`](2026-08-01-ec4-parallel-lazy/summary.md).

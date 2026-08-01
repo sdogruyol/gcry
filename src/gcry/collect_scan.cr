@@ -96,9 +96,9 @@ module Gcry
     property parallel_empty_chunk_dormant : Bool = false
     property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
-    # Go-style: finish STW before size-class reclaim so pause excludes O(heap)
-    # sweep. Mutators resume; sweep holds per-class freelist locks (safe only
-    # when world is running — STW must not take those locks). Default on for
+    # Finish STW before size-class reclaim so pause excludes O(heap) sweep.
+    # Mutators resume; sweep holds per-class freelist locks (safe only when
+    # world is running — STW must not take those locks). Default on for
     # Parallel reclaim-off; escape GCRY_DISABLE_LAZY_SWEEP=1.
     property lazy_sweep : Bool = true
 
