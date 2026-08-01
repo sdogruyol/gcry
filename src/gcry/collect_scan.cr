@@ -89,10 +89,12 @@ module Gcry
     # Empty-chunk reclaim after major.
     # - EC1: dormant (DONTNEED within retain) + munmap excess (default).
     # - Parallel default: no empty reclaim (munmap amplified soft realloc;
-    #   dormant-all cuts RSS ~3× but thr ~42k→~32k on Kemal EC4). Opt in:
-    #   GCRY_PARALLEL_DORMANT=1 (DONTNEED all empties, keep VA) or
-    #   GCRY_PARALLEL_RELEASE=1 (EC1-style munmap excess; can hang/soft).
+    #   dormant-all cuts RSS ~3× but thr ~25%). Opt in:
+    #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded);
+    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max);
+    #   GCRY_PARALLEL_RELEASE=1 — EC1-style munmap excess (can hang/soft).
     property parallel_empty_chunk_dormant : Bool = false
+    property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
 
     private def release_empty_chunks_this_collect? : Bool

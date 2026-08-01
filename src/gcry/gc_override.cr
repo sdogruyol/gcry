@@ -268,15 +268,20 @@ module GC
 
     # Adaptive empty-chunk release is process default (dormant + munmap excess).
     # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
-    # Parallel: reclaim off by default. GCRY_PARALLEL_DORMANT=1 → DONTNEED all
-    # empties (RSS↓, thr↓). GCRY_PARALLEL_RELEASE=1 → munmap excess (risky).
+    # Parallel: reclaim off by default.
+    #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded).
+    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy; thr↓).
+    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (risky; can hang).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
     end
-    if env_flag_one?("GCRY_PARALLEL_DORMANT")
+    if env_flag_one?("GCRY_PARALLEL_DORMANT") || env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
       heap.parallel_empty_chunk_dormant = true
+    end
+    if env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
+      heap.parallel_empty_chunk_dormant_all = true
     end
     if env_flag_one?("GCRY_PARALLEL_RELEASE")
       heap.parallel_empty_chunk_munmap = true

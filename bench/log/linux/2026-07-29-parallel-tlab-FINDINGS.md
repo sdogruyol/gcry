@@ -557,3 +557,15 @@ spin-wait helper pool steals EC cores. **Reject** (reverted). Ship bar was
 ≥ mark-gen 76.6%. Residual stays RSS / accept stretch ~80% open.
 
 Detail: [`2026-08-01-ec4-parallel-sweep/summary.md`](2026-08-01-ec4-parallel-sweep/summary.md).
+
+## 2026-08-01 — Bounded Parallel dormant (opt-in ship)
+
+Session `2026-08-01-ec4-rss-bounded/`.
+
+`PARALLEL_DORMANT` previously escaped `empty_chunk_retain` when munmap was
+off → dormant-all. **Ship:** honor retain; excess → freelist reserve.
+`PARALLEL_DORMANT_ALL` keeps unbounded. Soft **0/40**. Best A/B retain
+**32 MiB**: quiet `/json` **71.7%** @ ~63k, RSS **~1.7×** Boehm (gate ~5.8×).
+Thr &lt; 76.6% bar → **not** Parallel default. Opt-in for RSS-sensitive apps.
+
+Detail: [`2026-08-01-ec4-rss-bounded/summary.md`](2026-08-01-ec4-rss-bounded/summary.md).

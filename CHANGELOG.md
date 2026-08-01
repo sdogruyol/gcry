@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Parallel bounded empty-chunk dormant (opt-in):** `GCRY_PARALLEL_DORMANT=1`
+  now DONTNEEDs empties only within `empty_chunk_retain` (was unbounded when
+  munmap off). Excess stay freelist-mapped. Legacy unbounded:
+  `GCRY_PARALLEL_DORMANT_ALL=1`. Soft **0/40**. Quiet EC4 `/json` **~71.7%**
+  Boehm @ ~63k with retain=32 MiB, RSS **~1.7×** (gate ~5.8×) — thr below
+  mark-gen 76.6% bar, so **not** Parallel default. Session
+  `bench/log/linux/2026-08-01-ec4-rss-bounded/`.
 - **In-header mark generation:** `clear_all_marks` bumps an 8-bit generation
   in `BlockHeader` flags (bits 8–15) instead of walking the heap — kills
   `phase_clear` (~3 ms → ~tens of ns under Parallel reclaim-off). Wrap at 255
@@ -65,9 +72,9 @@ experimental — FINDINGS only, not folded into PERF).
   @ **~53k** abs (was ~52% @ ~36k). Long soak **100/100** soft=0 hard=0
   (`2026-07-31-ec4-soak-100-post-thr`). No `PERF.md` fold-in. See FINDINGS.
 - **Parallel empty-chunk reclaim opt-in:** default stays off under EC>1 (thr).
-  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empty chunks (RSS ~3× better, thr ~25%
-  down on Kemal EC4). `GCRY_PARALLEL_RELEASE=1` adds munmap excess (hung in
-  A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
+  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empties (was unbounded; see Unreleased
+  for retain-capped semantics). `GCRY_PARALLEL_RELEASE=1` adds munmap excess
+  (hung in A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
 - **EC>1 alloc-path A/B:** `GCRY_TLAB=1` @ EC4 still ~½ of TLAB-off thr (soft 0
   — keep opt-in). `@alloc_lock` as `pthread_mutex` deadlocks under STW
   (collections=0) — rejected; stay on `Crystal::SpinLock`. Fold

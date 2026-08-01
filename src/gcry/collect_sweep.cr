@@ -147,8 +147,13 @@ module Gcry
                 @fully_free_chunk_bytes += mapped
                 ChunkHeader.set_holed(chunk, false)
                 if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                  can_dormant = @empty_chunk_retain > 0 &&
-                                (dormant_budget_used + mapped <= @empty_chunk_retain || !munmap_empty_chunks_this_collect?)
+                  # Always honor empty_chunk_retain (EC1 munmap excess; Parallel
+                  # dormant bounded). Unbounded Parallel dormant is opt-in via
+                  # parallel_empty_chunk_dormant_all (GCRY_PARALLEL_DORMANT_ALL).
+                  within_retain = @empty_chunk_retain > 0 &&
+                                  (dormant_budget_used + mapped <= @empty_chunk_retain)
+                  can_dormant = within_retain ||
+                                (!munmap_empty_chunks_this_collect? && @parallel_empty_chunk_dormant_all && @empty_chunk_retain > 0)
                   # Drop freelist nodes via one rebuild_size_class_freelist per
                   # class at end of sweep (rebuild skips DORMANT / dropped
                   # chunks). Per-empty unlink_freelist_range was O(freelist ×
@@ -157,8 +162,6 @@ module Gcry
                   if can_dormant
                     # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                     # Parallel — munmap was the soft-realloc amplifier).
-                    # When munmap is allowed, only dormant within retain; when
-                    # not (Parallel default), dormant all empties.
                     ChunkHeader.set_dormant(chunk, true)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
@@ -181,6 +184,13 @@ module Gcry
                     to_unmap = chunk
                     drop = true
                     any_drop = true
+                  else
+                    # Parallel bounded excess: no DONTNEED budget, no munmap.
+                    # defer_reclaim left dead blocks USED after live_objects_sub —
+                    # link them onto the freelist without a second live_objects_dec.
+                    p = SizeClasses.payload(class_index)
+                    bb = BlockHeader::SIZE.to_u64 + p.to_u64
+                    freelist_reserve_fully_dead(chunk, class_index, p, bb)
                   end
                 elsif ChunkHeader.dormant?(chunk)
                   # release off: clear stale dormant from a prior process config.
@@ -662,6 +672,31 @@ module Gcry
       return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       payload = SizeClasses.payload(class_index) if payload == 0
+      link_small_to_freelist(chunk, header, payload, class_index)
+      free_bytes_add(payload.to_u64)
+      @bytes_reclaimed_since_gc += payload.to_u64
+      live_objects_dec
+    end
+
+    # Freelist-link a USED block without live_objects_dec (caller already
+    # batched the count, e.g. fully-dead defer path under Parallel bounded).
+    private def freelist_reserve_fully_dead(chunk : ChunkHeader*, class_index : Int32, payload : UInt32, block_bytes : UInt64) : Nil
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      reclaimed = 0_u64
+      while (cursor + block_bytes) <= limit
+        header = cursor.as(BlockHeader*)
+        unless BlockHeader.free?(header)
+          link_small_to_freelist(chunk, header, payload, class_index)
+          reclaimed &+= payload.to_u64
+        end
+        cursor += block_bytes
+      end
+      free_bytes_add(reclaimed) if reclaimed > 0
+      @bytes_reclaimed_since_gc += reclaimed
+    end
+
+    private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
       if was_nursery
@@ -673,10 +708,6 @@ module Gcry
         @freelists[class_index] = user
         @freelist_clean[class_index] = false
       end
-
-      free_bytes_add(payload.to_u64)
-      @bytes_reclaimed_since_gc += payload.to_u64
-      live_objects_dec
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.
