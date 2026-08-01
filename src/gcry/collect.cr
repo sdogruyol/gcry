@@ -200,6 +200,8 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # Set during STW when sweep will run after start_world (see sweep_after_world?).
+    @lazy_sweep_pending = false
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
@@ -927,15 +929,21 @@ module Gcry
           # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
           enqueue_unreachable_finalizers
 
-          t0 = monotonic_ns
           # For minor collections, snapshot nursery alloc bytes and reset survival
           # counter before sweep accumulates surviving nursery payload.
           if !major
             @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
           end
-          sweep(major: major)
-          @last_phase_sweep_ns = monotonic_ns - t0
+
+          # Go-style lazy sweep (Parallel reclaim-off): end STW before reclaim so
+          # pause excludes O(heap) phase_sweep; sweep runs under freelist locks.
+          @lazy_sweep_pending = sweep_after_world?
+          unless @lazy_sweep_pending
+            t0 = monotonic_ns
+            sweep(major: major, after_world: false)
+            @last_phase_sweep_ns = monotonic_ns - t0
+          end
 
           if major
             @bytes_since_gc.set(0_u64)
@@ -947,13 +955,17 @@ module Gcry
             end
             # Next minor starts a fresh soft-dirty window after a major.
             @soft_dirty_skip_until_major = false
-            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            unless @lazy_sweep_pending
+              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            end
           else
             @nursery_alloc_bytes.set(0_u64)
             @minor_collections += 1
-            # Record nursery survival statistics for adaptive threshold.
-            note_nursery_survival
-            arm_page_barrier_after_collect
+            unless @lazy_sweep_pending
+              # Record nursery survival statistics for adaptive threshold.
+              note_nursery_survival
+              arm_page_barrier_after_collect
+            end
           end
           @collections += 1
         ensure
@@ -971,6 +983,19 @@ module Gcry
         # recursive) or munmap mid-peer-collect.
         @suppress_collect.add(1)
         begin
+          if @lazy_sweep_pending
+            t0 = monotonic_ns
+            sweep(major: major, after_world: true)
+            @last_phase_sweep_ns = monotonic_ns - t0
+            @lazy_sweep_pending = false
+            if major
+              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            else
+              note_nursery_survival
+              arm_page_barrier_after_collect
+            end
+          end
+
           t_flush = monotonic_ns
           # Munmap outside STW — empty chunks + excess large freelist (reuse common).
           # Still under post-STW mutex so the next collect cannot stop_world here.

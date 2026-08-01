@@ -580,3 +580,18 @@ mark-gen ~67k. **Reject** (reverted). Stretch ~80% remains open; bar stays
 **76.6%**.
 
 Detail: [`2026-08-01-ec4-allfree-v2/summary.md`](2026-08-01-ec4-allfree-v2/summary.md).
+
+## 2026-08-01 — Go-style lazy (post-STW) sweep (SHIP)
+
+Session `2026-08-01-ec4-lazy-sweep/`.
+
+Prior stretch rejects (used_count / STW parallel sweep / ALL_FREE) paid
+mutator tax or stole EC cores while still walking empties inside pause.
+**Ship:** end STW after mark; reclaim under per-class freelist locks
+(Go sweep-outside-STW). Parallel reclaim-off + TLAB-off only;
+`GCRY_DISABLE_LAZY_SWEEP=1` escapes. Soft **0/40**. Quiet same-host:
+`/json` **78.8%** Boehm @ ~**69k** (was 76.6% @ ~67k); pause p50
+~20→**~8.5 ms**. EC1 smoke ~34.7k. Stretch ~80% nearly met; bar →
+**~78.8%**. Experimental; no PERF.
+
+Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summary.md).

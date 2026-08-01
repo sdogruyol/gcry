@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Parallel lazy (post-STW) sweep:** Go-style — end STW after mark; reclaim
+  under per-size-class freelist locks while mutators run. Active when
+  Parallel + TLAB off + empty-reclaim off (`GCRY_DISABLE_LAZY_SWEEP=1`
+  escapes). Soft **0/40**. Same-host EC4 `/json` **~78.8%** Boehm @ ~**69k**
+  (was ~76.6%; pause p50 ~20→~8.5 ms). Session
+  `bench/log/linux/2026-08-01-ec4-lazy-sweep/`. No `PERF.md` fold-in.
 - **Parallel bounded empty-chunk dormant (opt-in):** `GCRY_PARALLEL_DORMANT=1`
   now DONTNEEDs empties only within `empty_chunk_retain` (was unbounded when
   munmap off). Excess stay freelist-mapped. Legacy unbounded:

@@ -288,6 +288,10 @@ module GC
       heap.parallel_empty_chunk_dormant = true
     end
 
+    if env_flag_one?("GCRY_DISABLE_LAZY_SWEEP")
+      heap.lazy_sweep = false
+    end
+
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
       heap.empty_chunk_retain = retain
     end

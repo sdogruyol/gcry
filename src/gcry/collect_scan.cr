@@ -96,11 +96,30 @@ module Gcry
     property parallel_empty_chunk_dormant : Bool = false
     property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
+    # Go-style: finish STW before size-class reclaim so pause excludes O(heap)
+    # sweep. Mutators resume; sweep holds per-class freelist locks (safe only
+    # when world is running — STW must not take those locks). Default on for
+    # Parallel reclaim-off; escape GCRY_DISABLE_LAZY_SWEEP=1.
+    property lazy_sweep : Bool = true
 
     private def release_empty_chunks_this_collect? : Bool
       return false unless @release_empty_chunks
       return true unless multi_mutator_threads?
       @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
+    end
+
+    # Post-STW sweep is safe only when we will not rebuild/unlink the chunk
+    # list (empty reclaim / HOLED freelist rebuild) — those assume exclusive
+    # ownership of `@chunks` next pointers. TLAB-off only: freelist lock
+    # serializes alloc into the class being swept; TLAB hits skip that lock and
+    # could race clear_mark on a freshly allocated block in the same chunk.
+    private def sweep_after_world? : Bool
+      return false unless @lazy_sweep
+      return false unless multi_mutator_threads?
+      return false if @tlab_enabled
+      return false if release_empty_chunks_this_collect?
+      return false if @madvise_free_pages
+      true
     end
 
     private def munmap_empty_chunks_this_collect? : Bool

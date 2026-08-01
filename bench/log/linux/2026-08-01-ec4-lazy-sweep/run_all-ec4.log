@@ -1,0 +1,67 @@
+=== Session /home/uchiha/playground/gcry/bench/log/linux/2026-08-01-123846 (COUNT=1 GC=boehm gcry) ===
+=== Build mode: release (--release) ===
+=== Build kemal binaries (release, GC=boehm gcry) ===
+  crystal build flags: --release
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+W: Shard "gcry" version (0.16.0) doesn't match tag version (0.1.0)
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.1.0 at ../..)
+  kemal-gcry   kemal-boehm (cached)
+
+══════════════════════════════════════════════
+  RUN 1/1  →  /home/uchiha/playground/gcry/bench/log/linux/2026-08-01-123846/run-01
+══════════════════════════════════════════════
+  metadata.yaml written (/home/uchiha/playground/gcry/bench/log/linux/2026-08-01-123846/run-01)
+
+╔══════════════════════════════════════════════╗
+║  Kemal median-of-3  (run 1/1)  ║
+╚══════════════════════════════════════════════╝
+  kemal run=1 trial=1 path=/ tag=boehm ... 103143.47 req/s
+  kemal run=1 trial=1 path=/ tag=gcry ... 113531.37 req/s
+  kemal run=1 trial=1 path=/json tag=boehm ... 87856.81 req/s
+  kemal run=1 trial=1 path=/json tag=gcry ... 70502.98 req/s
+  kemal run=1 trial=2 path=/ tag=boehm ... 102895.92 req/s
+  kemal run=1 trial=2 path=/ tag=gcry ... 125641.79 req/s
+  kemal run=1 trial=2 path=/json tag=boehm ... 90968.92 req/s
+  kemal run=1 trial=2 path=/json tag=gcry ... 69236.59 req/s
+  kemal run=1 trial=3 path=/ tag=boehm ... 101027.91 req/s
+  kemal run=1 trial=3 path=/ tag=gcry ... 117521.11 req/s
+  kemal run=1 trial=3 path=/json tag=boehm ... 87224.88 req/s
+  kemal run=1 trial=3 path=/json tag=gcry ... 68714.47 req/s
+Wrote /home/uchiha/playground/gcry/bench/log/linux/2026-08-01-123846/run-01/kemal-summary.md
+Kemal median-of-3
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
+|------|------------------:|-----------------:|-------:|----------------:|---------------:|------:|
+| `/` | 102,896 | 117,521 | **114.2%** | 15,800 | 98,524 | **6.24×** |
+| `/json` | 87,857 | 69,237 | **78.8%** | 15,796 | 91,708 | **5.81×** |
+
+
+╔══════════════════════════════════════════════╗
+║              ALL DONE                        ║
+╚══════════════════════════════════════════════╝
+  Build: release (--release)
+  GC: boehm gcry
+  EC_PARALLELISM: 4
+  COUNT: 1
+  Session: /home/uchiha/playground/gcry/bench/log/linux/2026-08-01-123846/
+total 4.0K
+drwxr-xr-x 2 uchiha uchiha 4.0K Aug  1 15:45 run-01
+  --- run-01 ---
+total 36K
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:39 kemal-gcry-gcstats-_-t1.json
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:41 kemal-gcry-gcstats-_-t2.json
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:44 kemal-gcry-gcstats-_-t3.json
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:40 kemal-gcry-gcstats-_json-t1.json
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:43 kemal-gcry-gcstats-_json-t2.json
+-rw-r--r-- 1 uchiha uchiha 2.1K Aug  1 15:45 kemal-gcry-gcstats-_json-t3.json
+-rw-r--r-- 1 uchiha uchiha  351 Aug  1 15:45 kemal-median.tsv
+-rw-r--r-- 1 uchiha uchiha  367 Aug  1 15:45 kemal-summary.md
+-rw-r--r-- 1 uchiha uchiha  636 Aug  1 15:38 metadata.yaml
