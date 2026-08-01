@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No `PERF.md` fold-in.
 - **Parallel parked-fiber LAG default 256 KiB** (was 512; `GCRY_STW_STACK_LAG`
   still overrides; `0` = full guard→bottom). Soft **0/40**; quiet EC4 `/json`
-  med ~**58k** ≥ 512 KiB cut ~**51k**. See FINDINGS.
+  med ~**58k** ≥ 512 KiB cut ~**51k**. Same-host Boehm re-cut after ship:
+  EC4 `/json` **~71.5%** @ ~47k (`2026-08-01-092050`). See FINDINGS.
 - **`phase_scrub_ns`:** parked-fiber scrub timed separately on `/gc-stats`
   (excluded from `phase_roots_ns`) for Parallel A/B.
 

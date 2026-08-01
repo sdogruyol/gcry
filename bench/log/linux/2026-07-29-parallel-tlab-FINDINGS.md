@@ -481,8 +481,23 @@ Session `bench/log/linux/2026-08-01-ec4-stw-dedupe/`. Post-v0.16.0 tip.
    slightly lower at 256 (~49.7k vs ~53.7k) — quiet thr wins the ship rule.
 
 Same-host LAG 512 vs Boehm EC4: `/json` **66.5%** @ ~50.6k (Boehm ~76k).
-LAG 256 abs ~58.3k ≈ **~77%** of that Boehm med (cross-session; re-cut
-before citing). EC1 smoke `/json` ~31.4k (0.16 band). `stw_mt_property_test`
-PASS. EC>1 still experimental; no `PERF.md` fold-in.
+LAG 256 abs ~58.3k ≈ **~77%** of that Boehm med (cross-session). EC1 smoke
+`/json` ~31.4k (0.16 band). `stw_mt_property_test` PASS. EC>1 still
+experimental; no `PERF.md` fold-in.
 
 Detail: [`2026-08-01-ec4-stw-dedupe/summary.md`](2026-08-01-ec4-stw-dedupe/summary.md).
+
+### Quiet same-host re-cut (shipped defaults)
+
+Session `bench/log/linux/2026-08-01-092050/` (`5ddd56b`): dedupe + LAG 256
+default, TLAB off, `wrk -c100 -d30` med-of-3.
+
+| Path | % Boehm EC4 | gcry med | Boehm med | RSS × |
+|------|------------:|---------:|----------:|------:|
+| `/json` | **71.5%** | 46,623 | 65,244 | **5.51×** |
+| `/` | **104.3%** | 95,332 | 91,388 | **6.20×** |
+
+Pause p50 ~**34 ms**. Above pre-dedupe ~68%; **below** campaign bar ≥75%
+(stretch ~80%). Idle `/` noisy. No `PERF.md` fold-in.
+
+Detail: [`2026-08-01-092050/summary.md`](2026-08-01-092050/summary.md).

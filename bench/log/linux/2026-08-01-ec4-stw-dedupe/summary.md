@@ -42,8 +42,13 @@ re-cut; cite abs). Prior thr-gap recut was ~68% @ ~53k.
 
 - `stw_mt_property_test --workers=2,4` **PASS** (default LAG 256 rebuild)
 
+## Quiet same-host re-cut (after ship)
+
+Session [`../2026-08-01-092050/`](../2026-08-01-092050/) (`5ddd56b`): `/json`
+**71.5%** Boehm EC4 @ ~46.6k (Boehm ~65.2k); RSS **~5.5×**. Above ~68%
+pre-dedupe; below campaign ≥75%. See that summary.
+
 ## Verdict
 
-Ship dedupe + LAG 256 default. Soft green. Pause phases cut; quiet thr abs
-up on LAG 256. EC>1 still **experimental** (RSS high; no `PERF.md` fold-in).
-Stretch bar ~80% Boehm needs a quiet same-host Boehm+gcry re-cut.
+Ship dedupe + LAG 256 default. Soft green. Pause phases cut. Same-host
+`/json` **71.5%** — experimental still; no `PERF.md` fold-in.
