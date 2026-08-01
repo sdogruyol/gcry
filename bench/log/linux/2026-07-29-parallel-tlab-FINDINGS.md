@@ -545,3 +545,15 @@ fire (`phase_sweep` ~7→~1 ms). Quiet thr **regressed** vs mark-gen **76.6%**:
 parallel sweep or RSS — not used_count skip.
 
 Detail: [`2026-08-01-ec4-used-count-v2/summary.md`](2026-08-01-ec4-used-count-v2/summary.md).
+
+## 2026-08-01 — STW parallel sweep (REJECT)
+
+Session `2026-08-01-ec4-parallel-sweep/`.
+
+Size-class reclaim on STW-exempt pthreads (per-slot freelists + serial
+merge). Soft **0/40**. `phase_sweep` unchanged (~10 ms); thr **regressed**:
+serial ~**65k**, sweep=2 ~63k, sweep=4 ~**49k** (soak med ~42k). Idle
+spin-wait helper pool steals EC cores. **Reject** (reverted). Ship bar was
+≥ mark-gen 76.6%. Residual stays RSS / accept stretch ~80% open.
+
+Detail: [`2026-08-01-ec4-parallel-sweep/summary.md`](2026-08-01-ec4-parallel-sweep/summary.md).
