@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Parallel pthread LAG (experimental EC>1):** when suspend SP is on a pool
+  fiber, scan only the top **256 KiB** of the OS pthread stack from high
+  (was full map — dominated `phase_stacks` after fiber-scan dedupe).
+  `GCRY_STW_PTHREAD_LAG` overrides; `0` = full. Soft **0/40**. Same-host EC4
+  `/json` **~73.4%** Boehm @ ~**65k** (was ~71.5% @ ~47k); `phase_stacks`
+  ~7→~0.4 ms; pause p50 ~34→~24 ms. Session
+  `bench/log/linux/2026-08-01-ec4-pthread-lag/`. No `PERF.md` fold-in.
 - **Parallel STW stack dedupe (experimental EC>1):** drop dual
   `scan_fiber_stack_full` in `scan_other_thread_stacks` — running fibers are
   already full-scanned by `scan_all_fiber_roots` under multi-mutator STW. Keep

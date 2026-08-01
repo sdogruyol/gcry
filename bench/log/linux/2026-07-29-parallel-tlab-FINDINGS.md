@@ -501,3 +501,16 @@ Pause p50 ~**34 ms**. Above pre-dedupe ~68%; **below** campaign bar ≥75%
 (stretch ~80%). Idle `/` noisy. No `PERF.md` fold-in.
 
 Detail: [`2026-08-01-092050/summary.md`](2026-08-01-092050/summary.md).
+
+## 2026-08-01 — Parallel pthread LAG (SP on fiber)
+
+Session `bench/log/linux/2026-08-01-ec4-pthread-lag/`.
+
+After fiber-scan dedupe, `phase_stacks` was still ~7 ms — full pthread map
+when SP sits on a pool fiber. **Ship:** scan top **256 KiB** from pthread
+high (`stw_multi_pthread_lag`; `GCRY_STW_PTHREAD_LAG`; `0` = full). Soft
+**0/40**. Quiet same-host: `/json` **73.4%** Boehm @ **~65k** (was 71.5% @
+~47k); `phase_stacks` ~7→**~0.38 ms**, pause p50 ~34→**~24 ms**.
+`stw_mt_property_test` PASS. Still below ≥75% bar; experimental; no PERF.
+
+Detail: [`2026-08-01-ec4-pthread-lag/summary.md`](2026-08-01-ec4-pthread-lag/summary.md).

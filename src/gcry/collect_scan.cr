@@ -115,6 +115,13 @@ module Gcry
     # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
     property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
 
+    # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
+    # mapping for leftover scheduler frames. Full map (often ~8 MiB × N) dominates
+    # phase_stacks after fiber-scan dedupe. Scan only the top *lag* bytes from
+    # stack high (grows down). Override via GCRY_STW_PTHREAD_LAG; 0 = full map.
+    # Default 256 KiB (2026-08-01: soft 0/40; stacks ~7→~0.4 ms; thr ≥ 71.5% cut).
+    property stw_multi_pthread_lag : UInt64 = 256_u64 * 1024
+
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
       return nil unless @world_stopped
@@ -323,8 +330,8 @@ module Gcry
 
     # Scan [low, high) of the OS thread stack. When SP is inside the mapping,
     # clamp to SP−red_zone (still covers live frames). When SP is on a fiber
-    # stack, scan the full pthread mapping — Parallel workers leave scheduler
-    # frames there after switching onto a pool fiber.
+    # stack, Parallel workers leave scheduler frames near the pthread high end —
+    # scan a LAG window from high (not the full ~8 MiB map) unless lag is 0.
     private def scan_pthread_stack(pthread_bounds : {Void*, Void*}?, sp : Void*?) : Nil
       return unless pthread_bounds
 
@@ -339,9 +346,24 @@ module Gcry
           @sp_clamp_hits += 1
         else
           @sp_clamp_fallbacks += 1
+          # SP on pool fiber (or elsewhere): Parallel LAG from high.
+          if multi_mutator_threads?
+            lag = @stw_multi_pthread_lag
+            unless lag == 0
+              lagged = high > lag ? high - lag : low
+              low = lagged if lagged > low
+            end
+          end
         end
       else
         @sp_clamp_fallbacks += 1
+        if multi_mutator_threads?
+          lag = @stw_multi_pthread_lag
+          unless lag == 0
+            lagged = high > lag ? high - lag : low
+            low = lagged if lagged > low
+          end
+        end
       end
 
       Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|

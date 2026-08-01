@@ -380,6 +380,11 @@ module GC
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
+    # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
+    # Default 256 KiB from stack high; 0 = full pthread mapping.
+    if plag = env_u64("GCRY_STW_PTHREAD_LAG")
+      heap.stw_multi_pthread_lag = plag
+    end
 
     # Boehm-style stack hygiene (no compiler maps). Opt-in; measure RSS/thr.
     if env_flag_one?("GCRY_CLEAR_STACK")
