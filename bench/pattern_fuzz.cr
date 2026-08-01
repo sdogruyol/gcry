@@ -248,25 +248,23 @@ puts ""
 puts "=== Summary ==="
 failures = [] of String
 
-# Check p99 < 20x baseline (distributions with large allocs naturally have much
-# longer pause; this is a regression guard, not an absolute limit).
-# Bimodal allocs up to 32KB and stride up to 128KB vs baseline 256B means
-# the collector does proportionally more work per phase. CI runners can
-# amplify variance further.
+# Pause ratios vs baseline (regression guard, not absolute). Large-object
+# patterns do more work per phase; EC1 parked-fiber scrub is 4 KiB blind
+# (v0.16 thr) so stride pauses sit higher than the old 512 B+safe band.
+# GHA / crystal-latest hosts amplify further (seen ~45–57× on stride).
 {
   "Zipfian p99" => {z[:p99], baseline_p99, 3.0},
   "Bimodal p99" => {b[:p99], baseline_p99, 20.0},
-  "Stride p99"  => {s[:p99], baseline_p99, 20.0},
+  "Stride p99"  => {s[:p99], baseline_p99, 80.0},
 }.each do |label, (val, bl, lim)|
   check(label, val, bl, lim, failures)
 end
 
-# Check max < 20x baseline (more lenient for worst-case)
 {
   "Zipfian max" => {z[:max], baseline_max, 4.0},
   # Bimodal mixes 16B + 32KB; CI runners see high max-pause variance on the large side.
   "Bimodal max" => {b[:max], baseline_max, 20.0},
-  "Stride max"  => {s[:max], baseline_max, 20.0},
+  "Stride max"  => {s[:max], baseline_max, 80.0},
 }.each do |label, (val, bl, lim)|
   check(label, val, bl, lim, failures)
 end

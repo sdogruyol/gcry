@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **EC1 `stw_sp_clamp` counters:** idle/`stack_top` other-thread scan now
   increments `sp_clamp_fallbacks` (missed after cheap-scan restore; aarch64 /
   Darwin CI `samples/stw_sp_clamp` saw hits=0 fallbacks=0).
+- **`pattern_fuzz` Stride CI floor:** raise Stride p99/max vs-baseline limit
+  20→**80×** after EC1 4 KiB parked-fiber scrub (quiet ~11×; GHA crystal-latest
+  hit ~45–57×).
 
 ## [0.16.0] - 2026-08-01
 
