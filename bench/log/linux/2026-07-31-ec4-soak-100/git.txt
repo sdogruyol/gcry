@@ -1,0 +1,1 @@
+deb9d24 Record LAG+mutex+coalesce EC4 thr re-cut vs Boehm. EC4 /json ~52% of Boehm EC4 and ~1.17× gcry EC1 (was ~23% / ~0.52× pre-LAG).

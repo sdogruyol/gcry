@@ -154,7 +154,7 @@ Shipped and dogfooded on Linux + macOS; **v0.15.0** is a correctness release (pr
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ✅ fiber scrub **default-on**; `GCRY_CLEAR_STACK` still opt-in |
-| TLAB / Parallel EC | ⚠️ experimental — STW×freelist UAF class fixed; steal/detach race remains |
+| TLAB / Parallel EC | ⚠️ experimental — TLAB@EC1 correctness OK thr~75% of off; EC4 HTTP **anti-scales** (~23% Boehm EC4 `/json`, ~0.52× gcry EC1) — FINDINGS `2026-07-31-100844` |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
@@ -185,7 +185,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | Track | Why it matters |
 |-------|----------------|
 | **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
-| **TLAB head CAS / no live steal** | Before calling Parallel+TLAB supported |
+| **Parallel+TLAB supported defaults** | TLAB@EC1 Kemal OK; Parallel index/alloc lock hardening landed; **Kemal EC>1 + TLAB@Parallel alloc stress still fail** — `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md` |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |

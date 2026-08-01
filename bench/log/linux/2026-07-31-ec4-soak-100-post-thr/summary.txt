@@ -1,0 +1,1 @@
+soak100 ok=100 fail=0 soft=0 hard=0 boot=0 die=0 /100

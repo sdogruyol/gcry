@@ -1,8 +1,9 @@
 # Thread-local allocation buffers (TLAB): each mutator OS thread takes a private
 # freelist head per size-class so parallel ExecutionContexts can allocate without
-# racing on the global freelist. Chunk refill still serializes on @alloc_lock.
+# racing on the global freelist. Chunk refill takes the per-size-class freelist
+# SpinLock (not the global @alloc_lock).
 #
-# Fields (@alloc_lock, @tlab_enabled, …) are declared/initialized in heap.cr.
+# Fields (@alloc_lock, @freelist_locks, @tlab_enabled, …) are in heap.cr.
 
 require "c/pthread"
 
@@ -25,6 +26,9 @@ module Gcry
     end
 
     @tlabs = uninitialized StaticArray(Tlab, MAX_TLABS)
+    # Per-slot locks: must not GC-allocate under @alloc_lock (Pointer.malloc
+    # → GC.malloc → re-enter alloc → non-recursive SpinLock deadlock at boot).
+    @tlab_slot_locks = uninitialized StaticArray(Crystal::SpinLock, MAX_TLABS)
 
     def tlab_enabled? : Bool
       @tlab_enabled
@@ -43,22 +47,68 @@ module Gcry
     end
 
     def tlab_hits : UInt64
-      @tlab_hits
+      @tlab_hits.get
     end
 
     protected def ensure_tlabs : Nil
       return if @tlabs_booted
+      @alloc_lock.sync { ensure_tlabs_under_lock }
+    end
+
+    # Caller holds @alloc_lock.
+    private def ensure_tlabs_under_lock : Nil
+      return if @tlabs_booted
       MAX_TLABS.times do |i|
         @tlabs[i] = Tlab.new
+        @tlab_slot_locks[i] = Crystal::SpinLock.new
       end
       @tlabs_booted = true
     end
 
+    private def tlab_slot_index(tlab : Tlab*) : Int32
+      ((tlab.address - @tlabs.to_unsafe.address) // sizeof(Tlab)).to_i32
+    end
+
+    private def lock_tlab_slot(slot : Int32) : Nil
+      # Pointer receiver so SpinLock.@m is mutated in place (not a copy).
+      (@tlab_slot_locks.to_unsafe + slot).value.lock
+    end
+
+    private def unlock_tlab_slot(slot : Int32) : Nil
+      (@tlab_slot_locks.to_unsafe + slot).value.unlock
+    end
+
+    # Large-object path + TLAB table boot. SpinLock only — pthread_mutex ×
+    # STW suspend-while-holding deadlocks.
     protected def with_alloc_lock(&)
-      if @tlab_enabled
-        @alloc_lock.sync { yield }
+      @alloc_lock.sync { yield }
+    end
+
+    # Per-size-class global freelist (old or nursery). STW sweep must not take
+    # these (suspended mutator may hold one). Lock order: freelist → @alloc_lock
+    # (never reverse).
+    private def init_freelist_locks : Nil
+      SIZE_CLASS_COUNT.times do |i|
+        @freelist_locks[i] = Crystal::SpinLock.new
+        @nursery_freelist_locks[i] = Crystal::SpinLock.new
+      end
+    end
+
+    private def freelist_lock_ptr(index : Int32, nursery : Bool) : Crystal::SpinLock*
+      if nursery
+        @nursery_freelist_locks.to_unsafe + index
       else
+        @freelist_locks.to_unsafe + index
+      end
+    end
+
+    protected def with_freelist_lock(index : Int32, nursery : Bool, &)
+      lock = freelist_lock_ptr(index, nursery)
+      lock.value.lock
+      begin
         yield
+      ensure
+        lock.value.unlock
       end
     end
 
@@ -91,7 +141,7 @@ module Gcry
 
     # Caller must hold @alloc_lock (or be single-threaded).
     protected def current_tlab_under_lock(key : UInt64 = current_thread_key) : Tlab*
-      ensure_tlabs
+      ensure_tlabs_under_lock
       i = 0
       while i < MAX_TLABS
         if @tlabs[i].live && @tlabs[i].owner == key
@@ -115,9 +165,13 @@ module Gcry
     # Skips !free? nodes (USED-on-freelist after mid-alloc STW). If skipping
     # empties the list, force a fresh size-class chunk once.
 
-    # Like tlab_refill but if the freelist is empty after steal/map, drop the
+    # Like tlab_refill but if the freelist is empty after map, drop the
     # alloc lock and STW-collect once (map_chunk must not collect under TLAB
     # lock — that deadlocks), then retry.
+    # No live-TLAB steal: nulling another thread's freelist head races with
+    # lock-free tlab_alloc_small (TOCTOU dual-alloc). Idle freelists return via
+    # flush_all_tlabs under STW. (@tlab_steals stays 0; reserved for a future
+    # CAS steal if imbalance warrants it.)
     protected def tlab_refill(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = tlab_refill_once(class_index, payload, nursery)
       return head unless head.null?
@@ -126,6 +180,10 @@ module Gcry
       tlab_refill_once(class_index, payload, nursery)
     end
 
+    # Refill keeps @alloc_lock (not per-class freelist locks): Parallel TLAB
+    # hit path does find_block→@index_lock; concurrent per-class refill×mmap
+    # amplified index contention and crushed Kemal TLAB-on thr (~26k→~15k).
+    # TLAB-off alloc/free still use with_freelist_lock.
     private def tlab_refill_once(class_index : Int32, payload : UInt32, nursery : Bool) : Void*
       head = Pointer(Void).null
       batch = (8192_u64 / payload.to_u64).to_i32.clamp(1, 256)
@@ -166,29 +224,8 @@ module Gcry
             next
           end
 
-          if src.null?
-            stolen = steal_from_other_tlabs(class_index, nursery)
-            unless stolen.null?
-              tlab = current_tlab_under_lock
-              if tlab.null?
-                if nursery
-                  @nursery_freelists[class_index] = splice_free_nodes(stolen, @nursery_freelists[class_index])
-                else
-                  @freelists[class_index] = splice_free_nodes(stolen, @freelists[class_index])
-                end
-                break
-              end
-              if nursery
-                tlab.value.nursery_freelists[class_index] = stolen
-              else
-                tlab.value.freelists[class_index] = stolen
-              end
-              head = stolen
-              @tlab_refills += 1
-              @tlab_steals += 1
-            end
-            break
-          end
+          # Global still empty: do not steal from other live TLABs (TOCTOU).
+          break if src.null?
 
           if @blacklist_enabled
             taken = take_non_blacklisted(src, class_index, nursery)
@@ -247,113 +284,114 @@ module Gcry
             break
           end
 
-          if nursery
-            tlab.value.nursery_freelists[class_index] = head
-          else
-            tlab.value.freelists[class_index] = head
+          slot = tlab_slot_index(tlab)
+          lock_tlab_slot(slot)
+          begin
+            if nursery
+              tlab.value.nursery_freelists[class_index] = head
+            else
+              tlab.value.freelists[class_index] = head
+            end
+          ensure
+            unlock_tlab_slot(slot)
           end
           @tlab_refills += 1
-          @tlab_steals += count.to_u64
           break
         end
       end
       head
     end
 
-    # Caller holds @alloc_lock. Take another live TLAB's freelist for this class.
-    private def steal_from_other_tlabs(class_index : Int32, nursery : Bool) : Void*
-      self_key = current_thread_key
-      i = 0
-      while i < MAX_TLABS
-        if @tlabs[i].live && @tlabs[i].owner != self_key
-          head = nursery ? @tlabs[i].nursery_freelists[class_index] : @tlabs[i].freelists[class_index]
-          unless head.null?
-            if nursery
-              @tlabs[i].nursery_freelists[class_index] = Pointer(Void).null
-            else
-              @tlabs[i].freelists[class_index] = Pointer(Void).null
-            end
-            while !head.null? && !BlockHeader.free?(BlockHeader.from_user(head))
-              head = BlockHeader.from_user(head).value.next_free
-            end
-            return head unless head.null?
-          end
-        end
-        i += 1
-      end
-      Pointer(Void).null
-    end
-
-    protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool) : Void*
-      # Epoch protocol: flush_all_tlabs bumps @tlab_epoch under STW. Detach while
-      # FREE, then set_used only if epoch is unchanged — otherwise claim the
-      # orphan (unique) so we never dual-alloc a node published to global.
+    protected def tlab_alloc_small(payload : UInt32, flags : UInt32, class_index : Int32, nursery : Bool, rounded : UInt64) : Void*
+      # Per-slot lock closes Parallel dual-alloc on freelist head (TOCTOU on the
+      # lock-free load/store, or two OS threads briefly sharing a slot). Epoch
+      # protocol still applies across STW flush.
       32.times do
         epoch = @tlab_epoch.get
         tlab = current_tlab
+        slot = tlab_slot_index(tlab)
+        user = Pointer(Void).null
 
-        user = if nursery
-                 tlab.value.nursery_freelists[class_index]
-               else
-                 tlab.value.freelists[class_index]
-               end
+        lock_tlab_slot(slot)
+        begin
+          user = if nursery
+                   tlab.value.nursery_freelists[class_index]
+                 else
+                   tlab.value.freelists[class_index]
+                 end
 
-        if !user.null? && !BlockHeader.free?(BlockHeader.from_user(user))
-          if nursery
-            tlab.value.nursery_freelists[class_index] = Pointer(Void).null
-          else
-            tlab.value.freelists[class_index] = Pointer(Void).null
+          if !user.null? && !find_block(user)
+            if nursery
+              tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+            else
+              tlab.value.freelists[class_index] = Pointer(Void).null
+            end
+            user = Pointer(Void).null
           end
-          user = Pointer(Void).null
+
+          if !user.null? && !BlockHeader.free?(BlockHeader.from_user(user))
+            if nursery
+              tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+            else
+              tlab.value.freelists[class_index] = Pointer(Void).null
+            end
+            user = Pointer(Void).null
+          end
+
+          if !user.null?
+            header = BlockHeader.from_user(user)
+            if BlockHeader.free?(header)
+              next_free = header.value.next_free
+              if nursery
+                tlab.value.nursery_freelists[class_index] = next_free
+              else
+                tlab.value.freelists[class_index] = next_free
+              end
+              BlockHeader.set_used(header, payload, flags)
+              heap_set_mark(header) if @incremental_marking || @collecting
+              @tlab_hits.add(1_u64)
+            else
+              user = Pointer(Void).null
+            end
+          end
+        ensure
+          unlock_tlab_slot(slot)
         end
 
         if user.null?
-          user = tlab_refill(class_index, payload, nursery)
-          raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if user.null?
-          tlab = current_tlab
+          filled = tlab_refill(class_index, payload, nursery)
+          raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if filled.null?
           next if @tlab_epoch.get != epoch
-        else
-          @tlab_hits += 1
+          next # claim the freshly installed batch under the slot lock
         end
 
-        header = BlockHeader.from_user(user)
-        next unless BlockHeader.free?(header)
-        next_free = header.value.next_free
-
-        if nursery
-          next unless tlab.value.nursery_freelists[class_index] == user
-          tlab.value.nursery_freelists[class_index] = next_free
-        else
-          next unless tlab.value.freelists[class_index] == user
-          tlab.value.freelists[class_index] = next_free
-        end
-
-        # Detached: unique owner even if epoch advanced during STW.
-        BlockHeader.set_used(header, payload, flags)
-        heap_set_mark(header) if @incremental_marking || @collecting
-        with_alloc_lock do
-          @free_bytes -= payload if @free_bytes >= payload
-          @nursery_alloc_bytes += payload.to_u64 if nursery
-        end
+        # Atomic counters — no @alloc_lock on the TLAB hit path (Parallel thr).
+        free_bytes_sub(payload.to_u64)
+        @nursery_alloc_bytes.add(payload.to_u64) if nursery
+        note_alloc_bytes(rounded)
         return user
       end
       raise OutOfMemoryError.new("failed to claim TLAB node size class #{payload}")
     end
 
-    # Return a small object to the current thread's TLAB (no global lock).
+    # Return a small object to the current thread's TLAB.
     protected def tlab_free_small(pointer : Void*, class_index : Int32, payload : UInt32, nursery : Bool) : Nil
       tlab = current_tlab
-      header = BlockHeader.from_user(pointer)
-      if nursery
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, tlab.value.nursery_freelists[class_index])
-        tlab.value.nursery_freelists[class_index] = pointer
-      else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, tlab.value.freelists[class_index])
-        tlab.value.freelists[class_index] = pointer
+      slot = tlab_slot_index(tlab)
+      lock_tlab_slot(slot)
+      begin
+        header = BlockHeader.from_user(pointer)
+        if nursery
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, tlab.value.nursery_freelists[class_index])
+          tlab.value.nursery_freelists[class_index] = pointer
+        else
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, tlab.value.freelists[class_index])
+          tlab.value.freelists[class_index] = pointer
+        end
+      ensure
+        unlock_tlab_slot(slot)
       end
-      with_alloc_lock do
-        @free_bytes += payload.to_u64
-      end
+      @free_bytes.add(payload.to_u64)
     end
 
     # Flush TLAB freelists back to global (call under STW / before sweep / destroy).
@@ -362,6 +400,8 @@ module Gcry
     protected def flush_all_tlabs : Nil
       return unless @tlabs_booted && @tlab_enabled
       @tlab_epoch.add(1)
+      # No per-slot locks: callers run under STW. A suspended mutator may hold
+      # lock_tlab_slot; taking it here livelocks the collector.
       MAX_TLABS.times do |i|
         next unless @tlabs[i].live
         SIZE_CLASS_COUNT.times do |c|

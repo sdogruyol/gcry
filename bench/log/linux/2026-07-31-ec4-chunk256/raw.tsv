@@ -1,0 +1,11 @@
+config	trial	req_s	soft	cols	chunk_bytes	chunk_count	fully_free	pause_p50_us	sweep_ms
+c128	1	54464.09	0						
+c256	1	51645.67	0						
+c128	2	47796.44	0						
+c256	2	41354.44	0						
+c128	3	45420.30	0						
+c256	3	49048.88	0						
+c128	4	41419.87	0						
+c256	4	54105.58	0						
+c128	5	56309.32	0						
+c256	5	55202.43	0						

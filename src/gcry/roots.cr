@@ -103,7 +103,7 @@ module Gcry
       {% end %}
     end
 
-    # Combined: spill regs + scan [approx SP, bottom), feeding each candidate
+    # Combined: spill regs + scan [SP−red_zone, bottom), feeding each candidate
     # to *block*.
     def self.scan_mutator(bottom : Void*, & : Void* ->) : Nil
       spill_registers
@@ -112,8 +112,17 @@ module Gcry
       scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
         yield candidate
       end
-      # Stacks may include a PROT_NONE guard page if SP is stale — probe pages.
-      scan_range(stack_pointer, bottom, safe: true) do |candidate|
+      # Prefer hardware SP (− red zone). pointerof(local) sits mid-frame and
+      # skipped the leaf / red-zone window — Parallel collect-on-alloc then
+      # missed caller-held buffers (Kemal EC>1).
+      red = {% if flag?(:x86_64) %} 128_u64 {% else %} 0_u64 {% end %}
+      sp = hardware_stack_pointer.address
+      low = sp > red ? sp - red : 0_u64
+      # Also cover pointerof(local) if it somehow sits below hardware SP
+      # (shouldn't) — take the lesser address so we never shrink the window.
+      approx = stack_pointer.address
+      low = approx if approx < low
+      scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
         yield candidate
       end
       keep_alive(env.to_unsafe.as(Void*))

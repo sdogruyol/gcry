@@ -11,16 +11,57 @@ module Gcry
       end
     end
 
-    # Mark Thread objects and their current_fiber (TLS alone is not scanned).
+    # Module-typed Reference ivars (Scheduler, ExecutionContext) cannot
+    # `.as(Reference)` / `unsafe_as(Reference)` yet — load the pointer bits.
+    private def mark_ref_slot(slot_addr : UInt64) : Nil
+      bits = Pointer(UInt64).new(slot_addr).value
+      return if bits == 0
+      mark_root_candidate(Pointer(Void).new(bits), source: RootSource::Thread)
+    end
+
+    # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
     private def scan_thread_roots : Nil
       Thread.unsafe_each do |thread|
         mark_root_candidate(Pointer(Void).new(thread.object_id), source: RootSource::Thread)
         # Parallel EC can briefly have nil current_fiber while a worker OS
         # thread is between fibers / during shutdown — skip rather than raise.
-        fiber = thread.@current_fiber
-        next unless fiber
-        mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+        if fiber = thread.@current_fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+        end
+        if main = thread.@main_fiber
+          mark_root_candidate(Pointer(Void).new(main.object_id), source: RootSource::Thread)
+        end
+        # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
+        # only on conservative Thread body scan missed them when layout/scan_cap
+        # truncated the object (Kemal EC4 SEGV @ …0008).
+        # Same flag gate as Crystal Thread: under `-Dwithout_mt` these ivars and
+        # Fiber::ExecutionContext do not exist (CI fork_reinit / Darwin samples).
+        {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+          mark_ref_slot(pointerof(thread.@scheduler).address)
+          mark_ref_slot(pointerof(thread.@execution_context).address)
+        {% end %}
       end
+
+      {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+        # Global EC list (not thread-local) — keeps contexts that temporarily have
+        # no worker with them pinned via Thread.@execution_context.
+        Fiber::ExecutionContext.unsafe_each do |ec|
+          mark_ref_slot(pointerof(ec).address)
+          # Parallel: also pin queues / event loop / schedulers explicitly. Body
+          # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
+          if ec.is_a?(Fiber::ExecutionContext::Parallel)
+            mark_root_candidate(Pointer(Void).new(ec.@global_queue.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@event_loop.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@stack_pool.object_id), source: RootSource::Thread)
+            mark_root_candidate(Pointer(Void).new(ec.@schedulers.object_id), source: RootSource::Thread)
+            ec.@schedulers.each do |sched|
+              mark_root_candidate(Pointer(Void).new(sched.object_id), source: RootSource::Thread)
+              mark_root_candidate(Pointer(Void).new(sched.@runnables.object_id), source: RootSource::Thread)
+              mark_root_candidate(Pointer(Void).new(sched.@main_fiber.object_id), source: RootSource::Thread)
+            end
+          end
+        end
+      {% end %}
     end
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.
@@ -32,19 +73,119 @@ module Gcry
       end
     end
 
+    # True when more than the usual main + ExecutionContext Monitor threads
+    # exist. Parallel EC workers and Thread.new storms need aggressive STW
+    # stack scans; EC1/default must keep the cheap stack_top clamp or Kemal
+    # /json thr collapses (~78%→~48% Boehm on CI after always-full-scan).
+    private def multi_mutator_threads? : Bool
+      n = 0
+      Thread.unsafe_each do
+        n += 1
+        return true if n > 2
+      end
+      false
+    end
+
+    # Empty-chunk reclaim after major.
+    # - EC1: dormant (DONTNEED within retain) + munmap excess (default).
+    # - Parallel default: no empty reclaim (munmap amplified soft realloc;
+    #   dormant-all cuts RSS ~3× but thr ~42k→~32k on Kemal EC4). Opt in:
+    #   GCRY_PARALLEL_DORMANT=1 (DONTNEED all empties, keep VA) or
+    #   GCRY_PARALLEL_RELEASE=1 (EC1-style munmap excess; can hang/soft).
+    property parallel_empty_chunk_dormant : Bool = false
+    property parallel_empty_chunk_munmap : Bool = false
+
+    private def release_empty_chunks_this_collect? : Bool
+      return false unless @release_empty_chunks
+      return true unless multi_mutator_threads?
+      @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
+    end
+
+    private def munmap_empty_chunks_this_collect? : Bool
+      return false unless @release_empty_chunks
+      !multi_mutator_threads? || @parallel_empty_chunk_munmap
+    end
+
+    # How far below parked stack_top to scan under multi-mutator STW.
+    # Full guard→bottom × N fibers faults/scans historical high-water and
+    # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
+    # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
+    # this lag catches stack_top that lags without a visible SP. Override via
+    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 512 KiB.
+    property stw_multi_stack_lag : UInt64 = 512_u64 * 1024
+
+    # Lowest scan address from a suspended thread SP on *fiber*, or nil.
+    private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
+      return nil unless @world_stopped
+
+      stack = fiber.@stack
+      base = stack.pointer.address
+      bottom = stack.bottom.address
+      return nil unless guard < bottom
+
+      current = Thread.current
+      Thread.unsafe_each do |thread|
+        next if thread == current
+        sp = Platform.thread_sp(thread.to_unsafe)
+        next unless sp
+        spa = sp.address
+        next unless spa >= base && spa < bottom
+        return stack_scan_low(spa, guard)
+      end
+      nil
+    end
+
+    private def fiber_stack_scan_top(fiber : Fiber, guard : UInt64, stw_multi : Bool) : UInt64
+      if low = fiber_stack_sp_scan_low(fiber, guard)
+        return low
+      end
+
+      if fiber.running?
+        # Parallel: full span (mid-swap / stale stack_top). EC1: stack_top only
+        # — full guard→bottom on SYSMON crushed Kemal thr (~86%→~80% Boehm).
+        return guard if stw_multi
+        t = fiber.@context.stack_top.address
+        return t < guard ? guard : t
+      end
+
+      t = fiber.@context.stack_top.address
+      t = guard if t < guard
+      return t unless stw_multi
+
+      lag = @stw_multi_stack_lag
+      # 0 ⇒ classic full parked-fiber scan (correctness A/B; thr regresses).
+      return guard if lag == 0
+
+      lagged = t > lag ? t - lag : guard
+      lagged < guard ? guard : lagged
+    end
+
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
+      # Parallel / multi-thread STW: extend parked stack_top by LAG (and SP when
+      # present). Single-mutator: cheap stack_top clamp (Kemal thr path).
+      stw_multi = @world_stopped && multi_mutator_threads?
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
-        next if fiber.running?
-        # Clamp below guard page (PROT_NONE); stack_top can sit there after overflow.
-        # safe:true: reported ranges can still contain holes on some kernels.
+
+        # Without STW we must not touch another thread's live stack.
+        # Parallel STW: scan running fibers here too (current_fiber TLS can be
+        # briefly nil). EC1: leave running stacks to scan_other_thread_stacks
+        # (cheap SP/stack_top) — full dual-scan was thr-only cost.
+        if fiber.running?
+          next unless stw_multi
+        end
+
         stack = fiber.@stack
-        top = fiber.@context.stack_top.address
         guard = stack.pointer.address + Roots::PAGE_SIZE
-        top = guard if top < guard
-        Roots.scan_range(Pointer(Void).new(top), stack.bottom, safe: true) do |candidate|
+        bottom = stack.bottom.address
+        next unless guard < bottom
+
+        top = fiber_stack_scan_top(fiber, guard, stw_multi)
+        next unless top < bottom
+
+        Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end
@@ -53,48 +194,168 @@ module Gcry
     private def scan_other_thread_stacks : Nil
       return unless @stop_the_world
 
+      # Parallel mid-swap needs full fiber + pthread coverage. EC1 only has
+      # main+SYSMON — full 8 MiB SYSMON scans blew phase_stacks (~0.02→~3ms)
+      # and dropped Kemal /json ~86%→~80% Boehm. Keep the cheap path there.
+      multi = multi_mutator_threads?
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        fiber = thread.@current_fiber
-        next unless fiber
-        stack = fiber.@stack
         pthread = thread.to_unsafe
+        fiber = thread.@current_fiber
 
-        if fiber.name == "main"
-          if bounds = Platform.pthread_stack_bounds(pthread)
-            low = bounds[0]
-            high = bounds[1]
-            if (sp = Platform.thread_sp(pthread)) &&
-               sp.address >= low.address && sp.address < high.address
-              low = sp
-              @sp_clamp_hits += 1
-            else
-              @sp_clamp_fallbacks += 1
-            end
-            Roots.scan_range(low, high, safe: true) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Thread)
-            end
-            next
-          end
-        end
-
-        # Skip PROT_NONE guard; prefer saved stack_top (used portion) when it
-        # sits above the guard — full 8 MiB scans kill STW under many fibers.
-        # If suspend SP falls inside this fiber stack, clamp further.
-        guard = stack.pointer.address + Roots::PAGE_SIZE
-        top = fiber.@context.stack_top.address
-        top = guard if top < guard
-        if (sp = Platform.thread_sp(pthread)) &&
-           sp.address >= stack.pointer.address && sp.address < stack.bottom.address
-          top = sp.address if sp.address > top
-          @sp_clamp_hits += 1
-        end
-        low = Pointer(Void).new(top)
-        next if low.address >= stack.bottom.address
-        Roots.scan_range(low, stack.bottom, safe: true) do |candidate|
+        # Always spill GP registers at suspend — may hold the only live copy.
+        Platform.each_thread_greg(pthread) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
+
+        sp = Platform.thread_sp(pthread)
+        pthread_bounds = Platform.pthread_stack_bounds(pthread)
+
+        unless multi
+          next unless fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+          scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          next
+        end
+
+        if fiber
+          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+          scan_fiber_stack_full(fiber)
+        end
+
+        # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
+        # swapcontext saves the previous SP. If we only trust current_fiber +
+        # stack_top, live frames below a stale top (still holding SP) are
+        # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
+        # the suspend SP (red zone included).
+        scan_stack_containing_sp(sp)
+
+        # Pthread mapping: scheduler/main frames remain here while SP sits on
+        # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
+        scan_pthread_stack(pthread_bounds, sp)
+      end
+    end
+
+    # Single-mutator other-thread scan. Do **not** key off fiber.name == "main":
+    # every Thread's root fiber is named "main" (incl. SYSMON), and the old
+    # heuristic fell into full pthread scans when SP sat on a fiber stack
+    # (phase_stacks ~1.5ms vs ~0.02ms; Kemal /json stuck ~82% Boehm).
+    private def scan_other_thread_fiber_ec1(fiber : Fiber, sp : Void*?, pthread_bounds : {Void*, Void*}?) : Nil
+      stack = fiber.@stack
+      guard = stack.pointer.address + Roots::PAGE_SIZE
+      bottom = stack.bottom.address
+
+      if sp
+        spa = sp.address
+        if spa >= stack.pointer.address && spa < bottom
+          return unless guard < bottom
+          top = stack_scan_low(spa, guard)
+          @sp_clamp_hits += 1
+          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Thread)
+          end
+          return
+        end
+        if pthread_bounds
+          pl = pthread_bounds[0].address
+          ph = pthread_bounds[1].address
+          if spa >= pl && spa < ph
+            # SP on OS stack — clamp; never full-map when SP is elsewhere.
+            scan_pthread_stack(pthread_bounds, sp)
+            return
+          end
+        end
+      end
+
+      # Idle / SP unknown: cheap stack_top clamp (not full 8 MiB).
+      # Count as fallback so samples/stw_sp_clamp (and metrics) see the scan —
+      # aarch64/Darwin often land here when suspend SP is outside fiber/pthread
+      # bounds; skipping the counter made CI abort after the EC1 cheap path.
+      return unless guard < bottom
+      top = fiber.@context.stack_top.address
+      top = guard if top < guard
+      return unless top < bottom
+      @sp_clamp_fallbacks += 1
+      Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Thread)
+      end
+    end
+
+    private def scan_fiber_stack_full(fiber : Fiber) : Nil
+      stack = fiber.@stack
+      guard = stack.pointer.address + Roots::PAGE_SIZE
+      bottom = stack.bottom
+      return unless guard < bottom.address
+
+      # Parallel process STW: full span. stack_top is stale for running fibers
+      # and can lag mid-swap for "parked" ones.
+      @sp_clamp_fallbacks += 1
+      Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Thread)
+      end
+    end
+
+    # Scan [SP−red_zone, bottom) of whichever fiber stack holds *sp*.
+    private def scan_stack_containing_sp(sp : Void*?) : Nil
+      return unless sp
+
+      spa = sp.address
+      Fiber.unsafe_each do |fiber|
+        stack = fiber.@stack
+        base = stack.pointer.address
+        bottom = stack.bottom.address
+        next unless spa >= base && spa < bottom
+
+        guard = base + Roots::PAGE_SIZE
+        next unless guard < bottom
+
+        low = stack_scan_low(spa, guard)
+        @sp_clamp_hits += 1
+        Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(bottom), safe: true) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Thread)
+        end
+        return
+      end
+    end
+
+    # SysV x86_64 red zone: callees may store below SP without adjusting it.
+    {% if flag?(:x86_64) %}
+      STACK_SCAN_RED_ZONE = 128_u64
+    {% else %}
+      STACK_SCAN_RED_ZONE = 0_u64
+    {% end %}
+
+    private def stack_scan_low(sp_addr : UInt64, floor : UInt64) : UInt64
+      low = sp_addr > STACK_SCAN_RED_ZONE ? sp_addr - STACK_SCAN_RED_ZONE : 0_u64
+      low < floor ? floor : low
+    end
+
+    # Scan [low, high) of the OS thread stack. When SP is inside the mapping,
+    # clamp to SP−red_zone (still covers live frames). When SP is on a fiber
+    # stack, scan the full pthread mapping — Parallel workers leave scheduler
+    # frames there after switching onto a pool fiber.
+    private def scan_pthread_stack(pthread_bounds : {Void*, Void*}?, sp : Void*?) : Nil
+      return unless pthread_bounds
+
+      low = pthread_bounds[0].address
+      high = pthread_bounds[1].address
+      return unless low < high
+
+      if sp
+        spa = sp.address
+        if spa >= low && spa < high
+          low = stack_scan_low(spa, low)
+          @sp_clamp_hits += 1
+        else
+          @sp_clamp_fallbacks += 1
+        end
+      else
+        @sp_clamp_fallbacks += 1
+      end
+
+      Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Thread)
       end
     end
 

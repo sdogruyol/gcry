@@ -1,0 +1,11 @@
+2026-07-31T15:35:59.791430Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4793
+2026-07-31T15:36:02.597042Z  ERROR - kemal: Unable to get file info: '/home/uchiha/playground/gcry/public/json': Interrupted system call
+Unable to get file info: '/home/uchiha/playground/gcry/public/json': Interrupted system call (File::Error)
+  from /usr/share/crystal/src/crystal/system/unix/file.cr:41:9 in 'info?'
+  from /usr/share/crystal/src/file.cr:199:5 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+

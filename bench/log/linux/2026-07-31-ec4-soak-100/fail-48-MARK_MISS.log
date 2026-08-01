@@ -1,0 +1,35 @@
+2026-07-31T10:01:42.306074Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4500
+Failed to raise an exception: END_OF_STACK
+[0x6085f6d00f26] ?? +106128487747366 in ./bin/kemal-gcry
+[0x6085f6c88e58] ?? +106128487255640 in ./bin/kemal-gcry
+[0x6085f6ccabd1] ?? +106128487525329 in ./bin/kemal-gcry
+[0x6085f6cc7733] ?? +106128487511859 in ./bin/kemal-gcry
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (Failed to raise an exception: ArgumentErrorEND_OF_STACK)
+
+[0x6085f6d00f26] ?? +106128487747366 in ./bin/kemal-gcry
+[0x6085f6c88e58] ?? +106128487255640 in ./bin/kemal-gcry
+[0x6085f6ccabd1] ?? +106128487525329 in ./bin/kemal-gcry
+[0x6085f6cc7733] ?? +106128487511859 in ./bin/kemal-gcry
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+Failed to raise an exception: END_OF_STACK
+[0x6085f6d00f26] ?? +106128487747366 in ./bin/kemal-gcry
+[0x6085f6c88e58] ?? +106128487255640 in ./bin/kemal-gcry
+[0x6085f6ccabd1] ?? +  from 106128487525329./bin/kemal-gcry in '??' in 
+./bin/kemal-gcry  from 
+./bin/kemal-gcry in '??'[
+0x  from 6085f6cc7733./bin/kemal-gcry in '??'] 
+  from ??./bin/kemal-gcry in '??' +
+106128487511859 in   from ./bin/kemal-gcry???
+
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ./bin/kemal-gcry in '??'
+  from ???

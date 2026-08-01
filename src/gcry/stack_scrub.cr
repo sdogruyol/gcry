@@ -117,20 +117,33 @@ module Gcry
     end
 
     # Zero a capped window below each parked fiber's saved SP — not the full
-    # [guard, SP) span (that faults pages in and inflates RSS). Cap matches
-    # clear_stack's fiber path: Crystal fiber stacks are thinly mapped, so a
-    # 4 KiB blind clear below SP can SEGV on an unmapped hole (CI flake under
-    # Parallel STW). Roots.clear_range_safe skips unreadables as a second belt.
+    # [guard, SP) span (that faults pages in and inflates RSS).
+    #
+    # EC1 (PERF): 4 KiB blind clear — same as v0.15 `bebedae`. Cuts false
+    # stack roots (tip retained ~4× live_objects vs bebedae with 512 B +
+    # clear_range_safe). Stack type_id_gate stays off (Channel/Deque SEGV).
+    # Parallel: 512 B + clear_range_safe; skip when a foreign SP sits on the
+    # fiber (mid-swap). 4 KiB×clear_range_safe on EC1 hurts thr (page probes).
     protected def scrub_parked_fiber_stacks : Nil
       return unless @scrub_fibers_enabled
 
       current = Fiber.current
+      multi = multi_mutator_threads?
       wipe = @clear_stack_bytes
-      wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
+      if multi
+        wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
+      else
+        wipe = DEFAULT_CLEAR_STACK_BYTES if wipe > DEFAULT_CLEAR_STACK_BYTES
+      end
       scrubbed = 0_u64
       Fiber.unsafe_each do |fiber|
         next if fiber == current
         next if fiber.running?
+        # Mid-swap under Parallel: current_fiber already points at the next
+        # fiber while SP (and live frames) remain on this "parked" stack.
+        # EC1: SYSMON is suspended on its fiber during our STW — foreign-SP
+        # skip would never scrub it. Only skip under Parallel.
+        next if multi && fiber_stack_holds_foreign_sp?(fiber)
 
         stack = fiber.@stack
         base = stack.pointer.address
@@ -146,10 +159,37 @@ module Gcry
         low = guard if low < guard
         next if low >= top
 
-        scrubbed += Roots.clear_range_safe(low, top)
+        if multi
+          scrubbed += Roots.clear_range_safe(low, top)
+        else
+          len = top - low
+          next if len > Roots::MAX_SCAN_BYTES
+          Pointer(UInt8).new(low).clear(len)
+          scrubbed += len
+        end
       end
       @fiber_scrub_bytes_total += scrubbed
       @fiber_scrub_runs += 1
+    end
+
+    # True when a suspended OS thread's SP still lies on *fiber*'s stack.
+    private def fiber_stack_holds_foreign_sp?(fiber : Fiber) : Bool
+      return false unless @world_stopped
+
+      stack = fiber.@stack
+      base = stack.pointer.address
+      bottom = stack.bottom.address
+      return false if bottom <= base
+
+      current = Thread.current
+      Thread.unsafe_each do |thread|
+        next if thread == current
+        sp = Platform.thread_sp(thread.to_unsafe)
+        next unless sp
+        spa = sp.address
+        return true if spa >= base && spa < bottom
+      end
+      false
     end
 
     protected def maybe_clear_stack_on_alloc : Nil

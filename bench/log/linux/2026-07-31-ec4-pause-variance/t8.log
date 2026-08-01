@@ -1,0 +1,29 @@
+2026-07-31T08:46:01.464996Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3908
+2026-07-31T08:46:04.541278Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:253:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in '??'
+  from /usr/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from /usr/share/crystal/src/json/builder.cr:281:5 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+Failed to raise an exception: END_OF_STACK
+[0x5e06a2b34206] print_backtrace at /usr/share/crystal/src/exception/call_stack/libunwind.cr:100:5
+[0x5e06a2abbdf8] __crystal_raise at /usr/share/crystal/src/raise.cr:225:1
+[0x5e06a2afdeb1] release at /usr/share/crystal/src/crystal/spin_lock.cr:28:5
+[0x5e06a2afaa13] run at /usr/share/crystal/src/fiber.cr:204:5
+[0x0] Failed to raise an exception: ???END_OF_STACK
+
+
+Tried to raise:: pointer is not a gcry allocation[ (0xArgumentError5e06a2b34206)
+] print_backtrace at /usr/share/crystal/src/exception/call_stack/libunwind.cr:100:5
+[Error while trying to dump the backtrace: 0xpointer is not a gcry allocation5e06a2abbdf8 (] ArgumentError)
+__crystal_raise at /usr/share/crystal/src/raise.cr:225:1
+[0x5e06a2afdeb1] release at /usr/share/crystal/src/crystal/spin_lock.cr:28:5
+[0x5e06a2afaa13] run at /usr/share/crystal/src/fiber.cr:

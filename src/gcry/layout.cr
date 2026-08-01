@@ -432,6 +432,9 @@ module Gcry
     def self.register_hash(key_type : K.class, value_type : V.class) forall K, V
       {% begin %}
         # @block is Proc? (multi-word) — word-scanned via hash_block_*; not a single ptr.
+        # Both @indices and @entries are noscan blobs: keep them alive, walk Entry
+        # slots for key/value. Grey-scanning @entries re-marks capacity garbage
+        # past entries_size (false retention / thr collapse) — do not.
         scan = StaticArray(UInt16, 1).new(0)
         noscan = StaticArray(UInt16, 2).new(0)
         n_scan = 0
@@ -544,6 +547,8 @@ module Gcry
 
       register(Exception)
       register(IO::Memory)
+      # JSON / HTTP hot path — @buffer is Pointer(UInt8) (malloc_atomic, noscan).
+      register(String::Builder)
 
       register(Deque(String))
       register(Deque(Int32))

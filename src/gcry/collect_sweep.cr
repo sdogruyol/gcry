@@ -48,7 +48,7 @@ module Gcry
                 mapped = chunk.value.mapped_bytes
                 cache_large_chunk(chunk, header)
                 @bytes_reclaimed_since_gc += mapped
-                @live_objects -= 1 if @live_objects > 0
+                live_objects_dec
               end
             end
           else
@@ -65,7 +65,7 @@ module Gcry
               limit = ChunkHeader.data_end(chunk).as(UInt8*)
               # When releasing empties: discover live first so fully-dead chunks
               # skip freelist link (unlink-only for pre-existing free blocks).
-              defer_reclaim = major && @release_empty_chunks
+              defer_reclaim = major && release_empty_chunks_this_collect?
               if defer_reclaim
                 while (cursor + block_bytes) <= limit
                   usable_payload += payload.to_u64
@@ -98,14 +98,18 @@ module Gcry
                     cursor += block_bytes
                   end
                 else
+                  # Fully-dead chunk: batch the live_objects accounting (one
+                  # store under STW) instead of a CAS per block.
+                  dead = 0_u64
                   cursor = ChunkHeader.data_start(chunk).as(UInt8*)
                   while (cursor + block_bytes) <= limit
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      @live_objects -= 1 if @live_objects > 0
+                      dead &+= 1
                     end
                     cursor += block_bytes
                   end
+                  live_objects_sub(dead)
                 end
               else
                 while (cursor + block_bytes) <= limit
@@ -142,23 +146,37 @@ module Gcry
                 mapped = chunk.value.mapped_bytes
                 @fully_free_chunk_bytes += mapped
                 ChunkHeader.set_holed(chunk, false)
-                if @release_empty_chunks && class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                  if dormant_budget_used + mapped <= @empty_chunk_retain && @empty_chunk_retain > 0
-                    # Optional: keep VA with DONTNEED when retain > 0.
-                    # Set DORMANT flag but defer madvise to post-STW
-                    # `flush_pending_dormant_chunks` (kernel VM lock outside STW).
+                if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
+                  can_dormant = @empty_chunk_retain > 0 &&
+                                (dormant_budget_used + mapped <= @empty_chunk_retain || !munmap_empty_chunks_this_collect?)
+                  # Drop freelist nodes via one rebuild_size_class_freelist per
+                  # class at end of sweep (rebuild skips DORMANT / dropped
+                  # chunks). Per-empty unlink_freelist_range was O(freelist ×
+                  # empties) and dominated phase_sweep under HTTP churn.
+                  bit = 1_u64 << class_index
+                  if can_dormant
+                    # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
+                    # Parallel — munmap was the soft-realloc amplifier).
+                    # When munmap is allowed, only dormant within retain; when
+                    # not (Parallel default), dormant all empties.
                     ChunkHeader.set_dormant(chunk, true)
                     dormant_budget_used += mapped
                     @dormant_chunk_bytes += mapped
-                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
-                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
-                  else
+                    if ChunkHeader.nursery?(chunk)
+                      rebuild_nursery_mask |= bit
+                    else
+                      rebuild_mask |= bit
+                    end
+                  elsif munmap_empty_chunks_this_collect?
                     @heap_size -= mapped if @heap_size >= mapped
                     @bytes_reclaimed_since_gc += mapped
                     @released_chunk_bytes += mapped
                     index_remove(chunk)
-                    unlink_freelist_range(class_index, ChunkHeader.nursery?(chunk),
-                      ChunkHeader.data_start(chunk).address, ChunkHeader.data_end(chunk).address)
+                    if ChunkHeader.nursery?(chunk)
+                      rebuild_nursery_mask |= bit
+                    else
+                      rebuild_mask |= bit
+                    end
                     chunk.value.next = to_unmap
                     to_unmap = chunk
                     drop = true
@@ -213,7 +231,7 @@ module Gcry
         @pending_empty_chunks = to_unmap
       end
 
-      # Page-HOLED freelist rebuild (empty-chunk release uses unlink_freelist_range).
+      # Page-HOLED + empty dormant/munmap: one freelist rebuild per touched class.
       if rebuild_mask != 0 || rebuild_nursery_mask != 0
         SIZE_CLASS_COUNT.times do |i|
           bit = 1_u64 << i
@@ -274,6 +292,8 @@ module Gcry
     # physical pages are released outside STW (kernel VM lock avoided).
     # Coalesces contiguous dormant ranges into a single madvise.
     private def flush_pending_dormant_chunks : Nil
+      return if @dormant_chunk_bytes == 0
+
       data_lo = UInt64::MAX
       data_hi = 0_u64
       page = Platform.host_page_size
@@ -423,13 +443,29 @@ module Gcry
     # Drop freelist nodes whose user pointer falls in [lo, hi).
     # Never rewrite !free? headers: a USED object can still be linked on the
     # freelist after a mid-`tlab_alloc_small` STW + flush (see scrub_freelists).
+    #
+    # Parallel EC can corrupt next_free into a cycle (long GDB: DEFAULT-1 stuck
+    # here under major sweep while peers sit in STW sigsuspend — world never
+    # restarts). Bound the walk; on runaway install the partial new_head and
+    # stop (do not rebuild mid-sweep — @chunks is being relinked). Orphaned
+    # FREE blocks are recovered by a later rebuild_size_class_freelist.
     private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
       head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
       new_head = Pointer(Void).null
       user = head
+      # Hard ceiling: a sane freelist cannot exceed mapped heap / min header.
+      max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
+      max_steps = 1024_u64 if max_steps < 1024_u64
+      steps = 0_u64
       while user
+        steps &+= 1
+        if steps > max_steps
+          break
+        end
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
+        # Break obvious self-loops early (cycle of length 1).
+        nxt = Pointer(Void).null if nxt == user
         addr = user.address
         if (addr < lo || addr >= hi) && BlockHeader.free?(header)
           payload = header.value.size
@@ -618,7 +654,7 @@ module Gcry
           end
         end
       end
-      @free_bytes = total
+      @free_bytes.set(total)
     end
 
     private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32 = 0_u32) : Nil
@@ -638,9 +674,9 @@ module Gcry
         @freelist_clean[class_index] = false
       end
 
-      @free_bytes += payload.to_u64
+      free_bytes_add(payload.to_u64)
       @bytes_reclaimed_since_gc += payload.to_u64
-      @live_objects -= 1 if @live_objects > 0
+      live_objects_dec
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.
@@ -650,7 +686,7 @@ module Gcry
       @heap_size -= mapped if @heap_size >= mapped
       @unmapped_bytes += mapped
       @bytes_reclaimed_since_gc += payload
-      @live_objects -= 1 if @live_objects > 0
+      live_objects_dec
     end
 
     private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil

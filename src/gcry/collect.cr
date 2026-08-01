@@ -18,8 +18,11 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD           =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD           = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_GC_THRESHOLD =  4194304_u64 # 4 MiB — library / conservative
+    PROCESS_GC_THRESHOLD = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    # EC_PARALLELISM>1: 32 MiB majors storm under HTTP (~150+/20s). 64 MiB
+    # cut Kemal EC4 /json ~47k→~53k (d=20); 128 MiB no further win.
+    PROCESS_GC_THRESHOLD_PARALLEL  = 67108864_u64 # 64 MiB
     DEFAULT_NURSERY_THRESHOLD      =   524288_u64 # 512 KiB minor
     MIN_ADAPTIVE_NURSERY_THRESHOLD =    65536_u64 # 64 KiB floor
     MAX_ADAPTIVE_NURSERY_THRESHOLD =  8388608_u64 # 8 MiB cap — prevents unbounded growth
@@ -71,6 +74,9 @@ module Gcry
     # absurd. Heap-scan marks stay ungated so Array/Hash buffers remain reachable.
     # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.
     property type_id_gate : Bool = false
+    # When true with type_id_gate, also gate Stack/Thread ambient roots (RSS
+    # trade-off; unsafe for Channel buffers — see mark_root_candidate).
+    property type_id_gate_stacks : Bool = false
     getter type_id_root_rejects : UInt64 = 0_u64
     # Per-source breakdown of ambient-root rejects. Combined with
     # type_id_root_rejects: stack + static + thread == total.
@@ -135,6 +141,15 @@ module Gcry
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
     getter last_phase_sweep_ns : UInt64 = 0_u64
+    # Collect orchestration (ns) — EC>1 thr outliers: SpinLock wait / STW stop-start / flush.
+    getter last_phase_post_stw_wait_ns : UInt64 = 0_u64
+    getter last_phase_stw_stop_ns : UInt64 = 0_u64
+    getter last_phase_stw_start_ns : UInt64 = 0_u64
+    getter last_phase_flush_ns : UInt64 = 0_u64
+    getter max_post_stw_wait_ns : UInt64 = 0_u64
+    getter post_stw_wait_total_ns : UInt64 = 0_u64
+    getter post_stw_wait_count : UInt64 = 0_u64
+    getter collect_coalesced : UInt64 = 0_u64
     # Other-thread stack scans clamped to captured RSP (vs full pthread range).
     getter sp_clamp_hits : UInt64 = 0_u64
     getter sp_clamp_fallbacks : UInt64 = 0_u64
@@ -155,6 +170,11 @@ module Gcry
     # Serializes Roots::Set mutate vs STW: stop_world must not freeze a thread
     # mid-add_root/delete_root (half-linked / freed node → SEGV on @roots.each).
     @roots_lock = Crystal::SpinLock.new
+    # Serializes post-STW munmap/madvise vs the next collect's stop_world.
+    # pthread mutex (not SpinLock): under Parallel, SpinLock waiters burned a
+    # whole EC worker for hundreds of ms while another flushes — ~8–11s of
+    # wait in a 20s Kemal /json run. Embedded LibC mutex — no GC malloc at boot.
+    @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -163,10 +183,18 @@ module Gcry
     @incremental_marking = false
     @inc_active = false
     @world_stopped = false
+    # Thread that called stop_world — may allocate / take GC locks during STW.
+    # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
+    @stw_owner : Thread? = nil
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
+    # Monotonic span of every address ever mapped — never shrinks on munmap.
+    # Used by GC.realloc/free to refuse LibC fallback after empty-chunk release
+    # tightened @heap_min/@heap_max around a dangling pointer.
+    @heap_span_lo : UInt64 = UInt64::MAX
+    @heap_span_hi : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -272,28 +300,54 @@ module Gcry
       !BlockHeader.free?(header)
     end
 
+    # ExecutionContext Monitor must not run process STW — it would signal-suspend
+    # the mutator and re-introduce GCRY_STRESS resume deadlocks.
+    # Compare via `@name` ivar (no String alloc); Thread.current? for early boot.
+    private def monitor_thread? : Bool
+      thread = Thread.current?
+      return false unless thread
+      name = thread.@name
+      !name.nil? && name == "SYSMON"
+    end
+
+    # Parallel worker bootstrap: `Thread#start` → `Fiber::new` → malloc before
+    # `@current_fiber` is installed. Collecting on that thread raises
+    # `Thread#current_fiber cannot be nil` inside Crystal's raise path
+    # (Kemal EC4 + low GCRY_THRESHOLD: END_OF_STACK at boot).
+    private def thread_not_ready_for_collect? : Bool
+      thread = Thread.current?
+      return true unless thread
+      thread.@current_fiber.nil?
+    end
+
     # Full major collection (resets any in-progress incremental cycle).
-    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    # `coalesce`: if true and a peer collect already cleared the debt while we
+    # waited on the post-STW mutex, skip (Parallel EC alloc storms).
+    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
       return if @collecting
+      return if monitor_thread?
+      return if thread_not_ready_for_collect?
 
       abort_incremental
       Trace.collect_start(major: true)
-      run_collection(major: true, scan_stack: scan_stack, roots: roots)
+      run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: true)
       Invariant.after_collect(self)
     end
 
     # Young-generation collection. Scans roots + old objects for nursery pointers
     # (no compiler write barrier required).
-    def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil) : Nil
+    def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
       return if @collecting
+      return if monitor_thread?
+      return if thread_not_ready_for_collect?
       return unless @nursery_enabled
 
       abort_incremental
       Trace.collect_start(major: false)
-      run_collection(major: false, scan_stack: scan_stack, roots: roots)
+      run_collection(major: false, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
       Trace.collect_end(self, major: false)
     end
 
@@ -305,6 +359,8 @@ module Gcry
       return false if @destroyed
       return false if @collecting
       return false if @running_finalizers
+      return false if monitor_thread?
+      return false if thread_not_ready_for_collect?
 
       started = monotonic_ns
       unless @inc_active
@@ -315,50 +371,65 @@ module Gcry
       # and we bail out so the alloc path falls through to a full STW collect.
       return false unless @inc_active
 
-      @collecting = true
-      @incremental_marking = true
+      lock_post_stw
       finished = false
       begin
-        lock_write
-        stop_world_quiescing_roots
-        mark_loop_budget(work_units)
-        if @mark_stack.empty?
-          # Sound termination: rematerialize edges from dirty pages, then continue.
-          if scan_dirty_pages_for_pointers(nursery_only: false)
-            mark_loop_budget(work_units)
+        @collecting = true
+        @incremental_marking = true
+        begin
+          lock_write
+          stop_world_quiescing_roots
+          mark_loop_budget(work_units)
+          if @mark_stack.empty?
+            # Sound termination: rematerialize edges from dirty pages, then continue.
+            if scan_dirty_pages_for_pointers(nursery_only: false)
+              mark_loop_budget(work_units)
+            end
+          end
+          if @mark_stack.empty?
+            enqueue_unreachable_finalizers
+            sweep(major: true)
+            @bytes_since_gc.set(0_u64)
+            @nursery_alloc_bytes.set(0_u64)
+            @expl_freed_bytes_since_gc = 0_u64
+            @collections += 1
+            @major_collections += 1
+            if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+              Platform.invalidate_static_root_cache
+            end
+            @soft_dirty_skip_until_major = false
+            @inc_active = false
+            @incremental_marking = false
+            finished = true
+            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+          end
+        ensure
+          start_world
+          unlock_write
+          unless @inc_active
+            @mark_stack.clear
+            @incremental_marking = false
+          end
+          record_pause(started)
+        end
+
+        if finished
+          @suppress_collect.add(1)
+          begin
+            flush_pending_empty_chunks
+            trim_large_cache
+          ensure
+            @suppress_collect.sub(1)
           end
         end
-        if @mark_stack.empty?
-          enqueue_unreachable_finalizers
-          sweep(major: true)
-          @bytes_since_gc = 0_u64
-          @nursery_alloc_bytes = 0_u64
-          @expl_freed_bytes_since_gc = 0_u64
-          @collections += 1
-          @major_collections += 1
-          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
-            Platform.invalidate_static_root_cache
-          end
-          @soft_dirty_skip_until_major = false
-          @inc_active = false
-          @incremental_marking = false
-          finished = true
-          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-        end
-      ensure
-        start_world
-        unlock_write
         @collecting = false
-        unless @inc_active
-          @mark_stack.clear
-          @incremental_marking = false
-        end
-        record_pause(started)
+      ensure
+        # Ensure flag clears even if flush raised.
+        @collecting = false
+        unlock_post_stw
       end
 
       if finished
-        flush_pending_empty_chunks
-        trim_large_cache
         @running_finalizers = true
         begin
           @finalizers.run_pending
@@ -453,15 +524,18 @@ module Gcry
       return unless @enabled
       return if @collecting
       return if @running_finalizers
+      return if @suppress_collect.get > 0
+      return if monitor_thread?
+      return if thread_not_ready_for_collect?
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
-        collect
+        collect(coalesce: true)
         return
       end
 
-      if @nursery_enabled && @nursery_alloc_bytes >= @nursery_threshold
-        minor_collect
+      if @nursery_enabled && @nursery_alloc_bytes.get >= @nursery_threshold
+        minor_collect(coalesce: true)
         return
       end
 
@@ -479,14 +553,15 @@ module Gcry
       # Guarded by `bytes_since_gc >= gc_threshold / 4` so an idle path that
       # just happened to cross 75% doesn't repeatedly enter a barely-empty
       # incremental cycle.
+      bsg = @bytes_since_gc.get
       if @incremental_auto &&
-         @bytes_since_gc >= (@gc_threshold >> 2) &&
-         @bytes_since_gc >= (@gc_threshold - (@gc_threshold >> 2))
+         bsg >= (@gc_threshold >> 2) &&
+         bsg >= (@gc_threshold - (@gc_threshold >> 2))
         collect_a_little(@incremental_work)
         return
       end
 
-      return if @bytes_since_gc < @gc_threshold
+      return if bsg < @gc_threshold
 
       # Threshold crossed: try incremental one more time. If the cycle
       # finishes here we skip STW entirely; otherwise only the final sweep
@@ -495,7 +570,7 @@ module Gcry
         return
       end
 
-      collect
+      collect(coalesce: true)
     end
 
     protected def destroy_collector : Nil
@@ -509,11 +584,14 @@ module Gcry
       @before_collect_callbacks.clear
       @heap_min = UInt64::MAX
       @heap_max = 0_u64
+      @heap_span_lo = UInt64::MAX
+      @heap_span_hi = 0_u64
       @collections = 0_u64
       @minor_collections = 0_u64
       @major_collections = 0_u64
       @stack_bottom = Pointer(Void).null
-      @nursery_alloc_bytes = 0_u64
+      @nursery_alloc_bytes.set(0_u64)
+      @bytes_since_gc.set(0_u64)
       @unmapped_bytes = 0_u64
       @bytes_before_gc = 0_u64
       @bytes_reclaimed_since_gc = 0_u64
@@ -548,6 +626,8 @@ module Gcry
       finish = base + chunk.value.mapped_bytes
       @heap_min = base if base < @heap_min
       @heap_max = finish if finish > @heap_max
+      @heap_span_lo = base if base < @heap_span_lo
+      @heap_span_hi = finish if finish > @heap_span_hi
       ensure_bitmap_covers(@heap_min, @heap_max)
     end
 
@@ -697,155 +777,238 @@ module Gcry
       end
     end
 
-    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?) : Nil
-      started = monotonic_ns
-      @collecting = true
-      # Generational mark skips old objects; old→young edges come from
-      # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
-      # old walk). Finalizers/WeakRef must not treat unmarked old as dead
-      # (see unmarked_live_object?).
-      @minor_only = !major
-      begin
-        # Start mark helpers before write-lock / STW (library heaps only; process
-        # STW keeps the pool empty — Crystal threads would freeze with the world).
-        ensure_mark_worker_pool if @parallel_mark_workers > 1
+    private def init_post_stw_mutex : Nil
+      # Fresh mutex (also used after fork — parent copy may be locked/undefined).
+      LibC.pthread_mutex_init(pointerof(@post_stw_mutex), Pointer(LibC::PthreadMutexattrT).null)
+    end
 
-        # Block fiber swaps, then suspend other OS threads.
-        # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
-        lock_write
-        stop_world_quiescing_roots
-        flush_all_tlabs
-        # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
-        # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
-        scrub_freelists
-        note_collection_begin
-        @mark_stack.clear
+    private def lock_post_stw : Nil
+      LibC.pthread_mutex_lock(pointerof(@post_stw_mutex))
+    end
 
-        t0 = monotonic_ns
-        if major
-          clear_all_marks
-        else
-          clear_nursery_marks
+    private def try_lock_post_stw : Bool
+      LibC.pthread_mutex_trylock(pointerof(@post_stw_mutex)) == 0
+    end
+
+    private def unlock_post_stw : Nil
+      LibC.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+    end
+
+    private def debt_under_threshold?(major : Bool) : Bool
+      if major
+        @bytes_since_gc.get < @gc_threshold
+      else
+        @nursery_alloc_bytes.get < @nursery_threshold
+      end
+    end
+
+    private def note_post_stw_wait(wait_ns : UInt64) : Nil
+      @last_phase_post_stw_wait_ns = wait_ns
+      @post_stw_wait_total_ns += wait_ns
+      @post_stw_wait_count += 1
+      @max_post_stw_wait_ns = wait_ns if wait_ns > @max_post_stw_wait_ns
+    end
+
+    # Acquire post-STW mutex. When *coalesce*, never sleep on the mutex: the
+    # `@collecting=false`→`unlock` window lets every EC worker enter
+    # `run_collection` and pile up (~11s wait / 20s wrk). Failed trylock →
+    # skip; next `maybe_collect` retries after the holder finishes. Returns
+    # false if skipped without holding the lock.
+    private def acquire_post_stw(coalesce : Bool, cols_before : UInt64, major : Bool) : Bool
+      t_wait = monotonic_ns
+      if coalesce
+        unless try_lock_post_stw
+          @collect_coalesced += 1
+          note_post_stw_wait(monotonic_ns - t_wait)
+          return false
         end
-        @last_phase_clear_ns = monotonic_ns - t0
+      else
+        lock_post_stw
+      end
+      note_post_stw_wait(monotonic_ns - t_wait)
+      true
+    end
 
-        t0 = monotonic_ns
-        @before_collect_callbacks.each(&.call)
-        # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
-        # realloc pin / add_root); still respect allow_interior_pointers.
-        @roots.each { |ptr| mark_explicit_root(ptr) }
-        roots.try &.each { |ptr| mark_explicit_root(ptr) }
-        mark_metadata_roots
-        # Fiber objects + suspended stacks (once; not also via push_gc_roots).
-        scrub_parked_fiber_stacks if scan_stack
-        scan_all_fiber_roots if scan_stack
-        scan_thread_roots if scan_stack && @stop_the_world
-        @last_phase_roots_ns = monotonic_ns - t0
+    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+      cols_before = @collections
+      # Hold post-STW mutex through flush so Parallel EC cannot stop_world
+      # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
+      return unless acquire_post_stw(coalesce, cols_before, major)
 
-        t0 = monotonic_ns
-        if @scan_static_roots
-          Platform.scan_static_roots do |low, high|
-            each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
+      begin
+        # Auto-collect coalescing: peer finished while we acquired — skip STW.
+        if coalesce && @collections > cols_before && debt_under_threshold?(major)
+          @collect_coalesced += 1
+          return
+        end
+
+        # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
+        started = monotonic_ns
+        @collecting = true
+        # Generational mark skips old objects; old→young edges come from
+        # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
+        # old walk). Finalizers/WeakRef must not treat unmarked old as dead
+        # (see unmarked_live_object?).
+        @minor_only = !major
+        begin
+          # Start mark helpers before write-lock / STW (library heaps only; process
+          # STW keeps the pool empty — Crystal threads would freeze with the world).
+          ensure_mark_worker_pool if @parallel_mark_workers > 1
+
+          # Block fiber swaps, then suspend other OS threads.
+          # stop_world_quiescing_roots: no mutator frozen mid-add/delete_root.
+          lock_write
+          t0 = monotonic_ns
+          stop_world_quiescing_roots
+          @last_phase_stw_stop_ns = monotonic_ns - t0
+          flush_all_tlabs
+          # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
+          # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
+          scrub_freelists
+          note_collection_begin
+          @mark_stack.clear
+
+          t0 = monotonic_ns
+          if major
+            clear_all_marks
+          else
+            clear_nursery_marks
+          end
+          @last_phase_clear_ns = monotonic_ns - t0
+
+          t0 = monotonic_ns
+          @before_collect_callbacks.each(&.call)
+          # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
+          # realloc pin / add_root); still respect allow_interior_pointers.
+          @roots.each { |ptr| mark_explicit_root(ptr) }
+          roots.try &.each { |ptr| mark_explicit_root(ptr) }
+          mark_metadata_roots
+          # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+          scrub_parked_fiber_stacks if scan_stack
+          scan_all_fiber_roots if scan_stack
+          scan_thread_roots if scan_stack && @stop_the_world
+          @last_phase_roots_ns = monotonic_ns - t0
+
+          t0 = monotonic_ns
+          if @scan_static_roots
+            Platform.scan_static_roots do |low, high|
+              each_static_range_excluding_heap(low, high) do |a, b|
+                Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
+              end
             end
           end
-        end
-        @last_phase_static_ns = monotonic_ns - t0
+          @last_phase_static_ns = monotonic_ns - t0
 
-        t0 = monotonic_ns
-        if scan_stack
-          scan_mutator_stack
-          scan_other_thread_stacks
-        end
-        @last_phase_stacks_ns = monotonic_ns - t0
-
-        # Conservatively find nursery pointers from old objects.
-        # Official path: page-dirty remembered set (soft-dirty / mprotect).
-        scan_old_for_nursery_pointers unless major
-
-        t0 = monotonic_ns
-        mark_loop
-        @last_phase_mark_ns = monotonic_ns - t0
-
-        # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
-        # drop them before sweep / empty-chunk unlink.
-        scrub_freelists
-
-        # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
-        enqueue_unreachable_finalizers
-
-        t0 = monotonic_ns
-        # For minor collections, snapshot nursery alloc bytes and reset survival
-        # counter before sweep accumulates surviving nursery payload.
-        if !major
-          @nursery_alloc_before_minor = @nursery_alloc_bytes
-          @nursery_survival_bytes = 0_u64
-        end
-        sweep(major: major)
-        @last_phase_sweep_ns = monotonic_ns - t0
-
-        if major
-          @bytes_since_gc = 0_u64
-          @nursery_alloc_bytes = 0_u64
-          @expl_freed_bytes_since_gc = 0_u64
-          @major_collections += 1
-          if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
-            Platform.invalidate_static_root_cache
+          t0 = monotonic_ns
+          if scan_stack
+            scan_mutator_stack
+            scan_other_thread_stacks
           end
-          # Next minor starts a fresh soft-dirty window after a major.
-          @soft_dirty_skip_until_major = false
-          arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-        else
-          @nursery_alloc_bytes = 0_u64
-          @minor_collections += 1
-          # Record nursery survival statistics for adaptive threshold.
-          note_nursery_survival
-          arm_page_barrier_after_collect
+          @last_phase_stacks_ns = monotonic_ns - t0
+
+          # Conservatively find nursery pointers from old objects.
+          # Official path: page-dirty remembered set (soft-dirty / mprotect).
+          scan_old_for_nursery_pointers unless major
+
+          t0 = monotonic_ns
+          mark_loop
+          @last_phase_mark_ns = monotonic_ns - t0
+
+          # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
+          # drop them before sweep / empty-chunk unlink.
+          scrub_freelists
+
+          # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
+          enqueue_unreachable_finalizers
+
+          t0 = monotonic_ns
+          # For minor collections, snapshot nursery alloc bytes and reset survival
+          # counter before sweep accumulates surviving nursery payload.
+          if !major
+            @nursery_alloc_before_minor = @nursery_alloc_bytes.get
+            @nursery_survival_bytes = 0_u64
+          end
+          sweep(major: major)
+          @last_phase_sweep_ns = monotonic_ns - t0
+
+          if major
+            @bytes_since_gc.set(0_u64)
+            @nursery_alloc_bytes.set(0_u64)
+            @expl_freed_bytes_since_gc = 0_u64
+            @major_collections += 1
+            if (@major_collections % STATIC_ROOT_REFRESH_INTERVAL) == 0
+              Platform.invalidate_static_root_cache
+            end
+            # Next minor starts a fresh soft-dirty window after a major.
+            @soft_dirty_skip_until_major = false
+            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+          else
+            @nursery_alloc_bytes.set(0_u64)
+            @minor_collections += 1
+            # Record nursery survival statistics for adaptive threshold.
+            note_nursery_survival
+            arm_page_barrier_after_collect
+          end
+          @collections += 1
+        ensure
+          t0 = monotonic_ns
+          start_world
+          @last_phase_stw_start_ns = monotonic_ns - t0
+          unlock_write
+          @minor_only = false
+          @mark_stack.clear
+          record_pause(started)
         end
-        @collections += 1
+
+        # Keep @collecting true through post-STW flush so GCRY_STRESS / auto
+        # collect cannot re-enter while we still hold the post-STW mutex (non-
+        # recursive) or munmap mid-peer-collect.
+        @suppress_collect.add(1)
+        begin
+          t_flush = monotonic_ns
+          # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+          # Still under post-STW mutex so the next collect cannot stop_world here.
+          flush_pending_empty_chunks
+          # DORMANT madvise outside STW — kernel VM lock contention avoided.
+          flush_pending_dormant_chunks
+          # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
+          flush_pending_page_release_chunks
+          # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+          release_large_freelist_pages
+          trim_large_cache
+          @last_phase_flush_ns = monotonic_ns - t_flush
+
+          # After a major collect, record the heap range observation so the
+          # adaptive headroom in `ensure_bitmap_covers` stays tight.
+          # We record the raw range_bytes (not headroom-inflated) to avoid a
+          # positive-feedback loop where headroom drives up the running average.
+          if major
+            range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
+            note_bitmap_growth(range_bytes)
+
+            # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
+            # Resets counters each major so the policy tracks the current working set.
+            total_large = @large_cache_hits + @large_cache_misses
+            if total_large > 0
+              hit_pct = (@large_cache_hits * 100) // total_large
+              current = @large_cache_retain
+              if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+                # Good reuse: double retain (capped at limit).
+                @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
+              elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
+                # Poor reuse: halve retain (floor at 1 MiB).
+                @large_cache_retain = {current >> 1, 1048576_u64}.max
+              end
+            end
+            @large_cache_hits = 0_u64
+            @large_cache_misses = 0_u64
+          end
+        ensure
+          @suppress_collect.sub(1)
+        end
       ensure
-        start_world
-        unlock_write
         @collecting = false
-        @minor_only = false
-        @mark_stack.clear
-        record_pause(started)
-      end
-
-      # Munmap outside STW — empty chunks + excess large freelist (reuse common).
-      flush_pending_empty_chunks
-      # DORMANT madvise outside STW — kernel VM lock contention avoided.
-      flush_pending_dormant_chunks
-      # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
-      flush_pending_page_release_chunks
-      # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-      release_large_freelist_pages
-      trim_large_cache
-
-      # After a major collect, record the heap range observation so the
-      # adaptive headroom in `ensure_bitmap_covers` stays tight.
-      # We record the raw range_bytes (not headroom-inflated) to avoid a
-      # positive-feedback loop where headroom drives up the running average.
-      if major
-        range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
-        note_bitmap_growth(range_bytes)
-
-        # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
-        # Resets counters each major so the policy tracks the current working set.
-        total_large = @large_cache_hits + @large_cache_misses
-        if total_large > 0
-          hit_pct = (@large_cache_hits * 100) // total_large
-          current = @large_cache_retain
-          if hit_pct > 50 && current < LARGE_CACHE_LIMIT
-            # Good reuse: double retain (capped at limit).
-            @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
-          elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
-            # Poor reuse: halve retain (floor at 1 MiB).
-            @large_cache_retain = {current >> 1, 1048576_u64}.max
-          end
-        end
-        @large_cache_hits = 0_u64
-        @large_cache_misses = 0_u64
+        unlock_post_stw
       end
 
       @running_finalizers = true
@@ -940,7 +1103,7 @@ module Gcry
 
     private def note_collection_begin : Nil
       @reclaimed_bytes_before_gc = @bytes_reclaimed_since_gc
-      @bytes_before_gc = @bytes_since_gc
+      @bytes_before_gc = @bytes_since_gc.get
       @bytes_reclaimed_since_gc = 0_u64
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64

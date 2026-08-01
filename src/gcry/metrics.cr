@@ -208,7 +208,7 @@ module Gcry
       io << "# HELP #{prefix}_tlab_refills_total TLAB freelist refills\n"
       io << "# TYPE #{prefix}_tlab_refills_total counter\n"
       io << "#{prefix}_tlab_refills_total #{m.tlab_refills}\n"
-      io << "# HELP #{prefix}_tlab_steals_total TLAB steals from other threads\n"
+      io << "# HELP #{prefix}_tlab_steals_total Cross-TLAB steals (unused: live steal removed; reserved for future CAS)\n"
       io << "# TYPE #{prefix}_tlab_steals_total counter\n"
       io << "#{prefix}_tlab_steals_total #{m.tlab_steals}\n"
       io << "# HELP #{prefix}_tlab_hits_total TLAB allocs satisfied without refill (hit)\n"

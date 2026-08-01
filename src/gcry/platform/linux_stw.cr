@@ -30,20 +30,31 @@ module Gcry
     #          sp @ +256 within mcontext (fault_address + regs[31]).
     {% if flag?(:x86_64) %}
       UCONTEXT_SP_OFFSET = 160
+      # glibc x86_64: offsetof(ucontext_t, uc_mcontext.gregs) == 40, NGREG == 23.
+      UCONTEXT_GREGS_OFFSET = 40
+      UCONTEXT_NGREGS       = 23
     {% elsif flag?(:aarch64) %}
       UCONTEXT_SP_OFFSET = 432
+      # Skip full mcontext register dump on aarch64 for now (SP clamp only).
+      UCONTEXT_GREGS_OFFSET = 0
+      UCONTEXT_NGREGS       = 0
     {% else %}
-      UCONTEXT_SP_OFFSET = 0
+      UCONTEXT_SP_OFFSET    = 0
+      UCONTEXT_GREGS_OFFSET = 0
+      UCONTEXT_NGREGS       = 0
     {% end %}
 
     # Back-compat alias used by specs / samples.
     UCONTEXT_RSP_OFFSET = UCONTEXT_SP_OFFSET
 
     MAX_STW_SP_SLOTS = 64
+    MAX_STW_GREGS    = 32
 
-    # Async-signal-safe SP table (no Hash / Array growth).
+    # Async-signal-safe SP + GP-register table (no Hash / Array growth).
     @@stw_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
     @@stw_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
+    @@stw_gregs = uninitialized StaticArray(StaticArray(UInt64, MAX_STW_GREGS), MAX_STW_SP_SLOTS)
+    @@stw_ngregs = uninitialized StaticArray(Int32, MAX_STW_SP_SLOTS)
     # Bitmask of occupied slots. Must be `uninitialized` — a class-var
     # `Atomic(...).new` goes through Crystal.once and SIGSEGVs in GC.init
     # before Thread/Fiber exist. Atomic-in-StaticArray also fails (CAS on copy).
@@ -70,14 +81,15 @@ module Gcry
       @@stw_booted = true
     end
 
-    # Record SP for the interrupted thread (signal-handler safe).
-    def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64) : Nil
+    # Record SP (+ GP regs) for the interrupted thread (signal-handler safe).
+    def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Nil
       ensure_stw_table
       claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
         if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
           @@stw_sps[i] = sp
+          copy_ucontext_gregs(i, uctx)
           return
         end
         i += 1
@@ -92,6 +104,7 @@ module Gcry
             if @@stw_claimed.compare_and_set(claimed, claimed | bit)
               @@stw_ids[i] = id
               @@stw_sps[i] = sp
+              copy_ucontext_gregs(i, uctx)
               return
             end
             break # retry outer loop with fresh claimed
@@ -100,6 +113,19 @@ module Gcry
         end
         return if i >= MAX_STW_SP_SLOTS # table full
       end
+    end
+
+    private def self.copy_ucontext_gregs(slot : Int32, uctx : Void*) : Nil
+      @@stw_ngregs[slot] = 0
+      return if uctx.null? || UCONTEXT_NGREGS <= 0
+      n = UCONTEXT_NGREGS
+      n = MAX_STW_GREGS if n > MAX_STW_GREGS
+      i = 0
+      while i < n
+        @@stw_gregs[slot][i] = (uctx + UCONTEXT_GREGS_OFFSET + i * 8).as(UInt64*).value
+        i += 1
+      end
+      @@stw_ngregs[slot] = n
     end
 
     # Lookup SP captured at last suspend for *id*.
@@ -118,12 +144,32 @@ module Gcry
       nil
     end
 
+    # Yield each GP register word saved at suspend for *id* (may be empty).
+    def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
+      return unless @@stw_enabled && @@stw_booted
+      claimed = @@stw_claimed.get(:acquire)
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
+          n = @@stw_ngregs[i]
+          j = 0
+          while j < n
+            yield Pointer(Void).new(@@stw_gregs[i][j])
+            j += 1
+          end
+          return
+        end
+        i += 1
+      end
+    end
+
     def self.clear_thread_sps : Nil
       return unless @@stw_booted
       @@stw_claimed.set(0_u64, :release)
       i = 0
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
+        @@stw_ngregs[i] = 0
         i += 1
       end
     end
@@ -136,6 +182,7 @@ module Gcry
       i = 0
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
+        @@stw_ngregs[i] = 0
         i += 1
       end
     end
@@ -166,17 +213,25 @@ module Gcry
       action.sa_flags = LibC::SA_SIGINFO
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, _info, uctx|
         sp = Platform.sp_from_ucontext(uctx)
-        Platform.record_thread_sp(LibC.pthread_self, sp) if sp != 0
+        Platform.record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
 
-        # Mirror Crystal::System::Thread suspend handler.
-        ::Thread.current.@suspended.set(true)
+        # Mirror Crystal::System::Thread suspend handler, but clear
+        # `@suspended` after SIG_RESUME so start_world can confirm wake.
+        thread = ::Thread.current
+        thread.@suspended.set(true)
 
         mask = uninitialized LibC::SigsetT
         LibC.sigfillset(pointerof(mask))
         LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
+        # sa_mask blocks SIG_RESUME during this handler until sigsuspend
+        # atomically unblocks it — otherwise a fast resume is consumed by the
+        # empty SIG_RESUME handler and sigsuspend waits forever (GCRY_STRESS).
         LibC.sigsuspend(pointerof(mask))
+        thread.@suspended.set(false)
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
+      # Block resume for the whole SIGPWR handler except inside sigsuspend.
+      LibC.sigaddset(pointerof(action.@sa_mask), STW_SIG_RESUME)
       LibC.sigaction(STW_SIG_SUSPEND, pointerof(action), nil)
       @@stw_installed = true
     end

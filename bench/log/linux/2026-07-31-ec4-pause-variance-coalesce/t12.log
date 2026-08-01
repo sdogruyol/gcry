@@ -1,0 +1,43 @@
+2026-07-31T09:02:38.053746Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4112
+2026-07-31T09:02:40.104140Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:254:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from bench/kemal/src/server.cr:90:35 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-07-31T09:02:40.104140Z  ERROR - kemal: pointer is not a gcry allocation
+pointer is not a gcry allocation (ArgumentError)
+  from bench/kemal/lib/gcry/src/gcry/heap.cr:254:13 in 'realloc'
+  from /usr/share/crystal/src/string/builder.cr:145:5 in '??'
+  from /usr/share/crystal/src/string/builder.cr:119:11 in 'write'
+  from /usr/share/crystal/src/json/builder.cr:115:7 in 'string'
+  from /usr/share/crystal/src/json/builder.cr:254:17 in '->'
+  from bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /usr/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /usr/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /usr/share/crystal/src/http/server.cr:506:5 in '->'
+  from /usr/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+Invalid memory access (signal 11) at address 0x5f9eff878
+[0x5f9eff4bbef6] print_backtrace at /usr/share/crystal/src/exception/call_stack/libunwind.cr:100:5
+[0x5f9eff4bbad4] -> at /usr/share/crystal/src/crystal/system/unix/signal.cr:213:5
+[0x781a54445330] ?? +132054478246704 in /lib/x86_64-linux-gnu/libc.so.6
+[0x5f9eff449ca5] run_collection at /home/uchiha/playground/gcry/bench/kemal/lib/gcry/src/gcry/roots.cr:75:15
+[0x5f9eff448da9] collect:coalesce at /home/uchiha/playground/gcry/bench/kemal/lib/gcry/src/gcry/collect.cr:332:7
+[0x5f9eff44854b] allocate at /home/uchiha/playground/gcry/bench/kemal/lib/gcry/src/gcry/collect.cr:560:7
+[0x5f9eff4448da] ?? +105136492136666 in ./bin/kemal-gcry
+[0x5f9eff511f70] * at /usr/share/crystal/src/gc.cr:121:5
+[0x5f9eff511bf8] -> at /home/uchiha/playground/gcry/bench/kemal/src/server.cr:91:34
+[0x5f9eff54a4a1] call at /home/uchiha/playground/gcry/bench/kemal/lib/kemal/src/kemal/route_handler.cr:164:39
+[0x5f9eff535b0d] call at /usr/share/crystal/src/http/server/handler.cr:30:7
+[0x5f9eff52b1e3] process at /usr/share/crystal/src/http/server/request_processor.cr:58:11
+[0x5f9eff528a7c] -> at /usr/share/crystal/src/http/server.cr:506:5
+[0x5f9eff48255d] run at /usr/share/crystal/src/fiber.cr:168:11
+[0x0] ???

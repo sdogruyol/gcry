@@ -1,0 +1,1 @@
+indexfix60 ok=60 fail=0 soft=0 hard=0 /60

@@ -13,12 +13,14 @@
 #
 # TLAB defaults OFF for the CI STW gate; pass `--tlab` to also stress
 # thread-local freelists (fixed under process STW — see CHANGELOG).
+# Pass `--nursery` to enable young-gen + mix minor/major collects (Parallel
+# worker STW scan: hardware SP + greg; TLAB forces full fiber-stack scan).
 #
 # Build: crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
-# Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab]
+# Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab] [--nursery]
 #
 # On failure the seed is printed for deterministic local replay.
-# CI gates `--workers=2,4` (no TLAB) and `--tlab --workers=2,4`.
+# CI gates `--workers=2,4`, `--tlab --workers=2,4`, and `--tlab --nursery --workers=2,4`.
 
 require "../src/gcry"
 require "wait_group"
@@ -31,6 +33,7 @@ seed = 1_i64
 iterations = 200
 worker_counts = [2]
 enable_tlab = false
+enable_nursery = false
 
 ARGV.each do |arg|
   case arg
@@ -44,6 +47,10 @@ ARGV.each do |arg|
     enable_tlab = true
   when "--no-tlab"
     enable_tlab = false
+  when "--nursery"
+    enable_nursery = true
+  when "--no-nursery"
+    enable_nursery = false
   end
 end
 
@@ -237,7 +244,12 @@ class StwMtPropertyTest
         end
       end
 
-      GC.collect
+      # Mix minors with majors when nursery is on (Parallel worker STW stack scan).
+      if Gcry.default_heap.nursery_enabled && (i % 3 != 0)
+        Gcry.default_heap.minor_collect
+      else
+        GC.collect
+      end
       @collects.add(1)
       unless verify("after collect ##{i + 1}")
         @running.set(false)
@@ -268,7 +280,12 @@ puts "  seed=#{seed} iterations=#{iterations} workers=#{worker_counts}"
 puts "  stop_the_world=#{Gcry.default_heap.stop_the_world}"
 
 Gcry.default_heap.tlab_enabled = enable_tlab
+if enable_nursery
+  Gcry.default_heap.nursery_enabled = true
+  Gcry.default_heap.nursery_threshold = UInt64::MAX
+end
 puts "  tlab_enabled=#{Gcry.default_heap.tlab_enabled?}"
+puts "  nursery_enabled=#{Gcry.default_heap.nursery_enabled}"
 puts ""
 
 if !Gcry.default_heap.stop_the_world

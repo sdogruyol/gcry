@@ -23,8 +23,16 @@ module Gcry
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
     # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
+    #
+    # type_id_gate applies to *static* roots only by default. Applying it to
+    # stacks rejected live Channel/Deque buffers and similar raw allocations
+    # whose first word is not a Crystal type_id — Log::AsyncDispatcher then
+    # SEGVd under frequent collect (EC1 + GCRY_THRESHOLD=32KiB boot; also
+    # amplified Parallel HTTP pressure). Heap edges still use mark_candidate
+    # (no gate). Opt back into stack gating with GCRY_TYPE_ID_GATE=1.
     private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
-      mark_impl(pointer, gate_type_id: @type_id_gate, base_only: !@allow_interior_pointers, source: source)
+      gate = @type_id_gate && (source == RootSource::Static || @type_id_gate_stacks)
+      mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
     end
 
     # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash
@@ -60,20 +68,37 @@ module Gcry
       # find_object ignores FREE → empty-chunk munmap risk. Clear FREE but keep
       # next_free so scrub can walk the chain (BlockHeader.set_used would null
       # next_free and sever the freelist → OOM). Do not scan (uninit payload).
+      #
+      # Also mark the rest of the freelist chain reachable via next_free while
+      # leaving those nodes FREE. Stack roots usually hold only the current
+      # `user`; TLAB batches the tail. Unmarked FREE tails make all-free chunks
+      # look empty → munmap → SEGV in free? when the mutator resumes
+      # (Kemal + GCRY_TLAB=1 @ EC1).
+      #
+      # Minor × old: never claim. Minor does not munmap old chunks, and clearing
+      # FREE on an old freelist node (then skipping mark) leaves USED-on-freelist
+      # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
       if BlockHeader.free?(header)
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread
         if base_only && addr != BlockHeader.user_from(header).address
           return
         end
-        h = header.value
-        h.flags = h.flags & ~BlockHeader::Flags::FREE
-        header.value = h
-        return if heap_marked?(header)
         if @minor_only && !BlockHeader.nursery?(header)
           return
         end
-        heap_set_mark(header)
+        h = header.value
+        h.flags = h.flags & ~BlockHeader::Flags::FREE
+        header.value = h
+        heap_set_mark(header) unless heap_marked?(header)
+        walk = h.next_free
+        while walk
+          break unless find_block(walk)
+          wh = BlockHeader.from_user(walk)
+          break unless BlockHeader.free?(wh)
+          heap_set_mark(wh) unless heap_marked?(wh)
+          walk = wh.value.next_free
+        end
         return
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
@@ -212,11 +237,20 @@ module Gcry
             return
           elsif size_match
             # Leaf / value-only type: nothing to mark in the body.
-            @layout_precise_scans += 1
-            return
+            # Exception: raw pointer buffers (Array/Deque payloads) have no
+            # Crystal header — first UInt64 is a heap pointer (high half ≠ 0).
+            # Real References put type_id at 0 and usually padding at 4..7.
+            # Colliding with a leaf type_id + alloc_size would skip scanning
+            # every element → UAF (Kemal EC4 …0008 class).
+            if size >= 8 && (user.as(UInt64*).value >> 32) != 0
+              # fall through to full conservative
+            else
+              @layout_precise_scans += 1
+              return
+            end
           end
-          # size mismatch: ignore the layout entry (likely a raw buffer whose
-          # leading word collided with a Crystal type_id) → full conservative.
+          # size mismatch (or leaf+pointer-shaped header): ignore the layout
+          # entry → full conservative.
         end
       end
 
@@ -271,6 +305,8 @@ module Gcry
 
       entries = Pointer(Void*).new(user.address + entries_off).value
       return if entries.null?
+      # Stale/corrupted @entries (mark miss → reuse) must not SEGV the collector.
+      return unless is_heap_ptr(entries)
 
       pow2 = Pointer(UInt8).new(user.address + pow2_off).value
       # Crystal: indices_size = 1 << pow2; entries_capacity = indices_size // 2

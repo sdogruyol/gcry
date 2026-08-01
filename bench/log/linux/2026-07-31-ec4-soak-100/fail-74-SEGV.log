@@ -1,0 +1,38 @@
+2026-07-31T10:05:14.191712Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:4500
+Failed to raise an exception: END_OF_STACK
+[0x57cedb9c1f262026-07-31T10:05:18.976843Z  ERROR - kemal: pointer is not a gcry allocation
+] Failed to raise an exception: pointer is not a gcry allocation (ArgumentError??END_OF_STACK)
+ +
+96545959321382 in [./bin/kemal-gcry0x
+57cedb9c1f26] [0x57cedb949e58??]  +96545959321382?? in  +./bin/kemal-gcry96545958829656
+ in ./bin/kemal-gcry[
+0x57cedb949e58[] 0x57cedb98bbd1??]  +??96545958829656 + in 96545959099345./bin/kemal-gcry in 
+./bin/kemal-gcry[
+0x[57cedb98bbd10x] 57cedb988733??]  +??96545959099345 + in 96545959085875./bin/kemal-gcry in 
+./bin/kemal-gcry[
+0x[57cedb9887330x] 0??]  +???96545959085875
+ in 
+Tried to raise:./bin/kemal-gcry: 
+pointer is not a gcry allocation[ (0xArgumentError0)
+] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+Failed to raise an exception: END_OF_STACK
+[0x57cedb9c1f26] ?? +96545959321382 in ./bin/kemal-gcry
+[0x57cedb949e58] ?? +96545958829656 in ./bin/kemal-gcry
+[0x57cedb98bbd1] ?? +96545959099345 in ./bin/kemal-gcry
+[0x57cedb988733] ?? +96545959085875 in ./bin/kemal-gcry
+[0x0] ???
+
+Tried to raise:: pointer is not a gcry allocation (ArgumentError)
+Invalid memory access (signal 11) at address 0x70
+[0x57cedb9c1f26] print_backtrace at /usr/share/crystal/src/exception/call_stack/libunwind.cr:100:5
+[0x57cedb9c1b04] -> at /usr/share/crystal/src/crystal/system/unix/signal.cr:213:5
+[0x7dcb10045330] ?? +138311100551984 in /lib/x86_64-linux-gnu/libc.so.6
+[0x57cedb972084] load_debug_info at /usr/share/crystal/src/fiber.cr:77:3
+[0x57cedb96eea8] printable_backtrace at /usr/share/crystal/src/env.cr:101:16
+[0x57cedba04f49] inspect_with_backtrace at /usr/share/crystal/src/exception.cr:58:5
+[0x57cedba0146d] write at /usr/share/crystal/src/log/format.cr:136:9
+[0x57cedba00ef5] -> at /usr/share/crystal/src/log/dispatch.cr:61:9
+[0x57cedb98858d] run at /usr/share/crystal/src/fiber.cr:168:11
+[0x0] ???

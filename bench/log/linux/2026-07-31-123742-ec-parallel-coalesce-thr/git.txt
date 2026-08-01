@@ -1,0 +1,1 @@
+4d78af0 Cut EC4 collect queue: post-STW mutex + auto-collect coalesce. SpinLock wait burned ~half a Kemal run; sleeping mutex plus skip-when-peer-collected brings /json to ~40k with 20/20 soak.

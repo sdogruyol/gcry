@@ -2,6 +2,7 @@ require "./block"
 require "./size_classes"
 require "./mark_bitmap"
 require "crystal/spin_lock"
+require "c/pthread"
 
 module Gcry
   # mmap-backed allocator with size classes and conservative mark–sweep.
@@ -33,11 +34,31 @@ module Gcry
     getter chunk_index_count : Int32 = 0
 
     getter heap_size : UInt64 = 0_u64
-    getter free_bytes : UInt64 = 0_u64
-    getter total_bytes : UInt64 = 0_u64
-    getter bytes_since_gc : UInt64 = 0_u64
-    getter live_objects : UInt64 = 0_u64
+    # Alloc accounting is Atomic so TLAB hits / Parallel mutators need not take
+    # @alloc_lock just to bump counters (see note_alloc_bytes). Freelist heads
+    # still serialise on SpinLock.
+    @free_bytes = Atomic(UInt64).new(0_u64)
+    @total_bytes = Atomic(UInt64).new(0_u64)
+    @bytes_since_gc = Atomic(UInt64).new(0_u64)
+    @live_objects = Atomic(UInt64).new(0_u64)
     getter large_free_bytes : UInt64 = 0_u64
+
+    def free_bytes : UInt64
+      @free_bytes.get
+    end
+
+    def total_bytes : UInt64
+      @total_bytes.get
+    end
+
+    def bytes_since_gc : UInt64
+      @bytes_since_gc.get
+    end
+
+    def live_objects : UInt64
+      @live_objects.get
+    end
+
     # Sum of large-chunk mapped_bytes (live + free on freelist).
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).
@@ -69,7 +90,7 @@ module Gcry
     @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
     @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
-    @nursery_alloc_bytes : UInt64 = 0_u64
+    @nursery_alloc_bytes = Atomic(UInt64).new(0_u64)
     # Lazily rebuilt address-sorted index (mark / static exclusion).
     @chunk_index : ChunkHeader** = Pointer(ChunkHeader*).null
     @chunk_index_count = 0
@@ -85,11 +106,26 @@ module Gcry
     @pause_ring_len = 0
     @pause_ring_pos = 0
     # TLAB / parallel-mark (see tlab.cr / parallel_mark.cr) — init here for process GC.
+    # Must stay SpinLock (not pthread_mutex): STW can suspend a mutator that
+    # holds a freelist lock; a sleeping mutex then deadlocks the collector /
+    # peers (seen: collections=0, heap growth unbounded, thr ~12k).
+    # @alloc_lock: large objects + TLAB table boot. Per-size-class freelist
+    # heads use @freelist_locks / @nursery_freelist_locks so Parallel workers
+    # allocating different sizes do not serialise on one lock.
+    # STW sweep must not take freelist locks (suspended mutator may hold them).
     @alloc_lock = Crystal::SpinLock.new
+    @freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
+    @nursery_freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
+    # Parallel: Atomic RMW on every alloc/free. EC1 default off — LOCK XADD /
+    # CAS on the hot path costs Kemal thr; single mutator + rare SYSMON is
+    # fine with plain get/set. Set true when EC_PARALLELISM>1 (gc_override).
+    property heap_counters_atomic : Bool = false
+    @index_lock = Crystal::SpinLock.new
+    @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
-    @tlab_hits = 0_u64
+    @tlab_hits = Atomic(UInt64).new(0_u64)
     @tlabs_booted = false
     @tlab_epoch = Atomic(UInt64).new(0_u64)
     @parallel_mark_workers = 1
@@ -107,6 +143,11 @@ module Gcry
     # HDR pause histogram (logarithmic, power-of-two buckets, 1ns..~1s).
     # PAUSE_HDR_BUCKETS = 32 → bucket `i` covers [2^i, 2^(i+1)) ns.
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
+    # Nesting depth: realloc (and similar) suppress auto-collect while a block
+    # is only kept alive via add_root / in-flight copy. Must be Atomic —
+    # Parallel EC races on plain Int left suppress stuck high → no auto-GC
+    # (seen: suppress≈4607, collections=0 after atomic alloc-counter unlock).
+    @suppress_collect = Atomic(Int32).new(0)
 
     def initialize
       {% if flag?(:gcry_side_bitmap) %}
@@ -133,7 +174,11 @@ module Gcry
       @tlab_steals = 0_u64
       @tlabs_booted = false
       @tlab_epoch = Atomic(UInt64).new(0_u64)
+      @suppress_collect = Atomic(Int32).new(0)
       @alloc_lock = Crystal::SpinLock.new
+      init_freelist_locks
+      @index_lock = Crystal::SpinLock.new
+      init_post_stw_mutex
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
@@ -192,11 +237,14 @@ module Gcry
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @heap_size = 0_u64
-      @free_bytes = 0_u64
+      @free_bytes.set(0_u64)
+      @total_bytes.set(0_u64)
+      @bytes_since_gc.set(0_u64)
       @large_free_bytes = 0_u64
       @large_mapped_bytes = 0_u64
-      @live_objects = 0_u64
-      @nursery_alloc_bytes = 0_u64
+      @live_objects.set(0_u64)
+      @nursery_alloc_bytes.set(0_u64)
+      @tlab_hits.set(0_u64)
       @large_cache_hits = 0_u64
       @large_cache_misses = 0_u64
       unless @chunk_index.null?
@@ -257,12 +305,28 @@ module Gcry
       # Pin across allocate: process-GC type_id_gate rejects raw Pointer buffers
       # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
       # not re-scan an old-gen owner — without an explicit root, collect would
-      # reclaim `pointer` before we copy/free → double-free / UAF (Kemal HTTP).
+      # reclaim `pointer` before we copy → UAF (Kemal HTTP).
+      #
+      # Also suppress auto-collect for the fresh allocate: under Parallel EC a
+      # mark miss on the pin still let sweep free `pointer`, then allocate
+      # handed the same block back as `fresh` → copy of freed memory
+      # (String::Builder#resize on /json).
+      #
+      # Do NOT free `pointer` here. Crystal updates owners after realloc
+      # returns (`@indices = @indices.realloc(n)`): until that store, the ivar
+      # still holds `pointer`. Freeing immediately lets a peer Parallel collect
+      # reuse the block (e.g. as a String) while Hash.@indices still points at
+      # it → Headers#[]? / keep_alive? SEGV with ASCII garbage @indices (GDB
+      # EC4). Leave the old block for the next sweep once the caller drops it.
       add_root(pointer)
       begin
-        fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        @suppress_collect.add(1)
+        begin
+          fresh = allocate(new_size, atomic: atomic, clear: !atomic)
+        ensure
+          @suppress_collect.sub(1)
+        end
         fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
-        free(pointer)
         fresh
       ensure
         delete_root(pointer)
@@ -281,11 +345,9 @@ module Gcry
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
 
-        with_alloc_lock do
-          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-          note_explicit_free(payload)
-          @live_objects -= 1 if @live_objects > 0
-        end
+        bytes_since_gc_sub(payload)
+        note_explicit_free(payload)
+        live_objects_dec
         @finalizers.notice_reclaim(pointer)
         with_alloc_lock { cache_large_chunk(chunk, header) }
         trim_large_cache
@@ -304,33 +366,29 @@ module Gcry
       @finalizers.notice_reclaim(pointer)
 
       if @tlab_enabled
-        # TLAB free is per-thread; no global lock needed.
+        # TLAB free is per-thread; counters are Atomic (no @alloc_lock).
         tlab_free_small(pointer, class_index, payload, BlockHeader.nursery?(header))
-        with_alloc_lock do
-          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-          note_explicit_free(payload.to_u64)
-          @live_objects -= 1 if @live_objects > 0
-        end
+        bytes_since_gc_sub(payload.to_u64)
+        note_explicit_free(payload.to_u64)
+        live_objects_dec
       else
-        # Non-TLAB path: global freelist + counters must be serialised with
-        # @alloc_lock (with_alloc_lock skips locking when TLAB is disabled).
-        @alloc_lock.sync do
-          if BlockHeader.nursery?(header)
+        # Non-TLAB: per-size-class freelist lock; counters are Atomic.
+        nursery = BlockHeader.nursery?(header)
+        with_freelist_lock(class_index, nursery) do
+          if nursery
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
             @nursery_freelists[class_index] = pointer
             @nursery_freelist_clean[class_index] = false
-            @free_bytes += payload.to_u64
           else
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
             @freelists[class_index] = pointer
             @freelist_clean[class_index] = false
-            @free_bytes += payload.to_u64
           end
-
-          @bytes_since_gc = @bytes_since_gc > payload ? @bytes_since_gc - payload : 0_u64
-          note_explicit_free(payload.to_u64)
-          @live_objects -= 1 if @live_objects > 0
         end
+        free_bytes_add(payload.to_u64)
+        bytes_since_gc_sub(payload.to_u64)
+        note_explicit_free(payload.to_u64)
+        live_objects_dec
       end
       Invariant.after_free(self, pointer)
       Trace.after_free(pointer)
@@ -339,6 +397,15 @@ module Gcry
     def is_heap_ptr(pointer : Void*) : Bool
       return false if pointer.null?
       !chunk_containing(pointer.address).nil?
+    end
+
+    # Address in the historic mmap span even if the chunk was already
+    # index-removed / munmapped and @heap_min/@heap_max were tightened.
+    # Used to refuse LibC.realloc/free fallback (glibc "invalid pointer").
+    def in_heap_span?(pointer : Void*) : Bool
+      return false if pointer.null? || @heap_span_hi == 0 || @heap_span_lo == UInt64::MAX
+      addr = pointer.address
+      addr >= @heap_span_lo && addr < @heap_span_hi
     end
 
     def self.round_size(size : UInt64) : UInt64
@@ -352,6 +419,10 @@ module Gcry
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
+      # Cooperative STW for signal-exempt threads (SYSMON): do not mutate the
+      # heap while the collector holds the world stopped.
+      wait_if_world_stopped_other_thread
+
       maybe_collect
       maybe_clear_stack_on_alloc
 
@@ -364,98 +435,168 @@ module Gcry
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
-        user, from_cache = with_alloc_lock { alloc_large(rounded, flags) }
+        user, from_cache = with_alloc_lock do
+          u, fc = alloc_large(rounded, flags)
+          note_alloc_bytes(rounded)
+          {u, fc}
+        end
         needs_clear = clear && from_cache
       elsif @nursery_enabled
         user = if @tlab_enabled
-                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true)
+                 # Counters Atomic inside tlab_alloc_small (no @alloc_lock on hit).
+                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded)
                else
-                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index)
+                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
                end
         needs_clear = clear && !@nursery_freelist_clean[class_index]
       else
         user = if @tlab_enabled
-                 tlab_alloc_small(rounded.to_u32, flags, class_index, false)
+                 tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded)
                else
-                 alloc_old_small(rounded.to_u32, flags, class_index)
+                 alloc_old_small(rounded.to_u32, flags, class_index, rounded)
                end
         needs_clear = clear && !@freelist_clean[class_index]
       end
 
       user.as(UInt8*).clear(rounded) if needs_clear
-      with_alloc_lock do
-        @total_bytes += rounded
-        @bytes_since_gc += rounded
-        @live_objects += 1
-      end
       user
     end
 
-    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      @alloc_lock.sync do
-        user = @nursery_freelists[index]
+    # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
+    private def note_alloc_bytes(rounded : UInt64) : Nil
+      if @heap_counters_atomic
+        @total_bytes.add(rounded)
+        @bytes_since_gc.add(rounded)
+        @live_objects.add(1_u64)
+      else
+        @total_bytes.set(@total_bytes.get &+ rounded)
+        @bytes_since_gc.set(@bytes_since_gc.get &+ rounded)
+        @live_objects.set(@live_objects.get &+ 1_u64)
+      end
+    end
 
-        if user.null?
+    private def free_bytes_sub(n : UInt64) : Nil
+      if @heap_counters_atomic
+        loop do
+          cur = @free_bytes.get
+          nxt = cur >= n ? cur - n : 0_u64
+          break if @free_bytes.compare_and_set(cur, nxt)[1]
+        end
+      else
+        cur = @free_bytes.get
+        @free_bytes.set(cur >= n ? cur - n : 0_u64)
+      end
+    end
+
+    private def bytes_since_gc_sub(n : UInt64) : Nil
+      if @heap_counters_atomic
+        loop do
+          cur = @bytes_since_gc.get
+          nxt = cur > n ? cur - n : 0_u64
+          break if @bytes_since_gc.compare_and_set(cur, nxt)[1]
+        end
+      else
+        cur = @bytes_since_gc.get
+        @bytes_since_gc.set(cur > n ? cur - n : 0_u64)
+      end
+    end
+
+    # Mutator free / Parallel: CAS. STW sweep is single-threaded (world
+    # stopped) — plain set matches pre-atomic bebedae and avoids a CAS per
+    # dead object (was ~half of phase_sweep on Kemal EC1).
+    private def live_objects_dec : Nil
+      live_objects_sub(1_u64)
+    end
+
+    private def live_objects_sub(n : UInt64) : Nil
+      return if n == 0
+      if @collecting || !@heap_counters_atomic
+        cur = @live_objects.get
+        @live_objects.set(cur > n ? cur - n : 0_u64)
+        return
+      end
+      loop do
+        cur = @live_objects.get
+        nxt = cur > n ? cur - n : 0_u64
+        break if @live_objects.compare_and_set(cur, nxt)[1]
+      end
+    end
+
+    private def free_bytes_add(n : UInt64) : Nil
+      if @collecting || !@heap_counters_atomic
+        @free_bytes.set(@free_bytes.get &+ n)
+      else
+        @free_bytes.add(n)
+      end
+    end
+
+    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      user = with_freelist_lock(index, true) do
+        u = @nursery_freelists[index]
+
+        if u.null?
           refill_size_class(index, payload, nursery: true)
-          user = @nursery_freelists[index]
-          raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if user.null?
+          u = @nursery_freelists[index]
+          raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if u.null?
         end
 
         if @blacklist_enabled
-          taken = take_non_blacklisted(user, index, true)
+          taken = take_non_blacklisted(u, index, true)
           if taken.null?
-            header = BlockHeader.from_user(user)
+            header = BlockHeader.from_user(u)
             @nursery_freelists[index] = header.value.next_free
           else
-            user = taken
+            u = taken
           end
         else
-          header = BlockHeader.from_user(user)
+          header = BlockHeader.from_user(u)
           @nursery_freelists[index] = header.value.next_free
         end
 
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.from_user(u)
         BlockHeader.set_used(header, payload, flags)
         if @incremental_marking || @collecting
           heap_set_mark(header)
         end
-
-        @free_bytes -= payload if @free_bytes >= payload
-        @nursery_alloc_bytes += payload.to_u64
-        user
+        u
       end
+      free_bytes_sub(payload.to_u64)
+      @nursery_alloc_bytes.add(payload.to_u64)
+      note_alloc_bytes(rounded)
+      user
     end
 
-    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32) : Void*
-      @alloc_lock.sync do
-        user = @freelists[index]
+    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      user = with_freelist_lock(index, false) do
+        u = @freelists[index]
 
-        if user.null?
+        if u.null?
           refill_size_class(index, payload, nursery: false)
-          user = @freelists[index]
-          raise OutOfMemoryError.new("failed to refill size class #{payload}") if user.null?
+          u = @freelists[index]
+          raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
         end
 
         if @blacklist_enabled
-          taken = take_non_blacklisted(user, index, false)
+          taken = take_non_blacklisted(u, index, false)
           if taken.null?
-            header = BlockHeader.from_user(user)
+            header = BlockHeader.from_user(u)
             @freelists[index] = header.value.next_free
           else
-            user = taken
+            u = taken
           end
         else
-          header = BlockHeader.from_user(user)
+          header = BlockHeader.from_user(u)
           @freelists[index] = header.value.next_free
         end
 
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.from_user(u)
         BlockHeader.set_used(header, payload, flags)
         heap_set_mark(header) if @incremental_marking || @collecting
-
-        @free_bytes -= payload if @free_bytes >= payload
-        user
+        u
       end
+      free_bytes_sub(payload.to_u64)
+      note_alloc_bytes(rounded)
+      user
     end
 
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
@@ -488,7 +629,7 @@ module Gcry
         @freelists[index] = free_head
         @freelist_clean[index] = true
       end
-      @free_bytes += added
+      @free_bytes.add(added)
     end
 
     # Fault a dormant empty chunk back in and install its freelist.
@@ -524,7 +665,7 @@ module Gcry
             @freelists[index] = free_head
             @freelist_clean[index] = true
           end
-          @free_bytes += added
+          @free_bytes.add(added)
           return true
         end
         chunk = chunk.value.next
@@ -592,7 +733,7 @@ module Gcry
         tv.next_free = user
         th.value = tv
       end
-      @free_bytes += mapped
+      @free_bytes.add(mapped)
       @large_free_bytes += mapped
     end
 
@@ -616,7 +757,7 @@ module Gcry
             ph.value = pv
           end
           mapped = chunk.value.mapped_bytes
-          @free_bytes -= mapped if @free_bytes >= mapped
+          free_bytes_sub(mapped)
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
           @large_cache_hits += 1
           return user
@@ -645,7 +786,7 @@ module Gcry
           mapped = chunk.value.mapped_bytes
           unlink_chunk(chunk)
           @heap_size -= mapped if @heap_size >= mapped
-          @free_bytes -= mapped if @free_bytes >= mapped
+          free_bytes_sub(mapped)
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
           @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
           @unmapped_bytes += mapped
@@ -664,15 +805,17 @@ module Gcry
 
     # Freelist bytes in size-class chunks (excludes large freelist).
     def small_free_bytes : UInt64
-      @free_bytes >= @large_free_bytes ? @free_bytes - @large_free_bytes : 0_u64
+      fb = @free_bytes.get
+      fb >= @large_free_bytes ? fb - @large_free_bytes : 0_u64
     end
 
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
       ptr = mmap_anonymous(bytes)
 
       # One emergency collect may free large objects (munmap) before failing hard.
-      # Never collect here under TLAB: refill holds @alloc_lock, and STW+collect
-      # while that lock is held deadlocks Parallel mutators spinning on it.
+      # Never collect here under TLAB: refill holds a freelist SpinLock, and
+      # STW+collect while that lock is held deadlocks Parallel mutators spinning
+      # on it.
       if Gcry.mmap_failed?(ptr) && !@collecting && @enabled && !@tlab_enabled
         collect(scan_stack: true)
         ptr = mmap_anonymous(bytes)
@@ -696,8 +839,9 @@ module Gcry
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
       # Inline insert into sorted chunk index. Under TLAB MT this is called
-      # from refill_size_class which already holds @alloc_lock (via
-      # with_alloc_lock), so index_insert is serialised. Under Boehm (library
+      # from refill_size_class which already holds the size-class freelist
+      # lock (via with_freelist_lock), so index_insert is serialised per class.
+      # Under Boehm (library
       # heap) there is no contention.
       index_insert(chunk)
       invalidate_chunk_cache
@@ -758,7 +902,23 @@ module Gcry
 
     # Binary search over address-sorted chunk index, with a single-slot
     # last-chunk cache (pointer chasing in mark drains one chunk at a time).
+    #
+    # Mutators race `index_insert` / last-chunk cache under Parallel EC —
+    # serialize with @index_lock (separate from @alloc_lock to avoid deadlock
+    # when refill holds @alloc_lock and a concurrent realloc looks up a chunk).
+    # Skip the lock only while the world is stopped (true STW). Do NOT skip
+    # for `@collecting` alone: post-STW flush keeps `@collecting` with the
+    # world restarted so mutators mmap/index_insert while peers realloc —
+    # unlocked lookup → false `owns_user_pointer?` ("not a gcry allocation").
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
+      if @world_stopped
+        chunk_containing_unlocked(addr)
+      else
+        @index_lock.sync { chunk_containing_unlocked(addr) }
+      end
+    end
+
+    private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
       # Last-chunk fast path: most lookups during mark hit the same chunk
@@ -920,31 +1080,34 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
-      invalidate_chunk_cache
-      index_ensure_cap(@chunk_index_count + 1)
-      pos = index_lower_bound(chunk.address)
-      i = @chunk_index_count
-      while i > pos
-        (@chunk_index + i).value = (@chunk_index + (i - 1)).value
-        i -= 1
+      @index_lock.sync do
+        invalidate_chunk_cache
+        index_ensure_cap(@chunk_index_count + 1)
+        pos = index_lower_bound(chunk.address)
+        i = @chunk_index_count
+        while i > pos
+          (@chunk_index + i).value = (@chunk_index + (i - 1)).value
+          i -= 1
+        end
+        (@chunk_index + pos).value = chunk
+        @chunk_index_count += 1
       end
-      (@chunk_index + pos).value = chunk
-      @chunk_index_count += 1
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
-      invalidate_chunk_cache
-      pos = index_lower_bound(chunk.address)
-      return if pos >= @chunk_index_count
-      return if (@chunk_index + pos).value != chunk
-
-      i = pos
-      last = @chunk_index_count - 1
-      while i < last
-        (@chunk_index + i).value = (@chunk_index + (i + 1)).value
-        i += 1
+      @index_lock.sync do
+        invalidate_chunk_cache
+        pos = index_lower_bound(chunk.address)
+        unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
+          i = pos
+          last = @chunk_index_count - 1
+          while i < last
+            (@chunk_index + i).value = (@chunk_index + (i + 1)).value
+            i += 1
+          end
+          @chunk_index_count -= 1
+        end
       end
-      @chunk_index_count -= 1
     end
 
     private def chunk_for(user : Void*) : ChunkHeader*?

@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.16.0] - 2026-08-01
+
+EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Supported
+path remains EC parallelism **1**, `GCRY_TLAB` **off** (Parallel+TLAB stays
+experimental — FINDINGS only, not folded into PERF).
+
+### Performance
+
+- **Linux Kemal** (same-host median-of-3, `wrk -c 100 -d 30`, scrub on): `/json`
+  **~87%** of Boehm @ **~0.80×** post-GC RSS; `/` **~82%** @ **~0.79×**. Session
+  `bench/log/linux/2026-08-01-093130/` (`cb4d7f2`; idle `/` from `slash-recut/`).
+  Fair Boehm ~40k baseline. See [docs/PERF.md](docs/PERF.md) (Linux).
+- **EC1 thr levers (Boehm ~40k fair):** restore v0.15 parked-fiber scrub on EC1
+  (**4 KiB blind** clear; Parallel keeps 512 B + `clear_range_safe`). Tip with
+  512 B + safe retained ~4× more `live_objects` than bebedae. EC1 alloc/free
+  counters use plain get/set (`heap_counters_atomic` only when
+  `EC_PARALLELISM>1`) — avoid LOCK XADD/CAS on the hot path.
+- **EC1 sweep pause:** STW `live_objects` / `free_bytes` updates no longer
+  CAS-loop per dead object. Empty dormant/munmap freelist cleanup batches
+  into one `rebuild_size_class_freelist` per size class. Dormant post-STW
+  flush early-outs when `dormant_chunk_bytes == 0`.
+- **EC>1 thr gap (experimental):** auto-collect **trylock-or-skip** on
+  `@post_stw` (no waiter pile-up; wait_total ~11s/20s → ~0). Default major
+  threshold **64 MiB** when `EC_PARALLELISM>1` (`GCRY_THRESHOLD` still wins;
+  EC1 stays 32 MiB). Same-host re-cut: gcry EC4 `/json` **~68%** of Boehm EC4
+  @ **~53k** abs (was ~52% @ ~36k). Long soak **100/100** soft=0 hard=0
+  (`2026-07-31-ec4-soak-100-post-thr`). No `PERF.md` fold-in. See FINDINGS.
+- **Parallel empty-chunk reclaim opt-in:** default stays off under EC>1 (thr).
+  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empty chunks (RSS ~3× better, thr ~25%
+  down on Kemal EC4). `GCRY_PARALLEL_RELEASE=1` adds munmap excess (hung in
+  A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
+- **EC>1 alloc-path A/B:** `GCRY_TLAB=1` @ EC4 still ~½ of TLAB-off thr (soft 0
+  — keep opt-in). `@alloc_lock` as `pthread_mutex` deadlocks under STW
+  (collections=0) — rejected; stay on `Crystal::SpinLock`. Fold
+  `note_alloc_bytes` into the freelist lock (one acquire per small alloc /
+  TLAB hit). Session `2026-07-31-ec4-alloc-thr-ab`. No `PERF.md` fold-in.
+  See FINDINGS.
+- **Atomic alloc counters:** `bytes_since_gc` / `live_objects` / `free_bytes` /
+  etc. are `Atomic` so TLAB hits need no `@alloc_lock` for accounting. EC4
+  TLAB-off thr unchanged (~51k); TLAB-on still ~52% of off. Session
+  `2026-07-31-ec4-atomic-counters`. No `PERF.md` fold-in. See FINDINGS.
+- **Per-size-class freelist SpinLocks:** TLAB-off small alloc/free lock only
+  that size class (not global `@alloc_lock`). Large + TLAB table/refill keep
+  `@alloc_lock` (per-class refill hurt TLAB-on via `@index_lock`×`find_block`).
+  Quiet EC4 `/json` ~**55k** (was ~51k). Session
+  `2026-07-31-ec4-sizeclass-locks`. No `PERF.md` fold-in. See FINDINGS.
+
+### Fixed
+
+- **EC1 STW stack scan thr regression (Parallel fallout):** process-STW full
+  fiber/pthread scans added for EC>1 mid-swap were also applied on EC1
+  (main+SYSMON). Every Thread root fiber is named `"main"`, so SYSMON hit a
+  full pthread map scan (`phase_stacks` ~0.02→~3ms; Kemal `/json` ~86%→~80%
+  Boehm). Restore cheap SP/`stack_top` other-thread scans when
+  `!multi_mutator_threads?`; keep aggressive Parallel path. Limit
+  foreign-SP scrub skip to Parallel only. Sessions `2026-07-31-164302`
+  (regress), `2026-07-31-173530` (fix); final cut above.
+- **Parallel `@suppress_collect` race:** plain `Int` `+=`/`-=` under concurrent
+  `realloc` lost decrements so suppress stuck high (≈4607) and auto-collect
+  never ran (`collections=0`, thr collapsed). Use `Atomic(Int32)`. Exposed when
+  alloc counters left `@alloc_lock` (shorter critical section). See FINDINGS.
+- **`chunk_containing` lock during post-STW:** skipped `@index_lock` whenever
+  `@collecting` (not only `@world_stopped`). Flush keeps `@collecting` after
+  `start_world`, so Parallel mutators `index_insert` while peers realloc
+  unlocked → false `owns_user_pointer?` (`pointer is not a gcry allocation` on
+  String::Builder). Lock skip only under true STW. Soft errors **0/60** after
+  empty-chunk gate (was 2–3/60). See FINDINGS.
+- **Parallel empty-chunk release off:** under multi-mutator STW, skip empty-chunk
+  munmap even when `release_empty_chunks` is on (EC1 unchanged). Residual
+  mark-miss × post-STW munmap surfaced as Kemal `/json` soft
+  `pointer is not a gcry allocation` (22/40 → **3/40** with the gate; hard
+  deaths 0/40). `GCRY_STW_STACK_LAG` env for LAG A/B (default 512 KiB). See
+  FINDINGS mark-miss triage.
+- **EC1 `stw_sp_clamp` counters:** idle/`stack_top` other-thread scan now
+  increments `sp_clamp_fallbacks` (missed after cheap-scan restore; aarch64 /
+  Darwin CI `samples/stw_sp_clamp` saw hits=0 fallbacks=0).
+- **`pattern_fuzz` Stride CI floor:** raise Stride p99/max vs-baseline limit
+  20→**80×** after EC1 4 KiB parked-fiber scrub (quiet ~11×; GHA crystal-latest
+  hit ~45–57×).
+
+- **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
+- **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
+- **Parallel worker STW stack scan:** `scan_other_thread_stacks` used `max(stack_top, sp)` for running fibers; stale `stack_top` above hardware SP skipped live frames, so Parallel+TLAB in-flight mallocs were swept (pin saw FREE). Prefer suspend SP (+ x86_64 red zone), mark saved GP registers from the suspend `ucontext`, and with TLAB scan the full fiber stack (SP/greg alone still flaked under Parallel>2). CI: `stw_mt_property_test --tlab --nursery` mixes minors.
+- **TLAB FREE-claim chain mark:** stack/thread FREE-claim only marked the current freelist `user`; TLAB batch tails reachable via `next_free` stayed unmarked FREE, so empty-chunk release munmapped them and `tlab_alloc_small` SEGVd in `BlockHeader.free?` (Kemal `GCRY_TLAB=1` @ EC1). Claim now marks the `next_free` chain (keep FREE on tails); abandon TLAB heads that fail `find_block`.
+- **Parallel mutator heap-index races (partial):** under `EC_PARALLELISM>1`, `chunk_containing` / last-chunk cache raced `index_insert` (false `owns_user_pointer?` / corruption). Added `@index_lock`; `with_alloc_lock` always locks (was a no-op when TLAB off); `ensure_tlabs` boots under `@alloc_lock`. Process-STW other-thread fiber stacks always full-scan. Kemal `EC>1` HTTP still fails — see FINDINGS.
+- **TLAB per-slot freelist locks:** Parallel dual-alloc on lock-free TLAB heads (`ec_alloc_stress` double-free / `not a gcry allocation`). Per-slot `Crystal::SpinLock` (StaticArray — no GC malloc under `@alloc_lock` at boot). STW `flush_all_tlabs` must not take slot locks (suspended mutator may hold them). Refill always re-claims under the slot lock. Kemal `EC>1` still open.
+- **STW running-fiber scan:** `scan_all_fiber_roots` skipped `fiber.running?`, relying on `thread.@current_fiber`; under Parallel that TLS can be briefly nil so stacks were missed. Under process STW, scan running fiber stacks too; if `current_fiber` is nil, fall back to pthread stack bounds + greg.
+- **STW × ExecutionContext deadlock (`GCRY_STRESS`):** signal-suspending `SYSMON` deadlocks (fiber `yield` wait, or lost `SIG_RESUME` leaving `sigsuspend` forever). Fix: skip SIGPWR for the Monitor; cooperative STW via `@world_stopped` barriers in `allocate` / `lock_read`; busy-wait `@suspended` for other threads (no `yield_current`); hold `Thread.lock` for stop→start; harden resume handshake; **forbid process collect on `SYSMON`** so the Monitor cannot STW-suspend the mutator.
+- **TLAB@EC1 measured:** correctness OK (Kemal 20/20 default + thr=32KiB; STW MT `--tlab`). `/json` thr ~71–77% of TLAB-off on same host — keep **opt-in** (`GCRY_TLAB=1`), not an EC1 default. Hit-path `find_block` dominates; stripping it SEGVs. See FINDINGS.
+- **EC>1 thr vs Boehm (measured):** Kemal EC4 TLAB-off `/json` **~23%** of Boehm EC4 and **~0.52×** gcry EC1 (session `2026-07-31-100844-ec-parallel-thr`). Correctness quieter; Parallel still anti-scales — experimental.
+- **Multi-mutator STW stack LAG:** full `guard→bottom` on every parked fiber dominated EC4 `phase_roots` (~100ms+/collect). Prefer suspend SP−red_zone when present; otherwise scan from `stack_top − 512KiB` (not full guard). Same-host A/B `/json` median-of-5: LAG **~30k** vs stw_full **~16k** (~1.9×); EC4 soak 30×8s **0/30**. Quiet re-cut vs Boehm: EC4 `/json` **~37%** Boehm EC4 and **~0.87×** gcry EC1 (was ~23% / ~0.52×). `GCRY_TLAB=1` @ EC4: soak 3/20, thr not above good TLAB-off — keep opt-in. See FINDINGS.
+- **EC4 post-STW queue:** SpinLock wait on `@post_stw` burned ~8–11s/20s of worker time under Parallel HTTP. Switch to embedded `pthread_mutex`; auto-collect **coalesce** when a peer already cleared the debt; pause stats exclude queue wait. EC4 `/json` ~**40k** med (d=20) + soak **20/20** (was ~22k + crash outliers). Quiet `d=30` re-cut vs Boehm: EC4 `/json` **~52%** Boehm EC4 and **~1.17×** gcry EC1 (was ~23% / ~0.52× pre-LAG). Long soak **96/100** (4× SEGV/MARK_MISS). See FINDINGS.
+- **Post-STW flush keeps `@collecting` + `@suppress_collect`:** clearing `@collecting` before flush allowed stress/auto re-entry while still holding `@post_stw_lock` (non-recursive SpinLock). Hold collecting through flush.
+- **realloc suppress-collect + Boehm-like thread stacks:** growing `realloc` sets `@suppress_collect` around the fresh allocate so a mark miss cannot free-then-reuse the pinned buffer mid-copy (String::Builder `/json` double-free). `scan_other_thread_stacks` always scans `current_fiber`'s stack (no `name=="main"` early-out — every Thread main fiber is named `"main"`); also scans the pthread stack when suspend SP lies there. Register `String::Builder` layout (`@buffer` noscan).
+- **type_id_gate stacks off by default:** process GC gated *all* ambient roots; stack words pointing at Channel/Deque buffers (no Crystal type_id) were dropped, so `Log::AsyncDispatcher#write_logs` SEGVd under frequent collect (`GCRY_THRESHOLD=32KiB` killed even EC1 at boot). Gate now applies to static roots only; `GCRY_TYPE_ID_GATE=1` restores stack gating. Kemal `EC>1` still has residual flakes.
+- **Post-STW flush × Parallel collect race:** `@collecting` cleared before `flush_pending_empty_chunks`, so another EC worker could `stop_world` mid-munmap while a peer swept (`realloc(): invalid pointer` via `!is_heap_ptr` → `LibC.realloc`). Serialize next collect behind `@post_stw_lock` held through post-STW flush; refuse LibC.realloc for addresses still in the historic heap span.
+- **Parallel pthread stack always scanned:** when SP sat on a pool fiber, `scan_other_thread_stacks` skipped the OS thread stack, so scheduler/main frames left on the pthread mapping were unmarked (Kemal EC4 ~1–2/40 SEGV). Always scan pthread bounds (SP−red_zone clamp when SP is there; full mapping otherwise).
+- **STW scan stack that holds SP:** `Scheduler#swapcontext` sets `current_fiber` before saving the previous SP. Mid-swap STW then scanned the next fiber / stale `stack_top` and missed live frames on the previous stack (SEGV @ `0x4`). Also scan `[SP−red_zone, bottom)` of whichever fiber stack contains the suspend SP.
+- **Process-STW full fiber stack scan:** under `@world_stopped`, scan every fiber from guard→bottom (ignore parked `stack_top`). Parallel EC4 still flaked with SP/current_fiber heuristics alone.
+- **Skip fiber scrub when SP still on stack:** parked-fiber scrub used `stack_top` while Parallel mid-swap left the OS thread SP on that stack — wiping live frames before mark.
+- **Historic heap span for realloc/free:** `@heap_min/@heap_max` tighten after munmap, so a dangling gcry pointer fell outside the live span and `GC.realloc`/`free` called LibC (`realloc(): invalid pointer`). Keep a monotonic `@heap_span_*` for the LibC-fallback guard.
+- **Mutator stack scan from hardware SP:** `scan_mutator` used `pointerof(local)` (mid-frame), skipping the leaf/red-zone window on the collecting worker under Parallel.
+- **Freelist unlink cycle guard:** `unlink_freelist_range` could spin forever on a corrupted `next_free` cycle (Parallel EC4 long-GDB hang: DEFAULT-1 in sweep while peers stuck in STW). Bound the walk and break self-loops; install the partial freelist instead of hanging the stopped world. Skip precise Hash entry walk when `@entries` is not a live heap pointer.
+- **Revert Hash `@entries` grey-scan:** marking `@entries` via `mark_candidate` false-retained capacity-slot garbage (layout_spec) and collapsed Kemal `/json` thr (~36% of Boehm). `@entries`/`@indices` stay noscan; Entry walk remains authoritative.
+- **`-Dwithout_mt` compile:** Parallel EC root pins (`Thread.@execution_context` / `Fiber::ExecutionContext`) are gated with the same Crystal flag condition so `fork_reinit` and Darwin/aarch64 sample builds compile.
+- **STW fiber full-scan only with multi-mutator:** process-STW always full-scanning every parked fiber (Parallel mid-swap hardening) crushed CI Kemal `/json` thr (~78%→~48% Boehm). Restore `stack_top` clamp when only main+Monitor threads exist; multi-mutator now uses SP / `stack_top−512KiB` LAG (see above) instead of blanket `guard→bottom`.
+- **CI pause-budget floor:** major p99 floor 100→200 ms, major max floor 250→350 ms (GHA flakes `100.72`, `163.6` / `270`). Stress `hello_env` / sample steps wrapped in `timeout` so a hang fails fast instead of a 6h cancel.
+
 ## [0.15.0] - 2026-07-29
 
 Correctness release: process-STW × TLAB freelist UAF class fixed and CI-gated;
@@ -428,7 +537,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sdogruyol/gcry/compare/v0.12.0...v0.13.0

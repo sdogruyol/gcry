@@ -1,0 +1,3 @@
+2026-07-31T08:47:42.917757Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3913
+Invalid memory access (signal 11) at address 0x4
+[0x60827302b206] 

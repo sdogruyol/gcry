@@ -87,7 +87,7 @@ module Gcry
         @@stw_booted = true
       end
 
-      def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64) : Nil
+      def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Nil
         ensure_stw_table
         claimed = @@stw_claimed.get(:acquire)
         i = 0
@@ -130,6 +130,10 @@ module Gcry
           i += 1
         end
         nil
+      end
+
+      def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
+        # Mach path records SP via thread_get_state; full greg dump not wired yet.
       end
 
       def self.clear_thread_sps : Nil

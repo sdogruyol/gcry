@@ -81,9 +81,13 @@ module GC
       # Linux floor was tried with HOLED default-on and did not help; adaptive
       # still grows on high hit-rate. Escape: GCRY_LARGE_CACHE=<bytes>.
     {% end %}
-    # type_id_gate on ambient roots only (stack/static). Heap scan must still
-    # mark raw Array/Hash buffers that lack a Crystal type_id header.
+    # type_id_gate on *static* ambient roots (BSS false hits). Stack/thread
+    # roots stay ungated: Channel/Deque buffers and similar raw allocations
+    # fail the type_id heuristic and were dropped → Log::AsyncDispatcher SEGV
+    # under frequent collect. Escape to also gate stacks: GCRY_TYPE_ID_GATE=1.
+    # Heap scan still uses mark_candidate (no gate) for Array/Hash buffers.
     heap.type_id_gate = true
+    heap.type_id_gate_stacks = false
     # Page blacklist: previously off on Darwin (freelist abandonment spiral under
     # all-conservative scanning). Re-enabled in P2.3 era now that layout-precise
     # scans cut false root hits sharply — the abandon spiral is unlikely.
@@ -206,6 +210,13 @@ module GC
       {% else %}
         heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
       {% end %}
+      # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
+      # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
+      if (ec = env_u64("EC_PARALLELISM")) && ec > 1
+        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
+        # Contended alloc/free counters need Atomic RMW.
+        heap.heap_counters_atomic = true
+      end
     end
 
     if env_flag_one?("GCRY_DISABLE_NURSERY")
@@ -257,10 +268,19 @@ module GC
 
     # Adaptive empty-chunk release is process default (dormant + munmap excess).
     # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
+    # Parallel: reclaim off by default. GCRY_PARALLEL_DORMANT=1 → DONTNEED all
+    # empties (RSS↓, thr↓). GCRY_PARALLEL_RELEASE=1 → munmap excess (risky).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
+    end
+    if env_flag_one?("GCRY_PARALLEL_DORMANT")
+      heap.parallel_empty_chunk_dormant = true
+    end
+    if env_flag_one?("GCRY_PARALLEL_RELEASE")
+      heap.parallel_empty_chunk_munmap = true
+      heap.parallel_empty_chunk_dormant = true
     end
 
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
@@ -295,11 +315,14 @@ module GC
     end
 
     if env_flag_one?("GCRY_TYPE_ID_GATE")
+      # Opt into pre-fix behavior: gate stack/thread ambient roots too.
       heap.type_id_gate = true
+      heap.type_id_gate_stacks = true
     end
 
     if env_flag_one?("GCRY_DISABLE_TYPE_ID_GATE")
       heap.type_id_gate = false
+      heap.type_id_gate_stacks = false
     end
 
     if env_flag_one?("GCRY_DISABLE_STATIC_ROOTS")
@@ -351,6 +374,11 @@ module GC
     end
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
+    end
+    # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
+    # 512KiB; 0 = full guard→bottom (thr regresses). Triage residual EC4 mark-miss.
+    if lag = env_u64("GCRY_STW_STACK_LAG")
+      heap.stw_multi_stack_lag = lag
     end
 
     # Boehm-style stack hygiene (no compiler maps). Opt-in; measure RSS/thr.
@@ -421,6 +449,12 @@ module GC
     if @@gcry_ready
       # Pointers from the LibC bootstrap era are not on the gcry heap.
       if !pointer.null? && !Gcry.default_heap.is_heap_ptr(pointer)
+        # Emptied chunks are index-removed then munmapped post-STW. A mark miss
+        # (or racing flush) makes is_heap_ptr false while the address is still
+        # in the historic heap span — LibC.realloc aborts "invalid pointer".
+        if Gcry.default_heap.in_heap_span?(pointer)
+          raise ArgumentError.new("GC.realloc: not a live gcry allocation")
+        end
         return bootstrap_realloc(pointer, size)
       end
       Gcry.default_heap.realloc(pointer, size)
@@ -461,6 +495,9 @@ module GC
     return if pointer.null?
     if @@gcry_ready && Gcry.default_heap.is_heap_ptr(pointer)
       Gcry.default_heap.free(pointer)
+    elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
+      # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
+      raise ArgumentError.new("GC.free: not a live gcry allocation")
     else
       LibC.free(pointer)
     end
