@@ -140,6 +140,13 @@ module Gcry
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
+    # In-header mark generation (bits 8–15). clear_all_marks bumps this (O(1))
+    # instead of walking the heap; wraps at 255 with a full clear. Synced to
+    # BlockHeader.mark_gen for barrier / BlockHeader.marked? callers.
+    @header_mark_gen = 1_u8
+    @header_mark_gen_full_clears = 0_u64
+    getter header_mark_gen : UInt8
+    getter header_mark_gen_full_clears : UInt64
     # HDR pause histogram (logarithmic, power-of-two buckets, 1ns..~1s).
     # PAUSE_HDR_BUCKETS = 32 → bucket `i` covers [2^i, 2^(i+1)) ns.
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
@@ -193,6 +200,11 @@ module Gcry
       @mark_pthread_count = 0
       @mark_pthread_mode = false
       @mark_epoch = Atomic(UInt64).new(0_u64)
+      @header_mark_gen = 1_u8
+      @header_mark_gen_full_clears = 0_u64
+      {% unless flag?(:gcry_side_bitmap) %}
+        BlockHeader.mark_gen = @header_mark_gen
+      {% end %}
       @mark_shutdown = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false

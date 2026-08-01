@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **In-header mark generation:** `clear_all_marks` bumps an 8-bit generation
+  in `BlockHeader` flags (bits 8–15) instead of walking the heap — kills
+  `phase_clear` (~3 ms → ~tens of ns under Parallel reclaim-off). Wrap at 255
+  does a full gen clear. Side-bitmap path unchanged. Soft **0/40**. Same-host
+  EC4 `/json` **~76.6%** Boehm @ ~**67k** (was ~73.4%; ≥75% campaign bar).
+  Pause p50 ~24→~20 ms. Session `bench/log/linux/2026-08-01-ec4-mark-gen/`.
+  No `PERF.md` fold-in.
 - **Parallel pthread LAG (experimental EC>1):** when suspend SP is on a pool
   fiber, scan only the top **256 KiB** of the OS pthread stack from high
   (was full map — dominated `phase_stacks` after fiber-scan dedupe).

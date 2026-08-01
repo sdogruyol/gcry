@@ -514,3 +514,16 @@ high (`stw_multi_pthread_lag`; `GCRY_STW_PTHREAD_LAG`; `0` = full). Soft
 `stw_mt_property_test` PASS. Still below ≥75% bar; experimental; no PERF.
 
 Detail: [`2026-08-01-ec4-pthread-lag/summary.md`](2026-08-01-ec4-pthread-lag/summary.md).
+
+## 2026-08-01 — In-header mark generation (phase_clear O(1))
+
+Session `bench/log/linux/2026-08-01-ec4-mark-gen/`.
+
+`phase_clear` ~3 ms was a full non-FREE header walk. **Ship:** mark gen in
+flags bits 8–15; `clear_all_marks` bumps gen (wrap@255 → full clear). Soft
+**0/40**. Same-host EC4 `/json` **76.6%** Boehm @ ~**67k** (was 73.4% @ ~65k);
+`phase_clear` ~3ms→~55ns; pause p50 ~24→~20 ms. EC1 smoke `/json` ~33.6k.
+`stw_mt_property_test` PASS. **≥75% campaign bar met**; stretch ~80% open.
+Experimental; no PERF. Residual: sweep (~5–7 ms) + RSS.
+
+Detail: [`2026-08-01-ec4-mark-gen/summary.md`](2026-08-01-ec4-mark-gen/summary.md).

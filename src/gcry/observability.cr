@@ -35,6 +35,8 @@ module Gcry
         pause_total_ns:               p.total_ns,
         phase_clear_ns:               heap.last_phase_clear_ns,
         phase_scrub_ns:               heap.last_phase_scrub_ns,
+        header_mark_gen:              heap.header_mark_gen.to_u64,
+        header_mark_gen_full_clears:  heap.header_mark_gen_full_clears,
         phase_roots_ns:               heap.last_phase_roots_ns,
         phase_static_ns:              heap.last_phase_static_ns,
         phase_stacks_ns:              heap.last_phase_stacks_ns,
