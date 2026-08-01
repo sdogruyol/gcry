@@ -595,3 +595,20 @@ mutator tax or stole EC cores while still walking empties inside pause.
 **~78.8%**. Experimental; no PERF.
 
 Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summary.md).
+
+## 2026-08-01 — Stretch ~80% follow-ups (REJECT / no-ship)
+
+| Lever | Soft | Quiet `/json` | Notes |
+|-------|-----:|--------------:|-------|
+| dirty∪marked clean skip (aligned mmap) | 0/40 | **72.6%** | ~5 skips/745; freelist churn; reverted |
+| `GCRY_CHUNK_BYTES=256KiB` | 0/40 | **78.7%** | abs ↑; % flat — not Parallel default |
+| lazy freelist lock elision | 0/40 | **76.3%** | classify+reclaim tax; reverted |
+
+Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
+empties are the hot freelist — skip sets stay tiny; next real lever is
+Go **allocBits** (sweep cost ∝ allocated slots) or RSS reclaim that
+shrinks chunk count without thr cliff.
+
+Detail: [`2026-08-01-ec4-sweep-skip/summary.md`](2026-08-01-ec4-sweep-skip/summary.md),
+[`2026-08-01-ec4-chunk256/summary.md`](2026-08-01-ec4-chunk256/summary.md),
+[`2026-08-01-ec4-sweep-elide/summary.md`](2026-08-01-ec4-sweep-elide/summary.md).
