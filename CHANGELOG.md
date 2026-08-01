@@ -7,14 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **EC1 `stw_sp_clamp` counters:** idle/`stack_top` other-thread scan now
-  increments `sp_clamp_fallbacks` (missed after cheap-scan restore; aarch64 /
-  Darwin CI `samples/stw_sp_clamp` saw hits=0 fallbacks=0).
-- **`pattern_fuzz` Stride CI floor:** raise Stride p99/max vs-baseline limit
-  20→**80×** after EC1 4 KiB parked-fiber scrub (quiet ~11×; GHA crystal-latest
-  hit ~45–57×).
 
 ## [0.16.0] - 2026-08-01
 
@@ -89,6 +81,12 @@ experimental — FINDINGS only, not folded into PERF).
   `pointer is not a gcry allocation` (22/40 → **3/40** with the gate; hard
   deaths 0/40). `GCRY_STW_STACK_LAG` env for LAG A/B (default 512 KiB). See
   FINDINGS mark-miss triage.
+- **EC1 `stw_sp_clamp` counters:** idle/`stack_top` other-thread scan now
+  increments `sp_clamp_fallbacks` (missed after cheap-scan restore; aarch64 /
+  Darwin CI `samples/stw_sp_clamp` saw hits=0 fallbacks=0).
+- **`pattern_fuzz` Stride CI floor:** raise Stride p99/max vs-baseline limit
+  20→**80×** after EC1 4 KiB parked-fiber scrub (quiet ~11×; GHA crystal-latest
+  hit ~45–57×).
 
 - **No live TLAB steal:** `steal_from_other_tlabs` could null another thread's freelist head while that thread was in lock-free `tlab_alloc_small` (TOCTOU dual-alloc). Removed cross-TLAB steal; idle freelists return via STW `flush_all_tlabs`. `@tlab_steals` stays 0 (metric reserved for a future CAS steal).
 - **FREE-claim × minor:** stack/thread FREE-claim cleared `FREE` before the minor/old filter, so an old freelist node became USED-unmarked and scrub dropped it. Skip claim entirely for old nodes during minor (minor never munmaps old chunks); nursery nodes still claim+mark.
