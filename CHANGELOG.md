@@ -9,10 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Darwin re-cut (tip / 0.17 pending):** Kemal `/json` **83.6%** @ **0.93×**
+  RSS (hold vs v0.13 **83.9%**; confirm **83.2%**); `/` **89.6%** @ **0.97×**.
+  acikturkiye `/api/v1/` **70.7%** thr @ **18.4×** RSS (was v0.13 **~78%** /
+  **~16×**; confirm soft-Boehm % discarded). Sessions
+  `bench/log/macos/2026-08-02-085522/` + confirm `091817/` (`18513e0`). See
+  [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **EC1 production-readiness re-cut:** acikturkiye `/api/v1/` **~90%** thr @
   **~3.43×** RSS (was v0.15 **~2.54×** RSS; thr hold). `perf_smoke`
   **PASS** `/json` **84%** (`BENCH_RUNS=5`). Quiet Kemal tip smoke **~83%**
-  `/json` (host soft; v0.16 PERF headline unchanged). Darwin not re-cut.
+  `/json` (host soft; v0.16 PERF headline unchanged).
   Session `bench/log/linux/2026-08-02-ec1-readiness/`.
 - **Parallel TLAB-off + lazy sweep → supported opt-in:** Stretch ~80% thr
   campaign closed (accepted hold **~78.8%** `/json`). Documented as a

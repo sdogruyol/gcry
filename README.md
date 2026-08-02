@@ -185,12 +185,14 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### macOS (Apple Silicon)
 
-| Workload | gcry vs Boehm (v0.13.0) |
+| Workload | gcry vs Boehm (tip / 0.17 pending)* |
 |----------|------------------------:|
 | Kemal `/json` throughput | **~84%** |
 | Kemal `/json` post-GC RSS | **~0.93x** |
-| Kemal `/` throughput | **~93%** |
-| Fat app `/api/v1/` throughput | **~78%** |
+| Kemal `/` throughput | **~90%** |
+| Fat app `/api/v1/` throughput | **~71%** |
+
+\*Kemal + acik: `bench/log/macos/2026-08-02-085522/` (median-of-3, scrub on). Fat-app RSS ~**18×** — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 

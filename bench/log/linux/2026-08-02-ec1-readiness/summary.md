@@ -20,4 +20,4 @@ re-cut (this host is WSL2 Linux).
 - Kemal `/json` **83.1%** is host-soft vs v0.16 PERF headline **~87%**
   (Boehm louder ~39k; gcry abs ~33k still in band). **Do not** replace
   PERF headline with this smoke.
-- Darwin Kemal / acik: still carry v0.13 / ACIKTURKIYE-macos — blocked here.
+- Darwin Kemal / acik: re-cut later same day → `bench/log/macos/2026-08-02-085522/`.

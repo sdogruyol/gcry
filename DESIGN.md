@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.16.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (measured): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.13.0 cut, not re-cut for 0.16): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**2.54×** Linux, carry v0.15) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+As of **v0.16.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (measured): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (tip Darwin re-cut `2026-08-02-085522/`): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**3.43×** Linux tip; ~**18×** Darwin) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## Goals
 
@@ -162,9 +162,9 @@ Shipped and dogfooded on Linux + macOS; **v0.16.0** recovers EC1 Kemal thr after
 
 **Kemal Linux (v0.16.0 cut):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](docs/PERF.md).
 
-**Kemal macOS (v0.13.0 cut):** `/` ~**93%**, `/json` ~**84%**, post-GC RSS ~**0.93–1.06×** — [PERF-macos.md](docs/PERF-macos.md).
+**Kemal macOS (tip / 0.17 pending):** `/` ~**90%**, `/json` ~**84%**, post-GC RSS ~**0.93–0.97×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux thr ~**90%**, RSS ~**2.54×** (carry v0.15) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**78%**, RSS ~**15.8×** (v0.13 cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux thr ~**90%**, RSS ~**3.43×** (tip) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**71%**, RSS ~**18×** (tip) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 

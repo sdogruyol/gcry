@@ -25,9 +25,22 @@ After **reverting side bitmap as default**, making **in-header MARK the standard
 
 RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on both paths — the in-header MARK trades some throughput for a dramatic RSS recovery. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
 
-## Headline (v0.13.0 — current Darwin cut) — macOS aarch64
+## Headline (tip / 0.17.0 pending — current Darwin cut) — macOS aarch64
 
-macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Not re-cut for v0.15.0 — cite these numbers until a new Darwin session.
+Primary: `bench/log/macos/2026-08-02-085522/` (`18513e0`, Crystal 1.21.0, Apple M2 Pro). Confirm: `2026-08-02-091817/` (`/json` **83.2%**, `/` **89.5%**). macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Scrub on (default). First Darwin re-cut since v0.13.0.
+
+Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|--------:|--------------:|
+| `/` | 86,579 | 77,575 | **89.6%** | **0.97×** |
+| `/json` | 62,769 | 52,454 | **83.6%** | **0.93×** |
+
+`/json` **holds** vs v0.13 (**83.9%** → **83.6%**; confirm **83.2%**); RSS still at Boehm parity (**0.93–1.07×**). Idle `/` soft (−3pp) — host noise; gate is `/json`.
+
+## Headline (v0.13.0) — macOS aarch64
+
+macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Superseded by tip cut above.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 
@@ -81,12 +94,14 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
   | **v0.13.0** `darwin-rss-tuning` | **90.3%** | **82.6%** | **1.04–1.05×** | `empty_chunk_retain` 512KB, `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS at near-Boehm parity; `/json` ~82% thr due to more frequent collections. |
 |  | **2026-07-27** `6416ad6` | **92.1%** | **85.5%** | **0.75–0.88×** | Small chunk 128 KiB, fiber scrub on. GCry RSS below Boehm on both paths. |
 |  | **2026-07-27** `256k-chunk` | **92.6%** | **83.9%** | **0.93–1.06×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). acikturkiye thr recovers 57%→78% with same RSS. Kemal flat. |
+| **tip / 0.17** `2026-08-02-085522` | **89.6%** | **83.6%** | **0.93–0.97×** | First Darwin re-cut since v0.13 (`18513e0`). `/json` hold; `/` soft −3pp. |
+| tip confirm `2026-08-02-091817` | **89.5%** | **83.2%** | **0.99–1.07×** | Same-day confirm; Kemal hold. |
 
 ## How to record (macOS)
 
 ```sh
 # Crystal 1.21+ on the Mac under test
-LABEL=macos-aarch64-$(date +%Y%m%d) ./bench/median_kemal_boehm.sh
+TRIALS=3 WRK_DURATION=30 bash bench/run_all.sh kemal
 # Update THIS file only — not docs/PERF.md
 ```
 

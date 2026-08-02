@@ -18,7 +18,7 @@ Cite [PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**.
 
 ## macOS numbers
 
-Cite [PERF-macos.md](PERF-macos.md). Last Darwin Kemal cut is **v0.13.0** (not re-cut for 0.16): `/` ~**93%**, `/json` ~**84%**, post-GC RSS ~**0.93–1.06×**.
+Cite [PERF-macos.md](PERF-macos.md). Tip Darwin re-cut (`2026-08-02-085522/`): `/` ~**90%**, `/json` ~**84%**, post-GC RSS ~**0.93–0.97×**. Fat-app ~**71%** thr @ ~**18×** RSS.
 
 ## When to try gcry
 

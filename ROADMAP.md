@@ -9,14 +9,14 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Conservative mark-sweep, stop-the-world
 - [x] Linux + macOS process GC (x86_64 + ARM64)
 - [x] Kemal `/json`: **~87%** Boehm throughput (v0.16 headline; tip smoke ~83% host-soft)
-- [x] Post-GC RSS: **~0.80×** Linux (Kemal), **~0.93×** macOS (Kemal; v0.13 cut)
+- [x] Post-GC RSS: **~0.80×** Linux (Kemal), **~0.93×** macOS (Kemal; tip Darwin re-cut)
 - [x] EC1 thr recovery after Parallel-era STW / scrub / counter fallout (v0.16.0)
 - [x] Fat app (acikturkiye): ~**90%** thr, ~**3.43×** RSS (Linux tip `2026-08-02-064142`)
 - [x] Parallel **TLAB-off + lazy sweep** supported opt-in (~79% `/json` tip; not default)
 - [x] Process-STW × TLAB freelist UAF class fixed; `stw_mt_property_test` CI-gated
 - [x] HDR pause histograms, Prometheus metrics, `/gc-stats` observability
 - [x] Layout-precise scanning, type_id gate, SP clamp
-- [x] macOS Darwin Kemal RSS ~**0.93–1.06×** Boehm (v0.13 cut; MADV_FREE_REUSABLE, 256 KiB chunks)
+- [x] macOS Darwin Kemal RSS ~**0.93–0.97×** Boehm (tip; MADV_FREE_REUSABLE, 256 KiB chunks)
 - [x] Shard-based integration: `require "gcry"` + `-Dgc_none`
 - [x] Fiber stack scrubbing (default-on since v0.13.0)
 - [x] 16-byte object header, deferred madvise (pause tail eliminated)
