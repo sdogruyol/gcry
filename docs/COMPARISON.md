@@ -12,7 +12,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
 | Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
-| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / munmap still experimental | Yes |
+| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / `PARALLEL_RELEASE` **unsupported** | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
@@ -31,7 +31,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Stay on Boehm when
 
-- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (still experimental in gcry)
+- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (unsupported in gcry)
 - Windows process GC today; Darwin soft-dirty / nursery parity
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 - You want zero-tuning production defaults across OS targets (gcry Parallel needs resize + measure)

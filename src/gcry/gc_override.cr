@@ -271,7 +271,7 @@ module GC
     # Parallel: reclaim off by default.
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded).
     #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy; thr↓).
-    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (risky; can hang).
+    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (UNSUPPORTED; can hang).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
@@ -284,6 +284,10 @@ module GC
       heap.parallel_empty_chunk_dormant_all = true
     end
     if env_flag_one?("GCRY_PARALLEL_RELEASE")
+      warn_unsupported_env(
+        "gcry: WARNING: GCRY_PARALLEL_RELEASE=1 is unsupported (can hang / force in-STW sweep). " \
+        "Supported Parallel RSS opt-in is GCRY_PARALLEL_DORMANT=1. See docs/POLICY.md\n"
+      )
       heap.parallel_empty_chunk_munmap = true
       heap.parallel_empty_chunk_dormant = true
     end
@@ -377,8 +381,13 @@ module GC
       heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
     end
 
-    # Parallel ExecutionContext support (experimental).
+    # TLAB under Parallel is UNSUPPORTED (supported opt-in keeps TLAB off).
+    # Knob retained for research / A/B only — emits a stderr warning.
     if env_flag_one?("GCRY_TLAB")
+      warn_unsupported_env(
+        "gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC " \
+        "(supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md\n"
+      )
       heap.tlab_enabled = true
     end
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
@@ -424,6 +433,12 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+  end
+
+  # stderr warn for knobs that stay wired for research but are not a product path.
+  # LibC.write avoids allocating during GC.init / apply_env_config.
+  private def self.warn_unsupported_env(msg : String) : Nil
+    LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
   end
 
   private def self.env_flag_one?(name : String) : Bool

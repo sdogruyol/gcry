@@ -54,7 +54,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **16 MiB**, Darwin **512 KiB**; library **0**) |
 | `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
 | `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
-| `GCRY_PARALLEL_RELEASE=1` | Parallel: munmap excess empties (forces in-STW sweep; can hang) |
+| `GCRY_PARALLEL_RELEASE=1` | **Unsupported** — Parallel munmap excess (forces in-STW sweep; can hang). stderr warn; prefer `GCRY_PARALLEL_DORMANT=1` |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
@@ -72,7 +72,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
-| `GCRY_TLAB=1` | Thread-local freelists (experimental under Parallel; supported Parallel path keeps TLAB **off**) |
+| `GCRY_TLAB=1` | **Unsupported** under Parallel — thread-local freelists (research/A/B; stderr warn). Supported path keeps TLAB **off** |
 | `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
@@ -140,8 +140,9 @@ Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
 ~**80%** `/json` @ ~5.5× RSS; `GCRY_PARALLEL_DORMANT=1` for RSS ~**75%**
 @ ~4× — [PERF.md](PERF.md). Correctness gate: `make soft-soak-ec4`
 (soft+hard **0/40**); CI runs `make soft-soak-ec4-smoke` (N=5).
-`GCRY_TLAB=1` and `GCRY_PARALLEL_RELEASE` remain experimental;
-`GCRY_PARALLEL_MARK` is research — [POLICY.md](POLICY.md).
+`GCRY_TLAB=1` and `GCRY_PARALLEL_RELEASE` are **unsupported** (knobs
+kept for research; process GC prints a stderr warning). Soft-soak refuses
+both. `GCRY_PARALLEL_MARK` is research — [POLICY.md](POLICY.md).
 
 ## CI
 

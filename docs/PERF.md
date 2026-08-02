@@ -31,8 +31,8 @@ escapes). Soft soak **0/40**. Quiet cut:
 | `/json` | **~78.8%** | ~69k | ~**8.5 ms** | ~**5.8×** | `2026-08-01-ec4-lazy-sweep/` |
 
 Same-host follow-ups often land **~83–88%** (Boehm noise). Stretch ~80%
-closed as accepted. Still experimental: `GCRY_TLAB=1`, Parallel empty
-munmap (`GCRY_PARALLEL_RELEASE`). Hub:
+closed as accepted. **Unsupported** (stderr warn; not product):
+`GCRY_TLAB=1`, Parallel empty munmap (`GCRY_PARALLEL_RELEASE`). Hub:
 `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |

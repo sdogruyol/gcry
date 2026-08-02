@@ -53,6 +53,12 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Changed
 
+- **Parallel experimental surface narrowed:** `GCRY_TLAB=1` and
+  `GCRY_PARALLEL_RELEASE=1` are **unsupported** product paths (knobs kept
+  for research/A/B). Process GC prints a stderr warning when either is set.
+  `soft_soak_ec4` refuses both so the gate stays on TLAB-off + lazy.
+  Prefer `GCRY_PARALLEL_DORMANT=1` for Parallel RSS. Docs: POLICY,
+  HARDENING, PERF, COMPARISON.
 - **EC1 post-STW sweep (pause):** sole-mutator path now ends STW before the
   O(heap) sweep (same shape as Parallel lazy). Empty munmap still goes through
   the pending list + flush; `@chunks` rebuild is guarded by

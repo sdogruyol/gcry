@@ -92,7 +92,7 @@ module Gcry
     #   dormant-all cuts RSS ~3× but thr ~25%). Opt in:
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded);
     #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max);
-    #   GCRY_PARALLEL_RELEASE=1 — EC1-style munmap excess (can hang/soft).
+    #   GCRY_PARALLEL_RELEASE=1 — unsupported munmap excess (can hang/soft).
     property parallel_empty_chunk_dormant : Bool = false
     property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false

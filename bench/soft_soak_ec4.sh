@@ -30,6 +30,15 @@ if ! [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
+# Gate measures the supported Parallel path only (TLAB off, no munmap reclaim).
+if [[ "${GCRY_TLAB:-}" == "1" || "${GCRY_PARALLEL_RELEASE:-}" == "1" ]]; then
+  echo "ERROR: soft_soak_ec4 requires supported Parallel path:" >&2
+  echo "  unset GCRY_TLAB and GCRY_PARALLEL_RELEASE (TLAB-off + lazy)." >&2
+  exit 1
+fi
+# Strip accidental inheritance so trials stay on the supported shape.
+unset GCRY_TLAB GCRY_PARALLEL_RELEASE
+
 mkdir -p "$BIN" "$OUT"
 rm -f "$OUT/trials.tsv" "$OUT/summary.txt"
 
