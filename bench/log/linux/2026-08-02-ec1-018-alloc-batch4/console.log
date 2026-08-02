@@ -1,0 +1,28 @@
+=== Session /home/uchiha/playground/gcry/bench/log/linux/2026-08-02-151155 (COUNT=1 GC=boehm gcry) ===
+=== Build mode: release (--release) ===
+=== GCRY_FLAGS: GCRY_ALLOC_BATCH=4 ===
+=== Build kemal binaries (release, GC=boehm gcry) ===
+  crystal build flags: --release
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+W: Shard "gcry" version (0.17.0) doesn't match tag version (0.1.0)
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.1.0 at ../..)
+  kemal-gcry   kemal-boehm (cached)
+
+══════════════════════════════════════════════
+  RUN 1/1  →  /home/uchiha/playground/gcry/bench/log/linux/2026-08-02-151155/run-01
+══════════════════════════════════════════════
+  metadata.yaml written (/home/uchiha/playground/gcry/bench/log/linux/2026-08-02-151155/run-01)
+
+╔══════════════════════════════════════════════╗
+║  Kemal median-of-3  (run 1/1)  ║
+╚══════════════════════════════════════════════╝
+  kemal run=1 trial=1 path=/ tag=boehm ... 84616.68 req/s
+  kemal run=1 trial=1 path=/ tag=gcry ... 

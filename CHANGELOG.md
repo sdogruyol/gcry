@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Shard-only thr/RSS campaign notes —
+**not a tagged release.** EC1 **≥95% @ ≤1.0×** residual named; Parallel RSS
+profile stays **opt-in**. No process-default lever cleared both gates.
+Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+
+### Documentation
+
+- **0.18 campaign FINDINGS:** Phase 0 EC1 baseline `/json` **87.9%** @
+  **0.81×** (`2026-08-02-120500/`); confirm soft **85.4%** @ **0.76×**
+  (`152806/`). EC4 reclaim-off **80.5%** @ **5.48×** (`145600/`).
+  Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+- **KEEP_CHUNKS ceiling re-measured:** `GCRY_KEEP_CHUNKS=1` → `/json`
+  **95.0%** @ **3.07×** RSS (`121411/`). Hits thr bar; **fails RSS ≤1.0×**
+  — escape only (was 0.9-era cite).
+- **Rejects (not defaults):** `empty_chunk_retain=32 MiB` thr↓ (**81.9%**);
+  hot-prefer dormant demotion (no thr win; reverted); Parallel dormant
+  **default-on** thr % **68.8%** @ **3.29×** (RSS ok, thr gate miss;
+  reverted). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32 still the
+  **supported RSS opt-in** (~75% @ ~4×).
+
+### Performance
+
+- Linux Kemal EC1 holds the ~**86–88%** / ~**0.80×** band (no default-path
+  leap past KEEP_CHUNKS-without-RSS-tax). Parallel thr opt-in unchanged
+  (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
+
 ## [0.17.0] - 2026-08-02
 
 Darwin Kemal re-cut (first since v0.13) + Parallel TLAB-off + lazy sweep as a

@@ -40,7 +40,22 @@ munmap (`GCRY_PARALLEL_RELEASE`). Hub:
 | `/` | 81846 | 66841 | **81.7%** | **0.79×** |
 | `/json` | 35780 | 31067 | **86.8%** | **0.80×** |
 
-`GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+`GCRY_KEEP_CHUNKS=1` re-measured in the parked 0.18 campaign (**95%** `/json` @ **3.07×** RSS) — see Unreleased notes below; not a release headline. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+
+### Unreleased — 0.18 campaign notes *(not a tagged cut)*
+
+Working notes only — **do not cite as a release headline.**
+Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+
+| Session | Config | `/json` % | RSS × |
+|---------|--------|----------:|------:|
+| `2026-08-02-120500/` | EC1 tip baseline | **87.9%** | **0.81×** |
+| `2026-08-02-152806/` | EC1 confirm (soft) | **85.4%** | **0.76×** |
+| `2026-08-02-121411/` | `GCRY_KEEP_CHUNKS=1` | **95.0%** | **3.07×** |
+| `2026-08-02-145600/` | EC4 reclaim-off | **80.5%** | **5.48×** |
+
+Gate **≥95% @ ≤1.0×** missed without KEEP_CHUNKS RSS tax. Parallel dormant
+default-on rejected; `GCRY_PARALLEL_DORMANT=1` remains the RSS opt-in (~75% @ ~4×).
 
 ### v0.15.0 Linux cut (superseded headline)
 
@@ -83,7 +98,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.16.0** cut |
+| `GCRY_KEEP_CHUNKS=1` (0.18 campaign re-cut) | **~89%** | **~95%** | **~3.07×** | thr escape only — `2026-08-02-121411/` (unreleased) |
 | `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
