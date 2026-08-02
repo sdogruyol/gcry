@@ -32,6 +32,9 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 - **Nightly fuzz CLI:** `nightly-fuzz.yml` now passes `--seconds=1800 --seed=42`.
   Positional `1800 42` was ignored (`bench/fuzz.cr` only parses flags), so the
   job ran the default **30s** fuzz instead of 30 minutes.
+- **CI flake/gates:** `perf-smoke` thr floor stays **70%** (75% failed at
+  68.4% on GHA). `rss_leak` gates **heap_size** late-vs-early primarily;
+  RSS is a looser secondary ceil (DONTNEED re-fault noise).
 
 ### Added
 
@@ -43,9 +46,10 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 - **EC1 numeric regression gate:** `bench/perf_smoke.sh` now also fails on
   post-GC RSS × Boehm (`MAX_RSS_X`, default **1.5**) and `/gc-stats`
   `pause_p50` (`MAX_PAUSE_P50_MS`, default **3.0**), after the existing
-  same-host `/json` thr % gate. CI `perf-smoke` uses `MIN_PCT=75`
-  `MAX_RSS_X=1.25` `MAX_PAUSE_P50_MS=2.5` (quiet tip ~85% @ ~0.8× @
-  ~0.6 ms; headroom for host noise).
+  same-host `/json` thr % gate. CI `perf-smoke` uses `MIN_PCT=70`
+  `MAX_RSS_X=1.25` `MAX_PAUSE_P50_MS=2.5` (thr stays at the historical
+  floor — GHA hosts often land ~68–88%; RSS×/pause catch pause-campaign
+  regressions).
 
 ### Changed
 

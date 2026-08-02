@@ -148,6 +148,6 @@ Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
 Format, specs, `-Dgc_none` samples, env smoke, `bench/churn`, `soak-smoke`,
 and EC4 soft-soak smoke on Linux x86_64 (Crystal 1.21 + latest). aarch64
 native and `macos-latest` for STW/fork samples. `perf-smoke` gates Kemal
-`/json` same-host thr % (`MIN_PCT=75`), post-GC RSS × (`MAX_RSS_X=1.25`),
+`/json` same-host thr % (`MIN_PCT=70`), post-GC RSS × (`MAX_RSS_X=1.25`),
 and `pause_p50` (`MAX_PAUSE_P50_MS=2.5`) via `bench/perf_smoke.sh`.
 See `.github/workflows/ci.yml`.
