@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **WSL2 mprotect barrier spec:** some WSL kernels accept
-  `mprotect(PROT_READ)` but still allow the write without `SIGSEGV`. Spec
-  pending instead of failing (`spec/barrier_spec.cr`). Soft-dirty remains
-  the preferred Linux barrier.
+- **mprotect barrier `@@mp_hits` Atomic:** SEGV handler increment was a
+  plain class `UInt64`; under `--release` the mutator re-read a
+  register-cached zero, so `barrier_spec` false-pending'd on Linux/WSL
+  even when the dirty card was set. Hits are `Atomic(UInt64)`; spec
+  asserts dirty card + hits, and still `pending!` only if the host
+  truly never traps the RO write. Soft-dirty remains the preferred
+  Linux barrier.
 
 ### Performance
 

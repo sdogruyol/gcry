@@ -85,14 +85,15 @@ describe "Gcry mprotect barrier" do
         before = Gcry::Platform.mprotect_hits
         page.as(UInt8*).value = 0xAB_u8 # SEGV → dirty + unprotect
         page.as(UInt8*).value.should eq(0xAB_u8)
-        # Some WSL2 kernels accept mprotect(PROT_READ) but still allow the
-        # write without SIGSEGV — handler never runs. Soft-dirty is the
-        # preferred Linux barrier; skip rather than red-flake the suite.
-        pending! "host mprotect RO write did not SEGV (seen on WSL2)" unless Gcry::Platform.mprotect_hits > before
-
         dirty, total = Gcry::Platform.count_mprotect_dirty_pages
+        # Dirty card lives in malloc'd bitmap (visible after SEGV). Hits are
+        # Atomic so --release mutators observe the increment. True host fail
+        # (mprotect RO accepted but write never traps) still pending-skips.
+        pending! "host mprotect RO write did not SEGV" unless dirty >= 1 || Gcry::Platform.mprotect_hits > before
+
         total.should eq(1)
         dirty.should eq(1)
+        Gcry::Platform.mprotect_hits.should be > before
       ensure
         LibC.munmap(page, LibC::SizeT.new(4096)) unless Gcry.mmap_failed?(page)
       end

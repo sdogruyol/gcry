@@ -30,14 +30,17 @@ module Gcry
     @@mp_installed = false
     @@mp_enabled = false
     @@mp_old_sa = uninitialized LibC::Sigaction
-    @@mp_hits : UInt64 = 0
+    # Atomic: SEGV handler mutates; plain UInt64 is register-cached under
+    # --release so the mutator never observes the increment (false-pending
+    # barrier_spec on WSL/Linux release builds).
+    @@mp_hits = Atomic(UInt64).new(0_u64)
 
     def self.mprotect_barrier_enabled? : Bool
       @@mp_enabled
     end
 
     def self.mprotect_hits : UInt64
-      @@mp_hits
+      @@mp_hits.get
     end
 
     # Install SEGV handler that re-enables write + marks page dirty.
@@ -137,7 +140,7 @@ module Gcry
       word = idx >> 6
       bit = idx & 63
       (@@mp_bits + word).value |= 1_u64 << bit
-      @@mp_hits &+= 1
+      @@mp_hits.add(1_u64)
 
       page = @@mp_base + idx.to_u64 * PAGE
       LibC.mprotect(Pointer(Void).new(page), LibC::SizeT.new(PAGE),
