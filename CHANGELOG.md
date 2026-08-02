@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on GHA) while nursery minors stayed ~15ms (full old→young), so
   `minor ≤ major` red-flaked since `c04f1ff`. Gate on absolute minor p50
   (50ms) + soft ratio 3.0 (`bench/pause_budget.cr`).
+- **Darwin `stw_sp_clamp` flake:** EC1 other-thread scan skipped threads
+  with nil `current_fiber` and silent-returned when fiber `stack_top` was
+  unusable — CI saw `hits=0 fallbacks=0` despite Mach STW. Fall through to
+  pthread scan; sample + process_spec park a real `Thread` during collect.
 
 ### Performance
 

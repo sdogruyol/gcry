@@ -146,14 +146,25 @@ end
     end
 
     it "GC.collect exercises Mach STW SP clamp" do
-      ch = Channel(Nil).new
-      spawn { ch.send(nil) }
-      ch.receive
+      # Park a real OS thread (Monitor-only wake races on Darwin CI).
+      # Thread.new has no Fiber execution_context — spin on Atomic.
+      ready = Atomic(Int32).new(0)
+      release = Atomic(Int32).new(0)
+      worker = Thread.new do
+        ready.set(1)
+        while release.get == 0
+        end
+      end
+      until ready.get == 1
+      end
 
       GC.collect
       Gcry::Platform.stw_sp_capture_installed?.should be_true
       h = Gcry.default_heap
       (h.sp_clamp_hits + h.sp_clamp_fallbacks).should be > 0
+
+      release.set(1)
+      worker.join
     end
   end
 {% end %}

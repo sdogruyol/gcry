@@ -241,9 +241,15 @@ module Gcry
         pthread_bounds = Platform.pthread_stack_bounds(pthread)
 
         unless multi
-          next unless fiber
-          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-          scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          # current_fiber can be nil (idle Monitor / mid-swap). Skipping the
+          # whole thread left Darwin CI stw_sp_clamp at hits=0 fallbacks=0 and
+          # missed OS-stack roots. Scan pthread bounds when fiber is absent.
+          if fiber
+            mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          else
+            scan_pthread_stack(pthread_bounds, sp)
+          end
           next
         end
 
@@ -279,8 +285,7 @@ module Gcry
 
       if sp
         spa = sp.address
-        if spa >= stack.pointer.address && spa < bottom
-          return unless guard < bottom
+        if spa >= stack.pointer.address && spa < bottom && guard < bottom
           top = stack_scan_low(spa, guard)
           @sp_clamp_hits += 1
           Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
@@ -303,14 +308,20 @@ module Gcry
       # Count as fallback so samples/stw_sp_clamp (and metrics) see the scan —
       # aarch64/Darwin often land here when suspend SP is outside fiber/pthread
       # bounds; skipping the counter made CI abort after the EC1 cheap path.
-      return unless guard < bottom
-      top = fiber.@context.stack_top.address
-      top = guard if top < guard
-      return unless top < bottom
-      @sp_clamp_fallbacks += 1
-      Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Thread)
+      if guard < bottom
+        top = fiber.@context.stack_top.address
+        top = guard if top < guard
+        if top < bottom
+          @sp_clamp_fallbacks += 1
+          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Thread)
+          end
+          return
+        end
       end
+
+      # Fiber stack unusable — still cover OS frames (Darwin SYSMON flake).
+      scan_pthread_stack(pthread_bounds, sp)
     end
 
     # Scan [SP−red_zone, bottom) of whichever fiber stack holds *sp*.
