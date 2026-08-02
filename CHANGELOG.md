@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserts dirty card + hits, and still `pending!` only if the host
   truly never traps the RO write. Soft-dirty remains the preferred
   Linux barrier.
+- **CI pause-budget Phase 4:** in-header mark-gen cut major p50 (~23→~7ms
+  on GHA) while nursery minors stayed ~15ms (full old→young), so
+  `minor ≤ major` red-flaked since `c04f1ff`. Gate on absolute minor p50
+  (50ms) + soft ratio 3.0 (`bench/pause_budget.cr`).
 
 ### Performance
 
