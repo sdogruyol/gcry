@@ -40,6 +40,12 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   hard SEGV over Parallel TLAB-off Kemal `/json`; CI `perf-smoke` runs the
   smoke. Tip local gate **40/40 soft=0 hard=0** (thr med ~66k). Process-GC
   `make soak-smoke` is now on the PR `test` job.
+- **EC1 numeric regression gate:** `bench/perf_smoke.sh` now also fails on
+  post-GC RSS × Boehm (`MAX_RSS_X`, default **1.5**) and `/gc-stats`
+  `pause_p50` (`MAX_PAUSE_P50_MS`, default **3.0**), after the existing
+  same-host `/json` thr % gate. CI `perf-smoke` uses `MIN_PCT=75`
+  `MAX_RSS_X=1.25` `MAX_PAUSE_P50_MS=2.5` (quiet tip ~85% @ ~0.8× @
+  ~0.6 ms; headroom for host noise).
 
 ### Changed
 

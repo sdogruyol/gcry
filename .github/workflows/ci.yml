@@ -339,10 +339,13 @@ jobs:
       - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
 
-      - name: Kemal A/B thr gate
+      - name: Kemal A/B thr+RSS+pause gate
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 BENCH_RUNS=3 ./bench/perf_smoke.sh
+          # Same-host floors with CI noise headroom (quiet tip ~85% @ ~0.8× @ ~0.6ms).
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
+            MIN_PCT=75 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
+            ./bench/perf_smoke.sh
 
       - name: Kemal E2E (endpoints + 60s load)
         run: |
