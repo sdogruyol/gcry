@@ -9,12 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **EC1 production-readiness re-cut:** acikturkiye `/api/v1/` **~90%** thr @
+  **~3.43×** RSS (was v0.15 **~2.54×** RSS; thr hold). `perf_smoke`
+  **PASS** `/json` **84%** (`BENCH_RUNS=5`). Quiet Kemal tip smoke **~83%**
+  `/json` (host soft; v0.16 PERF headline unchanged). Darwin not re-cut.
+  Session `bench/log/linux/2026-08-02-ec1-readiness/`.
 - **Parallel TLAB-off + lazy sweep → supported opt-in:** Stretch ~80% thr
   campaign closed (accepted hold **~78.8%** `/json`). Documented as a
   measured opt-in path in [docs/PERF.md](docs/PERF.md), COMPARISON,
   HARDENING, README — **not** the process default (EC1 remains the
   headline). `GCRY_TLAB=1` / Parallel munmap stay experimental. FINDINGS
   hub: `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
+
+### Fixed
+
+- **WSL2 mprotect barrier spec:** some WSL kernels accept
+  `mprotect(PROT_READ)` but still allow the write without `SIGSEGV`. Spec
+  pending instead of failing (`spec/barrier_spec.cr`). Soft-dirty remains
+  the preferred Linux barrier.
 
 ### Performance
 

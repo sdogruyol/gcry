@@ -14,7 +14,7 @@ EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Linux Kemal `
 
 Cite [PERF.md](PERF.md) (**Linux** only; do not invent). Prefer **`/json`**.
 
-**v0.16.0** (measured): `/json` ~**87%** of Boehm thr @ ~**0.80×** post-GC RSS; `/` ~**82%** @ ~**0.79×**. Fat-app (acikturkiye): ~**90%** thr / ~**2.54×** RSS *(carry v0.15)* — [ACIKTURKIYE.md](ACIKTURKIYE.md).
+**v0.16.0** (measured): `/json` ~**87%** of Boehm thr @ ~**0.80×** post-GC RSS; `/` ~**82%** @ ~**0.79×**. Fat-app (acikturkiye) tip: ~**90%** thr / ~**3.43×** RSS — [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 ## macOS numbers
 

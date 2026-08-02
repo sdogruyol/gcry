@@ -4,14 +4,15 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-## Current (v0.16.0) — "EC1 thr recovered; Parallel+TLAB still experimental"
+## Current (v0.16.0 + Unreleased tip) — "EC1 recovered; Parallel TLAB-off lazy opt-in"
 
 - [x] Conservative mark-sweep, stop-the-world
 - [x] Linux + macOS process GC (x86_64 + ARM64)
-- [x] Kemal `/json`: **~87%** Boehm throughput (~95% with `GCRY_KEEP_CHUNKS=1`, 0.9-era)
-- [x] Post-GC RSS: **~0.80×** Linux (measured), **~0.93×** macOS (Kemal)
+- [x] Kemal `/json`: **~87%** Boehm throughput (v0.16 headline; tip smoke ~83% host-soft)
+- [x] Post-GC RSS: **~0.80×** Linux (Kemal), **~0.93×** macOS (Kemal; v0.13 cut)
 - [x] EC1 thr recovery after Parallel-era STW / scrub / counter fallout (v0.16.0)
-- [x] Fat app (acikturkiye): ~90% thr, ~2.54× RSS (Linux; carry v0.15 `2026-07-29-112202`)
+- [x] Fat app (acikturkiye): ~**90%** thr, ~**3.43×** RSS (Linux tip `2026-08-02-064142`)
+- [x] Parallel **TLAB-off + lazy sweep** supported opt-in (~79% `/json` tip; not default)
 - [x] Process-STW × TLAB freelist UAF class fixed; `stw_mt_property_test` CI-gated
 - [x] HDR pause histograms, Prometheus metrics, `/gc-stats` observability
 - [x] Layout-precise scanning, type_id gate, SP clamp
