@@ -420,6 +420,10 @@ module GC
     if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = false
     end
+    # Parallel parked-fiber scrub window below saved SP (default 512).
+    if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
+      heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
+    end
   end
 
   private def self.env_flag_one?(name : String) : Bool

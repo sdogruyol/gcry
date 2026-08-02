@@ -609,6 +609,7 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | post-STW Parallel munmap excess | abort | thr **~32k** | SEGV + cliff; reverted |
 | Parallel threshold 96 MiB (lazy tip) | 0/40 | **80.0%** vs control **83.1%** | abs↓ RSS↑; default stays 64 |
 | alloc freelist batch pop (N=8) | 0/40 | **63.3%** vs control **88.1%** | opt-in kept; default 0 |
+| Parallel fiber scrub 1024 B | 0/40 | **83.7%** vs control **83.9%** | % flat; default stays 512 |
 
 Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
 empties **are** the alloc freelist — rearranging/parallelizing the same
@@ -670,3 +671,13 @@ path skips that lock; STW flush. Soft **0/40**. Quiet same-host: batch=8
 0**; knob remains opt-in only.
 
 Detail: [`2026-08-02-ec4-alloc-batch/summary.md`](2026-08-02-ec4-alloc-batch/summary.md).
+
+## 2026-08-02 — Parallel fiber scrub 1024 B (REJECT default)
+
+Session `2026-08-02-ec4-fiber-scrub-1k/`.
+
+`GCRY_FIBER_SCRUB_BYTES=1024` vs default 512. Soft **0/40**. Quiet
+same-host: 1024 → `/json` **83.7%** @ ~60k; control → **83.9%** @ ~47k
+(Boehm louder on treatment). **Default stays 512**; knob opt-in.
+
+Detail: [`2026-08-02-ec4-fiber-scrub-1k/summary.md`](2026-08-02-ec4-fiber-scrub-1k/summary.md).

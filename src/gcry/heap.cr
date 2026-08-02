@@ -223,6 +223,7 @@ module Gcry
       @clear_stack_bytes = 4096_u64
       @clear_stack_every = 1
       @scrub_fibers_enabled = false
+      @fiber_scrub_bytes = FIBER_CLEAR_STACK_CAP
       @clear_stack_bytes_total = 0_u64
       @fiber_scrub_bytes_total = 0_u64
       @clear_stack_calls = 0_u64
