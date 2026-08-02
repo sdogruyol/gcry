@@ -198,7 +198,8 @@ jobs:
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
-          ./bin/rss_leak --cycles=20 --objects=5000
+          # Warm-up absorbs heap/RSS ramp; gate is late vs early half of measured cycles only.
+          ./bin/rss_leak --warmup=15 --cycles=20 --objects=5000
 
       - name: Compiler GC contract + crystal tools
         run: |

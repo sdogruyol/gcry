@@ -35,6 +35,11 @@ Darwin Kemal re-cut (first since v0.13) + Parallel TLAB-off + lazy sweep as a
 
 ### Fixed
 
+- **RSS leak CI flake:** `bench/rss_leak.cr` now runs dedicated warm-up
+  cycles (default **15**) before sampling; late-vs-early gate applies only
+  to post-warm-up medians. Previously the first half of a 20-cycle run was
+  still ramping (~33% “growth” on GHA). `--warmup=` / `--limit=` knobs;
+  CI + `make rss-leak` updated.
 - **mprotect barrier `@@mp_hits` Atomic:** SEGV handler increment was a
   plain class `UInt64`; under `--release` the mutator re-read a
   register-cached zero, so `barrier_spec` false-pending'd on Linux/WSL
