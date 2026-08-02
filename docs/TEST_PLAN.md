@@ -193,8 +193,8 @@ Priority labels:
 |---|--------|------|-------------|
 | 5.1 | 2-3 weeks | **Perf regression alerting** — GitHub Action: `bench/perf_smoke.sh` on every PR. Gate: gcry /json ≥ 70% of Boehm **same-host**. Variance protocol: N wrk runs, discard min/max, median + noise ratio. Per-run JSON in `bench/log/` (artifact). No committed absolute-RPS baseline (CI ≠ macOS ≠ WSL). | CI alerting |
 | 5.2 | 2-3 weeks | **Microbenchmark suite** — `bench/micro/`: alloc latency (p50/p99 per size class), free latency, collect latency (p50/p99/max), TLAB refill cost, parallel mark steal cost, barrier arming cost, STW suspend/resume latency, GC safepoint check overhead. CI regression gate with 5% threshold. | Microbenchmarks |
-| 5.3 | 1 week | **Pause time budget test** — Assertions: major p99/max scaled to live set, incremental `collect_a_little` slice (STW-aware budget), minor ≤ major. *Do not* run under `GCRY_DEBUG_INVARIANTS=1` with `-Dgc_none` (checker allocates → stack overflow). | Pause budget suite |
-| 5.4 | 1 week | **RSS leak detection** — Intra-run gate: late-half median RSS vs early-half &lt;10% growth. RSS/heap ratio logged only. `bench/trend.json` gitignored artifact. | RSS leak gate |
+| 5.3 | 1 week | **Pause time budget test** — Assertions: major p99/max scaled to live set, incremental `collect_a_little` slice (STW-aware budget), minor p50 absolute + soft minor/major ratio (mark-gen majors can be faster than full-scan minors). *Do not* run under `GCRY_DEBUG_INVARIANTS=1` with `-Dgc_none` (checker allocates → stack overflow). | Pause budget suite |
+| 5.4 | 1 week | **RSS leak detection** — Warm-up cycles (default 15) then intra-run gate: late-half median RSS vs early-half &lt;10% growth. RSS/heap ratio logged only. `bench/trend.json` gitignored artifact. | RSS leak gate |
 
 **Benchmark variance protocol:**
 
@@ -218,7 +218,7 @@ For each workload (same host, same job):
 - [x] `bench/micro/` exists with at least 6 benchmarks covering alloc, free, collect, TLAB, STW, lock overhead
 - [x] Microbenchmarks run in CI with < 5 min overhead (current: ~6s)
 - [x] Pause budget assertions pass in CI (`bench/pause_budget.cr`)
-- [x] RSS leak gate is intra-run growth only (`bench/rss_leak.cr`); `bench/trend.json` is local/CI artifact (gitignored)
+- [x] RSS leak gate is post-warm-up intra-run growth only (`bench/rss_leak.cr`); `bench/trend.json` is local/CI artifact (gitignored)
 
 **Success signal:** Microbenchmark suite runs in CI, perf regression alerts fire only on real regressions (no false positives in 1 month), RSS leak trend visible.
 

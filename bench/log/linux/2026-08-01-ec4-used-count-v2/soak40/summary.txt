@@ -1,0 +1,2 @@
+OK=40/40 soft=0 hard=0 fail=0
+OK thr med=66343.22

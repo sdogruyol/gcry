@@ -52,6 +52,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **16 MiB**, Darwin **512 KiB**; library **0**) |
+| `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
+| `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
+| `GCRY_PARALLEL_RELEASE=1` | Parallel: munmap excess empties (forces in-STW sweep; can hang) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
@@ -63,15 +66,20 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
 | `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program precise layouts (Linux Kemal `/json` thr cost ~7pp) |
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
+| `GCRY_STW_STACK_LAG` | Multi-mutator parked-fiber scan depth below `stack_top` (bytes; default **256 KiB**; `0` = full guard→bottom) |
+| `GCRY_STW_PTHREAD_LAG` | Multi-mutator pthread scan from stack high when SP is on a fiber (bytes; default **256 KiB**; `0` = full map) |
+| `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: Parallel reclaim-off / TLAB-off sweeps after `start_world`) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
-| `GCRY_TLAB=1` | Thread-local freelists (parallel contexts) |
+| `GCRY_TLAB=1` | Thread-local freelists (experimental under Parallel; supported Parallel path keeps TLAB **off**) |
+| `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
 | `GCRY_SCRUB_FIBERS=1` | Force fiber scrub on (already process default) |
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
+| `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
@@ -127,7 +135,11 @@ ExecutionContext does not call `set_stackbottom` on swap — gcry refreshes from
 
 Static roots: main executable RW (+ adjacent BSS); skip `.so` data and large RELRO. Fiber stacks scanned once per collect.
 
-Parallel contexts: STW covers Crystal threads; `GCRY_TLAB=1` helps alloc; `GCRY_PARALLEL_MARK` is research — see [POLICY.md](POLICY.md).
+Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
+`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — Kemal
+`/json` ~**79%** Boehm tip; see [PERF.md](PERF.md). `GCRY_TLAB=1` and
+`GCRY_PARALLEL_RELEASE` remain experimental; `GCRY_PARALLEL_MARK` is
+research — [POLICY.md](POLICY.md).
 
 ## CI
 

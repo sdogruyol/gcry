@@ -25,13 +25,29 @@ module Gcry
     module Flags
       FREE   = 1_u32
       ATOMIC = 2_u32
-      # Bit 4: in-header MARK is the default. Opt into a side MarkBitmap with
-      # `-Dgcry_side_bitmap` (keeps this bit reserved / unused on that path).
+      # Legacy single-bit MARK (pre mark-gen). Cleared on set/clear; unused for
+      # marked? after mark-gen. Side bitmap path (`-Dgcry_side_bitmap`) ignores
+      # header mark bits entirely.
       MARK         =  4_u32
       LARGE        =  8_u32
       NURSERY      = 16_u32 # young generation (Phase 6)
       FINALIZER    = 32_u32 # has at least one finalizer entry
       DISAPPEARING = 64_u32 # has at least one disappearing link (WeakRef)
+      # Bits 8–15: mark generation (in-header path). Matches Heap#header_mark_gen /
+      # BlockHeader.mark_gen. clear_all_marks bumps gen (O(1)) instead of walking.
+      MARK_GEN_SHIFT =          8
+      MARK_GEN_MASK  = 0xFF00_u32
+    end
+
+    # Process-wide current mark generation for in-header MARK (mirrors active Heap).
+    @@mark_gen = 1_u8
+
+    def self.mark_gen : UInt8
+      @@mark_gen
+    end
+
+    def self.mark_gen=(value : UInt8) : UInt8
+      @@mark_gen = value
     end
 
     def self.from_user(user : Void*) : BlockHeader*
@@ -60,17 +76,20 @@ module Gcry
 
     {% unless flag?(:gcry_side_bitmap) %}
       def self.marked?(header : BlockHeader*) : Bool
-        (header.value.flags & Flags::MARK) != 0
+        gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
+        gen == @@mark_gen
       end
 
       def self.set_mark(header : BlockHeader*) : Nil
         h = header.value
-        h.flags |= Flags::MARK
+        h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
+                  (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
         header.value = h
       end
 
       def self.clear_mark(header : BlockHeader*) : Nil
         h = header.value
+        h.flags &= ~Flags::MARK_GEN_MASK
         h.flags &= ~Flags::MARK
         header.value = h
       end

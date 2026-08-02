@@ -89,16 +89,36 @@ module Gcry
     # Empty-chunk reclaim after major.
     # - EC1: dormant (DONTNEED within retain) + munmap excess (default).
     # - Parallel default: no empty reclaim (munmap amplified soft realloc;
-    #   dormant-all cuts RSS ~3× but thr ~42k→~32k on Kemal EC4). Opt in:
-    #   GCRY_PARALLEL_DORMANT=1 (DONTNEED all empties, keep VA) or
-    #   GCRY_PARALLEL_RELEASE=1 (EC1-style munmap excess; can hang/soft).
+    #   dormant-all cuts RSS ~3× but thr ~25%). Opt in:
+    #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded);
+    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max);
+    #   GCRY_PARALLEL_RELEASE=1 — EC1-style munmap excess (can hang/soft).
     property parallel_empty_chunk_dormant : Bool = false
+    property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
+    # Finish STW before size-class reclaim so pause excludes O(heap) sweep.
+    # Mutators resume; sweep holds per-class freelist locks (safe only when
+    # world is running — STW must not take those locks). Default on for
+    # Parallel reclaim-off; escape GCRY_DISABLE_LAZY_SWEEP=1.
+    property lazy_sweep : Bool = true
 
     private def release_empty_chunks_this_collect? : Bool
       return false unless @release_empty_chunks
       return true unless multi_mutator_threads?
       @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
+    end
+
+    # Post-STW sweep: freelist locks serialize alloc into the class being
+    # swept (TLAB-off). Dormant-only empty reclaim is OK (chunks stay linked).
+    # Munmap / HOLED freelist rebuild stay in-STW only — post-STW munmap of
+    # excess empties was REJECT'd (SEGV + thr cliff; see FINDINGS munmap-lazy).
+    private def sweep_after_world? : Bool
+      return false unless @lazy_sweep
+      return false unless multi_mutator_threads?
+      return false if @tlab_enabled
+      return false if munmap_empty_chunks_this_collect?
+      return false if @madvise_free_pages
+      true
     end
 
     private def munmap_empty_chunks_this_collect? : Bool
@@ -111,8 +131,16 @@ module Gcry
     # dominated EC4 phase_roots (~100ms+/collect). Mid-swap frames with SP on
     # the stack are covered by fiber_stack_sp_scan_low / scan_other_thread_stacks;
     # this lag catches stack_top that lags without a visible SP. Override via
-    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 512 KiB.
-    property stw_multi_stack_lag : UInt64 = 512_u64 * 1024
+    # GCRY_STW_STACK_LAG (bytes; 0 = full guard→bottom). Default 256 KiB
+    # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
+    property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
+
+    # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
+    # mapping for leftover scheduler frames. Full map (often ~8 MiB × N) dominates
+    # phase_stacks after fiber-scan dedupe. Scan only the top *lag* bytes from
+    # stack high (grows down). Override via GCRY_STW_PTHREAD_LAG; 0 = full map.
+    # Default 256 KiB (2026-08-01: soft 0/40; stacks ~7→~0.4 ms; thr ≥ 71.5% cut).
+    property stw_multi_pthread_lag : UInt64 = 256_u64 * 1024
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
@@ -213,15 +241,24 @@ module Gcry
         pthread_bounds = Platform.pthread_stack_bounds(pthread)
 
         unless multi
-          next unless fiber
-          mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-          scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          # current_fiber can be nil (idle Monitor / mid-swap). Skipping the
+          # whole thread left Darwin CI stw_sp_clamp at hits=0 fallbacks=0 and
+          # missed OS-stack roots. Scan pthread bounds when fiber is absent.
+          if fiber
+            mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
+            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          else
+            scan_pthread_stack(pthread_bounds, sp)
+          end
           next
         end
 
+        # Running/parked fiber stacks are already covered by scan_all_fiber_roots
+        # under stw_multi (full guard→bottom for running; LAG for parked). Dual
+        # scan_fiber_stack_full here was thr-only cost (~phase_stacks half).
+        # Keep fiber object pin + mid-swap SP stack + pthread (scheduler frames).
         if fiber
           mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-          scan_fiber_stack_full(fiber)
         end
 
         # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
@@ -248,8 +285,7 @@ module Gcry
 
       if sp
         spa = sp.address
-        if spa >= stack.pointer.address && spa < bottom
-          return unless guard < bottom
+        if spa >= stack.pointer.address && spa < bottom && guard < bottom
           top = stack_scan_low(spa, guard)
           @sp_clamp_hits += 1
           Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
@@ -272,28 +308,20 @@ module Gcry
       # Count as fallback so samples/stw_sp_clamp (and metrics) see the scan —
       # aarch64/Darwin often land here when suspend SP is outside fiber/pthread
       # bounds; skipping the counter made CI abort after the EC1 cheap path.
-      return unless guard < bottom
-      top = fiber.@context.stack_top.address
-      top = guard if top < guard
-      return unless top < bottom
-      @sp_clamp_fallbacks += 1
-      Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Thread)
+      if guard < bottom
+        top = fiber.@context.stack_top.address
+        top = guard if top < guard
+        if top < bottom
+          @sp_clamp_fallbacks += 1
+          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Thread)
+          end
+          return
+        end
       end
-    end
 
-    private def scan_fiber_stack_full(fiber : Fiber) : Nil
-      stack = fiber.@stack
-      guard = stack.pointer.address + Roots::PAGE_SIZE
-      bottom = stack.bottom
-      return unless guard < bottom.address
-
-      # Parallel process STW: full span. stack_top is stale for running fibers
-      # and can lag mid-swap for "parked" ones.
-      @sp_clamp_fallbacks += 1
-      Roots.scan_range(Pointer(Void).new(guard), bottom, safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Thread)
-      end
+      # Fiber stack unusable — still cover OS frames (Darwin SYSMON flake).
+      scan_pthread_stack(pthread_bounds, sp)
     end
 
     # Scan [SP−red_zone, bottom) of whichever fiber stack holds *sp*.
@@ -333,8 +361,8 @@ module Gcry
 
     # Scan [low, high) of the OS thread stack. When SP is inside the mapping,
     # clamp to SP−red_zone (still covers live frames). When SP is on a fiber
-    # stack, scan the full pthread mapping — Parallel workers leave scheduler
-    # frames there after switching onto a pool fiber.
+    # stack, Parallel workers leave scheduler frames near the pthread high end —
+    # scan a LAG window from high (not the full ~8 MiB map) unless lag is 0.
     private def scan_pthread_stack(pthread_bounds : {Void*, Void*}?, sp : Void*?) : Nil
       return unless pthread_bounds
 
@@ -349,9 +377,24 @@ module Gcry
           @sp_clamp_hits += 1
         else
           @sp_clamp_fallbacks += 1
+          # SP on pool fiber (or elsewhere): Parallel LAG from high.
+          if multi_mutator_threads?
+            lag = @stw_multi_pthread_lag
+            unless lag == 0
+              lagged = high > lag ? high - lag : low
+              low = lagged if lagged > low
+            end
+          end
         end
       else
         @sp_clamp_fallbacks += 1
+        if multi_mutator_threads?
+          lag = @stw_multi_pthread_lag
+          unless lag == 0
+            lagged = high > lag ? high - lag : low
+            low = lagged if lagged > low
+          end
+        end
       end
 
       Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|

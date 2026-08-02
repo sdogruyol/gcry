@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-02
+
+Darwin Kemal re-cut (first since v0.13) + Parallel TLAB-off + lazy sweep as a
+**supported opt-in** (~79% `/json`). Linux Kemal PERF headline carries
+**v0.16.0** (~87% / ~0.80×); EC1 remains the default path.
+
+### Documentation
+
+- **Darwin re-cut:** Kemal `/json` **83.6%** @ **0.93×** RSS (hold vs v0.13
+  **83.9%**; confirm **83.2%**); `/` **89.6%** @ **0.97×**. acikturkiye
+  `/api/v1/` **70.7%** thr @ **18.4×** RSS (was v0.13 **~78%** / **~16×**;
+  confirm soft-Boehm % discarded). Sessions
+  `bench/log/macos/2026-08-02-085522/` + confirm `091817/` (`18513e0`). See
+  [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+- **EC1 production-readiness re-cut:** acikturkiye `/api/v1/` **~90%** thr @
+  **~3.43×** RSS (was v0.15 **~2.54×** RSS; thr hold). `perf_smoke`
+  **PASS** `/json` **84%** (`BENCH_RUNS=5`). Quiet Kemal tip smoke **~83%**
+  `/json` (host soft; v0.16 PERF headline unchanged).
+  Session `bench/log/linux/2026-08-02-ec1-readiness/`.
+- **Parallel TLAB-off + lazy sweep → supported opt-in:** Stretch ~80% thr
+  campaign closed (accepted hold **~78.8%** `/json`). Documented as a
+  measured opt-in path in [docs/PERF.md](docs/PERF.md), COMPARISON,
+  HARDENING, README — **not** the process default (EC1 remains the
+  headline). `GCRY_TLAB=1` / Parallel munmap stay experimental. FINDINGS
+  hub: `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
+
+### Fixed
+
+- **RSS leak CI flake:** `bench/rss_leak.cr` now runs dedicated warm-up
+  cycles (default **15**) before sampling; late-vs-early gate applies only
+  to post-warm-up medians. Previously the first half of a 20-cycle run was
+  still ramping (~33% “growth” on GHA). `--warmup=` / `--limit=` knobs;
+  CI + `make rss-leak` updated.
+- **mprotect barrier `@@mp_hits` Atomic:** SEGV handler increment was a
+  plain class `UInt64`; under `--release` the mutator re-read a
+  register-cached zero, so `barrier_spec` false-pending'd on Linux/WSL
+  even when the dirty card was set. Hits are `Atomic(UInt64)`; spec
+  asserts dirty card + hits, and still `pending!` only if the host
+  truly never traps the RO write. Soft-dirty remains the preferred
+  Linux barrier.
+- **CI pause-budget Phase 4:** in-header mark-gen cut major p50 (~23→~7ms
+  on GHA) while nursery minors stayed ~15ms (full old→young), so
+  `minor ≤ major` red-flaked since `c04f1ff`. Gate on absolute minor p50
+  (50ms) + soft ratio 3.0 (`bench/pause_budget.cr`).
+- **Darwin `stw_sp_clamp` flake:** EC1 other-thread scan skipped threads
+  with nil `current_fiber` and silent-returned when fiber `stack_top` was
+  unusable — CI saw `hits=0 fallbacks=0` despite Mach STW. Fall through to
+  pthread scan; sample + process_spec park a real `Thread` during collect.
+
+### Performance
+
+- **Parallel lazy (post-STW) sweep:** End STW after mark; reclaim under
+  per-size-class freelist locks while mutators run. Active when
+  Parallel + TLAB off + empty-reclaim off (`GCRY_DISABLE_LAZY_SWEEP=1`
+  escapes). Soft **0/40**. Same-host EC4 `/json` **~78.8%** Boehm @ ~**69k**
+  (was ~76.6%; pause p50 ~20→~8.5 ms). Session
+  `bench/log/linux/2026-08-01-ec4-lazy-sweep/`. Folded into PERF as
+  **supported opt-in** (EC1 headline unchanged).
+- **Parallel dormant + lazy sweep (opt-in):** dormant-only empty reclaim no
+  longer forces in-STW sweep; already-dormant chunks skip the block walk.
+  Soft **0/40**. Quiet EC4 `/json` **~75.1%** @ ~55k with retain=32 MiB, RSS
+  **~4.0×** (was opt-in dormant **71.7%** / ~1.7× when lazy was disabled).
+  Still below lazy gate **78.8%** — **not** Parallel default. Freelist churn
+  revives dormants each cycle (`sweep_dormant_skips` ≈ 0). Session
+  `bench/log/linux/2026-08-01-ec4-dormant-lazy/`.
+- **Parallel bounded empty-chunk dormant (opt-in):** `GCRY_PARALLEL_DORMANT=1`
+  DONTNEEDs empties within `empty_chunk_retain` (unbounded legacy:
+  `GCRY_PARALLEL_DORMANT_ALL=1`). Soft **0/40**. Prior quiet (pre-lazy compat)
+  **~71.7%** @ ~63k, RSS **~1.7×**. Session
+  `bench/log/linux/2026-08-01-ec4-rss-bounded/`.
+- **In-header mark generation:** `clear_all_marks` bumps an 8-bit generation
+  in `BlockHeader` flags (bits 8–15) instead of walking the heap — kills
+  `phase_clear` (~3 ms → ~tens of ns under Parallel reclaim-off). Wrap at 255
+  does a full gen clear. Side-bitmap path unchanged. Soft **0/40**. Same-host
+  EC4 `/json` **~76.6%** Boehm @ ~**67k** (was ~73.4%; ≥75% campaign bar).
+  Pause p50 ~24→~20 ms. Session `bench/log/linux/2026-08-01-ec4-mark-gen/`.
+  No `PERF.md` fold-in.
+- **Parallel pthread LAG (experimental EC>1):** when suspend SP is on a pool
+  fiber, scan only the top **256 KiB** of the OS pthread stack from high
+  (was full map — dominated `phase_stacks` after fiber-scan dedupe).
+  `GCRY_STW_PTHREAD_LAG` overrides; `0` = full. Soft **0/40**. Same-host EC4
+  `/json` **~73.4%** Boehm @ ~**65k** (was ~71.5% @ ~47k); `phase_stacks`
+  ~7→~0.4 ms; pause p50 ~34→~24 ms. Session
+  `bench/log/linux/2026-08-01-ec4-pthread-lag/`. No `PERF.md` fold-in.
+- **Parallel STW stack dedupe (experimental EC>1):** drop dual
+  `scan_fiber_stack_full` in `scan_other_thread_stacks` — running fibers are
+  already full-scanned by `scan_all_fiber_roots` under multi-mutator STW. Keep
+  greg + SP-containing stack + pthread scans. EC4 pause phases cut (roots
+  ~12.5→~2.2 ms, stacks ~12.5→~6.5 ms, p50 ~48→~37 ms vs prior sizeclass cut).
+  Soft soak **0/40**. Session `bench/log/linux/2026-08-01-ec4-stw-dedupe/`.
+  No `PERF.md` fold-in.
+- **Parallel parked-fiber LAG default 256 KiB** (was 512; `GCRY_STW_STACK_LAG`
+  still overrides; `0` = full guard→bottom). Soft **0/40**; quiet EC4 `/json`
+  med ~**58k** ≥ 512 KiB cut ~**51k**. Same-host Boehm re-cut after ship:
+  EC4 `/json` **~71.5%** @ ~47k (`2026-08-01-092050`). See FINDINGS.
+- **`phase_scrub_ns`:** parked-fiber scrub timed separately on `/gc-stats`
+  (excluded from `phase_roots_ns`) for Parallel A/B.
 
 ## [0.16.0] - 2026-08-01
 
@@ -36,9 +133,9 @@ experimental — FINDINGS only, not folded into PERF).
   @ **~53k** abs (was ~52% @ ~36k). Long soak **100/100** soft=0 hard=0
   (`2026-07-31-ec4-soak-100-post-thr`). No `PERF.md` fold-in. See FINDINGS.
 - **Parallel empty-chunk reclaim opt-in:** default stays off under EC>1 (thr).
-  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empty chunks (RSS ~3× better, thr ~25%
-  down on Kemal EC4). `GCRY_PARALLEL_RELEASE=1` adds munmap excess (hung in
-  A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
+  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empties (was unbounded; see 0.17.0
+  for retain-capped semantics). `GCRY_PARALLEL_RELEASE=1` adds munmap excess
+  (hung in A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
 - **EC>1 alloc-path A/B:** `GCRY_TLAB=1` @ EC4 still ~½ of TLAB-off thr (soft 0
   — keep opt-in). `@alloc_lock` as `pthread_mutex` deadlocks under STW
   (collections=0) — rejected; stay on `Crystal::SpinLock`. Fold
@@ -537,7 +634,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0

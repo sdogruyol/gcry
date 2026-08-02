@@ -14,6 +14,7 @@ module Gcry
   class Heap
     DEFAULT_CLEAR_STACK_BYTES = 4096_u64
     # Fiber stacks start thinly mapped; keep non-pthread wipes small.
+    # Parallel parked-fiber scrub default (override via GCRY_FIBER_SCRUB_BYTES).
     FIBER_CLEAR_STACK_CAP = 512_u64
 
     property clear_stack_enabled : Bool = false
@@ -21,6 +22,8 @@ module Gcry
     # When > 1, only every Nth allocate calls clear_stack (thr trade-off).
     property clear_stack_every : Int32 = 1
     property scrub_fibers_enabled : Bool = false
+    # Parallel multi-mutator parked-fiber wipe size (bytes below saved SP).
+    property fiber_scrub_bytes : UInt64 = FIBER_CLEAR_STACK_CAP
 
     getter clear_stack_bytes_total : UInt64 = 0_u64
     getter fiber_scrub_bytes_total : UInt64 = 0_u64
@@ -122,8 +125,9 @@ module Gcry
     # EC1 (PERF): 4 KiB blind clear — same as v0.15 `bebedae`. Cuts false
     # stack roots (tip retained ~4× live_objects vs bebedae with 512 B +
     # clear_range_safe). Stack type_id_gate stays off (Channel/Deque SEGV).
-    # Parallel: 512 B + clear_range_safe; skip when a foreign SP sits on the
-    # fiber (mid-swap). 4 KiB×clear_range_safe on EC1 hurts thr (page probes).
+    # Parallel: fiber_scrub_bytes (default 512) + clear_range_safe; skip when a
+    # foreign SP sits on the fiber (mid-swap). 4 KiB×clear_range_safe on EC1
+    # hurts thr (page probes).
     protected def scrub_parked_fiber_stacks : Nil
       return unless @scrub_fibers_enabled
 
@@ -131,7 +135,9 @@ module Gcry
       multi = multi_mutator_threads?
       wipe = @clear_stack_bytes
       if multi
-        wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
+        # Parallel: dedicated cap (default 512). Not clamped by clear_stack_bytes.
+        wipe = @fiber_scrub_bytes
+        wipe = FIBER_CLEAR_STACK_CAP if wipe == 0
       else
         wipe = DEFAULT_CLEAR_STACK_BYTES if wipe > DEFAULT_CLEAR_STACK_BYTES
       end

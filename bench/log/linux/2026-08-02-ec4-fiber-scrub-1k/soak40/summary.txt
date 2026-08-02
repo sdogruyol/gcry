@@ -1,0 +1,2 @@
+ok=40/40 soft=0 hard=0
+thr_med=55251 pause_p50_med_ms=9.02

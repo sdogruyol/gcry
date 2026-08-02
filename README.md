@@ -173,28 +173,30 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.16.0)* |
+| Workload | gcry vs Boehm (v0.17.0)* |
 |----------|------------------------:|
-| Kemal `/json` throughput | **~87%** (~95% with `GCRY_KEEP_CHUNKS=1`, 0.9-era) |
-| Kemal `/json` post-GC RSS | **~0.80x** |
-| Kemal `/` throughput | **~82%** |
-| Fat app `/api/v1/` throughput | **~90%** *(carry v0.15)* |
-| Fat app `/api/v1/` RSS | **~2.54x** *(carry v0.15)* |
+| Kemal `/json` throughput | **~87%** *(carry v0.16)* (~95% with `GCRY_KEEP_CHUNKS=1`, 0.9-era) |
+| Kemal `/json` post-GC RSS | **~0.80x** *(carry v0.16)* |
+| Kemal `/` throughput | **~82%** *(carry v0.16)* |
+| Fat app `/api/v1/` throughput | **~90%** |
+| Fat app `/api/v1/` RSS | **~3.43x** |
 
-\*Kemal: measured `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app: `2026-07-29-112202/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app: `2026-08-02-064142/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
 
 ### macOS (Apple Silicon)
 
-| Workload | gcry vs Boehm (v0.13.0) |
+| Workload | gcry vs Boehm (v0.17.0)* |
 |----------|------------------------:|
 | Kemal `/json` throughput | **~84%** |
 | Kemal `/json` post-GC RSS | **~0.93x** |
-| Kemal `/` throughput | **~93%** |
-| Fat app `/api/v1/` throughput | **~78%** |
+| Kemal `/` throughput | **~90%** |
+| Fat app `/api/v1/` throughput | **~71%** |
+
+\*Kemal + acik: `bench/log/macos/2026-08-02-085522/` (median-of-3, scrub on). Fat-app RSS ~**18×** — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-That fat-app RSS (~2.54x, measured) is an honest number. Stack maps will bring it to ~1.2x.
+That fat-app RSS (~3.43x Linux / ~18x Darwin, measured) is an honest number. Stack maps will bring it to ~1.2x.
 Until then, we live with this reality. We don't hide our numbers.
 
 ### Pause distribution (Kemal `/json`, Linux)
@@ -237,7 +239,7 @@ Windows is coming.
 | Today | Later / elsewhere |
 |-------|-------------------|
 | **Linux + macOS** process GC (Crystal >= 1.21) | Windows process GC |
-| Default ExecutionContext, **parallelism 1** | Parallel contexts: experimental (`GCRY_TLAB=1`; measure) |
+| Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
 

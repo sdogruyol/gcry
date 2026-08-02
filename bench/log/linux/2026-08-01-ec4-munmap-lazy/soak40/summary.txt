@@ -1,0 +1,3 @@
+ABORT after 5/40 soft soaks (GCRY_PARALLEL_RELEASE=1, retain 32 MiB).
+soft_total=0; thr med ~31604 (n=4 alive); run 5 SEGV.
+See ../summary.md — REJECT / reverted.

@@ -100,6 +100,7 @@ module Gcry
         len = append_u64(buf, len, "pause_ns", heap.last_pause_ns)
         len = append_u64(buf, len, "mark_ns", heap.last_phase_mark_ns)
         len = append_u64(buf, len, "sweep_ns", heap.last_phase_sweep_ns)
+        len = append_u64(buf, len, "scrub_ns", heap.last_phase_scrub_ns)
         append_u64(buf, len, "roots_ns", heap.last_phase_roots_ns)
       end
     end

@@ -522,12 +522,22 @@ module Gcry
 
     private def clear_all_marks : Nil
       {% unless flag?(:gcry_side_bitmap) %}
-        each_chunk do |chunk|
-          each_block_or_large(chunk) do |header|
-            next if BlockHeader.free?(header)
-            BlockHeader.clear_mark(header)
+        # Mark generation: bump O(1) so prior marks fail marked? without a heap
+        # walk. Was ~3ms phase_clear under Parallel reclaim-off (FREE-dominated).
+        # Wrap at 255 → full clear of gen bits (and legacy MARK) then gen=1.
+        if @header_mark_gen >= 255_u8
+          each_chunk do |chunk|
+            each_block_or_large(chunk) do |header|
+              next if BlockHeader.free?(header)
+              BlockHeader.clear_mark(header)
+            end
           end
+          @header_mark_gen = 1_u8
+          @header_mark_gen_full_clears &+= 1_u64
+        else
+          @header_mark_gen &+= 1_u8
         end
+        BlockHeader.mark_gen = @header_mark_gen
       {% else %}
         # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
         # to managed heap, not to the live-object count. Replaces the legacy

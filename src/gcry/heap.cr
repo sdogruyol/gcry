@@ -128,6 +128,13 @@ module Gcry
     @tlab_hits = Atomic(UInt64).new(0_u64)
     @tlabs_booted = false
     @tlab_epoch = Atomic(UInt64).new(0_u64)
+    # TLAB-off batch: claim N under freelist lock as USED, consume from
+    # thread stash without that lock (safe with lazy sweep). 0 = off.
+    property alloc_batch : Int32 = 0
+    @alloc_batches_booted = false
+    @alloc_batch_epoch = Atomic(UInt64).new(0_u64)
+    @alloc_batch_hits = Atomic(UInt64).new(0_u64)
+    @alloc_batch_refills = 0_u64
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
@@ -140,6 +147,13 @@ module Gcry
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
+    # In-header mark generation (bits 8–15). clear_all_marks bumps this (O(1))
+    # instead of walking the heap; wraps at 255 with a full clear. Synced to
+    # BlockHeader.mark_gen for barrier / BlockHeader.marked? callers.
+    @header_mark_gen = 1_u8
+    @header_mark_gen_full_clears = 0_u64
+    getter header_mark_gen : UInt8
+    getter header_mark_gen_full_clears : UInt64
     # HDR pause histogram (logarithmic, power-of-two buckets, 1ns..~1s).
     # PAUSE_HDR_BUCKETS = 32 → bucket `i` covers [2^i, 2^(i+1)) ns.
     @pause_hdr = uninitialized StaticArray(UInt64, PAUSE_HDR_BUCKETS)
@@ -174,6 +188,11 @@ module Gcry
       @tlab_steals = 0_u64
       @tlabs_booted = false
       @tlab_epoch = Atomic(UInt64).new(0_u64)
+      @alloc_batch = 0
+      @alloc_batches_booted = false
+      @alloc_batch_epoch = Atomic(UInt64).new(0_u64)
+      @alloc_batch_hits = Atomic(UInt64).new(0_u64)
+      @alloc_batch_refills = 0_u64
       @suppress_collect = Atomic(Int32).new(0)
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
@@ -193,12 +212,18 @@ module Gcry
       @mark_pthread_count = 0
       @mark_pthread_mode = false
       @mark_epoch = Atomic(UInt64).new(0_u64)
+      @header_mark_gen = 1_u8
+      @header_mark_gen_full_clears = 0_u64
+      {% unless flag?(:gcry_side_bitmap) %}
+        BlockHeader.mark_gen = @header_mark_gen
+      {% end %}
       @mark_shutdown = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false
       @clear_stack_bytes = 4096_u64
       @clear_stack_every = 1
       @scrub_fibers_enabled = false
+      @fiber_scrub_bytes = FIBER_CLEAR_STACK_CAP
       @clear_stack_bytes_total = 0_u64
       @fiber_scrub_bytes_total = 0_u64
       @clear_stack_calls = 0_u64
@@ -216,6 +241,7 @@ module Gcry
       @destroyed = true
       shutdown_mark_workers
       flush_all_tlabs
+      flush_all_alloc_batches
       # MUST tear down collector state (pending chunk flush, finalizers,
       # mark-stack) BEFORE unmapping the chunk list — destroy_collector walks
       # @chunks for flush_pending_dormant_chunks and
@@ -567,6 +593,10 @@ module Gcry
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      if @alloc_batch > 0 && !@tlab_enabled
+        return alloc_old_small_batched(payload, flags, index, rounded)
+      end
+
       user = with_freelist_lock(index, false) do
         u = @freelists[index]
 

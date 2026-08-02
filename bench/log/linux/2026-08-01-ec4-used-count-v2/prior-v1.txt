@@ -1,0 +1,1 @@
+v1 (SIZE=32 + chunk_containing every alloc): soft 0/40, /json 56.3% — REJECT hot-path cost

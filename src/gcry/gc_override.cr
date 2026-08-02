@@ -268,19 +268,28 @@ module GC
 
     # Adaptive empty-chunk release is process default (dormant + munmap excess).
     # GCRY_KEEP_CHUNKS=1 forces off; GCRY_RELEASE_CHUNKS=1 forces on.
-    # Parallel: reclaim off by default. GCRY_PARALLEL_DORMANT=1 → DONTNEED all
-    # empties (RSS↓, thr↓). GCRY_PARALLEL_RELEASE=1 → munmap excess (risky).
+    # Parallel: reclaim off by default.
+    #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded).
+    #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy; thr↓).
+    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (risky; can hang).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
       heap.release_empty_chunks = true
     end
-    if env_flag_one?("GCRY_PARALLEL_DORMANT")
+    if env_flag_one?("GCRY_PARALLEL_DORMANT") || env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
       heap.parallel_empty_chunk_dormant = true
+    end
+    if env_flag_one?("GCRY_PARALLEL_DORMANT_ALL")
+      heap.parallel_empty_chunk_dormant_all = true
     end
     if env_flag_one?("GCRY_PARALLEL_RELEASE")
       heap.parallel_empty_chunk_munmap = true
       heap.parallel_empty_chunk_dormant = true
+    end
+
+    if env_flag_one?("GCRY_DISABLE_LAZY_SWEEP")
+      heap.lazy_sweep = false
     end
 
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
@@ -372,13 +381,25 @@ module GC
     if env_flag_one?("GCRY_TLAB")
       heap.tlab_enabled = true
     end
+    # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
+    # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
+    if ab = env_u64("GCRY_ALLOC_BATCH")
+      if ab >= 1 && ab <= 64
+        heap.alloc_batch = ab.to_i32
+      end
+    end
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
     # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
-    # 512KiB; 0 = full guard→bottom (thr regresses). Triage residual EC4 mark-miss.
+    # 256 KiB (was 512); 0 = full guard→bottom (thr regresses).
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
+    end
+    # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
+    # Default 256 KiB from stack high; 0 = full pthread mapping.
+    if plag = env_u64("GCRY_STW_PTHREAD_LAG")
+      heap.stw_multi_pthread_lag = plag
     end
 
     # Boehm-style stack hygiene (no compiler maps). Opt-in; measure RSS/thr.
@@ -398,6 +419,10 @@ module GC
     end
     if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = false
+    end
+    # Parallel parked-fiber scrub window below saved SP (default 512).
+    if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
+      heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
   end
 

@@ -1,0 +1,3 @@
+OK=40/40 soft=0 hard=0 fail=0
+OK thr med=0
+OK thr med=50456.21 (n=40)

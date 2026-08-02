@@ -66,6 +66,8 @@ module Gcry
     # Partial-page MADV_DONTNEED on sparse chunks (opt-in — STW cost).
     property madvise_free_pages : Bool = false
     getter dormant_chunk_bytes : UInt64 = 0_u64
+    # Fully-dormant size-class chunks skipped in sweep (no block walk).
+    getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
@@ -136,6 +138,8 @@ module Gcry
     getter unmapped_bytes : UInt64 = 0_u64
     # Last major STW phase timings (ns) — for /gc-stats and tuning.
     getter last_phase_clear_ns : UInt64 = 0_u64
+    # Parked-fiber stack scrub (inside STW roots window; split for Parallel A/B).
+    getter last_phase_scrub_ns : UInt64 = 0_u64
     getter last_phase_roots_ns : UInt64 = 0_u64
     getter last_phase_static_ns : UInt64 = 0_u64
     getter last_phase_stacks_ns : UInt64 = 0_u64
@@ -198,6 +202,8 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # Set during STW when sweep will run after start_world (see sweep_after_world?).
+    @lazy_sweep_pending = false
     getter? soft_dirty_armed : Bool = false
     @soft_dirty_probed = false
     @soft_dirty_works = false
@@ -862,6 +868,8 @@ module Gcry
           stop_world_quiescing_roots
           @last_phase_stw_stop_ns = monotonic_ns - t0
           flush_all_tlabs
+          # TLAB-off USED stash → freelist before mark (unscanned thread locals).
+          flush_all_alloc_batches
           # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
           scrub_freelists
@@ -883,11 +891,15 @@ module Gcry
           @roots.each { |ptr| mark_explicit_root(ptr) }
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
-          # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+          # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
+          t_scrub = monotonic_ns
           scrub_parked_fiber_stacks if scan_stack
+          scrub_ns = monotonic_ns - t_scrub
+          @last_phase_scrub_ns = scrub_ns
+          # Fiber objects + suspended stacks (once; not also via push_gc_roots).
           scan_all_fiber_roots if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
-          @last_phase_roots_ns = monotonic_ns - t0
+          @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
 
           t0 = monotonic_ns
           if @scan_static_roots
@@ -921,15 +933,21 @@ module Gcry
           # Finalizers / WeakRef: one index pass (no Proc — that mallocs mid-STW).
           enqueue_unreachable_finalizers
 
-          t0 = monotonic_ns
           # For minor collections, snapshot nursery alloc bytes and reset survival
           # counter before sweep accumulates surviving nursery payload.
           if !major
             @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
           end
-          sweep(major: major)
-          @last_phase_sweep_ns = monotonic_ns - t0
+
+          # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
+          # excludes O(heap) phase_sweep; sweep runs under freelist locks.
+          @lazy_sweep_pending = sweep_after_world?
+          unless @lazy_sweep_pending
+            t0 = monotonic_ns
+            sweep(major: major, after_world: false)
+            @last_phase_sweep_ns = monotonic_ns - t0
+          end
 
           if major
             @bytes_since_gc.set(0_u64)
@@ -941,13 +959,17 @@ module Gcry
             end
             # Next minor starts a fresh soft-dirty window after a major.
             @soft_dirty_skip_until_major = false
-            arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            unless @lazy_sweep_pending
+              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            end
           else
             @nursery_alloc_bytes.set(0_u64)
             @minor_collections += 1
-            # Record nursery survival statistics for adaptive threshold.
-            note_nursery_survival
-            arm_page_barrier_after_collect
+            unless @lazy_sweep_pending
+              # Record nursery survival statistics for adaptive threshold.
+              note_nursery_survival
+              arm_page_barrier_after_collect
+            end
           end
           @collections += 1
         ensure
@@ -965,6 +987,19 @@ module Gcry
         # recursive) or munmap mid-peer-collect.
         @suppress_collect.add(1)
         begin
+          if @lazy_sweep_pending
+            t0 = monotonic_ns
+            sweep(major: major, after_world: true)
+            @last_phase_sweep_ns = monotonic_ns - t0
+            @lazy_sweep_pending = false
+            if major
+              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+            else
+              note_nursery_survival
+              arm_page_barrier_after_collect
+            end
+          end
+
           t_flush = monotonic_ns
           # Munmap outside STW — empty chunks + excess large freelist (reuse common).
           # Still under post-STW mutex so the next collect cannot stop_world here.

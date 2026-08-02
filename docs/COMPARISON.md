@@ -6,21 +6,21 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-| | gcry (0.16.0) | Boehm (Crystal default) |
+| | gcry (0.17.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
 | Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
-| Parallel OS threads | Experimental (measure — HTTP thr can drop; TLAB opt-in) | Yes |
+| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / munmap still experimental | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
-| Kemal `/json` (Linux v0.16.0) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
-| Kemal `/json` (macOS v0.13.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
+| Kemal `/json` (Linux v0.16 carry) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (macOS v0.17.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when
 
@@ -31,10 +31,10 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Stay on Boehm when
 
-- Parallel ExecutionContexts in production
+- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (still experimental in gcry)
 - Windows process GC today; Darwin soft-dirty / nursery parity
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
-- You want zero-experiment production defaults across OS targets
+- You want zero-tuning production defaults across OS targets (gcry Parallel needs resize + measure)
 
 ## Smoke before you claim readiness
 
@@ -45,8 +45,8 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 - [ ] WeakRef / finalizers OK if the app uses them
 - [ ] Same-host wrk vs Boehm on a real path ([PERF.md](PERF.md) Linux; [PERF-macos.md](PERF-macos.md) Darwin)
 - [ ] No GC from signal handlers; prefer fork+exec
-- [ ] Do not resize ExecutionContext for parallelism without measuring
+- [ ] Parallel: resize EC only with TLAB **off**; measure vs Boehm ([PERF.md](PERF.md) Parallel opt-in)
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**2.54×** post-GC RSS on Linux, carry v0.15) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**3.43×** Linux / ~**18×** Darwin) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).

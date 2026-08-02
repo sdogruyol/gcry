@@ -20,17 +20,36 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
-## Verdict (v0.13.0 — current Darwin cut) — macOS aarch64
+## Verdict (v0.17.0) — macOS aarch64
 
-`small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, 0 crashes. **Not re-cut for v0.15.0.**
+Primary (fair Boehm): `bench/log/macos/2026-08-02-085522/` (`18513e0`). Confirm: `2026-08-02-091817/` (soft/noisy Boehm → inflated %). `small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, scrub on, 0 crashes.
+
+| | thr (trial median) | post-GC RSS × |
+|--|-------------------:|--------------:|
+| **gcry vs Boehm** | **~71%** | **~18.4×** |
+
+Throughput usable (Mach STW). **Thr softer** than v0.13 **~78%** (−7pp); Boehm louder (~955 vs ~921) and gcry abs lower (~675 vs ~718). Confirm session gcry abs ~650–680 but Boehm soft (654–849) → **89%** — do not cite that %; keep this fair cut. RSS still not Boehm-class — dense conservative-live (~1.1 GiB `size_class_live_bytes`). Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
+
+### Trial detail (v0.17.0)
+
+| Trial | Boehm req/s | gcry req/s | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
+|------:|-----------:|----------:|-------:|----------------:|---------------:|------:|
+| 1 | 955 | 680 | **71.1%** | 28,784 | 631,424 | 21.94× |
+| 2 | 960 | 675 | **70.4%** | 34,928 | 632,752 | 18.12× |
+| 3 | 952 | 674 | **70.9%** | 34,352 | 588,544 | 17.13× |
+| **median** | 955 | 675 | **70.7%** | 34,352 | 631,424 | **18.38×** |
+
+~497 majors / 30s; pause p50 ~26 ms. Live set unchanged vs v0.13 cut.
+
+## Verdict (v0.13.0) — macOS aarch64
+
+Superseded by tip cut above.
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
 | **gcry vs Boehm** | **~78%** | **~15.8×** |
 
-Throughput usable (Mach STW). RSS is not Boehm-class — dense conservative-live. Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
-
-### Trial detail (256 KiB chunk)
+### Trial detail (256 KiB chunk, v0.13)
 
 | Trial | Boehm req/s | gcry req/s | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
 |------:|-----------:|----------:|-------:|----------------:|---------------:|------:|
@@ -38,8 +57,6 @@ Throughput usable (Mach STW). RSS is not Boehm-class — dense conservative-live
 | 2 | 919 | 718 | **78.1%** | 35,488 | 612,592 | 17.26× |
 | 3 | 921 | 670 | **72.7%** | 38,752 | 588,192 | 15.18× |
 | **median** | 921 | 718 | **77.9%** | 38,752 | 612,592 | **15.81×** |
-
-Throughput recovered to ~78% Boehm (up from ~62% with 128 KiB chunks). RSS steady at ~16× (live set unchanged, around ~1.1 GiB `size_class_live_bytes`). Collection count ~350 majors in 30s (sweep is 2× faster than 128 KiB: ~18 ms vs ~22 ms).
 
 ## History (macOS)
 
@@ -55,15 +72,14 @@ Throughput recovered to ~78% Boehm (up from ~62% with 128 KiB chunks). RSS stead
 | **v0.13.0** `darwin-rss-tuning` | **78.0%** | **22.1×** | `empty_chunk_retain` 512KB (was 8MB), `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS dropped from ~160 MiB to ~18 MiB (1.04× Boehm); ACIKTURKIYE ~700 MiB steady (conservative live set still dominant). Pause halved (47→25 ms). |
 | | **2026-07-27** `6416ad6` | **61.7%** | **17.5×** | Small chunk 128 KiB, fiber scrub. RSS improved from 22× to 17.5×; throughput dropped to ~62% (more collections from smaller chunks). |
 | | **2026-07-27** `256k-chunk` | **77.9%** | **15.8×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). Thr recovers to ~78% Boehm (up from 62%). RSS unchanged at ~16×. 0 crashes. |
+| **0.17.0** `2026-08-02-085522` | **70.7%** | **18.4×** | First Darwin re-cut since v0.13 (`18513e0`). Thr −7pp vs 256k cut; RSS ~18× (live set). 0 crashes. Fair Boehm ~955. |
+| 0.17 confirm `2026-08-02-091817` | *89.4%* | **16.7×** | Soft/noisy Boehm (654–849); gcry abs ~650–680. **Do not cite %** — keep 085522. |
 
 ## How to measure
 
 ```sh
-# Crystal 1.21+
-cd ../acikturkiye
-ACIKTURKIYE_ENV=demo crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry
-ACIKTURKIYE_ENV=demo crystal build --release src/acikturkiye.cr -o bin/acikturkiye-boehm
-LABEL=macos-aarch64-$(date +%Y%m%d) ../gcry/bench/median_acikturkiye_boehm.sh
+# Crystal 1.21+ (sibling ../acikturkiye with .env.demo)
+TRIALS=3 WRK_DURATION=30 bash bench/run_all.sh acik
 # Update THIS file only
 ```
 

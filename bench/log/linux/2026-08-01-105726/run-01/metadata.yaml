@@ -1,0 +1,27 @@
+timestamp_utc: "2026-08-01T10:57:31Z"
+session: "2026-08-01-105726"
+run: 1
+count: 1
+hostname: "DESKTOP-5HV5DFL"
+os: "Linux"
+os_release: "6.18.33.2-microsoft-standard-WSL2"
+os_version: "#1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026"
+arch: "x86_64"
+cpu: "12th Gen Intel(R) Core(TM) i3-12100F"
+cpu_cores: "8"
+crystal_version: "1.21.0"
+crystal_commit: "unknown"
+gcry_version: "0.16.0"
+git_commit: "c04f1ff"
+git_tag: "v0.16.0-5-gc04f1ff"
+wrk_connections: 100
+wrk_duration_seconds: 30
+trials: 3
+gc: "boehm gcry"
+gcry_flags: ""
+ec_parallelism: "4"
+ambient_gcry: |
+
+build_mode: "release"
+crystal_flags: ""
+crystal_build_flags: "--release"

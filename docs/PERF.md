@@ -17,7 +17,23 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 | `/json` | **~87%** | **~0.80×** |
 | `/` | **~82%** | **~0.79×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). Parallel EC stays experimental — not in this headline. Fat-app (acikturkiye) not re-cut this release — carry [ACIKTURKIYE.md](ACIKTURKIYE.md) v0.15 (~90% / ~2.54×).
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline; fat-app (acikturkiye) re-cut: thr **~90%** @ RSS **~3.43×** — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`2026-08-02-064142/`). Quiet Kemal smoke (`2026-08-02-065113/`) landed **~83%** `/json` (Boehm louder); **headline stays the v0.16 cut above**.
+
+### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
+
+Not the process default — apps must `ExecutionContext.default.resize(N)`
+(`EC_PARALLELISM=N` in kemal benches). Keep **`GCRY_TLAB` off**; lazy
+post-STW sweep is default for that shape (`GCRY_DISABLE_LAZY_SWEEP=1`
+escapes). Soft soak **0/40**. Quiet cut:
+
+| Path | % of Boehm | gcry (med) | pause p50 | RSS × | Session |
+|------|----------:|-----------:|----------:|------:|---------|
+| `/json` | **~78.8%** | ~69k | ~**8.5 ms** | ~**5.8×** | `2026-08-01-ec4-lazy-sweep/` |
+
+Same-host follow-ups often land **~83–88%** (Boehm noise). Stretch ~80%
+closed as accepted. Still experimental: `GCRY_TLAB=1`, Parallel empty
+munmap (`GCRY_PARALLEL_RELEASE`). Hub:
+`bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
@@ -56,7 +72,8 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | **0.13.0** | **~90%** | **~89%** | **~0.95×** *(est.)* | **Linux: scrub default-on** — Kemal/acik RSS estimated; macOS: 256 KiB chunk, fiber scrub, threshold tuning. |
 | **0.14.0** | **~89%** | **~89%** | **~0.79×** | Measured Linux re-cut (`2026-07-29-035426`, scrub on). Thr flat; Kemal RSS better than 0.13 est. Test suite + Trace/dump. Fat-app not re-cut. |
 | **0.15.0** | **~86%** | **~86%** | **~0.77×** | Correctness: TLAB+process STW freelist fix + STW MT harness. Kemal re-cut `2026-07-29-151144`; acik ~90% / ~2.54× (`112202`). |
-| **0.16.0** | **~82%** | **~87%** | **~0.80×** | EC1 thr recover after Parallel fallout (cheap STW scans, 4 KiB scrub, non-atomic counters, sweep batch). Cut `2026-08-01-093130` (+ `/` slash-recut). Parallel experimental — FINDINGS only. |
+| **0.16.0** | **~82%** | **~87%** | **~0.80×** | EC1 thr recover after Parallel fallout (cheap STW scans, 4 KiB scrub, non-atomic counters, sweep batch). Cut `2026-08-01-093130` (+ `/` slash-recut). |
+| **0.17.0** | *(carry 0.16)* | *(carry 0.16)* | *(carry)* | Darwin Kemal re-cut; Parallel TLAB-off + lazy **supported opt-in** (~79% EC4 `/json`, ~5.8× RSS). Linux Kemal not re-cut. `2026-08-01-ec4-lazy-sweep/`. |
 
 **Escape knobs (same era, not defaults):**
 

@@ -466,3 +466,242 @@ Absolute % of Boehm still host-noisy (Boehm ~41k → both ~78–80%; v0.15 cut
 had ~86% at Boehm ~38k). Soft 0/10. **Re-cut on quiet host before 0.16 tag.**
 
 Detail: [`2026-07-31-ec1-bebedae-ab/summary.md`](2026-07-31-ec1-bebedae-ab/summary.md).
+
+## 2026-08-01 — Parallel STW scan dedupe + LAG 256
+
+Session `bench/log/linux/2026-08-01-ec4-stw-dedupe/`. Post-v0.16.0 tip.
+
+1. **`phase_scrub_ns`** on `/gc-stats` (scrub excluded from `phase_roots_ns`).
+2. **Drop Parallel `scan_fiber_stack_full`** — dual full-span with
+   `scan_all_fiber_roots` was thr-only; keep greg + SP-containing stack +
+   pthread scan. Soft soak **0/40**. Pause: roots ~12.5→~2.2 ms, stacks
+   ~12.5→~6.5 ms, p50 ~48→~37 ms (vs sizeclass `v2-off-t1`).
+3. **LAG 256 KiB default** (was 512): soft **0/40**; quiet `/json` med
+   **~58.3k** ≥ LAG 512 cut **~50.6k** (same campaign). Soak d=8 med was
+   slightly lower at 256 (~49.7k vs ~53.7k) — quiet thr wins the ship rule.
+
+Same-host LAG 512 vs Boehm EC4: `/json` **66.5%** @ ~50.6k (Boehm ~76k).
+LAG 256 abs ~58.3k ≈ **~77%** of that Boehm med (cross-session). EC1 smoke
+`/json` ~31.4k (0.16 band). `stw_mt_property_test` PASS. EC>1 still
+experimental; no `PERF.md` fold-in.
+
+Detail: [`2026-08-01-ec4-stw-dedupe/summary.md`](2026-08-01-ec4-stw-dedupe/summary.md).
+
+### Quiet same-host re-cut (shipped defaults)
+
+Session `bench/log/linux/2026-08-01-092050/` (`5ddd56b`): dedupe + LAG 256
+default, TLAB off, `wrk -c100 -d30` med-of-3.
+
+| Path | % Boehm EC4 | gcry med | Boehm med | RSS × |
+|------|------------:|---------:|----------:|------:|
+| `/json` | **71.5%** | 46,623 | 65,244 | **5.51×** |
+| `/` | **104.3%** | 95,332 | 91,388 | **6.20×** |
+
+Pause p50 ~**34 ms**. Above pre-dedupe ~68%; **below** campaign bar ≥75%
+(stretch ~80%). Idle `/` noisy. No `PERF.md` fold-in.
+
+Detail: [`2026-08-01-092050/summary.md`](2026-08-01-092050/summary.md).
+
+## 2026-08-01 — Parallel pthread LAG (SP on fiber)
+
+Session `bench/log/linux/2026-08-01-ec4-pthread-lag/`.
+
+After fiber-scan dedupe, `phase_stacks` was still ~7 ms — full pthread map
+when SP sits on a pool fiber. **Ship:** scan top **256 KiB** from pthread
+high (`stw_multi_pthread_lag`; `GCRY_STW_PTHREAD_LAG`; `0` = full). Soft
+**0/40**. Quiet same-host: `/json` **73.4%** Boehm @ **~65k** (was 71.5% @
+~47k); `phase_stacks` ~7→**~0.38 ms**, pause p50 ~34→**~24 ms**.
+`stw_mt_property_test` PASS. Still below ≥75% bar; experimental; no PERF.
+
+Detail: [`2026-08-01-ec4-pthread-lag/summary.md`](2026-08-01-ec4-pthread-lag/summary.md).
+
+## 2026-08-01 — In-header mark generation (phase_clear O(1))
+
+Session `bench/log/linux/2026-08-01-ec4-mark-gen/`.
+
+`phase_clear` ~3 ms was a full non-FREE header walk. **Ship:** mark gen in
+flags bits 8–15; `clear_all_marks` bumps gen (wrap@255 → full clear). Soft
+**0/40**. Same-host EC4 `/json` **76.6%** Boehm @ ~**67k** (was 73.4% @ ~65k);
+`phase_clear` ~3ms→~55ns; pause p50 ~24→~20 ms. EC1 smoke `/json` ~33.6k.
+`stw_mt_property_test` PASS. **≥75% campaign bar met**; stretch ~80% open.
+Experimental; no PERF. Residual: sweep (~5–7 ms) + RSS.
+
+Detail: [`2026-08-01-ec4-mark-gen/summary.md`](2026-08-01-ec4-mark-gen/summary.md).
+
+## 2026-08-01 — used_count all-free sweep skip (REJECT)
+
+Sessions `2026-08-01-ec4-used-count/` (v1), `…-ec4-used-count-v2/` (v2).
+
+Maintained USED-block count to skip all-FREE chunk walks (unlike sticky
+ALL_FREE, which only skipped ~2/major). Soft **0/40** both variants; skips
+fire (`phase_sweep` ~7→~1 ms). Quiet thr **regressed** vs mark-gen **76.6%**:
+
+| Variant | `/json` % Boehm | Cause |
+|---------|----------------:|-------|
+| v1 SIZE=32 + `chunk_containing`/alloc | **56.3%** | mutator lookup |
+| v2 flags[16:31] + tip + invalidate | **69.2%** @ ~60k | tip/count RMW still costs |
+
+**Reject** (code reverted). Ship bar was ≥ mark-gen baseline. Next: STW
+parallel sweep or RSS — not used_count skip.
+
+Detail: [`2026-08-01-ec4-used-count-v2/summary.md`](2026-08-01-ec4-used-count-v2/summary.md).
+
+## 2026-08-01 — STW parallel sweep (REJECT)
+
+Session `2026-08-01-ec4-parallel-sweep/`.
+
+Size-class reclaim on STW-exempt pthreads (per-slot freelists + serial
+merge). Soft **0/40**. `phase_sweep` unchanged (~10 ms); thr **regressed**:
+serial ~**65k**, sweep=2 ~63k, sweep=4 ~**49k** (soak med ~42k). Idle
+spin-wait helper pool steals EC cores. **Reject** (reverted). Ship bar was
+≥ mark-gen 76.6%. Residual stays RSS / accept stretch ~80% open.
+
+Detail: [`2026-08-01-ec4-parallel-sweep/summary.md`](2026-08-01-ec4-parallel-sweep/summary.md).
+
+## 2026-08-01 — Bounded Parallel dormant (opt-in ship)
+
+Session `2026-08-01-ec4-rss-bounded/`.
+
+`PARALLEL_DORMANT` previously escaped `empty_chunk_retain` when munmap was
+off → dormant-all. **Ship:** honor retain; excess → freelist reserve.
+`PARALLEL_DORMANT_ALL` keeps unbounded. Soft **0/40**. Best A/B retain
+**32 MiB**: quiet `/json` **71.7%** @ ~63k, RSS **~1.7×** Boehm (gate ~5.8×).
+Thr &lt; 76.6% bar → **not** Parallel default. Opt-in for RSS-sensitive apps.
+
+Detail: [`2026-08-01-ec4-rss-bounded/summary.md`](2026-08-01-ec4-rss-bounded/summary.md).
+
+## 2026-08-01 — Stretch ~80% (LAG + ALL_FREE v2 REJECT)
+
+Sessions `2026-08-01-ec4-stretch-lag/`, `2026-08-01-ec4-allfree-v2/`.
+
+Env LAG 128/64: roots↓ but thr ≤ default 256. ALL_FREE sticky + tip clear:
+soft **0/40**, skips fire, `phase_sweep` still ~12 ms, thr **~63k** &lt;
+mark-gen ~67k. **Reject** (reverted). Stretch ~80% remains open; bar stays
+**76.6%**.
+
+Detail: [`2026-08-01-ec4-allfree-v2/summary.md`](2026-08-01-ec4-allfree-v2/summary.md).
+
+## 2026-08-01 — Lazy (post-STW) sweep (SHIP)
+
+Session `2026-08-01-ec4-lazy-sweep/`.
+
+Prior stretch rejects (used_count / STW parallel sweep / ALL_FREE) paid
+mutator tax or stole EC cores while still walking empties inside pause.
+**Ship:** end STW after mark; reclaim under per-class freelist locks while
+mutators run. Parallel reclaim-off + TLAB-off only;
+`GCRY_DISABLE_LAZY_SWEEP=1` escapes. Soft **0/40**. Quiet same-host:
+`/json` **78.8%** Boehm @ ~**69k** (was 76.6% @ ~67k); pause p50
+~20→**~8.5 ms**. EC1 smoke ~34.7k. Stretch ~80% nearly met; bar →
+**~78.8%**. Experimental; no PERF.
+
+Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summary.md).
+
+## 2026-08-01 — Stretch ~80% follow-ups (REJECT / no-ship)
+
+| Lever | Soft | Quiet `/json` | Notes |
+|-------|-----:|--------------:|-------|
+| dirty∪marked clean skip (aligned mmap) | 0/40 | **72.6%** | ~5 skips/745; freelist churn; reverted |
+| `GCRY_CHUNK_BYTES=256KiB` | 0/40 | **78.7%** | abs ↑; % flat — not Parallel default |
+| lazy freelist lock elision | 0/40 | **76.3%** | classify+reclaim tax; reverted |
+| alloc-bitmap sweep skip | 0 smoke | thr **~44k** | skips~0; dense death; reverted |
+| on-demand span reclaim (sweep gen) | 0/40 | **71.9%** | ~53k; mark tax + finish; reverted |
+| parallel post-STW lazy (4 EC fibers) | 0/40 | **73.6%** | steals mutator cores; reverted |
+| post-STW Parallel munmap excess | abort | thr **~32k** | SEGV + cliff; reverted |
+| Parallel threshold 96 MiB (lazy tip) | 0/40 | **80.0%** vs control **83.1%** | abs↓ RSS↑; default stays 64 |
+| alloc freelist batch pop (N=8) | 0/40 | **63.3%** vs control **88.1%** | opt-in kept; default 0 |
+| Parallel fiber scrub 1024 B | 0/40 | **83.7%** vs control **83.9%** | % flat; default stays 512 |
+
+**Stretch ~80% closed (accepted).** Campaign hold remains lazy tip **~78.8%**
+`/json` (host-relative quiet later ~83–88%). Residual freelist×lazy tax did
+not yield a shippable lever (see reject rows). **Promote** Parallel
+**TLAB-off** + lazy sweep as a **supported opt-in** (not process default;
+EC1 remains the PERF headline). `GCRY_TLAB=1` / Parallel+munmap stay
+experimental.
+
+Detail: [`2026-08-01-ec4-sweep-skip/summary.md`](2026-08-01-ec4-sweep-skip/summary.md),
+[`2026-08-01-ec4-chunk256/summary.md`](2026-08-01-ec4-chunk256/summary.md),
+[`2026-08-01-ec4-sweep-elide/summary.md`](2026-08-01-ec4-sweep-elide/summary.md),
+[`2026-08-01-ec4-alloc-bits/summary.md`](2026-08-01-ec4-alloc-bits/summary.md),
+[`2026-08-01-ec4-sweepgen/summary.md`](2026-08-01-ec4-sweepgen/summary.md),
+[`2026-08-01-ec4-parallel-lazy/summary.md`](2026-08-01-ec4-parallel-lazy/summary.md).
+
+## 2026-08-01 — Dormant + lazy sweep compat (opt-in ship; not default)
+
+Session `2026-08-01-ec4-dormant-lazy/`.
+
+**Bug/limit:** `PARALLEL_DORMANT` used `release_empty_chunks_this_collect?`
+to disable post-STW lazy → in-STW sweep + DONTNEED thr cliff (**71.7%**).
+**Ship:** allow lazy when only dormant (block lazy only for munmap/HOLED);
+skip block walk on already-dormant chunks. Soft **0/40**. Quiet retain=32
+MiB: `/json` **75.1%** @ ~55k, pause p50 ~**8.8 ms**, RSS **~4.0×** (was
+71.7% / ~1.7×). Skips ≈ 0 under freelist revive churn — **no** steady-state
+sweep-walk cut. Still &lt; **78.8%** gate → keep opt-in, not Parallel default.
+
+Detail: [`2026-08-01-ec4-dormant-lazy/summary.md`](2026-08-01-ec4-dormant-lazy/summary.md).
+
+## 2026-08-02 — Post-STW Parallel munmap excess (REJECT)
+
+Session `2026-08-01-ec4-munmap-lazy/`.
+
+Attempt: munmap retain-excess empties during lazy sweep (`PENDING_UNMAP` +
+flush under all freelist/`@alloc_lock`). Soft aborted (SEGV; thr med
+**~32k**). GC `Array` pending list SEGV'd on `#clear` after munmap; inline
+buffer still left intermittent SEGV + thr cliff. **Reverted.** Munmap
+again disables lazy (`sweep_after_world?`). Dormant+lazy opt-in unchanged.
+Stretch ~80% / walk-cut still open; bar **78.8%**.
+
+Detail: [`2026-08-01-ec4-munmap-lazy/summary.md`](2026-08-01-ec4-munmap-lazy/summary.md).
+
+## 2026-08-02 — Parallel threshold 96 MiB under lazy (REJECT)
+
+Session `2026-08-02-ec4-threshold-96/`.
+
+Env `GCRY_THRESHOLD=96MiB` vs default 64 MiB. Soft **0/40**. Quiet
+same-host: 96 → `/json` **80.0%** @ ~49k / RSS **8.4×** / majors ~84;
+control 64 → **83.1%** @ ~55k / **5.8×** / majors ~148. Fewer majors,
+worse thr and RSS (larger per-epoch sweep). **Default stays 64 MiB.**
+
+Detail: [`2026-08-02-ec4-threshold-96/summary.md`](2026-08-02-ec4-threshold-96/summary.md).
+
+## 2026-08-02 — Alloc freelist batch pop N=8 (REJECT default)
+
+Session `2026-08-02-ec4-alloc-batch/`.
+
+TLAB-off USED stash (`GCRY_ALLOC_BATCH`): claim N under freelist lock, hit
+path skips that lock; STW flush. Soft **0/40**. Quiet same-host: batch=8
+→ `/json` **63.3%** @ ~40k; control → **88.1%** @ ~50k. **Default stays
+0**; knob remains opt-in only.
+
+Detail: [`2026-08-02-ec4-alloc-batch/summary.md`](2026-08-02-ec4-alloc-batch/summary.md).
+
+## 2026-08-02 — Parallel fiber scrub 1024 B (REJECT default)
+
+Session `2026-08-02-ec4-fiber-scrub-1k/`.
+
+`GCRY_FIBER_SCRUB_BYTES=1024` vs default 512. Soft **0/40**. Quiet
+same-host: 1024 → `/json` **83.7%** @ ~60k; control → **83.9%** @ ~47k
+(Boehm louder on treatment). **Default stays 512**; knob opt-in.
+
+Detail: [`2026-08-02-ec4-fiber-scrub-1k/summary.md`](2026-08-02-ec4-fiber-scrub-1k/summary.md).
+
+## 2026-08-02 — Parallel TLAB-off lazy: supported opt-in (productize)
+
+Stretch thr levers exhausted (munmap / threshold / alloc-batch / scrub).
+**Supported opt-in config** (measure on the app; EC1 stays PERF default):
+
+- `EC_PARALLELISM>1` (e.g. 4)
+- `GCRY_TLAB` **off** (default)
+- lazy sweep **on** (default; `GCRY_DISABLE_LAZY_SWEEP=1` escapes)
+- empty-chunk munmap **off** under Parallel (default; `PARALLEL_RELEASE` experimental)
+
+Quiet tip: `/json` **~78.8%** Boehm @ ~69k, pause p50 ~**8.5 ms**
+(`2026-08-01-ec4-lazy-sweep/`). Soft **0/40**. Same-host follow-ups often
+**~83–88%** depending on Boehm noise. Productize smoke
+(`2026-08-02-ec4-productize/`): EC1 `/json` ~**29.3k**; EC4 quiet
+**81.5%** @ ~55k / ~5.5× RSS. Still **not** the process default
+ExecutionContext size — apps must resize EC and accept ~5–6× RSS vs Boehm
+on reclaim-off Kemal.
+
+Docs: `docs/PERF.md` (Parallel opt-in section), `docs/COMPARISON.md`,
+`docs/HARDENING.md`, `CHANGELOG` Unreleased.
+Detail: [`2026-08-02-ec4-productize/summary.md`](2026-08-02-ec4-productize/summary.md).

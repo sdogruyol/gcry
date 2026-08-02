@@ -120,7 +120,7 @@ pause-budget: $(BIN)
 
 rss-leak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak
-	$(BIN)/rss_leak --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000}
+	$(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000}
 
 compiler-gc-contract: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/compiler_gc_contract.cr -o $(BIN)/compiler_gc_contract

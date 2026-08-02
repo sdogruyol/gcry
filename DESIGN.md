@@ -4,7 +4,7 @@
 
 Crystal runs on [Boehm](https://github.com/ivmai/bdwgc) today. That works — and it also means the language’s most intimate runtime piece lives in C, behind a wall. **gcry** is the other path: a conservative mark–sweep collector written in Crystal, shipped as a shard, plugged in with `-Dgc_none`. No compiler fork. No waiting for upstream to grow a third backend.
 
-This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.16**.
+This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.17**.
 
 ---
 
@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.16.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (measured): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.13.0 cut, not re-cut for 0.16): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**2.54×** Linux, carry v0.15) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+As of **v0.17.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.17 Darwin re-cut): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**3.43×** Linux; ~**18×** Darwin) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## Goals
 
@@ -140,31 +140,31 @@ src/gcry/
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.16)
+## Where we are (v0.17)
 
-Shipped and dogfooded on Linux + macOS; **v0.16.0** recovers EC1 Kemal thr after Parallel-era STW/scrub/counter fallout (supported path: EC parallelism **1**, `GCRY_TLAB` **off**):
+Shipped and dogfooded on Linux + macOS; **v0.17.0** ships the Darwin Kemal re-cut and promotes Parallel TLAB-off + lazy sweep to a **supported opt-in**. Default path remains EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
 
 | Area | State |
 |------|--------|
 | Process GC via shard | ✅ `-Dgc_none` |
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64 |
-| Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (measured) |
+| Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry) |
 | Layout / type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
 | Stack / fiber scrub | ✅ fiber scrub **default-on** (EC1 **4 KiB** blind; Parallel 512 B + safe); `GCRY_CLEAR_STACK` still opt-in |
-| TLAB / Parallel EC | ⚠️ experimental — EC4 `/json` ~**68%** Boehm EC4, soak soft=0; TLAB@EC4 ~½ of off; Parallel empty-chunk reclaim opt-in — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
+| Parallel EC (TLAB-off + lazy) | ✅ **supported opt-in** — EC4 `/json` ~**79%** Boehm; TLAB-on / munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
 | Compiler stack maps | ❌ later (RSS) |
 
-**Kemal Linux (v0.16.0 cut):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](docs/PERF.md).
+**Kemal Linux (v0.16.0 carry):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](docs/PERF.md).
 
-**Kemal macOS (v0.13.0 cut):** `/` ~**93%**, `/json` ~**84%**, post-GC RSS ~**0.93–1.06×** — [PERF-macos.md](docs/PERF-macos.md).
+**Kemal macOS (v0.17.0 cut):** `/` ~**90%**, `/json` ~**84%**, post-GC RSS ~**0.93–0.97×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux thr ~**90%**, RSS ~**2.54×** (carry v0.15) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**78%**, RSS ~**15.8×** (v0.13 cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux thr ~**90%**, RSS ~**3.43×** — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**71%**, RSS ~**18×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
@@ -178,21 +178,21 @@ Shipped and dogfooded on Linux + macOS; **v0.16.0** recovers EC1 Kemal thr after
 | Host-page reclaim (now `MADV_FREE_REUSABLE` on Darwin) | Stack maps / fat-app RSS |
 | CI: `macos-latest` native specs + samples | — |
 
-Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pairing). Linux PERF re-cut completed in **v0.16.0**.
+Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pairing). Linux PERF re-cut completed in **v0.16.0**; Darwin Kemal re-cut in **v0.17.0**.
 
-## Frontier (after 0.16)
+## Frontier (after 0.17)
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~2.54× / Darwin ~15×) |
-| **Parallel+TLAB supported defaults** | EC4 soak soft=0 + thr levers landed; residual thr/RSS gap (~68% Boehm EC4; TLAB ~½) — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
+| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~3.43× / Darwin ~18×) |
+| **Parallel+TLAB / munmap supported** | TLAB-off + lazy is supported opt-in (~79%); TLAB-on + empty munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
 | **Windows process GC** | After Darwin |
 | **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
 | **Process-STW property tests** | Library MT property ≠ production STW surface |
 
-Shard-only polish continues (curated layouts, large-object page policy). Fat-app RSS still needs stack maps. Linux Kemal PERF re-cut landed in **0.16.0**.
+Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page policy). Fat-app RSS still needs stack maps. Darwin Kemal re-cut + Parallel supported opt-in landed in **0.17.0**.
 
 ## Risks
 
