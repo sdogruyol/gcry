@@ -607,6 +607,7 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | on-demand span reclaim (sweep gen) | 0/40 | **71.9%** | ~53k; mark tax + finish; reverted |
 | parallel post-STW lazy (4 EC fibers) | 0/40 | **73.6%** | steals mutator cores; reverted |
 | post-STW Parallel munmap excess | abort | thr **~32k** | SEGV + cliff; reverted |
+| Parallel threshold 96 MiB (lazy tip) | 0/40 | **80.0%** vs control **83.1%** | abs↓ RSS↑; default stays 64 |
 
 Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
 empties **are** the alloc freelist — rearranging/parallelizing the same
@@ -646,3 +647,14 @@ again disables lazy (`sweep_after_world?`). Dormant+lazy opt-in unchanged.
 Stretch ~80% / walk-cut still open; bar **78.8%**.
 
 Detail: [`2026-08-01-ec4-munmap-lazy/summary.md`](2026-08-01-ec4-munmap-lazy/summary.md).
+
+## 2026-08-02 — Parallel threshold 96 MiB under lazy (REJECT)
+
+Session `2026-08-02-ec4-threshold-96/`.
+
+Env `GCRY_THRESHOLD=96MiB` vs default 64 MiB. Soft **0/40**. Quiet
+same-host: 96 → `/json` **80.0%** @ ~49k / RSS **8.4×** / majors ~84;
+control 64 → **83.1%** @ ~55k / **5.8×** / majors ~148. Fewer majors,
+worse thr and RSS (larger per-epoch sweep). **Default stays 64 MiB.**
+
+Detail: [`2026-08-02-ec4-threshold-96/summary.md`](2026-08-02-ec4-threshold-96/summary.md).
