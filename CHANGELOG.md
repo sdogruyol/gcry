@@ -35,6 +35,9 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 - **CI flake/gates:** `perf-smoke` thr floor stays **70%** (75% failed at
   68.4% on GHA). `rss_leak` gates **heap_size** late-vs-early primarily;
   RSS is a looser secondary ceil (DONTNEED re-fault noise).
+- **pattern_fuzz pause ratios:** gate on per-phase `pause_last_ns`
+  percentiles (was cumulative heap p50/p99/max — one early major poisoned
+  every later pattern vs a lucky baseline on GHA).
 
 ### Added
 

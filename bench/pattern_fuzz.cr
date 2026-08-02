@@ -5,8 +5,8 @@
 #   2. Bimodal (small + large)
 #   3. Stride (array-growth)
 #
-# For each pattern, verifies:
-#   - Pause p99 < 2x baseline pause p99
+# For each pattern, verifies (per-phase last_pause percentiles vs baseline):
+#   - Pause p99 / max within pattern-specific ratio limits
 #   - RSS growth < 10% from start
 #
 # Build: crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
@@ -154,8 +154,11 @@ def run_phase(rng : Random, name : String, sizes : Array(Int32), heap : Gcry::He
 
   rss_after = read_rss_kb
   m_after = Gcry.metrics(heap)
+  # Per-phase pause only — cumulative p50/p99/max poison later patterns when
+  # one early major lands (GHA flake: lucky baseline then 20×+ ratios).
+  pause = m_after.pause_last_ns
 
-  PatternPhase.new(name, rss_before, rss_after, m_after.pause_p50_ns, m_after.pause_p99_ns, m_after.pause_max_ns,
+  PatternPhase.new(name, rss_before, rss_after, pause, pause, pause,
     m_after.heap_size.to_i64 - heap_before.to_i64, errors)
 end
 
@@ -165,6 +168,12 @@ heap = Gcry.default_heap.not_nil!
 
 puts "Pattern fuzz seed=#{seed} phases=#{phases} objects_per_phase=#{objects_per_phase}"
 puts ""
+
+# Warm heap so the first measured baseline phase is not an empty-heap outlier.
+3.times do
+  sizes = Array.new(objects_per_phase) { 16 + rng.rand(241) }
+  run_phase(rng, "warmup", sizes, heap)
+end
 
 # 1. Baseline — uniform random allocs (16B–256B, real-world typical)
 puts "=== Baseline (uniform random 16-256B) ==="
@@ -177,23 +186,25 @@ phases.times do |i|
 end
 puts ""
 
-baseline_p50 = baseline_phases.map(&.pause_p50).sum.to_f / baseline_phases.size
-baseline_p99 = baseline_phases.map(&.pause_p99).sum.to_f / baseline_phases.size
-baseline_max = baseline_phases.map(&.pause_max).max
-baseline_rss_growth = baseline_phases.map { |p| p.rss_end > p.rss_start ? (p.rss_end - p.rss_start).to_f / p.rss_start * 100 : 0.0 }
-baseline_rss_pct = baseline_rss_growth.sum / baseline_rss_growth.size
-
-puts "  baseline: p50=#{baseline_p50}ns p99=#{baseline_p99}ns max=#{baseline_max}ns rss_growth=#{baseline_rss_pct.round(2)}%"
-
-# Helper to compute and print phase stats
+# Percentiles over per-phase last_pause samples (not cumulative heap stats).
 def compute_phase_stats(phases : Array(PatternPhase)) : NamedTuple(p50: Float64, p99: Float64, max: UInt64, rss_pct: Float64)
-  p50 = phases.map(&.pause_p50).sum.to_f / phases.size
-  p99 = phases.map(&.pause_p99).sum.to_f / phases.size
-  max = phases.map(&.pause_max).max
+  samples = phases.map(&.pause_p50).sort
+  n = samples.size
+  p50 = samples[n // 2].to_f
+  p99 = samples[((n - 1) * 99) // 100].to_f
+  max = samples[-1]
   rss_growth = phases.map { |p| p.rss_end > p.rss_start ? (p.rss_end - p.rss_start).to_f / p.rss_start * 100 : 0.0 }
   rss_pct = rss_growth.sum / rss_growth.size
   {p50: p50, p99: p99, max: max, rss_pct: rss_pct}
 end
+
+baseline_stats = compute_phase_stats(baseline_phases)
+baseline_p50 = baseline_stats[:p50]
+baseline_p99 = baseline_stats[:p99]
+baseline_max = baseline_stats[:max]
+baseline_rss_pct = baseline_stats[:rss_pct]
+
+puts "  baseline: p50=#{baseline_p50}ns p99=#{baseline_p99}ns max=#{baseline_max}ns rss_growth=#{baseline_rss_pct.round(2)}%"
 
 # 2. Zipfian
 puts ""
