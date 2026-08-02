@@ -1,4 +1,4 @@
-# Darwin re-cut (tip / 0.17.0 pending)
+# Darwin re-cut (v0.17.0)
 
 First macOS A/B since v0.13 (`2026-07-27-181415/`). Host: Apple M2 Pro,
 Crystal 1.21.0, `18513e0` (`v0.16.0-19`), scrub on, 256 KiB Darwin chunks,

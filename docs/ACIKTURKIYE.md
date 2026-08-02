@@ -4,7 +4,7 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (tip / Unreleased) — Linux *(measured)*
+## Verdict (v0.17.0) — Linux *(measured)*
 
 Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), scrub **on**, auto-layouts **off**, EC1, median of 3. Session: `bench/log/linux/2026-08-02-064142/` (readiness hub `2026-08-02-ec1-readiness/`).
 

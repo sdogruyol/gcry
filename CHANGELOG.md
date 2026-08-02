@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-02
+
+Darwin Kemal re-cut (first since v0.13) + Parallel TLAB-off + lazy sweep as a
+**supported opt-in** (~79% `/json`). Linux Kemal PERF headline carries
+**v0.16.0** (~87% / ~0.80×); EC1 remains the default path.
+
 ### Documentation
 
-- **Darwin re-cut (tip / 0.17 pending):** Kemal `/json` **83.6%** @ **0.93×**
-  RSS (hold vs v0.13 **83.9%**; confirm **83.2%**); `/` **89.6%** @ **0.97×**.
-  acikturkiye `/api/v1/` **70.7%** thr @ **18.4×** RSS (was v0.13 **~78%** /
-  **~16×**; confirm soft-Boehm % discarded). Sessions
+- **Darwin re-cut:** Kemal `/json` **83.6%** @ **0.93×** RSS (hold vs v0.13
+  **83.9%**; confirm **83.2%**); `/` **89.6%** @ **0.97×**. acikturkiye
+  `/api/v1/` **70.7%** thr @ **18.4×** RSS (was v0.13 **~78%** / **~16×**;
+  confirm soft-Boehm % discarded). Sessions
   `bench/log/macos/2026-08-02-085522/` + confirm `091817/` (`18513e0`). See
   [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 - **EC1 production-readiness re-cut:** acikturkiye `/api/v1/` **~90%** thr @
@@ -122,7 +128,7 @@ experimental — FINDINGS only, not folded into PERF).
   @ **~53k** abs (was ~52% @ ~36k). Long soak **100/100** soft=0 hard=0
   (`2026-07-31-ec4-soak-100-post-thr`). No `PERF.md` fold-in. See FINDINGS.
 - **Parallel empty-chunk reclaim opt-in:** default stays off under EC>1 (thr).
-  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empties (was unbounded; see Unreleased
+  `GCRY_PARALLEL_DORMANT=1` DONTNEEDs empties (was unbounded; see 0.17.0
   for retain-capped semantics). `GCRY_PARALLEL_RELEASE=1` adds munmap excess
   (hung in A/B). EC1 dormant+munmap unchanged. See FINDINGS RSS A/B.
 - **EC>1 alloc-path A/B:** `GCRY_TLAB=1` @ EC4 still ~½ of TLAB-off thr (soft 0
@@ -623,7 +629,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sdogruyol/gcry/compare/v0.13.0...v0.14.0

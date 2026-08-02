@@ -6,7 +6,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Head-to-head
 
-| | gcry (0.16.0) | Boehm (Crystal default) |
+| | gcry (0.17.0) | Boehm (Crystal default) |
 |--|---------------|-------------------------|
 | Integration | Shard reopen under `-Dgc_none` | Built-in `gc/boehm` |
 | Core language | **Crystal** | C |
@@ -19,8 +19,8 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Root filters | Base-ptr + type_id gate + layout + SP clamp | Interior-friendly |
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
-| Kemal `/json` (Linux v0.16.0) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
-| Kemal `/json` (macOS tip / 0.17) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
+| Kemal `/json` (Linux v0.16 carry) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
+| Kemal `/json` (macOS v0.17.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when
 
@@ -49,4 +49,4 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**3.43×** Linux tip / ~**18×** Darwin) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**3.43×** Linux / ~**18×** Darwin) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).

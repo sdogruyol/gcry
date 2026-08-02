@@ -20,7 +20,7 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
-## Verdict (tip / 0.17.0 pending — current Darwin cut) — macOS aarch64
+## Verdict (v0.17.0) — macOS aarch64
 
 Primary (fair Boehm): `bench/log/macos/2026-08-02-085522/` (`18513e0`). Confirm: `2026-08-02-091817/` (soft/noisy Boehm → inflated %). `small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, scrub on, 0 crashes.
 
@@ -30,7 +30,7 @@ Primary (fair Boehm): `bench/log/macos/2026-08-02-085522/` (`18513e0`). Confirm:
 
 Throughput usable (Mach STW). **Thr softer** than v0.13 **~78%** (−7pp); Boehm louder (~955 vs ~921) and gcry abs lower (~675 vs ~718). Confirm session gcry abs ~650–680 but Boehm soft (654–849) → **89%** — do not cite that %; keep this fair cut. RSS still not Boehm-class — dense conservative-live (~1.1 GiB `size_class_live_bytes`). Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
-### Trial detail (tip)
+### Trial detail (v0.17.0)
 
 | Trial | Boehm req/s | gcry req/s | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
 |------:|-----------:|----------:|-------:|----------------:|---------------:|------:|
@@ -72,8 +72,8 @@ Superseded by tip cut above.
 | **v0.13.0** `darwin-rss-tuning` | **78.0%** | **22.1×** | `empty_chunk_retain` 512KB (was 8MB), `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS dropped from ~160 MiB to ~18 MiB (1.04× Boehm); ACIKTURKIYE ~700 MiB steady (conservative live set still dominant). Pause halved (47→25 ms). |
 | | **2026-07-27** `6416ad6` | **61.7%** | **17.5×** | Small chunk 128 KiB, fiber scrub. RSS improved from 22× to 17.5×; throughput dropped to ~62% (more collections from smaller chunks). |
 | | **2026-07-27** `256k-chunk` | **77.9%** | **15.8×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). Thr recovers to ~78% Boehm (up from 62%). RSS unchanged at ~16×. 0 crashes. |
-| **tip / 0.17** `2026-08-02-085522` | **70.7%** | **18.4×** | First Darwin re-cut since v0.13 (`18513e0`). Thr −7pp vs 256k cut; RSS ~18× (live set). 0 crashes. Fair Boehm ~955. |
-| tip confirm `2026-08-02-091817` | *89.4%* | **16.7×** | Soft/noisy Boehm (654–849); gcry abs ~650–680. **Do not cite %** — keep 085522. |
+| **0.17.0** `2026-08-02-085522` | **70.7%** | **18.4×** | First Darwin re-cut since v0.13 (`18513e0`). Thr −7pp vs 256k cut; RSS ~18× (live set). 0 crashes. Fair Boehm ~955. |
+| 0.17 confirm `2026-08-02-091817` | *89.4%* | **16.7×** | Soft/noisy Boehm (654–849); gcry abs ~650–680. **Do not cite %** — keep 085522. |
 
 ## How to measure
 

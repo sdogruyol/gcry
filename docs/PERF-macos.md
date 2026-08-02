@@ -25,7 +25,7 @@ After **reverting side bitmap as default**, making **in-header MARK the standard
 
 RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on both paths — the in-header MARK trades some throughput for a dramatic RSS recovery. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
 
-## Headline (tip / 0.17.0 pending — current Darwin cut) — macOS aarch64
+## Headline (v0.17.0) — macOS aarch64
 
 Primary: `bench/log/macos/2026-08-02-085522/` (`18513e0`, Crystal 1.21.0, Apple M2 Pro). Confirm: `2026-08-02-091817/` (`/json` **83.2%**, `/` **89.5%**). macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Scrub on (default). First Darwin re-cut since v0.13.0.
 
@@ -40,7 +40,7 @@ Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post
 
 ## Headline (v0.13.0) — macOS aarch64
 
-macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Superseded by tip cut above.
+macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Superseded by v0.17.0 cut above.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 
@@ -94,8 +94,8 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
   | **v0.13.0** `darwin-rss-tuning` | **90.3%** | **82.6%** | **1.04–1.05×** | `empty_chunk_retain` 512KB, `scrub_fibers_enabled=true`, `gc_threshold` 16MB, large-freelist `MADV_FREE_REUSABLE`. Kemal RSS at near-Boehm parity; `/json` ~82% thr due to more frequent collections. |
 |  | **2026-07-27** `6416ad6` | **92.1%** | **85.5%** | **0.75–0.88×** | Small chunk 128 KiB, fiber scrub on. GCry RSS below Boehm on both paths. |
 |  | **2026-07-27** `256k-chunk` | **92.6%** | **83.9%** | **0.93–1.06×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). acikturkiye thr recovers 57%→78% with same RSS. Kemal flat. |
-| **tip / 0.17** `2026-08-02-085522` | **89.6%** | **83.6%** | **0.93–0.97×** | First Darwin re-cut since v0.13 (`18513e0`). `/json` hold; `/` soft −3pp. |
-| tip confirm `2026-08-02-091817` | **89.5%** | **83.2%** | **0.99–1.07×** | Same-day confirm; Kemal hold. |
+| **0.17.0** `2026-08-02-085522` | **89.6%** | **83.6%** | **0.93–0.97×** | First Darwin re-cut since v0.13 (`18513e0`). `/json` hold; `/` soft −3pp. |
+| 0.17 confirm `2026-08-02-091817` | **89.5%** | **83.2%** | **0.99–1.07×** | Same-day confirm; Kemal hold. |
 
 ## How to record (macOS)
 

@@ -1,4 +1,4 @@
-# Darwin confirm re-cut (tip / 0.17.0 pending)
+# Darwin confirm re-cut (v0.17.0)
 
 Same-day confirm after `2026-08-02-085522/`. Host quiet (prior CPU
 contender gone). `18513e0`, Crystal 1.21.0, scrub on, 256 KiB Darwin chunks.
