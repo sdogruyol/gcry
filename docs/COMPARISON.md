@@ -12,7 +12,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
 | Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
-| Parallel OS threads | Experimental (measure — HTTP thr can drop; TLAB opt-in) | Yes |
+| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / munmap still experimental | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
@@ -31,10 +31,10 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Stay on Boehm when
 
-- Parallel ExecutionContexts in production
+- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (still experimental in gcry)
 - Windows process GC today; Darwin soft-dirty / nursery parity
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
-- You want zero-experiment production defaults across OS targets
+- You want zero-tuning production defaults across OS targets (gcry Parallel needs resize + measure)
 
 ## Smoke before you claim readiness
 
@@ -45,7 +45,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 - [ ] WeakRef / finalizers OK if the app uses them
 - [ ] Same-host wrk vs Boehm on a real path ([PERF.md](PERF.md) Linux; [PERF-macos.md](PERF-macos.md) Darwin)
 - [ ] No GC from signal handlers; prefer fork+exec
-- [ ] Do not resize ExecutionContext for parallelism without measuring
+- [ ] Parallel: resize EC only with TLAB **off**; measure vs Boehm ([PERF.md](PERF.md) Parallel opt-in)
 
 ## The RSS ceiling
 

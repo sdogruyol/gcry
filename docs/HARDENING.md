@@ -72,7 +72,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
-| `GCRY_TLAB=1` | Thread-local freelists (parallel contexts) |
+| `GCRY_TLAB=1` | Thread-local freelists (experimental under Parallel; supported Parallel path keeps TLAB **off**) |
 | `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
@@ -135,7 +135,11 @@ ExecutionContext does not call `set_stackbottom` on swap — gcry refreshes from
 
 Static roots: main executable RW (+ adjacent BSS); skip `.so` data and large RELRO. Fiber stacks scanned once per collect.
 
-Parallel contexts: STW covers Crystal threads; `GCRY_TLAB=1` helps alloc; `GCRY_PARALLEL_MARK` is research — see [POLICY.md](POLICY.md).
+Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
+`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — Kemal
+`/json` ~**79%** Boehm tip; see [PERF.md](PERF.md). `GCRY_TLAB=1` and
+`GCRY_PARALLEL_RELEASE` remain experimental; `GCRY_PARALLEL_MARK` is
+research — [POLICY.md](POLICY.md).
 
 ## CI
 

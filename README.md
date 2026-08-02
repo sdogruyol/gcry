@@ -237,7 +237,7 @@ Windows is coming.
 | Today | Later / elsewhere |
 |-------|-------------------|
 | **Linux + macOS** process GC (Crystal >= 1.21) | Windows process GC |
-| Default ExecutionContext, **parallelism 1** | Parallel contexts: experimental (`GCRY_TLAB=1`; measure) |
+| Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
 

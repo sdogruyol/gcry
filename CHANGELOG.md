@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **Parallel TLAB-off + lazy sweep → supported opt-in:** Stretch ~80% thr
+  campaign closed (accepted hold **~78.8%** `/json`). Documented as a
+  measured opt-in path in [docs/PERF.md](docs/PERF.md), COMPARISON,
+  HARDENING, README — **not** the process default (EC1 remains the
+  headline). `GCRY_TLAB=1` / Parallel munmap stay experimental. FINDINGS
+  hub: `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
+
 ### Performance
 
 - **Parallel lazy (post-STW) sweep:** End STW after mark; reclaim under
@@ -14,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Parallel + TLAB off + empty-reclaim off (`GCRY_DISABLE_LAZY_SWEEP=1`
   escapes). Soft **0/40**. Same-host EC4 `/json` **~78.8%** Boehm @ ~**69k**
   (was ~76.6%; pause p50 ~20→~8.5 ms). Session
-  `bench/log/linux/2026-08-01-ec4-lazy-sweep/`. No `PERF.md` fold-in.
+  `bench/log/linux/2026-08-01-ec4-lazy-sweep/`. Folded into PERF as
+  **supported opt-in** (EC1 headline unchanged).
 - **Parallel dormant + lazy sweep (opt-in):** dormant-only empty reclaim no
   longer forces in-STW sweep; already-dormant chunks skip the block walk.
   Soft **0/40**. Quiet EC4 `/json` **~75.1%** @ ~55k with retain=32 MiB, RSS

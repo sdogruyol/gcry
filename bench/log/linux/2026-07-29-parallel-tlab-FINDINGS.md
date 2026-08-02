@@ -611,10 +611,12 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | alloc freelist batch pop (N=8) | 0/40 | **63.3%** vs control **88.1%** | opt-in kept; default 0 |
 | Parallel fiber scrub 1024 B | 0/40 | **83.7%** vs control **83.9%** | % flat; default stays 512 |
 
-Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
-empties **are** the alloc freelist — rearranging/parallelizing the same
-O(heap) walk taxes mutators. Need work reduction (RSS/chunk count) or
-accept ~79% and promote Parallel TLAB-off as supported opt-in.
+**Stretch ~80% closed (accepted).** Campaign hold remains lazy tip **~78.8%**
+`/json` (host-relative quiet later ~83–88%). Residual freelist×lazy tax did
+not yield a shippable lever (see reject rows). **Promote** Parallel
+**TLAB-off** + lazy sweep as a **supported opt-in** (not process default;
+EC1 remains the PERF headline). `GCRY_TLAB=1` / Parallel+munmap stay
+experimental.
 
 Detail: [`2026-08-01-ec4-sweep-skip/summary.md`](2026-08-01-ec4-sweep-skip/summary.md),
 [`2026-08-01-ec4-chunk256/summary.md`](2026-08-01-ec4-chunk256/summary.md),
@@ -681,3 +683,25 @@ same-host: 1024 → `/json` **83.7%** @ ~60k; control → **83.9%** @ ~47k
 (Boehm louder on treatment). **Default stays 512**; knob opt-in.
 
 Detail: [`2026-08-02-ec4-fiber-scrub-1k/summary.md`](2026-08-02-ec4-fiber-scrub-1k/summary.md).
+
+## 2026-08-02 — Parallel TLAB-off lazy: supported opt-in (productize)
+
+Stretch thr levers exhausted (munmap / threshold / alloc-batch / scrub).
+**Supported opt-in config** (measure on the app; EC1 stays PERF default):
+
+- `EC_PARALLELISM>1` (e.g. 4)
+- `GCRY_TLAB` **off** (default)
+- lazy sweep **on** (default; `GCRY_DISABLE_LAZY_SWEEP=1` escapes)
+- empty-chunk munmap **off** under Parallel (default; `PARALLEL_RELEASE` experimental)
+
+Quiet tip: `/json` **~78.8%** Boehm @ ~69k, pause p50 ~**8.5 ms**
+(`2026-08-01-ec4-lazy-sweep/`). Soft **0/40**. Same-host follow-ups often
+**~83–88%** depending on Boehm noise. Productize smoke
+(`2026-08-02-ec4-productize/`): EC1 `/json` ~**29.3k**; EC4 quiet
+**81.5%** @ ~55k / ~5.5× RSS. Still **not** the process default
+ExecutionContext size — apps must resize EC and accept ~5–6× RSS vs Boehm
+on reclaim-off Kemal.
+
+Docs: `docs/PERF.md` (Parallel opt-in section), `docs/COMPARISON.md`,
+`docs/HARDENING.md`, `CHANGELOG` Unreleased.
+Detail: [`2026-08-02-ec4-productize/summary.md`](2026-08-02-ec4-productize/summary.md).

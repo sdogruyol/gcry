@@ -8,7 +8,7 @@ Boehm-class collector you can read and change in Crystal; **Linux + macOS**; fib
 
 ## v0.16.0 highlight
 
-EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Linux Kemal `/json` ~**87%** of Boehm @ ~**0.80×** post-GC RSS. Supported path remains EC parallelism **1**, `GCRY_TLAB` **off** (Parallel+TLAB stays experimental — FINDINGS only).
+EC1 thr recovery after Parallel-era STW / scrub / counter fallout. Linux Kemal `/json` ~**87%** of Boehm @ ~**0.80×** post-GC RSS. Default path remains EC parallelism **1**, `GCRY_TLAB` **off**. Parallel TLAB-off + lazy sweep is a **supported opt-in** (~79% `/json` tip); Parallel+TLAB stays experimental.
 
 ## Linux numbers
 
@@ -29,7 +29,7 @@ Cite [PERF-macos.md](PERF-macos.md). Last Darwin Kemal cut is **v0.13.0** (not r
 ## When to stay on Boehm
 
 - Windows process GC; Darwin soft-dirty / nursery parity
-- Parallel ExecutionContexts in production
+- Parallel EC **with TLAB** or empty munmap (still experimental); or zero-tuning Parallel defaults
 - Need `Process.fork` under ExecutionContext (Crystal forbids it; gcry atfork helps `-Dwithout_mt` / `LibC.fork` only)
 
 ## Channels
@@ -43,4 +43,4 @@ Cite [PERF-macos.md](PERF-macos.md). Last Darwin Kemal cut is **v0.13.0** (not r
 - [x] Tag `v0.16.0`; PERF.md + README refreshed same day
 - [ ] CI green on x86_64 + aarch64 + macOS
 - [ ] Link COMPARISON.md + POLICY.md + TEST_PLAN.md
-- [ ] Lead with **EC1 thr recovery + measured Linux numbers**, not a Parallel miracle
+- [ ] Lead with **EC1 thr recovery + measured Linux numbers**; Parallel only as measured opt-in (~79%)
