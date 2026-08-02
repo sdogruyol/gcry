@@ -27,11 +27,23 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   reverted). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32 still the
   **supported RSS opt-in** (~75% @ ~4×).
 
+### Changed
+
+- **EC1 post-STW sweep (pause):** sole-mutator path now ends STW before the
+  O(heap) sweep (same shape as Parallel lazy). Empty munmap still goes through
+  the pending list + flush; `@chunks` rebuild is guarded by
+  `@block_other_heap` so SYSMON cannot race `map_chunk`. Fully-dead
+  defer_reclaim fuses the dead-count into the discover pass (no second walk).
+  Under-load `/json` pause med **~4.1→~0.59 ms**; quiet med-of-3 `/json`
+  **84.6%** @ **0.82×** RSS, `pause_p50` **~0.58 ms**. Hub:
+  `bench/log/linux/2026-08-02-ec1-018-pause-lazy/`. Parallel munmap+lazy
+  remains rejected.
+
 ### Performance
 
-- Linux Kemal EC1 holds the ~**86–88%** / ~**0.80×** band (no default-path
-  leap past KEEP_CHUNKS-without-RSS-tax). Parallel thr opt-in unchanged
-  (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
+- Linux Kemal EC1 thr stays the ~**85–88%** / ~**0.80×** band; **pause_p50**
+  drops to ~**0.6 ms** under load (sweep outside STW). Parallel thr opt-in
+  unchanged (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
 
 ## [0.17.0] - 2026-08-02
 

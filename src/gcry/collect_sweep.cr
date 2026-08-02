@@ -53,7 +53,7 @@ module Gcry
             @size_class_chunk_count += 1
             note_chunk_fill(0_u64, 1_u64)
           end
-          unless after_world
+          if !after_world || relink_chunks_after_world?
             chunk.value.next = kept
             kept = chunk
           end
@@ -90,6 +90,9 @@ module Gcry
                 # skip freelist link (unlink-only for pre-existing free blocks).
                 defer_reclaim = major && release_empty_chunks_this_collect?
                 if defer_reclaim
+                  # Count unmarked USED in the discover pass so fully-dead
+                  # chunks skip a second O(blocks) walk (was pure pause cost).
+                  dead = 0_u64
                   while (cursor + block_bytes) <= limit
                     usable_payload += payload.to_u64
                     header = cursor.as(BlockHeader*)
@@ -103,6 +106,8 @@ module Gcry
                       if heap_marked?(header)
                         any_live = true
                         live_payload += payload.to_u64
+                      else
+                        dead &+= 1
                       end
                     end
                     cursor += block_bytes
@@ -123,15 +128,6 @@ module Gcry
                   else
                     # Fully-dead chunk: batch the live_objects accounting (one
                     # store under STW) instead of a CAS per block.
-                    dead = 0_u64
-                    cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                    while (cursor + block_bytes) <= limit
-                      header = cursor.as(BlockHeader*)
-                      unless BlockHeader.free?(header)
-                        dead &+= 1
-                      end
-                      cursor += block_bytes
-                    end
                     live_objects_sub(dead)
                   end
                 else
@@ -194,7 +190,9 @@ module Gcry
                         rebuild_mask |= bit
                       end
                     elsif munmap_empty_chunks_this_collect?
-                      # In-STW only (`sweep_after_world?` gates munmap off).
+                      # Queue for post-STW flush. Parallel lazy disables this
+                      # path (`sweep_after_world?`); EC1 lazy allows it and
+                      # rebuilds `@chunks` under `@block_other_heap`.
                       @heap_size -= mapped if @heap_size >= mapped
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
@@ -251,8 +249,9 @@ module Gcry
         end
 
         unless drop
-          # Lazy sweep: leave `@chunks` topology alone (map_chunk may prepend).
-          unless after_world
+          # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
+          # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
+          if !after_world || relink_chunks_after_world?
             chunk.value.next = kept
             kept = chunk
           end
@@ -260,7 +259,7 @@ module Gcry
         chunk = nxt
       end
 
-      unless after_world
+      if !after_world || relink_chunks_after_world?
         @chunks = kept
       end
 

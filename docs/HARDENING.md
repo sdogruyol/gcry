@@ -68,7 +68,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
 | `GCRY_STW_STACK_LAG` | Multi-mutator parked-fiber scan depth below `stack_top` (bytes; default **256 KiB**; `0` = full guard→bottom) |
 | `GCRY_STW_PTHREAD_LAG` | Multi-mutator pthread scan from stack high when SP is on a fiber (bytes; default **256 KiB**; `0` = full map) |
-| `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: Parallel reclaim-off / TLAB-off sweeps after `start_world`) |
+| `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: EC1 and Parallel reclaim-off / TLAB-off sweep after `start_world`) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |

@@ -190,6 +190,9 @@ module Gcry
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
     @stw_owner : Thread? = nil
+    # EC1 post-STW sweep/flush: block SYSMON map_chunk while `@chunks` is rebuilt
+    # and empties are queued for munmap (same cooperative spin as STW).
+    @block_other_heap = false
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
@@ -987,31 +990,45 @@ module Gcry
         # recursive) or munmap mid-peer-collect.
         @suppress_collect.add(1)
         begin
-          if @lazy_sweep_pending
-            t0 = monotonic_ns
-            sweep(major: major, after_world: true)
-            @last_phase_sweep_ns = monotonic_ns - t0
-            @lazy_sweep_pending = false
-            if major
-              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-            else
-              note_nursery_survival
-              arm_page_barrier_after_collect
+          # EC1 lazy: pin stw_owner + block SYSMON while rebuilding `@chunks`
+          # and munmapping empties (Parallel lazy does not relink / munmap).
+          ec1_lazy = @lazy_sweep_pending && !multi_mutator_threads?
+          if ec1_lazy
+            @stw_owner = Thread.current if @stw_owner.nil?
+            @block_other_heap = true
+          end
+          begin
+            if @lazy_sweep_pending
+              t0 = monotonic_ns
+              sweep(major: major, after_world: true)
+              @last_phase_sweep_ns = monotonic_ns - t0
+              @lazy_sweep_pending = false
+              if major
+                arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+              else
+                note_nursery_survival
+                arm_page_barrier_after_collect
+              end
+            end
+
+            t_flush = monotonic_ns
+            # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+            # Still under post-STW mutex so the next collect cannot stop_world here.
+            flush_pending_empty_chunks
+            # DORMANT madvise outside STW — kernel VM lock contention avoided.
+            flush_pending_dormant_chunks
+            # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
+            flush_pending_page_release_chunks
+            # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+            release_large_freelist_pages
+            trim_large_cache
+            @last_phase_flush_ns = monotonic_ns - t_flush
+          ensure
+            if ec1_lazy
+              @block_other_heap = false
+              @stw_owner = nil
             end
           end
-
-          t_flush = monotonic_ns
-          # Munmap outside STW — empty chunks + excess large freelist (reuse common).
-          # Still under post-STW mutex so the next collect cannot stop_world here.
-          flush_pending_empty_chunks
-          # DORMANT madvise outside STW — kernel VM lock contention avoided.
-          flush_pending_dormant_chunks
-          # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
-          flush_pending_page_release_chunks
-          # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-          release_large_freelist_pages
-          trim_large_cache
-          @last_phase_flush_ns = monotonic_ns - t_flush
 
           # After a major collect, record the heap range observation so the
           # adaptive headroom in `ensure_bitmap_covers` stays tight.

@@ -109,16 +109,30 @@ module Gcry
     end
 
     # Post-STW sweep: freelist locks serialize alloc into the class being
-    # swept (TLAB-off). Dormant-only empty reclaim is OK (chunks stay linked).
-    # Munmap / HOLED freelist rebuild stay in-STW only — post-STW munmap of
-    # excess empties was REJECT'd (SEGV + thr cliff; see FINDINGS munmap-lazy).
+    # swept (TLAB-off).
+    #
+    # Parallel: dormant-only empty reclaim (chunks stay linked). Post-STW
+    # munmap of excess empties was REJECT'd (SEGV + thr cliff; FINDINGS
+    # munmap-lazy) — keep that gate.
+    #
+    # EC1: allow post-STW sweep **with** munmap pending-list (pause excludes
+    # O(heap) walk). Sole mutator rebuilds `@chunks`; other threads (SYSMON)
+    # spin via `@block_other_heap` during the post-STW section.
     private def sweep_after_world? : Bool
       return false unless @lazy_sweep
-      return false unless multi_mutator_threads?
       return false if @tlab_enabled
-      return false if munmap_empty_chunks_this_collect?
       return false if @madvise_free_pages
+      unless multi_mutator_threads?
+        return true
+      end
+      return false if munmap_empty_chunks_this_collect?
       true
+    end
+
+    # EC1 post-STW: rebuild `@chunks` so munmap drops leave the list (Parallel
+    # after_world must not — map_chunk races).
+    private def relink_chunks_after_world? : Bool
+      !multi_mutator_threads?
     end
 
     private def munmap_empty_chunks_this_collect? : Bool
