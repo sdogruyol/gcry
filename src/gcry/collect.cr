@@ -868,6 +868,8 @@ module Gcry
           stop_world_quiescing_roots
           @last_phase_stw_stop_ns = monotonic_ns - t0
           flush_all_tlabs
+          # TLAB-off USED stash → freelist before mark (unscanned thread locals).
+          flush_all_alloc_batches
           # USED-on-freelist can remain after mid-`tlab_alloc_small` STW; unlink
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
           scrub_freelists

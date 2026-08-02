@@ -381,6 +381,13 @@ module GC
     if env_flag_one?("GCRY_TLAB")
       heap.tlab_enabled = true
     end
+    # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
+    # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
+    if ab = env_u64("GCRY_ALLOC_BATCH")
+      if ab >= 1 && ab <= 64
+        heap.alloc_batch = ab.to_i32
+      end
+    end
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end

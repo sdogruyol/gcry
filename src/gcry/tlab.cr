@@ -30,6 +30,22 @@ module Gcry
     # → GC.malloc → re-enter alloc → non-recursive SpinLock deadlock at boot).
     @tlab_slot_locks = uninitialized StaticArray(Crystal::SpinLock, MAX_TLABS)
 
+    # TLAB-off USED stash (see alloc_old_small_batched). Same slot count as TLAB.
+    struct AllocBatch
+      property freelists : StaticArray(Void*, SIZE_CLASS_COUNT)
+      property owner : UInt64
+      property live : Bool
+
+      def initialize
+        @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+        @owner = 0_u64
+        @live = false
+      end
+    end
+
+    @alloc_batches = uninitialized StaticArray(AllocBatch, MAX_TLABS)
+    @alloc_batch_slot_locks = uninitialized StaticArray(Crystal::SpinLock, MAX_TLABS)
+
     def tlab_enabled? : Bool
       @tlab_enabled
     end
@@ -48,6 +64,14 @@ module Gcry
 
     def tlab_hits : UInt64
       @tlab_hits.get
+    end
+
+    def alloc_batch_hits : UInt64
+      @alloc_batch_hits.get
+    end
+
+    def alloc_batch_refills : UInt64
+      @alloc_batch_refills
     end
 
     protected def ensure_tlabs : Nil
@@ -488,6 +512,256 @@ module Gcry
       else
         @freelists[class_index] = new_head
         @freelist_clean[class_index] = false
+      end
+    end
+
+    # --- TLAB-off alloc batch (USED stash) ---------------------------------
+    # Claim up to N freelist nodes under the per-class freelist lock, mark them
+    # USED (+mark bit while collecting), stash extras on a per-thread chain.
+    # Hits skip the freelist lock (unlike TLAB FREE caches — safe with lazy
+    # sweep). STW flush returns unused stash to the global freelist.
+
+    protected def ensure_alloc_batches : Nil
+      return if @alloc_batches_booted
+      @alloc_lock.sync { ensure_alloc_batches_under_lock }
+    end
+
+    private def ensure_alloc_batches_under_lock : Nil
+      return if @alloc_batches_booted
+      MAX_TLABS.times do |i|
+        @alloc_batches[i] = AllocBatch.new
+        @alloc_batch_slot_locks[i] = Crystal::SpinLock.new
+      end
+      @alloc_batches_booted = true
+    end
+
+    private def alloc_batch_slot_index(ab : AllocBatch*) : Int32
+      ((ab.address - @alloc_batches.to_unsafe.address) // sizeof(AllocBatch)).to_i32
+    end
+
+    private def lock_alloc_batch_slot(slot : Int32) : Nil
+      (@alloc_batch_slot_locks.to_unsafe + slot).value.lock
+    end
+
+    private def unlock_alloc_batch_slot(slot : Int32) : Nil
+      (@alloc_batch_slot_locks.to_unsafe + slot).value.unlock
+    end
+
+    protected def current_alloc_batch : AllocBatch*
+      ensure_alloc_batches
+      key = current_thread_key
+      i = 0
+      while i < MAX_TLABS
+        if @alloc_batches[i].live && @alloc_batches[i].owner == key
+          return @alloc_batches.to_unsafe + i
+        end
+        i += 1
+      end
+      ab = @alloc_lock.sync { current_alloc_batch_under_lock(key) }
+      if ab.null?
+        raise OutOfMemoryError.new("alloc-batch table full (#{MAX_TLABS} threads)")
+      end
+      ab
+    end
+
+    private def current_alloc_batch_under_lock(key : UInt64 = current_thread_key) : AllocBatch*
+      ensure_alloc_batches_under_lock
+      i = 0
+      while i < MAX_TLABS
+        if @alloc_batches[i].live && @alloc_batches[i].owner == key
+          return @alloc_batches.to_unsafe + i
+        end
+        i += 1
+      end
+      i = 0
+      while i < MAX_TLABS
+        unless @alloc_batches[i].live
+          @alloc_batches[i].owner = key
+          @alloc_batches[i].live = true
+          return @alloc_batches.to_unsafe + i
+        end
+        i += 1
+      end
+      Pointer(AllocBatch).null
+    end
+
+    # Pop one USED node from the thread stash, or refill under freelist lock.
+    protected def alloc_old_small_batched(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      batch = @alloc_batch
+      batch = 1 if batch < 1
+      batch = 64 if batch > 64
+
+      ab = current_alloc_batch
+      slot = alloc_batch_slot_index(ab)
+      user = Pointer(Void).null
+
+      lock_alloc_batch_slot(slot)
+      begin
+        user = ab.value.freelists[index]
+        if !user.null?
+          header = BlockHeader.from_user(user)
+          if BlockHeader.free?(header)
+            # Corrupt / flushed under us — drop chain.
+            ab.value.freelists[index] = Pointer(Void).null
+            user = Pointer(Void).null
+          else
+            ab.value.freelists[index] = header.value.next_free
+            BlockHeader.set_used(header, payload, flags)
+            heap_set_mark(header) if @incremental_marking || @collecting
+            @alloc_batch_hits.add(1_u64)
+          end
+        end
+      ensure
+        unlock_alloc_batch_slot(slot)
+      end
+
+      if user.null?
+        user = refill_alloc_batch(index, payload, flags, batch)
+        raise OutOfMemoryError.new("failed to refill alloc-batch size class #{payload}") if user.null?
+      end
+
+      note_alloc_bytes(rounded)
+      user
+    end
+
+    # Under freelist lock: claim up to `batch` FREE nodes as USED; return the
+    # first and stash the rest on the current thread's AllocBatch slot.
+    # Lock order: freelist → alloc-batch slot (never reverse).
+    private def refill_alloc_batch(class_index : Int32, payload : UInt32, flags : UInt32, batch : Int32) : Void*
+      first = Pointer(Void).null
+      stash_head = Pointer(Void).null
+      claimed = 0
+
+      with_freelist_lock(class_index, false) do
+        2.times do |attempt|
+          if @freelists[class_index].null?
+            refill_size_class(class_index, payload, nursery: false)
+          end
+
+          src = @freelists[class_index]
+          skip_budget = 4096
+          while !src.null? && !BlockHeader.free?(BlockHeader.from_user(src)) && skip_budget > 0
+            src = BlockHeader.from_user(src).value.next_free
+            @freelists[class_index] = src
+            skip_budget -= 1
+          end
+          if skip_budget == 0
+            @freelists[class_index] = Pointer(Void).null
+            src = Pointer(Void).null
+          end
+
+          if src.null? && attempt == 0
+            refill_size_class(class_index, payload, nursery: false)
+            next
+          end
+          break if src.null?
+
+          if @blacklist_enabled
+            taken = take_non_blacklisted(src, class_index, false)
+            unless taken.null?
+              th = BlockHeader.from_user(taken)
+              tv = th.value
+              tv.next_free = @freelists[class_index]
+              th.value = tv
+              @freelists[class_index] = taken
+              src = taken
+            end
+          end
+          break if src.null? || !BlockHeader.free?(BlockHeader.from_user(src))
+
+          claimed = 0
+          stash_head = Pointer(Void).null
+          first = Pointer(Void).null
+          while claimed < batch && !src.null?
+            break unless BlockHeader.free?(BlockHeader.from_user(src))
+            header = BlockHeader.from_user(src)
+            nxt = header.value.next_free
+            @freelists[class_index] = nxt
+            BlockHeader.set_used(header, payload, flags)
+            heap_set_mark(header) if @incremental_marking || @collecting
+            if first.null?
+              first = src
+              # next_free unused for the returned object
+              hv = header.value
+              hv.next_free = Pointer(Void).null
+              header.value = hv
+            else
+              hv = header.value
+              hv.next_free = stash_head
+              header.value = hv
+              stash_head = src
+            end
+            claimed += 1
+            src = nxt
+            # Skip USED-on-freelist nodes
+            while !src.null? && !BlockHeader.free?(BlockHeader.from_user(src))
+              src = BlockHeader.from_user(src).value.next_free
+              @freelists[class_index] = src
+            end
+          end
+          break
+        end
+      end
+
+      return Pointer(Void).null if first.null?
+
+      free_bytes_sub(payload.to_u64 * claimed.to_u64)
+      @alloc_batch_refills += 1
+
+      unless stash_head.null?
+        ab = current_alloc_batch
+        slot = alloc_batch_slot_index(ab)
+        lock_alloc_batch_slot(slot)
+        begin
+          # Prepend new stash in front of any residual (should be empty).
+          tail = stash_head
+          while true
+            h = BlockHeader.from_user(tail)
+            nxt = h.value.next_free
+            break if nxt.null?
+            tail = nxt
+          end
+          hv = BlockHeader.from_user(tail).value
+          hv.next_free = ab.value.freelists[class_index]
+          BlockHeader.from_user(tail).value = hv
+          ab.value.freelists[class_index] = stash_head
+        ensure
+          unlock_alloc_batch_slot(slot)
+        end
+      end
+
+      first
+    end
+
+    # Return unused USED-stash nodes to the global freelist (STW / destroy).
+    # Bump epoch so a resumed mid-claim abandons stale stash heads.
+    protected def flush_all_alloc_batches : Nil
+      return if @alloc_batch <= 0
+      return unless @alloc_batches_booted
+      @alloc_batch_epoch.add(1)
+      # No per-slot locks under STW (same rationale as flush_all_tlabs).
+      MAX_TLABS.times do |i|
+        next unless @alloc_batches[i].live
+        SIZE_CLASS_COUNT.times do |c|
+          head = @alloc_batches[i].freelists[c]
+          next if head.null?
+          @alloc_batches[i].freelists[c] = Pointer(Void).null
+          payload = SizeClasses.payload(c)
+          user = head
+          n = 0_u64
+          while user
+            header = BlockHeader.from_user(user)
+            nxt = header.value.next_free
+            unless BlockHeader.free?(header)
+              header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[c])
+              @freelists[c] = user
+              n &+= 1
+            end
+            user = nxt
+          end
+          free_bytes_add(payload.to_u64 * n) if n > 0
+          @freelist_clean[c] = false if n > 0
+        end
       end
     end
   end

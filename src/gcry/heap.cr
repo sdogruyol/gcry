@@ -128,6 +128,13 @@ module Gcry
     @tlab_hits = Atomic(UInt64).new(0_u64)
     @tlabs_booted = false
     @tlab_epoch = Atomic(UInt64).new(0_u64)
+    # TLAB-off batch: claim N under freelist lock as USED, consume from
+    # thread stash without that lock (safe with lazy sweep). 0 = off.
+    property alloc_batch : Int32 = 0
+    @alloc_batches_booted = false
+    @alloc_batch_epoch = Atomic(UInt64).new(0_u64)
+    @alloc_batch_hits = Atomic(UInt64).new(0_u64)
+    @alloc_batch_refills = 0_u64
     @parallel_mark_workers = 1
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
@@ -181,6 +188,11 @@ module Gcry
       @tlab_steals = 0_u64
       @tlabs_booted = false
       @tlab_epoch = Atomic(UInt64).new(0_u64)
+      @alloc_batch = 0
+      @alloc_batches_booted = false
+      @alloc_batch_epoch = Atomic(UInt64).new(0_u64)
+      @alloc_batch_hits = Atomic(UInt64).new(0_u64)
+      @alloc_batch_refills = 0_u64
       @suppress_collect = Atomic(Int32).new(0)
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
@@ -228,6 +240,7 @@ module Gcry
       @destroyed = true
       shutdown_mark_workers
       flush_all_tlabs
+      flush_all_alloc_batches
       # MUST tear down collector state (pending chunk flush, finalizers,
       # mark-stack) BEFORE unmapping the chunk list — destroy_collector walks
       # @chunks for flush_pending_dormant_chunks and
@@ -579,6 +592,10 @@ module Gcry
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+      if @alloc_batch > 0 && !@tlab_enabled
+        return alloc_old_small_batched(payload, flags, index, rounded)
+      end
+
       user = with_freelist_lock(index, false) do
         u = @freelists[index]
 

@@ -608,6 +608,7 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | parallel post-STW lazy (4 EC fibers) | 0/40 | **73.6%** | steals mutator cores; reverted |
 | post-STW Parallel munmap excess | abort | thr **~32k** | SEGV + cliff; reverted |
 | Parallel threshold 96 MiB (lazy tip) | 0/40 | **80.0%** vs control **83.1%** | abs↓ RSS↑; default stays 64 |
+| alloc freelist batch pop (N=8) | 0/40 | **63.3%** vs control **88.1%** | opt-in kept; default 0 |
 
 Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
 empties **are** the alloc freelist — rearranging/parallelizing the same
@@ -658,3 +659,14 @@ control 64 → **83.1%** @ ~55k / **5.8×** / majors ~148. Fewer majors,
 worse thr and RSS (larger per-epoch sweep). **Default stays 64 MiB.**
 
 Detail: [`2026-08-02-ec4-threshold-96/summary.md`](2026-08-02-ec4-threshold-96/summary.md).
+
+## 2026-08-02 — Alloc freelist batch pop N=8 (REJECT default)
+
+Session `2026-08-02-ec4-alloc-batch/`.
+
+TLAB-off USED stash (`GCRY_ALLOC_BATCH`): claim N under freelist lock, hit
+path skips that lock; STW flush. Soft **0/40**. Quiet same-host: batch=8
+→ `/json` **63.3%** @ ~40k; control → **88.1%** @ ~50k. **Default stays
+0**; knob remains opt-in only.
+
+Detail: [`2026-08-02-ec4-alloc-batch/summary.md`](2026-08-02-ec4-alloc-batch/summary.md).
