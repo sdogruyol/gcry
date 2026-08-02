@@ -606,6 +606,7 @@ Detail: [`2026-08-01-ec4-lazy-sweep/summary.md`](2026-08-01-ec4-lazy-sweep/summa
 | alloc-bitmap sweep skip | 0 smoke | thr **~44k** | skips~0; dense death; reverted |
 | on-demand span reclaim (sweep gen) | 0/40 | **71.9%** | ~53k; mark tax + finish; reverted |
 | parallel post-STW lazy (4 EC fibers) | 0/40 | **73.6%** | steals mutator cores; reverted |
+| post-STW Parallel munmap excess | abort | thr **~32k** | SEGV + cliff; reverted |
 
 Stretch **~80%** still open; campaign bar **78.8%**. Residual: reclaim-off
 empties **are** the alloc freelist — rearranging/parallelizing the same
@@ -632,3 +633,16 @@ MiB: `/json` **75.1%** @ ~55k, pause p50 ~**8.8 ms**, RSS **~4.0×** (was
 sweep-walk cut. Still &lt; **78.8%** gate → keep opt-in, not Parallel default.
 
 Detail: [`2026-08-01-ec4-dormant-lazy/summary.md`](2026-08-01-ec4-dormant-lazy/summary.md).
+
+## 2026-08-02 — Post-STW Parallel munmap excess (REJECT)
+
+Session `2026-08-01-ec4-munmap-lazy/`.
+
+Attempt: munmap retain-excess empties during lazy sweep (`PENDING_UNMAP` +
+flush under all freelist/`@alloc_lock`). Soft aborted (SEGV; thr med
+**~32k**). GC `Array` pending list SEGV'd on `#clear` after munmap; inline
+buffer still left intermittent SEGV + thr cliff. **Reverted.** Munmap
+again disables lazy (`sweep_after_world?`). Dormant+lazy opt-in unchanged.
+Stretch ~80% / walk-cut still open; bar **78.8%**.
+
+Detail: [`2026-08-01-ec4-munmap-lazy/summary.md`](2026-08-01-ec4-munmap-lazy/summary.md).

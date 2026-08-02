@@ -108,10 +108,10 @@ module Gcry
       @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
     end
 
-    # Post-STW sweep is safe when we will not munmap/unlink `@chunks`.
-    # Dormant-only empty reclaim is OK post-STW (chunks stay linked; freelist
-    # rebuilds take per-class locks). TLAB-off: freelist lock serializes alloc
-    # into the class being swept. HOLED freelist rebuild stays in-STW only.
+    # Post-STW sweep: freelist locks serialize alloc into the class being
+    # swept (TLAB-off). Dormant-only empty reclaim is OK (chunks stay linked).
+    # Munmap / HOLED freelist rebuild stay in-STW only — post-STW munmap of
+    # excess empties was REJECT'd (SEGV + thr cliff; see FINDINGS munmap-lazy).
     private def sweep_after_world? : Bool
       return false unless @lazy_sweep
       return false unless multi_mutator_threads?

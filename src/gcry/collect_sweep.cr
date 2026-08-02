@@ -10,7 +10,7 @@ module Gcry
       #
       # after_world (lazy sweep): mutators are running; take per-class freelist /
       # alloc locks around reclaim. Do not relink `@chunks` (would race
-      # map_chunk). Eligible only when empty-reclaim/HOLED rebuild is off.
+      # map_chunk). Munmap empty-reclaim / HOLED rebuild stay in-STW only.
       kept = Pointer(ChunkHeader).null
       # Fully free size-class chunks: queue here, munmap after start_world.
       to_unmap = Pointer(ChunkHeader).null
@@ -41,17 +41,16 @@ module Gcry
         nxt = chunk.value.next
         drop = false
 
-        # Already-dormant empties: pages DONTNEED'd, not on freelist. Skip the
-        # O(blocks) walk — big win when Parallel dormant trims the heap.
-        if ChunkHeader.dormant?(chunk) && (major || ChunkHeader.nursery?(chunk)) &&
-           !ChunkHeader.large?(chunk)
+        # Already-dormant empties: skip O(blocks) walk; recount retain budget.
+        if !ChunkHeader.large?(chunk) && (major || ChunkHeader.nursery?(chunk)) &&
+           ChunkHeader.dormant?(chunk)
           if major
             mapped = chunk.value.mapped_bytes
             @fully_free_chunk_bytes += mapped
             @dormant_chunk_bytes += mapped
             dormant_budget_used += mapped
-            @size_class_chunk_count += 1
             @sweep_dormant_skips += 1
+            @size_class_chunk_count += 1
             note_chunk_fill(0_u64, 1_u64)
           end
           unless after_world
@@ -195,15 +194,16 @@ module Gcry
                         rebuild_mask |= bit
                       end
                     elsif munmap_empty_chunks_this_collect?
+                      # In-STW only (`sweep_after_world?` gates munmap off).
                       @heap_size -= mapped if @heap_size >= mapped
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
-                      index_remove(chunk)
                       if ChunkHeader.nursery?(chunk)
                         rebuild_nursery_mask |= bit
                       else
                         rebuild_mask |= bit
                       end
+                      index_remove(chunk)
                       chunk.value.next = to_unmap
                       to_unmap = chunk
                       drop = true
