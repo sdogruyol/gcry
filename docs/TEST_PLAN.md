@@ -18,7 +18,7 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 | **Unit test coverage** | A | Specs across heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate. |
 | **Integration test** | A- | `process_spec/` under `-Dgc_none`. Nursery HTTP regression in `bench/nursery_headers.cr`. |
 | **Fuzz / property** | A- | Deterministic fuzz + replay; heap/layout/MT property tests in CI. |
-| **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (≥70% Boehm), nightly fuzz/soak. |
+| **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (≥70% Boehm), soak-smoke, EC4 soft-soak smoke, nightly fuzz/soak. |
 | **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
 | **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak. |
 | **Multi-thread test** | A | Library-heap MT property + thread storm + **process-STW MT property** (`bench/stw_mt_property_test.cr`, Parallel=2+4; TLAB@2+4; TLAB+nursery minors). |
@@ -28,6 +28,7 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
+| **EC4 soft soak full N=40 in CI** | 🟢 Medium | PR runs `make soft-soak-ec4-smoke` (N=5); local gate remains N=40 (`make soft-soak-ec4`). |
 | **CHANGELOG audit backlog** | 🟢 Medium | Older Fixed entries lack dedicated regressions (issues, not blockers). |
 | **PR auto-perf comments** | 🟢 Medium | Variance protocol exists; auto PR comment still open. |
 | **WeakRef / large-heap edge cases** | 🟢 Medium | Cycles, resurrection, multi-GB heaps lightly covered. |

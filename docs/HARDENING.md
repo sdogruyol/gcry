@@ -136,11 +136,15 @@ ExecutionContext does not call `set_stackbottom` on swap — gcry refreshes from
 Static roots: main executable RW (+ adjacent BSS); skip `.so` data and large RELRO. Fiber stacks scanned once per collect.
 
 Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
-`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — Kemal
-`/json` ~**79%** Boehm tip; see [PERF.md](PERF.md). `GCRY_TLAB=1` and
-`GCRY_PARALLEL_RELEASE` remain experimental; `GCRY_PARALLEL_MARK` is
-research — [POLICY.md](POLICY.md).
+`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — thr
+~**80%** `/json` @ ~5.5× RSS; `GCRY_PARALLEL_DORMANT=1` for RSS ~**75%**
+@ ~4× — [PERF.md](PERF.md). Correctness gate: `make soft-soak-ec4`
+(soft+hard **0/40**); CI runs `make soft-soak-ec4-smoke` (N=5).
+`GCRY_TLAB=1` and `GCRY_PARALLEL_RELEASE` remain experimental;
+`GCRY_PARALLEL_MARK` is research — [POLICY.md](POLICY.md).
 
 ## CI
 
-Format, specs, `-Dgc_none` samples, env smoke, `bench/churn` on Linux x86_64 (Crystal 1.21 + latest). aarch64 native and `macos-latest` for STW/fork samples. See `.github/workflows/ci.yml`.
+Format, specs, `-Dgc_none` samples, env smoke, `bench/churn`, `soak-smoke`,
+and EC4 soft-soak smoke on Linux x86_64 (Crystal 1.21 + latest). aarch64
+native and `macos-latest` for STW/fork samples. See `.github/workflows/ci.yml`.

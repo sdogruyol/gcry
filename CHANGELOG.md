@@ -27,6 +27,20 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   reverted). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32 still the
   **supported RSS opt-in** (~75% @ ~4×).
 
+### Fixed
+
+- **Nightly fuzz CLI:** `nightly-fuzz.yml` now passes `--seconds=1800 --seed=42`.
+  Positional `1800 42` was ignored (`bench/fuzz.cr` only parses flags), so the
+  job ran the default **30s** fuzz instead of 30 minutes.
+
+### Added
+
+- **EC4 soft-soak gate:** `bench/soft_soak_ec4.sh` + `make soft-soak-ec4`
+  (N=40) / `make soft-soak-ec4-smoke` (N=5). Scrapes soft mark-miss /
+  hard SEGV over Parallel TLAB-off Kemal `/json`; CI `perf-smoke` runs the
+  smoke. Tip local gate **40/40 soft=0 hard=0** (thr med ~66k). Process-GC
+  `make soak-smoke` is now on the PR `test` job.
+
 ### Changed
 
 - **EC1 post-STW sweep (pause):** sole-mutator path now ends STW before the

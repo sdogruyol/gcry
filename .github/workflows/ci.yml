@@ -155,6 +155,9 @@ jobs:
           crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
           ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
 
+      - name: Process-GC soak smoke (10s)
+        run: make soak-smoke
+
       - name: Thread storm (100 iterations, 4 workers)
         run: |
           crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
@@ -346,6 +349,11 @@ jobs:
           mkdir -p bin
           KEMAL_E2E_DURATION=60 PORT=3021 ./bench/kemal_e2e.sh
 
+      - name: EC4 soft-soak smoke (Parallel TLAB-off, N=5)
+        run: |
+          mkdir -p bin
+          make soft-soak-ec4-smoke
+
       - name: Upload perf report
         uses: actions/upload-artifact@v4
         with:
@@ -353,7 +361,7 @@ jobs:
           path: bench/log/
           retention-days: 30
 
-  # Weekly soak test (24h, Sunday 06:00 UTC).
+  # Weekly soak test (24h, Monday 06:00 UTC — see schedule cron above).
   soak:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
