@@ -38,6 +38,10 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   **84.6%** @ **0.82×** RSS, `pause_p50` **~0.58 ms**. Hub:
   `bench/log/linux/2026-08-02-ec1-018-pause-lazy/`. Parallel munmap+lazy
   remains rejected.
+- **Skip post-rebuild `recalc_free_bytes`:** munmap empties subtract FREE
+  payload counted in discover; drop the extra full-heap free walk after
+  freelist rebuild. Under-load sweep med **~3.47→~2.63 ms (−24%)**; pause
+  holds ~0.58 ms. Hub: `bench/log/linux/2026-08-02-ec1-018-pause-recalc/`.
 
 ### Performance
 

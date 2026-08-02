@@ -75,6 +75,8 @@ module Gcry
             any_live = false
             live_payload = 0_u64
             usable_payload = 0_u64
+            # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
+            free_payload = 0_u64
             fl_locked = false
             if after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT
               freelist_lock_ptr(class_index, ChunkHeader.nursery?(chunk)).value.lock
@@ -90,13 +92,14 @@ module Gcry
                 # skip freelist link (unlink-only for pre-existing free blocks).
                 defer_reclaim = major && release_empty_chunks_this_collect?
                 if defer_reclaim
-                  # Count unmarked USED in the discover pass so fully-dead
-                  # chunks skip a second O(blocks) walk (was pure pause cost).
+                  # Count unmarked USED + FREE payload in the discover pass so
+                  # fully-dead chunks skip a second O(blocks) walk.
                   dead = 0_u64
                   while (cursor + block_bytes) <= limit
                     usable_payload += payload.to_u64
                     header = cursor.as(BlockHeader*)
                     if BlockHeader.free?(header)
+                      free_payload &+= payload.to_u64
                       # FREE + marked: mid-alloc claimed from a stack root.
                       if heap_marked?(header)
                         any_live = true
@@ -193,6 +196,9 @@ module Gcry
                       # Queue for post-STW flush. Parallel lazy disables this
                       # path (`sweep_after_world?`); EC1 lazy allows it and
                       # rebuilds `@chunks` under `@block_other_heap`.
+                      # Drop FREE bytes that leave the heap (reclaim_small /
+                      # freelist_reserve already adjust; skip full recalc).
+                      free_bytes_sub(free_payload) if free_payload > 0
                       @heap_size -= mapped if @heap_size >= mapped
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
@@ -293,7 +299,9 @@ module Gcry
             end
           end
         end
-        recalc_free_bytes
+        # No recalc_free_bytes: reclaim_small / freelist_reserve / large cache
+        # and munmap free_payload_sub keep @free_bytes coherent. Full-heap
+        # recalc was an extra O(blocks) walk after every empty/HOLED rebuild.
       end
 
       if any_drop
