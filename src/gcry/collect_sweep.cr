@@ -30,6 +30,7 @@ module Gcry
         @chunk_fill_ge75 = 0_u64
         @dormant_chunk_bytes = 0_u64
         @dontneed_bytes = 0_u64
+        @sweep_dormant_skips = 0_u64
       end
 
       # Bytes of empty chunks kept dormant this major (within retain budget).
@@ -39,6 +40,27 @@ module Gcry
       while chunk
         nxt = chunk.value.next
         drop = false
+
+        # Already-dormant empties: pages DONTNEED'd, not on freelist. Skip the
+        # O(blocks) walk — big win when Parallel dormant trims the heap.
+        if ChunkHeader.dormant?(chunk) && (major || ChunkHeader.nursery?(chunk)) &&
+           !ChunkHeader.large?(chunk)
+          if major
+            mapped = chunk.value.mapped_bytes
+            @fully_free_chunk_bytes += mapped
+            @dormant_chunk_bytes += mapped
+            dormant_budget_used += mapped
+            @size_class_chunk_count += 1
+            @sweep_dormant_skips += 1
+            note_chunk_fill(0_u64, 1_u64)
+          end
+          unless after_world
+            chunk.value.next = kept
+            kept = chunk
+          end
+          chunk = nxt
+          next
+        end
 
         if major || ChunkHeader.nursery?(chunk)
           if ChunkHeader.large?(chunk)

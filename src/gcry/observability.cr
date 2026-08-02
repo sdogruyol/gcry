@@ -71,6 +71,7 @@ module Gcry
         soft_dirty_last_total:        heap.last_soft_dirty_total,
         soft_dirty_max_pct:           heap.soft_dirty_max_pct,
         dormant_chunk_bytes:          heap.dormant_chunk_bytes,
+        sweep_dormant_skips:          heap.sweep_dormant_skips,
         dontneed_bytes:               heap.dontneed_bytes,
         empty_chunk_retain:           heap.empty_chunk_retain,
         layout_precise_scans:         heap.layout_precise_scans,

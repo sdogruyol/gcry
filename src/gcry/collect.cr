@@ -66,6 +66,8 @@ module Gcry
     # Partial-page MADV_DONTNEED on sparse chunks (opt-in — STW cost).
     property madvise_free_pages : Bool = false
     getter dormant_chunk_bytes : UInt64 = 0_u64
+    # Fully-dormant size-class chunks skipped in sweep (no block walk).
+    getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.

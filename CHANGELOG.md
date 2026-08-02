@@ -15,12 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escapes). Soft **0/40**. Same-host EC4 `/json` **~78.8%** Boehm @ ~**69k**
   (was ~76.6%; pause p50 ~20→~8.5 ms). Session
   `bench/log/linux/2026-08-01-ec4-lazy-sweep/`. No `PERF.md` fold-in.
+- **Parallel dormant + lazy sweep (opt-in):** dormant-only empty reclaim no
+  longer forces in-STW sweep; already-dormant chunks skip the block walk.
+  Soft **0/40**. Quiet EC4 `/json` **~75.1%** @ ~55k with retain=32 MiB, RSS
+  **~4.0×** (was opt-in dormant **71.7%** / ~1.7× when lazy was disabled).
+  Still below lazy gate **78.8%** — **not** Parallel default. Freelist churn
+  revives dormants each cycle (`sweep_dormant_skips` ≈ 0). Session
+  `bench/log/linux/2026-08-01-ec4-dormant-lazy/`.
 - **Parallel bounded empty-chunk dormant (opt-in):** `GCRY_PARALLEL_DORMANT=1`
-  now DONTNEEDs empties only within `empty_chunk_retain` (was unbounded when
-  munmap off). Excess stay freelist-mapped. Legacy unbounded:
-  `GCRY_PARALLEL_DORMANT_ALL=1`. Soft **0/40**. Quiet EC4 `/json` **~71.7%**
-  Boehm @ ~63k with retain=32 MiB, RSS **~1.7×** (gate ~5.8×) — thr below
-  mark-gen 76.6% bar, so **not** Parallel default. Session
+  DONTNEEDs empties within `empty_chunk_retain` (unbounded legacy:
+  `GCRY_PARALLEL_DORMANT_ALL=1`). Soft **0/40**. Prior quiet (pre-lazy compat)
+  **~71.7%** @ ~63k, RSS **~1.7×**. Session
   `bench/log/linux/2026-08-01-ec4-rss-bounded/`.
 - **In-header mark generation:** `clear_all_marks` bumps an 8-bit generation
   in `BlockHeader` flags (bits 8–15) instead of walking the heap — kills

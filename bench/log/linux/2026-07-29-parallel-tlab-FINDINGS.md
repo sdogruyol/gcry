@@ -618,3 +618,17 @@ Detail: [`2026-08-01-ec4-sweep-skip/summary.md`](2026-08-01-ec4-sweep-skip/summa
 [`2026-08-01-ec4-alloc-bits/summary.md`](2026-08-01-ec4-alloc-bits/summary.md),
 [`2026-08-01-ec4-sweepgen/summary.md`](2026-08-01-ec4-sweepgen/summary.md),
 [`2026-08-01-ec4-parallel-lazy/summary.md`](2026-08-01-ec4-parallel-lazy/summary.md).
+
+## 2026-08-01 — Dormant + lazy sweep compat (opt-in ship; not default)
+
+Session `2026-08-01-ec4-dormant-lazy/`.
+
+**Bug/limit:** `PARALLEL_DORMANT` used `release_empty_chunks_this_collect?`
+to disable post-STW lazy → in-STW sweep + DONTNEED thr cliff (**71.7%**).
+**Ship:** allow lazy when only dormant (block lazy only for munmap/HOLED);
+skip block walk on already-dormant chunks. Soft **0/40**. Quiet retain=32
+MiB: `/json` **75.1%** @ ~55k, pause p50 ~**8.8 ms**, RSS **~4.0×** (was
+71.7% / ~1.7×). Skips ≈ 0 under freelist revive churn — **no** steady-state
+sweep-walk cut. Still &lt; **78.8%** gate → keep opt-in, not Parallel default.
+
+Detail: [`2026-08-01-ec4-dormant-lazy/summary.md`](2026-08-01-ec4-dormant-lazy/summary.md).
