@@ -59,7 +59,8 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   `.llvm_stackmaps` v3; hybrid walker (STW gregs + FP walk) calls
   `mark_precise_root` when `GCRY_PRECISE_STACK=1` (conservative scan still
   on). Crystal probe `gcry-stackmap-probe`: live locals (alloca preferred),
-  auto `-no-pie`.
+  auto `-no-pie`. EC root pins gate on `Thread` ivar presence (tip Crystal
+  vs 1.21.0 release both build `-Dgc_none`).
 - **`GCRY_EMPTY_CHUNK_WARM_RETAIN`:** opt-in bytes of fully-free chunks kept
   mapped (no DONTNEED) before dormant/munmap — research middle path vs
   `KEEP_CHUNKS`. Measured on 9950X; **not** a process default (no

@@ -34,15 +34,16 @@ module Gcry
         # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
         # only on conservative Thread body scan missed them when layout/scan_cap
         # truncated the object (Kemal EC4 SEGV @ …0008).
-        # Same flag gate as Crystal Thread: under `-Dwithout_mt` these ivars and
-        # Fiber::ExecutionContext do not exist (CI fork_reinit / Darwin samples).
-        {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+        # Gate on the ivar itself: Crystal 1.21.0 release declares
+        # @execution_context by default; tip needs -Dexecution_context
+        # (-Dpreview_mt). Flag-only gates break one of the two.
+        {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
           mark_ref_slot(pointerof(thread.@scheduler).address)
           mark_ref_slot(pointerof(thread.@execution_context).address)
         {% end %}
       end
 
-      {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
         # Global EC list (not thread-local) — keeps contexts that temporarily have
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|

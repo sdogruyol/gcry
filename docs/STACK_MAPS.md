@@ -77,6 +77,8 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 | LLVM IR | **Yes** — empty then **with lives** (`ptr %sm.s`, …); ~7.5k/9.7k sites carry ≥1 live in a small String program |
 | Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
 | Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
+| Process GC | **`crystal build -Dgc_none`** with tip probe works. Parallel EC on tip needs `-Dpreview_mt -Dexecution_context` (1.21.0 release has EC by default). |
+| Walker smoke | `CRYSTAL_EMIT_STACKMAP=1` + `GCRY_PRECISE_STACK=1`: maps load (`records>0`), `precise_stack_roots_marked≥1`. |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
