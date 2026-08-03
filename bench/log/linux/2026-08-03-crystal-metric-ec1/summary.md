@@ -1,9 +1,12 @@
-# crystal-metric Boehm vs gcry (secondary)
+# crystal-metric Boehm vs gcry (secondary) — SUPERSEDED
+
+Shared-process methodology (suite-order pollution). **Cite
+`2026-08-03-crystal-metric-fresh/` instead.** Raw trial logs dropped; summaries kept.
 
 - platform: `linux` (WSL2 i3-12100F)
 - trials: 3 (median wall)
 - filter: GC-sensitive subset
-- role: **secondary GC suite** — not a ship headline
+- role: **cautionary only** — not a ship headline
 - peak RSS × (GNU time med): **0.79**
 
 | Bench | Boehm s (med) | gcry s (med) | speed % Boehm | wall × |

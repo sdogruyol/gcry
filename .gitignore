@@ -17,6 +17,12 @@
 /bench/kemal/.shards/
 /bench/kemal/shard.lock
 
+# Nested crystal-metric bench deps / upstream results cache
+/bench/crystal_metric/lib/
+/bench/crystal_metric/.shards/
+/bench/crystal_metric/shard.lock
+/bench/crystal_metric/results.js
+
 # Generated perf artifacts (not cross-host baselines)
 /bench/trend.json
 /bench/mutations/SCORE.log
