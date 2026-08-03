@@ -100,6 +100,8 @@ exclusive (drop conservative) + acik RSS proof are next.
 | Walker cost | Mitigated: `find_near`, pc range reject, FP cap 128; hybrid leaf-only. |
 | Tip without EC | Livelock in soak — always `-Dpreview_mt -Dexecution_context`. |
 | Exclusive soak | Completes but can fail RSS≤10% gate (sparse maps / missed roots). Hybrid PASS. |
+| acik `--release` + maps | Needs stackmap **nounwind** (else LLVM 18 invoke/statepoint crash). |
+| acik hybrid smoke | tip base ~15× RSS (host/tip issue); hybrid 0 marks / thr↓ — see FINDINGS. |
 | Fiber parked stacks | Cover `@context.stack_top` frames |
 | Non-PIC stackmap relocs | Emit PIC objects or adjust stackmap reloc model |
 | Register-only lives | Emit prefers alloca; runtime deref when reg∈stack |
@@ -141,7 +143,9 @@ product reason to invest.
 5. ~~Exclusive knob~~ **done** (`GCRY_PRECISE_STACK=2`) — research only;
    parked-fiber precise coverage + Proc/union-by-value lives still open.
 6. ~~**Walker cost**~~ **done** (near lookup + hybrid leaf-only) — re-check soak/Kemal.
-7. Measure acikturkiye RSS A/B; only then discuss defaults / upstream PR.
+7. ~~acik smoke~~ **done** (`bench/log/linux/2026-08-03-acik-stackmap-smoke3/`) —
+   tip+EC base already ~15× RSS on 9950X; hybrid thr cliff, **0 marks**.
+   Fix tip baseline + walker hits before claiming RSS; then med-of-3 cut.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.
