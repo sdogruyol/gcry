@@ -78,6 +78,16 @@ Same host, med-of-3 `wrk -c100 -d30`, non2xx=0. Session:
 tip+EC ≈ system gcry — not a tip regressor. Gap vs i3 tip headline ~3.43× is
 host/demo-data/tree, not the tip compiler.
 
+### Non-stack knobs (9950X, 2026-08-03)
+
+Exclusive bin (`GCRY_PRECISE_STACK=2`), med-of-3 `wrk -c100 -d30`. Session:
+`bench/log/linux/2026-08-03-acik-nonstack-med3/`. Script: `bench/acik_nonstack_ab.sh`.
+
+Post-collect `size_class_live_bytes` ~380 MiB (dense chunks; dual-collect
+flat). `GCRY_AUTO_LAYOUTS`, `SCAN_CAPS`, large-cache/`EMPTY_CHUNK_RETAIN` floor,
+and `DISABLE_LAYOUT` — **no RSS win**. Gap is marked-live / conservative edges,
+not reclaim.
+
 ## What we learned
 
 | Finding | Implication |

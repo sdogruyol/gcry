@@ -152,9 +152,12 @@ product reason to invest.
 10. ~~denser emit~~ **done** — `PER_FUN=0`; Proc/union allocas; multi-word locs.
 11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
     gate (makecontext); Direct/Indirect refuse off-stack loads.
-12. ~~exclusivef stabilize~~ **blocked** — LEAF=0 still UAF on acik (maps hit
-    some frames, miss older-frame slots). Keep `=2` + full parked word-scan
-    (~7.8×). Next: non-stack retention, or denser maps at all call sites.
+12. ~~exclusivef stabilize~~ **blocked** — LEAF=0 still UAF on acik. Keep `=2`
+    + full parked word-scan (~7.8–9×).
+13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
+    dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
+    Next: conservative-scan attribution, or denser stackmaps (parked false roots
+    still seed the live graph).
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.
