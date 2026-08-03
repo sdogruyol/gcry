@@ -70,18 +70,15 @@ Flag alone does **not** change collect (no walker yet). Spec covers
 
 | Item | Result |
 |------|--------|
-| Checkout | `/home/uzumaki/playground/crystal` branch `gcry-stackmap-probe` (`2720853d2` base) |
+| Checkout | `/home/uzumaki/playground/crystal` branch `gcry-stackmap-probe` |
 | Gate | `CRYSTAL_EMIT_STACKMAP=1` → empty stackmap after each Crystal call |
 | LLVM IR | **Yes** — `call void (i64, i32, ...) @llvm.experimental.stackmap(...)` (~9.6k sites in hello) |
-| Object section | **Yes** — `.llvm_stackmaps` in `_main.o0.o` (`readelf -S`) |
-| Final link | **Fails** today — `ld.lld`: `R_X86_64_64` in `.llvm_stackmaps` needs **-fPIC** (Crystal default objects are not PIC) |
+| Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
+| Final link | **Fixed** — default PIE rejects absolute stackmap relocs; probe auto-adds **`-no-pie`** when the env gate is set. Runnable binary has live `.llvm_stackmaps`. |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
-section. Next engineering is **PIC (or equivalent) codegen/link** + live
-value lists — not a pivot away from `llvm.experimental.stackmap`.
-
-Custom `.gcry_stackmap` sidetable remains a fallback only if PIC proves
-intractable.
+section and we can link/run. Next: live value lists + runtime parse —
+not a pivot to a custom sidetable.
 
 ## Risks
 
@@ -113,14 +110,13 @@ intractable.
 
 **GO** — continue with `llvm.experimental.stackmap` MVP.
 
-Evidence: IR emit + `.llvm_stackmaps` in objects. Blocker for runnable
-binaries is PIC/link, not intrinsic support. acik RSS hypothesis still the
+Evidence: IR emit + `.llvm_stackmaps` in objects **and** runnable `-no-pie`
+binaries under `CRYSTAL_EMIT_STACKMAP=1`. acik RSS hypothesis still the
 product reason to invest.
 
 ### Next-phase checklist
 
-1. Crystal: compile with **PIC** (or fix stackmap relocations) so
-   `CRYSTAL_EMIT_STACKMAP=1` links a runnable binary; dump section at runtime.
+1. ~~Crystal: PIC / link so `CRYSTAL_EMIT_STACKMAP=1` is runnable~~ **done** (`-no-pie` auto)
 2. Crystal: pass **live GC pointers** into stackmap (filter
    `context.vars` / temps with `has_inner_pointers?`) — not empty lives.
 3. Runtime: parse `.llvm_stackmaps` (LLVM stackmap format) → PC → locations.
