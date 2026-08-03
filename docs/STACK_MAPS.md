@@ -162,6 +162,9 @@ product reason to invest.
 14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,
     `…/acik-live-attr-ab/`). ~83 MiB @ 32 KiB = atomic byteish; parked seeds
     atomics (mutator ≈ 0). **C layouts dead.**
+15. ~~**idle-drain A/B**~~ **done** (`…/acik-idle-drain/`). ESTAB=0 but
+    ~95 MiB @32 KiB + ~1500 `TCPSocket` survive idle dual-GC → **false roots
+    pin dead IO buffers** (not live conns / pool sizing).
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

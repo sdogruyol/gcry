@@ -22,6 +22,9 @@ BIN_VARIANT="${BIN_VARIANT:-exclusive}" # exclusive|base|sys — binary name
 PRECISE_MODE="${PRECISE_MODE:-}" # empty → derive from BIN_VARIANT
 SKIP_BUILD="${SKIP_BUILD:-0}"
 REQUIRE_2XX="${REQUIRE_2XX:-1}"
+# After wrk+dual-collect sample: idle then re-sample (A/B/C for 32 KiB atomics).
+# 0 = skip. Typical: IDLE_DRAIN_SEC=60
+IDLE_DRAIN_SEC="${IDLE_DRAIN_SEC:-0}"
 
 [[ -f "$AT/.env.demo" ]] || { echo "missing $AT/.env.demo"; exit 1; }
 command -v wrk >/dev/null || { echo "wrk not found"; exit 1; }
@@ -173,6 +176,7 @@ for trial in $(seq 1 "$TRIALS"); do
     _nofill="${GCRY_DISABLE_FIBER_FP_FILL:-}"
     _missonly="${GCRY_FIBER_FP_FILL_MISS_ONLY:-}"
     _misslog="${GCRY_STACKMAP_MISS_LOG:-}"
+    _neard="${GCRY_STACKMAP_NEAR_DELTA:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
     precise_env
@@ -181,6 +185,7 @@ for trial in $(seq 1 "$TRIALS"); do
     [[ -n "$_nofill" ]] && export GCRY_DISABLE_FIBER_FP_FILL="$_nofill"
     [[ -n "$_missonly" ]] && export GCRY_FIBER_FP_FILL_MISS_ONLY="$_missonly"
     [[ -n "$_misslog" ]] && export GCRY_STACKMAP_MISS_LOG="$_misslog"
+    [[ -n "$_neard" ]] && export GCRY_STACKMAP_NEAR_DELTA="$_neard"
     export GCRY_LIVE_ATTR=1
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
     exec "$BIN" >>"$log" 2>&1
@@ -203,11 +208,53 @@ for trial in $(seq 1 "$TRIALS"); do
   curl -sS "${base}/gc-collect" >/dev/null
   curl -sS "${base}/gc-live-attr" >"$attr"
   curl -sS "${base}/gc-stats" >"$stats"
+  ss -tn "sport = :${port}" 2>/dev/null | tee "$OUT/ss-t${trial}-post.txt" >/dev/null || true
+  estab=$(awk 'BEGIN{n=0} /ESTAB/{n++} END{print n+0}' "$OUT/ss-t${trial}-post.txt" 2>/dev/null || echo 0)
+  echo "estab_post=$estab" | tee "$OUT/estab-t${trial}-post.txt"
+  echo ok
+  summarize "$attr" "$stats" | tee "$OUT/summary-t${trial}.txt"
+
+  if [[ "$IDLE_DRAIN_SEC" -gt 0 ]]; then
+    echo -n "  idle ${IDLE_DRAIN_SEC}s ... "
+    sleep "$IDLE_DRAIN_SEC"
+    curl -sS "${base}/gc-collect" >/dev/null
+    curl -sS "${base}/gc-collect" >/dev/null
+    curl -sS "${base}/gc-live-attr" >"$OUT/live-attr-t${trial}-idle.json"
+    curl -sS "${base}/gc-stats" >"$OUT/gcstats-t${trial}-idle.json"
+    ss -tn "sport = :${port}" 2>/dev/null | tee "$OUT/ss-t${trial}-idle.txt" >/dev/null || true
+    estab_i=$(awk 'BEGIN{n=0} /ESTAB/{n++} END{print n+0}' "$OUT/ss-t${trial}-idle.txt" 2>/dev/null || echo 0)
+    echo "estab_idle=$estab_i" | tee "$OUT/estab-t${trial}-idle.txt"
+    python3 - "$attr" "$OUT/live-attr-t${trial}-idle.json" "$estab" "$estab_i" <<'PY' \
+      | tee "$OUT/idle-drain-t${trial}.txt"
+import json,sys
+a0=json.load(open(sys.argv[1])); a1=json.load(open(sys.argv[2]))
+e0,e1=int(sys.argv[3]),int(sys.argv[4])
+def mib(x): return x/1024/1024
+def mx(a):
+  m=a.get("max_size_class") or {}
+  return mib(m.get("atomic_bytes",0)), m.get("atomic_objects",0) or m.get("count",0), mib(a["total_bytes"])
+at0,n0,t0=mx(a0); at1,n1,t1=mx(a1)
+print(f"idle-drain: estab {e0}→{e1}  max_atomic {at0:.1f}→{at1:.1f} MiB  live {t0:.1f}→{t1:.1f} MiB")
+if e1 <= 2 and at1 > 40:
+  print("verdict: B-leaning (sockets drained, atomics remain → false roots / unreclaimed graph)")
+elif at1 <= max(8.0, 0.15*at0) and e1 <= e0:
+  print("verdict: A/C-leaning (atomics fell with drain → true live IO / pool)")
+else:
+  print("verdict: mixed — inspect top_type_ids + PG pool")
+print("top typed post→idle (type_id MiB):")
+def tops(a):
+  return {t["type_id"]:(t["bytes"],t["count"]) for t in (a.get("top_type_ids") or [])[:8]}
+tpost,tidle=tops(a0),tops(a1)
+for tid in sorted(set(tpost)|set(tidle), key=lambda i: -(tidle.get(i,tpost.get(i,(0,0))[0])):
+  b0,c0=tpost.get(tid,(0,0)); b1,c1=tidle.get(tid,(0,0))
+  print(f"  {tid:6d}  {mib(b0):5.1f}→{mib(b1):5.1f} MiB  n={c0}→{c1}")
+PY
+    echo ok
+  fi
+
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   clean_port "$port"
-  echo ok
-  summarize "$attr" "$stats" | tee "$OUT/summary-t${trial}.txt"
 done
 
 echo "done OUT=$OUT"

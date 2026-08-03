@@ -1,0 +1,77 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-idle-drain/mode0 bin=exclusive trials=1 d=15s
+  trial=1 ...   precise_mode=0
+estab_post=0
+ok
+live_objects=51301 total_MiB=109.9 typed_MiB=2.4 collision_MiB=85.2 raw_MiB=22.3 large_MiB=10.6
+gcstats size_class_live_MiB=96.3 live_objects=43393
+stack_maps_loaded=False records=0 hits=0 precise_marked=0
+first_mark MiB: mutator=0.0 parked=9.7 static=0.0 thread=0.0 precise=0.0 heap=97.1
+first_mark ATOMIC MiB: mutator=0.0 parked=9.4 precise=0.0 heap=86.0
+top size_classes (payload → MiB / count):
+  32768     95.4 MiB  n=3076
+     32      0.6 MiB  n=18415
+    320      0.5 MiB  n=1524
+  12288      0.4 MiB  n=95
+  20480      0.3 MiB  n=79
+     64      0.2 MiB  n=3626
+     48      0.2 MiB  n=6347
+  16384      0.2 MiB  n=78
+   6144      0.2 MiB  n=128
+    128      0.1 MiB  n=2910
+     80      0.1 MiB  n=1674
+  14336      0.1 MiB  n=73
+max_size_class 32768 breakdown MiB:
+  typed=0.3 collision=83.9 raw=11.2
+  atomic=95.4 ptrish=0.0 byteish=95.2
+top typed type_ids:
+       1      1.2 MiB  n=24379
+     441      0.5 MiB  n=1518
+     437      0.3 MiB  n=594
+     572      0.0 MiB  n=1413
+     193      0.0 MiB  n=566
+     621      0.0 MiB  n=475
+     405      0.0 MiB  n=51
+     467      0.0 MiB  n=110
+     625      0.0 MiB  n=93
+     210      0.0 MiB  n=274
+     456      0.0 MiB  n=94
+     457      0.0 MiB  n=94
+top collision type_ids (false typed on big blocks):
+      88     41.3 MiB  n=1323
+      49     38.2 MiB  n=1222
+      82      2.0 MiB  n=65
+   27836      1.4 MiB  n=44
+      80      0.8 MiB  n=25
+     405      0.7 MiB  n=141
+     155      0.4 MiB  n=30
+       5      0.1 MiB  n=17
+   55809      0.1 MiB  n=2
+     132      0.0 MiB  n=6
+     667      0.0 MiB  n=2
+      62      0.0 MiB  n=7
+  idle 45s ... estab_idle=0
+import json,sys
+a0=json.load(open(sys.argv[1])); a1=json.load(open(sys.argv[2]))
+e0,e1=int(sys.argv[3]),int(sys.argv[4])
+def mib(x): return x/1024/1024
+def mx(a):
+  m=a.get("max_size_class") or {}
+  return mib(m.get("atomic_bytes",0)), m.get("atomic_objects", m.get("count",0)), mib(a["total_bytes"])
+at0,n0,t0=mx(a0); at1,n1,t1=mx(a1)
+print(f"idle-drain: estab {e0}→{e1}  max_atomic {at0:.1f}→{at1:.1f} MiB  live {t0:.1f}→{t1:.1f} MiB")
+# Heuristic
+if e1 <= 2 and at1 > 40:
+  print("verdict: B-leaning (sockets drained, ~80MiB atomics remain → false roots / unreclaimed graph)")
+elif at1 <= max(8.0, 0.15*at0) and e1 <= e0:
+  print("verdict: A/C-leaning (atomics fell with drain → true live IO / pool)")
+else:
+  print("verdict: mixed — inspect top_type_ids + PG pool")
+print("top typed post→idle (type_id MiB):")
+def tops(a):
+  return {t["type_id"]:(t["bytes"],t["count"]) for t in (a.get("top_type_ids") or [])[:8]}
+tpost,tidle=tops(a0),tops(a1)
+for tid in sorted(set(tpost)|set(tidle), key=lambda i: -(tidle.get(i,tpost.get(i,(0,0))[0])):
+  b0,c0=tpost.get(tid,(0,0)); b1,c1=tidle.get(tid,(0,0))
+  print(f"  {tid:6d}  {mib(b0):5.1f}→{mib(b1):5.1f} MiB  n={c0}→{c1}")
+ok
+done OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-idle-drain/mode0
