@@ -29,7 +29,8 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 
 Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 
-- [ ] **Compiler stack maps** — fat-app RSS 3× → ~1.2× (precise root scanning)
+- [ ] **Compiler stack maps** — fat-app RSS 3× → ~1.2× (precise root scanning);
+      spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md)
 - [ ] **Write barrier** — sound concurrent / incremental GC backend
 - [ ] **Windows process GC** — platform stubs + process GC parity
 - [ ] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows

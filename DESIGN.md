@@ -184,7 +184,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~3.43× / Darwin ~18×) |
+| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~3.43× / Darwin ~18×) — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
 | **Parallel+TLAB / munmap supported** | TLAB-off + lazy is supported opt-in (~79%); TLAB-on + empty munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
