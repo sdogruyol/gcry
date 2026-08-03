@@ -78,6 +78,7 @@ module Gcry
         layout_precise_scans:         heap.layout_precise_scans,
         layout_conservative_scans:    heap.layout_conservative_scans,
         precise_stack_roots:          heap.precise_stack_roots,
+        precise_stack_exclusive:      heap.precise_stack_exclusive,
         precise_stack_roots_marked:   heap.precise_stack_roots_marked,
         layout_entries:               Layout.size,
         layout_unsafe_skips:          Layout.unsafe_skips_count,

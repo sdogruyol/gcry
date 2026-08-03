@@ -100,10 +100,12 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
-    # When true, load `.llvm_stackmaps` and mark_precise_root additively
-    # (conservative Roots.scan_* still runs). Opt-in: GCRY_PRECISE_STACK=1.
-    # See docs/STACK_MAPS.md.
+    # When true, load `.llvm_stackmaps` and mark_precise_root.
+    # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
     property precise_stack_roots : Bool = false
+    # When true with precise_stack_roots: skip conservative stack word scans
+    # (mutator / fiber / pthread ranges). Research only — incomplete maps ⇒ UAF.
+    property precise_stack_exclusive : Bool = false
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).

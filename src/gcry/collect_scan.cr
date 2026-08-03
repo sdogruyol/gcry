@@ -69,8 +69,13 @@ module Gcry
     private def scan_mutator_stack : Nil
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
-      Roots.scan_mutator(bottom) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Stack)
+      if @precise_stack_exclusive
+        # Exclusive: spill only — no conservative word scan.
+        Roots.spill_registers
+      else
+        Roots.scan_mutator(bottom) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Stack)
+        end
       end
       scan_precise_mutator_stack(bottom)
     end
@@ -279,8 +284,10 @@ module Gcry
         top = fiber_stack_scan_top(fiber, guard, stw_multi)
         next unless top < bottom
 
-        Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-          mark_root_candidate(candidate, source: RootSource::Stack)
+        unless @precise_stack_exclusive
+          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Stack)
+          end
         end
       end
     end
@@ -328,8 +335,8 @@ module Gcry
           # missed OS-stack roots. Scan pthread bounds when fiber is absent.
           if fiber
             mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
-          else
+            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds) unless @precise_stack_exclusive
+          elsif !@precise_stack_exclusive
             scan_pthread_stack(pthread_bounds, sp)
           end
           next
@@ -343,16 +350,18 @@ module Gcry
           mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
         end
 
-        # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
-        # swapcontext saves the previous SP. If we only trust current_fiber +
-        # stack_top, live frames below a stale top (still holding SP) are
-        # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
-        # the suspend SP (red zone included).
-        scan_stack_containing_sp(sp)
+        unless @precise_stack_exclusive
+          # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
+          # swapcontext saves the previous SP. If we only trust current_fiber +
+          # stack_top, live frames below a stale top (still holding SP) are
+          # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
+          # the suspend SP (red zone included).
+          scan_stack_containing_sp(sp)
 
-        # Pthread mapping: scheduler/main frames remain here while SP sits on
-        # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
-        scan_pthread_stack(pthread_bounds, sp)
+          # Pthread mapping: scheduler/main frames remain here while SP sits on
+          # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
+          scan_pthread_stack(pthread_bounds, sp)
+        end
       end
     end
 

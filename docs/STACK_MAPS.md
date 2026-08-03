@@ -64,9 +64,15 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 # Gcry::StackMaps — parse `.llvm_stackmaps` v3, PC→locations, FP walk
 ```
 
-`GCRY_PRECISE_STACK=1` loads maps from the main ELF and walks frames
-**additively** (conservative scan still runs). Needs
-`CRYSTAL_EMIT_STACKMAP=1` binaries for real hits.
+| Env | Behavior |
+|-----|----------|
+| `GCRY_PRECISE_STACK=1` | Hybrid: precise walker **+** conservative stack scan |
+| `GCRY_PRECISE_STACK=2` | Exclusive: precise only (no stack word scan). Research; UAF if maps miss |
+
+Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
+`--frame-pointers=always` so the FP walker can climb frames.
+
+Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 
 ## Compiler probe results
 
@@ -78,7 +84,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 | Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
 | Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
 | Process GC | **`crystal build -Dgc_none`** with tip probe works. Parallel EC on tip needs `-Dpreview_mt -Dexecution_context` (1.21.0 release has EC by default). |
-| Walker smoke | `CRYSTAL_EMIT_STACKMAP=1` + `GCRY_PRECISE_STACK=1`: maps load (`records>0`), `precise_stack_roots_marked≥1`. |
+| Walker smoke | `make stackmap-smoke` — hybrid + exclusive: `records=517`, `marked=3`, exit 0 (9950X, tip probe). |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
@@ -90,6 +96,7 @@ exclusive (drop conservative) + acik RSS proof are next.
 |------|------------|
 | Missing live slot → UAF | Conservative fallback until maps proven; fuzz + soak |
 | Map density / thr | Call-site filter; measure acik + Kemal |
+| Walker cost | Full soak with maps hung (~minutes for 10s) — FP walk × PC±16 per frame; tune before soft-soak/acik |
 | Fiber parked stacks | Cover `@context.stack_top` frames |
 | Non-PIC stackmap relocs | Emit PIC objects or adjust stackmap reloc model |
 | Register-only lives | Emit prefers alloca; runtime deref when reg∈stack |
@@ -128,9 +135,10 @@ product reason to invest.
    (`src/gcry/stack_maps.cr`, `spec/stack_maps_spec.cr`)
 4. ~~gcry walker (hybrid)~~ **done** — STW + mutator FP walk →
    `mark_precise_root`; conservative scan still always on.
-5. Knob to **disable** conservative stack scan when maps proven; fiber
-   parked-stack coverage; Proc/union-by-value lives.
-6. Measure acikturkiye RSS A/B; only then discuss defaults / upstream PR.
+5. ~~Exclusive knob~~ **done** (`GCRY_PRECISE_STACK=2`) — research only;
+   parked-fiber precise coverage + Proc/union-by-value lives still open.
+6. **Walker cost** — make FP/PC lookup cheap enough for soak/Kemal (before acik).
+7. Measure acikturkiye RSS A/B; only then discuss defaults / upstream PR.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

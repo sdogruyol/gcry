@@ -436,11 +436,17 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
-    # Compiler stack maps (docs/STACK_MAPS.md). Flag only here — section load
-    # is lazy on first collect (File I/O during GC.init can SEGV). Needs
-    # CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
-    if env_flag_one?("GCRY_PRECISE_STACK")
+    # Compiler stack maps (docs/STACK_MAPS.md). Section load is lazy on first
+    # collect. Needs CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
+    #   GCRY_PRECISE_STACK=1 — hybrid (precise + conservative stacks)
+    #   GCRY_PRECISE_STACK=2 — exclusive (no conservative stack word scan)
+    case env_digit("GCRY_PRECISE_STACK")
+    when 1
       heap.precise_stack_roots = true
+    when 2
+      heap.precise_stack_roots = true
+      heap.precise_stack_exclusive = true
+      warn_unsupported_env("gcry: GCRY_PRECISE_STACK=2 exclusive — research only; incomplete maps can UAF\n")
     end
   end
 
@@ -454,6 +460,16 @@ module GC
     flag = LibC.getenv(name)
     return false if flag.null?
     flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+  end
+
+  # Single ASCII digit env (e.g. GCRY_PRECISE_STACK=1|2). Nil if unset/invalid.
+  private def self.env_digit(name : String) : Int32?
+    flag = LibC.getenv(name)
+    return nil if flag.null?
+    ch = flag.value
+    return nil unless ch >= '0'.ord.to_u8 && ch <= '9'.ord.to_u8
+    return nil unless (flag + 1).value == 0
+    (ch - '0'.ord.to_u8).to_i32
   end
 
   private def self.env_u64(name : String) : UInt64?
