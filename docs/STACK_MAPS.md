@@ -181,6 +181,13 @@ product reason to invest.
 19. ~~**post-fix Boehm med3**~~ **done** (`…/acik-finalizer-gate-med3/`).
     tip+EC `base` vs Boehm: thr **~91.5%**, RSS **~1.81×** (was ~8.5× on this
     host pre-fix). `acik_stackmap_ab.sh` gains `ACIK_BIN_DIR` + dual collect.
+20. ~~**residual 1.81× anatomy**~~ **done** (`…/acik-residual-rss/`). Live_sc
+    only ~5–16 MiB; RSS = mapped-free + adaptive **large_cache 32 MiB** +
+    empty retain 16 MiB. Smoke: both caches 0 → **~0.87×** Boehm (1 trial).
+21. ~~**release0 med3**~~ **done** (`…/acik-release0-med3/`).
+    `GCRY_LARGE_CACHE=0` + `GCRY_EMPTY_CHUNK_RETAIN=0`: RSS **~1.00×** Boehm,
+    thr **~94%**. Now **Linux process defaults** (escape: same env vars with
+    non-zero budgets). Darwin unchanged (1 MiB large / 512 KiB empty retain).
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

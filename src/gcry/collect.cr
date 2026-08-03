@@ -1105,7 +1105,9 @@ module Gcry
             if total_large > 0
               hit_pct = (@large_cache_hits * 100) // total_large
               current = @large_cache_retain
-              if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+              # current == 0 means cache disabled (Linux process default); do not
+              # grow from zero — 0×2 would stay 0 anyway, but skip makes intent clear.
+              if hit_pct > 50 && current > 0 && current < LARGE_CACHE_LIMIT
                 # Good reuse: double retain (capped at limit).
                 @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
               elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor

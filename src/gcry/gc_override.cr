@@ -66,9 +66,11 @@ module GC
       # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
       heap.large_cache_retain = 1048576_u64
     {% else %}
-      # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
-      # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
-      heap.empty_chunk_retain = 16_u64 * 1024_u64 * 1024_u64
+      # Linux: munmap empty size-class chunks (no dormant retain). Prior 16 MiB
+      # retain + adaptive large-cache (→32 MiB) left acik ~2× Boehm RSS after the
+      # finalizer fix; release0 med3 (`…/acik-release0-med3/`) tied Boehm RSS at
+      # ~94% thr. Escape: GCRY_EMPTY_CHUNK_RETAIN=<bytes>.
+      heap.empty_chunk_retain = 0_u64
       # Linux: scrub parked fiber stacks to cut false retention from stale
       # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
       # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
@@ -77,9 +79,9 @@ module GC
       # is outside the root-scan window; no durable thr/RSS win).
       heap.scrub_fibers_enabled = true
       heap.blacklist_enabled = true
-      # Large-cache stays at Heap::DEFAULT_LARGE_CACHE_RETAIN (4 MiB). A 1 MiB
-      # Linux floor was tried with HOLED default-on and did not help; adaptive
-      # still grows on high hit-rate. Escape: GCRY_LARGE_CACHE=<bytes>.
+      # Large-object freelist: no retain (was 4 MiB floor, adaptive → 32 MiB).
+      # Escape: GCRY_LARGE_CACHE=<bytes> (adaptive may grow from a non-zero floor).
+      heap.large_cache_retain = 0_u64
     {% end %}
     # type_id_gate on *static* ambient roots (BSS false hits). Stack/thread
     # roots stay ungated: Channel/Deque buffers and similar raw allocations

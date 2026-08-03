@@ -92,6 +92,10 @@ registry + Boehm resurrect (`3a0bffe`). Session:
 Was ~8.5× on the same host pre-fix. RSS lever was finalizer correctness, not
 exclusivef / layouts / pool caps.
 
+Follow-up (`…/acik-release0-med3/`): `GCRY_LARGE_CACHE=0` +
+`GCRY_EMPTY_CHUNK_RETAIN=0` → RSS **~1.00×** Boehm, thr **~94%**. Those are
+now the **Linux process defaults** (opt up via the same env vars).
+
 ### Non-stack knobs (9950X, 2026-08-03)
 
 Exclusive bin (`GCRY_PRECISE_STACK=2`), med-of-3 `wrk -c100 -d30`. Session:
@@ -121,6 +125,6 @@ not reclaim.
 - Linux **HOLED** `GCRY_PAGE_DONTNEED` as process default — thr and RSS both worse (HOLED freelist rebuild blows sweep; free-only pages abandoned → chunk churn). Stay opt-in.
 - Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
 - Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
-- Expecting stack-maps alone to hit ≤1.5× Boehm RSS (finalizer fix did the heavy lift; residual ~1.81× is mapped/chunks + remaining false roots)
+- Expecting stack-maps alone to hit ≤1.5× Boehm RSS (finalizer fix + Linux retain=0 defaults closed the measured gap on this host)
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).
