@@ -30,12 +30,12 @@ does **not** exercise precise marking on acik.
 
 ## Takeaways
 
-1. **Tip+EC base already ~15× RSS** on this host — far above the Linux tip
-   headline ~3.43× (i3 / system Crystal). Stack maps are not the first-order
-   RSS regressor here; tip/EC cut needs its own baseline before map A/B.
-2. **Stackmap emit thr cost** is large on this fat binary (~67%→33% Boehm).
-3. **No RSS win from hybrid** (expected while additive + zero marks).
-4. Next: (a) why tip base RSS ≫ 3.43× on 9950X; (b) wire hybrid hits
-   (mutator near-PC or ensure STW greqs); (c) exclusive trial once (a) is sane.
+1. **~~Tip+EC base ~15×~~ INVALID** — wrk was **100% Non-2xx** (missing
+   `submissions`). Superseded by
+   `../2026-08-03-acik-tip-baseline2-med3/` (~**8.5×**, tip≈sys, non2xx=0).
+2. **Stackmap emit thr cost** on this smoke is unreliable (exception path).
+3. **No RSS win from hybrid** (expected while additive + zero marks) — still
+   the open walker-hit issue.
+4. Next: wire hybrid hits; exclusive A/B vs valid ~8.5× baseline.
 
 Do not promote stack maps or cut a version from this smoke.

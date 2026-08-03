@@ -21,10 +21,13 @@ DURATION="${WRK_DURATION:-30}"
 CONNECTIONS="${WRK_CONNECTIONS:-100}"
 PORT_BASE="${ACIK_PORT_BASE:-3600}"
 OUT="${ACIK_STACKMAP_OUT:-$ROOT/bench/log/linux/$(date +%Y-%m-%d-%H%M%S)-acik-stackmap}"
-# space-separated: boehm base hybrid exclusive
+# space-separated: boehm base hybrid exclusive sys tipec
+# sys = system Crystal + gcry (-Dgc_none); tipec = tip Crystal + EC + gcry
 VARIANTS="${VARIANTS:-boehm base hybrid}"
 SKIP_BOEHM="${SKIP_BOEHM:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
+# Fail trial if wrk reports Non-2xx (broken demo DB / exception path).
+REQUIRE_2XX="${REQUIRE_2XX:-1}"
 
 [[ -f "$AT/.env.demo" ]] || { echo "missing $AT/.env.demo"; exit 1; }
 [[ -x "$CUS" ]] || { echo "missing probe crystal: $CUS"; exit 1; }
@@ -70,9 +73,13 @@ else
         rm -f "$AT/bin/acikturkiye-boehm"
         build_one boehm "$SYS_CRYSTAL" build --release
         ;;
-      base)
-        rm -f "$AT/bin/acikturkiye-base"
-        build_one base "$CUS" build -Dgc_none "${TIP_FLAGS[@]}"
+      sys)
+        rm -f "$AT/bin/acikturkiye-sys"
+        build_one sys "$SYS_CRYSTAL" build -Dgc_none --release
+        ;;
+      base|tipec)
+        rm -f "$AT/bin/acikturkiye-$v"
+        build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}"
         ;;
       hybrid|exclusive)
         rm -f "$AT/bin/acikturkiye-$v"
@@ -96,19 +103,22 @@ clean_port() {
 wait_auth() {
   local base="$1" i code
   for i in $(seq 1 600); do
-    # Any HTTP response means the server is up (API may 500 on empty demo DB).
     # Do not `|| echo 000` — curl already prints 000 on connect fail; appending
     # made [[ != "000" ]] succeed spuriously.
     code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 1 \
       "${AUTH[@]}" "${base}/api/v1/" 2>/dev/null || true)
-    [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] && return 0
+    if [[ "$REQUIRE_2XX" == "1" ]]; then
+      [[ "$code" =~ ^2[0-9][0-9]$ ]] && return 0
+    else
+      [[ "$code" =~ ^[1-5][0-9][0-9]$ ]] && return 0
+    fi
     sleep 0.1
   done
   return 1
 }
 
 TSV="$OUT/acik-stackmap.tsv"
-printf "variant\ttrial\trps\trss_kib\tmarked\trecords\n" >"$TSV"
+printf "variant\ttrial\trps\trss_kib\tmarked\trecords\tnon2xx\n" >"$TSV"
 
 run_one() {
   local variant="$1" trial="$2"
@@ -137,17 +147,26 @@ run_one() {
   disown "$pid" 2>/dev/null || true
 
   if ! wait_auth "$base"; then
-    echo "FAIL (server)"
+    echo "FAIL (server / not 2xx — check demo DB migrate+seed)"
     tail -15 "$log" | sed 's/^/    /' || true
     kill -9 "$pid" 2>/dev/null || true
-    printf "%s\t%d\t0\t0\t0\t0\n" "$variant" "$trial" >>"$TSV"
+    printf "%s\t%d\t0\t0\t0\t0\t-1\n" "$variant" "$trial" >>"$TSV"
     return 0
   fi
 
   wrk -c "$CONNECTIONS" -d "$DURATION" "${AUTH[@]}" "${base}/api/v1/" >"$wrklog" 2>&1 || true
-  local rps
+  local rps non2xx
   rps=$(awk '/Requests\/sec:/ {print $2}' "$wrklog") || rps=0
   rps=${rps:-0}
+  non2xx=$(awk '/Non-2xx or 3xx responses:/ {print $NF}' "$wrklog") || non2xx=0
+  non2xx=${non2xx:-0}
+
+  if [[ "$REQUIRE_2XX" == "1" && "$non2xx" != "0" ]]; then
+    echo "FAIL (Non-2xx=${non2xx} — invalid for RSS gate)"
+    kill -9 "$pid" 2>/dev/null || true
+    printf "%s\t%d\t%s\t0\t0\t0\t%s\n" "$variant" "$trial" "$rps" "$non2xx" >>"$TSV"
+    return 0
+  fi
 
   curl -sf -o /dev/null "${base}/gc-collect" || true
   sleep 0.5
@@ -169,8 +188,8 @@ run_one() {
   kill -9 "$cpid" "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
 
-  printf "%s\t%d\t%s\t%s\t%s\t%s\n" "$variant" "$trial" "$rps" "$rss" "$marked" "$records" >>"$TSV"
-  echo "${rps} req/s rss=${rss}KiB marked=${marked}"
+  printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\n" "$variant" "$trial" "$rps" "$rss" "$marked" "$records" "$non2xx" >>"$TSV"
+  echo "${rps} req/s rss=${rss}KiB marked=${marked} non2xx=${non2xx}"
 }
 
 echo "=== Run ==="
@@ -189,25 +208,28 @@ rows = []
 with open(tsv) as f:
     next(f)
     for line in f:
-        v, t, rps, rss, marked, rec = line.strip().split("\t")
-        rows.append((v, float(rps), int(float(rss)), int(float(marked))))
+        parts = line.strip().split("\t")
+        v, t, rps, rss, marked, rec = parts[:6]
+        non2xx = int(float(parts[6])) if len(parts) > 6 else 0
+        rows.append((v, float(rps), int(float(rss)), int(float(marked)), non2xx))
 by = defaultdict(list)
-for v, rps, rss, marked in rows:
-    by[v].append((rps, rss, marked))
+for v, rps, rss, marked, non2xx in rows:
+    by[v].append((rps, rss, marked, non2xx))
 
 def med(xs):
     return stats.median(xs) if xs else 0
 
-lines = ["# acikturkiye stackmap A/B", "", "| variant | thr med | RSS KiB med | marked med |", "|---------|--------:|------------:|-----------:|"]
-boehm_rps = med([r for r,_,_ in by.get("boehm", [])]) or None
-boehm_rss = med([s for _,s,_ in by.get("boehm", [])]) or None
+lines = ["# acikturkiye stackmap A/B", "", "| variant | thr med | RSS KiB med | marked med | non2xx |", "|---------|--------:|------------:|-----------:|-------:|"]
+boehm_rps = med([r for r,_,_,_ in by.get("boehm", []) if r > 0]) or None
+boehm_rss = med([s for _,s,_,n in by.get("boehm", []) if s > 0 and n == 0]) or None
 for v in sorted(by.keys()):
-    rps = med([r for r,_,_ in by[v]])
-    rss = med([s for _,s,_ in by[v]])
-    mk = med([m for *_,m in by[v]])
-    thr = f"{100*rps/boehm_rps:.1f}% Boehm" if boehm_rps else "—"
-    rx = f"{rss/boehm_rss:.2f}×" if boehm_rss else "—"
-    lines.append(f"| {v} | {rps:.1f} ({thr}) | {rss:.0f} ({rx}) | {mk:.0f} |")
+    rps = med([r for r,_,_,_ in by[v]])
+    rss = med([s for _,s,_,n in by[v] if n == 0] or [s for _,s,_,_ in by[v]])
+    mk = med([m for _, _, m, _ in by[v]])
+    n2 = med([n for _, _, _, n in by[v]])
+    thr = f"{100*rps/boehm_rps:.1f}% Boehm" if boehm_rps and rps else "—"
+    rx = f"{rss/boehm_rss:.2f}×" if boehm_rss and rss else "—"
+    lines.append(f"| {v} | {rps:.1f} ({thr}) | {rss:.0f} ({rx}) | {mk:.0f} | {n2:.0f} |")
 lines += ["", f"Source: `{tsv}`", ""]
 text = "\n".join(lines)
 open(out, "w").write(text)

@@ -101,7 +101,7 @@ exclusive (drop conservative) + acik RSS proof are next.
 | Tip without EC | Livelock in soak — always `-Dpreview_mt -Dexecution_context`. |
 | Exclusive soak | Completes but can fail RSS≤10% gate (sparse maps / missed roots). Hybrid PASS. |
 | acik `--release` + maps | Needs stackmap **nounwind** (else LLVM 18 invoke/statepoint crash). |
-| acik hybrid smoke | tip base ~15× RSS (host/tip issue); hybrid 0 marks / thr↓ — see FINDINGS. |
+| acik hybrid smoke | Invalid ~15× was Non-2xx (missing demo schema). Valid tip≈sys ~**8.5×** on 9950X; hybrid still 0 marks. |
 | Fiber parked stacks | Cover `@context.stack_top` frames |
 | Non-PIC stackmap relocs | Emit PIC objects or adjust stackmap reloc model |
 | Register-only lives | Emit prefers alloca; runtime deref when reg∈stack |
@@ -143,9 +143,10 @@ product reason to invest.
 5. ~~Exclusive knob~~ **done** (`GCRY_PRECISE_STACK=2`) — research only;
    parked-fiber precise coverage + Proc/union-by-value lives still open.
 6. ~~**Walker cost**~~ **done** (near lookup + hybrid leaf-only) — re-check soak/Kemal.
-7. ~~acik smoke~~ **done** (`bench/log/linux/2026-08-03-acik-stackmap-smoke3/`) —
-   tip+EC base already ~15× RSS on 9950X; hybrid thr cliff, **0 marks**.
-   Fix tip baseline + walker hits before claiming RSS; then med-of-3 cut.
+7. ~~tip+EC baseline~~ **done** (`bench/log/linux/2026-08-03-acik-tip-baseline2-med3/`) —
+   prior ~15× was **Non-2xx** (empty demo schema). Valid med-of-3: tip≈sys
+   ~**8.5×** Boehm (not tip-specific); thr ~Boehm-parity. Next: walker hits +
+   exclusive A/B vs that baseline (smoke3 hybrid still **0 marks**).
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

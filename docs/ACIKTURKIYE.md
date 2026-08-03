@@ -61,6 +61,23 @@ FORCE_REBUILD=1 TRIALS=3 WRK_DURATION=30 WRK_CONNECTIONS=100 GC=both \
 
 Prefer `/api/v1/` thr + post-collect RSS over toy Kemal when asking “did GC get better?” on **Linux**.
 
+Harness note: `bench/acik_stackmap_ab.sh` defaults `REQUIRE_2XX=1` — a missing
+demo schema (`submissions`) yields 500s and fake RSS (was ~15×). Migrate + seed
+before cuts (`./bin/micrate up`, locations dump, `demo_organization_seeder.cr`).
+
+### tip+EC vs system (9950X, 2026-08-03)
+
+Same host, med-of-3 `wrk -c100 -d30`, non2xx=0. Session:
+`bench/log/linux/2026-08-03-acik-tip-baseline2-med3/`.
+
+| | thr % Boehm | post-GC RSS × |
+|--|------------:|--------------:|
+| sys (1.21.0 + gcry) | ~103% | **~8.51×** |
+| tipec (tip + EC + gcry) | ~102% | **~8.46×** |
+
+tip+EC ≈ system gcry — not a tip regressor. Gap vs i3 tip headline ~3.43× is
+host/demo-data/tree, not the tip compiler.
+
 ## What we learned
 
 | Finding | Implication |
