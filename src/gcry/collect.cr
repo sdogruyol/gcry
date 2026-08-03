@@ -99,6 +99,11 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
+    # When true, collect may use compiler stack maps via mark_precise_root
+    # instead of (or before) conservative Roots.scan_*. Default off — no walker
+    # yet; see docs/STACK_MAPS.md. Opt-in: GCRY_PRECISE_STACK=1.
+    property precise_stack_roots : Bool = false
+    getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
@@ -1163,6 +1168,7 @@ module Gcry
       @bytes_reclaimed_since_gc = 0_u64
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
+      @precise_stack_roots_marked = 0_u64
       @type_id_root_rejects = 0_u64
       @type_id_stack_rejects = 0_u64
       @type_id_static_rejects = 0_u64

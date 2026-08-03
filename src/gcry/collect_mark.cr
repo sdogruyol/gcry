@@ -42,6 +42,16 @@ module Gcry
       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
     end
 
+    # Compiler stack-map / precise-root entry (docs/STACK_MAPS.md). Same mark
+    # policy as add_root; no type_id_gate. Safe to call only during collect.
+    # With precise_stack_roots still false (default), nothing invokes this.
+    def mark_precise_root(pointer : Void*) : Nil
+      raise "mark_precise_root outside of collect" unless @collecting
+      return if pointer.null?
+      @precise_stack_roots_marked += 1
+      mark_explicit_root(pointer)
+    end
+
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       if @mark_parallel
         @mark_lock.lock

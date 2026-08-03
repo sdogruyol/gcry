@@ -436,6 +436,11 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+    # Compiler stack maps (docs/STACK_MAPS.md). Flag only — no walker yet;
+    # collect stays conservative until a frame walker calls mark_precise_root.
+    if env_flag_one?("GCRY_PRECISE_STACK")
+      heap.precise_stack_roots = true
+    end
   end
 
   # stderr warn for knobs that stay wired for research but are not a product path.
@@ -568,6 +573,13 @@ module GC
   def self.add_root(object : Reference)
     return unless @@gcry_ready
     Gcry.default_heap.add_root(Pointer(Void).new(object.object_id))
+  end
+
+  # Precise stack-map root (compiler / frame walker). No-op unless process GC
+  # is ready; raises if called outside collect. See docs/STACK_MAPS.md.
+  def self.mark_precise_root(pointer : Void*) : Nil
+    return unless @@gcry_ready
+    Gcry.default_heap.mark_precise_root(pointer)
   end
 
   def self.register_disappearing_link(pointer : Void**)

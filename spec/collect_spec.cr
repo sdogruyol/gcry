@@ -20,6 +20,21 @@ describe "Gcry::Heap collection" do
     end
   end
 
+  it "mark_precise_root keeps objects alive during collect" do
+    heap = Gcry::Heap.new
+    begin
+      keep = heap.malloc(64)
+      garbage = heap.malloc(64)
+      heap.before_collect { heap.mark_precise_root(keep) }
+      heap.collect(scan_stack: false)
+      heap.live?(keep).should be_true
+      heap.live?(garbage).should be_false
+      heap.precise_stack_roots_marked.should eq(1)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "traces pointers inside non-atomic objects" do
     heap = Gcry::Heap.new
     begin

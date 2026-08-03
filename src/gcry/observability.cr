@@ -77,6 +77,8 @@ module Gcry
         empty_chunk_warm_retain:      heap.empty_chunk_warm_retain,
         layout_precise_scans:         heap.layout_precise_scans,
         layout_conservative_scans:    heap.layout_conservative_scans,
+        precise_stack_roots:          heap.precise_stack_roots,
+        precise_stack_roots_marked:   heap.precise_stack_roots_marked,
         layout_entries:               Layout.size,
         layout_unsafe_skips:          Layout.unsafe_skips_count,
         type_id_root_rejects:         heap.type_id_root_rejects,
