@@ -188,6 +188,10 @@ product reason to invest.
     `GCRY_LARGE_CACHE=0` + `GCRY_EMPTY_CHUNK_RETAIN=0`: RSS **~1.00×** Boehm,
     thr **~94%**. Now **Linux process defaults** (escape: same env vars with
     non-zero budgets). Darwin unchanged (1 MiB large / 512 KiB empty retain).
+22. ~~**defaults verify**~~ **done** — acik med3 (`…/acik-defaults-verify-med3/`):
+    thr **~90%**, RSS **~1.40×** (t1 SEGV after `/gc-collect`; t2/t3 OK).
+    Kemal smoke (`…/kemal-release0-smoke/`): `/json` **~84%** @ **0.76×** — no
+    cliff vs ~87%/0.80× headline.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.
