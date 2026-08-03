@@ -103,9 +103,13 @@ module Gcry
     # When true, load `.llvm_stackmaps` and mark_precise_root.
     # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
     property precise_stack_roots : Bool = false
-    # When true with precise_stack_roots: skip conservative stack word scans
-    # (mutator / fiber / pthread ranges). Research only — incomplete maps ⇒ UAF.
+    # When true with precise_stack_roots: skip conservative mutator / other-thread
+    # stack word scans. Parked fibers still word-scanned unless
+    # precise_stack_fibers_exclusive (GCRY_PRECISE_FIBERS=1). Research — UAF risk.
     property precise_stack_exclusive : Bool = false
+    # When true with exclusive: also skip parked-fiber word scans (precise walk
+    # only). Default off — fat apps SEGV without it today.
+    property precise_stack_fibers_exclusive : Bool = false
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).

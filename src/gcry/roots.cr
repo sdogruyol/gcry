@@ -146,6 +146,19 @@ module Gcry
       {% end %}
     end
 
+    # Spill + scan the setjmp buffer only (no full stack). Used by exclusive
+    # precise-stack mode so register-held roots survive without word-scanning
+    # the mutator stack.
+    def self.each_spilled_register(& : Void* ->) : Nil
+      spill_registers
+      env = uninitialized StaticArray(UInt8, 256)
+      LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+      scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
+        yield candidate
+      end
+      keep_alive(env.to_unsafe.as(Void*))
+    end
+
     def self.keep_alive(ptr : Void*) : Nil
       asm("" :: "r"(ptr) : "memory")
     end

@@ -70,14 +70,35 @@ module Gcry
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
       if @precise_stack_exclusive
-        # Exclusive: spill only — no conservative word scan.
-        Roots.spill_registers
+        # Exclusive: no full SP→bottom word scan (RSS experiment). Still need
+        # setjmp regs + a shallow window for LLVM spill slots in active frames;
+        # stackmaps cover call-site lives via FP walk below.
+        Roots.each_spilled_register do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Stack)
+        end
+        scan_exclusive_mutator_spill_window(bottom)
       else
         Roots.scan_mutator(bottom) do |candidate|
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end
       scan_precise_mutator_stack(bottom)
+    end
+
+    # ~4 KiB below SP (+ red zone): enough for spill slots without scanning
+    # the whole fiber stack high-water (exclusive's RSS point).
+    EXCLUSIVE_MUTATOR_SPILL_WINDOW = 4096_u64
+
+    private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
+      red = STACK_SCAN_RED_ZONE.to_u64
+      sp = Roots.hardware_stack_pointer.address
+      win = EXCLUSIVE_MUTATOR_SPILL_WINDOW
+      low = sp > (red &+ win) ? sp - red - win : 0_u64
+      hi = bottom.address
+      return unless low < hi
+      Roots.scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Stack)
+      end
     end
 
     # Precise roots from `.llvm_stackmaps`. Hybrid (=1): capped mutator FP
@@ -121,6 +142,39 @@ module Gcry
               mark_precise_root(ptr)
             end
           end
+        end
+      {% end %}
+    end
+
+    # Precise roots for a parked fiber (x86_64-sysv swapcontext layout).
+    # stack_top → [r15,r14,r13,r12,rbp,rbx,rdi] then retaddr at +56.
+    # Without this, exclusive (=2) drops fiber word scans and UAFs on HTTP.
+    private def scan_precise_parked_fiber(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.loaded? || StackMaps.ensure_loaded
+
+      {% if flag?(:x86_64) %}
+        top = fiber.@context.stack_top.address
+        return unless top >= guard && (top &+ 56) < bottom
+
+        # Callee-saved spill slots may be the only live copy of a root.
+        i = 0
+        while i < 7
+          word = Pointer(UInt64).new(top &+ (i * 8)).value
+          mark_precise_root(Pointer(Void).new(word)) unless word == 0
+          i += 1
+        end
+
+        saved_rbp = Pointer(UInt64).new(top &+ 32).value
+        ret = Pointer(UInt64).new(top &+ 56).value
+        lo = guard
+        hi = bottom
+        StackMaps.each_root_near(ret, top, saved_rbp, Pointer(UInt64).null, 0, lo, hi) do |ptr|
+          mark_precise_root(ptr)
+        end
+        max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
+        StackMaps.each_root_fp_walk(top, saved_rbp, lo, hi, max_frames) do |ptr|
+          mark_precise_root(ptr)
         end
       {% end %}
     end
@@ -279,7 +333,22 @@ module Gcry
         top = fiber_stack_scan_top(fiber, guard, stw_multi)
         next unless top < bottom
 
-        unless @precise_stack_exclusive
+        # Precise walk of parked swapcontext frames (hybrid additive).
+        unless fiber.running?
+          scan_precise_parked_fiber(fiber, guard, bottom)
+        end
+
+        # Word scan:
+        # - Hybrid: always (parked + stw_multi running).
+        # - Exclusive default: parked fibers still word-scanned (acik otherwise
+        #   SEGVs in Kemal render_500). Opt out with GCRY_PRECISE_FIBERS=1.
+        # - Exclusive + fibers_exclusive: precise parked walk only.
+        word_scan = if @precise_stack_exclusive
+                      fiber.running? ? false : !@precise_stack_fibers_exclusive
+                    else
+                      true
+                    end
+        if word_scan
           Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Stack)
           end

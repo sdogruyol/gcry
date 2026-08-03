@@ -83,9 +83,11 @@ else
         ;;
       hybrid|exclusive)
         rm -f "$AT/bin/acikturkiye-$v"
-        # No --frame-pointers=always: not required for hybrid leaf RIP; exclusive
-        # FP walk is best-effort with default frame pointers.
-        CRYSTAL_EMIT_STACKMAP=1 build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}"
+        # Frame pointers required for exclusive FP walk under --release; hybrid
+        # benefits too. Raise map density (default PER_FUN=2 is too sparse for
+        # exclusive — missing frames have no conservative fallback).
+        CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN="${CRYSTAL_STACKMAP_PER_FUN:-256}" \
+          build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}" --frame-pointers=always
         ;;
       *)
         echo "unknown variant: $v" >&2

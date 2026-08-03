@@ -67,7 +67,8 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 | Env | Behavior |
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
-| `GCRY_PRECISE_STACK=2` | Exclusive: full FP walk, no stack word scan. Research; UAF if maps miss |
+| `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still word-scanned** (acik safety). Research. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: also drop parked-fiber word scan. Smoke-only today — acik SEGVs. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -145,9 +146,12 @@ product reason to invest.
 6. ~~**Walker cost**~~ **done** (near lookup + hybrid leaf-only) — re-check soak/Kemal.
 7. ~~tip+EC baseline~~ **done** (`…/acik-tip-baseline2-med3/`) — prior ~15×
    was **Non-2xx**. Valid tip≈sys ~**8.5×**.
-8. ~~hybrid walker hits~~ **done** — capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`);
-   acik smoke: lookups/hits ≫ 0, `marked>0`. Exclusive still SEGVs on acik
-   (incomplete maps) — research only.
+8. ~~hybrid walker hits~~ **done** — capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`).
+9. ~~exclusive runtime safety~~ **partial** — parked-fiber precise walk + spill
+   window; invoke-out stackmaps; `PER_FUN`↑ + `--frame-pointers=always` on acik
+   builds. `=2` keeps parked word-scan (survives acik ~Boehm thr). Pure fibers
+   (`GCRY_PRECISE_FIBERS=1`) smoke-green, acik still SEGV — denser park/exception
+   maps next.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

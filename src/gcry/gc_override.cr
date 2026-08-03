@@ -439,7 +439,8 @@ module GC
     # Compiler stack maps (docs/STACK_MAPS.md). Section load is lazy on first
     # collect. Needs CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
     #   GCRY_PRECISE_STACK=1 — hybrid (precise + conservative stacks)
-    #   GCRY_PRECISE_STACK=2 — exclusive (no conservative stack word scan)
+    #   GCRY_PRECISE_STACK=2 — exclusive mutator/other-thread (parked fibers
+    #     still word-scanned unless GCRY_PRECISE_FIBERS=1)
     case env_digit("GCRY_PRECISE_STACK")
     when 1
       heap.precise_stack_roots = true
@@ -447,6 +448,10 @@ module GC
       heap.precise_stack_roots = true
       heap.precise_stack_exclusive = true
       warn_unsupported_env("gcry: GCRY_PRECISE_STACK=2 exclusive — research only; incomplete maps can UAF\n")
+    end
+    if env_flag_one?("GCRY_PRECISE_FIBERS")
+      heap.precise_stack_fibers_exclusive = true
+      warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked fiber word scan off; UAF if maps miss\n")
     end
   end
 
