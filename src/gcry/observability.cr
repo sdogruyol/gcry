@@ -80,6 +80,7 @@ module Gcry
         precise_stack_roots:          heap.precise_stack_roots,
         precise_stack_exclusive:      heap.precise_stack_exclusive,
         precise_stack_fibers_exclusive: heap.precise_stack_fibers_exclusive,
+        precise_stack_fiber_leaf_bytes: heap.precise_stack_fiber_leaf_bytes,
         precise_stack_roots_marked:   heap.precise_stack_roots_marked,
         stack_maps_loaded:            StackMaps.loaded?,
         stack_maps_records:           StackMaps.record_count,

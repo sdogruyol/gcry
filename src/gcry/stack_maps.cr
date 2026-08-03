@@ -337,6 +337,8 @@ module Gcry
     # *stack_lo*/*stack_hi* (optional): when a Register value points into the
     # stack, treat it as an alloca slot and load the word (Crystal emit passes
     # alloca addresses; LLVM often encodes them as Register, not Direct).
+    # Multi-word Direct/Indirect (union/proc allocas, loc.size > 8): yield every
+    # aligned word in the slot.
     def self.each_root_at(pc : UInt64, rsp : UInt64, rbp : UInt64,
                           gregs : Pointer(UInt64), ngregs : Int32,
                           stack_lo : UInt64 = 0_u64, stack_hi : UInt64 = 0_u64,
@@ -344,7 +346,7 @@ module Gcry
       found = false
       each_location_at(pc) do |loc|
         found = true
-        if ptr = resolve_loc(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi)
+        each_resolved_root(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi) do |ptr|
           @@roots_yielded += 1
           yield ptr
         end
@@ -360,12 +362,41 @@ module Gcry
       found = false
       each_location_near(pc) do |loc|
         found = true
-        if ptr = resolve_loc(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi)
+        each_resolved_root(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi) do |ptr|
           @@roots_yielded += 1
           yield ptr
         end
       end
       found
+    end
+
+    private def self.each_resolved_root(loc : Loc, rsp : UInt64, rbp : UInt64,
+                                        gregs : Pointer(UInt64), ngregs : Int32,
+                                        stack_lo : UInt64, stack_hi : UInt64,
+                                        & : Void* ->) : Nil
+      # Multi-word stack slot (union / proc / tuple alloca).
+      if (loc.kind == LOC_DIRECT || loc.kind == LOC_INDIRECT) && loc.size > 8
+        base = reg_value(loc.reg, rsp, rbp, gregs, ngregs)
+        return unless base
+        addr = add_offset(base, loc.offset)
+        nwords = (loc.size.to_i32 // 8).clamp(1, 32)
+        i = 0
+        while i < nwords
+          waddr = addr &+ (i * 8)
+          if stack_lo < stack_hi
+            break if waddr < stack_lo || waddr &+ 8 > stack_hi
+          end
+          if ptr = load_word(waddr)
+            yield ptr unless ptr.null?
+          end
+          i += 1
+        end
+        return
+      end
+
+      if ptr = resolve_loc(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi)
+        yield ptr unless ptr.null?
+      end
     end
 
     # Walk x86_64 frame-pointer chain; resolve locations with RBP=fp.

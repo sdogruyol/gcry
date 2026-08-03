@@ -340,19 +340,34 @@ module Gcry
 
         # Word scan:
         # - Hybrid: always (parked + stw_multi running).
-        # - Exclusive default: parked fibers still word-scanned (acik otherwise
-        #   SEGVs in Kemal render_500). Opt out with GCRY_PRECISE_FIBERS=1.
-        # - Exclusive + fibers_exclusive: precise parked walk only.
-        word_scan = if @precise_stack_exclusive
-                      fiber.running? ? false : !@precise_stack_fibers_exclusive
-                    else
-                      true
-                    end
-        if word_scan
+        # - Exclusive default: full parked top→bottom (acik safety).
+        # - Exclusive + fibers_exclusive: shallow leaf window only (maps still
+        #   miss some park/exception slots; full scan defeated the RSS cut).
+        if @precise_stack_exclusive
+          next if fiber.running?
+          if @precise_stack_fibers_exclusive
+            scan_exclusive_parked_fiber_leaf(top, bottom)
+          else
+            Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+              mark_root_candidate(candidate, source: RootSource::Stack)
+            end
+          end
+        else
           Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Stack)
           end
         end
+      end
+    end
+
+    private def scan_exclusive_parked_fiber_leaf(top : UInt64, bottom : UInt64) : Nil
+      win = @precise_stack_fiber_leaf_bytes
+      return if win == 0
+      hi = top &+ win
+      hi = bottom if hi > bottom
+      return unless top < hi
+      Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(hi), safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Stack)
       end
     end
 

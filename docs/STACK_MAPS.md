@@ -67,8 +67,8 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 | Env | Behavior |
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
-| `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: also drop parked-fiber word scan. Smoke-only today — acik SEGVs. |
+| `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan → leaf window (`GCRY_PRECISE_FIBER_LEAF`, default 8 KiB; harness exclusivef uses 256 KiB). Leaf=0 = precise-only. **acik still SEGVs** even at 1 MiB leaf + unlimited maps. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -148,10 +148,12 @@ product reason to invest.
    was **Non-2xx**. Valid tip≈sys ~**8.5×**.
 8. ~~hybrid walker hits~~ **done** — capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`).
 9. ~~exclusive runtime safety~~ **partial** — parked-fiber precise walk + spill
-   window; invoke-out stackmaps; `PER_FUN`↑ + `--frame-pointers=always` on acik
-   builds. `=2` keeps parked word-scan (survives acik ~Boehm thr). Pure fibers
-   (`GCRY_PRECISE_FIBERS=1`) smoke-green, acik still SEGV — denser park/exception
-   maps next.
+   window; invoke-out stackmaps; `=2` survives acik with full parked word-scan.
+10. ~~denser emit~~ **done** — `PER_FUN=0` unlimited; Proc/union/tuple allocas;
+    multi-word `loc.size` resolve. acik `.llvm_stackmaps` ~7.5 MiB. Still
+    **not enough** for `GCRY_PRECISE_FIBERS=1` on acik (SEGV ≤1 MiB leaf).
+    Next: register/greg coverage for parked frames, stdlib park sites, or
+    accept parked full scan and chase RSS elsewhere.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

@@ -21,7 +21,8 @@ DURATION="${WRK_DURATION:-30}"
 CONNECTIONS="${WRK_CONNECTIONS:-100}"
 PORT_BASE="${ACIK_PORT_BASE:-3600}"
 OUT="${ACIK_STACKMAP_OUT:-$ROOT/bench/log/linux/$(date +%Y-%m-%d-%H%M%S)-acik-stackmap}"
-# space-separated: boehm base hybrid exclusive sys tipec
+# space-separated: boehm base hybrid exclusive exclusivef sys tipec
+# exclusivef = exclusive + GCRY_PRECISE_FIBERS=1 (pure parked-fiber exclusive)
 # sys = system Crystal + gcry (-Dgc_none); tipec = tip Crystal + EC + gcry
 VARIANTS="${VARIANTS:-boehm base hybrid}"
 SKIP_BOEHM="${SKIP_BOEHM:-0}"
@@ -57,7 +58,7 @@ build_one() {
     return 1
   }
   echo "ok ($(basename "$outbin"))"
-  if [[ "$name" == sm-* ]] || [[ "$name" == *stackmap* ]] || [[ "$name" == hybrid ]] || [[ "$name" == exclusive ]]; then
+  if [[ "$name" == sm-* ]] || [[ "$name" == *stackmap* ]] || [[ "$name" == hybrid ]] || [[ "$name" == exclusive* ]]; then
     readelf -S "$outbin" 2>/dev/null | grep -q llvm_stackmaps && echo "    .llvm_stackmaps: yes" || echo "    .llvm_stackmaps: NO"
   fi
 }
@@ -81,12 +82,13 @@ else
         rm -f "$AT/bin/acikturkiye-$v"
         build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}"
         ;;
-      hybrid|exclusive)
+      hybrid|exclusive|exclusivef)
         rm -f "$AT/bin/acikturkiye-$v"
-        # Frame pointers required for exclusive FP walk under --release; hybrid
-        # benefits too. Raise map density (default PER_FUN=2 is too sparse for
-        # exclusive — missing frames have no conservative fallback).
-        CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN="${CRYSTAL_STACKMAP_PER_FUN:-256}" \
+        # Frame pointers required for exclusive FP walk under --release.
+        # PER_FUN=0 ⇒ unlimited maps (exclusivef needs park/exception coverage).
+        per_fun="${CRYSTAL_STACKMAP_PER_FUN:-0}"
+        [[ "$v" == "hybrid" && -z "${CRYSTAL_STACKMAP_PER_FUN:-}" ]] && per_fun=32
+        CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN="$per_fun" \
           build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}" --frame-pointers=always
         ;;
       *)
@@ -141,6 +143,12 @@ run_one() {
     case "$variant" in
       hybrid) export GCRY_PRECISE_STACK=1 ;;
       exclusive) export GCRY_PRECISE_STACK=2 ;;
+      exclusivef)
+        export GCRY_PRECISE_STACK=2
+        export GCRY_PRECISE_FIBERS=1
+        # Research: even 1 MiB leaf + unlimited maps still SEGVs on acik.
+        export GCRY_PRECISE_FIBER_LEAF="${GCRY_PRECISE_FIBER_LEAF:-262144}"
+        ;;
     esac
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
     exec "$bin"

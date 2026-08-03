@@ -149,7 +149,7 @@ stackmap-smoke: $(BIN)
 	CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN=32 $(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
 		--no-debug --frame-pointers=always \
 		-o $(BIN)/stackmap_exclusive_fiber_smoke bench/stackmap_exclusive_fiber_smoke.cr
-	GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 $(BIN)/stackmap_exclusive_fiber_smoke
+	GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 GCRY_PRECISE_FIBER_LEAF=0 $(BIN)/stackmap_exclusive_fiber_smoke
 
 trace-smoke: $(BIN)
 	$(CRYSTAL) build bench/trace_smoke.cr -o $(BIN)/trace_smoke

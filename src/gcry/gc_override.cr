@@ -451,7 +451,11 @@ module GC
     end
     if env_flag_one?("GCRY_PRECISE_FIBERS")
       heap.precise_stack_fibers_exclusive = true
-      warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked fiber word scan off; UAF if maps miss\n")
+      # Optional leaf window (bytes). Default 8192; 0 = precise-only (smoke).
+      if leaf = env_u64("GCRY_PRECISE_FIBER_LEAF")
+        heap.precise_stack_fiber_leaf_bytes = leaf if leaf <= 1024_u64 * 1024
+      end
+      warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off (leaf window / precise); research\n")
     end
   end
 

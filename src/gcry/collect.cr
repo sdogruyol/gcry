@@ -107,9 +107,12 @@ module Gcry
     # stack word scans. Parked fibers still word-scanned unless
     # precise_stack_fibers_exclusive (GCRY_PRECISE_FIBERS=1). Research — UAF risk.
     property precise_stack_exclusive : Bool = false
-    # When true with exclusive: also skip parked-fiber word scans (precise walk
-    # only). Default off — fat apps SEGV without it today.
+    # When true with exclusive: parked fibers use leaf window (or 0 = precise
+    # only) instead of full top→bottom word scan. See GCRY_PRECISE_FIBERS.
     property precise_stack_fibers_exclusive : Bool = false
+    # Bytes of parked active stack (from stack_top toward bottom) to still
+    # word-scan under fibers_exclusive. 0 = precise walk only (UAF risk).
+    property precise_stack_fiber_leaf_bytes : UInt64 = 8192_u64
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
