@@ -49,12 +49,16 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 | Session | Config | `/json` % | RSS × |
 |---------|--------|----------:|------:|
-| `2026-08-02-120500/` | EC1 tip baseline | **87.9%** | **0.81×** |
-| `2026-08-02-152806/` | EC1 confirm (soft) | **85.4%** | **0.76×** |
-| `2026-08-02-121411/` | `GCRY_KEEP_CHUNKS=1` | **95.0%** | **3.07×** |
-| `2026-08-02-145600/` | EC4 reclaim-off | **80.5%** | **5.48×** |
+| `2026-08-02-120500/` | EC1 tip baseline (i3) | **87.9%** | **0.81×** |
+| `2026-08-02-152806/` | EC1 confirm soft (i3) | **85.4%** | **0.76×** |
+| `2026-08-02-121411/` | `GCRY_KEEP_CHUNKS=1` (i3) | **95.0%** | **3.07×** |
+| `2026-08-02-145600/` | EC4 reclaim-off (i3) | **80.5%** | **5.48×** |
+| `2026-08-03-072122/` | EC1 tip (9950X) | **82.5%** | **0.76×** |
+| `2026-08-03-072954/` | EC1 confirm (9950X) | **80.3%** | **0.76×** |
+| `2026-08-03-080248/` | `KEEP_CHUNKS=1` (9950X) | **90.1%** | **3.23×** |
 
-Gate **≥95% @ ≤1.0×** missed without KEEP_CHUNKS RSS tax. Parallel dormant
+Gate **≥95% @ ≤1.0×** and soft **≥90% @ ≤0.85×** missed without KEEP RSS tax.
+9950X hunt closed MISS (`2026-08-03-9950x-thr-hunt/`). Parallel dormant
 default-on rejected; `GCRY_PARALLEL_DORMANT=1` remains the RSS opt-in (~75% @ ~4×).
 
 ### v0.15.0 Linux cut (superseded headline)

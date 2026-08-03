@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Shard-only thr/RSS campaign notes —
-**not a tagged release.** EC1 **≥95% @ ≤1.0×** residual named; Parallel RSS
-profile stays **opt-in**. No process-default lever cleared both gates.
+Shard-only thr/RSS campaign —
+**not a tagged release.** Soft ≥90%@≤0.85× and hard ≥95%@≤1.0× both
+**MISS** on default path after 9950X re-open. Parallel RSS stays **opt-in**.
+Shard-only thr **exhausted** → escalate to compiler stack maps.
 Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Documentation
@@ -18,14 +19,21 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   **0.81×** (`2026-08-02-120500/`); confirm soft **85.4%** @ **0.76×**
   (`152806/`). EC4 reclaim-off **80.5%** @ **5.48×** (`145600/`).
   Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+- **9950X thr hunt (CLOSED MISS):** tip default `/json` ~**80–83%** @
+  **0.76×**, pause_p50 ~**0.33 ms** (`072122/` + `072954/`). KEEP
+  **90.1%** @ **3.23×** (`080248/`). Warm retain 32/256 MiB reject as
+  default. `GCRY_ALLOC_BATCH=4` **SEGV** under `/json` → reject.
+  Soft-soak EC4 **40/40**. Summary:
+  `bench/log/linux/2026-08-03-9950x-thr-hunt/`.
 - **KEEP_CHUNKS ceiling re-measured:** `GCRY_KEEP_CHUNKS=1` → `/json`
-  **95.0%** @ **3.07×** RSS (`121411/`). Hits thr bar; **fails RSS ≤1.0×**
-  — escape only (was 0.9-era cite).
+  **95.0%** @ **3.07×** RSS on i3 (`121411/`); **90.1%** @ **3.23×** on
+  9950X — escape only.
 - **Rejects (not defaults):** `empty_chunk_retain=32 MiB` thr↓ (**81.9%**);
   hot-prefer dormant demotion (no thr win; reverted); Parallel dormant
   **default-on** thr % **68.8%** @ **3.29×** (RSS ok, thr gate miss;
-  reverted). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32 still the
-  **supported RSS opt-in** (~75% @ ~4×).
+  reverted); warm retain (RSS↑ without ≤0.85× path to ≥90%);
+  `GCRY_ALLOC_BATCH=4` (SEGV). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32
+  still the **supported RSS opt-in** (~75% @ ~4×).
 
 ### Fixed
 
@@ -46,6 +54,10 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Added
 
+- **`GCRY_EMPTY_CHUNK_WARM_RETAIN`:** opt-in bytes of fully-free chunks kept
+  mapped (no DONTNEED) before dormant/munmap — research middle path vs
+  `KEEP_CHUNKS`. Measured on 9950X; **not** a process default (no
+  ≥90%@≤0.85×). Spec: warm retain keeps heap_size / zero unmapped.
 - **Secondary bench suite (crystal-metric):** vendored
   [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under
   `bench/crystal_metric/` + `bench/run_crystal_metric_ab.sh` /
@@ -91,9 +103,11 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Performance
 
-- Linux Kemal EC1 thr stays the ~**85–88%** / ~**0.80×** band; **pause_p50**
-  drops to ~**0.6 ms** under load (sweep outside STW). Parallel thr opt-in
-  unchanged (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
+- Linux Kemal EC1 thr stays the ~**85–88%** / ~**0.80×** band on i3; 9950X
+  tip quiet ~**80–83%** @ **0.76×**. **pause_p50** ~**0.33 ms** on 9950X
+  (~0.6 ms under-load i3 pause cut). Parallel thr opt-in unchanged
+  (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
+  Shard-only thr residual named — next bet stack maps.
 
 ## [0.17.0] - 2026-08-02
 

@@ -46,8 +46,9 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 
 Target: Match Boehm on the workloads Crystal users actually run.
 
-- [ ] **EC1 `/json` ≥95% @ ≤1.0× RSS** — residual after parked 0.18 campaign
-      (`bench/log/linux/2026-08-02-018-FINDINGS.md`)
+- [ ] **EC1 `/json` ≥95% @ ≤1.0× RSS** — shard-only thr **exhausted**
+      (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
+      compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
