@@ -113,26 +113,33 @@ Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier
 
 **Not a ship headline.** Product bar stays Kemal `/json` + [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
-Vendored [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under `bench/crystal_metric/`. Same-host Boehm vs gcry **wall time** on a GC-sensitive filter (Binarytrees, JSON*, string/Hash, Brainfuck*, Threadring, Matmul, Primes). Compute-bound language benches (Mandelbrot, Nbody, …) are noise — omit from GC claims.
+Vendored [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under `bench/crystal_metric/`. Same-host Boehm vs gcry **wall time**, **one fresh OS process per bench** (avoids suite-order pollution — shared-process `JsonParsePure` after `JsonGenerate` falsely looked ~20×). Filters: `FILTER=gc|core|stress|all` — see `bench/crystal_metric/README.md`. Compute-bound language benches (Mandelbrot, Nbody, …) are noise — omit from GC claims.
 
 ```sh
 make bench-crystal-metric
-# smoke: TRIALS=1 FILTER=Binarytrees,JsonParsePure,Threadring make bench-crystal-metric
+# smoke: TRIALS=1 FILTER=Binarytrees,JsonParsePure,Threadring bash bench/run_crystal_metric_ab.sh
 ```
 
-Quiet cut (WSL2 i3-12100F, Crystal 1.21, med-of-3): `bench/log/linux/2026-08-03-crystal-metric-ec1/`.
+### Shared-process cut (superseded methodology)
+
+`bench/log/linux/2026-08-03-crystal-metric-ec1/` — useful only as a cautionary tale (Pure/Primes inflated by prior benches). Prefer process-fresh cuts below.
+
+### Process-fresh cut (cite this)
+
+Session: `bench/log/linux/2026-08-03-crystal-metric-fresh/` (WSL2 i3-12100F, Crystal 1.21, med-of-3, `FILTER=gc`).
 
 | Bench | speed % Boehm | wall × | Notes |
 |-------|-------------:|-------:|-------|
-| Threadring | **~100%** | ~1.0× | Channel/fiber |
-| Brainfuck / Brainfuck2 / Matmul / RegexDna | **~98–103%** | ~1.0× | near parity |
-| JsonGenerate | **~93%** | ~1.08× | |
-| Binarytrees | **~40%** | ~2.5× | classic tree churn |
-| Knuckeotide / Revcomp / JsonParse* | **~55–72%** | ~1.4–1.8× | string/Hash pressure |
-| Primes | **~12%** | ~8.6× | sieve alloc storm |
-| JsonParsePure | **~5%** | ~20× | outlier — investigate separately |
+| Brainfuck / Brainfuck2 / Matmul / JsonGenerate | **~100–112%** | ~0.9–1.0× | near parity / slight win |
+| Threadring | **~97%** | ~1.03× | Channel/fiber |
+| RegexDna | **~88%** | ~1.13× | |
+| JsonParsePull / Serializable | **~70%** | ~1.4× | typed/pull JSON |
+| Revcomp / Knuckeotide | **~58–72%** | ~1.4–1.7× | string/Hash |
+| Binarytrees | **~32%** | ~3.1× | tree churn |
+| JsonParsePure | **~16%** | ~6.4× | `JSON::Any` Hash forest (was ~20× shared-process) |
+| Primes | **~14%** | ~7.3× | sieve alloc storm (real; not order artifact) |
 
-Peak RSS × (GNU `time -v` med): **~0.79×**. Some benches print checksum `err` on Crystal ≥1.21; timing A/B still counts them (`bench/run_crystal_metric_ab.sh`). Do **not** cite the upstream award total as a gcry score.
+Peak RSS × (median of per-bench peaks): **~0.63×**. Checksum `err` on Crystal ≥1.21 is OK for timing. Do **not** cite the upstream award total as a gcry score.
 
 ## How to record (Linux)
 

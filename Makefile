@@ -209,8 +209,8 @@ samples: $(BIN)
 bench-perf-smoke:
 	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/perf_smoke.sh
 
-# Secondary GC suite (vendored crystal-metric). Informational; no CI gate.
-# FILTER=Binarytrees,JsonParsePure,Threadring TRIALS=1 make bench-crystal-metric
+# Secondary GC suite (vendored crystal-metric, process-fresh). Informational.
+# FILTER=core|stress|gc|all|A,B TRIALS=1 make bench-crystal-metric
 bench-crystal-metric:
 	bash bench/run_crystal_metric_ab.sh
 

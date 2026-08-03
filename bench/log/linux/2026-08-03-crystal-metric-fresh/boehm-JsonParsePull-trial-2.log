@@ -1,0 +1,2 @@
+JsonParsePull: err result=JsonParsePull::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParsePull::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882) in 0.706s, award 1.0
+0.7056s, 1.00/1, 1.00
