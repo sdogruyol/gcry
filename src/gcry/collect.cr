@@ -111,8 +111,9 @@ module Gcry
     # only) instead of full top→bottom word scan. See GCRY_PRECISE_FIBERS.
     property precise_stack_fibers_exclusive : Bool = false
     # Bytes of parked active stack (from stack_top toward bottom) to still
-    # word-scan under fibers_exclusive. 0 = precise walk only (UAF risk).
-    property precise_stack_fiber_leaf_bytes : UInt64 = 8192_u64
+    # word-scan under fibers_exclusive. 0 = precise walk only (default for
+    # exclusivef after parked sysv gregs; was 8 KiB safety net).
+    property precise_stack_fiber_leaf_bytes : UInt64 = 0_u64
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).

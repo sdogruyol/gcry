@@ -68,7 +68,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
 | `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan → leaf window (`GCRY_PRECISE_FIBER_LEAF`, default 8 KiB; harness exclusivef uses 256 KiB). Leaf=0 = precise-only. **acik still SEGVs** even at 1 MiB leaf + unlimited maps. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. Leaf window via `GCRY_PRECISE_FIBER_LEAF` (0=precise-only; max 16 MiB). Parked walk uses **synthetic sysv gregs** + RSP@ret (`top+64`). Smoke OK; **acik exclusivef still flaky SEGV** at LEAF=0. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -149,11 +149,10 @@ product reason to invest.
 8. ~~hybrid walker hits~~ **done** — capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`).
 9. ~~exclusive runtime safety~~ **partial** — parked-fiber precise walk + spill
    window; invoke-out stackmaps; `=2` survives acik with full parked word-scan.
-10. ~~denser emit~~ **done** — `PER_FUN=0` unlimited; Proc/union/tuple allocas;
-    multi-word `loc.size` resolve. acik `.llvm_stackmaps` ~7.5 MiB. Still
-    **not enough** for `GCRY_PRECISE_FIBERS=1` on acik (SEGV ≤1 MiB leaf).
-    Next: register/greg coverage for parked frames, stdlib park sites, or
-    accept parked full scan and chase RSS elsewhere.
+10. ~~denser emit~~ **done** — `PER_FUN=0`; Proc/union allocas; multi-word locs.
+11. ~~parked sysv gregs~~ **done** — `fill_parked_sysv_gregs` / `each_root_parked_sysv`
+    (RSP@ret=`top+64`). `=2` acik med-of-3 ~**7.8×** vs base ~**8.6×** (thr ~93%).
+    `exclusivef` LEAF=0 still flaky SEGV on acik.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

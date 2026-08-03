@@ -147,33 +147,17 @@ module Gcry
     end
 
     # Precise roots for a parked fiber (x86_64-sysv swapcontext layout).
-    # stack_top → [r15,r14,r13,r12,rbp,rbx,rdi] then retaddr at +56.
-    # Without this, exclusive (=2) drops fiber word scans and UAFs on HTTP.
+    # Uses synthetic gregs from spill slots + caller RSP at ret (top+64).
     private def scan_precise_parked_fiber(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
       return unless @precise_stack_roots
       return unless StackMaps.loaded? || StackMaps.ensure_loaded
 
       {% if flag?(:x86_64) %}
         top = fiber.@context.stack_top.address
-        return unless top >= guard && (top &+ 56) < bottom
+        return unless top >= guard && (top &+ 64) <= bottom
 
-        # Callee-saved spill slots may be the only live copy of a root.
-        i = 0
-        while i < 7
-          word = Pointer(UInt64).new(top &+ (i * 8)).value
-          mark_precise_root(Pointer(Void).new(word)) unless word == 0
-          i += 1
-        end
-
-        saved_rbp = Pointer(UInt64).new(top &+ 32).value
-        ret = Pointer(UInt64).new(top &+ 56).value
-        lo = guard
-        hi = bottom
-        StackMaps.each_root_near(ret, top, saved_rbp, Pointer(UInt64).null, 0, lo, hi) do |ptr|
-          mark_precise_root(ptr)
-        end
         max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
-        StackMaps.each_root_fp_walk(top, saved_rbp, lo, hi, max_frames) do |ptr|
+        StackMaps.each_root_parked_sysv(top, guard, bottom, max_frames) do |ptr|
           mark_precise_root(ptr)
         end
       {% end %}

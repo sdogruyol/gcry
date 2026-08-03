@@ -119,4 +119,29 @@ describe Gcry::StackMaps do
   ensure
     Gcry::StackMaps.reset_for_testing
   end
+
+  it "fill_parked_sysv_gregs maps spill slots into glibc gregs order" do
+    # Fake spill block: r15..rdi then ret
+    buf = StaticArray(UInt64, 8).new(0_u64)
+    buf[0] = 0x15_u64
+    buf[1] = 0x14_u64
+    buf[2] = 0x13_u64
+    buf[3] = 0x12_u64
+    buf[4] = 0xb_u64  # rbp
+    buf[5] = 0x3_u64  # rbx
+    buf[6] = 0xd1_u64 # rdi
+    buf[7] = 0xdead_u64 # rip/ret
+    top = buf.to_unsafe.address
+    gregs = StaticArray(UInt64, Gcry::StackMaps::PARKED_SYSV_NGREGS).new(0_u64)
+    Gcry::StackMaps.fill_parked_sysv_gregs(top, gregs.to_unsafe)
+    gregs[7].should eq(0x15_u64)  # r15
+    gregs[6].should eq(0x14_u64)  # r14
+    gregs[5].should eq(0x13_u64)  # r13
+    gregs[4].should eq(0x12_u64)  # r12
+    gregs[10].should eq(0xb_u64) # rbp
+    gregs[11].should eq(0x3_u64)  # rbx
+    gregs[8].should eq(0xd1_u64)  # rdi
+    gregs[16].should eq(0xdead_u64)
+    gregs[15].should eq(top &+ 64) # caller RSP
+  end
 end

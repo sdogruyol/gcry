@@ -400,13 +400,16 @@ module Gcry
     end
 
     # Walk x86_64 frame-pointer chain; resolve locations with RBP=fp.
-    # Register GP locations need gregs (nil here) — only RBP/RSP-relative and
-    # stack-slot Register values are useful. *stack_lo*/*stack_hi* bound the
-    # readable stack (grows down: lo=SP side, hi=bottom).
+    # Optional *gregs* (glibc layout) for Register GP lives — typically the
+    # parked-fiber synthetic set from `fill_parked_sysv_gregs` (leaf callee-saved;
+    # over-marking parent frames is safe, under-marking is UAF).
+    # *stack_lo*/*stack_hi* bound the readable stack (grows down: lo=SP side, hi=bottom).
     # *max_frames* caps climb (hybrid uses HYBRID_MAX_FP_FRAMES).
     def self.each_root_fp_walk(rsp : UInt64, rbp : UInt64,
                                stack_lo : UInt64, stack_hi : UInt64,
                                max_frames : Int32 = MAX_FP_FRAMES,
+                               gregs : Pointer(UInt64) = Pointer(UInt64).null,
+                               ngregs : Int32 = 0,
                                & : Void* ->) : Nil
       return unless @@loaded
       {% unless flag?(:x86_64) %}
@@ -418,7 +421,7 @@ module Gcry
       limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
       while fp >= stack_lo && fp + 16 <= stack_hi && guard < limit
         ret = Pointer(UInt64).new(fp + 8).value
-        each_root_near(ret, fp &+ 16, fp, Pointer(UInt64).null, 0, stack_lo, stack_hi) do |root|
+        each_root_near(ret, fp &+ 16, fp, gregs, ngregs, stack_lo, stack_hi) do |root|
           yield root
         end
         next_fp = Pointer(UInt64).new(fp).value
@@ -426,6 +429,81 @@ module Gcry
         break if next_fp < stack_lo || next_fp >= stack_hi
         fp = next_fp
         guard += 1
+      end
+    end
+
+    # glibc x86_64 gregs[] size used by resolve_loc / dwarf_to_glibc_greg.
+    PARKED_SYSV_NGREGS = 17
+
+    # Fill glibc-order gregs from a parked fiber's x86_64-sysv swapcontext
+    # spill block at *stack_top*:
+    #   [r15,r14,r13,r12,rbp,rbx,rdi] then retaddr at +56.
+    # RSP is set to the caller's SP at the return site (*stack_top* + 64).
+    # Caller-saved regs (rax/rcx/rdx/rsi/r8–r11) stay 0 — those live in
+    # caller frames via stackmaps, not in the spill block.
+    def self.fill_parked_sysv_gregs(stack_top : UInt64, gregs : Pointer(UInt64)) : Nil
+      {% if flag?(:x86_64) %}
+        r15 = Pointer(UInt64).new(stack_top).value
+        r14 = Pointer(UInt64).new(stack_top &+ 8).value
+        r13 = Pointer(UInt64).new(stack_top &+ 16).value
+        r12 = Pointer(UInt64).new(stack_top &+ 24).value
+        rbp = Pointer(UInt64).new(stack_top &+ 32).value
+        rbx = Pointer(UInt64).new(stack_top &+ 40).value
+        rdi = Pointer(UInt64).new(stack_top &+ 48).value
+        rip = Pointer(UInt64).new(stack_top &+ 56).value
+        rsp = stack_top &+ 64 # past 7 spills + ret → caller's frame
+
+        i = 0
+        while i < PARKED_SYSV_NGREGS
+          gregs[i] = 0_u64
+          i += 1
+        end
+        # REG_R12..R15, RDI, RBP, RBX, RSP, RIP (see dwarf_to_glibc_greg)
+        gregs[4] = r12
+        gregs[5] = r13
+        gregs[6] = r14
+        gregs[7] = r15
+        gregs[8] = rdi
+        gregs[10] = rbp
+        gregs[11] = rbx
+        gregs[15] = rsp
+        gregs[16] = rip
+      {% end %}
+    end
+
+    # Precise roots for a parked x86_64-sysv fiber: spill-slot marks, leaf
+    # stackmap at swapcontext ret (with synthetic gregs), then FP walk.
+    def self.each_root_parked_sysv(stack_top : UInt64,
+                                   stack_lo : UInt64, stack_hi : UInt64,
+                                   max_frames : Int32 = MAX_FP_FRAMES,
+                                   & : Void* ->) : Nil
+      return unless @@loaded
+      {% unless flag?(:x86_64) %}
+        return
+      {% end %}
+      return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
+
+      gregs = StaticArray(UInt64, PARKED_SYSV_NGREGS).new(0_u64)
+      fill_parked_sysv_gregs(stack_top, gregs.to_unsafe)
+
+      # Spill slots themselves (may be sole live copy).
+      i = 0
+      while i < 7
+        word = Pointer(UInt64).new(stack_top &+ (i * 8)).value
+        yield Pointer(Void).new(word) unless word == 0
+        i += 1
+      end
+
+      rbp = gregs[10]
+      rsp = gregs[15]
+      rip = gregs[16]
+      each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_SYSV_NGREGS,
+                     stack_lo, stack_hi) do |root|
+        yield root
+      end
+      each_root_fp_walk(rsp, rbp, stack_lo, stack_hi, max_frames,
+                        gregs.to_unsafe, PARKED_SYSV_NGREGS) do |root|
+        yield root
       end
     end
 

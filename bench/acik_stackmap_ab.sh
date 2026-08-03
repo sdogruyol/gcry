@@ -138,6 +138,8 @@ run_one() {
   (
     cd "$AT"
     set -a; source .env.demo; set +a
+    # Preserve leaf override across the GCRY_* scrub below.
+    _leaf="${GCRY_PRECISE_FIBER_LEAF:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
     case "$variant" in
@@ -146,8 +148,8 @@ run_one() {
       exclusivef)
         export GCRY_PRECISE_STACK=2
         export GCRY_PRECISE_FIBERS=1
-        # Research: even 1 MiB leaf + unlimited maps still SEGVs on acik.
-        export GCRY_PRECISE_FIBER_LEAF="${GCRY_PRECISE_FIBER_LEAF:-262144}"
+        # Default 0: pure precise parked walk (synthetic sysv gregs + RSP@ret).
+        export GCRY_PRECISE_FIBER_LEAF="${_leaf:-0}"
         ;;
     esac
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
