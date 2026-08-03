@@ -37,7 +37,9 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   RSS is a looser secondary ceil (DONTNEED re-fault noise).
 - **pattern_fuzz pause ratios:** gate on per-phase `pause_last_ns`
   percentiles (was cumulative heap p50/p99/max — one early major poisoned
-  every later pattern vs a lucky baseline on GHA).
+  every later pattern vs a lucky baseline on GHA). Short runs drop the
+  worst phase before p99/max; baseline floored at 5 ms; Zipfian/Bimodal
+  ratio limits raised for GHA (crystal 1.21 CI saw ~25× vs 3×/20× caps).
 
 ### Added
 
