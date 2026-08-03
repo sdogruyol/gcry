@@ -1,0 +1,4 @@
+mode	max_atomic_MiB	collision_MiB	mutator_atomic	parked_atomic	precise_atomic	heap_atomic	live_MiB
+0	87.6	76.2	0.1	8.7	0.0	78.8	98.7
+1	86.0	78.0	0.1	7.6	1.8	76.8	103.1
+2	84.1	69.7	0.0	5.2	2.7	76.3	95.0

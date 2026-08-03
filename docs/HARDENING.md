@@ -75,6 +75,10 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
+| `GCRY_LIVE_ATTR=1` | Research: first-mark root-source counters; pair with `/gc-live-attr` |
+| `GCRY_DISABLE_FIBER_FP_FILL=1` | With `PRECISE_FIBERS`: skip FP-frame conservative fill (pure maps; UAF risk) |
+| `GCRY_STACKMAP_MISS_LOG=1` | Research: parked map-miss PC ring on `/gc-stats` (`stack_maps_top_miss_pcs`) |
+| `GCRY_STACKMAP_NEAR_DELTA` | Research: ret↔map slack bytes (default **128**; was 32 — too tight for arg pushes) |
 | `GCRY_TLAB=1` | **Unsupported** under Parallel — thread-local freelists (research/A/B; stderr warn). Supported path keeps TLAB **off** |
 | `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |

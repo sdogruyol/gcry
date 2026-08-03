@@ -68,7 +68,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
 | `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `GCRY_PRECISE_FIBER_LEAF` (0=precise-only; max 16 MiB). Parked walk: sysv gregs + RSP@ret; **skips FP walk if RBP not on-stack** (makecontext). Smoke OK; **acik exclusivef UAF** (maps miss older-frame slots). |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `LEAF=0` → precise maps **+ FP-frame conservative fill** (`each_parked_fp_frame_range`; escape `GCRY_DISABLE_FIBER_FP_FILL=1`). Parked walk skips FP if RBP not on-stack (makecontext). Smoke OK; acik exclusivef re-check after FP-fill. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -85,7 +85,7 @@ Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 | Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
 | Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
 | Process GC | Tip probe: **`-Dgc_none -Dpreview_mt -Dexecution_context`** (no EC flags ⇒ soak livelock). 1.21.0 release has EC by default. |
-| Emit density | Skip empty/External; `CRYSTAL_STACKMAP_PER_FUN` default **2**. |
+| Emit density | External + Crystal calls; `call_args` lives; pre-call when `PER_FUN=0` / `CRYSTAL_STACKMAP_BEFORE=1`. Default `PER_FUN=2`. |
 | Walker smoke | `make stackmap-smoke` — exclusive `marked=3`; hybrid loads maps (leaf-cheap). |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
@@ -149,15 +149,20 @@ product reason to invest.
 8. ~~hybrid walker hits~~ **done** — capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`).
 9. ~~exclusive runtime safety~~ **partial** — parked-fiber precise walk + spill
    window; invoke-out stackmaps; `=2` survives acik with full parked word-scan.
-10. ~~denser emit~~ **done** — `PER_FUN=0`; Proc/union allocas; multi-word locs.
+10. ~~denser emit~~ **done** — `PER_FUN=0`; External+call_args+pre-call;
+    acik records ~139k → **~306k** (`…/acik-denser-emit/`).
 11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
     gate (makecontext); Direct/Indirect refuse off-stack loads.
-12. ~~exclusivef stabilize~~ **blocked** — LEAF=0 still UAF on acik. Keep `=2`
-    + full parked word-scan (~7.8–9×).
+12. **exclusivef stabilize** — partial: denser emit + `NEAR_DELTA=128` clears
+    Crystal-frame misses (`PG::Connection` ret−map ≈74; see
+    `…/acik-parked-miss/`). Nofill still **SEGV** on libc/OOB frames — FP-fill
+    remains required (~0.6 MiB). Escape `GCRY_DISABLE_FIBER_FP_FILL=1`.
+    Miss ring: `GCRY_STACKMAP_MISS_LOG=1`.
 13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
     dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
-    Next: conservative-scan attribution, or denser stackmaps (parked false roots
-    still seed the live graph).
+14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,
+    `…/acik-live-attr-ab/`). ~83 MiB @ 32 KiB = atomic byteish; parked seeds
+    atomics (mutator ≈ 0). **C layouts dead.**
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

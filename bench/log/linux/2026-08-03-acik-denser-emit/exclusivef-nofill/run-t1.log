@@ -1,0 +1,95 @@
+gcry: GCRY_PRECISE_STACK=2 exclusive — research only; incomplete maps can UAF
+gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research
+INF 2026-08-03T19:34:20.670Z > Connecting to postgresql://REDACTED:REDACTED@172.24.176.1:5432/acikturkiye_demo
+| event = db_connect
+INF 2026-08-03T19:34:20.703Z > [demo] Açık Türkiye is ready to lead at http://0.0.0.0:3801
+INF 2026-08-03T19:34:20.777Z > 200 GET /api/v1/ 47.25ms
+INF 2026-08-03T19:34:20.795Z > 200 GET /api/v1/ 12.49ms
+INF 2026-08-03T19:34:20.802Z > 200 GET /api/v1/ 6.84ms
+INF 2026-08-03T19:34:20.856Z > 200 GET /api/v1/ 7.39ms
+INF 2026-08-03T19:34:20.884Z > 200 GET /api/v1/ 101.01ms
+INF 2026-08-03T19:34:20.892Z > 200 GET /api/v1/ 7.72ms
+INF 2026-08-03T19:34:20.893Z > 200 GET /api/v1/ 110.82ms
+INF 2026-08-03T19:34:20.902Z > 200 GET /api/v1/ 8.16ms
+INF 2026-08-03T19:34:20.927Z > 200 GET /api/v1/ 8.48ms
+INF 2026-08-03T19:34:20.942Z > 200 GET /api/v1/ 8.73ms
+INF 2026-08-03T19:34:20.955Z > 200 GET /api/v1/ 9.77ms
+INF 2026-08-03T19:34:20.981Z > 200 GET /api/v1/ 8.7ms
+INF 2026-08-03T19:34:20.994Z > 200 GET /api/v1/ 9.57ms
+INF 2026-08-03T19:34:21.008Z > 200 GET /api/v1/ 11.59ms
+INF 2026-08-03T19:34:21.019Z > 200 GET /api/v1/ 235.9ms
+INF 2026-08-03T19:34:21.026Z > 200 GET /api/v1/ 6.8ms
+INF 2026-08-03T19:34:21.044Z > 200 GET /api/v1/ 7.31ms
+INF 2026-08-03T19:34:21.060Z > 200 GET /api/v1/ 7.51ms
+INF 2026-08-03T19:34:21.076Z > 200 GET /api/v1/ 7.06ms
+INF 2026-08-03T19:34:21.092Z > 200 GET /api/v1/ 6.97ms
+INF 2026-08-03T19:34:21.109Z > 200 GET /api/v1/ 7.78ms
+INF 2026-08-03T19:34:21.124Z > 200 GET /api/v1/ 7.47ms
+INF 2026-08-03T19:34:21.147Z > 200 GET /api/v1/ 10.03ms
+INF 2026-08-03T19:34:21.156Z > 200 GET /api/v1/ 7.69ms
+INF 2026-08-03T19:34:21.164Z > 200 GET /api/v1/ 381.47ms
+INF 2026-08-03T19:34:21.170Z > 200 GET /api/v1/ 385.81ms
+INF 2026-08-03T19:34:21.174Z > 200 GET /api/v1/ 391.98ms
+INF 2026-08-03T19:34:21.182Z > 200 GET /api/v1/ 7.81ms
+INF 2026-08-03T19:34:21.184Z > 200 GET /api/v1/ 398.53ms
+INF 2026-08-03T19:34:21.185Z > 200 GET /api/v1/ 399.33ms
+INF 2026-08-03T19:34:21.192Z > 200 GET /api/v1/ 7.23ms
+INF 2026-08-03T19:34:21.196Z > 200 GET /api/v1/ 412.21ms
+INF 2026-08-03T19:34:21.205Z > 200 GET /api/v1/ 8.35ms
+INF 2026-08-03T19:34:21.215Z > 200 GET /api/v1/ 431.25ms
+INF 2026-08-03T19:34:21.223Z > 200 GET /api/v1/ 8.1ms
+INF 2026-08-03T19:34:21.237Z > 200 GET /api/v1/ 11.83ms
+INF 2026-08-03T19:34:21.252Z > 200 GET /api/v1/ 7.62ms
+INF 2026-08-03T19:34:21.275Z > 200 GET /api/v1/ 10.33ms
+INF 2026-08-03T19:34:21.284Z > 200 GET /api/v1/ 7.37ms
+INF 2026-08-03T19:34:21.301Z > 200 GET /api/v1/ 516.42ms
+INF 2026-08-03T19:34:21.308Z > 200 GET /api/v1/ 7.01ms
+INF 2026-08-03T19:34:21.324Z > 200 GET /api/v1/ 7.1ms
+INF 2026-08-03T19:34:21.333Z > 200 GET /api/v1/ 8.21ms
+INF 2026-08-03T19:34:21.334Z > 200 GET /api/v1/ 550.54ms
+INF 2026-08-03T19:34:21.335Z > 200 GET /api/v1/ 549.8ms
+INF 2026-08-03T19:34:21.340Z > 200 GET /api/v1/ 554.32ms
+INF 2026-08-03T19:34:21.344Z > 200 GET /api/v1/ 8.66ms
+INF 2026-08-03T19:34:21.357Z > 200 GET /api/v1/ 8.18ms
+INF 2026-08-03T19:34:21.372Z > 200 GET /api/v1/ 7.34ms
+INF 2026-08-03T19:34:21.384Z > 200 GET /api/v1/ 7.23ms
+INF 2026-08-03T19:34:21.392Z > 200 GET /api/v1/ 7.28ms
+INF 2026-08-03T19:34:21.408Z > 200 GET /api/v1/ 7.18ms
+INF 2026-08-03T19:34:21.421Z > 200 GET /api/v1/ 7.86ms
+INF 2026-08-03T19:34:21.433Z > 200 GET /api/v1/ 7.9ms
+INF 2026-08-03T19:34:21.439Z > 200 GET /api/v1/ 6.63ms
+INF 2026-08-03T19:34:21.455Z > 200 GET /api/v1/ 6.7ms
+INF 2026-08-03T19:34:21.472Z > 200 GET /api/v1/ 7.04ms
+INF 2026-08-03T19:34:21.475Z > 200 GET /api/v1/ 691.93ms
+Invalid memory access (signal 11) at address 0x8
+[0x13e57bf] ?? +20862911 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x13e52ef] ?? +20861679 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x7dbca4045330] ?? +138249159070512 in /lib/x86_64-linux-gnu/libc.so.6
+[0x131c076] ?? +20037750 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x147ea87] ?? +21490311 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x1495507] ?? +21583111 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x1495573] ?? +21583219 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x1496c5f] ?? +21589087 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x149bd7d] ?? +21609853 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x14bf099] ?? +21754009 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x150fb5b] ?? +22084443 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x14b898b] ?? +21727627 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15f09e3] ?? +23005667 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15f189f] ?? +23009439 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ec8f0] ?? +22989040 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15eb82d] ?? +22984749 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ed0d3] ?? +22991059 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ece1d] ?? +22990365 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15eeb96] ?? +22997910 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15edd98] ?? +22994328 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15e80c3] ?? +22970563 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15e7b9f] ?? +22969247 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ea27d] ?? +22979197 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ef0b5] ?? +22999221 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15f0809] ?? +23005193 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15ef491] ?? +23000209 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15e3a85] ?? +22952581 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x15e1430] ?? +22942768 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x1351ffa] ?? +20258810 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x1351f7e] ?? +20258686 in /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-exclusive
+[0x0] ???

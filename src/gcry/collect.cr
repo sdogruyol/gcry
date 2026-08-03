@@ -114,7 +114,33 @@ module Gcry
     # word-scan under fibers_exclusive. 0 = precise walk only (default for
     # exclusivef after parked sysv gregs; was 8 KiB safety net).
     property precise_stack_fiber_leaf_bytes : UInt64 = 0_u64
+    # When fibers_exclusive and leaf=0: word-scan each FP-chain frame body
+    # (map-miss safety net). Default on for exclusivef research.
+    property precise_stack_fiber_fp_fill : Bool = true
     getter precise_stack_roots_marked : UInt64 = 0_u64
+    getter parked_fp_fill_frames : UInt64 = 0_u64
+    getter parked_fp_fill_bytes : UInt64 = 0_u64
+    # Research: first-mark attribution by root source (GCRY_LIVE_ATTR=1).
+    # Stack/Static/Thread/Precise = ambient seeds; Heap = edge closure.
+    property live_attr_roots : Bool = false
+    getter first_mark_stack_objects : UInt64 = 0_u64
+    getter first_mark_stack_bytes : UInt64 = 0_u64
+    getter first_mark_stack_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_parked_objects : UInt64 = 0_u64
+    getter first_mark_parked_bytes : UInt64 = 0_u64
+    getter first_mark_parked_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_static_objects : UInt64 = 0_u64
+    getter first_mark_static_bytes : UInt64 = 0_u64
+    getter first_mark_static_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_thread_objects : UInt64 = 0_u64
+    getter first_mark_thread_bytes : UInt64 = 0_u64
+    getter first_mark_thread_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_precise_objects : UInt64 = 0_u64
+    getter first_mark_precise_bytes : UInt64 = 0_u64
+    getter first_mark_precise_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_heap_objects : UInt64 = 0_u64
+    getter first_mark_heap_bytes : UInt64 = 0_u64
+    getter first_mark_heap_atomic_bytes : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
@@ -1180,6 +1206,26 @@ module Gcry
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
       @precise_stack_roots_marked = 0_u64
+      @parked_fp_fill_frames = 0_u64
+      @parked_fp_fill_bytes = 0_u64
+      @first_mark_stack_objects = 0_u64
+      @first_mark_stack_bytes = 0_u64
+      @first_mark_stack_atomic_bytes = 0_u64
+      @first_mark_parked_objects = 0_u64
+      @first_mark_parked_bytes = 0_u64
+      @first_mark_parked_atomic_bytes = 0_u64
+      @first_mark_static_objects = 0_u64
+      @first_mark_static_bytes = 0_u64
+      @first_mark_static_atomic_bytes = 0_u64
+      @first_mark_thread_objects = 0_u64
+      @first_mark_thread_bytes = 0_u64
+      @first_mark_thread_atomic_bytes = 0_u64
+      @first_mark_precise_objects = 0_u64
+      @first_mark_precise_bytes = 0_u64
+      @first_mark_precise_atomic_bytes = 0_u64
+      @first_mark_heap_objects = 0_u64
+      @first_mark_heap_bytes = 0_u64
+      @first_mark_heap_atomic_bytes = 0_u64
       @type_id_root_rejects = 0_u64
       @type_id_stack_rejects = 0_u64
       @type_id_static_rejects = 0_u64

@@ -38,8 +38,13 @@ module Gcry
     @@nconstants = 0
     @@pc_min = 0_u64
     @@pc_max = 0_u64
-    # Return address may sit a few bytes past the stackmap PC (call size).
-    NEAR_DELTA = 32_u64
+    # Return address vs stackmap PC slack. Emit places llvm.experimental.stackmap
+    # immediately before/after the call in IR, but isel often inserts arg pushes
+    # between map and call (acik PG::Connection: ret−map ≈ 74). 32 was too tight
+    # → exclusivef UAF on dense frames. Default 128 covers typical push sequences.
+    # Override: GCRY_STACKMAP_NEAR_DELTA.
+    NEAR_DELTA_DEFAULT = 128_u64
+    @@near_delta = NEAR_DELTA_DEFAULT
     # Cap FP chain length — deep / corrupt chains dominated soak pause.
     MAX_FP_FRAMES = 128
     # Hybrid mutator walk: must climb past GC/stdlib frames (often map-less)
@@ -51,6 +56,17 @@ module Gcry
     @@roots_yielded = 0_u64
     @@lookups = 0_u64
     @@near_hits = 0_u64
+    # Research: parked-frame map-miss attribution (GCRY_STACKMAP_MISS_LOG=1).
+    MISS_TOP_N = 32
+    @@miss_log = false
+    @@parked_walk = false
+    @@misses = 0_u64
+    @@parked_misses = 0_u64
+    @@parked_oob_misses = 0_u64
+    @@parked_rbp_offstack = 0_u64
+    @@miss_pcs = StaticArray(UInt64, MISS_TOP_N).new(0_u64)
+    @@miss_counts = StaticArray(UInt64, MISS_TOP_N).new(0_u64)
+    @@miss_slots = 0
 
     def self.loaded? : Bool
       @@loaded
@@ -78,6 +94,98 @@ module Gcry
 
     def self.near_hits : UInt64
       @@near_hits
+    end
+
+    def self.near_delta : UInt64
+      @@near_delta
+    end
+
+    def self.near_delta=(v : UInt64) : Nil
+      @@near_delta = v.clamp(8_u64, 4096_u64)
+    end
+
+    def self.miss_log=(v : Bool) : Nil
+      @@miss_log = v
+    end
+
+    def self.miss_log? : Bool
+      @@miss_log
+    end
+
+    def self.misses : UInt64
+      @@misses
+    end
+
+    def self.parked_misses : UInt64
+      @@parked_misses
+    end
+
+    def self.parked_oob_misses : UInt64
+      @@parked_oob_misses
+    end
+
+    def self.parked_rbp_offstack : UInt64
+      @@parked_rbp_offstack
+    end
+
+    # Top miss return PCs (parked walk only when miss_log). STW-safe ring.
+    def self.top_miss_pcs : Array({pc: UInt64, count: UInt64})
+      out = Array({pc: UInt64, count: UInt64}).new(@@miss_slots)
+      i = 0
+      while i < @@miss_slots
+        out << {pc: @@miss_pcs[i], count: @@miss_counts[i]}
+        i += 1
+      end
+      out.sort_by! { |e| -e[:count].to_i64 }
+      out
+    end
+
+    private def self.note_parked_miss(pc : UInt64) : Nil
+      return unless @@miss_log && @@parked_walk
+      @@parked_misses += 1
+      # Null ret = FP-chain terminator / garbage — count but do not monopolize top-N.
+      return if pc == 0
+      i = 0
+      while i < @@miss_slots
+        if @@miss_pcs[i] == pc
+          @@miss_counts[i] &+= 1
+          return
+        end
+        i += 1
+      end
+      if @@miss_slots < MISS_TOP_N
+        @@miss_pcs[@@miss_slots] = pc
+        @@miss_counts[@@miss_slots] = 1_u64
+        @@miss_slots += 1
+        return
+      end
+      min_i = 0
+      min_c = @@miss_counts[0]
+      i = 1
+      while i < MISS_TOP_N
+        c = @@miss_counts[i]
+        if c < min_c
+          min_c = c
+          min_i = i
+        end
+        i += 1
+      end
+      @@miss_pcs[min_i] = pc
+      @@miss_counts[min_i] = 1_u64
+    end
+
+    private def self.clear_miss_table : Nil
+      @@misses = 0_u64
+      @@parked_misses = 0_u64
+      @@parked_oob_misses = 0_u64
+      @@parked_rbp_offstack = 0_u64
+      @@miss_slots = 0
+      i = 0
+      while i < MISS_TOP_N
+        @@miss_pcs[i] = 0_u64
+        @@miss_counts[i] = 0_u64
+        i += 1
+      end
     end
 
     # Parse *data* (full `.llvm_stackmaps` bytes). Replaces any prior table.
@@ -220,6 +328,7 @@ module Gcry
         @@roots_yielded = 0_u64
         @@lookups = 0_u64
         @@near_hits = 0_u64
+        clear_miss_table
         true
       ensure
         LibC.free(fn_addrs.as(Void*)) unless fn_addrs.null?
@@ -256,6 +365,10 @@ module Gcry
       @@roots_yielded = 0_u64
       @@lookups = 0_u64
       @@near_hits = 0_u64
+      @@miss_log = false
+      @@parked_walk = false
+      @@near_delta = NEAR_DELTA_DEFAULT
+      clear_miss_table
     end
 
     # Binary search for an exact PC record.
@@ -277,11 +390,12 @@ module Gcry
       -1
     end
 
-    # Largest stackmap PC with `pc - map_pc <= NEAR_DELTA` (one binary search).
-    # Matches return addresses that sit a few bytes past the stackmap point.
+    # Largest stackmap PC with `pc - map_pc <= near_delta` (one binary search).
+    # Matches return addresses past the stackmap (call body / arg pushes).
     def self.find_index_near(pc : UInt64) : Int32
       return -1 unless @@loaded && @@nrecords > 0
-      return -1 if pc < @@pc_min || pc > @@pc_max &+ NEAR_DELTA
+      delta = @@near_delta
+      return -1 if pc < @@pc_min || pc > @@pc_max &+ delta
       @@lookups += 1
 
       # upper_bound: first index with pcs[i] > pc
@@ -298,7 +412,7 @@ module Gcry
       return -1 if lo == 0
       idx = lo - 1
       map_pc = @@pcs[idx]
-      return -1 if pc < map_pc || (pc - map_pc) > NEAR_DELTA
+      return -1 if pc < map_pc || (pc - map_pc) > delta
       @@near_hits += 1
       idx
     end
@@ -312,7 +426,7 @@ module Gcry
       true
     end
 
-    # Yield locations for the stackmap nearest at-or-below *pc* within NEAR_DELTA.
+    # Yield locations for the stackmap nearest at-or-below *pc* within near_delta.
     def self.each_location_near(pc : UInt64, & : Loc ->) : Bool
       idx = find_index_near(pc)
       return false if idx < 0
@@ -421,8 +535,17 @@ module Gcry
       limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
       while fp >= stack_lo && fp + 16 <= stack_hi && guard < limit
         ret = Pointer(UInt64).new(fp + 8).value
-        each_root_near(ret, fp &+ 16, fp, gregs, ngregs, stack_lo, stack_hi) do |root|
+        hit = each_root_near(ret, fp &+ 16, fp, gregs, ngregs, stack_lo, stack_hi) do |root|
           yield root
+        end
+        unless hit
+          @@misses += 1
+          if @@miss_log && @@parked_walk
+            if ret < @@pc_min || ret > @@pc_max &+ @@near_delta
+              @@parked_oob_misses += 1
+            end
+            note_parked_miss(ret)
+          end
         end
         next_fp = Pointer(UInt64).new(fp).value
         break if next_fp <= fp
@@ -503,22 +626,93 @@ module Gcry
       rip = gregs[16]
 
       # swapcontext saves a real frame pointer on-stack; makecontext does not.
-      return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
+      unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
+        @@parked_rbp_offstack += 1 if @@miss_log
+        return
+      end
       return unless rsp >= stack_lo && rsp <= stack_hi
 
-      each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_SYSV_NGREGS,
-                     stack_lo, stack_hi) do |root|
+      # Attribute parked leaf + FP-walk misses (GCRY_STACKMAP_MISS_LOG=1).
+      @@parked_walk = true
+      leaf_hit = each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_SYSV_NGREGS,
+                                stack_lo, stack_hi) do |root|
         yield root
+      end
+      unless leaf_hit
+        @@misses += 1
+        if @@miss_log
+          if rip < @@pc_min || rip > @@pc_max &+ @@near_delta
+            @@parked_oob_misses += 1
+          end
+          note_parked_miss(rip)
+        end
       end
       each_root_fp_walk(rsp, rbp, stack_lo, stack_hi, max_frames,
                         gregs.to_unsafe, PARKED_SYSV_NGREGS) do |root|
         yield root
       end
+      @@parked_walk = false
     end
 
     private def self.frame_pointer_on_stack?(fp : UInt64, stack_lo : UInt64, stack_hi : UInt64) : Bool
       return false if fp == 0 || (fp & 7) != 0
       fp >= stack_lo && (fp &+ 16) <= stack_hi
+    end
+
+    # Max bytes to word-scan per FP frame / per fiber (exclusivef FP-fill).
+    # Without caps a stale RBP near stack bottom turns one "frame" into an
+    # 8 MiB full-stack scan (acik thr collapse / collect hang).
+    PARKED_FP_FILL_MAX_FRAME = 64_u64 * 1024
+    PARKED_FP_FILL_MAX_TOTAL = 256_u64 * 1024
+
+    # Yield each parked swapcontext frame body `[rsp, fp)` for conservative fill.
+    # Covers map-missed slots in frames the FP chain can see — denser than leaf
+    # window, cheaper/safer than full top→bottom (exclusivef research path).
+    # No-op when RBP not on-stack (makecontext). Oversized frames are skipped.
+    def self.each_parked_fp_frame_range(stack_top : UInt64,
+                                        stack_lo : UInt64, stack_hi : UInt64,
+                                        max_frames : Int32 = MAX_FP_FRAMES,
+                                        & : UInt64, UInt64 ->) : Nil
+      {% unless flag?(:x86_64) %}
+        return
+      {% end %}
+      return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
+
+      gregs = StaticArray(UInt64, PARKED_SYSV_NGREGS).new(0_u64)
+      fill_parked_sysv_gregs(stack_top, gregs.to_unsafe)
+      rbp = gregs[10]
+      rsp = gregs[15]
+      return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
+      return unless rsp >= stack_lo && rsp <= stack_hi
+      # Leaf FP must sit reasonably above RSP (same used stack region).
+      return unless rbp > rsp && (rbp - rsp) <= PARKED_FP_FILL_MAX_FRAME
+
+      fp = rbp
+      guard = 0
+      total = 0_u64
+      limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
+      while frame_pointer_on_stack?(fp, stack_lo, stack_hi) && guard < limit
+        if rsp < fp
+          span = fp - rsp
+          if span <= PARKED_FP_FILL_MAX_FRAME && total &+ span <= PARKED_FP_FILL_MAX_TOTAL
+            yield rsp, fp
+            total &+= span
+          elsif span > PARKED_FP_FILL_MAX_FRAME
+            # Broken/stale chain — stop rather than scan megabytes.
+            break
+          else
+            break # hit total budget
+          end
+        end
+        next_fp = Pointer(UInt64).new(fp).value
+        break if next_fp <= fp
+        break unless frame_pointer_on_stack?(next_fp, stack_lo, stack_hi)
+        rsp = fp &+ 16
+        break if rsp > stack_hi
+        break if next_fp <= rsp || (next_fp - rsp) > PARKED_FP_FILL_MAX_FRAME
+        fp = next_fp
+        guard += 1
+      end
     end
 
     # DWARF reg → value. Uses *rsp*/*rbp* overrides; GP via glibc gregs map.

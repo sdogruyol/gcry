@@ -1,0 +1,6 @@
+parked_miss=3493 oob=1932 rbp_off=0
+0x0	n=1878	?? at ??:0:0
+0x148d99c	n=1561	new at /home/uchiha/playground/acikturkiye/lib/pg/src/pq/connection.cr:23:5 |  (inlined by) initialize at /home/uchiha/playground/acikturkiye/lib/pg/src/pg/connection.cr:9:22 |  (inlined by) new at /home/uchiha/playground/acikturkiye/lib/pg/src/pg/connection.cr:7:5 |  (inlined by) build at /home/uchiha/playground/acikturkiye/lib/pg/src/pg/driver.cr:7:7 |  (inlined by) ~procProc(PG::Connection)@lib/db/src/db.cr:164 at /home/uchiha/playground/acikturkiye/lib/db/src/db.cr:164:19
+0x7b985962a1ca	n=18	?? at ??:0:0
+0x7b985962a28b	n=18	?? at ??:0:0
+0x130e815	n=18	_start at ??:0:0

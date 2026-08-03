@@ -1,0 +1,32 @@
+live_objects=51702 total_MiB=106.9 raw_MiB=17.2 typed_MiB=89.7 large_MiB=8.8
+gcstats size_class_live_MiB=94.7 live_objects=78429
+first_mark MiB: stack=4.4 static=0.0 thread=0.0 precise=0.0 heap=98.6
+top size_classes (payload → MiB / count):
+  32768     92.2 MiB  n=2951
+     32      0.8 MiB  n=25955
+    320      0.7 MiB  n=2348
+    640      0.7 MiB  n=1103
+  12288      0.5 MiB  n=39
+  20480      0.3 MiB  n=17
+  14336      0.3 MiB  n=24
+     80      0.2 MiB  n=2846
+     48      0.2 MiB  n=4682
+    160      0.2 MiB  n=1234
+     64      0.2 MiB  n=2775
+  10240      0.2 MiB  n=17
+top type_ids (id → MiB / count):
+      88     41.4 MiB  n=1360
+      49     41.2 MiB  n=1319
+       1      2.1 MiB  n=33597
+     155      0.6 MiB  n=175
+      80      0.6 MiB  n=18
+     405      0.5 MiB  n=82
+   27836      0.5 MiB  n=15
+     439      0.4 MiB  n=1469
+      82      0.2 MiB  n=7
+     535      0.2 MiB  n=416
+     435      0.1 MiB  n=965
+     356      0.1 MiB  n=104
+       5      0.1 MiB  n=258
+     112      0.1 MiB  n=3
+      32      0.1 MiB  n=169

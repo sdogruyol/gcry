@@ -451,12 +451,27 @@ module GC
     end
     if env_flag_one?("GCRY_PRECISE_FIBERS")
       heap.precise_stack_fibers_exclusive = true
-      # Optional leaf window (bytes). Default 0 = precise-only (parked sysv gregs).
-      # Cap at 16 MiB (typical fiber stack); larger values clamp.
+      # Optional leaf window (bytes). Default 0 = precise + FP-frame fill
+      # (each_parked_fp_frame_range). Cap at 16 MiB; larger values clamp.
       if leaf = env_u64("GCRY_PRECISE_FIBER_LEAF")
         heap.precise_stack_fiber_leaf_bytes = leaf.clamp(0_u64, 16_u64 * 1024 * 1024)
       end
+      # Escape: GCRY_DISABLE_FIBER_FP_FILL=1 → pure maps only (old UAF path).
+      if env_flag_one?("GCRY_DISABLE_FIBER_FP_FILL")
+        heap.precise_stack_fiber_fp_fill = false
+      end
       warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research\n")
+    end
+    # Research: parked map-miss PC ring on /gc-stats (exclusivef gap hunt).
+    if env_flag_one?("GCRY_STACKMAP_MISS_LOG")
+      Gcry::StackMaps.miss_log = true
+    end
+    if near = env_u64("GCRY_STACKMAP_NEAR_DELTA")
+      Gcry::StackMaps.near_delta = near
+    end
+    # Research: first-mark root-source counters + /gc-live-attr size/type summary.
+    if env_flag_one?("GCRY_LIVE_ATTR")
+      heap.live_attr_roots = true
     end
   end
 

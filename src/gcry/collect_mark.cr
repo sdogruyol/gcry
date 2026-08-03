@@ -8,11 +8,16 @@ module Gcry
     # through mark_root_candidate → mark_impl → mark_impl_unlocked; the case
     # only runs on the type_id gate reject path, so the hot path is unchanged.
     private enum RootSource
+      # Running mutator stack (SP→bottom / spill window).
       Stack
       Static
       Thread
       # Heap-to-heap edges — must not FREE-claim (would retain freelists).
       Heap
+      # Compiler stack-map precise roots (mark_precise_root). Attribution only.
+      Precise
+      # Parked fiber stack word-scan (and Crystal GC.push_stack).
+      Parked
     end
 
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
@@ -49,7 +54,7 @@ module Gcry
       raise "mark_precise_root outside of collect" unless @collecting
       return if pointer.null?
       @precise_stack_roots_marked += 1
-      mark_explicit_root(pointer)
+      mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Precise)
     end
 
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
@@ -90,7 +95,8 @@ module Gcry
       # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
       if BlockHeader.free?(header)
         return unless @tlab_enabled && @stop_the_world
-        return unless source == RootSource::Stack || source == RootSource::Thread
+        return unless source == RootSource::Stack || source == RootSource::Thread ||
+                      source == RootSource::Parked
         if base_only && addr != BlockHeader.user_from(header).address
           return
         end
@@ -119,10 +125,11 @@ module Gcry
       if gate_type_id && !type_id_plausible?(header)
         @type_id_root_rejects += 1
         case source
-        when RootSource::Stack  then @type_id_stack_rejects += 1
+        when RootSource::Stack, RootSource::Parked
+          @type_id_stack_rejects += 1
         when RootSource::Static then @type_id_static_rejects += 1
         when RootSource::Thread then @type_id_thread_rejects += 1
-        when RootSource::Heap
+        when RootSource::Heap, RootSource::Precise
           # no dedicated counter
         end
         note_false_root(addr)
@@ -135,7 +142,43 @@ module Gcry
       end
 
       heap_set_mark(header)
+      note_first_mark(header, source) if @live_attr_roots
       @mark_stack.push(header)
+    end
+
+    # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
+    # the root path that *seeded* them; Heap = transitive closure via edges.
+    # *_atomic_bytes: malloc_atomic slabs first reached from that source (acik
+    # 32 KiB String::Builder buffers).
+    private def note_first_mark(header : BlockHeader*, source : RootSource) : Nil
+      bytes = header.value.size.to_u64
+      atomic = BlockHeader.atomic?(header)
+      case source
+      when RootSource::Stack
+        @first_mark_stack_objects += 1
+        @first_mark_stack_bytes += bytes
+        @first_mark_stack_atomic_bytes += bytes if atomic
+      when RootSource::Parked
+        @first_mark_parked_objects += 1
+        @first_mark_parked_bytes += bytes
+        @first_mark_parked_atomic_bytes += bytes if atomic
+      when RootSource::Static
+        @first_mark_static_objects += 1
+        @first_mark_static_bytes += bytes
+        @first_mark_static_atomic_bytes += bytes if atomic
+      when RootSource::Thread
+        @first_mark_thread_objects += 1
+        @first_mark_thread_bytes += bytes
+        @first_mark_thread_atomic_bytes += bytes if atomic
+      when RootSource::Precise
+        @first_mark_precise_objects += 1
+        @first_mark_precise_bytes += bytes
+        @first_mark_precise_atomic_bytes += bytes if atomic
+      when RootSource::Heap
+        @first_mark_heap_objects += 1
+        @first_mark_heap_bytes += bytes
+        @first_mark_heap_atomic_bytes += bytes if atomic
+      end
     end
 
     # Keep allocation alive without scanning its payload (integer / index buffers).

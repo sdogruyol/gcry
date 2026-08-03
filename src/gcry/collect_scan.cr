@@ -7,7 +7,7 @@ module Gcry
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Stack)
+        mark_root_candidate(candidate, source: RootSource::Parked)
       end
     end
 
@@ -332,14 +332,19 @@ module Gcry
           next if fiber.running?
           if @precise_stack_fibers_exclusive
             scan_exclusive_parked_fiber_leaf(top, bottom)
+            # LEAF=0: FP-frame conservative fill (not full stack). Catches
+            # map-missed slots in older frames exclusivef previously UAF'd on.
+            if @precise_stack_fiber_leaf_bytes == 0 && @precise_stack_fiber_fp_fill
+              scan_exclusive_parked_fp_fill(fiber, guard, bottom)
+            end
           else
             Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-              mark_root_candidate(candidate, source: RootSource::Stack)
+              mark_root_candidate(candidate, source: RootSource::Parked)
             end
           end
         else
           Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-            mark_root_candidate(candidate, source: RootSource::Stack)
+            mark_root_candidate(candidate, source: RootSource::Parked)
           end
         end
       end
@@ -352,8 +357,25 @@ module Gcry
       hi = bottom if hi > bottom
       return unless top < hi
       Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(hi), safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Stack)
+        mark_root_candidate(candidate, source: RootSource::Parked)
       end
+    end
+
+    # Word-scan each parked FP-chain frame body. Research safety net for
+    # GCRY_PRECISE_FIBERS=1 + LEAF=0 when stackmaps miss older-frame lives.
+    private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
+      {% if flag?(:x86_64) %}
+        top = fiber.@context.stack_top.address
+        return unless top >= guard && (top &+ 64) <= bottom
+        max_frames = StackMaps::MAX_FP_FRAMES
+        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames) do |lo, hi|
+          @parked_fp_fill_frames += 1
+          @parked_fp_fill_bytes += (hi - lo)
+          Roots.scan_range(Pointer(Void).new(lo), Pointer(Void).new(hi), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Parked)
+          end
+        end
+      {% end %}
     end
 
     private def scan_other_thread_stacks : Nil

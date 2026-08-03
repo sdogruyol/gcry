@@ -114,6 +114,9 @@ describe Gcry::StackMaps do
     # Map at 0x1020; ret a few bytes later (typical after call).
     Gcry::StackMaps.find_index_near(0x1020_u64).should eq(0)
     Gcry::StackMaps.find_index_near(0x1025_u64).should eq(0)
+    # Default near_delta=128 covers arg-push gaps (acik PG ret−map ≈ 74).
+    Gcry::StackMaps.find_index_near(0x1020_u64 + 74).should eq(0)
+    Gcry::StackMaps.near_delta = 32_u64
     Gcry::StackMaps.find_index_near(0x1020_u64 + 33).should eq(-1)
     Gcry::StackMaps.find_index_near(0x9999_u64).should eq(-1)
   ensure
@@ -166,5 +169,35 @@ describe Gcry::StackMaps do
     roots.should eq([0xaaaa_bbbb_cccc_u64])
   ensure
     Gcry::StackMaps.reset_for_testing
+  end
+
+  it "each_parked_fp_frame_range yields [rsp,fp) bodies along the chain" do
+    # Layout (grows down): ... locals | saved_rbp | ret | ...
+    # Two frames: fp1 → fp0 → 0
+    mem = StaticArray(UInt64, 32).new(0_u64)
+    base = mem.to_unsafe.address
+    # Frame 0 (older): fp at base+20*8
+    fp0 = base &+ (20 * 8)
+    Pointer(UInt64).new(fp0).value = 0_u64
+    Pointer(UInt64).new(fp0 &+ 8).value = 0x1000_u64
+    # Frame 1 (leaf): fp at base+12*8, links to fp0; locals at base+8*8 .. fp1
+    fp1 = base &+ (12 * 8)
+    Pointer(UInt64).new(fp1).value = fp0
+    Pointer(UInt64).new(fp1 &+ 8).value = 0x2000_u64
+    # Spill block at base (stack_top): rbp=fp1, ret, … → rsp = top+64
+    top = base
+    Pointer(UInt64).new(top &+ 32).value = fp1 # rbp slot
+    Pointer(UInt64).new(top &+ 56).value = 0x2000_u64
+    lo = base
+    hi = base &+ (32 * 8)
+
+    ranges = [] of {UInt64, UInt64}
+    Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8) do |a, b|
+      ranges << {a, b}
+    end
+    ranges.size.should be >= 1
+    # First range: rsp=top+64 to fp1
+    ranges[0][0].should eq(top &+ 64)
+    ranges[0][1].should eq(fp1)
   end
 end

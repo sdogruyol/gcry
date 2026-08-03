@@ -5,8 +5,17 @@
 #
 #   Gcry.dump_heap(io)           # NDJSON lines
 #   Gcry.dump_heap_addresses     # Set of live user pointers (for diff)
+#   Gcry.live_attr_json          # size-class + top type_id summary (attribution)
 
 module Gcry
+  # Post-collect live-set attribution: aggregate USED blocks by size class and
+  # (plausible) type_id. Research aid for dense-live RSS (acik ~380 MiB) —
+  # does not prove false roots; pairs with first-mark counters when
+  # GCRY_LIVE_ATTR=1. Prefer after dual GC.collect so the live set is stable.
+  def self.live_attr_json(heap : Heap = default_heap, top_n : Int32 = 40) : String
+    Observability.json_live_attr(heap, top_n)
+  end
+
   # Write one NDJSON object per live block to *io*.
   # Returns the number of live objects written.
   # Warning: dumping heaps ≥ ~1 GiB may take > 10s.

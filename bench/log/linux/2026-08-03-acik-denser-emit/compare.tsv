@@ -1,0 +1,4 @@
+label	max_atomic	parked_atomic	heap_atomic	live	records	hits	fp_fill_MiB	fp_frames	rps	status
+exclusive	74.2	5.2	66.3	95.4	305944	53419	0.00	0	77.10	ok
+exclusivef-fpfill	87.2	5.7	78.9	99.9	305944	67923	0.67	3141	102.88	ok
+exclusivef-nofill	?	?	?	?	?	?	?	?	3.79	no-attr

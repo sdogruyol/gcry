@@ -1,0 +1,5 @@
+gcry: GCRY_PRECISE_STACK=2 exclusive — research only; incomplete maps can UAF
+INF 2026-08-03T17:28:52.800Z > Connecting to postgresql://REDACTED:REDACTED@172.24.176.1:5432/acikturkiye_demo
+| event = db_connect
+INF 2026-08-03T17:28:52.828Z > [demo] Açık Türkiye is ready to lead at http://0.0.0.0:3812
+INF 2026-08-03T17:29:00.130Z > Açık Türkiye is going to take a rest!
