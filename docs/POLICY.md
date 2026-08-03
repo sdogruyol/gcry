@@ -50,7 +50,7 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 | Kind | After reclaim |
 |------|----------------|
 | Large | Freelist + trim (`GCRY_LARGE_CACHE`) |
-| Size-class chunks | Empty → **munmap** (default); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes |
+| Size-class chunks | Empty → **munmap** (default); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` / `GCRY_EMPTY_CHUNK_WARM_RETAIN` escapes (warm = research) |
 | Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
 
 ## Incremental / barriers

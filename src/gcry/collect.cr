@@ -60,6 +60,10 @@ module Gcry
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
     # Library default false; process GC enables adaptive release.
     property release_empty_chunks : Bool = false
+    # Bytes of fully-free chunks to keep mapped+warm (no DONTNEED, no munmap)
+    # for reuse. Takes priority over empty_chunk_retain. Opt-in via
+    # GCRY_EMPTY_CHUNK_WARM_RETAIN — thr middle path vs KEEP_CHUNKS.
+    property empty_chunk_warm_retain : UInt64 = 0_u64
     # Bytes of fully-free chunks to keep dormant (DONTNEED) for reuse.
     property empty_chunk_retain : UInt64 = DEFAULT_EMPTY_CHUNK_RETAIN
     # MADV_DONTNEED free pages in partially-live chunks after major (Linux).

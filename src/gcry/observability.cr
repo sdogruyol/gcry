@@ -74,6 +74,7 @@ module Gcry
         sweep_dormant_skips:          heap.sweep_dormant_skips,
         dontneed_bytes:               heap.dontneed_bytes,
         empty_chunk_retain:           heap.empty_chunk_retain,
+        empty_chunk_warm_retain:      heap.empty_chunk_warm_retain,
         layout_precise_scans:         heap.layout_precise_scans,
         layout_conservative_scans:    heap.layout_conservative_scans,
         layout_entries:               Layout.size,

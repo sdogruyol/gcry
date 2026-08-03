@@ -299,6 +299,9 @@ module GC
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
       heap.empty_chunk_retain = retain
     end
+    if warm = env_u64("GCRY_EMPTY_CHUNK_WARM_RETAIN")
+      heap.empty_chunk_warm_retain = warm
+    end
 
     if env_flag_one?("GCRY_DISABLE_MADVISE")
       heap.madvise_free_pages = false

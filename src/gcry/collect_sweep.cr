@@ -33,7 +33,8 @@ module Gcry
         @sweep_dormant_skips = 0_u64
       end
 
-      # Bytes of empty chunks kept dormant this major (within retain budget).
+      # Bytes of empty chunks kept warm / dormant this major (retain budgets).
+      warm_budget_used = 0_u64
       dormant_budget_used = 0_u64
 
       chunk = @chunks
@@ -169,9 +170,12 @@ module Gcry
                   @fully_free_chunk_bytes += mapped
                   ChunkHeader.set_holed(chunk, false)
                   if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                    # Always honor empty_chunk_retain (EC1 munmap excess; Parallel
-                    # dormant bounded). Unbounded Parallel dormant is opt-in via
-                    # parallel_empty_chunk_dormant_all (GCRY_PARALLEL_DORMANT_ALL).
+                    # Priority: warm (mapped) → dormant (DONTNEED) → munmap.
+                    # Warm retain is the thr middle path vs KEEP_CHUNKS (RSS tax
+                    # without page-fault on reuse). Unbounded Parallel dormant
+                    # remains opt-in via parallel_empty_chunk_dormant_all.
+                    within_warm = @empty_chunk_warm_retain > 0 &&
+                                  (warm_budget_used + mapped <= @empty_chunk_warm_retain)
                     within_retain = @empty_chunk_retain > 0 &&
                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
                     can_dormant = within_retain ||
@@ -181,7 +185,14 @@ module Gcry
                     # chunks). Per-empty unlink_freelist_range was O(freelist ×
                     # empties) and dominated phase_sweep under HTTP churn.
                     bit = 1_u64 << class_index
-                    if can_dormant
+                    if within_warm
+                      # Warm: keep pages mapped; freelist dead blocks (defer path
+                      # left them USED after live_objects_sub).
+                      p = SizeClasses.payload(class_index)
+                      bb = BlockHeader::SIZE.to_u64 + p.to_u64
+                      freelist_reserve_fully_dead(chunk, class_index, p, bb)
+                      warm_budget_used += mapped
+                    elsif can_dormant
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).
                       ChunkHeader.set_dormant(chunk, true)
