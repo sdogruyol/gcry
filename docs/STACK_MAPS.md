@@ -165,6 +165,9 @@ product reason to invest.
 15. ~~**idle-drain A/B**~~ **done** (`…/acik-idle-drain/`). ESTAB=0 but
     ~95 MiB @32 KiB + ~1500 `TCPSocket` survive idle dual-GC → **false roots
     pin dead IO buffers** (not live conns / pool sizing).
+16. ~~**TCPSocket first-mark watch**~~ **done** (`…/acik-watch-tcp/`,
+    `GCRY_LIVE_ATTR_WATCH_TID=441`). ~98% **Heap** first-mark (not parked
+    stack seeds). Parent graph retains sockets; parked only seeds ~2 MiB.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

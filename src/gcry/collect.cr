@@ -129,6 +129,9 @@ module Gcry
     # Research: first-mark attribution by root source (GCRY_LIVE_ATTR=1).
     # Stack/Static/Thread/Precise = ambient seeds; Heap = edge closure.
     property live_attr_roots : Bool = false
+    # Optional: first-mark counts for one type_id (GCRY_LIVE_ATTR_WATCH_TID).
+    # acik idle-drain: TCPSocket ≈ 441 in tip exclusive bin.
+    property live_attr_watch_tid : Int32 = 0
     getter first_mark_stack_objects : UInt64 = 0_u64
     getter first_mark_stack_bytes : UInt64 = 0_u64
     getter first_mark_stack_atomic_bytes : UInt64 = 0_u64
@@ -147,6 +150,12 @@ module Gcry
     getter first_mark_heap_objects : UInt64 = 0_u64
     getter first_mark_heap_bytes : UInt64 = 0_u64
     getter first_mark_heap_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_watch_stack : UInt64 = 0_u64
+    getter first_mark_watch_parked : UInt64 = 0_u64
+    getter first_mark_watch_static : UInt64 = 0_u64
+    getter first_mark_watch_thread : UInt64 = 0_u64
+    getter first_mark_watch_precise : UInt64 = 0_u64
+    getter first_mark_watch_heap : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
@@ -1234,6 +1243,12 @@ module Gcry
       @first_mark_heap_objects = 0_u64
       @first_mark_heap_bytes = 0_u64
       @first_mark_heap_atomic_bytes = 0_u64
+      @first_mark_watch_stack = 0_u64
+      @first_mark_watch_parked = 0_u64
+      @first_mark_watch_static = 0_u64
+      @first_mark_watch_thread = 0_u64
+      @first_mark_watch_precise = 0_u64
+      @first_mark_watch_heap = 0_u64
       @type_id_root_rejects = 0_u64
       @type_id_stack_rejects = 0_u64
       @type_id_static_rejects = 0_u64

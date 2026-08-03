@@ -177,6 +177,7 @@ for trial in $(seq 1 "$TRIALS"); do
     _missonly="${GCRY_FIBER_FP_FILL_MISS_ONLY:-}"
     _misslog="${GCRY_STACKMAP_MISS_LOG:-}"
     _neard="${GCRY_STACKMAP_NEAR_DELTA:-}"
+    _watch="${GCRY_LIVE_ATTR_WATCH_TID:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
     precise_env
@@ -186,6 +187,7 @@ for trial in $(seq 1 "$TRIALS"); do
     [[ -n "$_missonly" ]] && export GCRY_FIBER_FP_FILL_MISS_ONLY="$_missonly"
     [[ -n "$_misslog" ]] && export GCRY_STACKMAP_MISS_LOG="$_misslog"
     [[ -n "$_neard" ]] && export GCRY_STACKMAP_NEAR_DELTA="$_neard"
+    [[ -n "$_watch" ]] && export GCRY_LIVE_ATTR_WATCH_TID="$_watch"
     export GCRY_LIVE_ATTR=1
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
     exec "$BIN" >>"$log" 2>&1
@@ -241,11 +243,18 @@ elif at1 <= max(8.0, 0.15*at0) and e1 <= e0:
   print("verdict: A/C-leaning (atomics fell with drain → true live IO / pool)")
 else:
   print("verdict: mixed — inspect top_type_ids + PG pool")
+def watch(a,tag):
+  tid=a.get("live_attr_watch_tid") or 0
+  if not tid: return
+  keys=["stack","parked","static","thread","precise","heap"]
+  parts=[f"{k}={a.get('first_mark_watch_'+k,0)}" for k in keys]
+  print(f"watch_tid={tid} [{tag}]: "+", ".join(parts))
+watch(a0,"post"); watch(a1,"idle")
 print("top typed post→idle (type_id MiB):")
 def tops(a):
   return {t["type_id"]:(t["bytes"],t["count"]) for t in (a.get("top_type_ids") or [])[:8]}
 tpost,tidle=tops(a0),tops(a1)
-for tid in sorted(set(tpost)|set(tidle), key=lambda i: -(tidle.get(i,tpost.get(i,(0,0))[0])):
+for tid in sorted(set(tpost)|set(tidle), key=lambda i: -(tidle.get(i,tpost.get(i,(0,0)))[0])):
   b0,c0=tpost.get(tid,(0,0)); b1,c1=tidle.get(tid,(0,0))
   print(f"  {tid:6d}  {mib(b0):5.1f}→{mib(b1):5.1f} MiB  n={c0}→{c1}")
 PY

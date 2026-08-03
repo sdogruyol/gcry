@@ -149,7 +149,7 @@ module Gcry
     # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
     # the root path that *seeded* them; Heap = transitive closure via edges.
     # *_atomic_bytes: malloc_atomic slabs first reached from that source (acik
-    # 32 KiB String::Builder buffers).
+    # 32 KiB IO buffers). Optional watch type_id → first_mark_watch_*.
     private def note_first_mark(header : BlockHeader*, source : RootSource) : Nil
       bytes = header.value.size.to_u64
       atomic = BlockHeader.atomic?(header)
@@ -178,6 +178,22 @@ module Gcry
         @first_mark_heap_objects += 1
         @first_mark_heap_bytes += bytes
         @first_mark_heap_atomic_bytes += bytes if atomic
+      end
+
+      watch = @live_attr_watch_tid
+      return if watch == 0
+      return if bytes < 4
+      # Payload starts after BlockHeader (same as heap_dump / live_attr_kind).
+      user = Pointer(UInt8).new(header.as(Void*).address + BlockHeader::SIZE)
+      tid = user.as(Int32*).value
+      return unless tid == watch
+      case source
+      when RootSource::Stack   then @first_mark_watch_stack += 1
+      when RootSource::Parked  then @first_mark_watch_parked += 1
+      when RootSource::Static  then @first_mark_watch_static += 1
+      when RootSource::Thread  then @first_mark_watch_thread += 1
+      when RootSource::Precise then @first_mark_watch_precise += 1
+      when RootSource::Heap    then @first_mark_watch_heap += 1
       end
     end
 

@@ -479,6 +479,13 @@ module GC
     if env_flag_one?("GCRY_LIVE_ATTR")
       heap.live_attr_roots = true
     end
+    # Watch one Crystal type_id's first-mark sources (e.g. TCPSocket=441).
+    if wtid = env_u64("GCRY_LIVE_ATTR_WATCH_TID")
+      if wtid > 0 && wtid <= Int32::MAX.to_u64
+        heap.live_attr_watch_tid = wtid.to_i32
+        heap.live_attr_roots = true
+      end
+    end
   end
 
   # stderr warn for knobs that stay wired for research but are not a product path.

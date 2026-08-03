@@ -76,6 +76,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
 | `GCRY_LIVE_ATTR=1` | Research: first-mark root-source counters; pair with `/gc-live-attr` |
+| `GCRY_LIVE_ATTR_WATCH_TID` | Research: first-mark counts for one type_id (`first_mark_watch_*`; implies LIVE_ATTR) |
 | `GCRY_DISABLE_FIBER_FP_FILL=1` | With `PRECISE_FIBERS`: skip FP-frame conservative fill (pure maps; UAF risk) |
 | `GCRY_FIBER_FP_FILL_MISS_ONLY=1` | With `PRECISE_FIBERS`: skip FP-fill on nonempty map hits (research; acik UAF) |
 | `GCRY_STACKMAP_MISS_LOG=1` | Research: parked map-miss PC ring on `/gc-stats` (`stack_maps_top_miss_pcs`) |
