@@ -192,6 +192,9 @@ product reason to invest.
     thr **~90%**, RSS **~1.40×** (t1 SEGV after `/gc-collect`; t2/t3 OK).
     Kemal smoke (`…/kemal-release0-smoke/`): `/json` **~84%** @ **0.76×** — no
     cliff vs ~87%/0.80× headline.
+23. ~~**SEGV bisect**~~ **done** (`…/acik-segv-bisect/`) — **unreproduced**
+    (0/45 under retain=0 + heavy/abrupt collect). One-shot Monitor crash; do
+    **not** revert retain=0 on that alone.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.
