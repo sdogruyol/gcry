@@ -68,7 +68,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
 | `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. Leaf window via `GCRY_PRECISE_FIBER_LEAF` (0=precise-only; max 16 MiB). Parked walk uses **synthetic sysv gregs** + RSP@ret (`top+64`). Smoke OK; **acik exclusivef still flaky SEGV** at LEAF=0. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `GCRY_PRECISE_FIBER_LEAF` (0=precise-only; max 16 MiB). Parked walk: sysv gregs + RSP@ret; **skips FP walk if RBP not on-stack** (makecontext). Smoke OK; **acik exclusivef UAF** (maps miss older-frame slots). |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -150,9 +150,11 @@ product reason to invest.
 9. ~~exclusive runtime safety~~ **partial** — parked-fiber precise walk + spill
    window; invoke-out stackmaps; `=2` survives acik with full parked word-scan.
 10. ~~denser emit~~ **done** — `PER_FUN=0`; Proc/union allocas; multi-word locs.
-11. ~~parked sysv gregs~~ **done** — `fill_parked_sysv_gregs` / `each_root_parked_sysv`
-    (RSP@ret=`top+64`). `=2` acik med-of-3 ~**7.8×** vs base ~**8.6×** (thr ~93%).
-    `exclusivef` LEAF=0 still flaky SEGV on acik.
+11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
+    gate (makecontext); Direct/Indirect refuse off-stack loads.
+12. ~~exclusivef stabilize~~ **blocked** — LEAF=0 still UAF on acik (maps hit
+    some frames, miss older-frame slots). Keep `=2` + full parked word-scan
+    (~7.8×). Next: non-stack retention, or denser maps at all call sites.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

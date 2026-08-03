@@ -473,6 +473,10 @@ module Gcry
 
     # Precise roots for a parked x86_64-sysv fiber: spill-slot marks, leaf
     # stackmap at swapcontext ret (with synthetic gregs), then FP walk.
+    #
+    # Never-started fibers (makecontext only) leave r15…rbp slots uninitialized;
+    # a garbage RBP must not drive Direct/Indirect loads (SEGV in collect).
+    # Those fibers only get spill-slot yields (Fiber* at +48 is the important one).
     def self.each_root_parked_sysv(stack_top : UInt64,
                                    stack_lo : UInt64, stack_hi : UInt64,
                                    max_frames : Int32 = MAX_FP_FRAMES,
@@ -497,6 +501,11 @@ module Gcry
       rbp = gregs[10]
       rsp = gregs[15]
       rip = gregs[16]
+
+      # swapcontext saves a real frame pointer on-stack; makecontext does not.
+      return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
+      return unless rsp >= stack_lo && rsp <= stack_hi
+
       each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_SYSV_NGREGS,
                      stack_lo, stack_hi) do |root|
         yield root
@@ -505,6 +514,11 @@ module Gcry
                         gregs.to_unsafe, PARKED_SYSV_NGREGS) do |root|
         yield root
       end
+    end
+
+    private def self.frame_pointer_on_stack?(fp : UInt64, stack_lo : UInt64, stack_hi : UInt64) : Bool
+      return false if fp == 0 || (fp & 7) != 0
+      fp >= stack_lo && (fp &+ 16) <= stack_hi
     end
 
     # DWARF reg → value. Uses *rsp*/*rbp* overrides; GP via glibc gregs map.
@@ -542,11 +556,15 @@ module Gcry
         # the heap root is the word stored there.
         base = reg_value(loc.reg, rsp, rbp, gregs, ngregs)
         return nil unless base
-        load_word(add_offset(base, loc.offset))
+        addr = add_offset(base, loc.offset)
+        return nil unless stack_addr_readable?(addr, stack_lo, stack_hi)
+        load_word(addr)
       when LOC_INDIRECT
         base = reg_value(loc.reg, rsp, rbp, gregs, ngregs)
         return nil unless base
-        load_word(add_offset(base, loc.offset))
+        addr = add_offset(base, loc.offset)
+        return nil unless stack_addr_readable?(addr, stack_lo, stack_hi)
+        load_word(addr)
       when LOC_CONSTANT
         return nil if loc.offset == 0
         Pointer(Void).new(add_offset(0_u64, loc.offset))
@@ -562,6 +580,13 @@ module Gcry
 
     private def self.add_offset(base : UInt64, offset : Int32) : UInt64
       (base.to_i64 + offset.to_i64).to_u64!
+    end
+
+    # When stack bounds are known, refuse Direct/Indirect loads off-stack
+    # (garbage RBP/RSP from makecontext must not SEGV the collector).
+    private def self.stack_addr_readable?(addr : UInt64, stack_lo : UInt64, stack_hi : UInt64) : Bool
+      return true unless stack_lo < stack_hi
+      (addr & 7) == 0 && addr >= stack_lo && (addr &+ 8) <= stack_hi
     end
 
     # --- ELF section read (Linux) ------------------------------------------------

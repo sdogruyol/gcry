@@ -147,7 +147,8 @@ module Gcry
     end
 
     # Precise roots for a parked fiber (x86_64-sysv swapcontext layout).
-    # Uses synthetic gregs from spill slots + caller RSP at ret (top+64).
+    # Uses synthetic gregs + RSP@ret; skips FP walk when RBP not on-stack
+    # (makecontext / never-started fibers).
     private def scan_precise_parked_fiber(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
       return unless @precise_stack_roots
       return unless StackMaps.loaded? || StackMaps.ensure_loaded
@@ -323,10 +324,10 @@ module Gcry
         end
 
         # Word scan:
-        # - Hybrid: always (parked + stw_multi running).
-        # - Exclusive default: full parked top→bottom (acik safety).
-        # - Exclusive + fibers_exclusive: shallow leaf window only (maps still
-        #   miss some park/exception slots; full scan defeated the RSS cut).
+        # - Hybrid: always.
+        # - Exclusive default: full parked top→bottom.
+        # - Exclusive + fibers_exclusive: LEAF window only (0 = pure precise;
+        #   acik still UAF — maps miss older-frame slots). Research.
         if @precise_stack_exclusive
           next if fiber.running?
           if @precise_stack_fibers_exclusive

@@ -144,4 +144,27 @@ describe Gcry::StackMaps do
     gregs[16].should eq(0xdead_u64)
     gregs[15].should eq(top &+ 64) # caller RSP
   end
+
+  it "each_root_parked_sysv skips FP walk when RBP is not on-stack (makecontext)" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+
+    # 8 spill words + padding so top+64 is in-range; RBP slot left 0.
+    buf = StaticArray(UInt64, 16).new(0_u64)
+    buf[6] = 0xaaaa_bbbb_cccc_u64 # rdi / Fiber*
+    buf[7] = 0x1020_u64           # rip near a map PC (would match if walked)
+    top = buf.to_unsafe.address
+    lo = top
+    hi = top &+ (16 * 8)
+
+    roots = [] of UInt64
+    Gcry::StackMaps.each_root_parked_sysv(top, lo, hi, 8) do |p|
+      roots << p.address
+    end
+    # Spill yields (7 regs) only — no near/fp when RBP=0. Ret at +56 is not
+    # a spill-slot yield; map Indirect[RBP-8] must not appear.
+    roots.should eq([0xaaaa_bbbb_cccc_u64])
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
 end
