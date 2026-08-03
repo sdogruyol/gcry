@@ -76,7 +76,21 @@ Same host, med-of-3 `wrk -c100 -d30`, non2xx=0. Session:
 | tipec (tip + EC + gcry) | ~102% | **~8.46×** |
 
 tip+EC ≈ system gcry — not a tip regressor. Gap vs i3 tip headline ~3.43× is
-host/demo-data/tree, not the tip compiler.
+host/demo-data/tree, not the tip compiler. **Superseded on this host** by the
+finalizer-registry fix below (~8.5× was dead `TCPSocket`/`Digest` retention).
+
+### Post-finalizer gate (9950X, 2026-08-03)
+
+Same host/method, tip+EC `base` (no stackmaps) vs Boehm after LibC finalizer
+registry + Boehm resurrect (`3a0bffe`). Session:
+`bench/log/linux/2026-08-03-acik-finalizer-gate-med3/`.
+
+| | thr % Boehm | post-GC RSS × |
+|--|------------:|--------------:|
+| tip+EC gcry (`base`) | **~91.5%** | **~1.81×** |
+
+Was ~8.5× on the same host pre-fix. RSS lever was finalizer correctness, not
+exclusivef / layouts / pool caps.
 
 ### Non-stack knobs (9950X, 2026-08-03)
 
@@ -95,7 +109,8 @@ not reclaim.
 | STW pauses ≪ wall | Thr gaps were mostly mutator / retention / VMA — fixed those first |
 | Empty-chunk release | Kemal RSS ≈ Boehm (0.9 era); acikturkiye chunks are **dense live** (~noop for RSS) |
 | Layout / type_id / SP clamp | Correct; ~no RSS move on this app |
-| Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16); acikturkiye tip **~3.43×** (was ~2.54× at v0.15) — scrub helps Kemal, not fat-app live set. Not a substitute for stack maps |
+| Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16); acik tip was ~3.43×/~~8.5×~~ until finalizer registry fix → **~1.81×** (9950X). Scrub ≠ substitute for correct finalizers / stack maps |
+| Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect closed most of the Boehm gap |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 
@@ -106,6 +121,6 @@ not reclaim.
 - Linux **HOLED** `GCRY_PAGE_DONTNEED` as process default — thr and RSS both worse (HOLED freelist rebuild blows sweep; free-only pages abandoned → chunk churn). Stay opt-in.
 - Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
 - Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
-- Expecting another shard filter to hit ≤1.5× Boehm RSS
+- Expecting stack-maps alone to hit ≤1.5× Boehm RSS (finalizer fix did the heavy lift; residual ~1.81× is mapped/chunks + remaining false roots)
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).

@@ -1,0 +1,7 @@
+variant	trial	rps	rss_kib	marked	records	non2xx
+boehm	1	137.89	44840	0	0	0
+base	1	130.93	101212	0	0	0
+boehm	2	144.21	55916	0	0	0
+base	2	123.81	60712	0	0	0
+boehm	3	134.86	56276	0	0	0
+base	3	126.17	101064	0	0	0

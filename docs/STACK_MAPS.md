@@ -3,8 +3,10 @@
 **Status:** spike **GO** — parser + hybrid walker landed (default off).
 Not a release feature. Product version stays **v0.17.0**.
 
-**Gate metric:** acikturkiye post-GC RSS × Boehm (Linux tip ~**3.43×**, thr
-~**90%**). Kemal thr is **not** the success bar.
+**Gate metric:** acikturkiye post-GC RSS × Boehm. Same-host tip+EC after
+finalizer fix (`…/acik-finalizer-gate-med3/`): ~**1.81×** RSS, thr ~**92%**.
+Older i3 cut ~**3.43×** / thr ~**90%** (pre-fix tree). Kemal thr is **not**
+the success bar.
 
 Hub parent: [ROADMAP.md](../ROADMAP.md) Phase 2 · [DESIGN.md](../DESIGN.md)
 Frontier · thr residual [FINDINGS](../bench/log/linux/2026-08-02-018-FINDINGS.md).
@@ -176,6 +178,9 @@ product reason to invest.
     registry + MT quiesce + Boehm resurrect-before-sweep. Gate sample: post-GC
     live **~15.7 MiB** / max atomic **~4.7 MiB** (was ~80–100 MiB atomics),
     wrk -c100 **SURVIVED**. RSS lever is finalizer correctness, not exclusivef.
+19. ~~**post-fix Boehm med3**~~ **done** (`…/acik-finalizer-gate-med3/`).
+    tip+EC `base` vs Boehm: thr **~91.5%**, RSS **~1.81×** (was ~8.5× on this
+    host pre-fix). `acik_stackmap_ab.sh` gains `ACIK_BIN_DIR` + dual collect.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

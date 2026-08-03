@@ -38,16 +38,25 @@ mkdir -p "$OUT" "$AT/bin"
 set -a; source "$AT/.env.demo"; set +a
 AUTH=(-H "X-API-KEY: ${API_KEY}" -H "X-API-SECRET: ${API_SECRET}")
 
+# Prefer AT/bin; if root-owned/unwritable, fall back to gcry/.tmp/acik-bin.
+BIN_DIR="${ACIK_BIN_DIR:-$AT/bin}"
+if [[ ! -w "$BIN_DIR" ]]; then
+  BIN_DIR="$ROOT/.tmp/acik-bin"
+  mkdir -p "$BIN_DIR"
+  echo "  note: AT/bin not writable → BIN_DIR=$BIN_DIR"
+fi
+
 EC_FLAGS=(-Dpreview_mt -Dexecution_context)
 TIP_FLAGS=(--release "${EC_FLAGS[@]}")
 
 echo "OUT=$OUT"
 echo "probe=$CUS"
+echo "bin_dir=$BIN_DIR"
 echo "variants=$VARIANTS trials=$TRIALS duration=${DURATION}s"
 
 build_one() {
   local name="$1"; shift
-  local outbin="$AT/bin/acikturkiye-$name"
+  local outbin="$BIN_DIR/acikturkiye-$name"
   echo -n "  build $name ... "
   (
     cd "$AT"
@@ -65,25 +74,25 @@ build_one() {
 
 echo "=== Build ==="
 if [[ "$SKIP_BUILD" == "1" ]]; then
-  echo "  SKIP_BUILD=1 — using existing $AT/bin/acikturkiye-*"
+  echo "  SKIP_BUILD=1 — using existing $BIN_DIR/acikturkiye-*"
 else
   for v in $VARIANTS; do
     case "$v" in
       boehm)
         [[ "$SKIP_BOEHM" == "1" ]] && continue
-        rm -f "$AT/bin/acikturkiye-boehm"
+        rm -f "$BIN_DIR/acikturkiye-boehm"
         build_one boehm "$SYS_CRYSTAL" build --release
         ;;
       sys)
-        rm -f "$AT/bin/acikturkiye-sys"
+        rm -f "$BIN_DIR/acikturkiye-sys"
         build_one sys "$SYS_CRYSTAL" build -Dgc_none --release
         ;;
       base|tipec)
-        rm -f "$AT/bin/acikturkiye-$v"
+        rm -f "$BIN_DIR/acikturkiye-$v"
         build_one "$v" "$CUS" build -Dgc_none "${TIP_FLAGS[@]}"
         ;;
       hybrid|exclusive|exclusivef)
-        rm -f "$AT/bin/acikturkiye-$v"
+        rm -f "$BIN_DIR/acikturkiye-$v"
         # Frame pointers required for exclusive FP walk under --release.
         # PER_FUN=0 ⇒ unlimited maps (exclusivef needs park/exception coverage).
         per_fun="${CRYSTAL_STACKMAP_PER_FUN:-0}"
@@ -126,13 +135,15 @@ printf "variant\ttrial\trps\trss_kib\tmarked\trecords\tnon2xx\n" >"$TSV"
 
 run_one() {
   local variant="$1" trial="$2"
-  local bin="$AT/bin/acikturkiye-$variant"
+  local bin="$BIN_DIR/acikturkiye-$variant"
+  [[ -x "$bin" ]] || bin="$AT/bin/acikturkiye-$variant"
   local port=$((PORT_BASE + trial * 10 + ${#variant}))
   local base="http://127.0.0.1:${port}"
   local log="$OUT/run-${variant}-t${trial}.log"
   local wrklog="$OUT/wrk-${variant}-t${trial}.txt"
 
   echo -n "  $variant trial=$trial ... "
+  [[ -x "$bin" ]] || { echo "FAIL missing $bin"; printf "%s\t%d\t0\t0\t0\t0\t-1\n" "$variant" "$trial" >>"$TSV"; return 0; }
   clean_port "$port"
 
   (
@@ -182,6 +193,9 @@ run_one() {
 
   curl -sf -o /dev/null "${base}/gc-collect" || true
   sleep 0.5
+  # Dual collect: finalizer resurrect needs a second pass to drop dead sockets.
+  curl -sf -o /dev/null "${base}/gc-collect" || true
+  sleep 0.3
   local stats="$OUT/gcstats-${variant}-t${trial}.json"
   curl -sf "${base}/gc-stats" >"$stats" 2>/dev/null || true
 
