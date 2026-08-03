@@ -71,10 +71,10 @@ Flag alone does **not** change collect (no walker yet). Spec covers
 | Item | Result |
 |------|--------|
 | Checkout | `/home/uzumaki/playground/crystal` branch `gcry-stackmap-probe` |
-| Gate | `CRYSTAL_EMIT_STACKMAP=1` → empty stackmap after each Crystal call |
-| LLVM IR | **Yes** — `call void (i64, i32, ...) @llvm.experimental.stackmap(...)` (~9.6k sites in hello) |
+| Gate | `CRYSTAL_EMIT_STACKMAP=1` → stackmap after each Crystal call |
+| LLVM IR | **Yes** — empty then **with lives** (`ptr %sm.s`, …); ~7.5k/9.7k sites carry ≥1 live in a small String program |
 | Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
-| Final link | **Fixed** — default PIE rejects absolute stackmap relocs; probe auto-adds **`-no-pie`** when the env gate is set. Runnable binary has live `.llvm_stackmaps`. |
+| Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Next: live value lists + runtime parse —
@@ -116,9 +116,9 @@ product reason to invest.
 
 ### Next-phase checklist
 
-1. ~~Crystal: PIC / link so `CRYSTAL_EMIT_STACKMAP=1` is runnable~~ **done** (`-no-pie` auto)
-2. Crystal: pass **live GC pointers** into stackmap (filter
-   `context.vars` / temps with `has_inner_pointers?`) — not empty lives.
+1. ~~Crystal: link so `CRYSTAL_EMIT_STACKMAP=1` is runnable~~ **done** (`-no-pie` auto)
+2. ~~Crystal: pass **live GC pointers** into stackmap~~ **done** (MVP:
+   `Pointer` + ref-like `has_inner_pointers?`; skip Proc/union-by-value; cap 32)
 3. Runtime: parse `.llvm_stackmaps` (LLVM stackmap format) → PC → locations.
 4. gcry: when `precise_stack_roots`, walk frames at STW and call
    `mark_precise_root`; keep conservative fallback behind a knob.
