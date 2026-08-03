@@ -107,4 +107,16 @@ describe Gcry::StackMaps do
   ensure
     Gcry::StackMaps.reset_for_testing
   end
+
+  it "find_index_near matches return addresses past the map PC" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+    # Map at 0x1020; ret a few bytes later (typical after call).
+    Gcry::StackMaps.find_index_near(0x1020_u64).should eq(0)
+    Gcry::StackMaps.find_index_near(0x1025_u64).should eq(0)
+    Gcry::StackMaps.find_index_near(0x1020_u64 + 33).should eq(-1)
+    Gcry::StackMaps.find_index_near(0x9999_u64).should eq(-1)
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
 end

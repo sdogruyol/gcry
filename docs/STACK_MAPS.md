@@ -83,8 +83,9 @@ Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 | LLVM IR | **Yes** — empty then **with lives** (`ptr %sm.s`, …); ~7.5k/9.7k sites carry ≥1 live in a small String program |
 | Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
 | Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
-| Process GC | **`crystal build -Dgc_none`** with tip probe works. Parallel EC on tip needs `-Dpreview_mt -Dexecution_context` (1.21.0 release has EC by default). |
-| Walker smoke | `make stackmap-smoke` — hybrid + exclusive: `records=517`, `marked=3`, exit 0 (9950X, tip probe). |
+| Process GC | Tip probe: **`-Dgc_none -Dpreview_mt -Dexecution_context`** (no EC flags ⇒ soak livelock). 1.21.0 release has EC by default. |
+| Emit density | Skip empty/External; `CRYSTAL_STACKMAP_PER_FUN` default **2**. |
+| Walker smoke | `make stackmap-smoke` — exclusive `marked=3`; hybrid loads maps (leaf-cheap). |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
@@ -96,7 +97,9 @@ exclusive (drop conservative) + acik RSS proof are next.
 |------|------------|
 | Missing live slot → UAF | Conservative fallback until maps proven; fuzz + soak |
 | Map density / thr | Call-site filter; measure acik + Kemal |
-| Walker cost | Full soak with maps hung (~minutes for 10s) — FP walk × PC±16 per frame; tune before soft-soak/acik |
+| Walker cost | Mitigated: `find_near`, pc range reject, FP cap 128; hybrid leaf-only. |
+| Tip without EC | Livelock in soak — always `-Dpreview_mt -Dexecution_context`. |
+| Exclusive soak | Completes but can fail RSS≤10% gate (sparse maps / missed roots). Hybrid PASS. |
 | Fiber parked stacks | Cover `@context.stack_top` frames |
 | Non-PIC stackmap relocs | Emit PIC objects or adjust stackmap reloc model |
 | Register-only lives | Emit prefers alloca; runtime deref when reg∈stack |
@@ -137,7 +140,7 @@ product reason to invest.
    `mark_precise_root`; conservative scan still always on.
 5. ~~Exclusive knob~~ **done** (`GCRY_PRECISE_STACK=2`) — research only;
    parked-fiber precise coverage + Proc/union-by-value lives still open.
-6. **Walker cost** — make FP/PC lookup cheap enough for soak/Kemal (before acik).
+6. ~~**Walker cost**~~ **done** (near lookup + hybrid leaf-only) — re-check soak/Kemal.
 7. Measure acikturkiye RSS A/B; only then discuss defaults / upstream PR.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;

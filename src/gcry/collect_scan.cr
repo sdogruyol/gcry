@@ -80,11 +80,14 @@ module Gcry
       scan_precise_mutator_stack(bottom)
     end
 
-    # Additive precise roots from `.llvm_stackmaps` (hybrid — conservative scan
-    # above still runs). No-op unless precise_stack_roots + maps loaded.
+    # Precise roots from `.llvm_stackmaps`. Hybrid (=1): leaf RIP near-lookup
+    # only (cheap; conservative covers callers). Exclusive (=2): full FP walk.
     private def scan_precise_mutator_stack(bottom : Void*) : Nil
       return unless @precise_stack_roots
       return unless StackMaps.ensure_loaded
+      # Hybrid: skip mutator FP walk — conservative scan already covered the
+      # stack; full walks dominated soak pause. Exclusive needs the walk.
+      return unless @precise_stack_exclusive
 
       {% if flag?(:x86_64) %}
         rsp = Roots.hardware_stack_pointer.address
@@ -111,17 +114,10 @@ module Gcry
           rip = gregs[16]
           lo = stack_lo
           hi = stack_hi
-          StackMaps.each_root_at(rip, rsp, rbp, gregs, n, lo, hi) do |ptr|
+          StackMaps.each_root_near(rip, rsp, rbp, gregs, n, lo, hi) do |ptr|
             mark_precise_root(ptr)
           end
-          # Return address may sit a few bytes past the stackmap PC.
-          15.times do |d|
-            p = rip > d + 1 ? rip - (d + 1) : rip
-            StackMaps.each_root_at(p, rsp, rbp, gregs, n, lo, hi) do |ptr|
-              mark_precise_root(ptr)
-            end
-          end
-          if lo < hi
+          if @precise_stack_exclusive && lo < hi
             StackMaps.each_root_fp_walk(rsp, rbp, lo, hi) do |ptr|
               mark_precise_root(ptr)
             end

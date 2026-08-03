@@ -42,7 +42,9 @@ roots = Gcry::StackMaps.roots_yielded
 marked = Gcry.default_heap.precise_stack_roots_marked
 exclusive = Gcry.default_heap.precise_stack_exclusive
 
-puts "keep=#{keep.bytesize}b loaded=#{loaded} records=#{records} hits=#{hits} roots_yielded=#{roots} marked=#{marked} exclusive=#{exclusive}"
+lookups = Gcry::StackMaps.lookups
+near_hits = Gcry::StackMaps.near_hits
+puts "keep=#{keep.bytesize}b loaded=#{loaded} records=#{records} hits=#{hits} near_hits=#{near_hits} lookups=#{lookups} roots_yielded=#{roots} marked=#{marked} exclusive=#{exclusive}"
 
 unless loaded && records > 0
   STDERR.puts "FAIL: expected .llvm_stackmaps in this binary (build with CRYSTAL_EMIT_STACKMAP=1)"
@@ -54,8 +56,15 @@ unless ENV["GCRY_PRECISE_STACK"]?.in?("1", "2")
   exit 1
 end
 
-if marked == 0 && roots == 0
-  STDERR.puts "FAIL: walker produced no precise roots (try --frame-pointers=always)"
+# Hybrid (=1) is leaf-cheap and may mark 0 on single-threaded churn (no STW
+# other-thread RIP). Exclusive (=2) must produce precise roots via FP walk.
+if exclusive
+  if marked == 0 && roots == 0
+    STDERR.puts "FAIL: exclusive walker produced no precise roots (try --frame-pointers=always)"
+    exit 1
+  end
+elsif !loaded
+  STDERR.puts "FAIL: maps not loaded"
   exit 1
 end
 

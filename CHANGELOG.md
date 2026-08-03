@@ -61,7 +61,8 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   on). Crystal probe `gcry-stackmap-probe`: live locals (alloca preferred),
   auto `-no-pie`. EC root pins gate on `Thread` ivar presence (tip Crystal
   vs 1.21.0 release both build `-Dgc_none`). `GCRY_PRECISE_STACK=2`
-  exclusive research knob; `make stackmap-smoke`.
+  exclusive research knob; `make stackmap-smoke`. Walker: `find_near` +
+  hybrid leaf-only; tip builds need `-Dpreview_mt -Dexecution_context`.
 - **`GCRY_EMPTY_CHUNK_WARM_RETAIN`:** opt-in bytes of fully-free chunks kept
   mapped (no DONTNEED) before dormant/munmap — research middle path vs
   `KEEP_CHUNKS`. Measured on 9950X; **not** a process default (no

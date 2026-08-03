@@ -36,9 +36,17 @@ module Gcry
     @@locs = Pointer(Loc).null
     @@constants = Pointer(UInt64).null
     @@nconstants = 0
+    @@pc_min = 0_u64
+    @@pc_max = 0_u64
+    # Return address may sit a few bytes past the stackmap PC (call size).
+    NEAR_DELTA = 32_u64
+    # Cap FP chain length — deep / corrupt chains dominated soak pause.
+    MAX_FP_FRAMES = 128
     # Lookups that found a record / roots yielded (observability).
     @@hits = 0_u64
     @@roots_yielded = 0_u64
+    @@lookups = 0_u64
+    @@near_hits = 0_u64
 
     def self.loaded? : Bool
       @@loaded
@@ -58,6 +66,14 @@ module Gcry
 
     def self.roots_yielded : UInt64
       @@roots_yielded
+    end
+
+    def self.lookups : UInt64
+      @@lookups
+    end
+
+    def self.near_hits : UInt64
+      @@near_hits
     end
 
     # Parse *data* (full `.llvm_stackmaps` bytes). Replaces any prior table.
@@ -188,9 +204,18 @@ module Gcry
         @@nlocs = total_locs
         @@constants = constants
         @@nconstants = num_const.to_i32
+        if @@nrecords > 0
+          @@pc_min = pcs[0]
+          @@pc_max = pcs[@@nrecords - 1]
+        else
+          @@pc_min = 0_u64
+          @@pc_max = 0_u64
+        end
         @@loaded = true
         @@hits = 0_u64
         @@roots_yielded = 0_u64
+        @@lookups = 0_u64
+        @@near_hits = 0_u64
         true
       ensure
         LibC.free(fn_addrs.as(Void*)) unless fn_addrs.null?
@@ -221,8 +246,12 @@ module Gcry
       free_table
       @@loaded = false
       @@load_attempted = false
+      @@pc_min = 0_u64
+      @@pc_max = 0_u64
       @@hits = 0_u64
       @@roots_yielded = 0_u64
+      @@lookups = 0_u64
+      @@near_hits = 0_u64
     end
 
     # Binary search for an exact PC record.
@@ -244,11 +273,51 @@ module Gcry
       -1
     end
 
+    # Largest stackmap PC with `pc - map_pc <= NEAR_DELTA` (one binary search).
+    # Matches return addresses that sit a few bytes past the stackmap point.
+    def self.find_index_near(pc : UInt64) : Int32
+      return -1 unless @@loaded && @@nrecords > 0
+      return -1 if pc < @@pc_min || pc > @@pc_max &+ NEAR_DELTA
+      @@lookups += 1
+
+      # upper_bound: first index with pcs[i] > pc
+      lo = 0
+      hi = @@nrecords
+      while lo < hi
+        mid = lo + (hi - lo) // 2
+        if @@pcs[mid] <= pc
+          lo = mid + 1
+        else
+          hi = mid
+        end
+      end
+      return -1 if lo == 0
+      idx = lo - 1
+      map_pc = @@pcs[idx]
+      return -1 if pc < map_pc || (pc - map_pc) > NEAR_DELTA
+      @@near_hits += 1
+      idx
+    end
+
     # Yield each location at *pc* (exact). Returns true if a record exists.
     def self.each_location_at(pc : UInt64, & : Loc ->) : Bool
       idx = find_index(pc)
       return false if idx < 0
       @@hits += 1
+      yield_locs(idx) { |loc| yield loc }
+      true
+    end
+
+    # Yield locations for the stackmap nearest at-or-below *pc* within NEAR_DELTA.
+    def self.each_location_near(pc : UInt64, & : Loc ->) : Bool
+      idx = find_index_near(pc)
+      return false if idx < 0
+      @@hits += 1
+      yield_locs(idx) { |loc| yield loc }
+      true
+    end
+
+    private def self.yield_locs(idx : Int32, & : Loc ->) : Nil
       base = @@loc_off[idx]
       n = @@loc_n[idx]
       i = 0
@@ -256,7 +325,6 @@ module Gcry
         yield @@locs[base + i]
         i += 1
       end
-      true
     end
 
     # Resolve locations at *pc* to pointer-sized roots.
@@ -280,6 +348,22 @@ module Gcry
       found
     end
 
+    # Like each_root_at but accepts return addresses a few bytes past the map PC.
+    def self.each_root_near(pc : UInt64, rsp : UInt64, rbp : UInt64,
+                            gregs : Pointer(UInt64), ngregs : Int32,
+                            stack_lo : UInt64 = 0_u64, stack_hi : UInt64 = 0_u64,
+                            & : Void* ->) : Bool
+      found = false
+      each_location_near(pc) do |loc|
+        found = true
+        if ptr = resolve_loc(loc, rsp, rbp, gregs, ngregs, stack_lo, stack_hi)
+          @@roots_yielded += 1
+          yield ptr
+        end
+      end
+      found
+    end
+
     # Walk x86_64 frame-pointer chain; resolve locations with RBP=fp.
     # Register GP locations need gregs (nil here) — only RBP/RSP-relative and
     # stack-slot Register values are useful. *stack_lo*/*stack_hi* bound the
@@ -294,14 +378,10 @@ module Gcry
 
       fp = rbp
       guard = 0
-      while fp >= stack_lo && fp + 16 <= stack_hi && guard < 4096
+      while fp >= stack_lo && fp + 16 <= stack_hi && guard < MAX_FP_FRAMES
         ret = Pointer(UInt64).new(fp + 8).value
-        # Stackmap sits at/just after the call; try ret and ret-1..ret-15.
-        16.times do |delta|
-          p = ret >= delta ? ret - delta : ret
-          if each_root_at(p, fp &+ 16, fp, Pointer(UInt64).null, 0, stack_lo, stack_hi) { |root| yield root }
-            break
-          end
+        each_root_near(ret, fp &+ 16, fp, Pointer(UInt64).null, 0, stack_lo, stack_hi) do |root|
+          yield root
         end
         next_fp = Pointer(UInt64).new(fp).value
         break if next_fp <= fp

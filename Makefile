@@ -139,8 +139,10 @@ soft-soak-ec4-smoke:
 	SOFT_SOAK_N=$${SOFT_SOAK_N:-5} SOFT_SOAK_DURATION=$${SOFT_SOAK_DURATION:-8} ./bench/soft_soak_ec4.sh
 
 # Compiler stack-map walker smoke (needs CRYSTAL with CRYSTAL_EMIT_STACKMAP support).
+# Tip Crystal requires -Dpreview_mt -Dexecution_context (else Scheduler path livelocks soak).
 stackmap-smoke: $(BIN)
-	CRYSTAL_EMIT_STACKMAP=1 $(CRYSTAL) build -Dgc_none --no-debug --frame-pointers=always \
+	CRYSTAL_EMIT_STACKMAP=1 $(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+		--no-debug --frame-pointers=always \
 		-o $(BIN)/stackmap_walker_smoke bench/stackmap_walker_smoke.cr
 	GCRY_PRECISE_STACK=1 $(BIN)/stackmap_walker_smoke
 	GCRY_PRECISE_STACK=2 $(BIN)/stackmap_walker_smoke
