@@ -71,8 +71,12 @@ describe "Gcry::Heap finalizers" do
       heap.add_finalizer(obj) { |ptr| finalized << ptr }
 
       heap.collect(scan_stack: false)
-      heap.live?(obj).should be_false
+      # Boehm: object resurrected through the finalizer collect so #finalize
+      # sees valid memory; reclaimed on the following collect if still dead.
       finalized.should eq([obj])
+      heap.live?(obj).should be_true
+      heap.collect(scan_stack: false)
+      heap.live?(obj).should be_false
     ensure
       heap.destroy
     end

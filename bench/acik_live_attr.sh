@@ -178,6 +178,7 @@ for trial in $(seq 1 "$TRIALS"); do
     _misslog="${GCRY_STACKMAP_MISS_LOG:-}"
     _neard="${GCRY_STACKMAP_NEAR_DELTA:-}"
     _watch="${GCRY_LIVE_ATTR_WATCH_TID:-}"
+    _thresh="${GCRY_THRESHOLD:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
     precise_env
@@ -188,6 +189,7 @@ for trial in $(seq 1 "$TRIALS"); do
     [[ -n "$_misslog" ]] && export GCRY_STACKMAP_MISS_LOG="$_misslog"
     [[ -n "$_neard" ]] && export GCRY_STACKMAP_NEAR_DELTA="$_neard"
     [[ -n "$_watch" ]] && export GCRY_LIVE_ATTR_WATCH_TID="$_watch"
+    [[ -n "$_thresh" ]] && export GCRY_THRESHOLD="$_thresh"
     export GCRY_LIVE_ATTR=1
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
     exec "$BIN" >>"$log" 2>&1

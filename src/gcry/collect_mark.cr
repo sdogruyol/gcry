@@ -658,16 +658,15 @@ module Gcry
     end
 
     # After mark, before sweep. Allocation-free (no Crystal Proc/closure).
+    # World stopped; registry quiesced at stop_world (no concurrent mutate).
+    #
+    # Boehm rule: enqueue finalizers for unmarked objects, then *resurrect*
+    # them (mark + rematerialize) so sweep does not reclaim before
+    # run_pending. Otherwise Socket/Digest#finalize runs on freed memory
+    # (acik wrk SEGV). Weak links clear while still unmarked. Next collect
+    # reclaims if nothing else holds the object.
     private def enqueue_unreachable_finalizers : Nil
-      i = 0
-      while i < @finalizers.entry_count
-        if unmarked_live_object?(@finalizers.entry_object_at(i))
-          @finalizers.queue_and_remove_entry_at(i)
-        else
-          i += 1
-        end
-      end
-
+      # Disappearing links first — targets still look dead for WeakRef.
       i = 0
       while i < @finalizers.link_count
         if unmarked_live_object?(@finalizers.link_object_at(i))
@@ -676,6 +675,19 @@ module Gcry
           i += 1
         end
       end
+
+      i = 0
+      while i < @finalizers.entry_count
+        obj = @finalizers.entry_object_at(i)
+        if unmarked_live_object?(obj)
+          @finalizers.queue_and_remove_entry_at(i)
+          mark_candidate(obj) unless obj.null?
+        else
+          i += 1
+        end
+      end
+
+      mark_loop unless @mark_stack.empty?
     end
 
     private def unmarked_live_object?(obj : Void*) : Bool

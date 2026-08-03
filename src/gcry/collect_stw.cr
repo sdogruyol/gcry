@@ -106,12 +106,15 @@ module Gcry
       !name.nil? && name == "SYSMON"
     end
 
-    # stop_world only after root-list mutators finish add/delete (see @roots_lock).
+    # stop_world only after root-list / finalizer-table mutators finish
+    # (see @roots_lock, Finalizers::Registry#lock_for_stw).
     private def stop_world_quiescing_roots : Nil
       @roots_lock.lock
+      @finalizers.lock_for_stw
       begin
         stop_world
       ensure
+        @finalizers.unlock_for_stw
         @roots_lock.unlock
       end
     end

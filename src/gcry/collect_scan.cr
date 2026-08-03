@@ -588,19 +588,17 @@ module Gcry
     end
 
     private def mark_metadata_roots : Nil
-      # No Crystal Proc/closure — allocating mid-mark re-enters malloc.
+      # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
+      # Only mark callback closure_data so Proc captures stay alive. Marking the
+      # old Crystal Array buffer kept every finalizable object forever (acik
+      # TCPSocket/Digest + 32 KiB IO buffers; finalizers never ran).
+      # World stopped; registry quiesced at stop_world.
       n = @finalizers.entry_count
-      if n > 0
-        mark_candidate(@finalizers.entries_buffer)
-        i = 0
-        while i < n
-          data = @finalizers.entry_closure_data_at(i)
-          mark_candidate(data) unless data.null?
-          i += 1
-        end
-      end
-      if @finalizers.link_count > 0
-        mark_candidate(@finalizers.links_buffer)
+      i = 0
+      while i < n
+        data = @finalizers.entry_closure_data_at(i)
+        mark_candidate(data) unless data.null?
+        i += 1
       end
     end
 

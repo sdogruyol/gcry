@@ -65,6 +65,8 @@ describe "Gcry stress" do
       end
       heap.collect(scan_stack: false)
       finalized.should eq(100)
+      # Resurrected for finalizers; second collect reclaims.
+      heap.collect(scan_stack: false)
       heap.live_objects.should eq(0)
     ensure
       heap.destroy

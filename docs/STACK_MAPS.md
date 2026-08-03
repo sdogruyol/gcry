@@ -171,6 +171,11 @@ product reason to invest.
 17. ~~**parent / pool probe**~~ **done** (`…/acik-parents/`). Hot co-retenants:
     `OpenSSL::Digest` (~1:1 with `TCPSocket`, 100% heap). SSL Client absent.
     `max_pool_size=4` **no RSS win** — not DB idle-pool.
+18. ~~**finalizer registry**~~ **done** (`…/acik-finalizer-fix/`). Root cause:
+    Crystal `Array` finalizer tables marked `Entry.object` forever. Fix: LibC
+    registry + MT quiesce + Boehm resurrect-before-sweep. Gate sample: post-GC
+    live **~15.7 MiB** / max atomic **~4.7 MiB** (was ~80–100 MiB atomics),
+    wrk -c100 **SURVIVED**. RSS lever is finalizer correctness, not exclusivef.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.
