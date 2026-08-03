@@ -200,10 +200,11 @@ if phases.includes?(4)
   check("minor p50 (ms)", minor_p50, 50.0, failures)
   if major_p50 > 0
     ratio = minor_p50 / major_p50
-    # In-header mark-gen made majors O(1) clear (~23ms → ~7ms on GHA) while
-    # minors stayed ~15ms → ratio inverted past 1.0. Soft ceiling 3.0 catches
-    # a real minor blow-up without demanding minor ≤ major.
-    check("minor/major ratio", ratio, 3.0, failures)
+    # In-header mark-gen + EC1 post-STW sweep made majors much faster on GHA
+    # (~23ms → ~6ms) while nursery minors still full-walk old→young (~15–19ms).
+    # Soft ceiling catches a real minor blow-up without demanding minor ≤ major.
+    # 3.0 flaked at 3.22 after pause-lazy; 4.5 leaves host noise headroom.
+    check("minor/major ratio", ratio, 4.5, failures)
   else
     puts "  WARN: major p50 is 0 — skipping ratio check"
   end

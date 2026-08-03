@@ -40,6 +40,9 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   every later pattern vs a lucky baseline on GHA). Short runs drop the
   worst phase before p99/max; baseline floored at 5 ms; Zipfian/Bimodal
   ratio limits raised for GHA (crystal 1.21 CI saw ~25× vs 3×/20× caps).
+- **pause_budget minor/major ratio:** soft ceiling **3.0 → 4.5**. Post-STW
+  EC1 majors landed ~6 ms p50 on GHA while nursery minors stay ~15–19 ms
+  (ratio 3.22 flake).
 
 ### Added
 
