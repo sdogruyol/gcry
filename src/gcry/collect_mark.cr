@@ -44,7 +44,7 @@ module Gcry
 
     # Compiler stack-map / precise-root entry (docs/STACK_MAPS.md). Same mark
     # policy as add_root; no type_id_gate. Safe to call only during collect.
-    # With precise_stack_roots still false (default), nothing invokes this.
+    # Invoked by StackMaps walker when precise_stack_roots (GCRY_PRECISE_STACK=1).
     def mark_precise_root(pointer : Void*) : Nil
       raise "mark_precise_root outside of collect" unless @collecting
       return if pointer.null?

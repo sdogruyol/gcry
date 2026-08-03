@@ -71,6 +71,57 @@ module Gcry
       Roots.scan_mutator(bottom) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Stack)
       end
+      scan_precise_mutator_stack(bottom)
+    end
+
+    # Additive precise roots from `.llvm_stackmaps` (hybrid — conservative scan
+    # above still runs). No-op unless precise_stack_roots + maps loaded.
+    private def scan_precise_mutator_stack(bottom : Void*) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.ensure_loaded
+
+      {% if flag?(:x86_64) %}
+        rsp = Roots.hardware_stack_pointer.address
+        rbp = uninitialized UInt64
+        asm("movq %rbp, $0" : "=r"(rbp) :: "volatile")
+        lo = rsp > STACK_SCAN_RED_ZONE ? rsp - STACK_SCAN_RED_ZONE : 0_u64
+        hi = bottom.address
+        StackMaps.each_root_fp_walk(rsp, rbp, lo, hi) do |ptr|
+          mark_precise_root(ptr)
+        end
+      {% end %}
+    end
+
+    private def scan_precise_thread_stack(pthread : LibC::PthreadT, stack_lo : UInt64, stack_hi : UInt64) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.loaded? || StackMaps.ensure_loaded
+
+      {% if flag?(:linux) && flag?(:x86_64) %}
+        Platform.with_thread_gregs(pthread) do |gregs, n|
+          return if n < 17
+          # glibc: REG_RBP=10, REG_RSP=15, REG_RIP=16
+          rbp = gregs[10]
+          rsp = gregs[15]
+          rip = gregs[16]
+          lo = stack_lo
+          hi = stack_hi
+          StackMaps.each_root_at(rip, rsp, rbp, gregs, n, lo, hi) do |ptr|
+            mark_precise_root(ptr)
+          end
+          # Return address may sit a few bytes past the stackmap PC.
+          15.times do |d|
+            p = rip > d + 1 ? rip - (d + 1) : rip
+            StackMaps.each_root_at(p, rsp, rbp, gregs, n, lo, hi) do |ptr|
+              mark_precise_root(ptr)
+            end
+          end
+          if lo < hi
+            StackMaps.each_root_fp_walk(rsp, rbp, lo, hi) do |ptr|
+              mark_precise_root(ptr)
+            end
+          end
+        end
+      {% end %}
     end
 
     # True when more than the usual main + ExecutionContext Monitor threads
@@ -253,6 +304,22 @@ module Gcry
 
         sp = Platform.thread_sp(pthread)
         pthread_bounds = Platform.pthread_stack_bounds(pthread)
+
+        # Precise stack-map roots (additive). Prefer fiber bounds when SP is on
+        # a fiber; else pthread mapping.
+        if @precise_stack_roots
+          lo = 0_u64
+          hi = 0_u64
+          if fiber
+            st = fiber.@stack
+            lo = st.pointer.address + Roots::PAGE_SIZE
+            hi = st.bottom.address
+          elsif pthread_bounds
+            lo = pthread_bounds[0].address
+            hi = pthread_bounds[1].address
+          end
+          scan_precise_thread_stack(pthread, lo, hi) if lo < hi
+        end
 
         unless multi
           # current_fiber can be nil (idle Monitor / mid-swap). Skipping the

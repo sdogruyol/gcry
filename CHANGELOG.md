@@ -55,10 +55,11 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 ### Added
 
 - **Stack maps spike:** [docs/STACK_MAPS.md](docs/STACK_MAPS.md) — GO on
-  `llvm.experimental.stackmap` MVP (IR + `.llvm_stackmaps` in objects;
-  PIC link next). gcry stub: `precise_stack_roots` /
-  `mark_precise_root` / `GCRY_PRECISE_STACK=1` (default off; no walker yet).
-  Crystal probe branch `gcry-stackmap-probe` (sibling checkout).
+  `llvm.experimental.stackmap` MVP. Runtime: `Gcry::StackMaps` parses ELF
+  `.llvm_stackmaps` v3; hybrid walker (STW gregs + FP walk) calls
+  `mark_precise_root` when `GCRY_PRECISE_STACK=1` (conservative scan still
+  on). Crystal probe `gcry-stackmap-probe`: live locals (alloca preferred),
+  auto `-no-pie`.
 - **`GCRY_EMPTY_CHUNK_WARM_RETAIN`:** opt-in bytes of fully-free chunks kept
   mapped (no DONTNEED) before dormant/munmap — research middle path vs
   `KEEP_CHUNKS`. Measured on 9950X; **not** a process default (no

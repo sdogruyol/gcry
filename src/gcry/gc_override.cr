@@ -436,8 +436,9 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
-    # Compiler stack maps (docs/STACK_MAPS.md). Flag only — no walker yet;
-    # collect stays conservative until a frame walker calls mark_precise_root.
+    # Compiler stack maps (docs/STACK_MAPS.md). Flag only here — section load
+    # is lazy on first collect (File I/O during GC.init can SEGV). Needs
+    # CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
     if env_flag_one?("GCRY_PRECISE_STACK")
       heap.precise_stack_roots = true
     end

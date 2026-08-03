@@ -14,6 +14,7 @@
 
 require "./mark"
 require "./roots"
+require "./stack_maps"
 require "./finalizer"
 
 module Gcry
@@ -99,9 +100,9 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
-    # When true, collect may use compiler stack maps via mark_precise_root
-    # instead of (or before) conservative Roots.scan_*. Default off — no walker
-    # yet; see docs/STACK_MAPS.md. Opt-in: GCRY_PRECISE_STACK=1.
+    # When true, load `.llvm_stackmaps` and mark_precise_root additively
+    # (conservative Roots.scan_* still runs). Opt-in: GCRY_PRECISE_STACK=1.
+    # See docs/STACK_MAPS.md.
     property precise_stack_roots : Bool = false
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
