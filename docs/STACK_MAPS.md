@@ -68,7 +68,7 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
 | `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `LEAF=0` → precise maps **+ FP-frame conservative fill** (`each_parked_fp_frame_range`; escape `GCRY_DISABLE_FIBER_FP_FILL=1`). Parked walk skips FP if RBP not on-stack (makecontext). Smoke OK; acik exclusivef re-check after FP-fill. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `LEAF=0` → precise maps **+ FP-frame fill** (default fill-all). `GCRY_FIBER_FP_FILL_MISS_ONLY=1` skips map-hit frames (acik UAF). `GCRY_DISABLE_FIBER_FP_FILL=1` = none. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -154,10 +154,9 @@ product reason to invest.
 11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
     gate (makecontext); Direct/Indirect refuse off-stack loads.
 12. **exclusivef stabilize** — partial: denser emit + `NEAR_DELTA=128` clears
-    Crystal-frame misses (`PG::Connection` ret−map ≈74; see
-    `…/acik-parked-miss/`). Nofill still **SEGV** on libc/OOB frames — FP-fill
-    remains required (~0.6 MiB). Escape `GCRY_DISABLE_FIBER_FP_FILL=1`.
-    Miss ring: `GCRY_STACKMAP_MISS_LOG=1`.
+    in-range Crystal misses (`…/acik-parked-miss/`). FP-fill **fill-all** still
+    required (~0.67 MiB); miss-only skip **SEGV** on acik (`…/acik-selective-fill/`
+    — map hit ≠ complete lives). Opt-in `GCRY_FIBER_FP_FILL_MISS_ONLY=1`.
 13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
     dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
 14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,

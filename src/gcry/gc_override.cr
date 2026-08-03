@@ -460,6 +460,12 @@ module GC
       if env_flag_one?("GCRY_DISABLE_FIBER_FP_FILL")
         heap.precise_stack_fiber_fp_fill = false
       end
+      # Research: GCRY_FIBER_FP_FILL_MISS_ONLY=1 → skip fill on map-hit frames.
+      # acik exclusivef UAF with this — map hit ≠ complete live set.
+      if env_flag_one?("GCRY_FIBER_FP_FILL_MISS_ONLY")
+        heap.precise_stack_fiber_fp_fill_miss_only = true
+        warn_unsupported_env("gcry: GCRY_FIBER_FP_FILL_MISS_ONLY=1 — research; UAF risk\n")
+      end
       warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research\n")
     end
     # Research: parked map-miss PC ring on /gc-stats (exclusivef gap hunt).

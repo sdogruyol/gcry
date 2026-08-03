@@ -117,9 +117,15 @@ module Gcry
     # When fibers_exclusive and leaf=0: word-scan each FP-chain frame body
     # (map-miss safety net). Default on for exclusivef research.
     property precise_stack_fiber_fp_fill : Bool = true
+    # When true: skip FP-fill on frames with a non-empty stackmap. Research —
+    # acik UAF (map hit ≠ complete lives). Default false = fill every frame.
+    # See GCRY_FIBER_FP_FILL_MISS_ONLY.
+    property precise_stack_fiber_fp_fill_miss_only : Bool = false
     getter precise_stack_roots_marked : UInt64 = 0_u64
     getter parked_fp_fill_frames : UInt64 = 0_u64
     getter parked_fp_fill_bytes : UInt64 = 0_u64
+    getter parked_fp_fill_skipped_frames : UInt64 = 0_u64
+    getter parked_fp_fill_skipped_bytes : UInt64 = 0_u64
     # Research: first-mark attribution by root source (GCRY_LIVE_ATTR=1).
     # Stack/Static/Thread/Precise = ambient seeds; Heap = edge closure.
     property live_attr_roots : Bool = false
@@ -1208,6 +1214,8 @@ module Gcry
       @precise_stack_roots_marked = 0_u64
       @parked_fp_fill_frames = 0_u64
       @parked_fp_fill_bytes = 0_u64
+      @parked_fp_fill_skipped_frames = 0_u64
+      @parked_fp_fill_skipped_bytes = 0_u64
       @first_mark_stack_objects = 0_u64
       @first_mark_stack_bytes = 0_u64
       @first_mark_stack_atomic_bytes = 0_u64

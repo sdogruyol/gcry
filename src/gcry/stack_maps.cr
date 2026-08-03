@@ -9,10 +9,10 @@ module Gcry
     VERSION_SUPPORTED = 3_u8
 
     # Location encodings (LLVM StackMaps.html).
-    LOC_REGISTER      = 1_u8
-    LOC_DIRECT        = 2_u8
-    LOC_INDIRECT      = 3_u8
-    LOC_CONSTANT      = 4_u8
+    LOC_REGISTER       = 1_u8
+    LOC_DIRECT         = 2_u8
+    LOC_INDIRECT       = 3_u8
+    LOC_CONSTANT       = 4_u8
     LOC_CONSTANT_INDEX = 5_u8
 
     struct Loc
@@ -635,7 +635,7 @@ module Gcry
       # Attribute parked leaf + FP-walk misses (GCRY_STACKMAP_MISS_LOG=1).
       @@parked_walk = true
       leaf_hit = each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_SYSV_NGREGS,
-                                stack_lo, stack_hi) do |root|
+        stack_lo, stack_hi) do |root|
         yield root
       end
       unless leaf_hit
@@ -648,7 +648,7 @@ module Gcry
         end
       end
       each_root_fp_walk(rsp, rbp, stack_lo, stack_hi, max_frames,
-                        gregs.to_unsafe, PARKED_SYSV_NGREGS) do |root|
+        gregs.to_unsafe, PARKED_SYSV_NGREGS) do |root|
         yield root
       end
       @@parked_walk = false
@@ -665,14 +665,26 @@ module Gcry
     PARKED_FP_FILL_MAX_FRAME = 64_u64 * 1024
     PARKED_FP_FILL_MAX_TOTAL = 256_u64 * 1024
 
+    # True when a non-empty stackmap sits within near_delta at-or-below *pc*.
+    def self.nonempty_map_near?(pc : UInt64) : Bool
+      idx = find_index_near(pc)
+      return false if idx < 0
+      @@loc_n[idx] > 0
+    end
+
     # Yield each parked swapcontext frame body `[rsp, fp)` for conservative fill.
     # Covers map-missed slots in frames the FP chain can see — denser than leaf
     # window, cheaper/safer than full top→bottom (exclusivef research path).
     # No-op when RBP not on-stack (makecontext). Oversized frames are skipped.
+    #
+    # When *miss_only*: skip frames that already have a non-empty stackmap.
+    # Default false (fill every frame) — map hit ≠ complete lives on acik.
+    # Opt-in via GCRY_FIBER_FP_FILL_MISS_ONLY=1. Block: lo, hi, do_fill.
     def self.each_parked_fp_frame_range(stack_top : UInt64,
                                         stack_lo : UInt64, stack_hi : UInt64,
                                         max_frames : Int32 = MAX_FP_FRAMES,
-                                        & : UInt64, UInt64 ->) : Nil
+                                        miss_only : Bool = false,
+                                        & : UInt64, UInt64, Bool ->) : Nil
       {% unless flag?(:x86_64) %}
         return
       {% end %}
@@ -682,6 +694,7 @@ module Gcry
       fill_parked_sysv_gregs(stack_top, gregs.to_unsafe)
       rbp = gregs[10]
       rsp = gregs[15]
+      rip = gregs[16]
       return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
       return unless rsp >= stack_lo && rsp <= stack_hi
       # Leaf FP must sit reasonably above RSP (same used stack region).
@@ -690,13 +703,20 @@ module Gcry
       fp = rbp
       guard = 0
       total = 0_u64
+      first = true
       limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
       while frame_pointer_on_stack?(fp, stack_lo, stack_hi) && guard < limit
         if rsp < fp
           span = fp - rsp
           if span <= PARKED_FP_FILL_MAX_FRAME && total &+ span <= PARKED_FP_FILL_MAX_TOTAL
-            yield rsp, fp
-            total &+= span
+            do_fill = true
+            if miss_only
+              # Leaf body ↔ parked RIP; older frames ↔ ret at fp+8 (same as FP walk).
+              pc = first ? rip : Pointer(UInt64).new(fp &+ 8).value
+              do_fill = !nonempty_map_near?(pc)
+            end
+            yield rsp, fp, do_fill
+            total &+= span if do_fill
           elsif span > PARKED_FP_FILL_MAX_FRAME
             # Broken/stale chain — stop rather than scan megabytes.
             break
@@ -704,6 +724,7 @@ module Gcry
             break # hit total budget
           end
         end
+        first = false
         next_fp = Pointer(UInt64).new(fp).value
         break if next_fp <= fp
         break unless frame_pointer_on_stack?(next_fp, stack_lo, stack_hi)
@@ -906,16 +927,16 @@ module Gcry
     # DWARF regnum → glibc x86_64 gregs[] index (REG_*).
     private def self.dwarf_to_glibc_greg(dwarf : UInt16) : Int32
       case dwarf
-      when 0  then 13 # rax
-      when 1  then 12 # rdx
-      when 2  then 14 # rcx
-      when 3  then 11 # rbx
-      when 4  then 9  # rsi
-      when 5  then 8  # rdi
-      when 6  then 10 # rbp
-      when 7  then 15 # rsp
-      when 8  then 0  # r8
-      when 9  then 1  # r9
+      when  0 then 13 # rax
+      when  1 then 12 # rdx
+      when  2 then 14 # rcx
+      when  3 then 11 # rbx
+      when  4 then 9  # rsi
+      when  5 then 8  # rdi
+      when  6 then 10 # rbp
+      when  7 then 15 # rsp
+      when  8 then 0  # r8
+      when  9 then 1  # r9
       when 10 then 2  # r10
       when 11 then 3  # r11
       when 12 then 4  # r12
@@ -923,7 +944,7 @@ module Gcry
       when 14 then 6  # r14
       when 15 then 7  # r15
       when 16 then 16 # rip
-      else -1
+      else         -1
       end
     end
 

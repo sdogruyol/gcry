@@ -171,6 +171,7 @@ for trial in $(seq 1 "$TRIALS"); do
     _fibers="${GCRY_PRECISE_FIBERS:-}"
     _leaf="${GCRY_PRECISE_FIBER_LEAF:-}"
     _nofill="${GCRY_DISABLE_FIBER_FP_FILL:-}"
+    _missonly="${GCRY_FIBER_FP_FILL_MISS_ONLY:-}"
     _misslog="${GCRY_STACKMAP_MISS_LOG:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
@@ -178,6 +179,7 @@ for trial in $(seq 1 "$TRIALS"); do
     [[ -n "$_fibers" ]] && export GCRY_PRECISE_FIBERS="$_fibers"
     [[ -n "$_leaf" ]] && export GCRY_PRECISE_FIBER_LEAF="$_leaf"
     [[ -n "$_nofill" ]] && export GCRY_DISABLE_FIBER_FP_FILL="$_nofill"
+    [[ -n "$_missonly" ]] && export GCRY_FIBER_FP_FILL_MISS_ONLY="$_missonly"
     [[ -n "$_misslog" ]] && export GCRY_STACKMAP_MISS_LOG="$_misslog"
     export GCRY_LIVE_ATTR=1
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"

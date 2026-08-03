@@ -361,16 +361,24 @@ module Gcry
       end
     end
 
-    # Word-scan each parked FP-chain frame body. Research safety net for
-    # GCRY_PRECISE_FIBERS=1 + LEAF=0 when stackmaps miss older-frame lives.
+    # Word-scan parked FP-chain frame bodies. Research safety net for
+    # GCRY_PRECISE_FIBERS=1 + LEAF=0. Default: every frame. Opt-in miss-only
+    # (GCRY_FIBER_FP_FILL_MISS_ONLY=1) skips nonempty map hits — acik UAF.
     private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
       {% if flag?(:x86_64) %}
         top = fiber.@context.stack_top.address
         return unless top >= guard && (top &+ 64) <= bottom
         max_frames = StackMaps::MAX_FP_FRAMES
-        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames) do |lo, hi|
+        miss_only = @precise_stack_fiber_fp_fill_miss_only
+        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames, miss_only) do |lo, hi, do_fill|
+          span = hi - lo
+          unless do_fill
+            @parked_fp_fill_skipped_frames += 1
+            @parked_fp_fill_skipped_bytes += span
+            next
+          end
           @parked_fp_fill_frames += 1
-          @parked_fp_fill_bytes += (hi - lo)
+          @parked_fp_fill_bytes += span
           Roots.scan_range(Pointer(Void).new(lo), Pointer(Void).new(hi), safe: true) do |candidate|
             mark_root_candidate(candidate, source: RootSource::Parked)
           end
