@@ -1,0 +1,14 @@
+Binarytrees: ok in 2.845s, award 1.0
+Brainfuck: ok in 4.020s, award 1.0
+Brainfuck2: ok in 1.663s, award 1.0
+Knuckeotide: err result=2880861202, but expected=1459386462 in 2.116s, award 1.0
+Matmul: ok in 0.567s, award 1.0
+RegexDna: err result=2046751773, but expected=2813760484 in 1.086s, award 1.0
+Revcomp: err result=578395556, but expected=2734405216 in 1.446s, award 1.0
+Threadring: ok in 1.064s, award 1.0
+Primes: ok in 9.182s, award 1.0
+JsonGenerate: err result=3931493865, but expected=1584466874 in 1.261s, award 1.0
+JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091) in 12.552s, award 1.0
+JsonParseSerializable: err result=JsonParseSerializable::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParseSerializable::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882) in 0.897s, award 1.0
+JsonParsePull: err result=JsonParsePull::Coordinate(@x=0.49986260081787687, @y=0.500113702362733, @z=0.5006048890911176), but expected=JsonParsePull::Coordinate(@x=0.49986260081788564, @y=0.5001137023627188, @z=0.5006048890910882) in 0.830s, award 1.0
+39.5296s, 13.00/13, 1.00

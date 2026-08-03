@@ -1,13 +1,13 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke trace-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke trace-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
 	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke trace-smoke mutate soak soak-smoke format format-check lint samples"
-	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
+	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
@@ -209,6 +209,11 @@ samples: $(BIN)
 bench-perf-smoke:
 	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/perf_smoke.sh
 
+# Secondary GC suite (vendored crystal-metric). Informational; no CI gate.
+# FILTER=Binarytrees,JsonParsePure,Threadring TRIALS=1 make bench-crystal-metric
+bench-crystal-metric:
+	bash bench/run_crystal_metric_ab.sh
+
 # A/B previous tag vs current tree; prints docs/PERF.md History rows.
 bench-kemal-record:
 	@test -n "$(PREV)" || (echo "set PREV=vX.Y.Z" && exit 1)
@@ -240,3 +245,4 @@ bench-run-kemal-symbols:
 clean:
 	rm -rf $(BIN)
 	rm -rf bench/kemal/lib bench/kemal/.shards bench/kemal/shard.lock
+	rm -rf bench/crystal_metric/lib bench/crystal_metric/.shards bench/crystal_metric/shard.lock

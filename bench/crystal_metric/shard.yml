@@ -1,0 +1,15 @@
+name: gcry_crystal_metric
+version: 0.1.0
+
+crystal: '>= 1.21.0'
+
+# Vendored [kostya/crystal-metric](https://github.com/kostya/crystal-metric) (MIT)
+# for same-host Boehm vs gcry A/B. See UPSTREAM.md / README.md.
+
+dependencies:
+  gcry:
+    path: ../..
+
+targets:
+  metric:
+    main: main.cr

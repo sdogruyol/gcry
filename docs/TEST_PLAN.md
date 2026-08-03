@@ -20,7 +20,7 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 | **Fuzz / property** | A- | Deterministic fuzz + replay; heap/layout/MT property tests in CI. |
 | **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (thr≥70% Boehm, RSS≤1.25×, pause_p50≤2.5ms), soak-smoke, EC4 soft-soak smoke, nightly fuzz/soak. |
 | **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
-| **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak. |
+| **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak; secondary crystal-metric GC subset (informational). |
 | **Multi-thread test** | A | Library-heap MT property + thread storm + **process-STW MT property** (`bench/stw_mt_property_test.cr`, Parallel=2+4; TLAB@2+4; TLAB+nursery minors). |
 | **Platform test** | B+ | Darwin stubs + Mach STW in CI; Windows still blocked. |
 

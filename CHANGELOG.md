@@ -41,6 +41,14 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Added
 
+- **Secondary bench suite (crystal-metric):** vendored
+  [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under
+  `bench/crystal_metric/` + `bench/run_crystal_metric_ab.sh` /
+  `make bench-crystal-metric`. Same-host Boehm vs gcry wall-time A/B on a
+  GC-sensitive filter (not a ship headline — Kemal `/json` + acikturkiye
+  stay primary). Quiet cut: `bench/log/linux/2026-08-03-crystal-metric-ec1/`
+  (Threadring ~parity; Binarytrees ~2.5× wall; JsonParsePure/Primes outliers).
+  Documented in [PERF.md](docs/PERF.md).
 - **EC4 soft-soak gate:** `bench/soft_soak_ec4.sh` + `make soft-soak-ec4`
   (N=40) / `make soft-soak-ec4-smoke` (N=5). Scrapes soft mark-miss /
   hard SEGV over Parallel TLAB-off Kemal `/json`; CI `perf-smoke` runs the

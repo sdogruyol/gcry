@@ -109,6 +109,31 @@ Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numb
 
 Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier can re-scan pages before sweep; nursery (`GCRY_NURSERY`) stays off for process HTTP unless you are measuring p99. Soft-dirty is **Linux-only**.
 
+## Secondary suite — crystal-metric (GC subset)
+
+**Not a ship headline.** Product bar stays Kemal `/json` + [ACIKTURKIYE.md](ACIKTURKIYE.md).
+
+Vendored [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under `bench/crystal_metric/`. Same-host Boehm vs gcry **wall time** on a GC-sensitive filter (Binarytrees, JSON*, string/Hash, Brainfuck*, Threadring, Matmul, Primes). Compute-bound language benches (Mandelbrot, Nbody, …) are noise — omit from GC claims.
+
+```sh
+make bench-crystal-metric
+# smoke: TRIALS=1 FILTER=Binarytrees,JsonParsePure,Threadring make bench-crystal-metric
+```
+
+Quiet cut (WSL2 i3-12100F, Crystal 1.21, med-of-3): `bench/log/linux/2026-08-03-crystal-metric-ec1/`.
+
+| Bench | speed % Boehm | wall × | Notes |
+|-------|-------------:|-------:|-------|
+| Threadring | **~100%** | ~1.0× | Channel/fiber |
+| Brainfuck / Brainfuck2 / Matmul / RegexDna | **~98–103%** | ~1.0× | near parity |
+| JsonGenerate | **~93%** | ~1.08× | |
+| Binarytrees | **~40%** | ~2.5× | classic tree churn |
+| Knuckeotide / Revcomp / JsonParse* | **~55–72%** | ~1.4–1.8× | string/Hash pressure |
+| Primes | **~12%** | ~8.6× | sieve alloc storm |
+| JsonParsePure | **~5%** | ~20× | outlier — investigate separately |
+
+Peak RSS × (GNU `time -v` med): **~0.79×**. Some benches print checksum `err` on Crystal ≥1.21; timing A/B still counts them (`bench/run_crystal_metric_ab.sh`). Do **not** cite the upstream award total as a gcry score.
+
 ## How to record (Linux)
 
 Same-day gcry + Boehm, both paths → update **this** file and the README Linux table. Do **not** overwrite these tables with macOS wrk — use [PERF-macos.md](PERF-macos.md).
@@ -119,4 +144,5 @@ LABEL=linux-$(date +%Y%m%d) ./bench/median_kemal_boehm.sh
 LABEL=linux-$(date +%Y%m%d) ./bench/median_acikturkiye_boehm.sh
 # or: GC=both COUNT=1 TRIALS=3 bash bench/run_all.sh all
 # after wrk: curl …/gc-collect && read RSS
+# secondary: make bench-crystal-metric
 ```

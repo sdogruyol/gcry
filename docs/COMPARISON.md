@@ -36,6 +36,9 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 - You want zero-tuning production defaults across OS targets (gcry Parallel needs resize + measure)
 
+Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
+[PERF.md](PERF.md) “Secondary suite”; not a Boehm replacement claim.
+
 ## Smoke before you claim readiness
 
 - [ ] `crystal spec` green
