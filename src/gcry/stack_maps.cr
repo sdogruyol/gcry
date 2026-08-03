@@ -42,6 +42,10 @@ module Gcry
     NEAR_DELTA = 32_u64
     # Cap FP chain length — deep / corrupt chains dominated soak pause.
     MAX_FP_FRAMES = 128
+    # Hybrid mutator walk: must climb past GC/stdlib frames (often map-less)
+    # before Crystal call-site rets appear. Cap below exclusive's full walk
+    # to limit STW pause; 32 clears stackmap-smoke on tip+EC.
+    HYBRID_MAX_FP_FRAMES = 32
     # Lookups that found a record / roots yielded (observability).
     @@hits = 0_u64
     @@roots_yielded = 0_u64
@@ -368,8 +372,10 @@ module Gcry
     # Register GP locations need gregs (nil here) — only RBP/RSP-relative and
     # stack-slot Register values are useful. *stack_lo*/*stack_hi* bound the
     # readable stack (grows down: lo=SP side, hi=bottom).
+    # *max_frames* caps climb (hybrid uses HYBRID_MAX_FP_FRAMES).
     def self.each_root_fp_walk(rsp : UInt64, rbp : UInt64,
                                stack_lo : UInt64, stack_hi : UInt64,
+                               max_frames : Int32 = MAX_FP_FRAMES,
                                & : Void* ->) : Nil
       return unless @@loaded
       {% unless flag?(:x86_64) %}
@@ -378,7 +384,8 @@ module Gcry
 
       fp = rbp
       guard = 0
-      while fp >= stack_lo && fp + 16 <= stack_hi && guard < MAX_FP_FRAMES
+      limit = max_frames > 0 ? max_frames : MAX_FP_FRAMES
+      while fp >= stack_lo && fp + 16 <= stack_hi && guard < limit
         ret = Pointer(UInt64).new(fp + 8).value
         each_root_near(ret, fp &+ 16, fp, Pointer(UInt64).null, 0, stack_lo, stack_hi) do |root|
           yield root

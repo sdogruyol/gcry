@@ -80,14 +80,12 @@ module Gcry
       scan_precise_mutator_stack(bottom)
     end
 
-    # Precise roots from `.llvm_stackmaps`. Hybrid (=1): leaf RIP near-lookup
-    # only (cheap; conservative covers callers). Exclusive (=2): full FP walk.
+    # Precise roots from `.llvm_stackmaps`. Hybrid (=1): capped mutator FP
+    # walk (conservative still covers the stack; other-thread leaf needs
+    # Parallel EC gregs). Exclusive (=2): full FP walk, no word scan.
     private def scan_precise_mutator_stack(bottom : Void*) : Nil
       return unless @precise_stack_roots
       return unless StackMaps.ensure_loaded
-      # Hybrid: skip mutator FP walk — conservative scan already covered the
-      # stack; full walks dominated soak pause. Exclusive needs the walk.
-      return unless @precise_stack_exclusive
 
       {% if flag?(:x86_64) %}
         rsp = Roots.hardware_stack_pointer.address
@@ -95,7 +93,8 @@ module Gcry
         asm("movq %rbp, $0" : "=r"(rbp) :: "volatile")
         lo = rsp > STACK_SCAN_RED_ZONE ? rsp - STACK_SCAN_RED_ZONE : 0_u64
         hi = bottom.address
-        StackMaps.each_root_fp_walk(rsp, rbp, lo, hi) do |ptr|
+        max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
+        StackMaps.each_root_fp_walk(rsp, rbp, lo, hi, max_frames) do |ptr|
           mark_precise_root(ptr)
         end
       {% end %}

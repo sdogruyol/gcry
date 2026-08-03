@@ -56,15 +56,15 @@ unless ENV["GCRY_PRECISE_STACK"]?.in?("1", "2")
   exit 1
 end
 
-# Hybrid (=1) is leaf-cheap and may mark 0 on single-threaded churn (no STW
-# other-thread RIP). Exclusive (=2) must produce precise roots via FP walk.
+# Hybrid (=1): capped mutator FP walk must consult the map (lookups>0).
+# Exclusive (=2): must produce precise roots via full FP walk.
 if exclusive
   if marked == 0 && roots == 0
     STDERR.puts "FAIL: exclusive walker produced no precise roots (try --frame-pointers=always)"
     exit 1
   end
-elsif !loaded
-  STDERR.puts "FAIL: maps not loaded"
+elsif lookups == 0
+  STDERR.puts "FAIL: hybrid walker never consulted maps (lookups=0)"
   exit 1
 end
 
