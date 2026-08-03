@@ -168,6 +168,9 @@ product reason to invest.
 16. ~~**TCPSocket first-mark watch**~~ **done** (`…/acik-watch-tcp/`,
     `GCRY_LIVE_ATTR_WATCH_TID=441`). ~98% **Heap** first-mark (not parked
     stack seeds). Parent graph retains sockets; parked only seeds ~2 MiB.
+17. ~~**parent / pool probe**~~ **done** (`…/acik-parents/`). Hot co-retenants:
+    `OpenSSL::Digest` (~1:1 with `TCPSocket`, 100% heap). SSL Client absent.
+    `max_pool_size=4` **no RSS win** — not DB idle-pool.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet.

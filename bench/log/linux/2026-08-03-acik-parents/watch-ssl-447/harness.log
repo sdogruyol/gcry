@@ -1,0 +1,70 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/watch-ssl-447 bin=exclusive trials=1 d=12s
+  trial=1 ...   precise_mode=0
+estab_post=0
+ok
+live_objects=33195 total_MiB=82.4 typed_MiB=1.4 collision_MiB=60.2 raw_MiB=20.7 large_MiB=10.5
+gcstats size_class_live_MiB=70.4 live_objects=23595
+stack_maps_loaded=False records=0 hits=0 precise_marked=0
+first_mark MiB: mutator=0.0 parked=8.6 static=0.0 thread=0.0 precise=0.0 heap=72.2
+first_mark ATOMIC MiB: mutator=0.0 parked=8.3 precise=0.0 heap=61.4
+top size_classes (payload → MiB / count):
+  32768     69.7 MiB  n=2250
+    320      0.3 MiB  n=1114
+  20480      0.3 MiB  n=78
+     32      0.2 MiB  n=7240
+     64      0.2 MiB  n=4117
+  16384      0.1 MiB  n=74
+  14336      0.1 MiB  n=89
+    640      0.1 MiB  n=3627
+   1024      0.1 MiB  n=94
+  12288      0.1 MiB  n=79
+     80      0.1 MiB  n=996
+     48      0.1 MiB  n=3399
+max_size_class 32768 breakdown MiB:
+  typed=0.2 collision=59.7 raw=9.8
+  atomic=69.7 ptrish=0.0 byteish=69.5
+top typed type_ids:
+       1      0.4 MiB  n=8319
+     441      0.3 MiB  n=1108
+     437      0.2 MiB  n=300
+      78      0.1 MiB  n=87
+     193      0.0 MiB  n=544
+     572      0.0 MiB  n=1003
+     467      0.0 MiB  n=111
+     625      0.0 MiB  n=89
+     210      0.0 MiB  n=263
+     456      0.0 MiB  n=89
+     457      0.0 MiB  n=89
+     622      0.0 MiB  n=88
+top collision type_ids (false typed on big blocks):
+      88     28.6 MiB  n=915
+      49     24.0 MiB  n=769
+      82      2.7 MiB  n=87
+     112      2.5 MiB  n=81
+   27836      1.5 MiB  n=48
+     155      0.3 MiB  n=28
+   55809      0.1 MiB  n=4
+     405      0.1 MiB  n=12
+     211      0.1 MiB  n=10
+       5      0.0 MiB  n=15
+      16      0.0 MiB  n=12
+       7      0.0 MiB  n=11
+  idle 30s ... estab_idle=0
+idle-drain: estab 0→0  max_atomic 69.7→70.0 MiB  live 82.4→82.1 MiB
+verdict: B-leaning (sockets drained, atomics remain → false roots / unreclaimed graph)
+watch_tid=447 [post]: stack=0, parked=0, static=0, thread=0, precise=0, heap=0
+watch_tid=447 [idle]: stack=0, parked=0, static=0, thread=0, precise=0, heap=0
+top typed post→idle (type_id MiB):
+     441    0.3→  0.3 MiB  n=1108→1112
+       1    0.4→  0.2 MiB  n=8319→5309
+     437    0.2→  0.1 MiB  n=300→173
+      78    0.1→  0.0 MiB  n=87→0
+     193    0.0→  0.0 MiB  n=544→0
+     572    0.0→  0.0 MiB  n=1003→1003
+     625    0.0→  0.0 MiB  n=89→0
+     467    0.0→  0.0 MiB  n=111→69
+     672    0.0→  0.0 MiB  n=0→101
+     537    0.0→  0.0 MiB  n=0→69
+     100    0.0→  0.0 MiB  n=0→101
+ok
+done OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/watch-ssl-447

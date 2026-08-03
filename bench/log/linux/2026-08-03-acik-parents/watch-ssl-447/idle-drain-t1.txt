@@ -1,0 +1,16 @@
+idle-drain: estab 0→0  max_atomic 69.7→70.0 MiB  live 82.4→82.1 MiB
+verdict: B-leaning (sockets drained, atomics remain → false roots / unreclaimed graph)
+watch_tid=447 [post]: stack=0, parked=0, static=0, thread=0, precise=0, heap=0
+watch_tid=447 [idle]: stack=0, parked=0, static=0, thread=0, precise=0, heap=0
+top typed post→idle (type_id MiB):
+     441    0.3→  0.3 MiB  n=1108→1112
+       1    0.4→  0.2 MiB  n=8319→5309
+     437    0.2→  0.1 MiB  n=300→173
+      78    0.1→  0.0 MiB  n=87→0
+     193    0.0→  0.0 MiB  n=544→0
+     572    0.0→  0.0 MiB  n=1003→1003
+     625    0.0→  0.0 MiB  n=89→0
+     467    0.0→  0.0 MiB  n=111→69
+     672    0.0→  0.0 MiB  n=0→101
+     537    0.0→  0.0 MiB  n=0→69
+     100    0.0→  0.0 MiB  n=0→101
