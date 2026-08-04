@@ -20,7 +20,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
 | Kemal `/json` (Linux v0.16 carry) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
-| Kemal `/json` (macOS v0.17.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
+| Kemal `/json` (macOS tip) | thr ~**84%**, post-GC RSS ~**1.01×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when
 
@@ -52,4 +52,4 @@ Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Fat-app Linux tip is ~**1×** Boehm after finalizer + retain=0 (v0.17 i3 cut was ~**3.43×**); Darwin acik is still ~**18×**. Layout / type_id / SP clamp alone did not close the old gap — correct finalizers did most of the Linux work. Remaining lever for Darwin / precise roots: **compiler stack maps**. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~1× macOS tip). Fat-app Linux tip is ~**1–1.6×** Boehm after finalizer + retain=0 (v0.17 i3 cut was ~**3.43×**); Darwin tip acik is ~**0.63×** (was ~**18×** at v0.17). Layout / type_id / SP clamp alone did not close the old gap — correct finalizers did most of the work. Stack maps remain research-only for precise roots. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).

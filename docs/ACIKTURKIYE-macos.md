@@ -103,4 +103,4 @@ TRIALS=3 WRK_DURATION=30 bash bench/run_all.sh acik
 # Update THIS file only
 ```
 
-Toy Kemal (macOS): [PERF-macos.md](PERF-macos.md).
+Toy Kemal (macOS tip): [PERF-macos.md](PERF-macos.md) — `/json` **~84%** @ **~1.01×** (`…/2026-08-04-172842/`).

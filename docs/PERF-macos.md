@@ -30,12 +30,24 @@ RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on b
 acikturkiye Darwin tip base closed the old ~18× RSS gate (~**90%** thr @
 ~**0.63×** RSS). Numbers live only in [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md)
 / `bench/log/macos/2026-08-04-acik-stackmap/` — do **not** fold into Kemal
-tables below. Kemal headline on this file is still the v0.17 cut until a fresh
-`bench/run_all.sh` Kemal med3 on tip.
+tables below.
+
+## Headline (tip / stack-maps) — macOS aarch64
+
+Primary: `bench/log/macos/2026-08-04-172842/` (`fda578a`, Crystal 1.21.0, Apple M2 Pro). macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Scrub on (default). First Darwin Kemal re-cut on tip since v0.17.0.
+
+Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|--------:|--------------:|
+| `/` | 87,369 | 79,275 | **90.7%** | **0.95×** |
+| `/json` | 62,964 | 52,872 | **84.0%** | **1.01×** |
+
+`/json` **holds** vs v0.17 (**83.6%** → **84.0%**); RSS still Boehm-class (**0.95–1.01×**). Gate is `/json`.
 
 ## Headline (v0.17.0) — macOS aarch64
 
-Primary: `bench/log/macos/2026-08-02-085522/` (`18513e0`, Crystal 1.21.0, Apple M2 Pro). Confirm: `2026-08-02-091817/` (`/json` **83.2%**, `/` **89.5%**). macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Scrub on (default). First Darwin re-cut since v0.13.0.
+Superseded by tip cut above for tip line. Primary: `bench/log/macos/2026-08-02-085522/` (`18513e0`, Crystal 1.21.0, Apple M2 Pro). Confirm: `2026-08-02-091817/` (`/json` **83.2%**, `/` **89.5%**). First Darwin re-cut since v0.13.0.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 
@@ -44,11 +56,11 @@ Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post
 | `/` | 86,579 | 77,575 | **89.6%** | **0.97×** |
 | `/json` | 62,769 | 52,454 | **83.6%** | **0.93×** |
 
-`/json` **holds** vs v0.13 (**83.9%** → **83.6%**; confirm **83.2%**); RSS still at Boehm parity (**0.93–1.07×**). Idle `/` soft (−3pp) — host noise; gate is `/json`.
+`/json` **held** vs v0.13 (**83.9%** → **83.6%**; confirm **83.2%**); RSS at Boehm parity (**0.93–0.97×**).
 
 ## Headline (v0.13.0) — macOS aarch64
 
-macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Superseded by v0.17.0 cut above.
+macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Superseded by later cuts above.
 
 Kemal median-of-3, `wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS:
 
@@ -104,6 +116,7 @@ Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (
 |  | **2026-07-27** `256k-chunk` | **92.6%** | **83.9%** | **0.93–1.06×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). acikturkiye thr recovers 57%→78% with same RSS. Kemal flat. |
 | **0.17.0** `2026-08-02-085522` | **89.6%** | **83.6%** | **0.93–0.97×** | First Darwin re-cut since v0.13 (`18513e0`). `/json` hold; `/` soft −3pp. |
 | 0.17 confirm `2026-08-02-091817` | **89.5%** | **83.2%** | **0.99–1.07×** | Same-day confirm; Kemal hold. |
+| **tip** `2026-08-04-172842` | **90.7%** | **84.0%** | **0.95–1.01×** | stack-maps tip (`fda578a`). `/json` hold; RSS still ~1×. |
 
 ## How to record (macOS)
 
