@@ -165,8 +165,9 @@ run_one() {
       exclusivef)
         export GCRY_PRECISE_STACK=2
         export GCRY_PRECISE_FIBERS=1
-        # Default 0: pure precise parked walk (synthetic sysv gregs + RSP@ret).
-        export GCRY_PRECISE_FIBER_LEAF="${_leaf:-0}"
+        # Default: heap property LEAF=8 KiB (+ FP-fill). Override via env or
+        # GCRY_FLAGS. LEAF=0 is research-only (fiber smoke / acik UAF risk).
+        [[ -n "$_leaf" ]] && export GCRY_PRECISE_FIBER_LEAF="$_leaf"
         ;;
     esac
     # Re-apply research/product knobs after scrub.

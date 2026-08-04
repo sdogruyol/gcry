@@ -8,8 +8,11 @@
 #     -o bin/stackmap_exclusive_fiber_smoke bench/stackmap_exclusive_fiber_smoke.cr
 #
 # Run:
-#   GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 GCRY_PRECISE_FIBER_LEAF=0 \
+#   GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 \
 #     ./bin/stackmap_exclusive_fiber_smoke
+#
+# Default LEAF=8 KiB (plus FP-fill). LEAF=0 is research-only and currently
+# fails this smoke — FP-fill spans miss the parked String slot.
 
 require "../src/gcry"
 

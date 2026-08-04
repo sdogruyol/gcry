@@ -135,11 +135,12 @@ module Gcry
     # only) instead of full top→bottom word scan. See GCRY_PRECISE_FIBERS.
     property precise_stack_fibers_exclusive : Bool = false
     # Bytes of parked active stack (from stack_top toward bottom) to still
-    # word-scan under fibers_exclusive. 0 = precise walk only (default for
-    # exclusivef after parked sysv gregs; was 8 KiB safety net).
-    property precise_stack_fiber_leaf_bytes : UInt64 = 0_u64
-    # When fibers_exclusive and leaf=0: word-scan each FP-chain frame body
-    # (map-miss safety net). Default on for exclusivef research.
+    # word-scan under fibers_exclusive. Default 8 KiB — FP-fill alone misses
+    # stack slots outside tiny [rsp,fp) spans (exclusive_fiber_smoke SEGV).
+    # Escape: GCRY_PRECISE_FIBER_LEAF=0 for maps+fill-only research.
+    property precise_stack_fiber_leaf_bytes : UInt64 = 8192_u64
+    # When fibers_exclusive: also word-scan each FP-chain frame body
+    # (additive with LEAF). Default on for exclusivef research.
     property precise_stack_fiber_fp_fill : Bool = true
     # When true: skip FP-fill on frames with a non-empty stackmap. Research —
     # acik UAF (map hit ≠ complete lives). Default false = fill every frame.

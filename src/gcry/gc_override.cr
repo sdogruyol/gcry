@@ -501,12 +501,13 @@ module GC
     end
     if env_flag_one?("GCRY_PRECISE_FIBERS")
       heap.precise_stack_fibers_exclusive = true
-      # Optional leaf window (bytes). Default 0 = precise + FP-frame fill
-      # (each_parked_fp_frame_range). Cap at 16 MiB; larger values clamp.
+      # Optional leaf window (bytes). Default 8 KiB (property). Cap 16 MiB.
+      # LEAF=0 = maps + FP-fill only (research; exclusive_fiber_smoke needs ≥8k
+      # or full-scan fallback when the FP chain is unusable).
       if leaf = env_u64("GCRY_PRECISE_FIBER_LEAF")
         heap.precise_stack_fiber_leaf_bytes = leaf.clamp(0_u64, 16_u64 * 1024 * 1024)
       end
-      # Escape: GCRY_DISABLE_FIBER_FP_FILL=1 → pure maps only (old UAF path).
+      # Escape: GCRY_DISABLE_FIBER_FP_FILL=1 → leaf/maps only (no FP-frame fill).
       if env_flag_one?("GCRY_DISABLE_FIBER_FP_FILL")
         heap.precise_stack_fiber_fp_fill = false
       end

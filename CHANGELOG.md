@@ -47,6 +47,13 @@ Product version stays **v0.17.0**.
 
 ### Fixed
 
+- **Exclusive stack-map correctness:** `GCRY_PRECISE_STACK=2` no longer skips
+  other-thread STW word scans (SYSMON / mid-swap / pthread); mutator spill
+  window **4→16 KiB**. `GCRY_PRECISE_FIBERS=1` default **LEAF=8 KiB** (+ FP-fill);
+  LEAF=0 + fill-only missed parked stack slots (`stackmap_exclusive_fiber_smoke`
+  SEGV). Harness no longer forces LEAF=0. Acik med3 clean: exclusive **~96%**
+  @ **~2.1×**, exclusivef **~99%** @ **~1.9×** — research only, not an RSS win
+  (`…/2026-08-04-acik-exclusivef-stabilize-med3/`).
 - **Nightly fuzz CLI:** `nightly-fuzz.yml` now passes `--seconds=1800 --seed=42`.
   Positional `1800 42` was ignored (`bench/fuzz.cr` only parses flags), so the
   job ran the default **30s** fuzz instead of 30 minutes.

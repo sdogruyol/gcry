@@ -85,9 +85,11 @@ module Gcry
       scan_precise_mutator_stack(bottom)
     end
 
-    # ~4 KiB below SP (+ red zone): enough for spill slots without scanning
-    # the whole fiber stack high-water (exclusive's RSS point).
-    EXCLUSIVE_MUTATOR_SPILL_WINDOW = 4096_u64
+    # Below SP (+ red zone): catch LLVM spill slots maps/FP walk miss without
+    # scanning the whole fiber high-water (exclusive's RSS point). 4 KiB was
+    # too shallow under acik --release (ThreadPool UAF / collect hang); 16 KiB
+    # still << full stack.
+    EXCLUSIVE_MUTATOR_SPILL_WINDOW = 16_u64 * 1024
 
     private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
       red = STACK_SCAN_RED_ZONE.to_u64
@@ -326,16 +328,25 @@ module Gcry
         # Word scan:
         # - Hybrid: always.
         # - Exclusive default: full parked top→bottom.
-        # - Exclusive + fibers_exclusive: LEAF window only (0 = pure precise;
-        #   acik still UAF — maps miss older-frame slots). Research.
+        # - Exclusive + fibers_exclusive: LEAF window (default 8 KiB) plus
+        #   optional FP-frame fill. LEAF=0 + fill-only misses stack slots
+        #   outside tiny [rsp,fp) spans (stackmap_exclusive_fiber_smoke SEGV).
         if @precise_stack_exclusive
           next if fiber.running?
           if @precise_stack_fibers_exclusive
             scan_exclusive_parked_fiber_leaf(top, bottom)
-            # LEAF=0: FP-frame conservative fill (not full stack). Catches
-            # map-missed slots in older frames exclusivef previously UAF'd on.
-            if @precise_stack_fiber_leaf_bytes == 0 && @precise_stack_fiber_fp_fill
-              scan_exclusive_parked_fp_fill(fiber, guard, bottom)
+            if @precise_stack_fiber_fp_fill
+              filled = scan_exclusive_parked_fp_fill(fiber, guard, bottom)
+              # No usable FP chain (makecontext / stale RBP) and no leaf →
+              # full parked word-scan for this fiber (correctness floor).
+              if !filled && @precise_stack_fiber_leaf_bytes == 0
+                Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+                  mark_root_candidate(candidate, source: RootSource::Parked)
+                end
+              end
+            elsif @precise_stack_fiber_leaf_bytes == 0
+              # Pure maps, no fill, no leaf — research UAF path
+              # (GCRY_DISABLE_FIBER_FP_FILL=1 + LEAF=0).
             end
           else
             Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
@@ -361,16 +372,19 @@ module Gcry
       end
     end
 
-    # Word-scan parked FP-chain frame bodies. Research safety net for
-    # GCRY_PRECISE_FIBERS=1 + LEAF=0. Default: every frame. Opt-in miss-only
-    # (GCRY_FIBER_FP_FILL_MISS_ONLY=1) skips nonempty map hits — acik UAF.
-    private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
+    # Word-scan parked FP-chain frame bodies. Additive safety net with LEAF.
+    # Default: every frame. Opt-in miss-only (GCRY_FIBER_FP_FILL_MISS_ONLY=1)
+    # skips nonempty map hits — acik UAF. Returns true when the FP chain was
+    # walkable (at least one frame yielded).
+    private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Bool
       {% if flag?(:x86_64) %}
         top = fiber.@context.stack_top.address
-        return unless top >= guard && (top &+ 64) <= bottom
+        return false unless top >= guard && (top &+ 64) <= bottom
         max_frames = StackMaps::MAX_FP_FRAMES
         miss_only = @precise_stack_fiber_fp_fill_miss_only
+        saw = false
         StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames, miss_only) do |lo, hi, do_fill|
+          saw = true
           span = hi - lo
           unless do_fill
             @parked_fp_fill_skipped_frames += 1
@@ -383,6 +397,9 @@ module Gcry
             mark_root_candidate(candidate, source: RootSource::Parked)
           end
         end
+        saw
+      {% else %}
+        false
       {% end %}
     end
 
@@ -427,10 +444,14 @@ module Gcry
           # current_fiber can be nil (idle Monitor / mid-swap). Skipping the
           # whole thread left Darwin CI stw_sp_clamp at hits=0 fallbacks=0 and
           # missed OS-stack roots. Scan pthread bounds when fiber is absent.
+          #
+          # Exclusive skips *mutator* full-stack word scan only — other threads
+          # under STW still need conservative coverage (gregs + maps alone
+          # missed SYSMON roots → acik ThreadPool UAF / collect hang).
           if fiber
             mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
-            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds) unless @precise_stack_exclusive
-          elsif !@precise_stack_exclusive
+            scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
+          else
             scan_pthread_stack(pthread_bounds, sp)
           end
           next
@@ -444,18 +465,16 @@ module Gcry
           mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
         end
 
-        unless @precise_stack_exclusive
-          # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
-          # swapcontext saves the previous SP. If we only trust current_fiber +
-          # stack_top, live frames below a stale top (still holding SP) are
-          # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
-          # the suspend SP (red zone included).
-          scan_stack_containing_sp(sp)
+        # Mid-swap: Scheduler sets current_fiber to the *next* fiber before
+        # swapcontext saves the previous SP. If we only trust current_fiber +
+        # stack_top, live frames below a stale top (still holding SP) are
+        # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
+        # the suspend SP (red zone included). Exclusive must keep this too.
+        scan_stack_containing_sp(sp)
 
-          # Pthread mapping: scheduler/main frames remain here while SP sits on
-          # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
-          scan_pthread_stack(pthread_bounds, sp)
-        end
+        # Pthread mapping: scheduler/main frames remain here while SP sits on
+        # a pool fiber (Boehm tracks per-thread stackbottom through swaps).
+        scan_pthread_stack(pthread_bounds, sp)
       end
     end
 

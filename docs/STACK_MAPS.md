@@ -72,8 +72,8 @@ def mark_precise_root(pointer : Void*) : Nil # during collect only
 | Env | Behavior |
 |-----|----------|
 | `GCRY_PRECISE_STACK=1` | Hybrid: capped mutator FP walk (`HYBRID_MAX_FP_FRAMES=32`) **+** conservative stack scan |
-| `GCRY_PRECISE_STACK=2` | Exclusive mutator/other-thread (spill window + FP). **Parked fibers still full word-scanned** (acik safety). Research. |
-| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. `LEAF=0` → precise maps **+ FP-frame fill** (default fill-all). `GCRY_FIBER_FP_FILL_MISS_ONLY=1` skips map-hit frames (acik UAF). `GCRY_DISABLE_FIBER_FP_FILL=1` = none. |
+| `GCRY_PRECISE_STACK=2` | Exclusive **mutator** (16 KiB spill + FP). Other threads under STW still word-scanned. Parked fibers full word-scanned unless `PRECISE_FIBERS`. Research. |
+| `GCRY_PRECISE_FIBERS=1` | With `=2`: parked full scan off. Default **LEAF=8 KiB** + FP-frame fill. `LEAF=0` = maps+fill only (fiber smoke SEGV / acik UAF). `GCRY_FIBER_FP_FILL_MISS_ONLY=1` skips map-hit frames (UAF). `GCRY_DISABLE_FIBER_FP_FILL=1` = leaf/maps only. |
 
 Needs `CRYSTAL_EMIT_STACKMAP=1` binaries for real hits. Prefer
 `--frame-pointers=always` so the FP walker can climb frames.
@@ -95,7 +95,9 @@ Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
-exclusive stabilize + Darwin RSS proof are next (Linux tip RSS already ~1×).
+exclusive/exclusivef are **correctness-stable** on Linux tip (30s med3 clean;
+`…/2026-08-04-acik-exclusivef-stabilize-med3/`) but **not** an RSS win (~2×).
+Darwin RSS proof is next (Linux tip RSS already ~1× without maps).
 
 ## Risks
 
@@ -105,7 +107,7 @@ exclusive stabilize + Darwin RSS proof are next (Linux tip RSS already ~1×).
 | Map density / thr | Call-site filter; measure acik + Kemal |
 | Walker cost | Mitigated: `find_near`, pc range reject; hybrid FP cap 32, exclusive 128. |
 | Tip without EC | Livelock in soak — always `-Dpreview_mt -Dexecution_context`. |
-| Exclusive soak | Completes but can fail RSS≤10% gate (sparse maps / missed roots). Hybrid PASS. |
+| Exclusive soak | Hybrid PASS. Exclusive/exclusivef acik 30s med3 **PASS** with LEAF=8 KiB + other-thread scans; RSS ~2× (not a win). |
 | acik `--release` + maps | Needs stackmap **nounwind** (else LLVM 18 invoke/statepoint crash). |
 | acik hybrid smoke | Invalid ~15× was Non-2xx (missing demo schema). Valid tip≈sys ~**8.5×** on 9950X; hybrid still 0 marks. |
 | Fiber parked stacks | Cover `@context.stack_top` frames |
@@ -158,14 +160,15 @@ product reason to invest.
     acik records ~139k → **~306k** (`…/acik-denser-emit/`).
 11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
     gate (makecontext); Direct/Indirect refuse off-stack loads.
-12. **exclusivef stabilize** — still partial / **not cut-ready**. Denser emit +
-    `NEAR_DELTA=128` clears in-range Crystal misses (`…/acik-parked-miss/`).
-    FP-fill fill-all required; miss-only **SEGV** (`…/acik-selective-fill/`).
-    Re-cut under retain=0 (`…/2026-08-04-acik-exclusivef-defaults/`): 15s smoke
-    OK (~88% thr @ ~1.8×); 30s med3 **2/3 ThreadPool crash**, exclusive
-    **collect hang**. Surviving exclusivef fp_fill ~10 KiB (was ~0.57 MiB) —
-    RSS no longer the blocker; correctness is. Keep product path without
-    `PRECISE_STACK` / `PRECISE_FIBERS`.
+12. ~~**exclusivef stabilize**~~ **done** (correctness; not RSS).
+    Root causes: exclusive skipped other-thread STW word scans; exclusivef
+    `LEAF=0` + FP-fill missed stack slots outside tiny `[rsp,fp)` (fiber smoke
+    SEGV). Fix: restore other-thread scans; mutator spill 16 KiB; default
+    LEAF=8 KiB + additive FP-fill; harness no longer forces LEAF=0. Med3
+    (`…/2026-08-04-acik-exclusivef-stabilize-med3/`): exclusive **95.7%** @
+    **2.07×**, exclusivef **98.9%** @ **1.91×**, 0/3 Non-2xx / hang. Prior
+    flake: `…/2026-08-04-acik-exclusivef-defaults/`. Still research-only —
+    product path without `PRECISE_STACK`. **Next:** Darwin acik RSS proof.
 13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
     dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
 14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,
@@ -213,6 +216,8 @@ product reason to invest.
 27. ~~**Kemal thr profil (9950X)**~~ **done** (`…/kemal-thr-profil/`) —
     munmap tax real but wall-small; KEEP absolute ~**+4%** rps; soft/hard
     thr gates still MISS (shard-only exhausted).
+28. **Darwin acik RSS proof** — exclusive/hybrid A/B on macOS vs ~18× tip.
+    Linux exclusive stabilize closed (item 12); maps still the Darwin lever.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet; ship PAGE_DONTNEED / mostly-empty as defaults.
