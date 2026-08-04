@@ -8,11 +8,16 @@ module Gcry
     # through mark_root_candidate → mark_impl → mark_impl_unlocked; the case
     # only runs on the type_id gate reject path, so the hot path is unchanged.
     private enum RootSource
+      # Running mutator stack (SP→bottom / spill window).
       Stack
       Static
       Thread
       # Heap-to-heap edges — must not FREE-claim (would retain freelists).
       Heap
+      # Compiler stack-map precise roots (mark_precise_root). Attribution only.
+      Precise
+      # Parked fiber stack word-scan (and Crystal GC.push_stack).
+      Parked
     end
 
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
@@ -40,6 +45,16 @@ module Gcry
     # ambient roots so allow_interior_pointers still applies.
     private def mark_explicit_root(pointer : Void*) : Nil
       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Stack)
+    end
+
+    # Compiler stack-map / precise-root entry (docs/STACK_MAPS.md). Same mark
+    # policy as add_root; no type_id_gate. Safe to call only during collect.
+    # Invoked by StackMaps walker when precise_stack_roots (GCRY_PRECISE_STACK=1).
+    def mark_precise_root(pointer : Void*) : Nil
+      raise "mark_precise_root outside of collect" unless @collecting
+      return if pointer.null?
+      @precise_stack_roots_marked += 1
+      mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Precise)
     end
 
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
@@ -80,7 +95,8 @@ module Gcry
       # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
       if BlockHeader.free?(header)
         return unless @tlab_enabled && @stop_the_world
-        return unless source == RootSource::Stack || source == RootSource::Thread
+        return unless source == RootSource::Stack || source == RootSource::Thread ||
+                      source == RootSource::Parked
         if base_only && addr != BlockHeader.user_from(header).address
           return
         end
@@ -109,10 +125,11 @@ module Gcry
       if gate_type_id && !type_id_plausible?(header)
         @type_id_root_rejects += 1
         case source
-        when RootSource::Stack  then @type_id_stack_rejects += 1
+        when RootSource::Stack, RootSource::Parked
+          @type_id_stack_rejects += 1
         when RootSource::Static then @type_id_static_rejects += 1
         when RootSource::Thread then @type_id_thread_rejects += 1
-        when RootSource::Heap
+        when RootSource::Heap, RootSource::Precise
           # no dedicated counter
         end
         note_false_root(addr)
@@ -125,7 +142,59 @@ module Gcry
       end
 
       heap_set_mark(header)
+      note_first_mark(header, source) if @live_attr_roots
       @mark_stack.push(header)
+    end
+
+    # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
+    # the root path that *seeded* them; Heap = transitive closure via edges.
+    # *_atomic_bytes: malloc_atomic slabs first reached from that source (acik
+    # 32 KiB IO buffers). Optional watch type_id → first_mark_watch_*.
+    private def note_first_mark(header : BlockHeader*, source : RootSource) : Nil
+      bytes = header.value.size.to_u64
+      atomic = BlockHeader.atomic?(header)
+      case source
+      when RootSource::Stack
+        @first_mark_stack_objects += 1
+        @first_mark_stack_bytes += bytes
+        @first_mark_stack_atomic_bytes += bytes if atomic
+      when RootSource::Parked
+        @first_mark_parked_objects += 1
+        @first_mark_parked_bytes += bytes
+        @first_mark_parked_atomic_bytes += bytes if atomic
+      when RootSource::Static
+        @first_mark_static_objects += 1
+        @first_mark_static_bytes += bytes
+        @first_mark_static_atomic_bytes += bytes if atomic
+      when RootSource::Thread
+        @first_mark_thread_objects += 1
+        @first_mark_thread_bytes += bytes
+        @first_mark_thread_atomic_bytes += bytes if atomic
+      when RootSource::Precise
+        @first_mark_precise_objects += 1
+        @first_mark_precise_bytes += bytes
+        @first_mark_precise_atomic_bytes += bytes if atomic
+      when RootSource::Heap
+        @first_mark_heap_objects += 1
+        @first_mark_heap_bytes += bytes
+        @first_mark_heap_atomic_bytes += bytes if atomic
+      end
+
+      watch = @live_attr_watch_tid
+      return if watch == 0
+      return if bytes < 4
+      # Payload starts after BlockHeader (same as heap_dump / live_attr_kind).
+      user = Pointer(UInt8).new(header.as(Void*).address + BlockHeader::SIZE)
+      tid = user.as(Int32*).value
+      return unless tid == watch
+      case source
+      when RootSource::Stack   then @first_mark_watch_stack += 1
+      when RootSource::Parked  then @first_mark_watch_parked += 1
+      when RootSource::Static  then @first_mark_watch_static += 1
+      when RootSource::Thread  then @first_mark_watch_thread += 1
+      when RootSource::Precise then @first_mark_watch_precise += 1
+      when RootSource::Heap    then @first_mark_watch_heap += 1
+      end
     end
 
     # Keep allocation alive without scanning its payload (integer / index buffers).
@@ -589,16 +658,15 @@ module Gcry
     end
 
     # After mark, before sweep. Allocation-free (no Crystal Proc/closure).
+    # World stopped; registry quiesced at stop_world (no concurrent mutate).
+    #
+    # Boehm rule: enqueue finalizers for unmarked objects, then *resurrect*
+    # them (mark + rematerialize) so sweep does not reclaim before
+    # run_pending. Otherwise Socket/Digest#finalize runs on freed memory
+    # (acik wrk SEGV). Weak links clear while still unmarked. Next collect
+    # reclaims if nothing else holds the object.
     private def enqueue_unreachable_finalizers : Nil
-      i = 0
-      while i < @finalizers.entry_count
-        if unmarked_live_object?(@finalizers.entry_object_at(i))
-          @finalizers.queue_and_remove_entry_at(i)
-        else
-          i += 1
-        end
-      end
-
+      # Disappearing links first — targets still look dead for WeakRef.
       i = 0
       while i < @finalizers.link_count
         if unmarked_live_object?(@finalizers.link_object_at(i))
@@ -607,6 +675,19 @@ module Gcry
           i += 1
         end
       end
+
+      i = 0
+      while i < @finalizers.entry_count
+        obj = @finalizers.entry_object_at(i)
+        if unmarked_live_object?(obj)
+          @finalizers.queue_and_remove_entry_at(i)
+          mark_candidate(obj) unless obj.null?
+        else
+          i += 1
+        end
+      end
+
+      mark_loop unless @mark_stack.empty?
     end
 
     private def unmarked_live_object?(obj : Void*) : Bool

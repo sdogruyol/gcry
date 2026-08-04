@@ -12,7 +12,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Core language | **Crystal** | C |
 | Model | Conservative STW (nursery / incremental opt-in) | Conservative BDW |
 | Fibers | STW + fiber / stack roots + SP clamp + scrub | LibGC + thread bottoms |
-| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / munmap still experimental | Yes |
+| Parallel OS threads | **Supported opt-in:** EC>1 + TLAB **off** + lazy sweep (~79% `/json`); TLAB-on / `PARALLEL_RELEASE` **unsupported** | Yes |
 | Fork | atfork reinit (default) | `GC_set_handle_fork` |
 | Finalizers / WeakRef | Yes (same-thread after collect) | Yes |
 | Empty-chunk RSS | Release **default-on** | LibGC reclaim |
@@ -20,7 +20,7 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 | Precise / moving | No (needs compiler) | No |
 | Platforms | **Linux + macOS** (soft-dirty Linux-only) | Broad |
 | Kemal `/json` (Linux v0.16 carry) | thr ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](PERF.md) | baseline |
-| Kemal `/json` (macOS v0.17.0) | thr ~**84%**, post-GC RSS ~**0.93×** — [PERF-macos.md](PERF-macos.md) | baseline |
+| Kemal `/json` (macOS tip) | thr ~**84%**, post-GC RSS ~**1.01×** — [PERF-macos.md](PERF-macos.md) | baseline |
 
 ## Pick gcry when
 
@@ -31,10 +31,13 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## Stay on Boehm when
 
-- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (still experimental in gcry)
+- You need Parallel EC **with TLAB** or empty-chunk munmap under EC>1 (unsupported in gcry)
 - Windows process GC today; Darwin soft-dirty / nursery parity
 - You need `Process.fork` under ExecutionContext (Crystal forbids it either way)
 - You want zero-tuning production defaults across OS targets (gcry Parallel needs resize + measure)
+
+Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
+[PERF.md](PERF.md) “Secondary suite”; not a Boehm replacement claim.
 
 ## Smoke before you claim readiness
 
@@ -49,4 +52,4 @@ Both are **conservative mark–sweep**. gcry is Crystal-native, STW-by-default, 
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**3.43×** Linux / ~**18×** Darwin) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~1× macOS tip). Fat-app Linux tip is ~**1–1.6×** Boehm after finalizer + retain=0 (v0.17 i3 cut was ~**3.43×**); Darwin tip acik is ~**0.63×** (was ~**18×** at v0.17). Layout / type_id / SP clamp alone did not close the old gap — correct finalizers did most of the work. Stack maps remain research-only for precise roots. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).

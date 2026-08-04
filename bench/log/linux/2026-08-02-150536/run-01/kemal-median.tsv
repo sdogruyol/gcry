@@ -1,0 +1,13 @@
+tag	path	trial	rps	rss_kib
+boehm	/	1	85860.43	16860
+gcry	/	1	63795.07	13144
+boehm	/json	1	39097.93	16684
+gcry	/json	1	32927.83	12964
+boehm	/	2	92103.06	15800
+gcry	/	2	74604.51	13472
+boehm	/json	2	40653.91	16196
+gcry	/json	2	34029.00	13044
+boehm	/	3	92052.49	15672
+gcry	/	3	75829.11	13100
+boehm	/json	3	40251.19	15728
+gcry	/json	3	34012.84	13088

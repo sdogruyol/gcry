@@ -146,17 +146,27 @@ module Gcry
 
     # Yield each GP register word saved at suspend for *id* (may be empty).
     def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
+      with_thread_gregs(id) do |gregs, n|
+        j = 0
+        while j < n
+          yield Pointer(Void).new(gregs[j])
+          j += 1
+        end
+      end
+    end
+
+    # Yield the raw glibc gregs snapshot for *id* (x86_64: REG_R8=0 … REG_RIP=16).
+    # Used by StackMaps to resolve DWARF register locations at the suspend PC.
+    def self.with_thread_gregs(id : LibC::PthreadT, & : Pointer(UInt64), Int32 ->) : Nil
       return unless @@stw_enabled && @@stw_booted
       claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
         if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
           n = @@stw_ngregs[i]
-          j = 0
-          while j < n
-            yield Pointer(Void).new(@@stw_gregs[i][j])
-            j += 1
-          end
+          return if n <= 0
+          # StaticArray(StaticArray) is contiguous — cast slot to UInt64*.
+          yield (@@stw_gregs.to_unsafe + i).as(UInt64*), n
           return
         end
         i += 1

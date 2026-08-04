@@ -1,0 +1,23 @@
+import json,sys
+a0=json.load(open(sys.argv[1])); a1=json.load(open(sys.argv[2]))
+e0,e1=int(sys.argv[3]),int(sys.argv[4])
+def mib(x): return x/1024/1024
+def mx(a):
+  m=a.get("max_size_class") or {}
+  return mib(m.get("atomic_bytes",0)), m.get("atomic_objects", m.get("count",0)), mib(a["total_bytes"])
+at0,n0,t0=mx(a0); at1,n1,t1=mx(a1)
+print(f"idle-drain: estab {e0}→{e1}  max_atomic {at0:.1f}→{at1:.1f} MiB  live {t0:.1f}→{t1:.1f} MiB")
+# Heuristic
+if e1 <= 2 and at1 > 40:
+  print("verdict: B-leaning (sockets drained, ~80MiB atomics remain → false roots / unreclaimed graph)")
+elif at1 <= max(8.0, 0.15*at0) and e1 <= e0:
+  print("verdict: A/C-leaning (atomics fell with drain → true live IO / pool)")
+else:
+  print("verdict: mixed — inspect top_type_ids + PG pool")
+print("top typed post→idle (type_id MiB):")
+def tops(a):
+  return {t["type_id"]:(t["bytes"],t["count"]) for t in (a.get("top_type_ids") or [])[:8]}
+tpost,tidle=tops(a0),tops(a1)
+for tid in sorted(set(tpost)|set(tidle), key=lambda i: -(tidle.get(i,tpost.get(i,(0,0))[0])):
+  b0,c0=tpost.get(tid,(0,0)); b1,c1=tidle.get(tid,(0,0))
+  print(f"  {tid:6d}  {mib(b0):5.1f}→{mib(b1):5.1f} MiB  n={c0}→{c1}")

@@ -7,7 +7,7 @@ module Gcry
       # stack_top may sit on the PROT_NONE guard; cheap safe skips leading
       # unreadable pages then bulk-scans (see Roots.scan_range_safe).
       Roots.scan_range(stack_top, stack_bottom, safe: true) do |candidate|
-        mark_root_candidate(candidate, source: RootSource::Stack)
+        mark_root_candidate(candidate, source: RootSource::Parked)
       end
     end
 
@@ -34,15 +34,16 @@ module Gcry
         # Scheduler + ExecutionContext hold run queues / event-loop state. Relying
         # only on conservative Thread body scan missed them when layout/scan_cap
         # truncated the object (Kemal EC4 SEGV @ …0008).
-        # Same flag gate as Crystal Thread: under `-Dwithout_mt` these ivars and
-        # Fiber::ExecutionContext do not exist (CI fork_reinit / Darwin samples).
-        {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+        # Gate on the ivar itself: Crystal 1.21.0 release declares
+        # @execution_context by default; tip needs -Dexecution_context
+        # (-Dpreview_mt). Flag-only gates break one of the two.
+        {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
           mark_ref_slot(pointerof(thread.@scheduler).address)
           mark_ref_slot(pointerof(thread.@execution_context).address)
         {% end %}
       end
 
-      {% if (!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context) %}
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
         # Global EC list (not thread-local) — keeps contexts that temporarily have
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|
@@ -68,9 +69,106 @@ module Gcry
     private def scan_mutator_stack : Nil
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
-      Roots.scan_mutator(bottom) do |candidate|
+      if @precise_stack_exclusive
+        # Exclusive: no full SP→bottom word scan (RSS experiment). Still need
+        # setjmp regs + a shallow window for LLVM spill slots in active frames;
+        # stackmaps cover call-site lives via FP walk below.
+        Roots.each_spilled_register do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Stack)
+        end
+        scan_exclusive_mutator_spill_window(bottom)
+      else
+        Roots.scan_mutator(bottom) do |candidate|
+          mark_root_candidate(candidate, source: RootSource::Stack)
+        end
+      end
+      scan_precise_mutator_stack(bottom)
+    end
+
+    # Below SP (+ red zone): catch LLVM spill slots maps/FP walk miss without
+    # scanning the whole fiber high-water (exclusive's RSS point). 4 KiB was
+    # too shallow under acik --release (ThreadPool UAF / collect hang); 16 KiB
+    # still << full stack.
+    EXCLUSIVE_MUTATOR_SPILL_WINDOW = 16_u64 * 1024
+
+    private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
+      red = STACK_SCAN_RED_ZONE.to_u64
+      sp = Roots.hardware_stack_pointer.address
+      win = EXCLUSIVE_MUTATOR_SPILL_WINDOW
+      low = sp > (red &+ win) ? sp - red - win : 0_u64
+      hi = bottom.address
+      return unless low < hi
+      Roots.scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Stack)
       end
+    end
+
+    # Precise roots from `.llvm_stackmaps`. Hybrid (=1): capped mutator FP
+    # walk (conservative still covers the stack; other-thread leaf needs
+    # Parallel EC gregs). Exclusive (=2): full FP walk, no word scan.
+    private def scan_precise_mutator_stack(bottom : Void*) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.ensure_loaded
+
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
+        rsp = Roots.hardware_stack_pointer.address
+        rbp = uninitialized UInt64
+        {% if flag?(:x86_64) %}
+          asm("movq %rbp, $0" : "=r"(rbp) :: "volatile")
+        {% else %}
+          asm("mov $0, x29" : "=r"(rbp) :: "volatile")
+        {% end %}
+        lo = rsp > STACK_SCAN_RED_ZONE ? rsp - STACK_SCAN_RED_ZONE : 0_u64
+        hi = bottom.address
+        max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
+        StackMaps.each_root_fp_walk(rsp, rbp, lo, hi, max_frames) do |ptr|
+          mark_precise_root(ptr)
+        end
+      {% end %}
+    end
+
+    private def scan_precise_thread_stack(pthread : LibC::PthreadT, stack_lo : UInt64, stack_hi : UInt64) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.loaded? || StackMaps.ensure_loaded
+
+      {% if flag?(:linux) && flag?(:x86_64) %}
+        Platform.with_thread_gregs(pthread) do |gregs, n|
+          return if n < 17
+          # glibc: REG_RBP=10, REG_RSP=15, REG_RIP=16
+          rbp = gregs[10]
+          rsp = gregs[15]
+          rip = gregs[16]
+          lo = stack_lo
+          hi = stack_hi
+          StackMaps.each_root_near(rip, rsp, rbp, gregs, n, lo, hi) do |ptr|
+            mark_precise_root(ptr)
+          end
+          if @precise_stack_exclusive && lo < hi
+            StackMaps.each_root_fp_walk(rsp, rbp, lo, hi) do |ptr|
+              mark_precise_root(ptr)
+            end
+          end
+        end
+      {% end %}
+    end
+
+    # Precise roots for a parked fiber (x86_64-sysv swapcontext layout).
+    # Uses synthetic gregs + RSP@ret; skips FP walk when RBP not on-stack
+    # (makecontext / never-started fibers).
+    private def scan_precise_parked_fiber(fiber : Fiber, guard : UInt64, bottom : UInt64) : Nil
+      return unless @precise_stack_roots
+      return unless StackMaps.loaded? || StackMaps.ensure_loaded
+
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
+        top = fiber.@context.stack_top.address
+        min_spill = {% if flag?(:aarch64) %} StackMaps::PARKED_AARCH64_SPILL_WORDS * 8 {% else %} 64 {% end %}
+        return unless top >= guard && (top &+ min_spill) <= bottom
+
+        max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
+        StackMaps.each_root_parked_sysv(top, guard, bottom, max_frames) do |ptr|
+          mark_precise_root(ptr)
+        end
+      {% end %}
     end
 
     # True when more than the usual main + ExecutionContext Monitor threads
@@ -92,7 +190,7 @@ module Gcry
     #   dormant-all cuts RSS ~3× but thr ~25%). Opt in:
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded);
     #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy RSS max);
-    #   GCRY_PARALLEL_RELEASE=1 — EC1-style munmap excess (can hang/soft).
+    #   GCRY_PARALLEL_RELEASE=1 — unsupported munmap excess (can hang/soft).
     property parallel_empty_chunk_dormant : Bool = false
     property parallel_empty_chunk_dormant_all : Bool = false
     property parallel_empty_chunk_munmap : Bool = false
@@ -109,16 +207,30 @@ module Gcry
     end
 
     # Post-STW sweep: freelist locks serialize alloc into the class being
-    # swept (TLAB-off). Dormant-only empty reclaim is OK (chunks stay linked).
-    # Munmap / HOLED freelist rebuild stay in-STW only — post-STW munmap of
-    # excess empties was REJECT'd (SEGV + thr cliff; see FINDINGS munmap-lazy).
+    # swept (TLAB-off).
+    #
+    # Parallel: dormant-only empty reclaim (chunks stay linked). Post-STW
+    # munmap of excess empties was REJECT'd (SEGV + thr cliff; FINDINGS
+    # munmap-lazy) — keep that gate.
+    #
+    # EC1: allow post-STW sweep **with** munmap pending-list (pause excludes
+    # O(heap) walk). Sole mutator rebuilds `@chunks`; other threads (SYSMON)
+    # spin via `@block_other_heap` during the post-STW section.
     private def sweep_after_world? : Bool
       return false unless @lazy_sweep
-      return false unless multi_mutator_threads?
       return false if @tlab_enabled
-      return false if munmap_empty_chunks_this_collect?
       return false if @madvise_free_pages
+      unless multi_mutator_threads?
+        return true
+      end
+      return false if munmap_empty_chunks_this_collect?
       true
+    end
+
+    # EC1 post-STW: rebuild `@chunks` so munmap drops leave the list (Parallel
+    # after_world must not — map_chunk races).
+    private def relink_chunks_after_world? : Bool
+      !multi_mutator_threads?
     end
 
     private def munmap_empty_chunks_this_collect? : Bool
@@ -213,10 +325,88 @@ module Gcry
         top = fiber_stack_scan_top(fiber, guard, stw_multi)
         next unless top < bottom
 
-        Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
-          mark_root_candidate(candidate, source: RootSource::Stack)
+        # Precise walk of parked swapcontext frames (hybrid additive).
+        unless fiber.running?
+          scan_precise_parked_fiber(fiber, guard, bottom)
+        end
+
+        # Word scan:
+        # - Hybrid: always.
+        # - Exclusive default: full parked top→bottom.
+        # - Exclusive + fibers_exclusive: LEAF window (default 8 KiB) plus
+        #   optional FP-frame fill. LEAF=0 + fill-only misses stack slots
+        #   outside tiny [rsp,fp) spans (stackmap_exclusive_fiber_smoke SEGV).
+        if @precise_stack_exclusive
+          next if fiber.running?
+          if @precise_stack_fibers_exclusive
+            scan_exclusive_parked_fiber_leaf(top, bottom)
+            if @precise_stack_fiber_fp_fill
+              filled = scan_exclusive_parked_fp_fill(fiber, guard, bottom)
+              # No usable FP chain (makecontext / stale RBP) and no leaf →
+              # full parked word-scan for this fiber (correctness floor).
+              if !filled && @precise_stack_fiber_leaf_bytes == 0
+                Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+                  mark_root_candidate(candidate, source: RootSource::Parked)
+                end
+              end
+            elsif @precise_stack_fiber_leaf_bytes == 0
+              # Pure maps, no fill, no leaf — research UAF path
+              # (GCRY_DISABLE_FIBER_FP_FILL=1 + LEAF=0).
+            end
+          else
+            Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+              mark_root_candidate(candidate, source: RootSource::Parked)
+            end
+          end
+        else
+          Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(bottom), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Parked)
+          end
         end
       end
+    end
+
+    private def scan_exclusive_parked_fiber_leaf(top : UInt64, bottom : UInt64) : Nil
+      win = @precise_stack_fiber_leaf_bytes
+      return if win == 0
+      hi = top &+ win
+      hi = bottom if hi > bottom
+      return unless top < hi
+      Roots.scan_range(Pointer(Void).new(top), Pointer(Void).new(hi), safe: true) do |candidate|
+        mark_root_candidate(candidate, source: RootSource::Parked)
+      end
+    end
+
+    # Word-scan parked FP-chain frame bodies. Additive safety net with LEAF.
+    # Default: every frame. Opt-in miss-only (GCRY_FIBER_FP_FILL_MISS_ONLY=1)
+    # skips nonempty map hits — acik UAF. Returns true when the FP chain was
+    # walkable (at least one frame yielded).
+    private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Bool
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
+        top = fiber.@context.stack_top.address
+        min_spill = {% if flag?(:aarch64) %} StackMaps::PARKED_AARCH64_SPILL_WORDS * 8 {% else %} 64 {% end %}
+        return false unless top >= guard && (top &+ min_spill) <= bottom
+        max_frames = StackMaps::MAX_FP_FRAMES
+        miss_only = @precise_stack_fiber_fp_fill_miss_only
+        saw = false
+        StackMaps.each_parked_fp_frame_range(top, guard, bottom, max_frames, miss_only) do |lo, hi, do_fill|
+          saw = true
+          span = hi - lo
+          unless do_fill
+            @parked_fp_fill_skipped_frames += 1
+            @parked_fp_fill_skipped_bytes += span
+            next
+          end
+          @parked_fp_fill_frames += 1
+          @parked_fp_fill_bytes += span
+          Roots.scan_range(Pointer(Void).new(lo), Pointer(Void).new(hi), safe: true) do |candidate|
+            mark_root_candidate(candidate, source: RootSource::Parked)
+          end
+        end
+        saw
+      {% else %}
+        false
+      {% end %}
     end
 
     private def scan_other_thread_stacks : Nil
@@ -240,10 +430,30 @@ module Gcry
         sp = Platform.thread_sp(pthread)
         pthread_bounds = Platform.pthread_stack_bounds(pthread)
 
+        # Precise stack-map roots (additive). Prefer fiber bounds when SP is on
+        # a fiber; else pthread mapping.
+        if @precise_stack_roots
+          lo = 0_u64
+          hi = 0_u64
+          if fiber
+            st = fiber.@stack
+            lo = st.pointer.address + Roots::PAGE_SIZE
+            hi = st.bottom.address
+          elsif pthread_bounds
+            lo = pthread_bounds[0].address
+            hi = pthread_bounds[1].address
+          end
+          scan_precise_thread_stack(pthread, lo, hi) if lo < hi
+        end
+
         unless multi
           # current_fiber can be nil (idle Monitor / mid-swap). Skipping the
           # whole thread left Darwin CI stw_sp_clamp at hits=0 fallbacks=0 and
           # missed OS-stack roots. Scan pthread bounds when fiber is absent.
+          #
+          # Exclusive skips *mutator* full-stack word scan only — other threads
+          # under STW still need conservative coverage (gregs + maps alone
+          # missed SYSMON roots → acik ThreadPool UAF / collect hang).
           if fiber
             mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Thread)
             scan_other_thread_fiber_ec1(fiber, sp, pthread_bounds)
@@ -265,7 +475,7 @@ module Gcry
         # swapcontext saves the previous SP. If we only trust current_fiber +
         # stack_top, live frames below a stale top (still holding SP) are
         # swept → Kemal EC>1 SEGV @ 0x4. Always scan the stack that contains
-        # the suspend SP (red zone included).
+        # the suspend SP (red zone included). Exclusive must keep this too.
         scan_stack_containing_sp(sp)
 
         # Pthread mapping: scheduler/main frames remain here while SP sits on
@@ -403,19 +613,17 @@ module Gcry
     end
 
     private def mark_metadata_roots : Nil
-      # No Crystal Proc/closure — allocating mid-mark re-enters malloc.
+      # Finalizer/link tables are LibC storage (not GC roots for Entry.object).
+      # Only mark callback closure_data so Proc captures stay alive. Marking the
+      # old Crystal Array buffer kept every finalizable object forever (acik
+      # TCPSocket/Digest + 32 KiB IO buffers; finalizers never ran).
+      # World stopped; registry quiesced at stop_world.
       n = @finalizers.entry_count
-      if n > 0
-        mark_candidate(@finalizers.entries_buffer)
-        i = 0
-        while i < n
-          data = @finalizers.entry_closure_data_at(i)
-          mark_candidate(data) unless data.null?
-          i += 1
-        end
-      end
-      if @finalizers.link_count > 0
-        mark_candidate(@finalizers.links_buffer)
+      i = 0
+      while i < n
+        data = @finalizers.entry_closure_data_at(i)
+        mark_candidate(data) unless data.null?
+        i += 1
       end
     end
 

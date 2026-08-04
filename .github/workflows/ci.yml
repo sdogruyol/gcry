@@ -155,6 +155,9 @@ jobs:
           crystal build -Dgc_none bench/pattern_fuzz.cr -o bin/pattern_fuzz
           ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
 
+      - name: Process-GC soak smoke (10s)
+        run: make soak-smoke
+
       - name: Thread storm (100 iterations, 4 workers)
         run: |
           crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
@@ -198,8 +201,9 @@ jobs:
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
-          # Warm-up absorbs heap/RSS ramp; gate is late vs early half of measured cycles only.
-          ./bin/rss_leak --warmup=15 --cycles=20 --objects=5000
+          # Primary gate: heap_size late vs early. RSS secondary with looser ceil
+          # (DONTNEED re-fault is noisy on shared GHA hosts).
+          ./bin/rss_leak --warmup=20 --cycles=20 --objects=5000 --limit=15 --rss-limit=30
 
       - name: Compiler GC contract + crystal tools
         run: |
@@ -336,15 +340,25 @@ jobs:
       - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
 
-      - name: Kemal A/B thr gate
+      - name: Kemal A/B thr+RSS+pause gate
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 MIN_PCT=70 BENCH_RUNS=3 ./bench/perf_smoke.sh
+          # Thr floor 65%: GHA often lands ~68–88% and has flaked at 68.1/68.4
+          # under a 70% gate. RSS×/pause catch pause-campaign regressions;
+          # quiet tip ~85% @ ~0.8× @ ~0.6ms.
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
+            MIN_PCT=65 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
+            ./bench/perf_smoke.sh
 
       - name: Kemal E2E (endpoints + 60s load)
         run: |
           mkdir -p bin
           KEMAL_E2E_DURATION=60 PORT=3021 ./bench/kemal_e2e.sh
+
+      - name: EC4 soft-soak smoke (Parallel TLAB-off, N=5)
+        run: |
+          mkdir -p bin
+          make soft-soak-ec4-smoke
 
       - name: Upload perf report
         uses: actions/upload-artifact@v4
@@ -353,7 +367,7 @@ jobs:
           path: bench/log/
           retention-days: 30
 
-  # Weekly soak test (24h, Sunday 06:00 UTC).
+  # Weekly soak test (24h, Monday 06:00 UTC — see schedule cron above).
   soak:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest

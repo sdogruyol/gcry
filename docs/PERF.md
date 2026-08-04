@@ -17,7 +17,7 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 | `/json` | **~87%** | **~0.80×** |
 | `/` | **~82%** | **~0.79×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline; fat-app (acikturkiye) re-cut: thr **~90%** @ RSS **~3.43×** — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`2026-08-02-064142/`). Quiet Kemal smoke (`2026-08-02-065113/`) landed **~83%** `/json` (Boehm louder); **headline stays the v0.16 cut above**.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **tip+EC after finalizer + Linux retain=0** is thr **~90–96%** @ RSS **~1–1.6×** (i3 headline **~96%** @ **~1.63×**; 9950X **~90–100%** @ **~1.0–1.6×**) — [ACIKTURKIYE.md](ACIKTURKIYE.md). Opt-in `GCRY_TIGHT_GROW=1` closes the freelist residual on acik (**~103%** @ **~0.92×**, `…/acik-tight-grow-v2-med3/`); Kemal `/json` soft (~**78%**) — not default. Quiet Kemal smokes land **~80–85%** `/json` @ **~0.75–0.79×** (host/Boehm noise; retain=0 no cliff) — **headline stays the v0.16 cut above**.
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 
@@ -31,8 +31,8 @@ escapes). Soft soak **0/40**. Quiet cut:
 | `/json` | **~78.8%** | ~69k | ~**8.5 ms** | ~**5.8×** | `2026-08-01-ec4-lazy-sweep/` |
 
 Same-host follow-ups often land **~83–88%** (Boehm noise). Stretch ~80%
-closed as accepted. Still experimental: `GCRY_TLAB=1`, Parallel empty
-munmap (`GCRY_PARALLEL_RELEASE`). Hub:
+closed as accepted. **Unsupported** (stderr warn; not product):
+`GCRY_TLAB=1`, Parallel empty munmap (`GCRY_PARALLEL_RELEASE`). Hub:
 `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
 
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
@@ -40,7 +40,33 @@ munmap (`GCRY_PARALLEL_RELEASE`). Hub:
 | `/` | 81846 | 66841 | **81.7%** | **0.79×** |
 | `/json` | 35780 | 31067 | **86.8%** | **0.80×** |
 
-`GCRY_KEEP_CHUNKS=1` was last measured in the 0.9 era (~**95%** `/json` @ ~**3×** RSS) — re-measure before citing against this cut. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+`GCRY_KEEP_CHUNKS=1` re-measured in the parked 0.18 campaign (**95%** `/json` @ **3.07×** RSS) — see Unreleased notes below; not a release headline. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+
+### Unreleased — 0.18 campaign notes *(not a tagged cut)*
+
+Working notes only — **do not cite as a release headline.**
+Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+
+| Session | Config | `/json` % | RSS × |
+|---------|--------|----------:|------:|
+| `2026-08-02-120500/` | EC1 tip baseline (i3) | **87.9%** | **0.81×** |
+| `2026-08-02-152806/` | EC1 confirm soft (i3) | **85.4%** | **0.76×** |
+| `2026-08-02-121411/` | `GCRY_KEEP_CHUNKS=1` (i3) | **95.0%** | **3.07×** |
+| `2026-08-02-145600/` | EC4 reclaim-off (i3) | **80.5%** | **5.48×** |
+| `2026-08-03-072122/` | EC1 tip (9950X) | **82.5%** | **0.76×** |
+| `2026-08-03-072954/` | EC1 confirm (9950X) | **80.3%** | **0.76×** |
+| `2026-08-03-080248/` | `KEEP_CHUNKS=1` (9950X) | **90.1%** | **3.23×** |
+| `2026-08-04-042404/` | retain=0 defaults (9950X) | **85.0%** | **0.78×** |
+| `2026-08-04-045839/` | tip i3 | **~80%** | **0.75×** |
+| `2026-08-04-kemal-thr-profil/` | tip + KEEP contrast (9950X) | **~80%** / KEEP abs **~+4%** | **0.79×** / **~3.4×** |
+| `2026-08-04-085740/` | `GCRY_TIGHT_GROW=1` (9950X) | **77.6%** | **0.78×** |
+
+Gate **≥95% @ ≤1.0×** and soft **≥90% @ ≤0.85×** missed without KEEP RSS tax.
+9950X hunt closed MISS; retain=0 reconfirm still MISS
+(`2026-08-02-018-FINDINGS.md`, `2026-08-04-kemal-thr-profil/`). Parallel dormant
+default-on rejected; `GCRY_PARALLEL_DORMANT=1` remains the Parallel RSS opt-in
+(~75% @ ~4×). Fat-app freelist residual: `GCRY_TIGHT_GROW=1` (acik **~0.92×**;
+Kemal thr soft — [ACIKTURKIYE.md](ACIKTURKIYE.md)).
 
 ### v0.15.0 Linux cut (superseded headline)
 
@@ -83,7 +109,8 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.6.0 + `GCRY_RELEASE_CHUNKS=1` | ~92% | ~92% | — | thr cost for RSS |
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
-| `GCRY_KEEP_CHUNKS=1` (0.9 era) | — | ~**95%** | ~**3×** | thr↑ RSS↑ escape — re-measure vs **0.16.0** cut |
+| `GCRY_KEEP_CHUNKS=1` (0.18 campaign re-cut) | **~89%** | **~95%** | **~3.07×** | thr escape only — `2026-08-02-121411/` (unreleased) |
+| `GCRY_TIGHT_GROW=1` (0.18 campaign) | **~95%** | **~78%** | **~0.78×** | fat-app RSS win; Kemal thr soft — `2026-08-04-085740/` (unreleased) |
 | `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
@@ -93,6 +120,38 @@ Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numb
 `Gcry.pause_stats` — ring of last 64 STW pauses: `last_ns`, `p50_ns`, `p99_ns`, `max_ns`, `total_ns`, `count`.
 
 Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier can re-scan pages before sweep; nursery (`GCRY_NURSERY`) stays off for process HTTP unless you are measuring p99. Soft-dirty is **Linux-only**.
+
+## Secondary suite — crystal-metric (GC subset)
+
+**Not a ship headline.** Product bar stays Kemal `/json` + [ACIKTURKIYE.md](ACIKTURKIYE.md).
+
+Vendored [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under `bench/crystal_metric/`. Same-host Boehm vs gcry **wall time**, **one fresh OS process per bench** (avoids suite-order pollution — shared-process `JsonParsePure` after `JsonGenerate` falsely looked ~20×). Filters: `FILTER=gc|core|stress|all` — see `bench/crystal_metric/README.md`. Compute-bound language benches (Mandelbrot, Nbody, …) are noise — omit from GC claims.
+
+```sh
+make bench-crystal-metric
+# smoke: TRIALS=1 FILTER=Binarytrees,JsonParsePure,Threadring bash bench/run_crystal_metric_ab.sh
+```
+
+### Shared-process cut (superseded methodology)
+
+`bench/log/linux/2026-08-03-crystal-metric-ec1/` — useful only as a cautionary tale (Pure/Primes inflated by prior benches). Prefer process-fresh cuts below.
+
+### Process-fresh cut (cite this)
+
+Session: `bench/log/linux/2026-08-03-crystal-metric-fresh/` (WSL2 i3-12100F, Crystal 1.21, med-of-3, `FILTER=gc`).
+
+| Bench | speed % Boehm | wall × | Notes |
+|-------|-------------:|-------:|-------|
+| Brainfuck / Brainfuck2 / Matmul / JsonGenerate | **~100–112%** | ~0.9–1.0× | near parity / slight win |
+| Threadring | **~97%** | ~1.03× | Channel/fiber |
+| RegexDna | **~88%** | ~1.13× | |
+| JsonParsePull / Serializable | **~70%** | ~1.4× | typed/pull JSON |
+| Revcomp / Knuckeotide | **~58–72%** | ~1.4–1.7× | string/Hash |
+| Binarytrees | **~32%** | ~3.1× | tree churn |
+| JsonParsePure | **~16%** | ~6.4× | `JSON::Any` Hash forest (was ~20× shared-process) |
+| Primes | **~14%** | ~7.3× | sieve alloc storm (real; not order artifact) |
+
+Peak RSS × (median of per-bench peaks): **~0.63×**. Checksum `err` on Crystal ≥1.21 is OK for timing. Do **not** cite the upstream award total as a gcry score.
 
 ## How to record (Linux)
 
@@ -104,4 +163,5 @@ LABEL=linux-$(date +%Y%m%d) ./bench/median_kemal_boehm.sh
 LABEL=linux-$(date +%Y%m%d) ./bench/median_acikturkiye_boehm.sh
 # or: GC=both COUNT=1 TRIALS=3 bash bench/run_all.sh all
 # after wrk: curl …/gc-collect && read RSS
+# secondary: make bench-crystal-metric
 ```

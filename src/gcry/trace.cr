@@ -98,10 +98,17 @@ module Gcry
         len = append_u64(buf, len, "live_objects", heap.live_objects)
         len = append_u64(buf, len, "heap_size", heap.heap_size)
         len = append_u64(buf, len, "pause_ns", heap.last_pause_ns)
+        len = append_u64(buf, len, "clear_ns", heap.last_phase_clear_ns)
+        len = append_u64(buf, len, "scrub_ns", heap.last_phase_scrub_ns)
+        len = append_u64(buf, len, "roots_ns", heap.last_phase_roots_ns)
+        len = append_u64(buf, len, "static_ns", heap.last_phase_static_ns)
+        len = append_u64(buf, len, "stacks_ns", heap.last_phase_stacks_ns)
         len = append_u64(buf, len, "mark_ns", heap.last_phase_mark_ns)
         len = append_u64(buf, len, "sweep_ns", heap.last_phase_sweep_ns)
-        len = append_u64(buf, len, "scrub_ns", heap.last_phase_scrub_ns)
-        append_u64(buf, len, "roots_ns", heap.last_phase_roots_ns)
+        len = append_u64(buf, len, "stw_stop_ns", heap.last_phase_stw_stop_ns)
+        len = append_u64(buf, len, "stw_start_ns", heap.last_phase_stw_start_ns)
+        # Post-STW reclaim (munmap / dormant / page release / large trim).
+        append_u64(buf, len, "flush_ns", heap.last_phase_flush_ns)
       end
     end
 

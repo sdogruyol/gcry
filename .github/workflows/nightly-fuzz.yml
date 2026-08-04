@@ -20,4 +20,5 @@ jobs:
         run: |
           mkdir -p bin
           crystal build --release bench/fuzz.cr -o bin/fuzz
-          ./bin/fuzz 1800 42
+          # fuzz.cr only accepts --seconds= / --seed= (positional args were a no-op).
+          ./bin/fuzz --seconds=1800 --seed=42

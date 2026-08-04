@@ -1,0 +1,4 @@
+variant	trial	rps	rss_kib	marked	records
+boehm	1	415.44	45916	0	0
+base	1	276.21	717008	0	0
+hybrid	1	135.96	666860	0	86135

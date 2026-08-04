@@ -1,0 +1,9 @@
+Running 15s test @ http://127.0.0.1:3614/api/v1/
+  2 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   809.82ms  584.58ms   2.00s    58.70%
+    Req/Sec    58.46     41.31   191.00     68.89%
+  1648 requests in 15.04s, 57.28MB read
+  Socket errors: connect 0, read 0, write 0, timeout 68
+Requests/sec:    109.59
+Transfer/sec:      3.81MB

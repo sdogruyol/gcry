@@ -1,0 +1,51 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-selective-fill/exclusive bin=exclusive trials=1 d=15s
+  trial=1 ...   precise_mode=2
+ok
+live_objects=58028 total_MiB=96.2 typed_MiB=2.4 collision_MiB=71.3 raw_MiB=22.5 large_MiB=10.6
+gcstats size_class_live_MiB=82.7 live_objects=97309
+stack_maps_loaded=True records=307302 hits=69193 precise_marked=9948
+first_mark MiB: mutator=0.1 parked=5.5 static=0.0 thread=0.0 precise=3.9 heap=83.6
+first_mark ATOMIC MiB: mutator=0.1 parked=5.3 precise=3.8 heap=72.5
+top size_classes (payload → MiB / count):
+  32768     81.4 MiB  n=2618
+     32      0.6 MiB  n=25899
+  12288      0.5 MiB  n=104
+    320      0.4 MiB  n=1312
+  20480      0.3 MiB  n=81
+     48      0.2 MiB  n=4974
+     64      0.2 MiB  n=3718
+   6144      0.2 MiB  n=92
+    640      0.2 MiB  n=4142
+  14336      0.2 MiB  n=84
+    128      0.2 MiB  n=3964
+    160      0.1 MiB  n=1614
+max_size_class 32768 breakdown MiB:
+  typed=0.1 collision=69.8 raw=11.5
+  atomic=81.4 ptrish=0.0 byteish=81.3
+top typed type_ids:
+       1      1.3 MiB  n=27984
+     441      0.4 MiB  n=1296
+     437      0.2 MiB  n=583
+     576      0.0 MiB  n=90
+     572      0.0 MiB  n=1191
+     193      0.0 MiB  n=535
+     621      0.0 MiB  n=620
+     405      0.0 MiB  n=65
+     904      0.0 MiB  n=150
+     625      0.0 MiB  n=88
+     467      0.0 MiB  n=98
+     210      0.0 MiB  n=257
+top collision type_ids (false typed on big blocks):
+      88     34.6 MiB  n=1106
+      49     30.6 MiB  n=979
+   27836      1.8 MiB  n=56
+      82      1.6 MiB  n=52
+      80      1.0 MiB  n=33
+     405      0.8 MiB  n=169
+     155      0.4 MiB  n=39
+   55809      0.1 MiB  n=3
+     139      0.1 MiB  n=10
+      94      0.0 MiB  n=12
+     356      0.0 MiB  n=16
+      62      0.0 MiB  n=8
+done OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-selective-fill/exclusive

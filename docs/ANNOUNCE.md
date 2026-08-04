@@ -29,7 +29,7 @@ Cite [PERF-macos.md](PERF-macos.md). **v0.17.0** Darwin re-cut: `/` ~**90%**, `/
 ## When to stay on Boehm
 
 - Windows process GC; Darwin soft-dirty / nursery parity
-- Parallel EC **with TLAB** or empty munmap (still experimental); or zero-tuning Parallel defaults
+- Parallel EC **with TLAB** or empty munmap (unsupported); or zero-tuning Parallel defaults
 - Need `Process.fork` under ExecutionContext (Crystal forbids it; gcry atfork helps `-Dwithout_mt` / `LibC.fork` only)
 
 ## Channels

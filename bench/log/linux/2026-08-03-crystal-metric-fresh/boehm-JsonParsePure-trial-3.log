@@ -1,0 +1,2 @@
+JsonParsePure: err result=JsonParsePure::Coordinate(@x=0.49995358947126856, @y=0.5000557786699196, @z=0.5007583687182323), but expected=JsonParsePure::Coordinate(@x=0.4999535894712113, @y=0.5000557786698896, @z=0.5007583687182091) in 0.722s, award 1.0
+0.7218s, 1.00/1, 1.00

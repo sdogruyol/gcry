@@ -66,9 +66,11 @@ module GC
       # so a fat cache is wasteful; 1 MiB floor avoids mmap churn for the common case.
       heap.large_cache_retain = 1048576_u64
     {% else %}
-      # Linux: 16 MiB dormant chunk retain budget (down from 64 MiB in v0.12.0,
-      # up from a prior 8 MiB that regressed acikturkiye RSS+thr via mmap churn).
-      heap.empty_chunk_retain = 16_u64 * 1024_u64 * 1024_u64
+      # Linux: munmap empty size-class chunks (no dormant retain). Prior 16 MiB
+      # retain + adaptive large-cache (→32 MiB) left acik ~2× Boehm RSS after the
+      # finalizer fix; release0 med3 (`…/acik-release0-med3/`) tied Boehm RSS at
+      # ~94% thr. Escape: GCRY_EMPTY_CHUNK_RETAIN=<bytes>.
+      heap.empty_chunk_retain = 0_u64
       # Linux: scrub parked fiber stacks to cut false retention from stale
       # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
       # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
@@ -77,9 +79,9 @@ module GC
       # is outside the root-scan window; no durable thr/RSS win).
       heap.scrub_fibers_enabled = true
       heap.blacklist_enabled = true
-      # Large-cache stays at Heap::DEFAULT_LARGE_CACHE_RETAIN (4 MiB). A 1 MiB
-      # Linux floor was tried with HOLED default-on and did not help; adaptive
-      # still grows on high hit-rate. Escape: GCRY_LARGE_CACHE=<bytes>.
+      # Large-object freelist: no retain (was 4 MiB floor, adaptive → 32 MiB).
+      # Escape: GCRY_LARGE_CACHE=<bytes> (adaptive may grow from a non-zero floor).
+      heap.large_cache_retain = 0_u64
     {% end %}
     # type_id_gate on *static* ambient roots (BSS false hits). Stack/thread
     # roots stay ungated: Channel/Deque buffers and similar raw allocations
@@ -271,7 +273,7 @@ module GC
     # Parallel: reclaim off by default.
     #   GCRY_PARALLEL_DORMANT=1 — DONTNEED within empty_chunk_retain (bounded).
     #   GCRY_PARALLEL_DORMANT_ALL=1 — DONTNEED every empty (legacy; thr↓).
-    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (risky; can hang).
+    #   GCRY_PARALLEL_RELEASE=1 — munmap excess (UNSUPPORTED; can hang).
     if env_flag_one?("GCRY_KEEP_CHUNKS")
       heap.release_empty_chunks = false
     elsif env_flag_one?("GCRY_RELEASE_CHUNKS")
@@ -284,6 +286,10 @@ module GC
       heap.parallel_empty_chunk_dormant_all = true
     end
     if env_flag_one?("GCRY_PARALLEL_RELEASE")
+      warn_unsupported_env(
+        "gcry: WARNING: GCRY_PARALLEL_RELEASE=1 is unsupported (can hang / force in-STW sweep). " \
+        "Supported Parallel RSS opt-in is GCRY_PARALLEL_DORMANT=1. See docs/POLICY.md\n"
+      )
       heap.parallel_empty_chunk_munmap = true
       heap.parallel_empty_chunk_dormant = true
     end
@@ -294,6 +300,9 @@ module GC
 
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
       heap.empty_chunk_retain = retain
+    end
+    if warm = env_u64("GCRY_EMPTY_CHUNK_WARM_RETAIN")
+      heap.empty_chunk_warm_retain = warm
     end
 
     if env_flag_one?("GCRY_DISABLE_MADVISE")
@@ -317,6 +326,54 @@ module GC
       # Linux HOLED free-page release stays OPT-IN (`GCRY_PAGE_DONTNEED=1`).
       # Default-on was measured to regress Kemal and acik thr/RSS: HOLED freelist
       # rebuild blows sweep cost and abandoned free pages cause chunk churn.
+      #
+      # Tight small-heap growth: prefer newest-chunk freelist + sparse
+      # GC-before-grow. Acik med3 ~103% thr @ ~0.92× RSS (vs ~1.56× control).
+      # Opt-in until Kemal reconfirm; then consider Linux process default.
+      #   GCRY_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW_GC=1
+      if env_flag_one?("GCRY_TIGHT_GROW")
+        heap.tight_grow = true
+      end
+      if env_flag_one?("GCRY_DISABLE_TIGHT_GROW")
+        heap.tight_grow = false
+      end
+      if env_flag_one?("GCRY_DISABLE_TIGHT_GROW_GC")
+        heap.tight_grow_gc = false
+      end
+      #
+      # Mostly-empty (HOLED-less) is a separate research knob:
+      #   GCRY_MOSTLY_EMPTY=1           — MADV_FREE free pages in ≤25%-live chunks
+      #   GCRY_MOSTLY_EMPTY_MODE=dontneed — unlink free-only runs + DONTNEED (churn risk)
+      #   GCRY_MOSTLY_EMPTY_PCT / GCRY_MOSTLY_EMPTY_BUDGET
+      # Ignored when PAGE_DONTNEED is on (HOLED owns the path).
+      if env_flag_one?("GCRY_MOSTLY_EMPTY") && !heap.madvise_free_pages
+        heap.mostly_empty_release = true
+        if pct = env_u64("GCRY_MOSTLY_EMPTY_PCT")
+          # Avoid NamedTuple/clamp alloc during GC.init — clamp manually.
+          p = pct
+          p = 1_u64 if p < 1
+          p = 100_u64 if p > 100
+          heap.mostly_empty_max_live_pct = p.to_u32
+        end
+        if budget = env_u64("GCRY_MOSTLY_EMPTY_BUDGET")
+          heap.mostly_empty_budget = budget
+        end
+        # LibC.getenv only — ENV[] allocates and can SEGV during GC.init.
+        mode = LibC.getenv("GCRY_MOSTLY_EMPTY_MODE")
+        unless mode.null?
+          # "dontneed" (case-sensitive ASCII); any other value keeps MADV_FREE.
+          # Measured REJECT on acik (COLLECT_HANG 2/3) — research only.
+          heap.mostly_empty_dontneed =
+            mode[0] == 'd'.ord.to_u8 && mode[1] == 'o'.ord.to_u8 &&
+              mode[2] == 'n'.ord.to_u8 && mode[3] == 't'.ord.to_u8 &&
+              mode[4] == 'n'.ord.to_u8 && mode[5] == 'e'.ord.to_u8 &&
+              mode[6] == 'e'.ord.to_u8 && mode[7] == 'd'.ord.to_u8 &&
+              mode[8] == 0
+          if heap.mostly_empty_dontneed
+            warn_unsupported_env("gcry: GCRY_MOSTLY_EMPTY_MODE=dontneed is research-only (COLLECT_HANG risk); not a product default\n")
+          end
+        end
+      end
     {% end %}
 
     if env_flag_one?("GCRY_INTERIOR")
@@ -377,8 +434,13 @@ module GC
       heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
     end
 
-    # Parallel ExecutionContext support (experimental).
+    # TLAB under Parallel is UNSUPPORTED (supported opt-in keeps TLAB off).
+    # Knob retained for research / A/B only — emits a stderr warning.
     if env_flag_one?("GCRY_TLAB")
+      warn_unsupported_env(
+        "gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC " \
+        "(supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md\n"
+      )
       heap.tlab_enabled = true
     end
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
@@ -424,12 +486,79 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+    # Compiler stack maps (docs/STACK_MAPS.md). Section load is lazy on first
+    # collect. Needs CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
+    #   GCRY_PRECISE_STACK=1 — hybrid (precise + conservative stacks)
+    #   GCRY_PRECISE_STACK=2 — exclusive mutator/other-thread (parked fibers
+    #     still word-scanned unless GCRY_PRECISE_FIBERS=1)
+    case env_digit("GCRY_PRECISE_STACK")
+    when 1
+      heap.precise_stack_roots = true
+    when 2
+      heap.precise_stack_roots = true
+      heap.precise_stack_exclusive = true
+      warn_unsupported_env("gcry: GCRY_PRECISE_STACK=2 exclusive — research only; incomplete maps can UAF\n")
+    end
+    if env_flag_one?("GCRY_PRECISE_FIBERS")
+      heap.precise_stack_fibers_exclusive = true
+      # Optional leaf window (bytes). Default 8 KiB (property). Cap 16 MiB.
+      # LEAF=0 = maps + FP-fill only (research; exclusive_fiber_smoke needs ≥8k
+      # or full-scan fallback when the FP chain is unusable).
+      if leaf = env_u64("GCRY_PRECISE_FIBER_LEAF")
+        heap.precise_stack_fiber_leaf_bytes = leaf.clamp(0_u64, 16_u64 * 1024 * 1024)
+      end
+      # Escape: GCRY_DISABLE_FIBER_FP_FILL=1 → leaf/maps only (no FP-frame fill).
+      if env_flag_one?("GCRY_DISABLE_FIBER_FP_FILL")
+        heap.precise_stack_fiber_fp_fill = false
+      end
+      # Research: GCRY_FIBER_FP_FILL_MISS_ONLY=1 → skip fill on map-hit frames.
+      # acik exclusivef UAF with this — map hit ≠ complete live set.
+      if env_flag_one?("GCRY_FIBER_FP_FILL_MISS_ONLY")
+        heap.precise_stack_fiber_fp_fill_miss_only = true
+        warn_unsupported_env("gcry: GCRY_FIBER_FP_FILL_MISS_ONLY=1 — research; UAF risk\n")
+      end
+      warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research\n")
+    end
+    # Research: parked map-miss PC ring on /gc-stats (exclusivef gap hunt).
+    if env_flag_one?("GCRY_STACKMAP_MISS_LOG")
+      Gcry::StackMaps.miss_log = true
+    end
+    if near = env_u64("GCRY_STACKMAP_NEAR_DELTA")
+      Gcry::StackMaps.near_delta = near
+    end
+    # Research: first-mark root-source counters + /gc-live-attr size/type summary.
+    if env_flag_one?("GCRY_LIVE_ATTR")
+      heap.live_attr_roots = true
+    end
+    # Watch one Crystal type_id's first-mark sources (e.g. TCPSocket=441).
+    if wtid = env_u64("GCRY_LIVE_ATTR_WATCH_TID")
+      if wtid > 0 && wtid <= Int32::MAX.to_u64
+        heap.live_attr_watch_tid = wtid.to_i32
+        heap.live_attr_roots = true
+      end
+    end
+  end
+
+  # stderr warn for knobs that stay wired for research but are not a product path.
+  # LibC.write avoids allocating during GC.init / apply_env_config.
+  private def self.warn_unsupported_env(msg : String) : Nil
+    LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
   end
 
   private def self.env_flag_one?(name : String) : Bool
     flag = LibC.getenv(name)
     return false if flag.null?
     flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+  end
+
+  # Single ASCII digit env (e.g. GCRY_PRECISE_STACK=1|2). Nil if unset/invalid.
+  private def self.env_digit(name : String) : Int32?
+    flag = LibC.getenv(name)
+    return nil if flag.null?
+    ch = flag.value
+    return nil unless ch >= '0'.ord.to_u8 && ch <= '9'.ord.to_u8
+    return nil unless (flag + 1).value == 0
+    (ch - '0'.ord.to_u8).to_i32
   end
 
   private def self.env_u64(name : String) : UInt64?
@@ -550,6 +679,13 @@ module GC
   def self.add_root(object : Reference)
     return unless @@gcry_ready
     Gcry.default_heap.add_root(Pointer(Void).new(object.object_id))
+  end
+
+  # Precise stack-map root (compiler / frame walker). No-op unless process GC
+  # is ready; raises if called outside collect. See docs/STACK_MAPS.md.
+  def self.mark_precise_root(pointer : Void*) : Nil
+    return unless @@gcry_ready
+    Gcry.default_heap.mark_precise_root(pointer)
   end
 
   def self.register_disappearing_link(pointer : Void**)

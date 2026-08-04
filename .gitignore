@@ -8,6 +8,14 @@
 .cache
 .DS_Store
 
+# Local scratch (acik rebuild bins, probe trees)
+.tmp/
+.tmp-*/
+
+# Local bench Postgres / Cursor project bits (not ship)
+.bench-pg/
+.cursor/
+
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them
 /shard.lock
@@ -16,6 +24,12 @@
 /bench/kemal/lib/
 /bench/kemal/.shards/
 /bench/kemal/shard.lock
+
+# Nested crystal-metric bench deps / upstream results cache
+/bench/crystal_metric/lib/
+/bench/crystal_metric/.shards/
+/bench/crystal_metric/shard.lock
+/bench/crystal_metric/results.js
 
 # Generated perf artifacts (not cross-host baselines)
 /bench/trend.json

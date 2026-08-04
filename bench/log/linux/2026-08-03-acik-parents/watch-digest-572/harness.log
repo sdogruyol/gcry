@@ -1,0 +1,70 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/watch-digest-572 bin=exclusive trials=1 d=12s
+  trial=1 ...  426822  precise_mode=0
+estab_post=0
+ok
+live_objects=34120 total_MiB=90.0 typed_MiB=6.7 collision_MiB=59.7 raw_MiB=23.5 large_MiB=15.2
+gcstats size_class_live_MiB=73.3 live_objects=23153
+stack_maps_loaded=False records=0 hits=0 precise_marked=0
+first_mark MiB: mutator=0.0 parked=10.6 static=0.0 thread=0.0 precise=0.0 heap=77.8
+first_mark ATOMIC MiB: mutator=0.0 parked=10.3 precise=0.0 heap=67.0
+top size_classes (payload → MiB / count):
+  32768     72.4 MiB  n=2326
+    320      0.4 MiB  n=1630
+  20480      0.3 MiB  n=68
+     32      0.2 MiB  n=6917
+    640      0.2 MiB  n=4710
+  14336      0.2 MiB  n=91
+  12288      0.1 MiB  n=111
+     64      0.1 MiB  n=3825
+  16384      0.1 MiB  n=68
+   1024      0.1 MiB  n=90
+     80      0.1 MiB  n=1010
+  10240      0.1 MiB  n=61
+max_size_class 32768 breakdown MiB:
+  typed=1.0 collision=58.9 raw=12.5
+  atomic=72.4 ptrish=0.1 byteish=71.3
+top typed type_ids:
+       1      5.2 MiB  n=8381
+     437      0.8 MiB  n=395
+     441      0.3 MiB  n=1143
+     576      0.1 MiB  n=90
+     193      0.0 MiB  n=532
+     572      0.0 MiB  n=956
+     467      0.0 MiB  n=111
+     625      0.0 MiB  n=87
+     210      0.0 MiB  n=257
+     456      0.0 MiB  n=88
+     457      0.0 MiB  n=88
+     622      0.0 MiB  n=86
+top collision type_ids (false typed on big blocks):
+      88     29.8 MiB  n=953
+      49     27.5 MiB  n=881
+   27836      1.0 MiB  n=32
+     155      0.3 MiB  n=39
+     405      0.2 MiB  n=29
+     211      0.1 MiB  n=12
+      62      0.1 MiB  n=10
+     306      0.1 MiB  n=9
+      94      0.1 MiB  n=16
+      37      0.1 MiB  n=10
+      34      0.1 MiB  n=7
+     667      0.1 MiB  n=2
+  idle 30s ... estab_idle=0
+idle-drain: estab 0→0  max_atomic 72.4→72.4 MiB  live 90.0→84.3 MiB
+verdict: B-leaning (sockets drained, atomics remain → false roots / unreclaimed graph)
+watch_tid=572 [post]: stack=0, parked=0, static=0, thread=0, precise=0, heap=955
+watch_tid=572 [idle]: stack=0, parked=0, static=0, thread=0, precise=0, heap=1038
+top typed post→idle (type_id MiB):
+     441    0.3→  0.4 MiB  n=1143→1147
+       1    5.2→  0.3 MiB  n=8381→6190
+     576    0.1→  0.0 MiB  n=90→0
+     437    0.8→  0.0 MiB  n=395→433
+     193    0.0→  0.0 MiB  n=532→0
+     572    0.0→  0.0 MiB  n=956→1038
+     625    0.0→  0.0 MiB  n=87→0
+     537    0.0→  0.0 MiB  n=0→204
+     467    0.0→  0.0 MiB  n=111→61
+     672    0.0→  0.0 MiB  n=0→101
+     904    0.0→  0.0 MiB  n=0→48
+ok
+done OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/watch-digest-572

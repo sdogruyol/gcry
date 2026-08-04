@@ -1,0 +1,7 @@
+State      Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43718       
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43500       
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43532       
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43780       
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43818       
+CLOSE-WAIT 1      0          127.0.0.1:3801    127.0.0.1:43148       

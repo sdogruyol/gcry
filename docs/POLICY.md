@@ -12,7 +12,7 @@ Product rules for **Linux** (x86_64 + aarch64) and **macOS** (arm64 + x86_64), C
 
 No soft heap cap, no null-return malloc. Crystal expects raise / abort.
 
-Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`, Linux process default **4 MiB** / Darwin **1 MiB**). Empty size-class chunks: **munmap outside STW** by default (`GCRY_KEEP_CHUNKS=1` to retain).
+Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`; Linux process default **0** / Darwin **1 MiB**). Empty size-class chunks: **munmap outside STW** by default (Linux dormant retain **0**; Darwin **512 KiB**; `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` to retain).
 
 ## Fork
 
@@ -39,7 +39,7 @@ the async handler — allocating there is the normal mutator path. That does
 | Mode | Support |
 |------|---------|
 | ExecutionContext, parallelism **1** | **Supported** — STW + fiber / Monitor stacks |
-| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); `GCRY_TLAB=1` / munmap experimental; `GCRY_PARALLEL_MARK` often **hurts** HTTP — measure |
+| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); RSS stretch `GCRY_PARALLEL_DORMANT=1` (~75% @ ~4×). `GCRY_TLAB=1` / `GCRY_PARALLEL_RELEASE=1` are **unsupported** (stderr warn; research/A/B only — hang/SEGV risk). `GCRY_PARALLEL_MARK` often **hurts** HTTP — measure |
 | `-Dpreview_mt` | Unsupported (deprecated) |
 | `-Dwithout_mt` | API works; prefer 1.21 default |
 
@@ -49,9 +49,10 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 
 | Kind | After reclaim |
 |------|----------------|
-| Large | Freelist + trim (`GCRY_LARGE_CACHE`) |
-| Size-class chunks | Empty → **munmap** (default); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` escapes |
+| Large | Freelist + trim (`GCRY_LARGE_CACHE`; Linux default retain **0**) |
+| Size-class chunks | Empty → **munmap** (Linux retain **0**; Darwin dormant **512 KiB**); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` / warm retain escapes |
 | Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
+| Fat-app freelist residual | `GCRY_TIGHT_GROW=1` (opt-in; acik ~0.92×; Kemal thr soft — not default) |
 
 ## Incremental / barriers
 

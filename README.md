@@ -149,6 +149,13 @@ EOF
 
 No clone. No install. Just Docker.
 
+**You only need the normal Crystal install (1.21+).** Install the shard,
+build with `-Dgc_none`, done. You do **not** need a special Crystal build.
+
+(There is an optional research mode that can use extra compiler data for
+more precise GC. It is off unless you turn it on, and almost nobody needs
+it. Details: [docs/STACK_MAPS.md](docs/STACK_MAPS.md).)
+
 ---
 
 ## Why a second option alongside Boehm?
@@ -178,26 +185,26 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 | Kemal `/json` throughput | **~87%** *(carry v0.16)* (~95% with `GCRY_KEEP_CHUNKS=1`, 0.9-era) |
 | Kemal `/json` post-GC RSS | **~0.80x** *(carry v0.16)* |
 | Kemal `/` throughput | **~82%** *(carry v0.16)* |
-| Fat app `/api/v1/` throughput | **~90%** |
-| Fat app `/api/v1/` RSS | **~3.43x** |
+| Fat app `/api/v1/` throughput | **~90–96%** *(tip; v0.17 carry)* |
+| Fat app `/api/v1/` RSS | **~1–1.6x** *(tip)* / **~0.92x** *(`GCRY_TIGHT_GROW=1`)* / **~3.43x** *(v0.17 i3 cut)* |
 
-\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app: `2026-08-02-064142/` — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
+\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app tip: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.6×**. Opt-in `GCRY_TIGHT_GROW=1` → acik **~103%** @ **~0.92×** (Kemal thr soft; not default) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
 
 ### macOS (Apple Silicon)
 
-| Workload | gcry vs Boehm (v0.17.0)* |
-|----------|------------------------:|
+| Workload | gcry vs Boehm (tip)* |
+|----------|--------------------:|
 | Kemal `/json` throughput | **~84%** |
-| Kemal `/json` post-GC RSS | **~0.93x** |
-| Kemal `/` throughput | **~90%** |
-| Fat app `/api/v1/` throughput | **~71%** |
+| Kemal `/json` post-GC RSS | **~1.01x** |
+| Kemal `/` throughput | **~91%** |
+| Fat app `/api/v1/` throughput | **~90%** |
+| Fat app `/api/v1/` RSS | **~0.63x** |
 
-\*Kemal + acik: `bench/log/macos/2026-08-02-085522/` (median-of-3, scrub on). Fat-app RSS ~**18×** — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+\*Kemal: `bench/log/macos/2026-08-04-172842/` (median-of-3, scrub on). Fat app: `…/2026-08-04-acik-stackmap/` tip base — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md). Tagged v0.17 carry was Kemal ~84% @ ~0.93× / acik ~71% @ ~18×.
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-That fat-app RSS (~3.43x Linux / ~18x Darwin, measured) is an honest number. Stack maps will bring it to ~1.2x.
-Until then, we live with this reality. We don't hide our numbers.
+Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**0.63x** (was ~**18x** at v0.17). Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
 
 ### Pause distribution (Kemal `/json`, Linux)
 
@@ -286,6 +293,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
+| [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |

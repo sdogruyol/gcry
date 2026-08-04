@@ -1,0 +1,107 @@
+{
+  "suite": "crystal-metric",
+  "role": "secondary_gc",
+  "platform": "linux",
+  "host": "WSL2 x86_64 i3-12100F",
+  "crystal": "1.21+",
+  "git": "ba07c51+",
+  "trials": 3,
+  "filter": "Binarytrees,Brainfuck,Brainfuck2,Knuckeotide,RegexDna,Revcomp,Threadring,Matmul,Primes,JsonGenerate,JsonParsePure,JsonParseSerializable,JsonParsePull",
+  "benches": [
+    {
+      "bench": "Binarytrees",
+      "boehm_s_med": 1.181,
+      "gcry_s_med": 2.945,
+      "gcry_speed_pct_of_boehm": 40.1,
+      "gcry_wall_x": 2.494
+    },
+    {
+      "bench": "Brainfuck",
+      "boehm_s_med": 3.946,
+      "gcry_s_med": 4.02,
+      "gcry_speed_pct_of_boehm": 98.2,
+      "gcry_wall_x": 1.019
+    },
+    {
+      "bench": "Brainfuck2",
+      "boehm_s_med": 1.675,
+      "gcry_s_med": 1.663,
+      "gcry_speed_pct_of_boehm": 100.7,
+      "gcry_wall_x": 0.993
+    },
+    {
+      "bench": "JsonGenerate",
+      "boehm_s_med": 1.17,
+      "gcry_s_med": 1.261,
+      "gcry_speed_pct_of_boehm": 92.8,
+      "gcry_wall_x": 1.078
+    },
+    {
+      "bench": "JsonParsePull",
+      "boehm_s_med": 0.542,
+      "gcry_s_med": 0.785,
+      "gcry_speed_pct_of_boehm": 69.0,
+      "gcry_wall_x": 1.448
+    },
+    {
+      "bench": "JsonParsePure",
+      "boehm_s_med": 0.616,
+      "gcry_s_med": 12.552,
+      "gcry_speed_pct_of_boehm": 4.9,
+      "gcry_wall_x": 20.377
+    },
+    {
+      "bench": "JsonParseSerializable",
+      "boehm_s_med": 0.554,
+      "gcry_s_med": 0.897,
+      "gcry_speed_pct_of_boehm": 61.8,
+      "gcry_wall_x": 1.619
+    },
+    {
+      "bench": "Knuckeotide",
+      "boehm_s_med": 1.158,
+      "gcry_s_med": 2.116,
+      "gcry_speed_pct_of_boehm": 54.7,
+      "gcry_wall_x": 1.827
+    },
+    {
+      "bench": "Matmul",
+      "boehm_s_med": 0.558,
+      "gcry_s_med": 0.567,
+      "gcry_speed_pct_of_boehm": 98.4,
+      "gcry_wall_x": 1.016
+    },
+    {
+      "bench": "Primes",
+      "boehm_s_med": 1.069,
+      "gcry_s_med": 9.182,
+      "gcry_speed_pct_of_boehm": 11.6,
+      "gcry_wall_x": 8.589
+    },
+    {
+      "bench": "RegexDna",
+      "boehm_s_med": 1.114,
+      "gcry_s_med": 1.087,
+      "gcry_speed_pct_of_boehm": 102.5,
+      "gcry_wall_x": 0.976
+    },
+    {
+      "bench": "Revcomp",
+      "boehm_s_med": 1.043,
+      "gcry_s_med": 1.453,
+      "gcry_speed_pct_of_boehm": 71.8,
+      "gcry_wall_x": 1.393
+    },
+    {
+      "bench": "Threadring",
+      "boehm_s_med": 1.047,
+      "gcry_s_med": 1.045,
+      "gcry_speed_pct_of_boehm": 100.2,
+      "gcry_wall_x": 0.998
+    }
+  ],
+  "boehm_peak_rss_kib_med": 1793372,
+  "gcry_peak_rss_kib_med": 1417220,
+  "peak_rss_x": 0.79,
+  "note": "Informational only. Product bar remains Kemal /json + acikturkiye. speed_pct>100 means gcry faster (less wall). Some benches err checksum on Crystal 1.21; wall times still used."
+}

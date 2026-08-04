@@ -1,0 +1,21 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-04-acik-exclusivef-defaults-smoke
+probe=/home/uchiha/playground/gcry/../crystal/bin/crystal
+bin_dir=/home/uchiha/playground/gcry/.tmp/acik-bin
+variants=boehm exclusive exclusivef trials=1 duration=15s
+=== Build ===
+  SKIP_BUILD=1 — using existing /home/uchiha/playground/gcry/.tmp/acik-bin/acikturkiye-*
+=== Run ===
+  boehm trial=1 ... 120.08 req/s rss=53824KiB marked=0 non2xx=0
+  exclusive trial=1 ... 110.08 req/s rss=62824KiB marked=505 non2xx=0
+  exclusivef trial=1 ... 106.13 req/s rss=94744KiB marked=203 non2xx=0
+# acikturkiye stackmap A/B
+
+| variant | thr med | RSS KiB med | marked med | non2xx |
+|---------|--------:|------------:|-----------:|-------:|
+| boehm | 120.1 (100.0% Boehm) | 53824 (1.00×) | 0 | 0 |
+| exclusive | 110.1 (91.7% Boehm) | 62824 (1.17×) | 505 | 0 |
+| exclusivef | 106.1 (88.4% Boehm) | 94744 (1.76×) | 203 | 0 |
+
+Source: `/home/uchiha/playground/gcry/bench/log/linux/2026-08-04-acik-exclusivef-defaults-smoke/acik-stackmap.tsv`
+
+Done → /home/uchiha/playground/gcry/bench/log/linux/2026-08-04-acik-exclusivef-defaults-smoke

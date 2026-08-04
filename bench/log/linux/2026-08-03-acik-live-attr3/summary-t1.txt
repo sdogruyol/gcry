@@ -1,0 +1,46 @@
+live_objects=49774 total_MiB=96.1 typed_MiB=3.8 collision_MiB=71.3 raw_MiB=21.0 large_MiB=8.3
+gcstats size_class_live_MiB=84.5 live_objects=60870
+stack_maps_loaded=True records=138986 hits=63921 precise_marked=6151
+first_mark MiB: stack=5.4 static=0.0 thread=0.0 precise=2.0 heap=85.0
+top size_classes (payload → MiB / count):
+  32768     82.7 MiB  n=2658
+     32      0.6 MiB  n=20088
+    320      0.5 MiB  n=1772
+    640      0.5 MiB  n=4111
+  20480      0.4 MiB  n=78
+  12288      0.3 MiB  n=74
+  14336      0.3 MiB  n=88
+  16384      0.3 MiB  n=89
+     80      0.2 MiB  n=2623
+     64      0.2 MiB  n=3077
+     48      0.2 MiB  n=4068
+    160      0.2 MiB  n=1018
+max_size_class 32768 breakdown MiB:
+  typed=0.8 collision=69.5 raw=12.4
+  atomic=82.7 ptrish=0.1 byteish=81.8
+top typed type_ids:
+       1      1.8 MiB  n=26058
+     435      0.8 MiB  n=974
+     439      0.4 MiB  n=1313
+      78      0.1 MiB  n=31
+     902      0.1 MiB  n=450
+       5      0.1 MiB  n=149
+     570      0.0 MiB  n=1168
+     334      0.0 MiB  n=10
+     191      0.0 MiB  n=465
+     619      0.0 MiB  n=578
+     535      0.0 MiB  n=332
+      96      0.0 MiB  n=820
+top collision type_ids (false typed on big blocks):
+      88     35.6 MiB  n=1140
+      49     30.4 MiB  n=974
+   27836      2.3 MiB  n=73
+     155      0.7 MiB  n=91
+      82      0.4 MiB  n=14
+     405      0.4 MiB  n=65
+      80      0.3 MiB  n=9
+     665      0.1 MiB  n=8
+     112      0.1 MiB  n=3
+   55809      0.1 MiB  n=3
+     356      0.1 MiB  n=37
+      78      0.1 MiB  n=20

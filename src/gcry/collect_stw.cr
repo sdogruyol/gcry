@@ -43,12 +43,13 @@ module Gcry
     end
 
     # Non-collector threads must not mutate the heap or take GC.lock_read while
-    # STW is active (SYSMON is signal-exempt — see stop_world).
+    # STW is active (SYSMON is signal-exempt — see stop_world), or during EC1
+    # post-STW `@chunks` rebuild / pending munmap (`@block_other_heap`).
     private def wait_if_world_stopped_other_thread : Nil
-      return unless @world_stopped
+      return unless @world_stopped || @block_other_heap
       owner = @stw_owner
       return if owner && Thread.current == owner
-      until !@world_stopped
+      until !@world_stopped && !@block_other_heap
         Intrinsics.pause
       end
     end
@@ -105,12 +106,15 @@ module Gcry
       !name.nil? && name == "SYSMON"
     end
 
-    # stop_world only after root-list mutators finish add/delete (see @roots_lock).
+    # stop_world only after root-list / finalizer-table mutators finish
+    # (see @roots_lock, Finalizers::Registry#lock_for_stw).
     private def stop_world_quiescing_roots : Nil
       @roots_lock.lock
+      @finalizers.lock_for_stw
       begin
         stop_world
       ensure
+        @finalizers.unlock_for_stw
         @roots_lock.unlock
       end
     end
@@ -158,6 +162,7 @@ module Gcry
     def after_fork_child_reinit : Nil
       @world_stopped = false
       @stw_owner = nil
+      @block_other_heap = false
       @collecting = false
       @running_finalizers = false
       @incremental_marking = false

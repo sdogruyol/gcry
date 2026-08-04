@@ -1,0 +1,4 @@
+/lib/
+/.shards/
+/shard.lock
+/results.js

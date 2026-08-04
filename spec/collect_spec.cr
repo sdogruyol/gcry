@@ -20,6 +20,21 @@ describe "Gcry::Heap collection" do
     end
   end
 
+  it "mark_precise_root keeps objects alive during collect" do
+    heap = Gcry::Heap.new
+    begin
+      keep = heap.malloc(64)
+      garbage = heap.malloc(64)
+      heap.before_collect { heap.mark_precise_root(keep) }
+      heap.collect(scan_stack: false)
+      heap.live?(keep).should be_true
+      heap.live?(garbage).should be_false
+      heap.precise_stack_roots_marked.should eq(1)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "traces pointers inside non-atomic objects" do
     heap = Gcry::Heap.new
     begin
@@ -203,6 +218,33 @@ it "keeps empty chunks dormant within empty_chunk_retain" do
     heap.released_chunk_bytes.should eq(0)
     heap.dormant_chunk_bytes.should be > 0
     heap.dontneed_bytes.should be > 0
+    heap.heap_size.should eq(before)
+    heap.malloc(64).should_not be_nil
+  ensure
+    heap.destroy
+  end
+end
+
+it "keeps empty chunks warm within empty_chunk_warm_retain" do
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.release_empty_chunks = true
+    heap.empty_chunk_warm_retain = UInt64::MAX
+    heap.empty_chunk_retain = 0 # warm only — no dormant fallback
+    heap.nursery_enabled = false
+
+    keep = heap.malloc(64)
+    heap.add_root(keep)
+    8_000.times { heap.malloc(64) }
+
+    before = heap.heap_size
+    heap.collect(scan_stack: false)
+    heap.live?(keep).should be_true
+    heap.unmapped_bytes.should eq(0)
+    heap.released_chunk_bytes.should eq(0)
+    heap.dormant_chunk_bytes.should eq(0)
+    heap.dontneed_bytes.should eq(0)
     heap.heap_size.should eq(before)
     heap.malloc(64).should_not be_nil
   ensure

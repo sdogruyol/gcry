@@ -1,0 +1,70 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/pool-cap-4 bin=exclusive trials=1 d=12s
+  trial=1 ...   precise_mode=0
+estab_post=0
+ok
+live_objects=81765 total_MiB=98.6 typed_MiB=4.6 collision_MiB=73.3 raw_MiB=20.7 large_MiB=11.2
+gcstats size_class_live_MiB=83.1 live_objects=80938
+stack_maps_loaded=False records=0 hits=0 precise_marked=0
+first_mark MiB: mutator=0.0 parked=10.1 static=0.0 thread=0.0 precise=0.0 heap=83.4
+first_mark ATOMIC MiB: mutator=0.0 parked=9.8 precise=0.0 heap=71.4
+top size_classes (payload → MiB / count):
+  32768     80.5 MiB  n=2577
+     32      0.9 MiB  n=29548
+    640      0.6 MiB  n=4237
+  20480      0.6 MiB  n=90
+     80      0.6 MiB  n=7332
+    320      0.5 MiB  n=1752
+  12288      0.4 MiB  n=118
+  14336      0.3 MiB  n=81
+  16384      0.3 MiB  n=87
+     64      0.3 MiB  n=4244
+     48      0.2 MiB  n=9417
+    160      0.2 MiB  n=2743
+max_size_class 32768 breakdown MiB:
+  typed=0.2 collision=71.0 raw=9.2
+  atomic=80.5 ptrish=0.1 byteish=80.2
+top typed type_ids:
+       1      2.6 MiB  n=43232
+     437      0.6 MiB  n=2956
+     441      0.4 MiB  n=1280
+     537      0.1 MiB  n=1234
+     904      0.1 MiB  n=600
+     576      0.1 MiB  n=108
+       5      0.1 MiB  n=163
+      78      0.1 MiB  n=80
+     572      0.0 MiB  n=1161
+     193      0.0 MiB  n=569
+     621      0.0 MiB  n=651
+      96      0.0 MiB  n=973
+top collision type_ids (false typed on big blocks):
+      88     34.1 MiB  n=1092
+      49     31.1 MiB  n=995
+      82      2.0 MiB  n=64
+     112      1.9 MiB  n=60
+   27836      1.3 MiB  n=42
+     155      0.8 MiB  n=106
+     405      0.5 MiB  n=59
+      80      0.4 MiB  n=12
+   55809      0.1 MiB  n=4
+       5      0.1 MiB  n=92
+       7      0.1 MiB  n=74
+     356      0.1 MiB  n=43
+  idle 30s ... estab_idle=0
+idle-drain: estab 0→0  max_atomic 80.5→80.7 MiB  live 98.6→93.0 MiB
+verdict: B-leaning (sockets drained, atomics remain → false roots / unreclaimed graph)
+watch_tid=441 [post]: stack=1, parked=188, static=0, thread=0, precise=0, heap=1090
+watch_tid=441 [idle]: stack=1, parked=1, static=0, thread=0, precise=0, heap=1281
+top typed post→idle (type_id MiB):
+     441    0.4→  0.4 MiB  n=1280→1284
+       1    2.6→  0.2 MiB  n=43232→5688
+     904    0.1→  0.0 MiB  n=600→0
+     437    0.6→  0.1 MiB  n=2956→379
+     576    0.1→  0.0 MiB  n=108→0
+      78    0.1→  0.0 MiB  n=80→0
+     537    0.1→  0.0 MiB  n=1234→170
+     572    0.0→  0.0 MiB  n=0→1175
+     467    0.0→  0.0 MiB  n=0→69
+     672    0.0→  0.0 MiB  n=0→101
+       5    0.1→  0.0 MiB  n=163→11
+ok
+done OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parents/pool-cap-4

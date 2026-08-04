@@ -20,11 +20,11 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 - Marks live in the **BlockHeader** (`MARK` flag). Side `MarkBitmap` mmap is **opt-in** (`-Dgcry_side_bitmap`) — Linux HTTP A/B: ~9× Kemal RSS vs ~1× header marks
 - Majors: Linux **32 MiB**, Darwin **16 MiB**; **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
-- Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **16 MiB**, Darwin **512 KiB**
+- Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
 - Fiber stack scrub **on** (Linux + Darwin; `GCRY_DISABLE_SCRUB_FIBERS=1` to opt out)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
-- Large-object freelist retain: Linux process **4 MiB**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive up to 32 MiB)
+- Large-object freelist retain: Linux process **0**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive grows only from a non-zero floor, up to 32 MiB)
 - Free-page physical release: Darwin **on** (`MADV_FREE_REUSABLE`); Linux HOLED **opt-in** (`GCRY_PAGE_DONTNEED=1` — measured thr+RSS regression as default). Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
 - Auto-collect suppressed while finalizers run
 
@@ -51,14 +51,20 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
-| `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **16 MiB**, Darwin **512 KiB**; library **0**) |
+| `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **0**, Darwin **512 KiB**; library **0**) |
+| `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Mapped warm empty-byte budget before dormant/munmap (research; not default) |
+| `GCRY_TIGHT_GROW=1` | Sticky newest-chunk freelist + sparse GC-before-grow (fat-app RSS; Kemal thr soft — not default) |
+| `GCRY_DISABLE_TIGHT_GROW=1` | Force tight-grow off |
+| `GCRY_DISABLE_TIGHT_GROW_GC=1` | Prefer-freelist only (no GC-before-grow) |
+| `GCRY_PRECISE_STACK=1` | Load `.llvm_stackmaps` + hybrid precise walker (additive; see [STACK_MAPS.md](STACK_MAPS.md)) |
+| `GCRY_PRECISE_STACK=2` | **Research:** exclusive precise stacks (no conservative stack word scan; UAF risk) |
 | `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
 | `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
-| `GCRY_PARALLEL_RELEASE=1` | Parallel: munmap excess empties (forces in-STW sweep; can hang) |
+| `GCRY_PARALLEL_RELEASE=1` | **Unsupported** — Parallel munmap excess (forces in-STW sweep; can hang). stderr warn; prefer `GCRY_PARALLEL_DORMANT=1` |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
-| `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **4 MiB**; Darwin **1 MiB**; adaptive) |
+| `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **0**; Darwin **1 MiB**; adaptive from non-zero) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
@@ -68,11 +74,17 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
 | `GCRY_STW_STACK_LAG` | Multi-mutator parked-fiber scan depth below `stack_top` (bytes; default **256 KiB**; `0` = full guard→bottom) |
 | `GCRY_STW_PTHREAD_LAG` | Multi-mutator pthread scan from stack high when SP is on a fiber (bytes; default **256 KiB**; `0` = full map) |
-| `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: Parallel reclaim-off / TLAB-off sweeps after `start_world`) |
+| `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: EC1 and Parallel reclaim-off / TLAB-off sweep after `start_world`) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |
 | `GCRY_DISABLE_STATIC_ROOTS=1` | Skip dyld/ELF static root scan (debug; unsafe) |
-| `GCRY_TLAB=1` | Thread-local freelists (experimental under Parallel; supported Parallel path keeps TLAB **off**) |
+| `GCRY_LIVE_ATTR=1` | Research: first-mark root-source counters; pair with `/gc-live-attr` |
+| `GCRY_LIVE_ATTR_WATCH_TID` | Research: first-mark counts for one type_id (`first_mark_watch_*`; implies LIVE_ATTR) |
+| `GCRY_DISABLE_FIBER_FP_FILL=1` | With `PRECISE_FIBERS`: skip FP-frame conservative fill (pure maps; UAF risk) |
+| `GCRY_FIBER_FP_FILL_MISS_ONLY=1` | With `PRECISE_FIBERS`: skip FP-fill on nonempty map hits (research; acik UAF) |
+| `GCRY_STACKMAP_MISS_LOG=1` | Research: parked map-miss PC ring on `/gc-stats` (`stack_maps_top_miss_pcs`) |
+| `GCRY_STACKMAP_NEAR_DELTA` | Research: ret↔map slack bytes (default **128**; was 32 — too tight for arg pushes) |
+| `GCRY_TLAB=1` | **Unsupported** under Parallel — thread-local freelists (research/A/B; stderr warn). Supported path keeps TLAB **off** |
 | `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
@@ -136,11 +148,19 @@ ExecutionContext does not call `set_stackbottom` on swap — gcry refreshes from
 Static roots: main executable RW (+ adjacent BSS); skip `.so` data and large RELRO. Fiber stacks scanned once per collect.
 
 Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
-`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — Kemal
-`/json` ~**79%** Boehm tip; see [PERF.md](PERF.md). `GCRY_TLAB=1` and
-`GCRY_PARALLEL_RELEASE` remain experimental; `GCRY_PARALLEL_MARK` is
-research — [POLICY.md](POLICY.md).
+`EC_PARALLELISM>1`, **`GCRY_TLAB` off**, lazy sweep on (default) — thr
+~**80%** `/json` @ ~5.5× RSS; `GCRY_PARALLEL_DORMANT=1` for RSS ~**75%**
+@ ~4× — [PERF.md](PERF.md). Correctness gate: `make soft-soak-ec4`
+(soft+hard **0/40**); CI runs `make soft-soak-ec4-smoke` (N=5).
+`GCRY_TLAB=1` and `GCRY_PARALLEL_RELEASE` are **unsupported** (knobs
+kept for research; process GC prints a stderr warning). Soft-soak refuses
+both. `GCRY_PARALLEL_MARK` is research — [POLICY.md](POLICY.md).
 
 ## CI
 
-Format, specs, `-Dgc_none` samples, env smoke, `bench/churn` on Linux x86_64 (Crystal 1.21 + latest). aarch64 native and `macos-latest` for STW/fork samples. See `.github/workflows/ci.yml`.
+Format, specs, `-Dgc_none` samples, env smoke, `bench/churn`, `soak-smoke`,
+and EC4 soft-soak smoke on Linux x86_64 (Crystal 1.21 + latest). aarch64
+native and `macos-latest` for STW/fork samples. `perf-smoke` gates Kemal
+`/json` same-host thr % (`MIN_PCT=70`), post-GC RSS × (`MAX_RSS_X=1.25`),
+and `pause_p50` (`MAX_PAUSE_P50_MS=2.5`) via `bench/perf_smoke.sh`.
+See `.github/workflows/ci.yml`.

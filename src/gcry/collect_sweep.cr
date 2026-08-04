@@ -30,10 +30,13 @@ module Gcry
         @chunk_fill_ge75 = 0_u64
         @dormant_chunk_bytes = 0_u64
         @dontneed_bytes = 0_u64
+        @mostly_empty_bytes = 0_u64
+        @mostly_empty_chunks = 0_u64
         @sweep_dormant_skips = 0_u64
       end
 
-      # Bytes of empty chunks kept dormant this major (within retain budget).
+      # Bytes of empty chunks kept warm / dormant this major (retain budgets).
+      warm_budget_used = 0_u64
       dormant_budget_used = 0_u64
 
       chunk = @chunks
@@ -53,7 +56,7 @@ module Gcry
             @size_class_chunk_count += 1
             note_chunk_fill(0_u64, 1_u64)
           end
-          unless after_world
+          if !after_world || relink_chunks_after_world?
             chunk.value.next = kept
             kept = chunk
           end
@@ -75,6 +78,8 @@ module Gcry
             any_live = false
             live_payload = 0_u64
             usable_payload = 0_u64
+            # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
+            free_payload = 0_u64
             fl_locked = false
             if after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT
               freelist_lock_ptr(class_index, ChunkHeader.nursery?(chunk)).value.lock
@@ -90,10 +95,14 @@ module Gcry
                 # skip freelist link (unlink-only for pre-existing free blocks).
                 defer_reclaim = major && release_empty_chunks_this_collect?
                 if defer_reclaim
+                  # Count unmarked USED + FREE payload in the discover pass so
+                  # fully-dead chunks skip a second O(blocks) walk.
+                  dead = 0_u64
                   while (cursor + block_bytes) <= limit
                     usable_payload += payload.to_u64
                     header = cursor.as(BlockHeader*)
                     if BlockHeader.free?(header)
+                      free_payload &+= payload.to_u64
                       # FREE + marked: mid-alloc claimed from a stack root.
                       if heap_marked?(header)
                         any_live = true
@@ -103,6 +112,8 @@ module Gcry
                       if heap_marked?(header)
                         any_live = true
                         live_payload += payload.to_u64
+                      else
+                        dead &+= 1
                       end
                     end
                     cursor += block_bytes
@@ -123,15 +134,6 @@ module Gcry
                   else
                     # Fully-dead chunk: batch the live_objects accounting (one
                     # store under STW) instead of a CAS per block.
-                    dead = 0_u64
-                    cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                    while (cursor + block_bytes) <= limit
-                      header = cursor.as(BlockHeader*)
-                      unless BlockHeader.free?(header)
-                        dead &+= 1
-                      end
-                      cursor += block_bytes
-                    end
                     live_objects_sub(dead)
                   end
                 else
@@ -169,10 +171,14 @@ module Gcry
                   mapped = chunk.value.mapped_bytes
                   @fully_free_chunk_bytes += mapped
                   ChunkHeader.set_holed(chunk, false)
+                  ChunkHeader.set_sparse(chunk, false)
                   if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                    # Always honor empty_chunk_retain (EC1 munmap excess; Parallel
-                    # dormant bounded). Unbounded Parallel dormant is opt-in via
-                    # parallel_empty_chunk_dormant_all (GCRY_PARALLEL_DORMANT_ALL).
+                    # Priority: warm (mapped) → dormant (DONTNEED) → munmap.
+                    # Warm retain is the thr middle path vs KEEP_CHUNKS (RSS tax
+                    # without page-fault on reuse). Unbounded Parallel dormant
+                    # remains opt-in via parallel_empty_chunk_dormant_all.
+                    within_warm = @empty_chunk_warm_retain > 0 &&
+                                  (warm_budget_used + mapped <= @empty_chunk_warm_retain)
                     within_retain = @empty_chunk_retain > 0 &&
                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
                     can_dormant = within_retain ||
@@ -182,7 +188,14 @@ module Gcry
                     # chunks). Per-empty unlink_freelist_range was O(freelist ×
                     # empties) and dominated phase_sweep under HTTP churn.
                     bit = 1_u64 << class_index
-                    if can_dormant
+                    if within_warm
+                      # Warm: keep pages mapped; freelist dead blocks (defer path
+                      # left them USED after live_objects_sub).
+                      p = SizeClasses.payload(class_index)
+                      bb = BlockHeader::SIZE.to_u64 + p.to_u64
+                      freelist_reserve_fully_dead(chunk, class_index, p, bb)
+                      warm_budget_used += mapped
+                    elsif can_dormant
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).
                       ChunkHeader.set_dormant(chunk, true)
@@ -194,7 +207,12 @@ module Gcry
                         rebuild_mask |= bit
                       end
                     elsif munmap_empty_chunks_this_collect?
-                      # In-STW only (`sweep_after_world?` gates munmap off).
+                      # Queue for post-STW flush. Parallel lazy disables this
+                      # path (`sweep_after_world?`); EC1 lazy allows it and
+                      # rebuilds `@chunks` under `@block_other_heap`.
+                      # Drop FREE bytes that leave the heap (reclaim_small /
+                      # freelist_reserve already adjust; skip full recalc).
+                      free_bytes_sub(free_payload) if free_payload > 0
                       @heap_size -= mapped if @heap_size >= mapped
                       @bytes_reclaimed_since_gc += mapped
                       @released_chunk_bytes += mapped
@@ -204,6 +222,11 @@ module Gcry
                         rebuild_mask |= bit
                       end
                       index_remove(chunk)
+                      if @tight_grow && @grow_lo[class_index] == ChunkHeader.data_start(chunk).address
+                        @grow_lo[class_index] = 0_u64
+                        @grow_hi[class_index] = 0_u64
+                        @prefer_freelists[class_index] = Pointer(Void).null
+                      end
                       chunk.value.next = to_unmap
                       to_unmap = chunk
                       drop = true
@@ -227,6 +250,7 @@ module Gcry
                   if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                      usable_payload > 0 && live_payload < usable_payload
                     ChunkHeader.set_holed(chunk, true)
+                    ChunkHeader.set_sparse(chunk, false)
                     bit = 1_u64 << class_index
                     if ChunkHeader.nursery?(chunk)
                       rebuild_nursery_mask |= bit
@@ -235,6 +259,17 @@ module Gcry
                     end
                   else
                     ChunkHeader.set_holed(chunk, false)
+                    # Mostly-empty (HOLED-less): high-free-ratio non-empty chunks.
+                    # Post-STW MADV_FREE by default — freelist stays valid (no rebuild).
+                    # Exclusive with HOLED / madvise_free_pages.
+                    if @mostly_empty_release && !@madvise_free_pages &&
+                       class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                       usable_payload > 0 &&
+                       live_payload * 100 <= usable_payload * @mostly_empty_max_live_pct.to_u64
+                      ChunkHeader.set_sparse(chunk, true)
+                    else
+                      ChunkHeader.set_sparse(chunk, false)
+                    end
                   end
                 end
                 unless drop
@@ -251,8 +286,9 @@ module Gcry
         end
 
         unless drop
-          # Lazy sweep: leave `@chunks` topology alone (map_chunk may prepend).
-          unless after_world
+          # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
+          # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
+          if !after_world || relink_chunks_after_world?
             chunk.value.next = kept
             kept = chunk
           end
@@ -260,7 +296,7 @@ module Gcry
         chunk = nxt
       end
 
-      unless after_world
+      if !after_world || relink_chunks_after_world?
         @chunks = kept
       end
 
@@ -294,7 +330,9 @@ module Gcry
             end
           end
         end
-        recalc_free_bytes
+        # No recalc_free_bytes: reclaim_small / freelist_reserve / large cache
+        # and munmap free_payload_sub keep @free_bytes coherent. Full-heap
+        # recalc was an extra O(blocks) walk after every empty/HOLED rebuild.
       end
 
       if any_drop
@@ -406,7 +444,7 @@ module Gcry
           next if ChunkHeader.dormant?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% else %}
         each_chunk do |chunk|
@@ -414,9 +452,100 @@ module Gcry
           next if ChunkHeader.large?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% end %}
+    end
+
+    # Mostly-empty flush: free pages in SPARSE chunks, no HOLED freelist rebuild.
+    # Default MADV_FREE keeps freelist words valid. Opt-in dontneed mode unlinks
+    # freelist nodes in free-only page runs then MADV_DONTNEED (churn risk).
+    private def flush_pending_mostly_empty_chunks : Nil
+      return unless @mostly_empty_release
+      return if @madvise_free_pages
+
+      budget = @mostly_empty_budget
+      budget_left = budget == 0 ? UInt64::MAX : budget
+      preserve = !@mostly_empty_dontneed
+
+      each_chunk do |chunk|
+        next unless ChunkHeader.sparse?(chunk)
+        ChunkHeader.set_sparse(chunk, false)
+        next if ChunkHeader.large?(chunk)
+        next if ChunkHeader.dormant?(chunk)
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        break if budget_left == 0
+
+        payload = SizeClasses.payload(class_index)
+        nursery = ChunkHeader.nursery?(chunk)
+        before = @dontneed_bytes
+        if @mostly_empty_dontneed
+          unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+        end
+        if release_free_pages_in_chunk(chunk, payload, preserve_content: preserve)
+          gained = @dontneed_bytes - before
+          if gained > budget_left
+            # Counters already include full run; budget is best-effort cap on
+            # further chunks this major.
+            budget_left = 0
+          else
+            budget_left -= gained
+          end
+          @mostly_empty_bytes += gained
+          @mostly_empty_chunks += 1
+        end
+      end
+    end
+
+    # Drop freelist nodes whose user pointer lies in free-only page runs of
+    # *chunk*, then leave those pages eligible for MADV_DONTNEED. No class-wide
+    # rebuild (unlike HOLED).
+    private def unlink_free_only_page_runs(chunk : ChunkHeader*, class_index : Int32, nursery : Bool, payload : UInt32) : Nil
+      page = Platform.host_page_size
+      data0 = ChunkHeader.data_start(chunk).address
+      data1 = ChunkHeader.data_end(chunk).address
+      return if data1 <= data0
+
+      first_page = data0 & ~(page - 1)
+      last_page = (data1 - 1) & ~(page - 1)
+      n_pages = ((last_page - first_page) // page) + 1
+      return if n_pages == 0 || n_pages > 64
+
+      live_mask = 0_u64
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      while (cursor + block_bytes) <= limit
+        header = cursor.as(BlockHeader*)
+        unless BlockHeader.free?(header)
+          b0 = cursor.address
+          b1 = cursor.address + block_bytes
+          p = b0 & ~(page - 1)
+          while p < b1
+            idx = ((p - first_page) // page).to_i32
+            live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+            p += page
+          end
+        end
+        cursor += block_bytes
+      end
+
+      idx = 0
+      while idx < n_pages.to_i32
+        if (live_mask & (1_u64 << idx)) == 0
+          run_start = first_page + idx.to_u64 * page
+          while idx < n_pages.to_i32 && (live_mask & (1_u64 << idx)) == 0
+            idx += 1
+          end
+          run_end = first_page + idx.to_u64 * page
+          if run_start >= data0 && run_end <= data1 && run_end > run_start
+            unlink_freelist_range(class_index, nursery, run_start, run_end)
+          end
+        else
+          idx += 1
+        end
+      end
     end
 
     # Release physical pages for cached large-object chunks after a major
@@ -521,21 +650,31 @@ module Gcry
     # stop (do not rebuild mid-sweep — @chunks is being relinked). Orphaned
     # FREE blocks are recovered by a later rebuild_size_class_freelist.
     private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
-      head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+      if nursery
+        @nursery_freelists[class_index] = filter_freelist_outside(
+          @nursery_freelists[class_index], lo, hi)
+        @nursery_freelist_clean[class_index] = false
+      else
+        @freelists[class_index] = filter_freelist_outside(@freelists[class_index], lo, hi)
+        if @tight_grow
+          @prefer_freelists[class_index] = filter_freelist_outside(
+            @prefer_freelists[class_index], lo, hi)
+        end
+        @freelist_clean[class_index] = false
+      end
+    end
+
+    private def filter_freelist_outside(head : Void*, lo : UInt64, hi : UInt64) : Void*
       new_head = Pointer(Void).null
       user = head
-      # Hard ceiling: a sane freelist cannot exceed mapped heap / min header.
       max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
       max_steps = 1024_u64 if max_steps < 1024_u64
       steps = 0_u64
       while user
         steps &+= 1
-        if steps > max_steps
-          break
-        end
+        break if steps > max_steps
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
-        # Break obvious self-loops early (cycle of length 1).
         nxt = Pointer(Void).null if nxt == user
         addr = user.address
         if (addr < lo || addr >= hi) && BlockHeader.free?(header)
@@ -545,13 +684,7 @@ module Gcry
         end
         user = nxt
       end
-      if nursery
-        @nursery_freelists[class_index] = new_head
-        @nursery_freelist_clean[class_index] = false
-      else
-        @freelists[class_index] = new_head
-        @freelist_clean[class_index] = false
-      end
+      new_head
     end
 
     private def rebuild_size_class_freelist(class_index : Int32, nursery : Bool, *, recalc : Bool = true) : Nil
@@ -628,9 +761,51 @@ module Gcry
       else
         @freelists[class_index] = head
         @freelist_clean[class_index] = false
+        retight_partition_freelist(class_index) if @tight_grow
       end
 
       recalc_free_bytes if recalc
+    end
+
+    # After a full freelist rebuild, re-establish sticky prefer = newest chunk.
+    private def retight_partition_freelist(class_index : Int32) : Nil
+      chunk = @chunks
+      grow = Pointer(ChunkHeader).null
+      while chunk
+        if !ChunkHeader.large?(chunk) && !ChunkHeader.dormant?(chunk) &&
+           chunk.value.size_class == class_index.to_u32 &&
+           !ChunkHeader.nursery?(chunk)
+          grow = chunk
+          break
+        end
+        chunk = chunk.value.next
+      end
+      if grow.null?
+        @prefer_freelists[class_index] = Pointer(Void).null
+        @grow_lo[class_index] = 0_u64
+        @grow_hi[class_index] = 0_u64
+        return
+      end
+      @grow_lo[class_index] = ChunkHeader.data_start(grow).address
+      @grow_hi[class_index] = ChunkHeader.data_end(grow).address
+      user = @freelists[class_index]
+      prefer = Pointer(Void).null
+      global = Pointer(Void).null
+      while user
+        header = BlockHeader.from_user(user)
+        nxt = header.value.next_free
+        payload = header.value.size
+        if tight_addr_in_grow?(class_index, user.address)
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, prefer)
+          prefer = user
+        else
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, global)
+          global = user
+        end
+        user = nxt
+      end
+      @prefer_freelists[class_index] = prefer
+      @freelists[class_index] = global
     end
 
     # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
@@ -650,11 +825,12 @@ module Gcry
       {% end %}
     end
 
-    # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
-    # safe because those blocks are omitted from the freelist (HOLED + rebuild).
-    # Pre-computes contiguous free-page runs and issues ONE madvise per run
-    # instead of one per page (reduces syscall count from up to 64 to 1-3).
-    private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
+    # Drop RSS for free pages that hold no live blocks.
+    # preserve_content=false → MADV_DONTNEED / Darwin reusable (HOLED path must
+    # omit those blocks from the freelist via rebuild).
+    # preserve_content=true → Linux MADV_FREE (freelist words stay valid until
+    # kernel reclaim) — used by mostly-empty without HOLED.
+    private def release_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32, *, preserve_content : Bool) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
         page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
@@ -698,7 +874,17 @@ module Gcry
             run_end = first_page + idx.to_u64 * page
             len = run_end - run_start
             if run_start >= data0 && run_end <= data1 && len > 0
-              if Platform.release_physical_pages(run_start, len)
+              ok = if preserve_content
+                     {% if flag?(:linux) %}
+                       Platform.release_physical_pages_free(run_start, len)
+                     {% else %}
+                       # Darwin reusable already preserves content.
+                       Platform.release_physical_pages(run_start, len)
+                     {% end %}
+                   else
+                     Platform.release_physical_pages(run_start, len)
+                   end
+              if ok
                 @dontneed_bytes += len
                 any = true
               end
@@ -760,15 +946,7 @@ module Gcry
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
-      if was_nursery
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
-        @nursery_freelists[class_index] = user
-        @nursery_freelist_clean[class_index] = false
-      else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
-        @freelists[class_index] = user
-        @freelist_clean[class_index] = false
-      end
+      push_size_class_free(class_index, was_nursery, header, user, payload)
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.

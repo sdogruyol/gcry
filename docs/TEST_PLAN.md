@@ -18,9 +18,9 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 | **Unit test coverage** | A | Specs across heap, collect, layout, barrier, finalizer, TLAB, parallel_mark, scrub, metrics, blacklist, type_id_gate. |
 | **Integration test** | A- | `process_spec/` under `-Dgc_none`. Nursery HTTP regression in `bench/nursery_headers.cr`. |
 | **Fuzz / property** | A- | Deterministic fuzz + replay; heap/layout/MT property tests in CI. |
-| **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (≥70% Boehm), nightly fuzz/soak. |
+| **CI infrastructure** | A | Linux x86_64 + aarch64, macOS, ASan, Valgrind, coverage, perf-smoke (thr≥70% Boehm, RSS≤1.25×, pause_p50≤2.5ms), soak-smoke, EC4 soft-soak smoke, nightly fuzz/soak. |
 | **Regression tests** | A- | `spec/regression/` (4 UAF-born cases) + CONTRIBUTING / PR template. |
-| **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak. |
+| **Performance test** | A- | Same-host % Boehm gate, microbench, pause budget, RSS leak; secondary crystal-metric GC subset (informational). |
 | **Multi-thread test** | A | Library-heap MT property + thread storm + **process-STW MT property** (`bench/stw_mt_property_test.cr`, Parallel=2+4; TLAB@2+4; TLAB+nursery minors). |
 | **Platform test** | B+ | Darwin stubs + Mach STW in CI; Windows still blocked. |
 
@@ -28,6 +28,7 @@ Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrow
 
 | Gap | Severity | Detail |
 |-----|----------|--------|
+| **EC4 soft soak full N=40 in CI** | 🟢 Medium | PR runs `make soft-soak-ec4-smoke` (N=5); local gate remains N=40 (`make soft-soak-ec4`). |
 | **CHANGELOG audit backlog** | 🟢 Medium | Older Fixed entries lack dedicated regressions (issues, not blockers). |
 | **PR auto-perf comments** | 🟢 Medium | Variance protocol exists; auto PR comment still open. |
 | **WeakRef / large-heap edge cases** | 🟢 Medium | Cycles, resurrection, multi-GB heaps lightly covered. |
@@ -191,7 +192,7 @@ Priority labels:
 
 | # | Effort | Task | Deliverable |
 |---|--------|------|-------------|
-| 5.1 | 2-3 weeks | **Perf regression alerting** — GitHub Action: `bench/perf_smoke.sh` on every PR. Gate: gcry /json ≥ 70% of Boehm **same-host**. Variance protocol: N wrk runs, discard min/max, median + noise ratio. Per-run JSON in `bench/log/` (artifact). No committed absolute-RPS baseline (CI ≠ macOS ≠ WSL). | CI alerting |
+| 5.1 | 2-3 weeks | **Perf regression alerting** — GitHub Action: `bench/perf_smoke.sh` on every PR. Gates (same-host): `/json` thr ≥ `MIN_PCT` of Boehm (CI **70%**), post-GC RSS × ≤ `MAX_RSS_X` (CI **1.25**), `pause_p50` ≤ `MAX_PAUSE_P50_MS` (CI **2.5**). Variance protocol for thr; instrumented pass for RSS/pause. Per-run JSON in `bench/log/` (artifact). No committed absolute-RPS baseline (CI ≠ macOS ≠ WSL). | CI alerting |
 | 5.2 | 2-3 weeks | **Microbenchmark suite** — `bench/micro/`: alloc latency (p50/p99 per size class), free latency, collect latency (p50/p99/max), TLAB refill cost, parallel mark steal cost, barrier arming cost, STW suspend/resume latency, GC safepoint check overhead. CI regression gate with 5% threshold. | Microbenchmarks |
 | 5.3 | 1 week | **Pause time budget test** — Assertions: major p99/max scaled to live set, incremental `collect_a_little` slice (STW-aware budget), minor p50 absolute + soft minor/major ratio (mark-gen majors can be faster than full-scan minors). *Do not* run under `GCRY_DEBUG_INVARIANTS=1` with `-Dgc_none` (checker allocates → stack overflow). | Pause budget suite |
 | 5.4 | 1 week | **RSS leak detection** — Warm-up cycles (default 15) then intra-run gate: late-half median RSS vs early-half &lt;10% growth. RSS/heap ratio logged only. `bench/trend.json` gitignored artifact. | RSS leak gate |
@@ -204,21 +205,24 @@ For each workload (same host, same job):
   2. Discard min and max
   3. Report median of remaining
   4. Report IQR / median as noise ratio (informational)
-  5. Gate: gcry median / Boehm median >= MIN_PCT (default 70%)
+  5. Gate: gcry median / Boehm median >= MIN_PCT (default/CI 70%)
+  6. Instrumented /json pass: post-GC RSS × and pause_p50_ms gates
 ```
 
 **What could go wrong:**
 - **wrk noise ratio > 0.15 (5.1):** The 0.15 threshold may be too tight for noisy CI environments. Mitigation: start with 0.25, tighten over time. Document the chosen threshold and why. If still noisy, increase iterations from 5 to 10.
 - **Microbenchmark suite takes too long (5.2):** Measuring p99 latency per size class requires many iterations. Mitigation: measure only representative size classes (16, 64, 256, 1024, 4096) not all 60+. Target: microbenchmarks finish in < 5 min.
-- **Cross-host absolute baselines are meaningless (5.1/5.4):** CI ≠ macOS ≠ WSL for RPS and RSS. Mitigation: thr gate is same-run % of Boehm; RSS gate is intra-run late-vs-early growth only. No committed `baseline.json`.
+- **Cross-host absolute baselines are meaningless (5.1/5.4):** CI ≠ macOS ≠ WSL for RPS and RSS. Mitigation: thr gate is same-run % of Boehm; RSS× is same-job post-GC ratio vs Boehm (not absolute KiB); leak gate is primarily heap_size late-vs-early (RSS secondary, looser). No committed `baseline.json`.
 
 **Definition of Done:**
 - [x] `bench/perf_smoke.sh` has variance protocol implemented (5 runs, min/max discard, median, noise ratio)
+- [x] `bench/perf_smoke.sh` gates thr %, post-GC RSS ×, and pause_p50 (CI floors in `perf-smoke` job)
+- [x] `bench/rss_leak.cr` gates heap_size late-vs-early; RSS uses a looser secondary ceil
 - [ ] PR comment posts before/after perf numbers automatically
 - [x] `bench/micro/` exists with at least 6 benchmarks covering alloc, free, collect, TLAB, STW, lock overhead
 - [x] Microbenchmarks run in CI with < 5 min overhead (current: ~6s)
 - [x] Pause budget assertions pass in CI (`bench/pause_budget.cr`)
-- [x] RSS leak gate is post-warm-up intra-run growth only (`bench/rss_leak.cr`); `bench/trend.json` is local/CI artifact (gitignored)
+- [x] Leak gate is post-warm-up intra-run growth (`bench/rss_leak.cr`: heap primary, RSS secondary); `bench/trend.json` is local/CI artifact (gitignored)
 
 **Success signal:** Microbenchmark suite runs in CI, perf regression alerts fire only on real regressions (no false positives in 1 month), RSS leak trend visible.
 

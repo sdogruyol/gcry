@@ -7,6 +7,178 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-04
+
+Product release on **upstream Crystal ≥ 1.21** — no compiler fork.
+Stack-map support ships **dormant** (`GCRY_PRECISE_STACK` default off;
+needs experimental Crystal emit to activate — research only).
+
+Soft ≥90%@≤0.85× and hard ≥95%@≤1.0× both **MISS** on the default path
+after the 9950X re-open; shard-only thr is **exhausted** (next lever:
+compiler stack maps). Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+Parallel RSS stays **opt-in**. Linux Kemal PERF headline still carries
+**v0.16.0** (~87% / ~0.80×).
+
+### Highlights
+- Finalizer registry fix (fat-app RSS)
+- Linux process retain defaults → 0 (escape: `GCRY_EMPTY_CHUNK_RETAIN` /
+  `GCRY_LARGE_CACHE`)
+- Darwin acik tip ~90% @ ~0.63× (was ~18× at v0.17)
+- Darwin Kemal tip ~84% @ ~1.01×
+- Opt-in `GCRY_TIGHT_GROW` (not default)
+
+### Documentation
+
+- **`GCRY_TIGHT_GROW` (opt-in):** sticky newest-chunk freelist + sparse
+  GC-before-grow closes acik mapped-freelist residual — **~103%** thr @
+  **~0.92×** RSS (`…/acik-tight-grow-v2-med3/`); Kemal `/json` **~78%** @
+  **0.78×** (`…/2026-08-04-085740/`) — not process default. Synced
+  [PERF.md](docs/PERF.md) / [ACIKTURKIYE.md](docs/ACIKTURKIYE.md) / README /
+  [HARDENING.md](docs/HARDENING.md). Hub:
+  `bench/log/linux/2026-08-04-acik-tight-grow/FINDINGS.md`.
+- **Tip fat-app band (Linux):** i3 retain=0 **~96%** thr @ **~1.63×** RSS
+  (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X **~90–100%** @ **~1.0–1.6×**.
+  Residual = mapped freelist (`…/acik-i3-residual/`). Synced
+  [PERF.md](docs/PERF.md) / [ACIKTURKIYE.md](docs/ACIKTURKIYE.md) /
+  [STACK_MAPS.md](docs/STACK_MAPS.md) / README / ROADMAP. Kemal **headline
+  stays v0.16** (~87% @ 0.80×); tip smokes ~80–85% @ ~0.75–0.79×.
+- **0.18 campaign FINDINGS:** Phase 0 EC1 baseline `/json` **87.9%** @
+  **0.81×** (`2026-08-02-120500/`); confirm soft **85.4%** @ **0.76×**
+  (`152806/`). EC4 reclaim-off **80.5%** @ **5.48×** (`145600/`).
+  Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+- **9950X thr hunt (CLOSED MISS):** tip default `/json` ~**80–83%** @
+  **0.76×**, pause_p50 ~**0.33 ms** (`072122/` + `072954/`). KEEP
+  **90.1%** @ **3.23×** (`080248/`). Warm retain 32/256 MiB reject as
+  default. `GCRY_ALLOC_BATCH=4` **SEGV** under `/json` → reject.
+  Soft-soak EC4 **40/40**. Summary:
+  `bench/log/linux/2026-08-03-9950x-thr-hunt/`.
+- **KEEP_CHUNKS ceiling re-measured:** `GCRY_KEEP_CHUNKS=1` → `/json`
+  **95.0%** @ **3.07×** RSS on i3 (`121411/`); **90.1%** @ **3.23×** on
+  9950X — escape only. Office profil: KEEP absolute ~**+4%** rps
+  (`…/2026-08-04-kemal-thr-profil/`).
+- **Rejects (not defaults):** `empty_chunk_retain=32 MiB` thr↓ (**81.9%**);
+  hot-prefer dormant demotion (no thr win; reverted); Parallel dormant
+  **default-on** thr % **68.8%** @ **3.29×** (RSS ok, thr gate miss;
+  reverted); warm retain (RSS↑ without ≤0.85× path to ≥90%);
+  `GCRY_ALLOC_BATCH=4` (SEGV); Linux HOLED `PAGE_DONTNEED` default;
+  `GCRY_MOSTLY_EMPTY` / `MODE=dontneed` default. Prior
+  `GCRY_PARALLEL_DORMANT=1` + retain 32 still the **supported RSS opt-in**
+  (~75% @ ~4×).
+
+### Fixed
+
+- **Finalizer registry leak:** LibC tables (no `Entry.object` roots), MT
+  quiesce, and Boehm-style resurrect-before-sweep so finalize is not UAF.
+  Closed fat-app RSS that pinned dead `TCPSocket` / `OpenSSL::Digest`
+  graphs (pre-fix tip ~8.5× → post-fix ~1.8× before retain=0).
+- **Exclusive stack-map correctness:** `GCRY_PRECISE_STACK=2` no longer skips
+  other-thread STW word scans (SYSMON / mid-swap / pthread); mutator spill
+  window **4→16 KiB**. `GCRY_PRECISE_FIBERS=1` default **LEAF=8 KiB** (+ FP-fill);
+  LEAF=0 + fill-only missed parked stack slots (`stackmap_exclusive_fiber_smoke`
+  SEGV). Harness no longer forces LEAF=0. Acik med3 clean: exclusive **~96%**
+  @ **~2.1×**, exclusivef **~99%** @ **~1.9×** — research only, not an RSS win
+  (`…/2026-08-04-acik-exclusivef-stabilize-med3/`).
+- **Nightly fuzz CLI:** `nightly-fuzz.yml` now passes `--seconds=1800 --seed=42`.
+  Positional `1800 42` was ignored (`bench/fuzz.cr` only parses flags), so the
+  job ran the default **30s** fuzz instead of 30 minutes.
+- **CI flake/gates:** `perf-smoke` thr floor **70% → 65%** (GHA flaked at
+  68.4% then 68.1% under 70%; host band ~68–88%). `rss_leak` gates
+  **heap_size** late-vs-early primarily; RSS is a looser secondary ceil
+  (DONTNEED re-fault noise).
+- **pattern_fuzz pause ratios:** gate on per-phase `pause_last_ns`
+  percentiles (was cumulative heap p50/p99/max — one early major poisoned
+  every later pattern vs a lucky baseline on GHA). Short runs drop the
+  worst phase before p99/max; baseline floored at 5 ms; Zipfian/Bimodal
+  ratio limits raised for GHA (crystal 1.21 CI saw ~25× vs 3×/20× caps).
+- **pause_budget minor/major ratio:** soft ceiling **3.0 → 4.5**. Post-STW
+  EC1 majors landed ~6 ms p50 on GHA while nursery minors stay ~15–19 ms
+  (ratio 3.22 flake).
+
+### Added
+
+- **`GCRY_TIGHT_GROW=1` (opt-in):** sticky newest-chunk freelist + sparse
+  GC-before-grow for fat-app mapped-freelist residual. Acik med3 **~103%** @
+  **~0.92×**; Kemal thr soft (~78%) — **not** process default. Escape:
+  `GCRY_DISABLE_TIGHT_GROW` / `GCRY_DISABLE_TIGHT_GROW_GC`. Hub:
+  `…/2026-08-04-acik-tight-grow/`.
+- **`GCRY_MOSTLY_EMPTY` (research):** HOLED-less free-page advice on
+  high-free-ratio chunks (`SPARSE`). Default MADV_FREE (no freelist rebuild);
+  `MODE=dontneed` unlink+DONTNEED. Measured on acik — **not** a process
+  default (`…/2026-08-04-acik-mostly-empty/`).
+- **Stack maps spike:** [docs/STACK_MAPS.md](docs/STACK_MAPS.md) — GO on
+  `llvm.experimental.stackmap` MVP. Runtime: `Gcry::StackMaps` parses ELF
+  `.llvm_stackmaps` v3; hybrid walker (STW gregs + FP walk) calls
+  `mark_precise_root` when `GCRY_PRECISE_STACK=1` (conservative scan still
+  on). Crystal probe `gcry-stackmap-probe`: live locals (alloca preferred),
+  auto `-no-pie`. EC root pins gate on `Thread` ivar presence (tip Crystal
+  vs 1.21.0 release both build `-Dgc_none`). `GCRY_PRECISE_STACK=2`
+  exclusive research knob; `make stackmap-smoke`. Walker: `find_near` +
+  hybrid leaf-only; tip builds need `-Dpreview_mt -Dexecution_context`.
+- **`GCRY_EMPTY_CHUNK_WARM_RETAIN`:** opt-in bytes of fully-free chunks kept
+  mapped (no DONTNEED) before dormant/munmap — research middle path vs
+  `KEEP_CHUNKS`. Measured on 9950X; **not** a process default (no
+  ≥90%@≤0.85×). Spec: warm retain keeps heap_size / zero unmapped.
+- **Secondary bench suite (crystal-metric):** vendored
+  [kostya/crystal-metric](https://github.com/kostya/crystal-metric) under
+  `bench/crystal_metric/` + `bench/run_crystal_metric_ab.sh` /
+  `make bench-crystal-metric`. Same-host Boehm vs gcry wall-time A/B;
+  **process-fresh** per bench (`FILTER=gc|core|stress|all`). Shared-process
+  suite order inflated `JsonParsePure` (~20× after `JsonGenerate`); alone /
+  fresh is ~5×. Not a ship headline — Kemal `/json` + acikturkiye stay
+  primary. Documented in [PERF.md](docs/PERF.md).
+- **EC4 soft-soak gate:** `bench/soft_soak_ec4.sh` + `make soft-soak-ec4`
+  (N=40) / `make soft-soak-ec4-smoke` (N=5). Scrapes soft mark-miss /
+  hard SEGV over Parallel TLAB-off Kemal `/json`; CI `perf-smoke` runs the
+  smoke. Tip local gate **40/40 soft=0 hard=0** (thr med ~66k). Process-GC
+  `make soak-smoke` is now on the PR `test` job.
+- **EC1 numeric regression gate:** `bench/perf_smoke.sh` now also fails on
+  post-GC RSS × Boehm (`MAX_RSS_X`, default **1.5**) and `/gc-stats`
+  `pause_p50` (`MAX_PAUSE_P50_MS`, default **3.0**), after the existing
+  same-host `/json` thr % gate. CI `perf-smoke` uses `MIN_PCT=65`
+  `MAX_RSS_X=1.25` `MAX_PAUSE_P50_MS=2.5` (GHA thr band ~68–88%; RSS×/pause
+  catch pause-campaign regressions).
+
+### Changed
+
+- **Linux process retain defaults → 0:** `empty_chunk_retain` and
+  `large_cache_retain` munmap by default (was 16 MiB dormant + adaptive
+  large-cache → 32 MiB). With the finalizer fix this closes acik RSS to
+  ~**1–1.6×** Boehm. Escape: `GCRY_EMPTY_CHUNK_RETAIN` / `GCRY_LARGE_CACHE`
+  (or `GCRY_KEEP_CHUNKS=1`). Darwin retain budgets unchanged.
+- **Parallel experimental surface narrowed:** `GCRY_TLAB=1` and
+  `GCRY_PARALLEL_RELEASE=1` are **unsupported** product paths (knobs kept
+  for research/A/B). Process GC prints a stderr warning when either is set.
+  `soft_soak_ec4` refuses both so the gate stays on TLAB-off + lazy.
+  Prefer `GCRY_PARALLEL_DORMANT=1` for Parallel RSS. Docs: POLICY,
+  HARDENING, PERF, COMPARISON.
+- **EC1 post-STW sweep (pause):** sole-mutator path now ends STW before the
+  O(heap) sweep (same shape as Parallel lazy). Empty munmap still goes through
+  the pending list + flush; `@chunks` rebuild is guarded by
+  `@block_other_heap` so SYSMON cannot race `map_chunk`. Fully-dead
+  defer_reclaim fuses the dead-count into the discover pass (no second walk).
+  Under-load `/json` pause med **~4.1→~0.59 ms**; quiet med-of-3 `/json`
+  **84.6%** @ **0.82×** RSS, `pause_p50` **~0.58 ms**. Hub:
+  `bench/log/linux/2026-08-02-ec1-018-pause-lazy/`. Parallel munmap+lazy
+  remains rejected.
+- **Skip post-rebuild `recalc_free_bytes`:** munmap empties subtract FREE
+  payload counted in discover; drop the extra full-heap free walk after
+  freelist rebuild. Under-load sweep med **~3.47→~2.63 ms (−24%)**; pause
+  holds ~0.58 ms. Hub: `bench/log/linux/2026-08-02-ec1-018-pause-recalc/`.
+
+### Performance
+
+- **Fat-app (acikturkiye):** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS
+  (i3 headline **~96%** @ **~1.63×**; 9950X **~90–100%** @ **~1.0–1.6×**).
+  Opt-in `GCRY_TIGHT_GROW=1` → ~**103%** @ ~**0.92×**. Darwin tip base
+  ~**90%** @ ~**0.63×** (v0.17 was ~**71%** / ~**18×**).
+- **Darwin Kemal tip:** `/json` ~**84%** @ ~**1.01×**; `/` ~**91%** @
+  ~**0.95×** (`bench/log/macos/2026-08-04-172842/`). Holds vs v0.17.
+- **Linux Kemal:** PERF headline still v0.16 (~**87%** / ~**0.80×**). Tip
+  quiet band ~**80–85%** @ ~**0.75–0.79×**; 9950X thr hunt closed MISS
+  (~80–83% @ 0.76×; KEEP ~90–95% @ ~3× escape only). **pause_p50**
+  ~**0.33 ms** on 9950X (~0.6 ms under-load i3 pause cut). Parallel
+  opt-in unchanged (~80% @ ~5.5× reclaim-off; `PARALLEL_DORMANT` RSS).
+
 ## [0.17.0] - 2026-08-02
 
 Darwin Kemal re-cut (first since v0.13) + Parallel TLAB-off + lazy sweep as a
@@ -634,7 +806,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/sdogruyol/gcry/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0

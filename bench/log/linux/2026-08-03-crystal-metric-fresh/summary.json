@@ -1,0 +1,144 @@
+{
+  "suite": "crystal-metric",
+  "role": "secondary_gc",
+  "mode": "process_fresh",
+  "platform": "linux",
+  "trials": 3,
+  "filter": "gc",
+  "benches": [
+    {
+      "bench": "Binarytrees",
+      "boehm_s_med": 1.277,
+      "gcry_s_med": 3.997,
+      "gcry_speed_pct_of_boehm": 31.9,
+      "gcry_wall_x": 3.13,
+      "boehm_peak_rss_kib_med": 51424,
+      "gcry_peak_rss_kib_med": 63304,
+      "peak_rss_x": 1.231
+    },
+    {
+      "bench": "Brainfuck",
+      "boehm_s_med": 4.214,
+      "gcry_s_med": 3.767,
+      "gcry_speed_pct_of_boehm": 111.9,
+      "gcry_wall_x": 0.894,
+      "boehm_peak_rss_kib_med": 4540,
+      "gcry_peak_rss_kib_med": 6612,
+      "peak_rss_x": 1.456
+    },
+    {
+      "bench": "Brainfuck2",
+      "boehm_s_med": 1.754,
+      "gcry_s_med": 1.747,
+      "gcry_speed_pct_of_boehm": 100.4,
+      "gcry_wall_x": 0.996,
+      "boehm_peak_rss_kib_med": 4468,
+      "gcry_peak_rss_kib_med": 6608,
+      "peak_rss_x": 1.479
+    },
+    {
+      "bench": "Knuckeotide",
+      "boehm_s_med": 1.269,
+      "gcry_s_med": 2.185,
+      "gcry_speed_pct_of_boehm": 58.1,
+      "gcry_wall_x": 1.722,
+      "boehm_peak_rss_kib_med": 43500,
+      "gcry_peak_rss_kib_med": 88424,
+      "peak_rss_x": 2.033
+    },
+    {
+      "bench": "RegexDna",
+      "boehm_s_med": 1.771,
+      "gcry_s_med": 2.003,
+      "gcry_speed_pct_of_boehm": 88.4,
+      "gcry_wall_x": 1.131,
+      "boehm_peak_rss_kib_med": 402676,
+      "gcry_peak_rss_kib_med": 251608,
+      "peak_rss_x": 0.625
+    },
+    {
+      "bench": "Revcomp",
+      "boehm_s_med": 1.068,
+      "gcry_s_med": 1.486,
+      "gcry_speed_pct_of_boehm": 71.9,
+      "gcry_wall_x": 1.391,
+      "boehm_peak_rss_kib_med": 898364,
+      "gcry_peak_rss_kib_med": 481456,
+      "peak_rss_x": 0.536
+    },
+    {
+      "bench": "Threadring",
+      "boehm_s_med": 1.073,
+      "gcry_s_med": 1.11,
+      "gcry_speed_pct_of_boehm": 96.7,
+      "gcry_wall_x": 1.034,
+      "boehm_peak_rss_kib_med": 6776,
+      "gcry_peak_rss_kib_med": 10544,
+      "peak_rss_x": 1.556
+    },
+    {
+      "bench": "Matmul",
+      "boehm_s_med": 0.613,
+      "gcry_s_med": 0.597,
+      "gcry_speed_pct_of_boehm": 102.7,
+      "gcry_wall_x": 0.974,
+      "boehm_peak_rss_kib_med": 30132,
+      "gcry_peak_rss_kib_med": 37788,
+      "peak_rss_x": 1.254
+    },
+    {
+      "bench": "JsonGenerate",
+      "boehm_s_med": 1.341,
+      "gcry_s_med": 1.323,
+      "gcry_speed_pct_of_boehm": 101.4,
+      "gcry_wall_x": 0.987,
+      "boehm_peak_rss_kib_med": 1335104,
+      "gcry_peak_rss_kib_med": 986488,
+      "peak_rss_x": 0.739
+    },
+    {
+      "bench": "JsonParseSerializable",
+      "boehm_s_med": 0.564,
+      "gcry_s_med": 0.812,
+      "gcry_speed_pct_of_boehm": 69.5,
+      "gcry_wall_x": 1.44,
+      "boehm_peak_rss_kib_med": 539676,
+      "gcry_peak_rss_kib_med": 510188,
+      "peak_rss_x": 0.945
+    },
+    {
+      "bench": "JsonParsePull",
+      "boehm_s_med": 0.566,
+      "gcry_s_med": 0.802,
+      "gcry_speed_pct_of_boehm": 70.6,
+      "gcry_wall_x": 1.417,
+      "boehm_peak_rss_kib_med": 571396,
+      "gcry_peak_rss_kib_med": 516724,
+      "peak_rss_x": 0.904
+    },
+    {
+      "bench": "Primes",
+      "boehm_s_med": 1.32,
+      "gcry_s_med": 9.634,
+      "gcry_speed_pct_of_boehm": 13.7,
+      "gcry_wall_x": 7.298,
+      "boehm_peak_rss_kib_med": 674192,
+      "gcry_peak_rss_kib_med": 761996,
+      "peak_rss_x": 1.13
+    },
+    {
+      "bench": "JsonParsePure",
+      "boehm_s_med": 0.681,
+      "gcry_s_med": 4.35,
+      "gcry_speed_pct_of_boehm": 15.7,
+      "gcry_wall_x": 6.388,
+      "boehm_peak_rss_kib_med": 706896,
+      "gcry_peak_rss_kib_med": 529540,
+      "peak_rss_x": 0.749
+    }
+  ],
+  "boehm_peak_rss_kib_med": 402676,
+  "gcry_peak_rss_kib_med": 251608,
+  "peak_rss_x": 0.625,
+  "note": "Informational only. Product bar remains Kemal /json + acikturkiye. Each bench is a fresh process (no suite-order pollution). speed_pct>100 means gcry faster (less wall)."
+}

@@ -1,0 +1,16 @@
+idle-drain: estab 0→0  max_atomic 14.9→5.3 MiB  live 35.0→11.4 MiB
+verdict: A/C-leaning (atomics fell with drain → true live IO / pool)
+top typed post→idle (type_id MiB):
+     435    0.8→  0.0 MiB  n=3355→0
+     902    0.3→  0.0 MiB  n=1700→0
+       1    4.6→  0.2 MiB  n=51874→3671
+     535    0.1→  0.0 MiB  n=1432→0
+       5    0.1→  0.0 MiB  n=337→0
+     574    0.1→  0.0 MiB  n=106→0
+     439    0.1→  0.0 MiB  n=214→83
+     465    0.0→  0.0 MiB  n=0→91
+     670    0.0→  0.0 MiB  n=0→101
+      98    0.0→  0.0 MiB  n=0→101
+     258    0.0→  0.0 MiB  n=0→42
+      94    0.1→  0.0 MiB  n=1948→51
+     425    0.0→  0.0 MiB  n=0→8

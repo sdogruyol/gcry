@@ -1,0 +1,270 @@
+require "./spec_helper"
+
+# Arch DWARF numbers for synthetic maps / gregs (x86_64 vs aarch64).
+private def stackmap_fp_dwarf : UInt16
+  {% if flag?(:aarch64) %}
+    29_u16
+  {% else %}
+    6_u16 # RBP
+  {% end %}
+end
+
+private def stackmap_gp0_dwarf : UInt16
+  0_u16 # x86 RAX / aarch64 x0
+end
+
+# glibc x86_64 REG_RAX=13; aarch64 DWARF-indexed gregs use index == dwarf.
+private def stackmap_gp0_greg_index : Int32
+  {% if flag?(:aarch64) %}
+    0
+  {% else %}
+    13
+  {% end %}
+end
+
+# Minimal LLVM stackmap v3 blob:
+#   1 function @ 0x1000, stack=64, 1 record
+#   record: id=1, offset=0x20 → PC 0x1020, 2 locations:
+#     Indirect [FP-8] size 8
+#     Register GP0 size 8
+private def synthetic_stackmap_v3 : Bytes
+  io = IO::Memory.new
+  # Header
+  io.write_byte 3_u8
+  io.write_byte 0_u8
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes 1_u32, IO::ByteFormat::LittleEndian # NumFunctions
+  io.write_bytes 0_u32, IO::ByteFormat::LittleEndian # NumConstants
+  io.write_bytes 1_u32, IO::ByteFormat::LittleEndian # NumRecords
+  # StkSizeRecord
+  io.write_bytes 0x1000_u64, IO::ByteFormat::LittleEndian
+  io.write_bytes 64_u64, IO::ByteFormat::LittleEndian
+  io.write_bytes 1_u64, IO::ByteFormat::LittleEndian
+  # StkMapRecord
+  io.write_bytes 1_u64, IO::ByteFormat::LittleEndian # id
+  io.write_bytes 0x20_u32, IO::ByteFormat::LittleEndian
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian # flags
+  io.write_bytes 2_u16, IO::ByteFormat::LittleEndian # nloc
+  # Loc 0: Indirect, size 8, FP, offset -8
+  io.write_byte 3_u8
+  io.write_byte 0_u8
+  io.write_bytes 8_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes stackmap_fp_dwarf, IO::ByteFormat::LittleEndian
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes -8_i32, IO::ByteFormat::LittleEndian
+  # Loc 1: Register, size 8, GP0
+  io.write_byte 1_u8
+  io.write_byte 0_u8
+  io.write_bytes 8_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes stackmap_gp0_dwarf, IO::ByteFormat::LittleEndian
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes 0_i32, IO::ByteFormat::LittleEndian
+  # align to 8 (32 bytes of locs → already aligned), padding + liveouts
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian
+  io.write_bytes 0_u16, IO::ByteFormat::LittleEndian # NumLiveOuts
+  # align8 trailing
+  io.to_slice.dup
+end
+
+describe Gcry::StackMaps do
+  it "parses v3 records into PC → locations" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+    Gcry::StackMaps.loaded?.should be_true
+    Gcry::StackMaps.record_count.should eq(1)
+    Gcry::StackMaps.location_count.should eq(2)
+    Gcry::StackMaps.find_index(0x1020_u64).should eq(0)
+    Gcry::StackMaps.find_index(0x9999_u64).should eq(-1)
+
+    kinds = [] of UInt8
+    Gcry::StackMaps.each_location_at(0x1020_u64) { |loc| kinds << loc.kind }
+    kinds.should eq([Gcry::StackMaps::LOC_INDIRECT, Gcry::StackMaps::LOC_REGISTER])
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
+
+  it "resolves Indirect + Register with FP/gregs" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+
+    # Stack slot at fp-8 holds a fake heap-looking pointer.
+    slot = Pointer(UInt64).malloc(1)
+    slot.value = 0xdead_beef_0000_u64
+    rbp = slot.address + 8 # so fp-8 == slot
+    rsp = rbp
+    lo = slot.address
+    hi = slot.address + 16
+
+    gregs = Pointer(UInt64).malloc(32)
+    32.times { |i| gregs[i] = 0 }
+    gregs[stackmap_gp0_greg_index] = 0xcafe_0000_u64
+
+    roots = [] of UInt64
+    Gcry::StackMaps.each_root_at(0x1020_u64, rsp, rbp, gregs, 32, lo, hi) do |p|
+      roots << p.address
+    end
+    roots.should contain(0xdead_beef_0000_u64)
+    roots.should contain(0xcafe_0000_u64)
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
+
+  it "skips Indirect when FP base is zero (no SEGV)" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+    gregs = Pointer(UInt64).malloc(32)
+    32.times { |i| gregs[i] = 0 }
+    roots = [] of UInt64
+    # rbp=0, no stack bounds — must not crash on FP-8
+    Gcry::StackMaps.each_root_at(0x1020_u64, 0_u64, 0_u64, gregs, 32) do |p|
+      roots << p.address
+    end
+    roots.should_not contain(0_u64)
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
+
+  it "treats Register values in the stack range as alloca slots" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+
+    slot = Pointer(UInt64).malloc(1)
+    slot.value = 0x1111_2222_3333_u64
+    gregs = Pointer(UInt64).malloc(32)
+    32.times { |i| gregs[i] = 0 }
+    gregs[stackmap_gp0_greg_index] = slot.address
+    lo = slot.address
+    hi = slot.address + 16
+
+    roots = [] of UInt64
+    Gcry::StackMaps.each_root_at(0x1020_u64, lo, lo, gregs, 32, lo, hi) do |p|
+      roots << p.address
+    end
+    roots.should contain(0x1111_2222_3333_u64)
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
+
+  it "find_index_near matches return addresses past the map PC" do
+    Gcry::StackMaps.reset_for_testing
+    Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+    # Map at 0x1020; ret a few bytes later (typical after call).
+    Gcry::StackMaps.find_index_near(0x1020_u64).should eq(0)
+    Gcry::StackMaps.find_index_near(0x1025_u64).should eq(0)
+    # Default near_delta=128 covers arg-push gaps (acik PG ret−map ≈ 74).
+    Gcry::StackMaps.find_index_near(0x1020_u64 + 74).should eq(0)
+    Gcry::StackMaps.near_delta = 32_u64
+    Gcry::StackMaps.find_index_near(0x1020_u64 + 33).should eq(-1)
+    Gcry::StackMaps.find_index_near(0x9999_u64).should eq(-1)
+  ensure
+    Gcry::StackMaps.reset_for_testing
+  end
+
+  {% if flag?(:x86_64) %}
+    it "fill_parked_sysv_gregs maps spill slots into glibc gregs order" do
+      # Fake spill block: r15..rdi then ret
+      buf = StaticArray(UInt64, 8).new(0_u64)
+      buf[0] = 0x15_u64
+      buf[1] = 0x14_u64
+      buf[2] = 0x13_u64
+      buf[3] = 0x12_u64
+      buf[4] = 0xb_u64    # rbp
+      buf[5] = 0x3_u64    # rbx
+      buf[6] = 0xd1_u64   # rdi
+      buf[7] = 0xdead_u64 # rip/ret
+      top = buf.to_unsafe.address
+      gregs = StaticArray(UInt64, Gcry::StackMaps::PARKED_SYSV_NGREGS).new(0_u64)
+      Gcry::StackMaps.fill_parked_sysv_gregs(top, gregs.to_unsafe)
+      gregs[7].should eq(0x15_u64) # r15
+      gregs[6].should eq(0x14_u64) # r14
+      gregs[5].should eq(0x13_u64) # r13
+      gregs[4].should eq(0x12_u64) # r12
+      gregs[10].should eq(0xb_u64) # rbp
+      gregs[11].should eq(0x3_u64) # rbx
+      gregs[8].should eq(0xd1_u64) # rdi
+      gregs[16].should eq(0xdead_u64)
+      gregs[15].should eq(top &+ 64) # caller RSP
+    end
+
+    it "each_root_parked_sysv skips FP walk when RBP is not on-stack (makecontext)" do
+      Gcry::StackMaps.reset_for_testing
+      Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+
+      # 8 spill words + padding so top+64 is in-range; RBP slot left 0.
+      buf = StaticArray(UInt64, 16).new(0_u64)
+      buf[6] = 0xaaaa_bbbb_cccc_u64 # rdi / Fiber*
+      buf[7] = 0x1020_u64           # rip near a map PC (would match if walked)
+      top = buf.to_unsafe.address
+      lo = top
+      hi = top &+ (16 * 8)
+
+      roots = [] of UInt64
+      Gcry::StackMaps.each_root_parked_sysv(top, lo, hi, 8) do |p|
+        roots << p.address
+      end
+      # Spill yields (7 regs) only — no near/fp when RBP=0. Ret at +56 is not
+      # a spill-slot yield; map Indirect[RBP-8] must not appear.
+      roots.should eq([0xaaaa_bbbb_cccc_u64])
+    ensure
+      Gcry::StackMaps.reset_for_testing
+    end
+  {% end %}
+
+  # Spill layout below is x86_64-sysv (8×8); aarch64-generic is 22 words.
+  {% if flag?(:x86_64) %}
+    it "each_parked_fp_frame_range yields [rsp,fp) bodies along the chain" do
+      # Layout (grows down): ... locals | saved_rbp | ret | ...
+      # Two frames: fp1 → fp0 → 0
+      mem = StaticArray(UInt64, 32).new(0_u64)
+      base = mem.to_unsafe.address
+      # Frame 0 (older): fp at base+20*8
+      fp0 = base &+ (20 * 8)
+      Pointer(UInt64).new(fp0).value = 0_u64
+      Pointer(UInt64).new(fp0 &+ 8).value = 0x1000_u64
+      # Frame 1 (leaf): fp at base+12*8, links to fp0; locals at base+8*8 .. fp1
+      fp1 = base &+ (12 * 8)
+      Pointer(UInt64).new(fp1).value = fp0
+      Pointer(UInt64).new(fp1 &+ 8).value = 0x2000_u64
+      # Spill block at base (stack_top): rbp=fp1, ret, … → rsp = top+64
+      top = base
+      Pointer(UInt64).new(top &+ 32).value = fp1 # rbp slot
+      Pointer(UInt64).new(top &+ 56).value = 0x2000_u64
+      lo = base
+      hi = base &+ (32 * 8)
+
+      ranges = [] of {UInt64, UInt64, Bool}
+      Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8) do |a, b, fill|
+        ranges << {a, b, fill}
+      end
+      ranges.size.should be >= 1
+      # First range: rsp=top+64 to fp1; no maps loaded → fill
+      ranges[0][0].should eq(top &+ 64)
+      ranges[0][1].should eq(fp1)
+      ranges[0][2].should be_true
+    end
+
+    it "each_parked_fp_frame_range miss_only skips nonempty map hits" do
+      Gcry::StackMaps.reset_for_testing
+      Gcry::StackMaps.load_bytes(synthetic_stackmap_v3).should be_true
+      # Map at 0x1020; park leaf RIP there so first frame is a hit → do_fill=false.
+      mem = StaticArray(UInt64, 32).new(0_u64)
+      base = mem.to_unsafe.address
+      fp1 = base &+ (12 * 8)
+      Pointer(UInt64).new(fp1).value = 0_u64
+      Pointer(UInt64).new(fp1 &+ 8).value = 0x9999_u64
+      top = base
+      Pointer(UInt64).new(top &+ 32).value = fp1
+      Pointer(UInt64).new(top &+ 56).value = 0x1020_u64 # rip = map PC
+      lo = base
+      hi = base &+ (32 * 8)
+      fills = [] of Bool
+      Gcry::StackMaps.each_parked_fp_frame_range(top, lo, hi, 8, miss_only: true) do |_a, _b, fill|
+        fills << fill
+      end
+      fills.size.should be >= 1
+      fills[0].should be_false
+    ensure
+      Gcry::StackMaps.reset_for_testing
+    end
+  {% end %}
+end

@@ -14,6 +14,7 @@
 
 require "./mark"
 require "./roots"
+require "./stack_maps"
 require "./finalizer"
 
 module Gcry
@@ -60,11 +61,39 @@ module Gcry
     # munmap'd (excess) or kept dormant with MADV_DONTNEED (within retain).
     # Library default false; process GC enables adaptive release.
     property release_empty_chunks : Bool = false
+    # Bytes of fully-free chunks to keep mapped+warm (no DONTNEED, no munmap)
+    # for reuse. Takes priority over empty_chunk_retain. Opt-in via
+    # GCRY_EMPTY_CHUNK_WARM_RETAIN — thr middle path vs KEEP_CHUNKS.
+    property empty_chunk_warm_retain : UInt64 = 0_u64
     # Bytes of fully-free chunks to keep dormant (DONTNEED) for reuse.
     property empty_chunk_retain : UInt64 = DEFAULT_EMPTY_CHUNK_RETAIN
     # MADV_DONTNEED free pages in partially-live chunks after major (Linux).
     # Partial-page MADV_DONTNEED on sparse chunks (opt-in — STW cost).
     property madvise_free_pages : Bool = false
+    # Mostly-empty reclaim (Linux research): high-free-ratio non-empty chunks
+    # get post-STW free-page advice WITHOUT HOLED freelist rebuild.
+    # Opt-in via GCRY_MOSTLY_EMPTY=1. Mutual exclusion with madvise_free_pages.
+    property mostly_empty_release : Bool = false
+    # Qualify when live_payload * 100 <= usable_payload * pct (default 25%).
+    property mostly_empty_max_live_pct : UInt32 = 25_u32
+    # Max free-page bytes advised per major (0 = unlimited).
+    property mostly_empty_budget : UInt64 = 0_u64
+    # false = MADV_FREE (preserve content / freelist); true = unlink + DONTNEED.
+    property mostly_empty_dontneed : Bool = false
+    getter mostly_empty_bytes : UInt64 = 0_u64
+    getter mostly_empty_chunks : UInt64 = 0_u64
+    # Tight small-heap growth (alloc locality): prefer newest chunk's freelist
+    # so older chunks can go fully empty → munmap. Opt-in / Linux research;
+    # see GCRY_TIGHT_GROW. Not TLAB.
+    property tight_grow : Bool = false
+    # Collect once before mapping a new size-class chunk when freelist empty
+    # and the small heap is already sparse (see tight_grow_gc_pct).
+    property tight_grow_gc : Bool = true
+    # small_free*100 >= small_mapped*pct → allow GC-before-grow (default 35).
+    property tight_grow_gc_pct : UInt32 = 35_u32
+    getter tight_grow_collects : UInt64 = 0_u64
+    getter tight_grow_prefer_allocs : UInt64 = 0_u64
+    getter tight_grow_maps : UInt64 = 0_u64
     getter dormant_chunk_bytes : UInt64 = 0_u64
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
@@ -95,6 +124,63 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
+    # When true, load `.llvm_stackmaps` and mark_precise_root.
+    # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
+    property precise_stack_roots : Bool = false
+    # When true with precise_stack_roots: skip conservative mutator / other-thread
+    # stack word scans. Parked fibers still word-scanned unless
+    # precise_stack_fibers_exclusive (GCRY_PRECISE_FIBERS=1). Research — UAF risk.
+    property precise_stack_exclusive : Bool = false
+    # When true with exclusive: parked fibers use leaf window (or 0 = precise
+    # only) instead of full top→bottom word scan. See GCRY_PRECISE_FIBERS.
+    property precise_stack_fibers_exclusive : Bool = false
+    # Bytes of parked active stack (from stack_top toward bottom) to still
+    # word-scan under fibers_exclusive. Default 8 KiB — FP-fill alone misses
+    # stack slots outside tiny [rsp,fp) spans (exclusive_fiber_smoke SEGV).
+    # Escape: GCRY_PRECISE_FIBER_LEAF=0 for maps+fill-only research.
+    property precise_stack_fiber_leaf_bytes : UInt64 = 8192_u64
+    # When fibers_exclusive: also word-scan each FP-chain frame body
+    # (additive with LEAF). Default on for exclusivef research.
+    property precise_stack_fiber_fp_fill : Bool = true
+    # When true: skip FP-fill on frames with a non-empty stackmap. Research —
+    # acik UAF (map hit ≠ complete lives). Default false = fill every frame.
+    # See GCRY_FIBER_FP_FILL_MISS_ONLY.
+    property precise_stack_fiber_fp_fill_miss_only : Bool = false
+    getter precise_stack_roots_marked : UInt64 = 0_u64
+    getter parked_fp_fill_frames : UInt64 = 0_u64
+    getter parked_fp_fill_bytes : UInt64 = 0_u64
+    getter parked_fp_fill_skipped_frames : UInt64 = 0_u64
+    getter parked_fp_fill_skipped_bytes : UInt64 = 0_u64
+    # Research: first-mark attribution by root source (GCRY_LIVE_ATTR=1).
+    # Stack/Static/Thread/Precise = ambient seeds; Heap = edge closure.
+    property live_attr_roots : Bool = false
+    # Optional: first-mark counts for one type_id (GCRY_LIVE_ATTR_WATCH_TID).
+    # acik idle-drain: TCPSocket ≈ 441 in tip exclusive bin.
+    property live_attr_watch_tid : Int32 = 0
+    getter first_mark_stack_objects : UInt64 = 0_u64
+    getter first_mark_stack_bytes : UInt64 = 0_u64
+    getter first_mark_stack_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_parked_objects : UInt64 = 0_u64
+    getter first_mark_parked_bytes : UInt64 = 0_u64
+    getter first_mark_parked_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_static_objects : UInt64 = 0_u64
+    getter first_mark_static_bytes : UInt64 = 0_u64
+    getter first_mark_static_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_thread_objects : UInt64 = 0_u64
+    getter first_mark_thread_bytes : UInt64 = 0_u64
+    getter first_mark_thread_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_precise_objects : UInt64 = 0_u64
+    getter first_mark_precise_bytes : UInt64 = 0_u64
+    getter first_mark_precise_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_heap_objects : UInt64 = 0_u64
+    getter first_mark_heap_bytes : UInt64 = 0_u64
+    getter first_mark_heap_atomic_bytes : UInt64 = 0_u64
+    getter first_mark_watch_stack : UInt64 = 0_u64
+    getter first_mark_watch_parked : UInt64 = 0_u64
+    getter first_mark_watch_static : UInt64 = 0_u64
+    getter first_mark_watch_thread : UInt64 = 0_u64
+    getter first_mark_watch_precise : UInt64 = 0_u64
+    getter first_mark_watch_heap : UInt64 = 0_u64
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
@@ -190,6 +276,9 @@ module Gcry
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
     @stw_owner : Thread? = nil
+    # EC1 post-STW sweep/flush: block SYSMON map_chunk while `@chunks` is rebuilt
+    # and empties are queued for munmap (same cooperative spin as STW).
+    @block_other_heap = false
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
     @gc_lock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
@@ -987,31 +1076,47 @@ module Gcry
         # recursive) or munmap mid-peer-collect.
         @suppress_collect.add(1)
         begin
-          if @lazy_sweep_pending
-            t0 = monotonic_ns
-            sweep(major: major, after_world: true)
-            @last_phase_sweep_ns = monotonic_ns - t0
-            @lazy_sweep_pending = false
-            if major
-              arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
-            else
-              note_nursery_survival
-              arm_page_barrier_after_collect
+          # EC1 lazy: pin stw_owner + block SYSMON while rebuilding `@chunks`
+          # and munmapping empties (Parallel lazy does not relink / munmap).
+          ec1_lazy = @lazy_sweep_pending && !multi_mutator_threads?
+          if ec1_lazy
+            @stw_owner = Thread.current if @stw_owner.nil?
+            @block_other_heap = true
+          end
+          begin
+            if @lazy_sweep_pending
+              t0 = monotonic_ns
+              sweep(major: major, after_world: true)
+              @last_phase_sweep_ns = monotonic_ns - t0
+              @lazy_sweep_pending = false
+              if major
+                arm_page_barrier_after_collect if @nursery_enabled || @incremental_auto
+              else
+                note_nursery_survival
+                arm_page_barrier_after_collect
+              end
+            end
+
+            t_flush = monotonic_ns
+            # Munmap outside STW — empty chunks + excess large freelist (reuse common).
+            # Still under post-STW mutex so the next collect cannot stop_world here.
+            flush_pending_empty_chunks
+            # DORMANT madvise outside STW — kernel VM lock contention avoided.
+            flush_pending_dormant_chunks
+            # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
+            flush_pending_page_release_chunks
+            # Mostly-empty (SPARSE): MADV_FREE or bounded unlink+DONTNEED; no HOLED rebuild.
+            flush_pending_mostly_empty_chunks
+            # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
+            release_large_freelist_pages
+            trim_large_cache
+            @last_phase_flush_ns = monotonic_ns - t_flush
+          ensure
+            if ec1_lazy
+              @block_other_heap = false
+              @stw_owner = nil
             end
           end
-
-          t_flush = monotonic_ns
-          # Munmap outside STW — empty chunks + excess large freelist (reuse common).
-          # Still under post-STW mutex so the next collect cannot stop_world here.
-          flush_pending_empty_chunks
-          # DORMANT madvise outside STW — kernel VM lock contention avoided.
-          flush_pending_dormant_chunks
-          # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
-          flush_pending_page_release_chunks
-          # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
-          release_large_freelist_pages
-          trim_large_cache
-          @last_phase_flush_ns = monotonic_ns - t_flush
 
           # After a major collect, record the heap range observation so the
           # adaptive headroom in `ensure_bitmap_covers` stays tight.
@@ -1027,7 +1132,9 @@ module Gcry
             if total_large > 0
               hit_pct = (@large_cache_hits * 100) // total_large
               current = @large_cache_retain
-              if hit_pct > 50 && current < LARGE_CACHE_LIMIT
+              # current == 0 means cache disabled (Linux process default); do not
+              # grow from zero — 0×2 would stay 0 anyway, but skip makes intent clear.
+              if hit_pct > 50 && current > 0 && current < LARGE_CACHE_LIMIT
                 # Good reuse: double retain (capped at limit).
                 @large_cache_retain = {current * 2, LARGE_CACHE_LIMIT}.min
               elsif hit_pct < 10 && current > 1048576_u64 # 1 MiB floor
@@ -1142,6 +1249,35 @@ module Gcry
       @bytes_reclaimed_since_gc = 0_u64
       @layout_precise_scans = 0_u64
       @layout_conservative_scans = 0_u64
+      @precise_stack_roots_marked = 0_u64
+      @parked_fp_fill_frames = 0_u64
+      @parked_fp_fill_bytes = 0_u64
+      @parked_fp_fill_skipped_frames = 0_u64
+      @parked_fp_fill_skipped_bytes = 0_u64
+      @first_mark_stack_objects = 0_u64
+      @first_mark_stack_bytes = 0_u64
+      @first_mark_stack_atomic_bytes = 0_u64
+      @first_mark_parked_objects = 0_u64
+      @first_mark_parked_bytes = 0_u64
+      @first_mark_parked_atomic_bytes = 0_u64
+      @first_mark_static_objects = 0_u64
+      @first_mark_static_bytes = 0_u64
+      @first_mark_static_atomic_bytes = 0_u64
+      @first_mark_thread_objects = 0_u64
+      @first_mark_thread_bytes = 0_u64
+      @first_mark_thread_atomic_bytes = 0_u64
+      @first_mark_precise_objects = 0_u64
+      @first_mark_precise_bytes = 0_u64
+      @first_mark_precise_atomic_bytes = 0_u64
+      @first_mark_heap_objects = 0_u64
+      @first_mark_heap_bytes = 0_u64
+      @first_mark_heap_atomic_bytes = 0_u64
+      @first_mark_watch_stack = 0_u64
+      @first_mark_watch_parked = 0_u64
+      @first_mark_watch_static = 0_u64
+      @first_mark_watch_thread = 0_u64
+      @first_mark_watch_precise = 0_u64
+      @first_mark_watch_heap = 0_u64
       @type_id_root_rejects = 0_u64
       @type_id_stack_rejects = 0_u64
       @type_id_static_rejects = 0_u64

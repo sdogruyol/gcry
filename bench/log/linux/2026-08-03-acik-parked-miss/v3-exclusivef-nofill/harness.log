@@ -1,0 +1,3 @@
+OUT=/home/uchiha/playground/gcry/bench/log/linux/2026-08-03-acik-parked-miss/v3-exclusivef-nofill bin=exclusive trials=1 d=12s
+  trial=1 ...   precise_mode=2
+curl: (7) Failed to connect to 127.0.0.1 port 3801 after 0 ms: Couldn't connect to server

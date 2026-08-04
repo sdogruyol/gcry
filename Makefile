@@ -1,14 +1,14 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e trace-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e trace-smoke mutate soak soak-smoke format format-check lint samples"
-	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-kemal-record"
-	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke mutate soak soak-smoke format format-check lint samples"
+	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record"
+	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
 $(BIN):
@@ -131,6 +131,26 @@ compiler-gc-contract: $(BIN)
 kemal-e2e:
 	KEMAL_E2E_DURATION=$${KEMAL_E2E_DURATION:-60} ./bench/kemal_e2e.sh
 
+# Parallel EC4 TLAB-off soft soak (0 soft / 0 hard). Local gate N=40; CI smoke N=5.
+soft-soak-ec4:
+	SOFT_SOAK_N=$${SOFT_SOAK_N:-40} ./bench/soft_soak_ec4.sh
+
+soft-soak-ec4-smoke:
+	SOFT_SOAK_N=$${SOFT_SOAK_N:-5} SOFT_SOAK_DURATION=$${SOFT_SOAK_DURATION:-8} ./bench/soft_soak_ec4.sh
+
+# Compiler stack-map walker smoke (needs CRYSTAL with CRYSTAL_EMIT_STACKMAP support).
+# Tip Crystal requires -Dpreview_mt -Dexecution_context (else Scheduler path livelocks soak).
+stackmap-smoke: $(BIN)
+	CRYSTAL_EMIT_STACKMAP=1 $(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+		--no-debug --frame-pointers=always \
+		-o $(BIN)/stackmap_walker_smoke bench/stackmap_walker_smoke.cr
+	GCRY_PRECISE_STACK=1 $(BIN)/stackmap_walker_smoke
+	GCRY_PRECISE_STACK=2 $(BIN)/stackmap_walker_smoke
+	CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN=32 $(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+		--no-debug --frame-pointers=always \
+		-o $(BIN)/stackmap_exclusive_fiber_smoke bench/stackmap_exclusive_fiber_smoke.cr
+	GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 $(BIN)/stackmap_exclusive_fiber_smoke
+
 trace-smoke: $(BIN)
 	$(CRYSTAL) build bench/trace_smoke.cr -o $(BIN)/trace_smoke
 	$(BIN)/trace_smoke
@@ -202,6 +222,11 @@ samples: $(BIN)
 bench-perf-smoke:
 	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/perf_smoke.sh
 
+# Secondary GC suite (vendored crystal-metric, process-fresh). Informational.
+# FILTER=core|stress|gc|all|A,B TRIALS=1 make bench-crystal-metric
+bench-crystal-metric:
+	bash bench/run_crystal_metric_ab.sh
+
 # A/B previous tag vs current tree; prints docs/PERF.md History rows.
 bench-kemal-record:
 	@test -n "$(PREV)" || (echo "set PREV=vX.Y.Z" && exit 1)
@@ -233,3 +258,4 @@ bench-run-kemal-symbols:
 clean:
 	rm -rf $(BIN)
 	rm -rf bench/kemal/lib bench/kemal/.shards bench/kemal/shard.lock
+	rm -rf bench/crystal_metric/lib bench/crystal_metric/.shards bench/crystal_metric/shard.lock
