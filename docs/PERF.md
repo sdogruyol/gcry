@@ -17,7 +17,7 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 | `/json` | **~87%** | **~0.80×** |
 | `/` | **~82%** | **~0.79×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline; fat-app (acikturkiye) re-cut: thr **~90%** @ RSS **~3.43×** — [ACIKTURKIYE.md](ACIKTURKIYE.md) (`2026-08-02-064142/`). Quiet Kemal smoke (`2026-08-02-065113/`) landed **~83%** `/json` (Boehm louder); **headline stays the v0.16 cut above**.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **tip+EC on 9950X** after finalizer + Linux retain=0 is thr **~90–94%** @ RSS **~1.0–1.4×** — [ACIKTURKIYE.md](ACIKTURKIYE.md). Quiet Kemal smoke (`2026-08-02-065113/`) landed **~83%** `/json` (Boehm louder); retain=0 smoke **~84%** @ **0.76×** (`2026-08-03-kemal-release0-smoke/`) — **headline stays the v0.16 cut above**.
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 

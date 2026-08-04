@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.17.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.17 Darwin re-cut): **`/json` ~84%**, RSS **~0.93×**. Fat apps still show the conservative tax (~**3.43×** Linux; ~**18×** Darwin) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+As of **v0.17.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.17 Darwin re-cut): **`/json` ~84%**, RSS **~0.93×**. Fat-app Linux tip is ~**90%** thr @ ~**1×** RSS (finalizer + retain=0; v0.17 i3 was ~**3.43×**); Darwin still ~**18×** — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
 
 ## Goals
 
@@ -164,7 +164,7 @@ Shipped and dogfooded on Linux + macOS; **v0.17.0** ships the Darwin Kemal re-cu
 
 **Kemal macOS (v0.17.0 cut):** `/` ~**90%**, `/json` ~**84%**, post-GC RSS ~**0.93–0.97×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux thr ~**90%**, RSS ~**3.43×** — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**71%**, RSS ~**18×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux tip thr ~**90%**, RSS ~**1×** (v0.17 i3 cut ~**3.43×**) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**71%**, RSS ~**18×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
@@ -184,7 +184,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Closes fat-app RSS (Linux ~3.43× / Darwin ~18×) — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
+| **Stack maps / precise roots** | Darwin fat-app ~18×; Linux tip already ~1× via finalizer + retain=0 — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
 | **Parallel+TLAB / munmap supported** | TLAB-off + lazy is supported opt-in (~79%); TLAB-on + empty munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | **Write barriers in codegen** | Sound concurrent / cheaper incremental |
 | **Moving / compacting** | After precise roots |
@@ -192,7 +192,7 @@ Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pai
 | **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
 | **Process-STW property tests** | Library MT property ≠ production STW surface |
 
-Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page policy). Fat-app RSS still needs stack maps. Darwin Kemal re-cut + Parallel supported opt-in landed in **0.17.0**.
+Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page policy). Darwin fat-app RSS still needs stack maps; Linux tip closed the measured Boehm gap without them. Darwin Kemal re-cut + Parallel supported opt-in landed in **0.17.0**.
 
 ## Risks
 

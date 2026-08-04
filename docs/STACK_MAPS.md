@@ -3,10 +3,11 @@
 **Status:** spike **GO** — parser + hybrid walker landed (default off).
 Not a release feature. Product version stays **v0.17.0**.
 
-**Gate metric:** acikturkiye post-GC RSS × Boehm. Same-host tip+EC after
-finalizer fix (`…/acik-finalizer-gate-med3/`): ~**1.81×** RSS, thr ~**92%**.
-Older i3 cut ~**3.43×** / thr ~**90%** (pre-fix tree). Kemal thr is **not**
-the success bar.
+**Gate metric:** acikturkiye post-GC RSS × Boehm. Linux tip after finalizer +
+retain=0: ~**1.0–1.4×** RSS, thr ~**90–94%** (`…/acik-release0-med3/`,
+`…/acik-defaults-verify-med3/`). Post-finalizer with old caches was ~**1.81×**;
+v0.17 i3 cut ~**3.43×**. Darwin still ~**18×**. Kemal thr is **not** the
+success bar.
 
 Hub parent: [ROADMAP.md](../ROADMAP.md) Phase 2 · [DESIGN.md](../DESIGN.md)
 Frontier · thr residual [FINDINGS](../bench/log/linux/2026-08-02-018-FINDINGS.md).
@@ -20,7 +21,8 @@ objects alive → false retention.
 | Workload | Tip RSS × Boehm | Note |
 |----------|----------------:|------|
 | Kemal `/json` | ~**0.80×** | scrub + empty-chunk release enough |
-| acikturkiye `/api/v1/` | ~**3.43×** | dense conservative-live; scrub/layout do not close |
+| acikturkiye `/api/v1/` (Linux) | ~**1×** | finalizer + retain=0; was ~3.43× (v0.17 i3) / ~8.5× (pre-fix tip) |
+| acikturkiye `/api/v1/` (Darwin) | ~**18×** | still the stack-map RSS gate |
 
 Stack scrub / type_id / layout are **not** substitutes for knowing which
 slots are pointers.
@@ -92,7 +94,7 @@ Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
-exclusive (drop conservative) + acik RSS proof are next.
+exclusive stabilize + Darwin RSS proof are next (Linux tip RSS already ~1×).
 
 ## Risks
 
@@ -112,7 +114,7 @@ exclusive (drop conservative) + acik RSS proof are next.
 ## Success criteria (later phases)
 
 1. Precise path correctness — soak / soft-soak green
-2. acikturkiye post-GC RSS **materially down** vs ~3.43× (soft hypothesis ~**1.2×** — unproven)
+2. Darwin acik post-GC RSS **materially down** vs ~18×; Linux tip already ~**1×** without maps (hold that band under exclusive/precise)
 3. thr hold (~90% band)
 4. Kemal not regressed beyond noise
 

@@ -4,9 +4,22 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict (v0.17.0) — Linux *(measured)*
+## Verdict — tip+EC Linux (9950X, 2026-08-03) *(current)*
 
-Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--release`, **in-header MARK** (default), scrub **on**, auto-layouts **off**, EC1, median of 3. Session: `bench/log/linux/2026-08-02-064142/` (readiness hub `2026-08-02-ec1-readiness/`).
+Same host, tip Crystal + EC, WSL2 x86_64 (Ryzen 9 9950X), `wrk -c100 -d30`, dual `/gc-collect`, median of 3. After LibC finalizer registry (`3a0bffe`) + Linux **retain=0** process defaults (`9228bb9`: `large_cache` / `empty_chunk_retain` → 0).
+
+| Cut | Session | thr % Boehm | post-GC RSS × |
+|-----|---------|------------:|--------------:|
+| **release0 env → now Linux defaults** | `…/acik-release0-med3/` | **~94%** | **~1.00×** |
+| defaults-as-code verify | `…/acik-defaults-verify-med3/` | **~90%** | **~1.40×** |
+
+Cite **~90% thr @ ~1× RSS** as the tip band (release0 ties Boehm; verify med3 noisier, one unreproduced Monitor SEGV — see `…/acik-segv-bisect/`). Post-finalizer with *old* caches was ~**91.5%** @ ~**1.81×** (`…/acik-finalizer-gate-med3/`). Pre-fix tip on this host was ~**8.5×** — not conservative density alone.
+
+Kemal smoke after the same defaults: `/json` **~84%** @ **0.76×** (`…/kemal-release0-smoke/`) — no cliff vs [PERF.md](PERF.md) v0.16 headline. Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
+
+## v0.17.0 tagged cut — Linux i3 *(superseded on tip)*
+
+Tagged-release cut on Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--release`, scrub **on**, EC1, median of 3. Session: `bench/log/linux/2026-08-02-064142/` (readiness hub `2026-08-02-ec1-readiness/`). **Do not cite as tip RSS** — finalizer + retain=0 closed that gap on 9950X.
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
@@ -19,7 +32,7 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--
 | 3 | 92.3% | 3.46× | 111 / 120 |
 | **median** | **89.8%** | **3.43×** | — |
 
-**Thr holds** vs v0.15 (~90%). **RSS worse** than v0.15 **~2.54×** — dense conservative-live; empty-chunk reclaim does not close it. Kemal Linux headline still [PERF.md](PERF.md) v0.16 (~87% `/json` @ ~0.80×). Script: `bash bench/run_all.sh acik`.
+**Thr holds** vs v0.15 (~90%). On that tree/host, RSS was worse than v0.15 **~2.54×**. Script: `bash bench/run_all.sh acik`.
 
 ### v0.15.0 Linux cut (superseded RSS; thr same band)
 
@@ -75,26 +88,19 @@ Same host, med-of-3 `wrk -c100 -d30`, non2xx=0. Session:
 | sys (1.21.0 + gcry) | ~103% | **~8.51×** |
 | tipec (tip + EC + gcry) | ~102% | **~8.46×** |
 
-tip+EC ≈ system gcry — not a tip regressor. Gap vs i3 tip headline ~3.43× is
-host/demo-data/tree, not the tip compiler. **Superseded on this host** by the
-finalizer-registry fix below (~8.5× was dead `TCPSocket`/`Digest` retention).
+tip+EC ≈ system gcry — not a tip regressor. The ~8.5× here was dead
+`TCPSocket`/`Digest` retention (finalizer registry), not a tip-compiler
+regressor vs the v0.17 i3 ~3.43× cut. **Superseded** by the tip Verdict above.
 
-### Post-finalizer gate (9950X, 2026-08-03)
+### Post-finalizer → retain=0 path (9950X, 2026-08-03)
 
-Same host/method, tip+EC `base` (no stackmaps) vs Boehm after LibC finalizer
-registry + Boehm resurrect (`3a0bffe`). Session:
-`bench/log/linux/2026-08-03-acik-finalizer-gate-med3/`.
-
-| | thr % Boehm | post-GC RSS × |
-|--|------------:|--------------:|
-| tip+EC gcry (`base`) | **~91.5%** | **~1.81×** |
-
-Was ~8.5× on the same host pre-fix. RSS lever was finalizer correctness, not
+Detail behind the tip Verdict above. After LibC finalizer registry + Boehm
+resurrect (`3a0bffe`), tip+EC `base` vs Boehm was thr **~91.5%** @ RSS
+**~1.81×** (`…/acik-finalizer-gate-med3/`) — was ~8.5× pre-fix. Residual was
+allocator caches, not live-graph: `GCRY_LARGE_CACHE=0` +
+`GCRY_EMPTY_CHUNK_RETAIN=0` → **~94% @ 1.00×** (`…/acik-release0-med3/`), now
+Linux process defaults. Lever was finalizer correctness + retain policy, not
 exclusivef / layouts / pool caps.
-
-Follow-up (`…/acik-release0-med3/`): `GCRY_LARGE_CACHE=0` +
-`GCRY_EMPTY_CHUNK_RETAIN=0` → RSS **~1.00×** Boehm, thr **~94%**. Those are
-now the **Linux process defaults** (opt up via the same env vars).
 
 ### Non-stack knobs (9950X, 2026-08-03)
 
@@ -113,8 +119,9 @@ not reclaim.
 | STW pauses ≪ wall | Thr gaps were mostly mutator / retention / VMA — fixed those first |
 | Empty-chunk release | Kemal RSS ≈ Boehm (0.9 era); acikturkiye chunks are **dense live** (~noop for RSS) |
 | Layout / type_id / SP clamp | Correct; ~no RSS move on this app |
-| Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16); acik tip was ~3.43×/~~8.5×~~ until finalizer registry fix → **~1.81×** (9950X). Scrub ≠ substitute for correct finalizers / stack maps |
-| Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect closed most of the Boehm gap |
+| Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16). Acik: scrub ≠ substitute for correct finalizers; tip closed with finalizer + retain=0 → **~1×** (9950X) |
+| Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect → ~1.81×, then retain=0 → ~1× |
+| Linux large/empty retain defaults → 0 | Mapped-free caches were the residual after finalizer fix; escape via `GCRY_LARGE_CACHE` / `GCRY_EMPTY_CHUNK_RETAIN` |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 

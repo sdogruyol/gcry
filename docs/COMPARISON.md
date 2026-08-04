@@ -52,4 +52,4 @@ Secondary CLI shapes (tree/JSON/channel): vendored crystal-metric GC subset —
 
 ## The RSS ceiling
 
-Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Dense live heaps (e.g. acikturkiye ~**3.43×** Linux / ~**18×** Darwin) stay thicker — layout, type_id gate, and SP clamp were measured; they don’t close that gap. Next lever is **compiler stack maps**, not another env flag. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+Shard-only gcry reaches **at-or-below Boehm RSS on Kemal** (~0.80× Linux, ~0.93× macOS). Fat-app Linux tip is ~**1×** Boehm after finalizer + retain=0 (v0.17 i3 cut was ~**3.43×**); Darwin acik is still ~**18×**. Layout / type_id / SP clamp alone did not close the old gap — correct finalizers did most of the Linux work. Remaining lever for Darwin / precise roots: **compiler stack maps**. Field notes: [ACIKTURKIYE.md](ACIKTURKIYE.md), [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
