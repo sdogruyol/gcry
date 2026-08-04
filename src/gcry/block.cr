@@ -197,6 +197,9 @@ module Gcry
       DORMANT = 2_u32
       # Some free pages were MADV_DONTNEED'd; freelist must skip those holes.
       HOLED = 4_u32
+      # Mostly-empty: queued for post-STW free-page release without HOLED rebuild.
+      # Default advice is MADV_FREE (content preserved; freelist stays valid).
+      SPARSE = 8_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32, @flags : UInt32 = 0_u32)
@@ -252,6 +255,20 @@ module Gcry
         h.flags |= Flags::HOLED
       else
         h.flags &= ~Flags::HOLED
+      end
+      chunk.value = h
+    end
+
+    def self.sparse?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::SPARSE) != 0
+    end
+
+    def self.set_sparse(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::SPARSE
+      else
+        h.flags &= ~Flags::SPARSE
       end
       chunk.value = h
     end

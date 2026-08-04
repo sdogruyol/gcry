@@ -70,6 +70,18 @@ module Gcry
     # MADV_DONTNEED free pages in partially-live chunks after major (Linux).
     # Partial-page MADV_DONTNEED on sparse chunks (opt-in — STW cost).
     property madvise_free_pages : Bool = false
+    # Mostly-empty reclaim (Linux research): high-free-ratio non-empty chunks
+    # get post-STW free-page advice WITHOUT HOLED freelist rebuild.
+    # Opt-in via GCRY_MOSTLY_EMPTY=1. Mutual exclusion with madvise_free_pages.
+    property mostly_empty_release : Bool = false
+    # Qualify when live_payload * 100 <= usable_payload * pct (default 25%).
+    property mostly_empty_max_live_pct : UInt32 = 25_u32
+    # Max free-page bytes advised per major (0 = unlimited).
+    property mostly_empty_budget : UInt64 = 0_u64
+    # false = MADV_FREE (preserve content / freelist); true = unlink + DONTNEED.
+    property mostly_empty_dontneed : Bool = false
+    getter mostly_empty_bytes : UInt64 = 0_u64
+    getter mostly_empty_chunks : UInt64 = 0_u64
     getter dormant_chunk_bytes : UInt64 = 0_u64
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
@@ -1080,6 +1092,8 @@ module Gcry
             flush_pending_dormant_chunks
             # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
             flush_pending_page_release_chunks
+            # Mostly-empty (SPARSE): MADV_FREE or bounded unlink+DONTNEED; no HOLED rebuild.
+            flush_pending_mostly_empty_chunks
             # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
             release_large_freelist_pages
             trim_large_cache

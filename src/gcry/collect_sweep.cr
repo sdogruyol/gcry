@@ -30,6 +30,8 @@ module Gcry
         @chunk_fill_ge75 = 0_u64
         @dormant_chunk_bytes = 0_u64
         @dontneed_bytes = 0_u64
+        @mostly_empty_bytes = 0_u64
+        @mostly_empty_chunks = 0_u64
         @sweep_dormant_skips = 0_u64
       end
 
@@ -169,6 +171,7 @@ module Gcry
                   mapped = chunk.value.mapped_bytes
                   @fully_free_chunk_bytes += mapped
                   ChunkHeader.set_holed(chunk, false)
+                  ChunkHeader.set_sparse(chunk, false)
                   if release_empty_chunks_this_collect? && class_index >= 0 && class_index < SIZE_CLASS_COUNT
                     # Priority: warm (mapped) → dormant (DONTNEED) → munmap.
                     # Warm retain is the thr middle path vs KEEP_CHUNKS (RSS tax
@@ -242,6 +245,7 @@ module Gcry
                   if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                      usable_payload > 0 && live_payload < usable_payload
                     ChunkHeader.set_holed(chunk, true)
+                    ChunkHeader.set_sparse(chunk, false)
                     bit = 1_u64 << class_index
                     if ChunkHeader.nursery?(chunk)
                       rebuild_nursery_mask |= bit
@@ -250,6 +254,17 @@ module Gcry
                     end
                   else
                     ChunkHeader.set_holed(chunk, false)
+                    # Mostly-empty (HOLED-less): high-free-ratio non-empty chunks.
+                    # Post-STW MADV_FREE by default — freelist stays valid (no rebuild).
+                    # Exclusive with HOLED / madvise_free_pages.
+                    if @mostly_empty_release && !@madvise_free_pages &&
+                       class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                       usable_payload > 0 &&
+                       live_payload * 100 <= usable_payload * @mostly_empty_max_live_pct.to_u64
+                      ChunkHeader.set_sparse(chunk, true)
+                    else
+                      ChunkHeader.set_sparse(chunk, false)
+                    end
                   end
                 end
                 unless drop
@@ -424,7 +439,7 @@ module Gcry
           next if ChunkHeader.dormant?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% else %}
         each_chunk do |chunk|
@@ -432,9 +447,100 @@ module Gcry
           next if ChunkHeader.large?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          dontneed_free_pages_in_chunk(chunk, SizeClasses.payload(class_index))
+          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% end %}
+    end
+
+    # Mostly-empty flush: free pages in SPARSE chunks, no HOLED freelist rebuild.
+    # Default MADV_FREE keeps freelist words valid. Opt-in dontneed mode unlinks
+    # freelist nodes in free-only page runs then MADV_DONTNEED (churn risk).
+    private def flush_pending_mostly_empty_chunks : Nil
+      return unless @mostly_empty_release
+      return if @madvise_free_pages
+
+      budget = @mostly_empty_budget
+      budget_left = budget == 0 ? UInt64::MAX : budget
+      preserve = !@mostly_empty_dontneed
+
+      each_chunk do |chunk|
+        next unless ChunkHeader.sparse?(chunk)
+        ChunkHeader.set_sparse(chunk, false)
+        next if ChunkHeader.large?(chunk)
+        next if ChunkHeader.dormant?(chunk)
+        class_index = chunk.value.size_class.to_i32
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        break if budget_left == 0
+
+        payload = SizeClasses.payload(class_index)
+        nursery = ChunkHeader.nursery?(chunk)
+        before = @dontneed_bytes
+        if @mostly_empty_dontneed
+          unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+        end
+        if release_free_pages_in_chunk(chunk, payload, preserve_content: preserve)
+          gained = @dontneed_bytes - before
+          if gained > budget_left
+            # Counters already include full run; budget is best-effort cap on
+            # further chunks this major.
+            budget_left = 0
+          else
+            budget_left -= gained
+          end
+          @mostly_empty_bytes += gained
+          @mostly_empty_chunks += 1
+        end
+      end
+    end
+
+    # Drop freelist nodes whose user pointer lies in free-only page runs of
+    # *chunk*, then leave those pages eligible for MADV_DONTNEED. No class-wide
+    # rebuild (unlike HOLED).
+    private def unlink_free_only_page_runs(chunk : ChunkHeader*, class_index : Int32, nursery : Bool, payload : UInt32) : Nil
+      page = Platform.host_page_size
+      data0 = ChunkHeader.data_start(chunk).address
+      data1 = ChunkHeader.data_end(chunk).address
+      return if data1 <= data0
+
+      first_page = data0 & ~(page - 1)
+      last_page = (data1 - 1) & ~(page - 1)
+      n_pages = ((last_page - first_page) // page) + 1
+      return if n_pages == 0 || n_pages > 64
+
+      live_mask = 0_u64
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      while (cursor + block_bytes) <= limit
+        header = cursor.as(BlockHeader*)
+        unless BlockHeader.free?(header)
+          b0 = cursor.address
+          b1 = cursor.address + block_bytes
+          p = b0 & ~(page - 1)
+          while p < b1
+            idx = ((p - first_page) // page).to_i32
+            live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+            p += page
+          end
+        end
+        cursor += block_bytes
+      end
+
+      idx = 0
+      while idx < n_pages.to_i32
+        if (live_mask & (1_u64 << idx)) == 0
+          run_start = first_page + idx.to_u64 * page
+          while idx < n_pages.to_i32 && (live_mask & (1_u64 << idx)) == 0
+            idx += 1
+          end
+          run_end = first_page + idx.to_u64 * page
+          if run_start >= data0 && run_end <= data1 && run_end > run_start
+            unlink_freelist_range(class_index, nursery, run_start, run_end)
+          end
+        else
+          idx += 1
+        end
+      end
     end
 
     # Release physical pages for cached large-object chunks after a major
@@ -668,11 +774,12 @@ module Gcry
       {% end %}
     end
 
-    # Drop RSS for free pages that hold no live blocks. Intrusive freelist is
-    # safe because those blocks are omitted from the freelist (HOLED + rebuild).
-    # Pre-computes contiguous free-page runs and issues ONE madvise per run
-    # instead of one per page (reduces syscall count from up to 64 to 1-3).
-    private def dontneed_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32) : Bool
+    # Drop RSS for free pages that hold no live blocks.
+    # preserve_content=false → MADV_DONTNEED / Darwin reusable (HOLED path must
+    # omit those blocks from the freelist via rebuild).
+    # preserve_content=true → Linux MADV_FREE (freelist words stay valid until
+    # kernel reclaim) — used by mostly-empty without HOLED.
+    private def release_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32, *, preserve_content : Bool) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
         page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
@@ -716,7 +823,17 @@ module Gcry
             run_end = first_page + idx.to_u64 * page
             len = run_end - run_start
             if run_start >= data0 && run_end <= data1 && len > 0
-              if Platform.release_physical_pages(run_start, len)
+              ok = if preserve_content
+                     {% if flag?(:linux) %}
+                       Platform.release_physical_pages_free(run_start, len)
+                     {% else %}
+                       # Darwin reusable already preserves content.
+                       Platform.release_physical_pages(run_start, len)
+                     {% end %}
+                   else
+                     Platform.release_physical_pages(run_start, len)
+                   end
+              if ok
                 @dontneed_bytes += len
                 any = true
               end

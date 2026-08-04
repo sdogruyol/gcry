@@ -326,6 +326,40 @@ module GC
       # Linux HOLED free-page release stays OPT-IN (`GCRY_PAGE_DONTNEED=1`).
       # Default-on was measured to regress Kemal and acik thr/RSS: HOLED freelist
       # rebuild blows sweep cost and abandoned free pages cause chunk churn.
+      #
+      # Mostly-empty (HOLED-less) is a separate research knob:
+      #   GCRY_MOSTLY_EMPTY=1           — MADV_FREE free pages in ≤25%-live chunks
+      #   GCRY_MOSTLY_EMPTY_MODE=dontneed — unlink free-only runs + DONTNEED (churn risk)
+      #   GCRY_MOSTLY_EMPTY_PCT / GCRY_MOSTLY_EMPTY_BUDGET
+      # Ignored when PAGE_DONTNEED is on (HOLED owns the path).
+      if env_flag_one?("GCRY_MOSTLY_EMPTY") && !heap.madvise_free_pages
+        heap.mostly_empty_release = true
+        if pct = env_u64("GCRY_MOSTLY_EMPTY_PCT")
+          # Avoid NamedTuple/clamp alloc during GC.init — clamp manually.
+          p = pct
+          p = 1_u64 if p < 1
+          p = 100_u64 if p > 100
+          heap.mostly_empty_max_live_pct = p.to_u32
+        end
+        if budget = env_u64("GCRY_MOSTLY_EMPTY_BUDGET")
+          heap.mostly_empty_budget = budget
+        end
+        # LibC.getenv only — ENV[] allocates and can SEGV during GC.init.
+        mode = LibC.getenv("GCRY_MOSTLY_EMPTY_MODE")
+        unless mode.null?
+          # "dontneed" (case-sensitive ASCII); any other value keeps MADV_FREE.
+          # Measured REJECT on acik (COLLECT_HANG 2/3) — research only.
+          heap.mostly_empty_dontneed =
+            mode[0] == 'd'.ord.to_u8 && mode[1] == 'o'.ord.to_u8 &&
+              mode[2] == 'n'.ord.to_u8 && mode[3] == 't'.ord.to_u8 &&
+              mode[4] == 'n'.ord.to_u8 && mode[5] == 'e'.ord.to_u8 &&
+              mode[6] == 'e'.ord.to_u8 && mode[7] == 'd'.ord.to_u8 &&
+              mode[8] == 0
+          if heap.mostly_empty_dontneed
+            warn_unsupported_env("gcry: GCRY_MOSTLY_EMPTY_MODE=dontneed is research-only (COLLECT_HANG risk); not a product default\n")
+          end
+        end
+      end
     {% end %}
 
     if env_flag_one?("GCRY_INTERIOR")
