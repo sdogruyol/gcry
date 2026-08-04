@@ -8,6 +8,14 @@
 .cache
 .DS_Store
 
+# Local scratch (acik rebuild bins, probe trees)
+.tmp/
+.tmp-*/
+
+# Local bench Postgres / Cursor project bits (not ship)
+.bench-pg/
+.cursor/
+
 # Libraries don't need dependency lock
 # Dependencies will be locked in applications that use them
 /shard.lock
