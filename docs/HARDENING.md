@@ -53,6 +53,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **0**, Darwin **512 KiB**; library **0**) |
 | `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Mapped warm empty-byte budget before dormant/munmap (research; not default) |
+| `GCRY_TIGHT_GROW=1` | Sticky newest-chunk freelist + sparse GC-before-grow (fat-app RSS; Kemal thr soft — not default) |
+| `GCRY_DISABLE_TIGHT_GROW=1` | Force tight-grow off |
+| `GCRY_DISABLE_TIGHT_GROW_GC=1` | Prefer-freelist only (no GC-before-grow) |
 | `GCRY_PRECISE_STACK=1` | Load `.llvm_stackmaps` + hybrid precise walker (additive; see [STACK_MAPS.md](STACK_MAPS.md)) |
 | `GCRY_PRECISE_STACK=2` | **Research:** exclusive precise stacks (no conservative stack word scan; UAF risk) |
 | `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |

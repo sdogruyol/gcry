@@ -179,9 +179,9 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 | Kemal `/json` post-GC RSS | **~0.80x** *(carry v0.16)* |
 | Kemal `/` throughput | **~82%** *(carry v0.16)* |
 | Fat app `/api/v1/` throughput | **~90–96%** *(tip; v0.17 carry)* |
-| Fat app `/api/v1/` RSS | **~1–1.6x** *(tip)* / **~3.43x** *(v0.17 i3 cut)* |
+| Fat app `/api/v1/` RSS | **~1–1.6x** *(tip)* / **~0.92x** *(`GCRY_TIGHT_GROW=1`)* / **~3.43x** *(v0.17 i3 cut)* |
 
-\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app tip: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.6×** — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
+\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app tip: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.6×**. Opt-in `GCRY_TIGHT_GROW=1` → acik **~103%** @ **~0.92×** (Kemal thr soft; not default) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
 
 ### macOS (Apple Silicon)
 
@@ -196,7 +196,7 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). The v0.17 i3 cut was ~**3.43x**. Darwin is still ~**18x**. Stack maps remain the lever for Darwin and for precise roots — we don't hide the numbers.
+Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin is still ~**18x**. Stack maps remain the lever for Darwin and for precise roots — we don't hide the numbers.
 
 ### Pause distribution (Kemal `/json`, Linux)
 

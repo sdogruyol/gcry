@@ -52,6 +52,7 @@ Process GC: `stop_the_world = true`. Library `Gcry::Heap` under Boehm: STW off.
 | Large | Freelist + trim (`GCRY_LARGE_CACHE`; Linux default retain **0**) |
 | Size-class chunks | Empty → **munmap** (Linux retain **0**; Darwin dormant **512 KiB**); `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` / warm retain escapes |
 | Sparse pages | `GCRY_PAGE_DONTNEED=1` (Linux opt-in; Darwin default-on) |
+| Fat-app freelist residual | `GCRY_TIGHT_GROW=1` (opt-in; acik ~0.92×; Kemal thr soft — not default) |
 
 ## Incremental / barriers
 

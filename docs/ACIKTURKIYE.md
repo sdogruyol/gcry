@@ -22,6 +22,21 @@ pre-fix **~8.5×**). Residual anatomy on i3: mapped freelist / sparse chunks
 unreproduced Monitor SEGV — `…/acik-segv-bisect/`. Stack-map notes:
 [STACK_MAPS.md](STACK_MAPS.md).
 
+### Opt-in: `GCRY_TIGHT_GROW=1` *(closes freelist residual)*
+
+Sticky newest-chunk freelist + sparse GC-before-grow (no HOLED / DONTNEED).
+**Not** a process default — Kemal `/json` thr soft (~78%). Hub:
+`bench/log/linux/2026-08-04-acik-tight-grow/FINDINGS.md`.
+
+| Host | Session | thr % | RSS × |
+|------|---------|------:|------:|
+| 9950X tip + `TIGHT_GROW` | `…/2026-08-04-acik-tight-grow-v2-med3/` | **~103%** | **~0.92×** |
+| 9950X tip control (same day) | `…/acik-mostly-empty-control-med3/` | **~100%** | **~1.56×** |
+
+Escape: `GCRY_DISABLE_TIGHT_GROW=1`, `GCRY_DISABLE_TIGHT_GROW_GC=1`. Prefer this
+for fat HTTP on Linux tip when RSS under Boehm matters; keep default path for
+Kemal-class thr.
+
 ## v0.17.0 tagged cut — Linux i3 *(superseded on tip)*
 
 Tagged-release cut on Crystal 1.21.0, WSL2 x86_64 (i3-12100F), `wrk -c 100 -d 30`, pure `--release`, scrub **on**, EC1, median of 3. Session: `bench/log/linux/2026-08-02-064142/` (readiness hub `2026-08-02-ec1-readiness/`). **Do not cite as tip RSS** — finalizer + retain=0 closed that gap on 9950X.
@@ -128,6 +143,7 @@ not reclaim.
 | Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect → ~1.81×, then retain=0 → ~1× |
 | Linux large/empty retain defaults → 0 | Mapped-free caches were the residual after finalizer fix; escape via `GCRY_LARGE_CACHE` / `GCRY_EMPTY_CHUNK_RETAIN` |
 | Post-retain=0 ~1.4–1.6× | Idle live_sc falls; heap/RSS stay — **mapped freelist** / sparse chunks (`…/acik-i3-residual/`) |
+| `GCRY_TIGHT_GROW=1` | Closes freelist floor on acik (**~103%** @ **~0.92×**); Kemal thr soft — **opt-in only** |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 
@@ -139,6 +155,7 @@ not reclaim.
 - **`GCRY_MOSTLY_EMPTY`** as process default — MADV_FREE thr-safe but **no RSS win**; `MODE=dontneed` COLLECT_HANG / thr cliff (`…/2026-08-04-acik-mostly-empty/`). Research opt-in only.
 - Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
 - Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
-- Expecting page-advice on sparse chunks to close the ~1.4–1.6× freelist floor (HOLED + mostly-empty exhausted); Darwin ~18× still wants stack maps
+- Expecting page-advice on sparse chunks to close the ~1.4–1.6× freelist floor (HOLED + mostly-empty exhausted) — use **`GCRY_TIGHT_GROW=1`** instead; Darwin ~18× still wants stack maps
+- Shipping `GCRY_TIGHT_GROW` as process default — acik win, Kemal `/json` ~78% soft gate MISS
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).

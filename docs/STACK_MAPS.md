@@ -6,7 +6,8 @@ Not a release feature. Product version stays **v0.17.0**.
 **Gate metric:** acikturkiye post-GC RSS × Boehm. Linux tip after finalizer +
 retain=0: ~**1–1.6×** RSS, thr ~**90–96%** (i3 headline **~1.63×** /
 `…/2026-08-04-acik-i3-retain0-med3/`; 9950X **~1.0–1.6×`). Residual is
-mapped freelist, not live-graph (`…/acik-i3-residual/`). Post-finalizer with
+mapped freelist (`…/acik-i3-residual/`); opt-in `GCRY_TIGHT_GROW=1` →
+~**0.92×** @ ~**103%** thr (`…/acik-tight-grow-v2-med3/`). Post-finalizer with
 old caches was ~**1.81×**; v0.17 i3 cut ~**3.43×**. Darwin still ~**18×**.
 Kemal thr is **not** the success bar.
 
@@ -216,7 +217,9 @@ product reason to invest.
 27. ~~**Kemal thr profil (9950X)**~~ **done** (`…/kemal-thr-profil/`) —
     munmap tax real but wall-small; KEEP absolute ~**+4%** rps; soft/hard
     thr gates still MISS (shard-only exhausted).
-28. **Darwin acik RSS proof** — exclusive/hybrid A/B on macOS vs ~18× tip.
+28. ~~**`GCRY_TIGHT_GROW`**~~ **done** (opt-in) — acik **~103%** @ **~0.92×**
+    (`…/acik-tight-grow-v2-med3/`); Kemal thr soft — not default. Docs synced.
+29. **Darwin acik RSS proof** — exclusive/hybrid A/B on macOS vs ~18× tip.
     Linux exclusive stabilize closed (item 12); maps still the Darwin lever.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;

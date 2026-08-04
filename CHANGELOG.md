@@ -16,6 +16,13 @@ Product version stays **v0.17.0**.
 
 ### Documentation
 
+- **`GCRY_TIGHT_GROW` (opt-in):** sticky newest-chunk freelist + sparse
+  GC-before-grow closes acik mapped-freelist residual — **~103%** thr @
+  **~0.92×** RSS (`…/acik-tight-grow-v2-med3/`); Kemal `/json` **~78%** @
+  **0.78×** (`…/2026-08-04-085740/`) — not process default. Synced
+  [PERF.md](docs/PERF.md) / [ACIKTURKIYE.md](docs/ACIKTURKIYE.md) / README /
+  [HARDENING.md](docs/HARDENING.md). Hub:
+  `bench/log/linux/2026-08-04-acik-tight-grow/FINDINGS.md`.
 - **Tip fat-app band (Linux):** i3 retain=0 **~96%** thr @ **~1.63×** RSS
   (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X **~90–100%** @ **~1.0–1.6×**.
   Residual = mapped freelist (`…/acik-i3-residual/`). Synced
@@ -71,6 +78,11 @@ Product version stays **v0.17.0**.
 
 ### Added
 
+- **`GCRY_TIGHT_GROW=1` (opt-in):** sticky newest-chunk freelist + sparse
+  GC-before-grow for fat-app mapped-freelist residual. Acik med3 **~103%** @
+  **~0.92×**; Kemal thr soft (~78%) — **not** process default. Escape:
+  `GCRY_DISABLE_TIGHT_GROW` / `GCRY_DISABLE_TIGHT_GROW_GC`. Hub:
+  `…/2026-08-04-acik-tight-grow/`.
 - **`GCRY_MOSTLY_EMPTY` (research):** HOLED-less free-page advice on
   high-free-ratio chunks (`SPARSE`). Default MADV_FREE (no freelist rebuild);
   `MODE=dontneed` unlink+DONTNEED. Measured on acik — **not** a process

@@ -17,7 +17,7 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 | `/json` | **~87%** | **~0.80×** |
 | `/` | **~82%** | **~0.79×** |
 
-Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **tip+EC after finalizer + Linux retain=0** is thr **~90–96%** @ RSS **~1–1.6×** (i3 headline **~96%** @ **~1.63×**; 9950X **~90–100%** @ **~1.0–1.6×**) — [ACIKTURKIYE.md](ACIKTURKIYE.md). Quiet Kemal smokes land **~80–85%** `/json` @ **~0.75–0.79×** (host/Boehm noise; retain=0 no cliff) — **headline stays the v0.16 cut above**.
+Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17.0** carries this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **tip+EC after finalizer + Linux retain=0** is thr **~90–96%** @ RSS **~1–1.6×** (i3 headline **~96%** @ **~1.63×**; 9950X **~90–100%** @ **~1.0–1.6×**) — [ACIKTURKIYE.md](ACIKTURKIYE.md). Opt-in `GCRY_TIGHT_GROW=1` closes the freelist residual on acik (**~103%** @ **~0.92×**, `…/acik-tight-grow-v2-med3/`); Kemal `/json` soft (~**78%**) — not default. Quiet Kemal smokes land **~80–85%** `/json` @ **~0.75–0.79×** (host/Boehm noise; retain=0 no cliff) — **headline stays the v0.16 cut above**.
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 
@@ -59,11 +59,14 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 | `2026-08-04-042404/` | retain=0 defaults (9950X) | **85.0%** | **0.78×** |
 | `2026-08-04-045839/` | tip i3 | **~80%** | **0.75×** |
 | `2026-08-04-kemal-thr-profil/` | tip + KEEP contrast (9950X) | **~80%** / KEEP abs **~+4%** | **0.79×** / **~3.4×** |
+| `2026-08-04-085740/` | `GCRY_TIGHT_GROW=1` (9950X) | **77.6%** | **0.78×** |
 
 Gate **≥95% @ ≤1.0×** and soft **≥90% @ ≤0.85×** missed without KEEP RSS tax.
 9950X hunt closed MISS; retain=0 reconfirm still MISS
 (`2026-08-02-018-FINDINGS.md`, `2026-08-04-kemal-thr-profil/`). Parallel dormant
-default-on rejected; `GCRY_PARALLEL_DORMANT=1` remains the RSS opt-in (~75% @ ~4×).
+default-on rejected; `GCRY_PARALLEL_DORMANT=1` remains the Parallel RSS opt-in
+(~75% @ ~4×). Fat-app freelist residual: `GCRY_TIGHT_GROW=1` (acik **~0.92×**;
+Kemal thr soft — [ACIKTURKIYE.md](ACIKTURKIYE.md)).
 
 ### v0.15.0 Linux cut (superseded headline)
 
@@ -107,6 +110,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.7-dev + keep chunks | — | ~100% | high | empty retain ≈ waste |
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
 | `GCRY_KEEP_CHUNKS=1` (0.18 campaign re-cut) | **~89%** | **~95%** | **~3.07×** | thr escape only — `2026-08-02-121411/` (unreleased) |
+| `GCRY_TIGHT_GROW=1` (0.18 campaign) | **~95%** | **~78%** | **~0.78×** | fat-app RSS win; Kemal thr soft — `2026-08-04-085740/` (unreleased) |
 | `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
