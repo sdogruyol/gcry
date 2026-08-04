@@ -110,10 +110,14 @@ module Gcry
       return unless @precise_stack_roots
       return unless StackMaps.ensure_loaded
 
-      {% if flag?(:x86_64) %}
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
         rsp = Roots.hardware_stack_pointer.address
         rbp = uninitialized UInt64
-        asm("movq %rbp, $0" : "=r"(rbp) :: "volatile")
+        {% if flag?(:x86_64) %}
+          asm("movq %rbp, $0" : "=r"(rbp) :: "volatile")
+        {% else %}
+          asm("mov $0, x29" : "=r"(rbp) :: "volatile")
+        {% end %}
         lo = rsp > STACK_SCAN_RED_ZONE ? rsp - STACK_SCAN_RED_ZONE : 0_u64
         hi = bottom.address
         max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
@@ -155,9 +159,10 @@ module Gcry
       return unless @precise_stack_roots
       return unless StackMaps.loaded? || StackMaps.ensure_loaded
 
-      {% if flag?(:x86_64) %}
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
         top = fiber.@context.stack_top.address
-        return unless top >= guard && (top &+ 64) <= bottom
+        min_spill = {% if flag?(:aarch64) %} StackMaps::PARKED_AARCH64_SPILL_WORDS * 8 {% else %} 64 {% end %}
+        return unless top >= guard && (top &+ min_spill) <= bottom
 
         max_frames = @precise_stack_exclusive ? StackMaps::MAX_FP_FRAMES : StackMaps::HYBRID_MAX_FP_FRAMES
         StackMaps.each_root_parked_sysv(top, guard, bottom, max_frames) do |ptr|
@@ -377,9 +382,10 @@ module Gcry
     # skips nonempty map hits — acik UAF. Returns true when the FP chain was
     # walkable (at least one frame yielded).
     private def scan_exclusive_parked_fp_fill(fiber : Fiber, guard : UInt64, bottom : UInt64) : Bool
-      {% if flag?(:x86_64) %}
+      {% if flag?(:x86_64) || flag?(:aarch64) %}
         top = fiber.@context.stack_top.address
-        return false unless top >= guard && (top &+ 64) <= bottom
+        min_spill = {% if flag?(:aarch64) %} StackMaps::PARKED_AARCH64_SPILL_WORDS * 8 {% else %} 64 {% end %}
+        return false unless top >= guard && (top &+ min_spill) <= bottom
         max_frames = StackMaps::MAX_FP_FRAMES
         miss_only = @precise_stack_fiber_fp_fill_miss_only
         saw = false

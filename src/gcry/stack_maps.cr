@@ -336,15 +336,18 @@ module Gcry
       end
     end
 
-    # Load `.llvm_stackmaps` from the main executable (Linux ELF).
+    # Load stackmaps from the main executable (ELF `.llvm_stackmaps` or
+    # Mach-O `__LLVM_STACKMAPS,__llvm_stackmaps`).
     def self.load_from_exe : Bool
-      {% unless flag?(:linux) %}
-        return false
+      {% if flag?(:linux) %}
+        bytes = read_elf_section("/proc/self/exe", ".llvm_stackmaps")
+        return false unless bytes
+        load_bytes(bytes)
+      {% elsif flag?(:darwin) %}
+        load_from_macho_exe
+      {% else %}
+        false
       {% end %}
-      path = "/proc/self/exe"
-      bytes = read_elf_section(path, ".llvm_stackmaps")
-      return false unless bytes
-      load_bytes(bytes)
     end
 
     # Idempotent: try once per process.
@@ -513,12 +516,12 @@ module Gcry
       end
     end
 
-    # Walk x86_64 frame-pointer chain; resolve locations with RBP=fp.
-    # Optional *gregs* (glibc layout) for Register GP lives — typically the
-    # parked-fiber synthetic set from `fill_parked_sysv_gregs` (leaf callee-saved;
-    # over-marking parent frames is safe, under-marking is UAF).
+    # Walk frame-pointer chain; resolve locations with FP=rbp param.
+    # Optional *gregs* for Register GP lives — x86_64 glibc layout or
+    # aarch64 DWARF-indexed synthetic set from parked fill helpers.
     # *stack_lo*/*stack_hi* bound the readable stack (grows down: lo=SP side, hi=bottom).
     # *max_frames* caps climb (hybrid uses HYBRID_MAX_FP_FRAMES).
+    # AArch64 AAPCS frame record matches x86_64: [fp]=prev_fp, [fp+8]=ret.
     def self.each_root_fp_walk(rsp : UInt64, rbp : UInt64,
                                stack_lo : UInt64, stack_hi : UInt64,
                                max_frames : Int32 = MAX_FP_FRAMES,
@@ -526,7 +529,7 @@ module Gcry
                                ngregs : Int32 = 0,
                                & : Void* ->) : Nil
       return unless @@loaded
-      {% unless flag?(:x86_64) %}
+      {% unless flag?(:x86_64) || flag?(:aarch64) %}
         return
       {% end %}
 
@@ -557,6 +560,10 @@ module Gcry
 
     # glibc x86_64 gregs[] size used by resolve_loc / dwarf_to_glibc_greg.
     PARKED_SYSV_NGREGS = 17
+    # AArch64: DWARF-indexed array (x0=0 … sp=31) for parked synthetic gregs.
+    PARKED_AARCH64_NGREGS = 32
+    # Crystal aarch64-generic swapcontext spills 22×8 bytes (8 FP + 14 GP).
+    PARKED_AARCH64_SPILL_WORDS = 22
 
     # Fill glibc-order gregs from a parked fiber's x86_64-sysv swapcontext
     # spill block at *stack_top*:
@@ -594,6 +601,35 @@ module Gcry
       {% end %}
     end
 
+    # Fill DWARF-indexed gregs from Crystal aarch64-generic swapcontext spill.
+    # Layout at *stack_top* (see fiber/context/aarch64-generic.cr):
+    #   [0..7] d15..d8, [8]=x30/lr, [9]=x29/fp, [10..19]=x28..x19,
+    #   [20]=x0, [21]=x1. RSP at return = stack_top + 22*8.
+    def self.fill_parked_aarch64_gregs(stack_top : UInt64, gregs : Pointer(UInt64)) : Nil
+      {% if flag?(:aarch64) %}
+        i = 0
+        while i < PARKED_AARCH64_NGREGS
+          gregs[i] = 0_u64
+          i += 1
+        end
+        gregs[30] = Pointer(UInt64).new(stack_top &+ 8 * 8).value  # lr
+        gregs[29] = Pointer(UInt64).new(stack_top &+ 9 * 8).value  # fp
+        gregs[28] = Pointer(UInt64).new(stack_top &+ 10 * 8).value
+        gregs[27] = Pointer(UInt64).new(stack_top &+ 11 * 8).value
+        gregs[26] = Pointer(UInt64).new(stack_top &+ 12 * 8).value
+        gregs[25] = Pointer(UInt64).new(stack_top &+ 13 * 8).value
+        gregs[24] = Pointer(UInt64).new(stack_top &+ 14 * 8).value
+        gregs[23] = Pointer(UInt64).new(stack_top &+ 15 * 8).value
+        gregs[22] = Pointer(UInt64).new(stack_top &+ 16 * 8).value
+        gregs[21] = Pointer(UInt64).new(stack_top &+ 17 * 8).value
+        gregs[20] = Pointer(UInt64).new(stack_top &+ 18 * 8).value
+        gregs[19] = Pointer(UInt64).new(stack_top &+ 19 * 8).value
+        gregs[0] = Pointer(UInt64).new(stack_top &+ 20 * 8).value
+        gregs[1] = Pointer(UInt64).new(stack_top &+ 21 * 8).value
+        gregs[31] = stack_top &+ (PARKED_AARCH64_SPILL_WORDS * 8) # rsp after pop
+      {% end %}
+    end
+
     # Precise roots for a parked x86_64-sysv fiber: spill-slot marks, leaf
     # stackmap at swapcontext ret (with synthetic gregs), then FP walk.
     #
@@ -605,7 +641,10 @@ module Gcry
                                    max_frames : Int32 = MAX_FP_FRAMES,
                                    & : Void* ->) : Nil
       return unless @@loaded
-      {% unless flag?(:x86_64) %}
+      {% if flag?(:aarch64) %}
+        each_root_parked_aarch64(stack_top, stack_lo, stack_hi, max_frames) { |root| yield root }
+        return
+      {% elsif !flag?(:x86_64) %}
         return
       {% end %}
       return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
@@ -654,6 +693,60 @@ module Gcry
       @@parked_walk = false
     end
 
+    # Precise roots for a parked aarch64-generic fiber (Crystal swapcontext).
+    def self.each_root_parked_aarch64(stack_top : UInt64,
+                                      stack_lo : UInt64, stack_hi : UInt64,
+                                      max_frames : Int32 = MAX_FP_FRAMES,
+                                      & : Void* ->) : Nil
+      return unless @@loaded
+      {% unless flag?(:aarch64) %}
+        return
+      {% end %}
+      spill_bytes = PARKED_AARCH64_SPILL_WORDS * 8
+      return unless stack_top >= stack_lo && (stack_top &+ spill_bytes) <= stack_hi
+
+      gregs = StaticArray(UInt64, PARKED_AARCH64_NGREGS).new(0_u64)
+      fill_parked_aarch64_gregs(stack_top, gregs.to_unsafe)
+
+      # Integer spill slots (skip d8–d15); may be sole live copy (Fiber* in x0).
+      i = 8
+      while i < PARKED_AARCH64_SPILL_WORDS
+        word = Pointer(UInt64).new(stack_top &+ (i * 8)).value
+        yield Pointer(Void).new(word) unless word == 0
+        i += 1
+      end
+
+      rbp = gregs[29]
+      rsp = gregs[31]
+      rip = gregs[30]
+
+      unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
+        @@parked_rbp_offstack += 1 if @@miss_log
+        return
+      end
+      return unless rsp >= stack_lo && rsp <= stack_hi
+
+      @@parked_walk = true
+      leaf_hit = each_root_near(rip, rsp, rbp, gregs.to_unsafe, PARKED_AARCH64_NGREGS,
+        stack_lo, stack_hi) do |root|
+        yield root
+      end
+      unless leaf_hit
+        @@misses += 1
+        if @@miss_log
+          if rip < @@pc_min || rip > @@pc_max &+ @@near_delta
+            @@parked_oob_misses += 1
+          end
+          note_parked_miss(rip)
+        end
+      end
+      each_root_fp_walk(rsp, rbp, stack_lo, stack_hi, max_frames,
+        gregs.to_unsafe, PARKED_AARCH64_NGREGS) do |root|
+        yield root
+      end
+      @@parked_walk = false
+    end
+
     private def self.frame_pointer_on_stack?(fp : UInt64, stack_lo : UInt64, stack_hi : UInt64) : Bool
       return false if fp == 0 || (fp & 7) != 0
       fp >= stack_lo && (fp &+ 16) <= stack_hi
@@ -685,16 +778,28 @@ module Gcry
                                         max_frames : Int32 = MAX_FP_FRAMES,
                                         miss_only : Bool = false,
                                         & : UInt64, UInt64, Bool ->) : Nil
-      {% unless flag?(:x86_64) %}
+      {% unless flag?(:x86_64) || flag?(:aarch64) %}
         return
       {% end %}
-      return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
-
-      gregs = StaticArray(UInt64, PARKED_SYSV_NGREGS).new(0_u64)
-      fill_parked_sysv_gregs(stack_top, gregs.to_unsafe)
-      rbp = gregs[10]
-      rsp = gregs[15]
-      rip = gregs[16]
+      rbp = 0_u64
+      rsp = 0_u64
+      rip = 0_u64
+      {% if flag?(:aarch64) %}
+        spill_bytes = PARKED_AARCH64_SPILL_WORDS * 8
+        return unless stack_top >= stack_lo && (stack_top &+ spill_bytes) <= stack_hi
+        gregs_a64 = StaticArray(UInt64, PARKED_AARCH64_NGREGS).new(0_u64)
+        fill_parked_aarch64_gregs(stack_top, gregs_a64.to_unsafe)
+        rbp = gregs_a64[29]
+        rsp = gregs_a64[31]
+        rip = gregs_a64[30]
+      {% else %}
+        return unless stack_top >= stack_lo && (stack_top &+ 64) <= stack_hi
+        gregs_x64 = StaticArray(UInt64, PARKED_SYSV_NGREGS).new(0_u64)
+        fill_parked_sysv_gregs(stack_top, gregs_x64.to_unsafe)
+        rbp = gregs_x64[10]
+        rsp = gregs_x64[15]
+        rip = gregs_x64[16]
+      {% end %}
       return unless frame_pointer_on_stack?(rbp, stack_lo, stack_hi)
       return unless rsp >= stack_lo && rsp <= stack_hi
       # Leaf FP must sit reasonably above RSP (same used stack region).
@@ -736,22 +841,33 @@ module Gcry
       end
     end
 
-    # DWARF reg → value. Uses *rsp*/*rbp* overrides; GP via glibc gregs map.
+    # DWARF reg → value. Uses *rsp*/*rbp* overrides; GP via arch gregs map.
     def self.reg_value(dwarf_reg : UInt16, rsp : UInt64, rbp : UInt64,
                        gregs : Pointer(UInt64), ngregs : Int32) : UInt64?
-      case dwarf_reg
-      when 6 then rbp
-      when 7 then rsp
-      else
-        return nil if gregs.null? || ngregs <= 0
-        {% if flag?(:x86_64) %}
-          gi = dwarf_to_glibc_greg(dwarf_reg)
-          return nil if gi < 0 || gi >= ngregs
-          gregs[gi]
-        {% else %}
-          nil
-        {% end %}
-      end
+      {% if flag?(:aarch64) %}
+        case dwarf_reg
+        when 29 then rbp # FP
+        when 31 then rsp # SP
+        else
+          return nil if gregs.null? || ngregs <= 0
+          return nil if dwarf_reg.to_i32 >= ngregs
+          gregs[dwarf_reg]
+        end
+      {% else %}
+        case dwarf_reg
+        when 6 then rbp
+        when 7 then rsp
+        else
+          return nil if gregs.null? || ngregs <= 0
+          {% if flag?(:x86_64) %}
+            gi = dwarf_to_glibc_greg(dwarf_reg)
+            return nil if gi < 0 || gi >= ngregs
+            gregs[gi]
+          {% else %}
+            nil
+          {% end %}
+        end
+      {% end %}
     end
 
     def self.resolve_loc(loc : Loc, rsp : UInt64, rbp : UInt64,
@@ -803,6 +919,56 @@ module Gcry
       return true unless stack_lo < stack_hi
       (addr & 7) == 0 && addr >= stack_lo && (addr &+ 8) <= stack_hi
     end
+
+    # --- Mach-O section read (Darwin) --------------------------------------------
+
+    {% if flag?(:darwin) %}
+      # Reuse Platform::LibDyld (darwin_roots) — image 0 is the main executable.
+      private def self.load_from_macho_exe : Bool
+        mh = Platform::LibDyld._dyld_get_image_header(0_u32)
+        return false if mh.null?
+        return false unless mh.value.magic == Platform::MH_MAGIC_64
+
+        slide = Platform::LibDyld._dyld_get_image_vmaddr_slide(0_u32).to_u64!
+        p = Pointer(UInt8).new(mh.address + sizeof(Platform::LibDyld::MachHeader64))
+        cmd_i = 0_u32
+        while cmd_i < mh.value.ncmds
+          lc = p.as(Platform::LibDyld::LoadCommand*)
+          if lc.value.cmd == Platform::LC_SEGMENT_64
+            seg = p.as(Platform::LibDyld::SegmentCommand64*)
+            if macho_name_eq?(seg.value.segname, "__LLVM_STACKMAPS")
+              sect = Pointer(Platform::LibDyld::Section64).new(
+                p.address + sizeof(Platform::LibDyld::SegmentCommand64)
+              )
+              j = 0_u32
+              while j < seg.value.nsects
+                s = (sect + j).value
+                if macho_name_eq?(s.sectname, "__llvm_stackmaps") && s.size > 0
+                  return false if s.size > 64_u64 * 1024 * 1024
+                  addr = s.addr &+ slide
+                  bytes = Bytes.new(s.size)
+                  Pointer(UInt8).new(addr).copy_to(bytes.to_unsafe, s.size)
+                  return load_bytes(bytes)
+                end
+                j += 1
+              end
+            end
+          end
+          p += lc.value.cmdsize
+          cmd_i += 1
+        end
+        false
+      end
+
+      private def self.macho_name_eq?(name : StaticArray(UInt8, 16), expect : String) : Bool
+        i = 0
+        while i < expect.bytesize
+          return false if name[i] != expect.byte_at(i)
+          i += 1
+        end
+        i == 16 || name[i] == 0
+      end
+    {% end %}
 
     # --- ELF section read (Linux) ------------------------------------------------
 

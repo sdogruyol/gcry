@@ -72,7 +72,11 @@ build_one() {
   }
   echo "ok ($(basename "$outbin"))"
   if [[ "$name" == sm-* ]] || [[ "$name" == *stackmap* ]] || [[ "$name" == hybrid ]] || [[ "$name" == exclusive* ]]; then
-    readelf -S "$outbin" 2>/dev/null | grep -q llvm_stackmaps && echo "    .llvm_stackmaps: yes" || echo "    .llvm_stackmaps: NO"
+    if command -v readelf >/dev/null 2>&1; then
+      readelf -S "$outbin" 2>/dev/null | grep -q llvm_stackmaps && echo "    .llvm_stackmaps: yes" || echo "    .llvm_stackmaps: NO"
+    elif command -v otool >/dev/null 2>&1; then
+      otool -l "$outbin" 2>/dev/null | grep -q __llvm_stackmaps && echo "    __llvm_stackmaps: yes" || echo "    __llvm_stackmaps: NO"
+    fi
   fi
 }
 
@@ -113,7 +117,12 @@ else
 fi
 
 clean_port() {
-  fuser -k "${1}/tcp" 2>/dev/null || true
+  # Linux: fuser PORT/tcp. Darwin fuser has no that syntax — use lsof.
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+  else
+    fuser -k "${1}/tcp" 2>/dev/null || true
+  fi
   sleep 0.3
 }
 
