@@ -29,6 +29,9 @@ SKIP_BOEHM="${SKIP_BOEHM:-0}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 # Fail trial if wrk reports Non-2xx (broken demo DB / exception path).
 REQUIRE_2XX="${REQUIRE_2XX:-1}"
+# Space-separated KEY=VALUE re-applied after the per-trial GCRY_* scrub
+# (same idea as bench/run_all.sh). Example: GCRY_FLAGS="GCRY_PAGE_DONTNEED=1"
+GCRY_FLAGS="${GCRY_FLAGS:-}"
 
 [[ -f "$AT/.env.demo" ]] || { echo "missing $AT/.env.demo"; exit 1; }
 [[ -x "$CUS" ]] || { echo "missing probe crystal: $CUS"; exit 1; }
@@ -53,6 +56,7 @@ echo "OUT=$OUT"
 echo "probe=$CUS"
 echo "bin_dir=$BIN_DIR"
 echo "variants=$VARIANTS trials=$TRIALS duration=${DURATION}s"
+[[ -n "$GCRY_FLAGS" ]] && echo "gcry_flags=$GCRY_FLAGS"
 
 build_one() {
   local name="$1"; shift
@@ -149,8 +153,10 @@ run_one() {
   (
     cd "$AT"
     set -a; source .env.demo; set +a
-    # Preserve leaf override across the GCRY_* scrub below.
+    # Preserve leaf + GCRY_FLAGS across the GCRY_* scrub below
+    # (GCRY_FLAGS itself matches /^GCRY_/ and would be unset).
     _leaf="${GCRY_PRECISE_FIBER_LEAF:-}"
+    _flags="${GCRY_FLAGS:-}"
     while IFS= read -r _k; do [[ -n "$_k" ]] && unset "$_k" || true
     done < <(env | awk -F= '/^GCRY_/ {print $1}')
     case "$variant" in
@@ -163,6 +169,12 @@ run_one() {
         export GCRY_PRECISE_FIBER_LEAF="${_leaf:-0}"
         ;;
     esac
+    # Re-apply research/product knobs after scrub.
+    if [[ -n "$_flags" ]]; then
+      for _kv in $_flags; do
+        export "$_kv"
+      done
+    fi
     export ACIKTURKIYE_ENV=demo ACIKTURKIYE_SERVER_PORT="$port"
     exec "$bin"
   ) >"$log" 2>&1 &
