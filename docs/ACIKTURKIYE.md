@@ -4,18 +4,20 @@
 
 Real process-GC pressure test: **Kemal + PostgreSQL** mobile API (`/api/v1/`), sibling path dep on gcry. Toy Kemal understates fat binaries, many fibers, and large buffers — **this** is the harder bar.
 
-## Verdict — tip+EC Linux (9950X, 2026-08-03) *(current)*
+## Verdict — tip+EC Linux *(current)*
 
-Same host, tip Crystal + EC, WSL2 x86_64 (Ryzen 9 9950X), `wrk -c100 -d30`, dual `/gc-collect`, median of 3. After LibC finalizer registry (`3a0bffe`) + Linux **retain=0** process defaults (`9228bb9`: `large_cache` / `empty_chunk_retain` → 0).
+After LibC finalizer registry (`3a0bffe`) + Linux **retain=0** process defaults
+(`9228bb9`). `wrk -c100 -d30`, dual `/gc-collect`, median of 3.
 
-| Cut | Session | thr % Boehm | post-GC RSS × |
-|-----|---------|------------:|--------------:|
-| **release0 env → now Linux defaults** | `…/acik-release0-med3/` | **~94%** | **~1.00×** |
-| defaults-as-code verify | `…/acik-defaults-verify-med3/` | **~90%** | **~1.40×** |
+| Host | Cut | Session | thr % | RSS × |
+|------|-----|---------|------:|------:|
+| **i3-12100F** (headline) | tip defaults | `…/2026-08-04-acik-i3-retain0-med3/` | **~96%** | **~1.63×** |
+| 9950X | release0 env → defaults | `…/acik-release0-med3/` | **~94%** | **~1.00×** |
+| 9950X | defaults-as-code verify | `…/acik-defaults-verify-med3/` | **~90%** | **~1.40×** |
 
-Cite **~90% thr @ ~1× RSS** as the tip band (release0 ties Boehm; verify med3 noisier, one unreproduced Monitor SEGV — see `…/acik-segv-bisect/`). Post-finalizer with *old* caches was ~**91.5%** @ ~**1.81×** (`…/acik-finalizer-gate-med3/`). Pre-fix tip on this host was ~**8.5×** — not conservative density alone.
-
-Kemal smoke after the same defaults: `/json` **~84%** @ **0.76×** (`…/kemal-release0-smoke/`) — no cliff vs [PERF.md](PERF.md) v0.16 headline. Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
+Cite tip band **~90–96% thr @ ~1–1.6× RSS** (was v0.17 i3 **~3.43×** / 9950X
+pre-fix **~8.5×**). 9950X verify had one unreproduced Monitor SEGV —
+`…/acik-segv-bisect/`. Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
 
 ## v0.17.0 tagged cut — Linux i3 *(superseded on tip)*
 
