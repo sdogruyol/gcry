@@ -25,6 +25,14 @@ After **reverting side bitmap as default**, making **in-header MARK the standard
 
 RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on both paths — the in-header MARK trades some throughput for a dramatic RSS recovery. The `madvise` syscall storm that caused 132–150 ms STW pauses is gone: all page-release operations run **post-STW**, coalesced into contiguous runs (1 syscall per run instead of 1 per page × up to 64 per chunk).
 
+## Fat-app note (tip / stack-maps)
+
+acikturkiye Darwin tip base closed the old ~18× RSS gate (~**90%** thr @
+~**0.63×** RSS). Numbers live only in [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md)
+/ `bench/log/macos/2026-08-04-acik-stackmap/` — do **not** fold into Kemal
+tables below. Kemal headline on this file is still the v0.17 cut until a fresh
+`bench/run_all.sh` Kemal med3 on tip.
+
 ## Headline (v0.17.0) — macOS aarch64
 
 Primary: `bench/log/macos/2026-08-02-085522/` (`18513e0`, Crystal 1.21.0, Apple M2 Pro). Confirm: `2026-08-02-091817/` (`/json` **83.2%**, `/` **89.5%**). macOS `gc_override.cr` sets `small_chunk_bytes = 262144` (256 KiB). Scrub on (default). First Darwin re-cut since v0.13.0.

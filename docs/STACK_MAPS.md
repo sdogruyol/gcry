@@ -8,8 +8,9 @@ retain=0: ~**1–1.6×** RSS, thr ~**90–96%** (i3 headline **~1.63×** /
 `…/2026-08-04-acik-i3-retain0-med3/`; 9950X **~1.0–1.6×`). Residual is
 mapped freelist (`…/acik-i3-residual/`); opt-in `GCRY_TIGHT_GROW=1` →
 ~**0.92×** @ ~**103%** thr (`…/acik-tight-grow-v2-med3/`). Post-finalizer with
-old caches was ~**1.81×**; v0.17 i3 cut ~**3.43×**. Darwin still ~**18×**.
-Kemal thr is **not** the success bar.
+old caches was ~**1.81×**; v0.17 i3 cut ~**3.43×**. Darwin tip base
+~**0.63×** @ ~**90%** (`…/macos/2026-08-04-acik-stackmap/` — was ~**18×** at
+v0.17). Kemal thr is **not** the success bar.
 
 Hub parent: [ROADMAP.md](../ROADMAP.md) Phase 2 · [DESIGN.md](../DESIGN.md)
 Frontier · thr residual [FINDINGS](../bench/log/linux/2026-08-02-018-FINDINGS.md).
@@ -24,7 +25,7 @@ objects alive → false retention.
 |----------|----------------:|------|
 | Kemal `/json` | ~**0.80×** | scrub + empty-chunk release enough |
 | acikturkiye `/api/v1/` (Linux) | ~**1–1.6×** | finalizer + retain=0; was ~3.43× (v0.17 i3) / ~8.5× (pre-fix tip) |
-| acikturkiye `/api/v1/` (Darwin) | ~**18×** | still the stack-map RSS gate |
+| acikturkiye `/api/v1/` (Darwin) | ~**0.63×** | tip base; was ~18× at v0.17 |
 
 Stack scrub / type_id / layout are **not** substitutes for knowing which
 slots are pointers.
@@ -88,17 +89,17 @@ Smoke: `make stackmap-smoke` (probe Crystal on `PATH` or `CRYSTAL=`).
 | Checkout | `/home/uzumaki/playground/crystal` branch `gcry-stackmap-probe` |
 | Gate | `CRYSTAL_EMIT_STACKMAP=1` → stackmap after each Crystal call |
 | LLVM IR | **Yes** — empty then **with lives** (`ptr %sm.s`, …); ~7.5k/9.7k sites carry ≥1 live in a small String program |
-| Object section | **Yes** — `.llvm_stackmaps` (`R_X86_64_64` → `.text`) |
-| Final link | **Fixed** — auto **`-no-pie`** when gated. Runnable binary has `.llvm_stackmaps`. |
+| Object section | **Yes** — ELF `.llvm_stackmaps`; Darwin `__LLVM_STACKMAPS,__llvm_stackmaps` |
+| Final link | **Fixed** — auto **`-no-pie`** when gated (Linux; unused arg on Darwin clang). |
 | Process GC | Tip probe: **`-Dgc_none -Dpreview_mt -Dexecution_context`** (no EC flags ⇒ soak livelock). 1.21.0 release has EC by default. |
 | Emit density | External + Crystal calls; `call_args` lives; pre-call when `PER_FUN=0` / `CRYSTAL_STACKMAP_BEFORE=1`. Default `PER_FUN=2`. |
-| Walker smoke | `make stackmap-smoke` — exclusive `marked=3`; hybrid loads maps (leaf-cheap). |
+| Walker smoke | `make stackmap-smoke` — Linux + Darwin aarch64 OK (Mach-O load + FP/parked walker). |
 
 **Conclusion:** Crystal’s LLVM pipeline **keeps** stackmaps into a real
 section and we can link/run. Runtime parse + hybrid walker are in-tree;
 exclusive/exclusivef are **correctness-stable** on Linux tip (30s med3 clean;
 `…/2026-08-04-acik-exclusivef-stabilize-med3/`) but **not** an RSS win (~2×).
-Darwin RSS proof is next (Linux tip RSS already ~1× without maps).
+Darwin tip base RSS closed (~0.63× without maps). Exclusive/hybrid not an RSS win.
 
 ## Risks
 
@@ -118,7 +119,8 @@ Darwin RSS proof is next (Linux tip RSS already ~1× without maps).
 ## Success criteria (later phases)
 
 1. Precise path correctness — soak / soft-soak green
-2. Darwin acik post-GC RSS **materially down** vs ~18×; Linux tip already ~**1–1.6×** without maps (hold that band under exclusive/precise)
+2. ~~Darwin acik post-GC RSS down vs ~18×~~ **done** (tip base ~**0.63×**);
+   Linux tip ~**1–1.6×** without maps — hold that band; exclusive not RSS
 3. thr hold (~90% band)
 4. Kemal not regressed beyond noise
 
@@ -169,7 +171,7 @@ product reason to invest.
     (`…/2026-08-04-acik-exclusivef-stabilize-med3/`): exclusive **95.7%** @
     **2.07×**, exclusivef **98.9%** @ **1.91×**, 0/3 Non-2xx / hang. Prior
     flake: `…/2026-08-04-acik-exclusivef-defaults/`. Still research-only —
-    product path without `PRECISE_STACK`. **Next:** Darwin acik RSS proof.
+    product path without `PRECISE_STACK`.
 13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
     dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
 14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,
@@ -219,8 +221,13 @@ product reason to invest.
     thr gates still MISS (shard-only exhausted).
 28. ~~**`GCRY_TIGHT_GROW`**~~ **done** (opt-in) — acik **~103%** @ **~0.92×**
     (`…/acik-tight-grow-v2-med3/`); Kemal thr soft — not default. Docs synced.
-29. **Darwin acik RSS proof** — exclusive/hybrid A/B on macOS vs ~18× tip.
-    Linux exclusive stabilize closed (item 12); maps still the Darwin lever.
+29. ~~**Darwin acik RSS proof**~~ **done** (`…/macos/2026-08-04-acik-stackmap/`).
+    Tip+EC **base ~90% @ 0.63×** (was ~18× @ v0.17). Mach-O loader + aarch64
+    FP/parked walker land; `stackmap-smoke` OK. hybrid/exclusive mark roots
+    but **worse RSS** than base (~0.86–1.27×) — research only. Product path:
+    tip without `PRECISE_STACK` (same as Linux).
+30. **PR stack-maps → master** — exclusive stabilize + TIGHT_GROW opt-in +
+    Darwin loader/walker + docs. No v0.18 tag.
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
 open write-barrier work yet; ship PAGE_DONTNEED / mostly-empty as defaults.

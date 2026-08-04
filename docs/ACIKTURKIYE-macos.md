@@ -20,15 +20,34 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 | Free-page release | Walks ALL kept size-class chunks on Darwin (not just HOLED) for aggressive RSS recovery |
 | Compare | Only same-host Darwin Boehm — never cite vs Linux % |
 
+## Verdict (tip / stack-maps) — macOS aarch64
+
+Primary: `bench/log/macos/2026-08-04-acik-stackmap/` (`75a9d25` + Darwin Mach-O/aarch64 stackmap walker). Tip Crystal probe `4a965f423`, system Boehm Crystal 1.21.0, Apple M2 Pro. `acik_stackmap_ab.sh` med-of-3, `wrk -c 100 -d 30`, dual `/gc-collect`, 0 Non-2xx.
+
+| | thr (trial median) | post-GC RSS × |
+|--|-------------------:|--------------:|
+| **gcry tip base vs Boehm** | **~90%** | **~0.63×** |
+
+Closes the v0.17 **~18×** Darwin RSS gate on the **product path** (no `PRECISE_STACK`). Live_sc ~6–9 MiB post-GC (was ~1.1 GiB dense false-live). Stackmap hybrid/exclusive load maps and mark roots but **do not** beat tip base RSS (~0.86–1.27×) — research only; see [FINDINGS](../bench/log/macos/2026-08-04-acik-stackmap/FINDINGS.md). Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
+
+### Trial detail (tip base, 2026-08-04)
+
+| Trial | Boehm req/s | gcry base req/s | % Boehm | Boehm RSS (KiB) | base RSS (KiB) | RSS × |
+|------:|-----------:|----------------:|-------:|----------------:|---------------:|------:|
+| 1 | 1036 | 920 | **88.9%** | 63,856 | 47,120 | 0.74× |
+| 2 | 999 | 903 | **90.4%** | 57,568 | 34,912 | 0.61× |
+| 3 | 1004 | 874 | **87.1%** | 55,344 | 36,480 | 0.66× |
+| **median** | 1004 | 903 | **89.9%** | 57,568 | 36,480 | **0.63×** |
+
 ## Verdict (v0.17.0) — macOS aarch64
 
-Primary (fair Boehm): `bench/log/macos/2026-08-02-085522/` (`18513e0`). Confirm: `2026-08-02-091817/` (soft/noisy Boehm → inflated %). `small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, scrub on, 0 crashes.
+Superseded by tip cut above for RSS. Primary (fair Boehm): `bench/log/macos/2026-08-02-085522/` (`18513e0`). Confirm: `2026-08-02-091817/` (soft/noisy Boehm → inflated %). `small_chunk_bytes` = 262144 in `gc_override.cr` (Darwin only). Median-of-3, `wrk -c 100 -d 30`, `--release`, scrub on, 0 crashes.
 
 | | thr (trial median) | post-GC RSS × |
 |--|-------------------:|--------------:|
 | **gcry vs Boehm** | **~71%** | **~18.4×** |
 
-Throughput usable (Mach STW). **Thr softer** than v0.13 **~78%** (−7pp); Boehm louder (~955 vs ~921) and gcry abs lower (~675 vs ~718). Confirm session gcry abs ~650–680 but Boehm soft (654–849) → **89%** — do not cite that %; keep this fair cut. RSS still not Boehm-class — dense conservative-live (~1.1 GiB `size_class_live_bytes`). Next real win: **compiler stack maps**. Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
+Throughput usable (Mach STW). **Thr softer** than v0.13 **~78%** (−7pp); Boehm louder (~955 vs ~921) and gcry abs lower (~675 vs ~718). Confirm session gcry abs ~650–680 but Boehm soft (654–849) → **89%** — do not cite that %; keep this fair cut for the **tagged** v0.17 line. RSS was dense conservative-live (~1.1 GiB) — fixed on tip by finalizer/registry work, not by enabling stackmaps.
 
 ### Trial detail (v0.17.0)
 
@@ -74,6 +93,7 @@ Superseded by tip cut above.
 | | **2026-07-27** `256k-chunk` | **77.9%** | **15.8×** | **macOS default → 256 KiB chunk** (`gc_override.cr`). Thr recovers to ~78% Boehm (up from 62%). RSS unchanged at ~16×. 0 crashes. |
 | **0.17.0** `2026-08-02-085522` | **70.7%** | **18.4×** | First Darwin re-cut since v0.13 (`18513e0`). Thr −7pp vs 256k cut; RSS ~18× (live set). 0 crashes. Fair Boehm ~955. |
 | 0.17 confirm `2026-08-02-091817` | *89.4%* | **16.7×** | Soft/noisy Boehm (654–849); gcry abs ~650–680. **Do not cite %** — keep 085522. |
+| **tip** `2026-08-04-acik-stackmap` | **89.9%** | **0.63×** | stack-maps tip base (finalizer era). Stackmap exclusive/hybrid not RSS-better. |
 
 ## How to measure
 
