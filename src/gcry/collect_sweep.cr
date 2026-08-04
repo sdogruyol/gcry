@@ -222,6 +222,11 @@ module Gcry
                         rebuild_mask |= bit
                       end
                       index_remove(chunk)
+                      if @tight_grow && @grow_lo[class_index] == ChunkHeader.data_start(chunk).address
+                        @grow_lo[class_index] = 0_u64
+                        @grow_hi[class_index] = 0_u64
+                        @prefer_freelists[class_index] = Pointer(Void).null
+                      end
                       chunk.value.next = to_unmap
                       to_unmap = chunk
                       drop = true
@@ -645,21 +650,31 @@ module Gcry
     # stop (do not rebuild mid-sweep — @chunks is being relinked). Orphaned
     # FREE blocks are recovered by a later rebuild_size_class_freelist.
     private def unlink_freelist_range(class_index : Int32, nursery : Bool, lo : UInt64, hi : UInt64) : Nil
-      head = nursery ? @nursery_freelists[class_index] : @freelists[class_index]
+      if nursery
+        @nursery_freelists[class_index] = filter_freelist_outside(
+          @nursery_freelists[class_index], lo, hi)
+        @nursery_freelist_clean[class_index] = false
+      else
+        @freelists[class_index] = filter_freelist_outside(@freelists[class_index], lo, hi)
+        if @tight_grow
+          @prefer_freelists[class_index] = filter_freelist_outside(
+            @prefer_freelists[class_index], lo, hi)
+        end
+        @freelist_clean[class_index] = false
+      end
+    end
+
+    private def filter_freelist_outside(head : Void*, lo : UInt64, hi : UInt64) : Void*
       new_head = Pointer(Void).null
       user = head
-      # Hard ceiling: a sane freelist cannot exceed mapped heap / min header.
       max_steps = (@heap_size // BlockHeader::SIZE.to_u64) &+ 1024_u64
       max_steps = 1024_u64 if max_steps < 1024_u64
       steps = 0_u64
       while user
         steps &+= 1
-        if steps > max_steps
-          break
-        end
+        break if steps > max_steps
         header = BlockHeader.from_user(user)
         nxt = header.value.next_free
-        # Break obvious self-loops early (cycle of length 1).
         nxt = Pointer(Void).null if nxt == user
         addr = user.address
         if (addr < lo || addr >= hi) && BlockHeader.free?(header)
@@ -669,13 +684,7 @@ module Gcry
         end
         user = nxt
       end
-      if nursery
-        @nursery_freelists[class_index] = new_head
-        @nursery_freelist_clean[class_index] = false
-      else
-        @freelists[class_index] = new_head
-        @freelist_clean[class_index] = false
-      end
+      new_head
     end
 
     private def rebuild_size_class_freelist(class_index : Int32, nursery : Bool, *, recalc : Bool = true) : Nil
@@ -752,9 +761,51 @@ module Gcry
       else
         @freelists[class_index] = head
         @freelist_clean[class_index] = false
+        retight_partition_freelist(class_index) if @tight_grow
       end
 
       recalc_free_bytes if recalc
+    end
+
+    # After a full freelist rebuild, re-establish sticky prefer = newest chunk.
+    private def retight_partition_freelist(class_index : Int32) : Nil
+      chunk = @chunks
+      grow = Pointer(ChunkHeader).null
+      while chunk
+        if !ChunkHeader.large?(chunk) && !ChunkHeader.dormant?(chunk) &&
+           chunk.value.size_class == class_index.to_u32 &&
+           !ChunkHeader.nursery?(chunk)
+          grow = chunk
+          break
+        end
+        chunk = chunk.value.next
+      end
+      if grow.null?
+        @prefer_freelists[class_index] = Pointer(Void).null
+        @grow_lo[class_index] = 0_u64
+        @grow_hi[class_index] = 0_u64
+        return
+      end
+      @grow_lo[class_index] = ChunkHeader.data_start(grow).address
+      @grow_hi[class_index] = ChunkHeader.data_end(grow).address
+      user = @freelists[class_index]
+      prefer = Pointer(Void).null
+      global = Pointer(Void).null
+      while user
+        header = BlockHeader.from_user(user)
+        nxt = header.value.next_free
+        payload = header.value.size
+        if tight_addr_in_grow?(class_index, user.address)
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, prefer)
+          prefer = user
+        else
+          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, global)
+          global = user
+        end
+        user = nxt
+      end
+      @prefer_freelists[class_index] = prefer
+      @freelists[class_index] = global
     end
 
     # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
@@ -895,15 +946,7 @@ module Gcry
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
-      if was_nursery
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
-        @nursery_freelists[class_index] = user
-        @nursery_freelist_clean[class_index] = false
-      else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
-        @freelists[class_index] = user
-        @freelist_clean[class_index] = false
-      end
+      push_size_class_free(class_index, was_nursery, header, user, payload)
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.

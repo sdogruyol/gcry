@@ -327,6 +327,20 @@ module GC
       # Default-on was measured to regress Kemal and acik thr/RSS: HOLED freelist
       # rebuild blows sweep cost and abandoned free pages cause chunk churn.
       #
+      # Tight small-heap growth: prefer newest-chunk freelist + sparse
+      # GC-before-grow. Acik med3 ~103% thr @ ~0.92× RSS (vs ~1.56× control).
+      # Opt-in until Kemal reconfirm; then consider Linux process default.
+      #   GCRY_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW=1 / GCRY_DISABLE_TIGHT_GROW_GC=1
+      if env_flag_one?("GCRY_TIGHT_GROW")
+        heap.tight_grow = true
+      end
+      if env_flag_one?("GCRY_DISABLE_TIGHT_GROW")
+        heap.tight_grow = false
+      end
+      if env_flag_one?("GCRY_DISABLE_TIGHT_GROW_GC")
+        heap.tight_grow_gc = false
+      end
+      #
       # Mostly-empty (HOLED-less) is a separate research knob:
       #   GCRY_MOSTLY_EMPTY=1           — MADV_FREE free pages in ≤25%-live chunks
       #   GCRY_MOSTLY_EMPTY_MODE=dontneed — unlink free-only runs + DONTNEED (churn risk)

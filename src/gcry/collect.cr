@@ -82,6 +82,18 @@ module Gcry
     property mostly_empty_dontneed : Bool = false
     getter mostly_empty_bytes : UInt64 = 0_u64
     getter mostly_empty_chunks : UInt64 = 0_u64
+    # Tight small-heap growth (alloc locality): prefer newest chunk's freelist
+    # so older chunks can go fully empty → munmap. Opt-in / Linux research;
+    # see GCRY_TIGHT_GROW. Not TLAB.
+    property tight_grow : Bool = false
+    # Collect once before mapping a new size-class chunk when freelist empty
+    # and the small heap is already sparse (see tight_grow_gc_pct).
+    property tight_grow_gc : Bool = true
+    # small_free*100 >= small_mapped*pct → allow GC-before-grow (default 35).
+    property tight_grow_gc_pct : UInt32 = 35_u32
+    getter tight_grow_collects : UInt64 = 0_u64
+    getter tight_grow_prefer_allocs : UInt64 = 0_u64
+    getter tight_grow_maps : UInt64 = 0_u64
     getter dormant_chunk_bytes : UInt64 = 0_u64
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64

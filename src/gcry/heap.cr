@@ -84,6 +84,12 @@ module Gcry
     @mark_bitmap_cap_bits : UInt64 = 0_u64
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    # Tight-grow: freelist nodes that live in the current grow chunk (newest
+    # mmap for the class). Alloc prefers these so older chunks are not
+    # refilled and can become fully empty for munmap.
+    @prefer_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
+    @grow_lo = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+    @grow_hi = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     # True while freelist blocks are still MAP_ANONYMOUS-zeroed (skip malloc clear).
     @freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
     @nursery_freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
@@ -170,6 +176,9 @@ module Gcry
       {% end %}
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @prefer_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @grow_lo = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+      @grow_hi = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
@@ -259,6 +268,9 @@ module Gcry
       @chunks = Pointer(ChunkHeader).null
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @prefer_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
+      @grow_lo = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+      @grow_hi = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       @freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @nursery_freelist_clean = StaticArray(Bool, SIZE_CLASS_COUNT).new(false)
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
@@ -401,15 +413,7 @@ module Gcry
         # Non-TLAB: per-size-class freelist lock; counters are Atomic.
         nursery = BlockHeader.nursery?(header)
         with_freelist_lock(class_index, nursery) do
-          if nursery
-            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
-            @nursery_freelists[class_index] = pointer
-            @nursery_freelist_clean[class_index] = false
-          else
-            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
-            @freelists[class_index] = pointer
-            @freelist_clean[class_index] = false
-          end
+          push_size_class_free(class_index, nursery, header, pointer, payload)
         end
         free_bytes_add(payload.to_u64)
         bytes_since_gc_sub(payload.to_u64)
@@ -597,36 +601,133 @@ module Gcry
         return alloc_old_small_batched(payload, flags, index, rounded)
       end
 
+      # Tight-grow: never collect under the freelist lock (STW vs lock deadlock).
+      # If both prefer+global are empty, GC once outside the lock, then refill.
+      if @tight_grow && @tight_grow_gc && !@collecting && @enabled && !@tlab_enabled
+        empty = with_freelist_lock(index, false) do
+          @prefer_freelists[index].null? && @freelists[index].null?
+        end
+        # Collect before grow only when the small heap is already sparse —
+        # otherwise this becomes a thr-killing STW storm (seen: ~1k majors/30s).
+        min_bsg = @gc_threshold >> 2
+        min_bsg = 1_048_576_u64 if min_bsg < 1_048_576_u64
+        sm = small_mapped_bytes
+        sf = small_free_bytes
+        sparse = sm > 0 && sf * 100 >= sm * @tight_grow_gc_pct.to_u64
+        if empty && sparse && @bytes_since_gc.get >= min_bsg
+          @tight_grow_collects &+= 1
+          collect(scan_stack: true)
+        end
+      end
+
       user = with_freelist_lock(index, false) do
-        u = @freelists[index]
-
-        if u.null?
-          refill_size_class(index, payload, nursery: false)
-          u = @freelists[index]
-          raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
-        end
-
-        if @blacklist_enabled
-          taken = take_non_blacklisted(u, index, false)
-          if taken.null?
-            header = BlockHeader.from_user(u)
-            @freelists[index] = header.value.next_free
-          else
-            u = taken
-          end
-        else
-          header = BlockHeader.from_user(u)
-          @freelists[index] = header.value.next_free
-        end
-
-        header = BlockHeader.from_user(u)
-        BlockHeader.set_used(header, payload, flags)
-        heap_set_mark(header) if @incremental_marking || @collecting
-        u
+        alloc_old_small_locked(payload, flags, index)
       end
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
       user
+    end
+
+    # Freelist lock held. Prefer-list first (tight_grow), then global, then map.
+    private def alloc_old_small_locked(payload : UInt32, flags : UInt32, index : Int32) : Void*
+      u = Pointer(Void).null
+      prefer_hit = false
+      if @tight_grow
+        u = @prefer_freelists[index]
+        prefer_hit = !u.null?
+      end
+      if u.null?
+        u = @freelists[index]
+        prefer_hit = false
+      end
+
+      if u.null?
+        refill_size_class(index, payload, nursery: false)
+        if @tight_grow
+          u = @prefer_freelists[index]
+          prefer_hit = !u.null?
+        end
+        if u.null?
+          u = @freelists[index]
+          prefer_hit = false
+        end
+        raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
+      end
+
+      if @blacklist_enabled
+        if @tight_grow
+          fold_prefer_into_global(index)
+          prefer_hit = false
+          u = @freelists[index]
+          if u.null?
+            refill_size_class(index, payload, nursery: false)
+            fold_prefer_into_global(index) if @tight_grow
+            u = @freelists[index]
+            raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
+          end
+        end
+        taken = take_non_blacklisted(u, index, false)
+        if taken.null?
+          header = BlockHeader.from_user(u)
+          @freelists[index] = header.value.next_free
+        else
+          u = taken
+        end
+      else
+        header = BlockHeader.from_user(u)
+        nxt = header.value.next_free
+        if prefer_hit
+          @prefer_freelists[index] = nxt
+          @tight_grow_prefer_allocs &+= 1
+        else
+          @freelists[index] = nxt
+        end
+      end
+
+      header = BlockHeader.from_user(u)
+      BlockHeader.set_used(header, payload, flags)
+      heap_set_mark(header) if @incremental_marking || @collecting
+      u
+    end
+
+    private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32) : Nil
+      if nursery
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+        @nursery_freelists[class_index] = pointer
+        @nursery_freelist_clean[class_index] = false
+        return
+      end
+      if @tight_grow && tight_addr_in_grow?(class_index, pointer.address)
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @prefer_freelists[class_index])
+        @prefer_freelists[class_index] = pointer
+        @freelist_clean[class_index] = false
+      else
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
+        @freelists[class_index] = pointer
+        @freelist_clean[class_index] = false
+      end
+    end
+
+    private def tight_addr_in_grow?(index : Int32, addr : UInt64) : Bool
+      lo = @grow_lo[index]
+      return false if lo == 0
+      addr >= lo && addr < @grow_hi[index]
+    end
+
+    private def fold_prefer_into_global(index : Int32) : Nil
+      splice = @prefer_freelists[index]
+      return if splice.null?
+      tail = splice
+      while true
+        th = BlockHeader.from_user(tail)
+        nxt = th.value.next_free
+        break if nxt.null?
+        tail = nxt
+      end
+      th = BlockHeader.from_user(tail)
+      th.value = BlockHeader.new(th.value.size, BlockHeader::Flags::FREE, @freelists[index])
+      @freelists[index] = splice
+      @prefer_freelists[index] = Pointer(Void).null
     end
 
     private def refill_size_class(index : Int32, payload : UInt32, nursery : Bool = false) : Nil
@@ -655,6 +756,28 @@ module Gcry
       if nursery
         @nursery_freelists[index] = free_head
         @nursery_freelist_clean[index] = true
+      elsif @tight_grow
+        # Merge prior prefer into global, then install new chunk as prefer.
+        splice = @prefer_freelists[index]
+        unless splice.null?
+          # append global onto end of prefer chain, then move all to global
+          tail = splice
+          while true
+            th = BlockHeader.from_user(tail)
+            nxt = th.value.next_free
+            break if nxt.null?
+            tail = nxt
+          end
+          th = BlockHeader.from_user(tail)
+          th.value = BlockHeader.new(th.value.size, BlockHeader::Flags::FREE, @freelists[index])
+          @freelists[index] = splice
+          @prefer_freelists[index] = Pointer(Void).null
+        end
+        @grow_lo[index] = ChunkHeader.data_start(chunk).address
+        @grow_hi[index] = ChunkHeader.data_end(chunk).address
+        @prefer_freelists[index] = free_head
+        @freelist_clean[index] = true
+        @tight_grow_maps &+= 1
       else
         @freelists[index] = free_head
         @freelist_clean[index] = true
@@ -691,6 +814,12 @@ module Gcry
           if nursery
             @nursery_freelists[index] = free_head
             @nursery_freelist_clean[index] = true
+          elsif @tight_grow
+            fold_prefer_into_global(index)
+            @grow_lo[index] = ChunkHeader.data_start(chunk).address
+            @grow_hi[index] = ChunkHeader.data_end(chunk).address
+            @prefer_freelists[index] = free_head
+            @freelist_clean[index] = true
           else
             @freelists[index] = free_head
             @freelist_clean[index] = true
