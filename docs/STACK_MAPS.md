@@ -4,10 +4,11 @@
 Not a release feature. Product version stays **v0.17.0**.
 
 **Gate metric:** acikturkiye post-GC RSS × Boehm. Linux tip after finalizer +
-retain=0: ~**1.0–1.4×** RSS, thr ~**90–94%** (`…/acik-release0-med3/`,
-`…/acik-defaults-verify-med3/`). Post-finalizer with old caches was ~**1.81×**;
-v0.17 i3 cut ~**3.43×**. Darwin still ~**18×**. Kemal thr is **not** the
-success bar.
+retain=0: ~**1–1.6×** RSS, thr ~**90–96%** (i3 headline **~1.63×** /
+`…/2026-08-04-acik-i3-retain0-med3/`; 9950X **~1.0–1.6×`). Residual is
+mapped freelist, not live-graph (`…/acik-i3-residual/`). Post-finalizer with
+old caches was ~**1.81×**; v0.17 i3 cut ~**3.43×**. Darwin still ~**18×**.
+Kemal thr is **not** the success bar.
 
 Hub parent: [ROADMAP.md](../ROADMAP.md) Phase 2 · [DESIGN.md](../DESIGN.md)
 Frontier · thr residual [FINDINGS](../bench/log/linux/2026-08-02-018-FINDINGS.md).
@@ -21,7 +22,7 @@ objects alive → false retention.
 | Workload | Tip RSS × Boehm | Note |
 |----------|----------------:|------|
 | Kemal `/json` | ~**0.80×** | scrub + empty-chunk release enough |
-| acikturkiye `/api/v1/` (Linux) | ~**1×** | finalizer + retain=0; was ~3.43× (v0.17 i3) / ~8.5× (pre-fix tip) |
+| acikturkiye `/api/v1/` (Linux) | ~**1–1.6×** | finalizer + retain=0; was ~3.43× (v0.17 i3) / ~8.5× (pre-fix tip) |
 | acikturkiye `/api/v1/` (Darwin) | ~**18×** | still the stack-map RSS gate |
 
 Stack scrub / type_id / layout are **not** substitutes for knowing which
@@ -114,7 +115,7 @@ exclusive stabilize + Darwin RSS proof are next (Linux tip RSS already ~1×).
 ## Success criteria (later phases)
 
 1. Precise path correctness — soak / soft-soak green
-2. Darwin acik post-GC RSS **materially down** vs ~18×; Linux tip already ~**1×** without maps (hold that band under exclusive/precise)
+2. Darwin acik post-GC RSS **materially down** vs ~18×; Linux tip already ~**1–1.6×** without maps (hold that band under exclusive/precise)
 3. thr hold (~90% band)
 4. Kemal not regressed beyond noise
 
@@ -201,6 +202,17 @@ product reason to invest.
 23. ~~**SEGV bisect**~~ **done** (`…/acik-segv-bisect/`) — **unreproduced**
     (0/45 under retain=0 + heavy/abrupt collect). One-shot Monitor crash; do
     **not** revert retain=0 on that alone.
+24. ~~**i3 tip retain=0**~~ **done** (`…/2026-08-04-acik-i3-retain0-med3/`) —
+    thr **~96%**, RSS **~1.63×** (headline host vs v0.17 **~3.43×**).
+25. ~~**residual anatomy**~~ **done** (`…/acik-i3-residual/`) — idle live_sc
+    ~16→5 MiB, heap ~80 MiB stays; mapped freelist / sparse chunks.
+26. ~~**PAGE_DONTNEED / mostly-empty**~~ **done** — HOLED default **REJECT**
+    (`…/acik-i3-page-dontneed/`); HOLED-less `GCRY_MOSTLY_EMPTY` MADV_FREE no
+    RSS win, `MODE=dontneed` COLLECT_HANG (**REJECT** default;
+    `…/2026-08-04-acik-mostly-empty/`). Research opt-in only.
+27. ~~**Kemal thr profil (9950X)**~~ **done** (`…/kemal-thr-profil/`) —
+    munmap tax real but wall-small; KEEP absolute ~**+4%** rps; soft/hard
+    thr gates still MISS (shard-only exhausted).
 
 **Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
-open write-barrier work yet.
+open write-barrier work yet; ship PAGE_DONTNEED / mostly-empty as defaults.

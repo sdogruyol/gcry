@@ -11,7 +11,7 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Kemal `/json`: **~87%** Boehm throughput (v0.16 Linux carry; tip smoke ~83% host-soft)
 - [x] Post-GC RSS: **~0.80×** Linux (Kemal, v0.16 carry), **~0.93×** macOS (Kemal; v0.17 Darwin re-cut)
 - [x] EC1 thr recovery after Parallel-era STW / scrub / counter fallout (v0.16.0)
-- [x] Fat app (acikturkiye): tip Linux ~**90%** thr @ ~**1×** RSS (finalizer + retain=0; v0.17 i3 was ~3.43×); Darwin ~**71%** thr @ ~**18×** RSS
+- [x] Fat app (acikturkiye): tip Linux ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; i3 ~1.63× / 9950X ~1.0–1.6×; v0.17 i3 was ~3.43×); Darwin ~**71%** thr @ ~**18×** RSS
 - [x] Parallel **TLAB-off + lazy sweep** supported opt-in (~79% `/json`; not default)
 - [x] Process-STW × TLAB freelist UAF class fixed; `stw_mt_property_test` CI-gated
 - [x] HDR pause histograms, Prometheus metrics, `/gc-stats` observability
@@ -29,8 +29,8 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 
 Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 
-- [ ] **Compiler stack maps** — precise roots (Darwin acik ~18×; Linux tip already ~1× via
-      finalizer + retain=0); spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md)
+- [ ] **Compiler stack maps** — precise roots (Darwin acik ~18×; Linux tip ~1–1.6× via
+      finalizer + retain=0, freelist residual); spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md)
 - [ ] **Write barrier** — sound concurrent / incremental GC backend
 - [ ] **Windows process GC** — platform stubs + process GC parity
 - [ ] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows

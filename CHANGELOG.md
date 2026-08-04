@@ -12,9 +12,16 @@ Shard-only thr/RSS campaign —
 **MISS** on default path after 9950X re-open. Parallel RSS stays **opt-in**.
 Shard-only thr **exhausted** → escalate to compiler stack maps.
 Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+Product version stays **v0.17.0**.
 
 ### Documentation
 
+- **Tip fat-app band (Linux):** i3 retain=0 **~96%** thr @ **~1.63×** RSS
+  (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X **~90–100%** @ **~1.0–1.6×**.
+  Residual = mapped freelist (`…/acik-i3-residual/`). Synced
+  [PERF.md](docs/PERF.md) / [ACIKTURKIYE.md](docs/ACIKTURKIYE.md) /
+  [STACK_MAPS.md](docs/STACK_MAPS.md) / README / ROADMAP. Kemal **headline
+  stays v0.16** (~87% @ 0.80×); tip smokes ~80–85% @ ~0.75–0.79×.
 - **0.18 campaign FINDINGS:** Phase 0 EC1 baseline `/json` **87.9%** @
   **0.81×** (`2026-08-02-120500/`); confirm soft **85.4%** @ **0.76×**
   (`152806/`). EC4 reclaim-off **80.5%** @ **5.48×** (`145600/`).
@@ -27,13 +34,16 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
   `bench/log/linux/2026-08-03-9950x-thr-hunt/`.
 - **KEEP_CHUNKS ceiling re-measured:** `GCRY_KEEP_CHUNKS=1` → `/json`
   **95.0%** @ **3.07×** RSS on i3 (`121411/`); **90.1%** @ **3.23×** on
-  9950X — escape only.
+  9950X — escape only. Office profil: KEEP absolute ~**+4%** rps
+  (`…/2026-08-04-kemal-thr-profil/`).
 - **Rejects (not defaults):** `empty_chunk_retain=32 MiB` thr↓ (**81.9%**);
   hot-prefer dormant demotion (no thr win; reverted); Parallel dormant
   **default-on** thr % **68.8%** @ **3.29×** (RSS ok, thr gate miss;
   reverted); warm retain (RSS↑ without ≤0.85× path to ≥90%);
-  `GCRY_ALLOC_BATCH=4` (SEGV). Prior `GCRY_PARALLEL_DORMANT=1` + retain 32
-  still the **supported RSS opt-in** (~75% @ ~4×).
+  `GCRY_ALLOC_BATCH=4` (SEGV); Linux HOLED `PAGE_DONTNEED` default;
+  `GCRY_MOSTLY_EMPTY` / `MODE=dontneed` default. Prior
+  `GCRY_PARALLEL_DORMANT=1` + retain 32 still the **supported RSS opt-in**
+  (~75% @ ~4×).
 
 ### Fixed
 
@@ -54,6 +64,10 @@ Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
 
 ### Added
 
+- **`GCRY_MOSTLY_EMPTY` (research):** HOLED-less free-page advice on
+  high-free-ratio chunks (`SPARSE`). Default MADV_FREE (no freelist rebuild);
+  `MODE=dontneed` unlink+DONTNEED. Measured on acik — **not** a process
+  default (`…/2026-08-04-acik-mostly-empty/`).
 - **Stack maps spike:** [docs/STACK_MAPS.md](docs/STACK_MAPS.md) — GO on
   `llvm.experimental.stackmap` MVP. Runtime: `Gcry::StackMaps` parses ELF
   `.llvm_stackmaps` v3; hybrid walker (STW gregs + FP walk) calls

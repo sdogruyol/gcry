@@ -14,10 +14,13 @@ After LibC finalizer registry (`3a0bffe`) + Linux **retain=0** process defaults
 | **i3-12100F** (headline) | tip defaults | `…/2026-08-04-acik-i3-retain0-med3/` | **~96%** | **~1.63×** |
 | 9950X | release0 env → defaults | `…/acik-release0-med3/` | **~94%** | **~1.00×** |
 | 9950X | defaults-as-code verify | `…/acik-defaults-verify-med3/` | **~90%** | **~1.40×** |
+| 9950X | tip control (office) | `…/2026-08-04-acik-mostly-empty-control-med3/` | **~100%** | **~1.56×** |
 
 Cite tip band **~90–96% thr @ ~1–1.6× RSS** (was v0.17 i3 **~3.43×** / 9950X
-pre-fix **~8.5×**). 9950X verify had one unreproduced Monitor SEGV —
-`…/acik-segv-bisect/`. Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
+pre-fix **~8.5×**). Residual anatomy on i3: mapped freelist / sparse chunks
+(`…/2026-08-04-acik-i3-residual/`) — not live-graph. 9950X verify had one
+unreproduced Monitor SEGV — `…/acik-segv-bisect/`. Stack-map notes:
+[STACK_MAPS.md](STACK_MAPS.md).
 
 ## v0.17.0 tagged cut — Linux i3 *(superseded on tip)*
 
@@ -124,6 +127,7 @@ not reclaim.
 | Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16). Acik: scrub ≠ substitute for correct finalizers; tip closed with finalizer + retain=0 → **~1×** (9950X) |
 | Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect → ~1.81×, then retain=0 → ~1× |
 | Linux large/empty retain defaults → 0 | Mapped-free caches were the residual after finalizer fix; escape via `GCRY_LARGE_CACHE` / `GCRY_EMPTY_CHUNK_RETAIN` |
+| Post-retain=0 ~1.4–1.6× | Idle live_sc falls; heap/RSS stay — **mapped freelist** / sparse chunks (`…/acik-i3-residual/`) |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
 | Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
 
@@ -132,8 +136,9 @@ not reclaim.
 - Nursery / incremental as process default on this HTTP heap
 - Smaller `GCRY_CHUNK_BYTES` for RSS
 - Linux **HOLED** `GCRY_PAGE_DONTNEED` as process default — thr and RSS both worse (HOLED freelist rebuild blows sweep; free-only pages abandoned → chunk churn). Stay opt-in.
+- **`GCRY_MOSTLY_EMPTY`** as process default — MADV_FREE thr-safe but **no RSS win**; `MODE=dontneed` COLLECT_HANG / thr cliff (`…/2026-08-04-acik-mostly-empty/`). Research opt-in only.
 - Process-default curated `HTTP::Headers` Hash layout — Kemal `/json` thr soft vs builtins-only; register app-side if needed (`bench/nursery_headers.cr` / `GCRY_AUTO_LAYOUTS`)
 - Collect-time mutator `clear_stack` / Linux 1 MiB large-cache floor as defaults — no durable win over fiber scrub + 4 MiB cache
-- Expecting stack-maps alone to hit ≤1.5× Boehm RSS (finalizer fix + Linux retain=0 defaults closed the measured gap on this host)
+- Expecting page-advice on sparse chunks to close the ~1.4–1.6× freelist floor (HOLED + mostly-empty exhausted); Darwin ~18× still wants stack maps
 
 Toy Kemal (Linux): [PERF.md](PERF.md). Policy / knobs: [POLICY.md](POLICY.md), [HARDENING.md](HARDENING.md).
