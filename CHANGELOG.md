@@ -7,12 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Shard-only thr/RSS campaign —
-**not a tagged release.** Soft ≥90%@≤0.85× and hard ≥95%@≤1.0× both
-**MISS** on default path after 9950X re-open. Parallel RSS stays **opt-in**.
-Shard-only thr **exhausted** → escalate to compiler stack maps.
-Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
-Product version stays **v0.17.0**.
+## [0.18.0] - 2026-08-04
+
+Product release on **upstream Crystal ≥ 1.21** — no compiler fork.
+Stack-map support ships **dormant** (`GCRY_PRECISE_STACK` default off;
+needs experimental Crystal emit to activate — research only).
+
+Soft ≥90%@≤0.85× and hard ≥95%@≤1.0× both **MISS** on the default path
+after the 9950X re-open; shard-only thr is **exhausted** (next lever:
+compiler stack maps). Hub: `bench/log/linux/2026-08-02-018-FINDINGS.md`.
+Parallel RSS stays **opt-in**. Linux Kemal PERF headline still carries
+**v0.16.0** (~87% / ~0.80×).
+
+### Highlights
+- Finalizer registry fix (fat-app RSS)
+- Linux process retain defaults → 0 (escape: `GCRY_EMPTY_CHUNK_RETAIN` /
+  `GCRY_LARGE_CACHE`)
+- Darwin acik tip ~90% @ ~0.63× (was ~18× at v0.17)
+- Darwin Kemal tip ~84% @ ~1.01×
+- Opt-in `GCRY_TIGHT_GROW` (not default)
 
 ### Documentation
 
@@ -54,6 +67,10 @@ Product version stays **v0.17.0**.
 
 ### Fixed
 
+- **Finalizer registry leak:** LibC tables (no `Entry.object` roots), MT
+  quiesce, and Boehm-style resurrect-before-sweep so finalize is not UAF.
+  Closed fat-app RSS that pinned dead `TCPSocket` / `OpenSSL::Digest`
+  graphs (pre-fix tip ~8.5× → post-fix ~1.8× before retain=0).
 - **Exclusive stack-map correctness:** `GCRY_PRECISE_STACK=2` no longer skips
   other-thread STW word scans (SYSMON / mid-swap / pthread); mutator spill
   window **4→16 KiB**. `GCRY_PRECISE_FIBERS=1` default **LEAF=8 KiB** (+ FP-fill);
@@ -123,6 +140,11 @@ Product version stays **v0.17.0**.
 
 ### Changed
 
+- **Linux process retain defaults → 0:** `empty_chunk_retain` and
+  `large_cache_retain` munmap by default (was 16 MiB dormant + adaptive
+  large-cache → 32 MiB). With the finalizer fix this closes acik RSS to
+  ~**1–1.6×** Boehm. Escape: `GCRY_EMPTY_CHUNK_RETAIN` / `GCRY_LARGE_CACHE`
+  (or `GCRY_KEEP_CHUNKS=1`). Darwin retain budgets unchanged.
 - **Parallel experimental surface narrowed:** `GCRY_TLAB=1` and
   `GCRY_PARALLEL_RELEASE=1` are **unsupported** product paths (knobs kept
   for research/A/B). Process GC prints a stderr warning when either is set.
@@ -145,11 +167,17 @@ Product version stays **v0.17.0**.
 
 ### Performance
 
-- Linux Kemal EC1 thr stays the ~**85–88%** / ~**0.80×** band on i3; 9950X
-  tip quiet ~**80–83%** @ **0.76×**. **pause_p50** ~**0.33 ms** on 9950X
-  (~0.6 ms under-load i3 pause cut). Parallel thr opt-in unchanged
-  (~80% @ ~5.5× reclaim-off); RSS opt-in unchanged (`PARALLEL_DORMANT`).
-  Shard-only thr residual named — next bet stack maps.
+- **Fat-app (acikturkiye):** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS
+  (i3 headline **~96%** @ **~1.63×**; 9950X **~90–100%** @ **~1.0–1.6×**).
+  Opt-in `GCRY_TIGHT_GROW=1` → ~**103%** @ ~**0.92×**. Darwin tip base
+  ~**90%** @ ~**0.63×** (v0.17 was ~**71%** / ~**18×**).
+- **Darwin Kemal tip:** `/json` ~**84%** @ ~**1.01×**; `/` ~**91%** @
+  ~**0.95×** (`bench/log/macos/2026-08-04-172842/`). Holds vs v0.17.
+- **Linux Kemal:** PERF headline still v0.16 (~**87%** / ~**0.80×**). Tip
+  quiet band ~**80–85%** @ ~**0.75–0.79×**; 9950X thr hunt closed MISS
+  (~80–83% @ 0.76×; KEEP ~90–95% @ ~3× escape only). **pause_p50**
+  ~**0.33 ms** on 9950X (~0.6 ms under-load i3 pause cut). Parallel
+  opt-in unchanged (~80% @ ~5.5× reclaim-off; `PARALLEL_DORMANT` RSS).
 
 ## [0.17.0] - 2026-08-02
 
@@ -778,7 +806,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/sdogruyol/gcry/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sdogruyol/gcry/compare/v0.14.0...v0.15.0
