@@ -149,6 +149,13 @@ EOF
 
 No clone. No install. Just Docker.
 
+**You only need the normal Crystal install (1.21+).** Install the shard,
+build with `-Dgc_none`, done. You do **not** need a special Crystal build.
+
+(There is an optional research mode that can use extra compiler data for
+more precise GC. It is off unless you turn it on, and almost nobody needs
+it. Details: [docs/STACK_MAPS.md](docs/STACK_MAPS.md).)
+
 ---
 
 ## Why a second option alongside Boehm?
@@ -286,6 +293,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
+| [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |

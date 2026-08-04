@@ -612,8 +612,8 @@ module Gcry
           gregs[i] = 0_u64
           i += 1
         end
-        gregs[30] = Pointer(UInt64).new(stack_top &+ 8 * 8).value  # lr
-        gregs[29] = Pointer(UInt64).new(stack_top &+ 9 * 8).value  # fp
+        gregs[30] = Pointer(UInt64).new(stack_top &+ 8 * 8).value # lr
+        gregs[29] = Pointer(UInt64).new(stack_top &+ 9 * 8).value # fp
         gregs[28] = Pointer(UInt64).new(stack_top &+ 10 * 8).value
         gregs[27] = Pointer(UInt64).new(stack_top &+ 11 * 8).value
         gregs[26] = Pointer(UInt64).new(stack_top &+ 12 * 8).value
