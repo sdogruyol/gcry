@@ -157,10 +157,14 @@ product reason to invest.
     acik records ~139k → **~306k** (`…/acik-denser-emit/`).
 11. ~~parked sysv gregs~~ **done** — RSP@ret + synthetic gregs; RBP on-stack
     gate (makecontext); Direct/Indirect refuse off-stack loads.
-12. **exclusivef stabilize** — partial: denser emit + `NEAR_DELTA=128` clears
-    in-range Crystal misses (`…/acik-parked-miss/`). FP-fill **fill-all** still
-    required (~0.67 MiB); miss-only skip **SEGV** on acik (`…/acik-selective-fill/`
-    — map hit ≠ complete lives). Opt-in `GCRY_FIBER_FP_FILL_MISS_ONLY=1`.
+12. **exclusivef stabilize** — still partial / **not cut-ready**. Denser emit +
+    `NEAR_DELTA=128` clears in-range Crystal misses (`…/acik-parked-miss/`).
+    FP-fill fill-all required; miss-only **SEGV** (`…/acik-selective-fill/`).
+    Re-cut under retain=0 (`…/2026-08-04-acik-exclusivef-defaults/`): 15s smoke
+    OK (~88% thr @ ~1.8×); 30s med3 **2/3 ThreadPool crash**, exclusive
+    **collect hang**. Surviving exclusivef fp_fill ~10 KiB (was ~0.57 MiB) —
+    RSS no longer the blocker; correctness is. Keep product path without
+    `PRECISE_STACK` / `PRECISE_FIBERS`.
 13. ~~non-stack knob A/B~~ **done** (`…/acik-nonstack-med3/`) — live ~380 MiB
     dense; AUTO_LAYOUTS / SCAN_CAPS / floor / DISABLE_LAYOUT **no RSS win**.
 14. ~~**conservative-scan attribution**~~ **done** (`…/acik-live-attr3/`,

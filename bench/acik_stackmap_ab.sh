@@ -191,13 +191,27 @@ run_one() {
     return 0
   fi
 
-  curl -sf -o /dev/null "${base}/gc-collect" || true
+  # Bound collects — exclusive/exclusivef can STW-deadlock; bare curl hangs forever.
+  local collect_t="${GCRY_COLLECT_TIMEOUT:-45}"
+  local collect_hang=0
+  if ! curl -sf --max-time "$collect_t" -o /dev/null "${base}/gc-collect"; then
+    collect_hang=1
+  fi
   sleep 0.5
   # Dual collect: finalizer resurrect needs a second pass to drop dead sockets.
-  curl -sf -o /dev/null "${base}/gc-collect" || true
-  sleep 0.3
+  if [[ "$collect_hang" == "0" ]]; then
+    if ! curl -sf --max-time "$collect_t" -o /dev/null "${base}/gc-collect"; then
+      collect_hang=1
+    fi
+    sleep 0.3
+  fi
   local stats="$OUT/gcstats-${variant}-t${trial}.json"
-  curl -sf "${base}/gc-stats" >"$stats" 2>/dev/null || true
+  if [[ "$collect_hang" == "0" ]]; then
+    curl -sf --max-time 10 "${base}/gc-stats" >"$stats" 2>/dev/null || true
+  else
+    echo "(collect HANG>${collect_t}s — skip stats; killing)"
+    : >"$stats"
+  fi
 
   local marked=0 records=0
   if [[ -s "$stats" ]]; then
@@ -213,6 +227,14 @@ run_one() {
 
   kill -9 "$cpid" "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
+  clean_port "$port"
+
+  if [[ "$collect_hang" == "1" ]]; then
+    # Encode hang in non2xx column as -2 (distinct from missing bin -1 / HTTP non2xx).
+    printf "%s\t%d\t%s\t%s\t%s\t%s\t-2\n" "$variant" "$trial" "$rps" "$rss" "$marked" "$records" >>"$TSV"
+    echo "${rps} req/s rss=${rss}KiB marked=${marked} COLLECT_HANG>${collect_t}s"
+    return 0
+  fi
 
   printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\n" "$variant" "$trial" "$rps" "$rss" "$marked" "$records" "$non2xx" >>"$TSV"
   echo "${rps} req/s rss=${rss}KiB marked=${marked} non2xx=${non2xx}"
@@ -252,10 +274,13 @@ for v in sorted(by.keys()):
     rps = med([r for r,_,_,_ in by[v]])
     rss = med([s for _,s,_,n in by[v] if n == 0] or [s for _,s,_,_ in by[v]])
     mk = med([m for _, _, m, _ in by[v]])
-    n2 = med([n for _, _, _, n in by[v]])
+    n2s = [n for _, _, _, n in by[v]]
+    hangs = sum(1 for n in n2s if n == -2)
+    n2 = med(n2s)
     thr = f"{100*rps/boehm_rps:.1f}% Boehm" if boehm_rps and rps else "—"
     rx = f"{rss/boehm_rss:.2f}×" if boehm_rss and rss else "—"
-    lines.append(f"| {v} | {rps:.1f} ({thr}) | {rss:.0f} ({rx}) | {mk:.0f} | {n2:.0f} |")
+    n2s_disp = f"{n2:.0f}" + (f" ({hangs}×COLLECT_HANG)" if hangs else "")
+    lines.append(f"| {v} | {rps:.1f} ({thr}) | {rss:.0f} ({rx}) | {mk:.0f} | {n2s_disp} |")
 lines += ["", f"Source: `{tsv}`", ""]
 text = "\n".join(lines)
 open(out, "w").write(text)
