@@ -886,13 +886,15 @@ module Gcry
         # Live value is the address (alloca / frame index). For pointer slots
         # the heap root is the word stored there.
         base = reg_value(loc.reg, rsp, rbp, gregs, ngregs)
-        return nil unless base
+        return nil if base.nil? || base == 0
         addr = add_offset(base, loc.offset)
         return nil unless stack_addr_readable?(addr, stack_lo, stack_hi)
         load_word(addr)
       when LOC_INDIRECT
         base = reg_value(loc.reg, rsp, rbp, gregs, ngregs)
-        return nil unless base
+        # UInt64 0 is truthy in Crystal — reject explicitly (x86 DWARF RBP=6
+        # on aarch64 reads gregs[6]=0 → addr 0xfffffffffffffff8 SEGV).
+        return nil if base.nil? || base == 0
         addr = add_offset(base, loc.offset)
         return nil unless stack_addr_readable?(addr, stack_lo, stack_hi)
         load_word(addr)
@@ -913,11 +915,13 @@ module Gcry
       (base.to_i64 + offset.to_i64).to_u64!
     end
 
-    # When stack bounds are known, refuse Direct/Indirect loads off-stack
-    # (garbage RBP/RSP from makecontext must not SEGV the collector).
+    # Refuse Direct/Indirect loads that would SEGV: null page always, and
+    # off-stack when bounds are known (garbage FP from makecontext).
     private def self.stack_addr_readable?(addr : UInt64, stack_lo : UInt64, stack_hi : UInt64) : Bool
+      return false if (addr & 7) != 0
+      return false if addr < 4096_u64 # null page / wrap from base0+neg offset
       return true unless stack_lo < stack_hi
-      (addr & 7) == 0 && addr >= stack_lo && (addr &+ 8) <= stack_hi
+      addr >= stack_lo && (addr &+ 8) <= stack_hi
     end
 
     # --- Mach-O section read (Darwin) --------------------------------------------
