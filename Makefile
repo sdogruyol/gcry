@@ -166,7 +166,8 @@ soak-smoke: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/soak.cr -o $(BIN)/soak
 	# Looser RSS ceil than the 24h soak: 10s GHA smokes re-fault ~0.5–1 MiB
 	# after drain (seen 6968→7720 kB, ~11%) and are not a durable leak signal.
-	$(BIN)/soak --duration=10 --rss-limit=$${SOAK_SMOKE_RSS_LIMIT:-30} --telemetry=/tmp/gcry-soak-smoke.log
+	# warmup=0: CI smoke is 10s; baseline is cold RSS (looser --rss-limit covers ramp).
+	$(BIN)/soak --duration=10 --warmup=0 --rss-limit=$${SOAK_SMOKE_RSS_LIMIT:-30} --telemetry=/tmp/gcry-soak-smoke.log
 
 format:
 	$(CRYSTAL) tool format
