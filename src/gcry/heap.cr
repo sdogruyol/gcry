@@ -213,7 +213,7 @@ module Gcry
       @mark_lock = Crystal::SpinLock.new
       @mark_parallel = false
       @mark_worker_threads = [] of Thread
-      {% if flag?(:darwin) %}
+      {% if flag?(:darwin) || flag?(:musl) %}
         @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(Pointer(Void).null.as(LibC::PthreadT))
       {% else %}
         @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(LibC::PthreadT.new(0))
