@@ -1,0 +1,8 @@
+wrk_rps=48344.22
+tlab_hits=93727201 refills=942180 hit_rate_pct=99
+attr_samples=93727201
+lock_wait_avg_ns=212.5 pct_crit=60.1%
+lock_hold_avg_ns=141.2 pct_crit=39.9%
+find_block_avg_ns=63.7 pct_hold=45.1% pct_crit=18.0%
+refill_avg_ns=1905.5 calls=942180
+collections=111 small_mapped=143785984 dormant=68550656

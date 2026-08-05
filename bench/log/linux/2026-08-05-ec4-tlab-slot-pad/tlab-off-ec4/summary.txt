@@ -1,0 +1,4 @@
+wrk_rps=86151.58
+tlab_hits=0 refills=0 hit_rate_pct=100
+attr_samples=0
+collections=196 small_mapped=110624768 dormant=0

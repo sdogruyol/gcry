@@ -1,0 +1,3 @@
+wrk_rps=44519.41
+lock_wait_avg_ns=222.8
+lock_hold_avg_ns=148.8

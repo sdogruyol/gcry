@@ -151,9 +151,11 @@ Only if crash gates are green **and** quiet RSS is in a plausible band:
    **wait ~58%** / hold ~42% of (wait+hold); `find_block` ~**19%** of that
    (~half of hold). Attr tax ~15% thr — use % not abs.
 2. One lever at a time; reject if TLAB-off quiet regresses.
-3. Candidates (re-ordered from C.1): **pad `@tlab_slot_locks`** (false-share
-   hypothesis on ~193 ns wait/hit), then epoch/`find_block` elision (~19%
-   crit), then hold shrinkage. Re-validate; do not assume older FINDINGS.
+3. Candidates (re-ordered from C.1):
+   - ~~pad `@tlab_slot_locks`~~ — **REJECT**
+     (`…/2026-08-05-ec4-tlab-slot-pad/`; wait 193→213–223 ns; revert pad).
+   - epoch/`find_block` elision (~19% crit)
+   - hold shrinkage / accept thr gap
 
 Keep `GCRY_TLAB` warn until promote criteria below.
 Research-only: `GCRY_TLAB_HIT_ATTR` (not product).
@@ -190,6 +192,6 @@ Promote TLAB-on from **unsupported** → **correctness-supported opt-in**
 
 ## First concrete next step
 
-**Phase C.2:** one thr lever from C.1 ordering — start with cache-line pad
-on `@tlab_slot_locks` (measure wait_ns drop via `GCRY_TLAB_HIT_ATTR`), guard
-TLAB-off quiet.
+**Phase C.3:** next thr lever after pad REJECT — prefer epoch/`find_block`
+elision with soft-soak + TLAB-off guard, or accept Parallel TLAB-on thr
+residual and document.
