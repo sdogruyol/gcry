@@ -451,6 +451,15 @@ module GC
     if env_flag_one?("GCRY_TLAB_HIT_ATTR")
       heap.tlab_hit_attr = true
     end
+    # Research: skip find_block on TLAB hit (Phase C.3). Footgun with munmap
+    # empty reclaim — keep opt-in; prefer Parallel reclaim-off / dormant32.
+    if env_flag_one?("GCRY_TLAB_SKIP_FIND_BLOCK")
+      warn_unsupported_env(
+        "gcry: WARNING: GCRY_TLAB_SKIP_FIND_BLOCK=1 is research-only " \
+        "(SEGV if empty chunks munmap under TLAB). See docs/PARALLEL_TLAB_ON.md\n"
+      )
+      heap.tlab_skip_find_block = true
+    end
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
     # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
     if ab = env_u64("GCRY_ALLOC_BATCH")

@@ -134,6 +134,10 @@ module Gcry
     @tlab_hits = Atomic(UInt64).new(0_u64)
     # Research: GCRY_TLAB_HIT_ATTR=1 — ns attribution on tlab_alloc_small.
     property tlab_hit_attr : Bool = false
+    # Research: GCRY_TLAB_SKIP_FIND_BLOCK=1 — omit find_block on TLAB hit.
+    # Safe only while empty chunks stay mapped (Parallel reclaim-off / dormant;
+    # not with PARALLEL_RELEASE or EC1 munmap). Historically SEGV without that.
+    property tlab_skip_find_block : Bool = false
     @tlab_hit_attr_samples = Atomic(UInt64).new(0_u64)
     @tlab_hit_attr_lock_wait_ns = Atomic(UInt64).new(0_u64)
     @tlab_hit_attr_lock_hold_ns = Atomic(UInt64).new(0_u64)

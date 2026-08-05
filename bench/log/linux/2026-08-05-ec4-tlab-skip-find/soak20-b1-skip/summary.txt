@@ -1,0 +1,3 @@
+config EC4 TLAB-on
+process OK 20/20 fail=0 soft=0 hard=0
+OK thr med=68901.82 (n=20)

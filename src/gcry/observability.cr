@@ -150,6 +150,7 @@ module Gcry
         tlab_hits:                             heap.tlab_hits,
         tlab_hit_rate_pct:                     heap.tlab_refills + heap.tlab_hits > 0 ? (heap.tlab_hits * 100) // (heap.tlab_refills + heap.tlab_hits) : 100_u64,
         tlab_hit_attr:                         heap.tlab_hit_attr,
+        tlab_skip_find_block:                  heap.tlab_skip_find_block,
         tlab_hit_attr_samples:                 heap.tlab_hit_attr_samples,
         tlab_hit_attr_lock_wait_ns:            heap.tlab_hit_attr_lock_wait_ns,
         tlab_hit_attr_lock_hold_ns:            heap.tlab_hit_attr_lock_hold_ns,

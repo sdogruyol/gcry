@@ -1,0 +1,8 @@
+wrk_rps=55118.75
+tlab_skip_find_block=True
+tlab_hits=107335802 hit_rate_pct=98
+attr_samples=107335802
+lock_wait_avg_ns=75.8 pct_crit=51.3%
+lock_hold_avg_ns=71.8 pct_crit=48.7%
+find_block_calls=0 find_block_ns=0
+collections=126 small_mapped=130154496 dormant=45088768

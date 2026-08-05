@@ -380,7 +380,9 @@ module Gcry
                    tlab.value.freelists[class_index]
                  end
 
-          if !user.null?
+          # find_block abandons heads whose chunk left the index (munmap empty
+          # reclaim). Research skip: trust the TLAB head when empties stay mapped.
+          if !user.null? && !@tlab_skip_find_block
             if attr
               t0 = monotonic_ns
               ok = !!find_block(user)

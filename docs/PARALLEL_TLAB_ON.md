@@ -154,11 +154,14 @@ Only if crash gates are green **and** quiet RSS is in a plausible band:
 3. Candidates (re-ordered from C.1):
    - ~~pad `@tlab_slot_locks`~~ — **REJECT**
      (`…/2026-08-05-ec4-tlab-slot-pad/`; wait 193→213–223 ns; revert pad).
-   - epoch/`find_block` elision (~19% crit)
-   - hold shrinkage / accept thr gap
+   - ~~`find_block` elision~~ — **KEEP research opt-in**
+     `GCRY_TLAB_SKIP_FIND_BLOCK=1`
+     (`…/2026-08-05-ec4-tlab-skip-find/`; B1 med3 **~63k** vs control
+     **~53k**, soak 20/20; not default — munmap UAF footgun).
+   - hold shrinkage / accept thr gap vs TLAB-off (~108k)
 
 Keep `GCRY_TLAB` warn until promote criteria below.
-Research-only: `GCRY_TLAB_HIT_ATTR` (not product).
+Research-only: `GCRY_TLAB_HIT_ATTR`, `GCRY_TLAB_SKIP_FIND_BLOCK` (not product).
 
 ### Phase D — Promote decision
 
@@ -192,6 +195,7 @@ Promote TLAB-on from **unsupported** → **correctness-supported opt-in**
 
 ## First concrete next step
 
-**Phase C.3:** next thr lever after pad REJECT — prefer epoch/`find_block`
-elision with soft-soak + TLAB-off guard, or accept Parallel TLAB-on thr
-residual and document.
+**Phase C.4 / D fork:** accept Parallel TLAB-on thr residual (~⅗ of
+TLAB-off with B1+skip) and document, **or** one more hold-path lever.
+Promote criteria still require multi-host soak + POLICY touch before
+dropping “unsupported”.

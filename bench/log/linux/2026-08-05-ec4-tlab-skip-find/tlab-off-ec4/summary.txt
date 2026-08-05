@@ -1,0 +1,5 @@
+wrk_rps=81196.84
+tlab_skip_find_block=False
+tlab_hits=0 hit_rate_pct=100
+attr_samples=0
+collections=184 small_mapped=110362624 dormant=0
