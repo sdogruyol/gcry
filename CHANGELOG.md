@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Process / backticks under `-Dgc_none`:** Crystal `prepare_args` omits the
+  argv NULL terminator; Boehm size-class padding hid it, gcry exact classes
+  surfaced `EFAULT` (`Bad address`). Shard workaround:
+  `crystal_process_compat.cr` (`malloc(args.size + 1)`). [#14]
+
 ## [0.18.0] - 2026-08-04
 
 Product release on **upstream Crystal ≥ 1.21** — no compiler fork.

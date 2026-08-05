@@ -54,6 +54,17 @@ describe "process GC (-Dgc_none)" do
     keep.sum.should eq((0...100).sum)
   end
 
+  # Crystal prepare_args omitted argv NULL; Boehm over-alloc hid it (#14).
+  it "runs Process / command literals (argv NULL terminator)" do
+    `echo gcry-process-argv`.should eq("gcry-process-argv\n")
+    Process.run("echo", ["direct"], output: Process::Redirect::Pipe) do |proc|
+      proc.output.gets_to_end.should eq("direct\n")
+    end
+    Process.run("echo shell", shell: true, output: Process::Redirect::Pipe) do |proc|
+      proc.output.gets_to_end.should eq("shell\n")
+    end
+  end
+
   it "alloc storm + periodic collect" do
     live = [] of String
     500.times do |i|
