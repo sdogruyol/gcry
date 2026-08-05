@@ -1,0 +1,4 @@
+tlab_hits=107795695 refills=1135458 hit_rate_pct=98
+attr_samples=0
+refill_ns=0 calls=0
+collections=127 small_mapped=123076608 dormant=67239936

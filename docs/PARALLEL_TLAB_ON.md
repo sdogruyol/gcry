@@ -145,13 +145,18 @@ auto bounded dormant (product PR).
 
 Only if crash gates are green **and** quiet RSS is in a plausible band:
 
-1. Profile TLAB hit path (lock + `find_block`) under EC4 `/json`.
+1. ~~Profile TLAB hit path (lock + `find_block`) under EC4 `/json`.~~
+   **Done** — `bench/log/linux/2026-08-05-ec4-tlab-hit-attr/FINDINGS.md`
+   (`GCRY_TLAB_HIT_ATTR=1`). Composition under B1+EC4 `/json`: slot-lock
+   **wait ~58%** / hold ~42% of (wait+hold); `find_block` ~**19%** of that
+   (~half of hold). Attr tax ~15% thr — use % not abs.
 2. One lever at a time; reject if TLAB-off quiet regresses.
-3. Candidates (from FINDINGS — re-validate, do not assume): atomic counters
-   on hit, safer epoch/`find_block` elision, refill batching that does not
-   amplify `@index_lock`.
+3. Candidates (re-ordered from C.1): **pad `@tlab_slot_locks`** (false-share
+   hypothesis on ~193 ns wait/hit), then epoch/`find_block` elision (~19%
+   crit), then hold shrinkage. Re-validate; do not assume older FINDINGS.
 
 Keep `GCRY_TLAB` warn until promote criteria below.
+Research-only: `GCRY_TLAB_HIT_ATTR` (not product).
 
 ### Phase D — Promote decision
 
@@ -185,7 +190,6 @@ Promote TLAB-on from **unsupported** → **correctness-supported opt-in**
 
 ## First concrete next step
 
-**Phase A on this branch:** tip baseline A1→A4, write
-`bench/log/linux/<session>/FINDINGS.md`, then decide B vs C.
-
-Do not start thr micro-opts before A3 is green.
+**Phase C.2:** one thr lever from C.1 ordering — start with cache-line pad
+on `@tlab_slot_locks` (measure wait_ns drop via `GCRY_TLAB_HIT_ATTR`), guard
+TLAB-off quiet.

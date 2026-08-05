@@ -446,6 +446,11 @@ module GC
       )
       heap.tlab_enabled = true
     end
+    # Research: ns breakdown of TLAB hit (slot lock wait/hold + find_block + refill).
+    # Exposed on /gc-stats; slows the path — not for product thr cuts.
+    if env_flag_one?("GCRY_TLAB_HIT_ATTR")
+      heap.tlab_hit_attr = true
+    end
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
     # Amortizes lock vs lazy sweep. Clamped 1..64; ignored when TLAB is on.
     if ab = env_u64("GCRY_ALLOC_BATCH")

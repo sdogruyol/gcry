@@ -1,0 +1,8 @@
+tlab_hits=91214559 refills=998793 hit_rate_pct=98
+attr_samples=91214559
+lock_wait_ns_total=17640985999  avg_ns/hit=193.4  pct_of_crit=57.8%
+lock_hold_ns_total=12867056828  avg_ns/hit=141.1  pct_of_crit=42.2%
+find_block_ns_total=5793240486  avg_ns/call=63.5  calls=91214559  pct_of_hold=45.0%
+find_block_pct_of_crit=19.0%
+refill_ns_total=1913750467 calls=998793 avg_ns=1916.1
+collections=108 small_mapped=129499136 dormant=67108864

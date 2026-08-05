@@ -132,6 +132,15 @@ module Gcry
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
     @tlab_hits = Atomic(UInt64).new(0_u64)
+    # Research: GCRY_TLAB_HIT_ATTR=1 — ns attribution on tlab_alloc_small.
+    property tlab_hit_attr : Bool = false
+    @tlab_hit_attr_samples = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_lock_wait_ns = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_lock_hold_ns = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_find_block_ns = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_find_block_calls = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_refill_ns = Atomic(UInt64).new(0_u64)
+    @tlab_hit_attr_refill_calls = Atomic(UInt64).new(0_u64)
     @tlabs_booted = false
     @tlab_epoch = Atomic(UInt64).new(0_u64)
     # TLAB-off batch: claim N under freelist lock as USED, consume from

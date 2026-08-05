@@ -66,6 +66,34 @@ module Gcry
       @tlab_hits.get
     end
 
+    def tlab_hit_attr_samples : UInt64
+      @tlab_hit_attr_samples.get
+    end
+
+    def tlab_hit_attr_lock_wait_ns : UInt64
+      @tlab_hit_attr_lock_wait_ns.get
+    end
+
+    def tlab_hit_attr_lock_hold_ns : UInt64
+      @tlab_hit_attr_lock_hold_ns.get
+    end
+
+    def tlab_hit_attr_find_block_ns : UInt64
+      @tlab_hit_attr_find_block_ns.get
+    end
+
+    def tlab_hit_attr_find_block_calls : UInt64
+      @tlab_hit_attr_find_block_calls.get
+    end
+
+    def tlab_hit_attr_refill_ns : UInt64
+      @tlab_hit_attr_refill_ns.get
+    end
+
+    def tlab_hit_attr_refill_calls : UInt64
+      @tlab_hit_attr_refill_calls.get
+    end
+
     def alloc_batch_hits : UInt64
       @alloc_batch_hits.get
     end
@@ -331,13 +359,20 @@ module Gcry
       # Per-slot lock closes Parallel dual-alloc on freelist head (TOCTOU on the
       # lock-free load/store, or two OS threads briefly sharing a slot). Epoch
       # protocol still applies across STW flush.
+      attr = @tlab_hit_attr
       32.times do
         epoch = @tlab_epoch.get
         tlab = current_tlab
         slot = tlab_slot_index(tlab)
         user = Pointer(Void).null
+        find_ns = 0_u64
+        find_calls = 0_u64
+        wait_ns = 0_u64
+        hold_ns = 0_u64
 
+        t_wait0 = attr ? monotonic_ns : 0_u64
         lock_tlab_slot(slot)
+        t_hold0 = attr ? monotonic_ns : 0_u64
         begin
           user = if nursery
                    tlab.value.nursery_freelists[class_index]
@@ -345,13 +380,28 @@ module Gcry
                    tlab.value.freelists[class_index]
                  end
 
-          if !user.null? && !find_block(user)
-            if nursery
-              tlab.value.nursery_freelists[class_index] = Pointer(Void).null
-            else
-              tlab.value.freelists[class_index] = Pointer(Void).null
+          if !user.null?
+            if attr
+              t0 = monotonic_ns
+              ok = !!find_block(user)
+              find_ns += monotonic_ns - t0
+              find_calls += 1
+              unless ok
+                if nursery
+                  tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+                else
+                  tlab.value.freelists[class_index] = Pointer(Void).null
+                end
+                user = Pointer(Void).null
+              end
+            elsif !find_block(user)
+              if nursery
+                tlab.value.nursery_freelists[class_index] = Pointer(Void).null
+              else
+                tlab.value.freelists[class_index] = Pointer(Void).null
+              end
+              user = Pointer(Void).null
             end
-            user = Pointer(Void).null
           end
 
           if !user.null? && !BlockHeader.free?(BlockHeader.from_user(user))
@@ -381,13 +431,33 @@ module Gcry
           end
         ensure
           unlock_tlab_slot(slot)
+          if attr
+            t_end = monotonic_ns
+            wait_ns = t_hold0 >= t_wait0 ? t_hold0 - t_wait0 : 0_u64
+            hold_ns = t_end >= t_hold0 ? t_end - t_hold0 : 0_u64
+          end
         end
 
         if user.null?
-          filled = tlab_refill(class_index, payload, nursery)
+          if attr
+            t0 = monotonic_ns
+            filled = tlab_refill(class_index, payload, nursery)
+            @tlab_hit_attr_refill_ns.add(monotonic_ns - t0)
+            @tlab_hit_attr_refill_calls.add(1_u64)
+          else
+            filled = tlab_refill(class_index, payload, nursery)
+          end
           raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if filled.null?
           next if @tlab_epoch.get != epoch
           next # claim the freshly installed batch under the slot lock
+        end
+
+        if attr
+          @tlab_hit_attr_samples.add(1_u64)
+          @tlab_hit_attr_lock_wait_ns.add(wait_ns)
+          @tlab_hit_attr_lock_hold_ns.add(hold_ns)
+          @tlab_hit_attr_find_block_ns.add(find_ns)
+          @tlab_hit_attr_find_block_calls.add(find_calls)
         end
 
         # Atomic counters — no @alloc_lock on the TLAB hit path (Parallel thr).

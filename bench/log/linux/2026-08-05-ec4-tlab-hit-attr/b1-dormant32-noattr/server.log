@@ -1,0 +1,3 @@
+gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC (supported path: TLAB off + lazy). RSS cliff unless GCRY_PARALLEL_DORMANT=1 + GCRY_EMPTY_CHUNK_RETAIN — see docs/PARALLEL_TLAB_ON.md
+2026-08-05T12:29:55.799548Z   INFO - kemal: [production] Kemal is ready to lead at http://0.0.0.0:19877
+2026-08-05T12:30:21.236681Z   INFO - kemal: Kemal is going to take a rest!
