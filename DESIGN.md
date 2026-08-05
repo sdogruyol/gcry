@@ -4,7 +4,7 @@
 
 Crystal runs on [Boehm](https://github.com/ivmai/bdwgc) today. That works — and it also means the language’s most intimate runtime piece lives in C, behind a wall. **gcry** is the other path: a conservative mark–sweep collector written in Crystal, shipped as a shard, plugged in with `-Dgc_none`. No compiler fork. No waiting for upstream to grow a third backend.
 
-This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.17**.
+This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.18**.
 
 ---
 
@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.17.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal (v0.17 Darwin re-cut): **`/json` ~84%**, RSS **~0.93×**. Fat-app Linux tip is ~**90%** thr @ ~**1×** RSS (finalizer + retain=0; v0.17 i3 was ~**3.43×**); Darwin still ~**18×** — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md).
+As of **v0.18.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**0.63×** (was ~**18×**) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
 
 ## Goals
 
@@ -140,15 +140,15 @@ src/gcry/
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.17)
+## Where we are (v0.18)
 
-Shipped and dogfooded on Linux + macOS; **v0.17.0** ships the Darwin Kemal re-cut and promotes Parallel TLAB-off + lazy sweep to a **supported opt-in**. Default path remains EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
+Shipped and dogfooded on Linux + macOS; **v0.18.0** closes fat-app RSS on the shard-only path (finalizer + retain=0) and keeps stack maps **dormant**. Parallel TLAB-off + lazy sweep remains a **supported opt-in**. Default path: EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
 
 | Area | State |
 |------|--------|
-| Process GC via shard | ✅ `-Dgc_none` |
+| Process GC via shard | ✅ `-Dgc_none` (stock Crystal ≥ 1.21) |
 | Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64 |
-| Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry) |
+| Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry); fat-app tip ~**1–1.6×** |
 | Layout / type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
@@ -158,13 +158,13 @@ Shipped and dogfooded on Linux + macOS; **v0.17.0** ships the Darwin Kemal re-cu
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
-| Compiler stack maps | ❌ later (RSS) |
+| Compiler stack maps | ⚠️ machinery shipped **dormant** — not product default; see [STACK_MAPS.md](docs/STACK_MAPS.md) |
 
 **Kemal Linux (v0.16.0 carry):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](docs/PERF.md).
 
-**Kemal macOS (v0.17.0 cut):** `/` ~**90%**, `/json` ~**84%**, post-GC RSS ~**0.93–0.97×** — [PERF-macos.md](docs/PERF-macos.md).
+**Kemal macOS (tip):** `/` ~**91%**, `/json` ~**84%**, post-GC RSS ~**0.95–1.01×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux tip thr ~**90%**, RSS ~**1×** (v0.17 i3 cut ~**3.43×**) — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin thr ~**71%**, RSS ~**18×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin tip ~**90%** @ ~**0.63×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 

@@ -180,15 +180,15 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.17.0)* |
+| Workload | gcry vs Boehm (v0.18.0)* |
 |----------|------------------------:|
-| Kemal `/json` throughput | **~87%** *(carry v0.16)* (~95% with `GCRY_KEEP_CHUNKS=1`, 0.9-era) |
+| Kemal `/json` throughput | **~87%** *(carry v0.16)* (~95% with `GCRY_KEEP_CHUNKS=1`, escape) |
 | Kemal `/json` post-GC RSS | **~0.80x** *(carry v0.16)* |
 | Kemal `/` throughput | **~82%** *(carry v0.16)* |
-| Fat app `/api/v1/` throughput | **~90–96%** *(tip; v0.17 carry)* |
-| Fat app `/api/v1/` RSS | **~1–1.6x** *(tip)* / **~0.92x** *(`GCRY_TIGHT_GROW=1`)* / **~3.43x** *(v0.17 i3 cut)* |
+| Fat app `/api/v1/` throughput | **~90–96%** |
+| Fat app `/api/v1/` RSS | **~1–1.6x** / **~0.92x** *(`GCRY_TIGHT_GROW=1`)* / **~3.43x** *(v0.17 i3 cut)* |
 
-\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Fat app tip: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.6×**. Opt-in `GCRY_TIGHT_GROW=1` → acik **~103%** @ **~0.92×** (Kemal thr soft; not default) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default.
+\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Quiet tip / post-tag 9950X smokes ~**80%** `/json` @ ~**0.74×** — headline stays the v0.16 cut. Fat app: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.8×** (post-tag **~102%** @ **~1.76×**, `…/2026-08-05-091820/`). Opt-in `GCRY_TIGHT_GROW=1` → acik **~103%** @ **~0.92×** (Kemal thr soft; not default) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant — not this release’s win.
 
 ### macOS (Apple Silicon)
 

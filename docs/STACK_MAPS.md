@@ -1,7 +1,8 @@
 # Compiler stack maps (spike)
 
 **Status:** spike **GO** — parser + hybrid walker landed (default off).
-Not a release feature. Product version stays **v0.17.0**.
+Not a release feature / not the v0.18 product win. Product = **v0.18.0**
+shard-only; `GCRY_PRECISE_STACK` stays **off**.
 
 **Gate metric:** acikturkiye post-GC RSS × Boehm. Linux tip after finalizer +
 retain=0: ~**1–1.6×** RSS, thr ~**90–96%** (i3 headline **~1.63×** /

@@ -15,12 +15,13 @@ After LibC finalizer registry (`3a0bffe`) + Linux **retain=0** process defaults
 | 9950X | release0 env → defaults | `…/acik-release0-med3/` | **~94%** | **~1.00×** |
 | 9950X | defaults-as-code verify | `…/acik-defaults-verify-med3/` | **~90%** | **~1.40×** |
 | 9950X | tip control (office) | `…/2026-08-04-acik-mostly-empty-control-med3/` | **~100%** | **~1.56×** |
+| 9950X | v0.18 post-tag confirm | `…/2026-08-05-091820/` | **~102%** | **~1.76×** |
 
-Cite tip band **~90–96% thr @ ~1–1.6× RSS** (was v0.17 i3 **~3.43×** / 9950X
-pre-fix **~8.5×**). Residual anatomy on i3: mapped freelist / sparse chunks
-(`…/2026-08-04-acik-i3-residual/`) — not live-graph. 9950X verify had one
-unreproduced Monitor SEGV — `…/acik-segv-bisect/`. Stack-map notes:
-[STACK_MAPS.md](STACK_MAPS.md).
+Cite tip band **~90–96% thr @ ~1–1.6× RSS** (9950X soft high ~**1.8×**; was v0.17
+i3 **~3.43×** / 9950X pre-fix **~8.5×**). Residual anatomy on i3: mapped
+freelist / sparse chunks (`…/2026-08-04-acik-i3-residual/`) — not live-graph.
+9950X verify had one unreproduced Monitor SEGV — `…/acik-segv-bisect/`.
+Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
 
 ### Opt-in: `GCRY_TIGHT_GROW=1` *(closes freelist residual)*
 
