@@ -28,7 +28,26 @@ module Gcry
     @tlabs = uninitialized StaticArray(Tlab, MAX_TLABS)
     # Per-slot locks: must not GC-allocate under @alloc_lock (Pointer.malloc
     # → GC.malloc → re-enter alloc → non-recursive SpinLock deadlock at boot).
-    @tlab_slot_locks = uninitialized StaticArray(Crystal::SpinLock, MAX_TLABS)
+    #
+    # Crystal::SpinLock is 4 B; packing MAX_TLABS of them false-shares under
+    # EC>1 (Phase C.1: ~193 ns wait/hit). One lock per cache line.
+    CACHE_LINE_BYTES = 64
+
+    struct PaddedSpinLock
+      # sizeof(Crystal::SpinLock) == 4 on this Crystal; pad to 64 B total.
+      @lock = Crystal::SpinLock.new
+      @pad = uninitialized StaticArray(UInt8, 60)
+
+      def lock : Nil
+        pointerof(@lock).value.lock
+      end
+
+      def unlock : Nil
+        pointerof(@lock).value.unlock
+      end
+    end
+
+    @tlab_slot_locks = uninitialized StaticArray(PaddedSpinLock, MAX_TLABS)
 
     # TLAB-off USED stash (see alloc_old_small_batched). Same slot count as TLAB.
     struct AllocBatch
@@ -110,9 +129,12 @@ module Gcry
     # Caller holds @alloc_lock.
     private def ensure_tlabs_under_lock : Nil
       return if @tlabs_booted
+      if sizeof(PaddedSpinLock) != CACHE_LINE_BYTES || sizeof(Crystal::SpinLock) != 4
+        raise "gcry: PaddedSpinLock layout drift (padded=#{sizeof(PaddedSpinLock)} spin=#{sizeof(Crystal::SpinLock)})"
+      end
       MAX_TLABS.times do |i|
         @tlabs[i] = Tlab.new
-        @tlab_slot_locks[i] = Crystal::SpinLock.new
+        @tlab_slot_locks[i] = PaddedSpinLock.new
       end
       @tlabs_booted = true
     end
@@ -122,7 +144,7 @@ module Gcry
     end
 
     private def lock_tlab_slot(slot : Int32) : Nil
-      # Pointer receiver so SpinLock.@m is mutated in place (not a copy).
+      # Pointer receiver so the padded lock is mutated in place (not a copy).
       (@tlab_slot_locks.to_unsafe + slot).value.lock
     end
 
