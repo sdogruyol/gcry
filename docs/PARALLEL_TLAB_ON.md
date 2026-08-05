@@ -91,10 +91,14 @@ refusal on the default script.
 Log under `bench/log/linux/YYYY-MM-DD-ec4-tlab-on-baseline/`.  
 Update FINDINGS hub with a short “tip baseline” section.
 
-**Stop / branch decision after A:** if A3 is already 0/40 and A1 green, skip
-to Phase C (thr residual). If A3 fails, Phase B is mandatory.
+**Stop / branch decision after A:**
 
-### Phase B — Correctness fixes (only what A proves)
+- If A3 fails (soft/hard) → Phase **B** (crash/UAF class).
+- If A3 green but A4 RSS/thr cliffs → Phase **B′** (RSS / reclaim) before C.
+- Tip baseline `2026-08-05-ec4-tlab-on-baseline/`: A1–A3 **PASS**; A4 TLAB-on
+  quiet RSS ~**126×** vs TLAB-off ~**6×** → **B′ next**, not thr C.
+
+### Phase B — Crash / soft correctness (only if A1–A3 fail)
 
 Likely residual classes (historical; confirm with A failures):
 
@@ -113,9 +117,25 @@ Rules for B patches:
 - Every patch runs **A2** (TLAB-off soak) before merge to this plan branch.
 - No Parallel default flips in B.
 
-### Phase C — Thr residual (only after B or clean A)
+### Phase B′ — RSS / reclaim under TLAB-on (tip baseline forced this)
 
-Only if correctness is quiet:
+Soft-soak does **not** gate RSS. Tip A4: TLAB-on maps ~**1.9 GiB** /
+~15k chunks with `released_chunk_bytes=0` (Parallel munmap off) while
+TLAB-off stays ~**6×** Boehm.
+
+Investigations (research knobs only until proven):
+
+1. Chunk proliferation — TLAB refill / size-class growth vs TLAB-off.
+2. Safe empty reclaim without `PARALLEL_RELEASE` — e.g. bounded
+   `PARALLEL_DORMANT` under TLAB-on; measure hang/soft risk.
+3. Whether freelist heads pin empties that sweep could return.
+
+**Do not** enable Parallel empty munmap by default. Re-run A2 + A4 after
+each lever.
+
+### Phase C — Thr residual (only after B/B′ quiet)
+
+Only if crash gates are green **and** quiet RSS is in a plausible band:
 
 1. Profile TLAB hit path (lock + `find_block`) under EC4 `/json`.
 2. One lever at a time; reject if TLAB-off quiet regresses.

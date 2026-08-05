@@ -1,0 +1,27 @@
+timestamp_utc: "2026-08-05T11:42:03Z"
+session: "2026-08-05-114156"
+run: 1
+count: 1
+hostname: "R9-9950X"
+os: "Linux"
+os_release: "6.6.87.2-microsoft-standard-WSL2"
+os_version: "#1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025"
+arch: "x86_64"
+cpu: "AMD Ryzen 9 9950X 16-Core Processor"
+cpu_cores: "32"
+crystal_version: "1.21.0"
+crystal_commit: "unknown"
+gcry_version: "0.18.0"
+git_commit: "edf96c3"
+git_tag: "v0.18.0-7-gedf96c3"
+wrk_connections: 100
+wrk_duration_seconds: 30
+trials: 3
+gc: "boehm gcry"
+gcry_flags: "GCRY_TLAB=1"
+ec_parallelism: "4"
+ambient_gcry: |
+
+build_mode: "release"
+crystal_flags: ""
+crystal_build_flags: "--release"

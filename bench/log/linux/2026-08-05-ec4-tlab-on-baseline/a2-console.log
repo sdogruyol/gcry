@@ -1,0 +1,56 @@
+SOFT_SOAK_N=${SOFT_SOAK_N:-40} ./bench/soft_soak_ec4.sh
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.18.0 at ../..)
+Building kemal-gcry (EC4 soft soak, TLAB off)...
+  trial 1/40 OK req/s=107934.67 soft=0 hard=0 alive=1 
+  trial 2/40 OK req/s=106544.36 soft=0 hard=0 alive=1 
+  trial 3/40 OK req/s=106535.98 soft=0 hard=0 alive=1 
+  trial 4/40 OK req/s=109040.48 soft=0 hard=0 alive=1 
+  trial 5/40 OK req/s=107724.26 soft=0 hard=0 alive=1 
+  trial 6/40 OK req/s=106995.18 soft=0 hard=0 alive=1 
+  trial 7/40 OK req/s=107651.49 soft=0 hard=0 alive=1 
+  trial 8/40 OK req/s=108084.81 soft=0 hard=0 alive=1 
+  trial 9/40 OK req/s=107186.96 soft=0 hard=0 alive=1 
+  trial 10/40 OK req/s=107710.76 soft=0 hard=0 alive=1 
+  trial 11/40 OK req/s=107710.67 soft=0 hard=0 alive=1 
+  trial 12/40 OK req/s=108655.79 soft=0 hard=0 alive=1 
+  trial 13/40 OK req/s=108015.50 soft=0 hard=0 alive=1 
+  trial 14/40 OK req/s=107205.51 soft=0 hard=0 alive=1 
+  trial 15/40 OK req/s=106503.20 soft=0 hard=0 alive=1 
+  trial 16/40 OK req/s=108028.40 soft=0 hard=0 alive=1 
+  trial 17/40 OK req/s=107643.52 soft=0 hard=0 alive=1 
+  trial 18/40 OK req/s=107704.31 soft=0 hard=0 alive=1 
+  trial 19/40 OK req/s=106945.13 soft=0 hard=0 alive=1 
+  trial 20/40 OK req/s=106858.39 soft=0 hard=0 alive=1 
+  trial 21/40 OK req/s=108543.25 soft=0 hard=0 alive=1 
+  trial 22/40 OK req/s=109057.08 soft=0 hard=0 alive=1 
+  trial 23/40 OK req/s=104797.16 soft=0 hard=0 alive=1 
+  trial 24/40 OK req/s=107513.71 soft=0 hard=0 alive=1 
+  trial 25/40 OK req/s=107841.48 soft=0 hard=0 alive=1 
+  trial 26/40 OK req/s=107656.64 soft=0 hard=0 alive=1 
+  trial 27/40 OK req/s=107532.29 soft=0 hard=0 alive=1 
+  trial 28/40 OK req/s=105253.58 soft=0 hard=0 alive=1 
+  trial 29/40 OK req/s=107674.00 soft=0 hard=0 alive=1 
+  trial 30/40 OK req/s=108374.25 soft=0 hard=0 alive=1 
+  trial 31/40 OK req/s=108023.81 soft=0 hard=0 alive=1 
+  trial 32/40 OK req/s=107043.71 soft=0 hard=0 alive=1 
+  trial 33/40 OK req/s=107698.09 soft=0 hard=0 alive=1 
+  trial 34/40 OK req/s=108524.65 soft=0 hard=0 alive=1 
+  trial 35/40 OK req/s=107679.20 soft=0 hard=0 alive=1 
+  trial 36/40 OK req/s=107273.82 soft=0 hard=0 alive=1 
+  trial 37/40 OK req/s=108150.69 soft=0 hard=0 alive=1 
+  trial 38/40 OK req/s=106359.42 soft=0 hard=0 alive=1 
+  trial 39/40 OK req/s=107536.95 soft=0 hard=0 alive=1 
+  trial 40/40 OK req/s=106620.10 soft=0 hard=0 alive=1 
+config EC4 TLAB-off
+process OK 40/40 fail=0 soft=0 hard=0
+OK thr med=107665.32 (n=40)
+PASS: soft-soak EC4 TLAB-off 40/40 soft=0 hard=0

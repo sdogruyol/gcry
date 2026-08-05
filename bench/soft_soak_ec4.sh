@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# EC4 Kemal soft soak — Parallel TLAB-off + lazy correctness gate.
+# EC4 Kemal soft soak — Parallel correctness gate (default: TLAB-off + lazy).
 #
 # Campaign bar: soft+hard == 0 over N trials (`wrk -c100 -d8 /json`).
 # Soft: mark-miss / realloc class (`pointer is not a gcry allocation`, …).
 # Hard: SEGV / abort / server dead mid-trial.
 #
 # Usage:
-#   ./bench/soft_soak_ec4.sh              # N=40 local gate
+#   ./bench/soft_soak_ec4.sh              # N=40 supported path (TLAB off)
 #   SOFT_SOAK_N=5 ./bench/soft_soak_ec4.sh   # CI smoke
 #   make soft-soak-ec4
 #   make soft-soak-ec4-smoke
+#   # Research / Parallel TLAB-on plan (docs/PARALLEL_TLAB_ON.md Phase A3):
+#   SOFT_SOAK_ALLOW_TLAB=1 GCRY_TLAB=1 SOFT_SOAK_OUT=... ./bench/soft_soak_ec4.sh
+#   make soft-soak-ec4-tlab
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +24,7 @@ CONNECTIONS="${WRK_CONNECTIONS:-100}"
 PORT_BASE="${SOFT_SOAK_PORT:-3230}"
 EC="${EC_PARALLELISM:-4}"
 OUT="${SOFT_SOAK_OUT:-/tmp/gcry-soft-soak-ec4}"
+ALLOW_TLAB="${SOFT_SOAK_ALLOW_TLAB:-0}"
 
 command -v wrk >/dev/null || { echo "ERROR: wrk not found"; exit 1; }
 command -v curl >/dev/null || { echo "ERROR: curl not found"; exit 1; }
@@ -30,21 +34,36 @@ if ! [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
-# Gate measures the supported Parallel path only (TLAB off, no munmap reclaim).
-if [[ "${GCRY_TLAB:-}" == "1" || "${GCRY_PARALLEL_RELEASE:-}" == "1" ]]; then
-  echo "ERROR: soft_soak_ec4 requires supported Parallel path:" >&2
-  echo "  unset GCRY_TLAB and GCRY_PARALLEL_RELEASE (TLAB-off + lazy)." >&2
+# PARALLEL_RELEASE stays forbidden (hang / in-STW sweep risk).
+if [[ "${GCRY_PARALLEL_RELEASE:-}" == "1" ]]; then
+  echo "ERROR: soft_soak_ec4 forbids GCRY_PARALLEL_RELEASE=1 (unsupported)." >&2
   exit 1
 fi
-# Strip accidental inheritance so trials stay on the supported shape.
-unset GCRY_TLAB GCRY_PARALLEL_RELEASE
+unset GCRY_PARALLEL_RELEASE
+
+TLAB_ON=0
+if [[ "${GCRY_TLAB:-}" == "1" ]]; then
+  if [[ "$ALLOW_TLAB" != "1" ]]; then
+    echo "ERROR: soft_soak_ec4 default gate is supported Parallel (TLAB off)." >&2
+    echo "  unset GCRY_TLAB, or set SOFT_SOAK_ALLOW_TLAB=1 for TLAB-on research." >&2
+    exit 1
+  fi
+  TLAB_ON=1
+else
+  # Strip accidental inheritance on the supported-path gate.
+  unset GCRY_TLAB
+fi
 
 mkdir -p "$BIN" "$OUT"
 rm -f "$OUT/trials.tsv" "$OUT/summary.txt"
 
 cd "$KEMAL"
 shards install --production 2>/dev/null || shards install
-echo "Building kemal-gcry (EC${EC} soft soak)..."
+if [[ "$TLAB_ON" -eq 1 ]]; then
+  echo "Building kemal-gcry (EC${EC} soft soak, GCRY_TLAB=1 research)..."
+else
+  echo "Building kemal-gcry (EC${EC} soft soak, TLAB off)..."
+fi
 crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-soft-soak"
 
 echo -e "n\tresult\treq_s\tsoft\thard\talive\tnote" >"$OUT/trials.tsv"
@@ -78,7 +97,13 @@ for i in $(seq 1 "$N"); do
   wrk_log="$OUT/wrk-${i}.txt"
   rm -f "$srv_log" "$wrk_log"
 
-  EC_PARALLELISM="$EC" PORT="$port" "$BIN/kemal-gcry-soft-soak" >"$srv_log" 2>&1 &
+  if [[ "$TLAB_ON" -eq 1 ]]; then
+    EC_PARALLELISM="$EC" PORT="$port" GCRY_TLAB=1 \
+      "$BIN/kemal-gcry-soft-soak" >"$srv_log" 2>&1 &
+  else
+    EC_PARALLELISM="$EC" PORT="$port" \
+      "$BIN/kemal-gcry-soft-soak" >"$srv_log" 2>&1 &
+  fi
   spid=$!
   alive=1
   result="OK"
@@ -161,7 +186,11 @@ for i in $(seq 1 "$N"); do
   echo "  trial $i/$N $result req/s=$req_s soft=$soft hard=$hard alive=$alive $note"
 done
 
+tlab_label="TLAB-off"
+[[ "$TLAB_ON" -eq 1 ]] && tlab_label="TLAB-on"
+
 {
+  echo "config EC${EC} ${tlab_label}"
   echo "process OK ${ok}/${N} fail=${fail} soft=${soft_total} hard=${hard_total}"
   if [[ "$ok" -gt 0 ]]; then
     awk -F'\t' 'NR>1 && $2=="OK" {print $3}' "$OUT/trials.tsv" \
@@ -178,9 +207,9 @@ done
 } | tee "$OUT/summary.txt"
 
 if [[ "$soft_total" -ne 0 || "$hard_total" -ne 0 || "$fail" -ne 0 ]]; then
-  echo "FAIL: soft-soak EC${EC} soft=${soft_total} hard=${hard_total} fail=${fail}" >&2
+  echo "FAIL: soft-soak EC${EC} ${tlab_label} soft=${soft_total} hard=${hard_total} fail=${fail}" >&2
   exit 1
 fi
 
-echo "PASS: soft-soak EC${EC} ${ok}/${N} soft=0 hard=0"
+echo "PASS: soft-soak EC${EC} ${tlab_label} ${ok}/${N} soft=0 hard=0"
 exit 0
