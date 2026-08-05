@@ -416,6 +416,35 @@ jobs:
           test -f bin/min_aarch64.o
           test -f bin/alloc_aarch64.o
 
+  # musl LibC ABI smoke (object emit). Catches PthreadT/Void* and similar typedef
+  # mismatches that glibc hosts do not exercise (Alpine / static musl).
+  test-musl:
+    runs-on: ubuntu-latest
+    name: test (musl cross-compile)
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Cross-compile samples for ${{ matrix.target }}
+        run: |
+          mkdir -p bin
+          suffix="${{ matrix.target }}"
+          crystal build -Dgc_none --cross-compile --target "$suffix" samples/hello.cr -o "bin/hello_${suffix}"
+          crystal build -Dgc_none --cross-compile --target "$suffix" samples/min.cr -o "bin/min_${suffix}"
+          crystal build -Dgc_none --cross-compile --target "$suffix" samples/alloc.cr -o "bin/alloc_${suffix}"
+          test -f "bin/hello_${suffix}.o"
+          test -f "bin/min_${suffix}.o"
+          test -f "bin/alloc_${suffix}.o"
+
   # Native aarch64 (GitHub ubuntu-24.04-arm).
   test-aarch64-native:
     runs-on: ubuntu-24.04-arm
