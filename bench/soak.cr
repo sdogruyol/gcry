@@ -8,10 +8,10 @@
 #   - WeakRef / disappearing links: ~10 Hz
 #
 # Hourly telemetry: heap size, pause stats, live_objects, RSS.
-# After soak: RSS within 10% of start, no crashes.
+# After soak: RSS within --rss-limit % of start (default 10), no crashes.
 #
 # Build:  crystal build -Dgc_none bench/soak.cr -o bin/soak
-# Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log]
+# Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit=10]
 
 require "../src/gcry"
 
@@ -22,6 +22,7 @@ require "../src/gcry"
 # ---- CLI args ----
 duration = 24 * 3600
 telemetry_path = "/tmp/gcry-soak.log"
+rss_limit_pct = 10
 
 ARGV.each do |arg|
   case arg
@@ -29,6 +30,8 @@ ARGV.each do |arg|
     duration = $1.to_i
   when /--telemetry=(.+)/
     telemetry_path = $1
+  when /--rss-limit=(\d+)/
+    rss_limit_pct = $1.to_i
   end
 end
 
@@ -83,7 +86,7 @@ class SoakTest
   @total_finalizable : UInt64
   @total_weakref : UInt64
 
-  def initialize(@telemetry_path : String)
+  def initialize(@telemetry_path : String, @rss_limit_pct : Int32 = 10)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -238,13 +241,17 @@ class SoakTest
 
     puts "Final: heap=#{m.heap_size / 1024}kB live=#{m.live_objects} rss=#{rss_end}kB finalized=#{SoakFinalizable.seen}"
 
-    # RSS within 10% of start
-    if rss_end > start_rss * 11 / 10 && start_rss > 0
-      msg = "RSS leak: start=#{start_rss}kB end=#{rss_end}kB (> 10%)"
-      telemetry.puts "# result: FAIL: #{msg}"
-      telemetry.close
-      STDERR.puts "  SOAK FAIL: #{msg}"
-      return false
+    # RSS growth ceil (default 10%). Short CI smokes use a looser --rss-limit:
+    # DONTNEED re-fault / page-cache noise on shared GHA hosts often lands ~11%.
+    if start_rss > 0 && @rss_limit_pct >= 0
+      limit = start_rss + start_rss * @rss_limit_pct.to_u64 / 100
+      if rss_end > limit
+        msg = "RSS leak: start=#{start_rss}kB end=#{rss_end}kB (> #{@rss_limit_pct}%)"
+        telemetry.puts "# result: FAIL: #{msg}"
+        telemetry.close
+        STDERR.puts "  SOAK FAIL: #{msg}"
+        return false
+      end
     end
 
     telemetry.puts "# result: PASS"
@@ -266,6 +273,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path)
+test = SoakTest.new(telemetry_path, rss_limit_pct)
 success = test.run(duration)
 exit(1) unless success
