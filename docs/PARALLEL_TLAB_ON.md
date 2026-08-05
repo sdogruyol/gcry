@@ -1,7 +1,9 @@
 # Parallel TLAB-on — correctness plan
 
 **Branch:** `plan/parallel-tlab-on`  
-**Status:** kickoff (plan only — no product default change)  
+**Status:** Phase **C closed** — thr residual **accepted**; still **unsupported**
+(no product default / no Phase D promote yet)  
+**Close hub:** [bench/log/linux/2026-08-05-ec4-tlab-on-close/FINDINGS.md](../bench/log/linux/2026-08-05-ec4-tlab-on-close/FINDINGS.md)  
 **Parent FINDINGS:** [bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md](../bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md)
 
 ## Goal
@@ -20,8 +22,20 @@ first.” Correctness gates before any thr claim.
 | EC1, TLAB off | **Product default** | Linux Kemal headline (~87% / ~0.80×) |
 | EC>1, TLAB **off**, lazy on, munmap off | **Supported opt-in** | ~79% `/json`, ~5–6× RSS; soft 0/40 |
 | EC>1 + `GCRY_PARALLEL_DORMANT=1` | Supported RSS stretch | ~75% @ ~4× |
-| `GCRY_TLAB=1` (any EC) | **Unsupported** | stderr warn; research / A/B |
+| `GCRY_TLAB=1` (any EC) | **Unsupported** | stderr warn; research recipe below |
 | `GCRY_PARALLEL_RELEASE=1` | **Unsupported** | hang / in-STW sweep risk |
+
+### Research recipe (TLAB-on Parallel — not product)
+
+9950X tip (~**63k** `/json` @ ~**3.5×** RSS; ~⅗ of TLAB-off ~108k):
+
+```bash
+EC_PARALLELISM=4 GCRY_TLAB=1 \
+  GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=33554432 \
+  GCRY_TLAB_SKIP_FIND_BLOCK=1
+```
+
+See close hub. Thr gap **accepted** (C.4); do not chase further this epic.
 
 Ship rule: **never** change Parallel defaults or TLAB-off behavior to chase
 TLAB-on thr. Escapes stay opt-in behind env + warn until promoted.
@@ -158,21 +172,26 @@ Only if crash gates are green **and** quiet RSS is in a plausible band:
      `GCRY_TLAB_SKIP_FIND_BLOCK=1`
      (`…/2026-08-05-ec4-tlab-skip-find/`; B1 med3 **~63k** vs control
      **~53k**, soak 20/20; not default — munmap UAF footgun).
-   - hold shrinkage / accept thr gap vs TLAB-off (~108k)
+   - ~~hold shrinkage / accept thr gap~~ — **ACCEPT** (C.4)
+     (`…/2026-08-05-ec4-tlab-on-close/`). Recipe thr ~⅗ of TLAB-off;
+     no further lever this epic.
 
 Keep `GCRY_TLAB` warn until promote criteria below.
 Research-only: `GCRY_TLAB_HIT_ATTR`, `GCRY_TLAB_SKIP_FIND_BLOCK` (not product).
 
-### Phase D — Promote decision
+### Phase D — Promote decision *(deferred)*
 
 Promote TLAB-on from **unsupported** → **correctness-supported opt-in**
 (still not default) only if:
 
 - [ ] A1–A3 green on two hosts or two days (noise control)
-- [ ] A4 documented; thr gap accepted or closed enough
-- [ ] POLICY / HARDENING / COMPARISON / PERF Parallel section updated
+- [x] A4 documented; thr gap **accepted** (C.4 close hub)
+- [ ] POLICY / HARDENING / COMPARISON / PERF Parallel section updated for promote
 - [ ] stderr warn removed or reworded (“thr experimental”)
 - [ ] Supported TLAB-off path unchanged (defaults + lazy + no munmap)
+
+C.4 updates PERF/HARDENING/POLICY with a **research** footnote only — not a
+promote.
 
 ## Harnesses (use these — don’t invent)
 
@@ -195,7 +214,6 @@ Promote TLAB-on from **unsupported** → **correctness-supported opt-in**
 
 ## First concrete next step
 
-**Phase C.4 / D fork:** accept Parallel TLAB-on thr residual (~⅗ of
-TLAB-off with B1+skip) and document, **or** one more hold-path lever.
-Promote criteria still require multi-host soak + POLICY touch before
-dropping “unsupported”.
+**Done for this epic (C closed).** Optional later: Phase **D** promote
+(multi-host soak + warn reword), or auto bounded dormant when `TLAB∧EC>1`.
+Merge plan branch when ready; do not flip Parallel / TLAB defaults.

@@ -39,7 +39,7 @@ the async handler — allocating there is the normal mutator path. That does
 | Mode | Support |
 |------|---------|
 | ExecutionContext, parallelism **1** | **Supported** — STW + fiber / Monitor stacks |
-| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); RSS stretch `GCRY_PARALLEL_DORMANT=1` (~75% @ ~4×). `GCRY_TLAB=1` / `GCRY_PARALLEL_RELEASE=1` are **unsupported** (stderr warn; research/A/B only — hang/SEGV risk). `GCRY_PARALLEL_MARK` often **hurts** HTTP — measure |
+| Extra parallel contexts | **Supported opt-in:** EC>1 + TLAB **off** + lazy (~79% `/json`); RSS stretch `GCRY_PARALLEL_DORMANT=1` (~75% @ ~4×). `GCRY_TLAB=1` / `GCRY_PARALLEL_RELEASE=1` are **unsupported** (stderr warn). TLAB-on research recipe (dormant32 + `TLAB_SKIP_FIND_BLOCK`; thr ~⅗ of TLAB-off) — [PARALLEL_TLAB_ON.md](PARALLEL_TLAB_ON.md); not promoted. `GCRY_PARALLEL_MARK` often **hurts** HTTP — measure |
 | `-Dpreview_mt` | Unsupported (deprecated) |
 | `-Dwithout_mt` | API works; prefer 1.21 default |
 

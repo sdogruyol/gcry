@@ -84,7 +84,9 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_FIBER_FP_FILL_MISS_ONLY=1` | With `PRECISE_FIBERS`: skip FP-fill on nonempty map hits (research; acik UAF) |
 | `GCRY_STACKMAP_MISS_LOG=1` | Research: parked map-miss PC ring on `/gc-stats` (`stack_maps_top_miss_pcs`) |
 | `GCRY_STACKMAP_NEAR_DELTA` | Research: ret↔map slack bytes (default **128**; was 32 — too tight for arg pushes) |
-| `GCRY_TLAB=1` | **Unsupported** under Parallel — thread-local freelists (research/A/B; stderr warn). Supported path keeps TLAB **off** |
+| `GCRY_TLAB=1` | **Unsupported** under Parallel — thread-local freelists (research/A/B; stderr warn). Supported path keeps TLAB **off**. RSS recipe: `PARALLEL_DORMANT=1` + `EMPTY_CHUNK_RETAIN` (e.g. 32 MiB) |
+| `GCRY_TLAB_SKIP_FIND_BLOCK=1` | **Research** — skip `find_block` on TLAB hit (stderr warn). SEGV if empty chunks munmap; pair with Parallel reclaim-off / dormant. See [PARALLEL_TLAB_ON.md](PARALLEL_TLAB_ON.md) |
+| `GCRY_TLAB_HIT_ATTR=1` | **Research** — ns attribution on TLAB hit (`/gc-stats`); slows path |
 | `GCRY_ALLOC_BATCH=N` | TLAB-off: claim N (1..64) freelist nodes per lock; USED stash (lazy-safe) |
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
@@ -154,7 +156,9 @@ Parallel contexts: STW covers Crystal threads. **Supported opt-in:**
 (soft+hard **0/40**); CI runs `make soft-soak-ec4-smoke` (N=5).
 `GCRY_TLAB=1` and `GCRY_PARALLEL_RELEASE` are **unsupported** (knobs
 kept for research; process GC prints a stderr warning). Soft-soak refuses
-both. `GCRY_PARALLEL_MARK` is research — [POLICY.md](POLICY.md).
+both. TLAB-on research recipe (dormant32 + `TLAB_SKIP_FIND_BLOCK`) —
+[PARALLEL_TLAB_ON.md](PARALLEL_TLAB_ON.md). `GCRY_PARALLEL_MARK` is research —
+[POLICY.md](POLICY.md).
 
 ## CI
 

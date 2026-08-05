@@ -35,6 +35,11 @@ closed as accepted. **Unsupported** (stderr warn; not product):
 `GCRY_TLAB=1`, Parallel empty munmap (`GCRY_PARALLEL_RELEASE`). Hub:
 `bench/log/linux/2026-07-29-parallel-tlab-FINDINGS.md`.
 
+Research-only Parallel TLAB-on (9950X tip; thr gap **accepted**): dormant32 +
+`GCRY_TLAB_SKIP_FIND_BLOCK=1` → `/json` ~**63k** @ ~**3.5×** RSS (~⅗ of
+TLAB-off ~108k). Not a supported opt-in — [PARALLEL_TLAB_ON.md](PARALLEL_TLAB_ON.md),
+close hub `…/2026-08-05-ec4-tlab-on-close/`.
+
 | Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
 |------|------------------:|-----------------:|-------:|--------------:|
 | `/` | 81846 | 66841 | **81.7%** | **0.79×** |
