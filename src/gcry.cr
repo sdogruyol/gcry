@@ -149,4 +149,5 @@ end
 
 {% if flag?(:gc_none) %}
   require "./gcry/gc_override"
+  require "./gcry/crystal_process_compat"
 {% end %}
