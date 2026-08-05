@@ -139,7 +139,8 @@ module Gcry
     private def current_thread_key : UInt64
       {% if flag?(:win32) || flag?(:wasm32) %}
         1_u64
-      {% elsif flag?(:darwin) %}
+      {% elsif flag?(:darwin) || flag?(:musl) %}
+        # PthreadT is Void* — no integer conversion (same as darwin).
         LibC.pthread_self.as(Void*).address
       {% else %}
         LibC.pthread_self.to_u64!
