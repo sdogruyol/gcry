@@ -1,0 +1,15 @@
+gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC (supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md
+2026-08-05T12:14:46.477093Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3243
+2026-08-05T12:14:49.775463Z  ERROR - kemal: Index out of bounds
+Index out of bounds (IndexError)
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/json/builder.cr:359:7 in 'end_scalar'
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/json/builder.cr:325:17 in 'string'
+  from src/server.cr:91:34 in '->'
+  from lib/kemal/src/kemal/route_handler.cr:164:39 in 'call'
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server/handler.cr:30:7 in 'call'
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server/request_processor.cr:58:11 in 'process'
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/http/server.cr:506:5 in '->'
+  from /home/uzumaki/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168:11 in 'run'
+  from ???
+
+2026-08-05T12:14:54.588036Z   INFO - kemal: Kemal is going to take a rest!

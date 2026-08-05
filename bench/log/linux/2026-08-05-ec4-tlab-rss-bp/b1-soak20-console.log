@@ -1,0 +1,35 @@
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.18.0 at ../..)
+Building kemal-gcry (EC4 soft soak, GCRY_TLAB=1 research)...
+  trial 1/20 OK req/s=58504.73 soft=0 hard=0 alive=1 
+  trial 2/20 OK req/s=54672.17 soft=0 hard=0 alive=1 
+  trial 3/20 OK req/s=57187.21 soft=0 hard=0 alive=1 
+  trial 4/20 OK req/s=54081.12 soft=0 hard=0 alive=1 
+  trial 5/20 OK req/s=55650.05 soft=0 hard=0 alive=1 
+  trial 6/20 OK req/s=57524.97 soft=0 hard=0 alive=1 
+  trial 7/20 OK req/s=55859.84 soft=0 hard=0 alive=1 
+  trial 8/20 OK req/s=55017.58 soft=0 hard=0 alive=1 
+  trial 9/20 OK req/s=57860.60 soft=0 hard=0 alive=1 
+  trial 10/20 OK req/s=55676.10 soft=0 hard=0 alive=1 
+  trial 11/20 OK req/s=53607.03 soft=0 hard=0 alive=1 
+  trial 12/20 OK req/s=54010.11 soft=0 hard=0 alive=1 
+  trial 13/20 OK req/s=56689.26 soft=0 hard=0 alive=1 
+  trial 14/20 OK req/s=57118.09 soft=0 hard=0 alive=1 
+  trial 15/20 OK req/s=57501.41 soft=0 hard=0 alive=1 
+  trial 16/20 OK req/s=56746.17 soft=0 hard=0 alive=1 
+  trial 17/20 OK req/s=58411.94 soft=0 hard=0 alive=1 
+  trial 18/20 OK req/s=56648.79 soft=0 hard=0 alive=1 
+  trial 19/20 OK req/s=55815.71 soft=0 hard=0 alive=1 
+  trial 20/20 OK req/s=55791.02 soft=0 hard=0 alive=1 
+config EC4 TLAB-on
+process OK 20/20 fail=0 soft=0 hard=0
+OK thr med=56254.32 (n=20)
+PASS: soft-soak EC4 TLAB-on 20/20 soft=0 hard=0

@@ -436,10 +436,13 @@ module GC
 
     # TLAB under Parallel is UNSUPPORTED (supported opt-in keeps TLAB off).
     # Knob retained for research / A/B only — emits a stderr warning.
+    # Tip: alone under EC>1, empty reclaim stays off → RSS cliff (~100×);
+    # pair with GCRY_PARALLEL_DORMANT=1 + GCRY_EMPTY_CHUNK_RETAIN (e.g. 32 MiB).
     if env_flag_one?("GCRY_TLAB")
       warn_unsupported_env(
         "gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC " \
-        "(supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md\n"
+        "(supported path: TLAB off + lazy). RSS cliff unless " \
+        "GCRY_PARALLEL_DORMANT=1 + GCRY_EMPTY_CHUNK_RETAIN — see docs/PARALLEL_TLAB_ON.md\n"
       )
       heap.tlab_enabled = true
     end

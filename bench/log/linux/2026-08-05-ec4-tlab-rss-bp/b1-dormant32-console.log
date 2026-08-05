@@ -1,0 +1,31 @@
+=== Session /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115327 (COUNT=1 GC=boehm gcry) ===
+=== Build mode: release (--release) ===
+=== GCRY_FLAGS: GCRY_TLAB=1 GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=33554432 ===
+=== Build kemal binaries (release, GC=boehm gcry) ===
+  crystal build flags: --release
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.18.0 at ../..)
+  kemal-gcry   kemal-boehm (cached)
+
+══════════════════════════════════════════════
+  RUN 1/1  →  /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115327/run-01
+══════════════════════════════════════════════
+  metadata.yaml written (/home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115327/run-01)
+
+╔══════════════════════════════════════════════╗
+║  Kemal median-of-3  (run 1/1)  ║
+╚══════════════════════════════════════════════╝
+  kemal run=1 trial=1 path=/ tag=boehm ... 66995.85 req/s
+  kemal run=1 trial=1 path=/ tag=gcry ... 125560.90 req/s
+  kemal run=1 trial=1 path=/json tag=boehm ... 43198.51 req/s
+  kemal run=1 trial=1 path=/json tag=gcry ... 57829.29 req/s
+  kemal run=1 trial=2 path=/ tag=boehm ... 68622.62 req/s
+  kemal run=1 trial=2 path=/ tag=gcry ... 

@@ -1,0 +1,68 @@
+=== Session /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115941 (COUNT=1 GC=boehm gcry) ===
+=== Build mode: release (--release) ===
+=== GCRY_FLAGS: GCRY_TLAB=1 GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=33554432 ===
+=== Build kemal binaries (release, GC=boehm gcry) ===
+  crystal build flags: --release
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.12.0)
+I: Using gcry (0.18.0 at ../..)
+  kemal-gcry   kemal-boehm (cached)
+
+══════════════════════════════════════════════
+  RUN 1/1  →  /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115941/run-01
+══════════════════════════════════════════════
+  metadata.yaml written (/home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115941/run-01)
+
+╔══════════════════════════════════════════════╗
+║  Kemal median-of-3  (run 1/1)  ║
+╚══════════════════════════════════════════════╝
+  kemal run=1 trial=1 path=/ tag=boehm ... 66531.42 req/s
+  kemal run=1 trial=1 path=/ tag=gcry ... 126805.73 req/s
+  kemal run=1 trial=1 path=/json tag=boehm ... 44721.69 req/s
+  kemal run=1 trial=1 path=/json tag=gcry ... 56750.81 req/s
+  kemal run=1 trial=2 path=/ tag=boehm ... 68432.73 req/s
+  kemal run=1 trial=2 path=/ tag=gcry ... 127819.42 req/s
+  kemal run=1 trial=2 path=/json tag=boehm ... 44639.55 req/s
+  kemal run=1 trial=2 path=/json tag=gcry ... 57607.79 req/s
+  kemal run=1 trial=3 path=/ tag=boehm ... 65139.61 req/s
+  kemal run=1 trial=3 path=/ tag=gcry ... 129036.55 req/s
+  kemal run=1 trial=3 path=/json tag=boehm ... 44465.63 req/s
+  kemal run=1 trial=3 path=/json tag=gcry ... 57566.66 req/s
+Wrote /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115941/run-01/kemal-summary.md
+Kemal median-of-3
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | Boehm RSS (KiB) | gcry RSS (KiB) | RSS × |
+|------|------------------:|-----------------:|-------:|----------------:|---------------:|------:|
+| `/` | 66,531 | 127,819 | **192.1%** | 15,872 | 64,240 | **4.05×** |
+| `/json` | 44,640 | 57,567 | **129.0%** | 15,872 | 55,040 | **3.47×** |
+
+
+╔══════════════════════════════════════════════╗
+║              ALL DONE                        ║
+╚══════════════════════════════════════════════╝
+  Build: release (--release)
+  GC: boehm gcry
+  GCRY_FLAGS: GCRY_TLAB=1 GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=33554432
+  EC_PARALLELISM: 4
+  COUNT: 1
+  Session: /home/uzumaki/playground/gcry/bench/log/linux/2026-08-05-115941/
+total 4.0K
+drwxr-xr-x 2 uzumaki uzumaki 4.0K Aug  5 15:06 run-01
+  --- run-01 ---
+total 36K
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:00 kemal-gcry-gcstats-_-t1.json
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:02 kemal-gcry-gcstats-_-t2.json
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:04 kemal-gcry-gcstats-_-t3.json
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:01 kemal-gcry-gcstats-_json-t1.json
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:03 kemal-gcry-gcstats-_json-t2.json
+-rw-r--r-- 1 uzumaki uzumaki 3.8K Aug  5 15:06 kemal-gcry-gcstats-_json-t3.json
+-rw-r--r-- 1 uzumaki uzumaki  348 Aug  5 15:06 kemal-median.tsv
+-rw-r--r-- 1 uzumaki uzumaki  367 Aug  5 15:06 kemal-summary.md
+-rw-r--r-- 1 uzumaki uzumaki  696 Aug  5 14:59 metadata.yaml

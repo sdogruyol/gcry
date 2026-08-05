@@ -1,0 +1,3 @@
+gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC (supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md
+2026-08-05T12:13:49.045604Z   INFO - kemal: [development] Kemal is ready to lead at http://0.0.0.0:3236
+2026-08-05T12:13:57.156211Z   INFO - kemal: Kemal is going to take a rest!

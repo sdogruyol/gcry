@@ -117,21 +117,29 @@ Rules for B patches:
 - Every patch runs **A2** (TLAB-off soak) before merge to this plan branch.
 - No Parallel default flips in B.
 
-### Phase B′ — RSS / reclaim under TLAB-on (tip baseline forced this)
+### Phase B′ — RSS / reclaim under TLAB-on *(measured 2026-08-05)*
 
-Soft-soak does **not** gate RSS. Tip A4: TLAB-on maps ~**1.9 GiB** /
-~15k chunks with `released_chunk_bytes=0` (Parallel munmap off) while
-TLAB-off stays ~**6×** Boehm.
+Soft-soak does **not** gate RSS. Tip A4: TLAB-on alone ~**126×** RSS /
+~1.9 GiB (Parallel reclaim off). Hub:
+`bench/log/linux/2026-08-05-ec4-tlab-rss-bp/`.
 
-Investigations (research knobs only until proven):
+**Cause:** Parallel empty reclaim off + TLAB chunk growth — not a freelist
+UAF. **Fix (research env, no default flip):**
 
-1. Chunk proliferation — TLAB refill / size-class growth vs TLAB-off.
-2. Safe empty reclaim without `PARALLEL_RELEASE` — e.g. bounded
-   `PARALLEL_DORMANT` under TLAB-on; measure hang/soft risk.
-3. Whether freelist heads pin empties that sweep could return.
+```bash
+EC_PARALLELISM=4 GCRY_TLAB=1 \
+  GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=33554432
+```
 
-**Do not** enable Parallel empty munmap by default. Re-run A2 + A4 after
-each lever.
+| | `/json` abs | RSS × |
+|--|------------:|------:|
+| TLAB-on alone | ~48k | ~**126×** |
+| TLAB + dormant32 | ~**58k** | ~**3.5×** |
+| TLAB-off Parallel | ~108k | ~**6×** |
+
+Soft-soak B1 recipe **20/20** soft=0. **Do not** enable `PARALLEL_RELEASE`.
+Optional later: stderr hint when `GCRY_TLAB=1`∧EC>1 without dormant; or
+auto bounded dormant (product PR).
 
 ### Phase C — Thr residual (only after B/B′ quiet)
 
