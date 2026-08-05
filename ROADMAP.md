@@ -36,8 +36,10 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 - [ ] **Windows process GC** — platform stubs + process GC parity
 - [ ] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows
 - [ ] **Benchmark regression alerts** — GitHub Action comparing PR vs baseline perf
-- [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
-      (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)
+- [ ] **Parallel TLAB-on credibility** — correctness before thr; do not regress
+      TLAB-off supported opt-in — plan: [docs/PARALLEL_TLAB_ON.md](docs/PARALLEL_TLAB_ON.md)
+- [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in alias for `-Dgc_none`
+      (fork `feat/gc-gcry-flag`; upstream when ready)
 - [ ] **Security / fuzzing** — documented fuzz hours, crash-free stress runs
 - [ ] **good-first-issue grooming** — Windows stubs, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
