@@ -65,7 +65,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
 | `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
 | `GCRY_PARALLEL_RELEASE=1` | **Unsupported** — Parallel munmap excess (forces in-STW sweep; can hang). stderr warn; prefer `GCRY_PARALLEL_DORMANT=1` |
-| `GCRY_SOUND=1` | **Root-completeness profile** — turns off every heuristic that can decline to mark a live pointer (interiors on, misaligned interiors on, type_id gate off, STW lags 0, fiber scrub off, blacklist off). Applied before the individual knobs, so any explicit `GCRY_*` still wins. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) |
+| `GCRY_SOUND=1` | **Soundness profile** — turns off every heuristic that can decline to mark a live pointer (interiors on, misaligned interiors on, static roots on, type_id gate off, STW lags 0, fiber scrub off, blacklist off) and pins the barrier axis (nursery/incremental off). Applied before the individual knobs, so any explicit `GCRY_*` still wins — and the `soundness` field on `/gc-stats` demotes to `sound-roots-only` / `tuned` when one does. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_UNALIGNED_CANDIDATES=1` | Follow misaligned candidate values (`str.to_unsafe + 3`); implied by `GCRY_SOUND` |
 | `GCRY_ALIGNED_CANDIDATES=1` | Force the cheap alignment filter back on (escape from `GCRY_SOUND`) |

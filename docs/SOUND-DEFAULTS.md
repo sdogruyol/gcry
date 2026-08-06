@@ -30,6 +30,7 @@ GCRY_SOUND=1 ./your-app
 | `stw_multi_pthread_lag` | `256 KiB` | Same, for the OS thread mapping when SP sits on a pool fiber. |
 | `scrub_fibers_enabled` | `true` | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. |
 | `blacklist_enabled` | `true` | Steers allocation away from pages the type_id gate called false. With the gate off nothing feeds it; the profile turns it off so `sound` has exactly one meaning. |
+| `scan_static_roots` | `true` (process) | A heap that never walks BSS/data misses roots by construction. `GCRY_DISABLE_STATIC_ROOTS=1` turns it off and will crash a real program — it is in the profile so the label can never report `sound` while it is off. Library heaps default it *off*, so a library heap must opt in before it can report sound roots. |
 
 `GCRY_SOUND=1` sets all of these to their complete-scan values. It is applied
 **before** the individual `GCRY_*` knobs, so an explicit knob still wins:
@@ -60,21 +61,36 @@ the raw-buffer heap-edge path is ungated (`allow_interior_pointers`). It
 survives only in `Gcry::Layout` entry lookup — the body-scan axis above — and
 in the `type_id_root_false_negatives` diagnostic counter.
 
-### Known limits of the label
+### The third axis: barriers
 
-`root_soundness` covers **root completeness only**. It does not assert
-anything about:
+Generational (`GCRY_NURSERY`) and incremental (`GCRY_INCREMENTAL`) collection
+make liveness depend on the old→young / dirty-page remembered set. Soft-dirty
+has measured false-negatives — the nursery note in `gc_override.cr` cites
+"Kemal Hash key UAF / SEGV at 0x0..0x11" under WSL. Complete roots do not save
+you if the barrier misses a write.
 
-- **Barrier soundness.** `GCRY_SOUND=1 GCRY_NURSERY=1` or `GCRY_INCREMENTAL=1`
-  still reports `sound` while running a generational/incremental path whose
-  old→young remembered set depends on soft-dirty, which has measured
-  false-negatives under WSL (see the nursery note in `gc_override.cr`). Both
-  are off by default; do not turn them on and read `sound` as reassurance.
-- **Body-scan precision.** See the layout axis above.
+Both are off by default, and `GCRY_SOUND` sets them off explicitly so the
+profile does not depend on that default holding. If you turn one back on, the
+label says so rather than reporting a clean bill of health:
 
-If you need a single configuration with neither caveat, that is
-`GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1` with nursery and incremental left off —
-the "sound + conservative bodies" row in the numbers below.
+| Config | `soundness` | `root_soundness` | `barrier_soundness` |
+|--------|-------------|------------------|---------------------|
+| defaults | `tuned` | `tuned` | `sound` |
+| `GCRY_SOUND=1` | **`sound`** | `sound` | `sound` |
+| `GCRY_SOUND=1 GCRY_NURSERY=1` | `sound-roots-only` | `sound` | `tuned` |
+| `GCRY_SOUND=1 GCRY_INCREMENTAL=1` | `sound-roots-only` | `sound` | `tuned` |
+| `GCRY_NURSERY=1` | `tuned` | `tuned` | `tuned` |
+
+`soundness` is the label a correctness claim should cite. The per-axis fields
+say *which* assumption is in play when it is not `sound`.
+
+### What the label still does not cover
+
+**Body-scan precision** (`Gcry::Layout`) — see the axis above. It is left out
+deliberately so its cost stays attributable, not because it is risk-free. A
+configuration with no caveat on any axis is
+`GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1` — the "sound + conservative bodies" row
+in the numbers below.
 
 ---
 
@@ -85,22 +101,28 @@ plus a derived label:
 
 ```json
 {
+  "soundness": "sound",
   "root_soundness": "sound",
+  "barrier_soundness": "sound",
   "allow_interior_pointers": true,
   "scan_unaligned_candidates": true,
+  "scan_static_roots": true,
   "type_id_gate": false,
   "stw_multi_stack_lag": 0,
   "scrub_fibers_enabled": false,
   "blacklist_enabled": false,
+  "nursery_enabled": false,
+  "incremental_auto": false,
   "layout_precise": true
 }
 ```
 
-In-process: `Gcry.sound_roots?` / `Gcry.root_soundness`. Both derive from the
-heap fields, so they report what the collector *is*, not what an env var asked
-for. `bench/sound_profile_ab.sh` fails the run if a config labelled `sound`
-reports otherwise, and `samples/sound_profile.cr` fails CI if a
-root-completeness knob is added later and forgotten in `apply_sound_profile`.
+In-process: `Gcry.sound?` / `Gcry.soundness`, with `Gcry.sound_roots?` and
+`Gcry.sound_barriers?` for the individual axes. All derive from the heap
+fields, so they report what the collector *is*, not what an env var asked for.
+`bench/sound_profile_ab.sh` fails the run if a config labelled `sound` reports
+otherwise, and `samples/sound_profile.cr` fails CI if a knob on either axis is
+added later and forgotten in `apply_sound_profile`.
 
 ---
 
