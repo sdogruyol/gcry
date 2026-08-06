@@ -52,12 +52,30 @@ passes abort the run rather than silently reporting.
 | gcry tuned | 33110 | **80.6%** | 0.56× | 0.48 ms | 7.23% |
 | gcry sound roots | 32390 | **78.8%** | 0.53× | 0.52 ms | 4.42% |
 
-Two things that had never both held before:
+Two things held here that never had before — **and the first of them did not
+replicate**:
 
-1. **`sound` is below `tuned`** (−2.18%) — the physically correct direction,
-   since sound does strictly more work. Every prior cut had it above.
-2. **`tuned` lands at 80.6%**, inside this box's historical 80.0–85.0% band, so
-   the handover's §5 sanity gate passes.
+1. **`sound` came out below `tuned`** (−2.18%), the physically correct
+   direction. A later 9×30 s cut put it *above* again (+2.27%), so this was
+   noise, not the fix working. See the correction below.
+2. **`tuned` lands at 80.6%**, inside this box's historical 80.0–85.0% band.
+
+## Correction: the clock was not the only defect
+
+A 9×30 s cut taken after this one (`2026-08-06-115427-sound-profile/`) put
+`sound` back above `tuned`, which is impossible. The cause was a second harness
+defect this cut did not control for: **configs ran as consecutive blocks**, so
+config position was confounded with time. In that cut the three gcry blocks
+came out monotonically faster in execution order — tuned +0%, sound +2.11%,
+sound-cons +2.80% — with a visible upward slope inside the blocks themselves.
+
+Block position was therefore worth ~2–3%, larger than the effect being
+measured, and it is *bias*, not variance: more runs cannot average it out. The
+harness now interleaves configs round-robin.
+
+So the clock fix below is real and necessary — 37 passes in a single later run
+would have been wrong without it — but it did not by itself make the channel
+resolve, and this cut should not be read as evidence that it did.
 
 ## What this does and does not establish
 
