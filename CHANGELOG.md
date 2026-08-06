@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_SOUND=1` — root-completeness profile.** gcry's process defaults
+  include a class of knobs that trade *root-scan completeness* for throughput
+  or RSS: base-pointer-only ambient roots, the static-root `type_id` gate, the
+  256 KiB STW stack/pthread lags, and parked-fiber scrub. Each can decline to
+  mark a pointer that is genuinely live, so throughput measured with them armed
+  does not answer "what does a correct gcry cost?". One flag turns the whole
+  class off. Applied before the individual knobs, so any explicit `GCRY_*`
+  still overrides it. [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)
+- **`scan_unaligned_candidates` / `GCRY_UNALIGNED_CANDIDATES=1`** (implied by
+  `GCRY_SOUND`). The mark path dropped misaligned candidate *values* before
+  `find_block` ever ran, so an interior pointer into a byte buffer
+  (`str.to_unsafe + 3`) — a root bdwgc resolves via `GC_base` — was never
+  followed. Escape back to the cheap filter: `GCRY_ALIGNED_CANDIDATES=1`.
+- **`Gcry.sound_roots?` / `Gcry.root_soundness`**, plus the underlying knob
+  values on `/gc-stats`. Derived from the live heap fields, so a benchmark can
+  *prove* which configuration ran instead of trusting that an env var took.
+- **`bench/sound_profile_ab.sh`** (`make bench-sound-profile`): Boehm vs gcry
+  tuned vs gcry sound vs gcry sound+conservative, one host, one run. Aborts if
+  a config labelled `sound` did not actually boot sound.
+- **CI:** `sound-profile-smoke` plus the stress / churn / pattern-fuzz /
+  thread-storm / finalizer / STW-MT suite re-run under `GCRY_SOUND=1` and under
+  `GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1`. `samples/sound_profile.cr` fails the
+  build if a root heuristic is added later and forgotten in
+  `apply_sound_profile`.
+
+First cut (Kemal `/json`, WSL2 i3-12100F, median of 5,
+`bench/log/linux/2026-08-06-042555-sound-profile/`): tuned **84.9%** @
+**0.76×**, sound **83.9%** @ **0.75×**, sound+conservative **83.8%** @
+**0.75×**. The whole heuristic class is worth ~1pp of throughput on this
+workload and does not move RSS — but Kemal is where these knobs were least
+expected to matter (they were argued on fat-app RSS).
+
 ### Fixed
 
 - **Process / backticks under `-Dgc_none`:** Crystal `prepare_args` omits the

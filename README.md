@@ -206,6 +206,28 @@ Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) 
 
 Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**0.63x** (was ~**18x** at v0.17). Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
 
+### What the default heuristics cost
+
+Every number above is measured with gcry's **root-completeness heuristics
+armed** — base-pointer-only ambient roots, the static-root `type_id` gate,
+256 KiB STW stack lags, parked-fiber scrub. Each can decline to mark a pointer
+that is genuinely live, so those numbers price a collector that is allowed to
+guess. `GCRY_SOUND=1` turns the whole class off:
+
+```sh
+GCRY_SOUND=1 ./your-app
+```
+
+| Kemal `/json` (tip, i3, median of 5) | % of Boehm | RSS × |
+|--------------------------------------|-----------:|------:|
+| tuned (process defaults) | 84.9% | 0.76× |
+| **sound roots** (`GCRY_SOUND=1`) | **83.9%** | **0.75×** |
+| sound + fully conservative bodies | 83.8% | 0.75× |
+
+**~1pp of throughput, no RSS change.** That is the number a correctness claim
+can cite. Method, per-knob rationale, and the fat-app cut:
+[docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+
 ### Pause distribution (Kemal `/json`, Linux)
 
 Illustrative histogram from an earlier cut (not the v0.16.0 median session). Prefer `Gcry.pause_stats` / `/gc-stats` on your host.
@@ -271,6 +293,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
+| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (~-1pp thr) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
 | `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
@@ -293,6 +316,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
+| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | `GCRY_SOUND=1` — what gcry costs with no root heuristics |
 | [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |

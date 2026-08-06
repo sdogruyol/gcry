@@ -19,6 +19,31 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 
 Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17–v0.18** carry this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **v0.18 after finalizer + Linux retain=0** is thr **~90–96%** @ RSS **~1–1.6×** (i3 headline **~96%** @ **~1.63×**; 9950X **~90–102%** @ **~1.0–1.8×**) — [ACIKTURKIYE.md](ACIKTURKIYE.md). Opt-in `GCRY_TIGHT_GROW=1` closes the freelist residual on acik (**~103%** @ **~0.92×**, `…/acik-tight-grow-v2-med3/`); Kemal `/json` soft (~**78%**) — not default. Quiet Kemal smokes land **~80–85%** `/json` @ **~0.74–0.79×** (host/Boehm noise; retain=0 no cliff) — **headline stays the v0.16 cut above**.
 
+### Sound-roots cut — what the default heuristics actually cost
+
+Every number above is measured with gcry's **root-completeness heuristics
+armed**: base-pointer-only ambient roots, the static-root `type_id` gate,
+256 KiB STW stack/pthread lags, and parked-fiber scrub. Each of those can
+decline to mark a pointer that is genuinely live, so a throughput number
+produced with them on does not answer "what does a *correct* gcry cost?".
+
+`GCRY_SOUND=1` turns the whole class off. Same host, same session, `wrk -c 100
+-d 20`, median of 5 — `bench/log/linux/2026-08-06-042555-sound-profile/`
+(`make bench-sound-profile`). Each `sound` row is confirmed applied via its own
+`/gc-stats` `root_soundness`, not assumed from the env var.
+
+| Kemal `/json` config | % of Boehm | post-GC RSS × |
+|----------------------|-----------:|--------------:|
+| tuned (process defaults) | **84.9%** | **0.76×** |
+| sound roots (`GCRY_SOUND=1`) | **83.9%** | **0.75×** |
+| sound + conservative bodies (`+GCRY_DISABLE_LAYOUT=1`) | **83.8%** | **0.75×** |
+
+**The entire root-heuristic class is worth ~1pp of throughput here, and RSS
+does not move.** Kemal is, however, the workload these knobs were *least*
+expected to matter on — they were argued on fat-app RSS (fiber scrub at acik
+3.00× → 2.65×, the STW lags at EC4 `phase_roots`). Full method, per-knob
+rationale, and the acik cut: [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
+
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 
 Not the process default — apps must `ExecutionContext.default.resize(N)`
