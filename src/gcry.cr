@@ -102,6 +102,31 @@ module Gcry
     default_heap.live?(pointer)
   end
 
+  # True when no root-completeness heuristic is armed: every ambient pointer
+  # the collector can see is followed, and nothing below a parked SP is wiped.
+  # This is the configuration whose numbers belong in a correctness claim —
+  # see docs/SOUND-DEFAULTS.md. Derived from the live fields, so it reports
+  # what the heap *is*, not what an env var asked for.
+  def self.sound_roots?(heap : Heap = default_heap) : Bool
+    heap.allow_interior_pointers &&
+      heap.scan_unaligned_candidates &&
+      !heap.type_id_gate &&
+      !heap.type_id_gate_stacks &&
+      heap.stw_multi_stack_lag == 0 &&
+      heap.stw_multi_pthread_lag == 0 &&
+      !heap.scrub_fibers_enabled &&
+      !heap.blacklist_enabled &&
+      # Exclusive stack maps replace conservative scans with incomplete
+      # compiler data — the opposite of this profile (docs/STACK_MAPS.md).
+      !heap.precise_stack_exclusive &&
+      !heap.precise_stack_fibers_exclusive
+  end
+
+  # "sound" | "tuned" — label for `/gc-stats` and bench logs.
+  def self.root_soundness(heap : Heap = default_heap) : String
+    sound_roots?(heap) ? "sound" : "tuned"
+  end
+
   def self.push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
     default_heap.push_stack(stack_top, stack_bottom)
   end
