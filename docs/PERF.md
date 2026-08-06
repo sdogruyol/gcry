@@ -76,6 +76,12 @@ The exception is `scrub_fibers`: disabling it *gains* **1.29%** (8/9 rounds,
 3.2σ), and the per-collection trace independently has it saving 1.7% of root
 work. It loses on throughput, pause and root completeness at once.
 
+**Default-path control** (`…-153032-sound-profile/`): the branch adds an ivar
+load and a branch to the hot mark path. Against `master` built from its own
+worktree, both interleaved in one job at default configuration: **+0.12%, 95%
+CI −1.42% … +1.66%** — no measurable regression, and the −2.13% figure that
+had been carried for this is excluded.
+
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW
 lags at EC4 `phase_roots`).
