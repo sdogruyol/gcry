@@ -74,7 +74,9 @@ module Gcry
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
-      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+      # scan_unaligned_candidates keeps them (GCRY_SOUND) — a misaligned interior
+      # into a byte buffer is a root bdwgc would resolve via GC_base.
+      return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       header = find_block(pointer)
       return unless header
@@ -215,7 +217,7 @@ module Gcry
     private def mark_noscan_unlocked(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
-      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+      return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       header = find_object(pointer)
       return unless header
