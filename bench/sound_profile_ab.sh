@@ -58,37 +58,42 @@ clock_pair() { python3 -c 'import time; print(time.time(), time.monotonic())'; }
 # comparison rather than merely widening it — an inflated `sound` row is
 # exactly how a config that does strictly more work ends up "ahead" of tuned.
 #
-# Measure the interval ourselves with the monotonic clock, take wrk's request
-# *count* (which no clock can distort), and redo any pass where the two clocks
-# disagree by more than 1%.
+# Measure the interval ourselves with the monotonic clock and divide wrk's
+# request *count* (which no clock can distort) by it.
+#
+# A stepped pass is NOT discarded. The step corrupts wrk's reported rate, not
+# the pass: recomputed against monotonic, stepped passes land squarely inside
+# the spread of clean ones (38.6k/39.3k against a 35.4–41.9k clean range).
+# Discarding them would also make the documented 9×30 s methodology impossible
+# — steps arrive every ~32 s, so a 30 s pass catches one ~94% of the time and a
+# retry loop would simply never terminate.
+# timed_wrk runs inside a command substitution, so the tally cannot live in a
+# shell variable — the increment would happen in the subshell and be lost.
+STEP_LOG="$(mktemp)"
 timed_wrk() {
-  local url="$1" attempt t0 t1 out rate
-  for attempt in 1 2 3; do
-    t0="$(clock_pair)"
-    out="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "$url")"
-    t1="$(clock_pair)"
-    if rate="$(WRK_OUT="$out" python3 -c '
+  local url="$1" t0 t1 out result
+  t0="$(clock_pair)"
+  out="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "$url")"
+  t1="$(clock_pair)"
+  result="$(WRK_OUT="$out" python3 -c '
 import os, re, sys
 r0, m0 = (float(x) for x in sys.argv[1].split())
 r1, m1 = (float(x) for x in sys.argv[2].split())
 dr, dm = r1 - r0, m1 - m0
-if dm <= 0 or abs(dr - dm) / dm > 0.01:
-    sys.exit(1)          # a clock step landed inside this pass
+if dm <= 0:
+    sys.exit(2)
 o = os.environ["WRK_OUT"]
 m = re.search(r"(\d+) requests in", o)
 if not m:
     sys.exit(2)
-print(round(int(m.group(1)) / dm, 2))
-' "$t0" "$t1")"; then
-      echo "$rate"
-      return 0
-    fi
-    echo "    (clock step inside the pass — redoing)" >&2
-  done
-  echo "ERROR: three consecutive passes hit a CLOCK_REALTIME step." >&2
-  echo "       The host is stepping its clock faster than a pass can complete;" >&2
-  echo "       shorten WRK_DURATION or fix host time sync before trusting rates." >&2
-  exit 1
+# Second field flags whether a step landed inside this pass, for the tally.
+print(round(int(m.group(1)) / dm, 2), int(abs(dr - dm) / dm > 0.01))
+' "$t0" "$t1")" || {
+    echo "ERROR: could not parse a request count out of wrk" >&2
+    exit 1
+  }
+  [ "${result#* }" = "1" ] && echo step >> "$STEP_LOG"
+  echo "${result% *}"
 }
 
 rss_kib() {
@@ -119,7 +124,8 @@ stop_server() {
   wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=""
 }
-trap stop_server EXIT INT TERM
+cleanup() { stop_server; rm -f "${STEP_LOG:-}"; }
+trap cleanup EXIT INT TERM
 
 # A server that never came up is not a slow config, it is a broken run. Abort
 # rather than returning a sentinel: a 0 (or an empty JSON row) survives into
@@ -189,15 +195,9 @@ print(json.dumps({
 "
 }
 
-# variance_run <binary> <env...> → JSON with median
-variance_run() {
-  local bin="$1"; shift
-  local -a vals=()
-  for i in $(seq 1 "$RUNS"); do
-    local rps; rps="$(single_run "$bin" "$@")"
-    vals+=("$rps")
-    echo "    run $i: $rps req/s" >&2
-  done
+# stats_from <rate> <rate> ... → JSON with median, spread and IQR noise
+stats_from() {
+  local -a vals=("$@")
   python3 -c "
 import json, sys
 vals = sorted(float(v) for v in sys.argv[1:])
@@ -224,11 +224,12 @@ mkdir -p "$RUN_DIR"
 echo ""
 echo "path=$PATH_UNDER_TEST  runs=$RUNS  duration=${DURATION}s  connections=$CONNECTIONS"
 
-run_config() {
+report_config() {
   local key="$1" bin="$2" is_gcry="$3"; shift 3
   echo ""
   echo "=== $key ==="
-  variance_run "$bin" "$@" > "$RUN_DIR/$key-thr.json"
+  # shellcheck disable=SC2046 — the file holds one bare number per line.
+  stats_from $(cat "$RUN_DIR/$key-runs.txt") > "$RUN_DIR/$key-thr.json"
   python3 -c "
 import json
 d = json.load(open('$RUN_DIR/$key-thr.json'))
@@ -264,17 +265,60 @@ EOF
 )}"
 
 KEYS=()
+ENVS=()
+BINS=()
+GCRY=()
 while read -r key rest; do
   [ -n "$key" ] || continue
   case "$key" in \#*) continue ;; esac
   KEYS+=("$key")
-  # $rest is deliberately unquoted: it is a list of ENV=V words, not one word.
+  ENVS+=("$rest")
   if [ "$key" = "boehm" ]; then
-    run_config "$key" "$BIN/kemal-boehm-sound" 0 $rest
+    BINS+=("$BIN/kemal-boehm-sound"); GCRY+=(0)
   else
-    run_config "$key" "$BIN/kemal-gcry-sound" 1 $rest
+    BINS+=("$BIN/kemal-gcry-sound"); GCRY+=(1)
   fi
+  : > "$RUN_DIR/$key-runs.txt"
 done <<< "$CONFIGS"
+
+# Round-robin, NOT one config's runs then the next.
+#
+# Blocked execution confounds config with time. Measured on this host: running
+# boehm/tuned/sound/sound-cons as consecutive ~5-minute blocks, the three gcry
+# blocks came out monotonically faster in execution order (+0%, +2.11%,
+# +2.80%) — and `sound` cannot actually be faster than `tuned`, since it does
+# strictly more work. So the block order was worth ~2–3%, which is larger than
+# anything being measured here, and no number of runs fixes it: it is bias, not
+# variance.
+#
+# Interleaving spreads any drift across every config instead of loading it onto
+# whichever ran last.
+# …and rotate the order every round, because interleaving alone does not
+# remove position bias, it just shrinks it to within-round scale.
+#
+# Measured: with a fixed within-round order, whichever config ran first came
+# out ~2% slower than all the others — and it was the *same* ~2% for three
+# different knob configurations (+2.34%, +1.91%, +1.91%), which is the
+# signature of position rather than of any knob. Rotating means each config
+# occupies each slot equally often across the run.
+NCFG=${#KEYS[@]}
+echo ""
+echo "interleaved: $RUNS rounds × $NCFG configs, order rotated each round"
+for round in $(seq 1 "$RUNS"); do
+  printf '  round %s:' "$round"
+  for slot in $(seq 0 $((NCFG - 1))); do
+    i=$(( (slot + round - 1) % NCFG ))
+    # ${ENVS[i]} deliberately unquoted: a list of ENV=V words, not one word.
+    rps="$(single_run "${BINS[$i]}" ${ENVS[$i]})"
+    echo "$rps" >> "$RUN_DIR/${KEYS[$i]}-runs.txt"
+    printf '  %s=%s' "${KEYS[$i]}" "$rps"
+  done
+  printf '\n'
+done
+
+for i in "${!KEYS[@]}"; do
+  report_config "${KEYS[$i]}" "${BINS[$i]}" "${GCRY[$i]}" ${ENVS[$i]}
+done
 
 echo ""
 python3 - "$RUN_DIR" "${KEYS[@]}" <<'PY'
@@ -388,4 +432,10 @@ for r in rows:
 PY
 
 echo ""
+STEPS="$(wc -l < "$STEP_LOG" 2>/dev/null || echo 0)"
+if [ "$STEPS" -gt 0 ]; then
+  echo "note: $STEPS pass(es) contained a CLOCK_REALTIME step; rates came from"
+  echo "      CLOCK_MONOTONIC so they are unaffected — wrk's own Requests/sec"
+  echo "      would have read ~19% high on those."
+fi
 echo "log: $RUN_DIR"
