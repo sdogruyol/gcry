@@ -36,10 +36,21 @@ command -v wrk >/dev/null || { echo "ERROR: wrk not found"; exit 1; }
 command -v python3 >/dev/null || { echo "ERROR: python3 not found"; exit 1; }
 mkdir -p "$BIN"
 
+# Parallel EC needs its own binary: the server's `ExecutionContext.default
+# .resize(N)` is a no-op unless the build carries -Dpreview_mt
+# -Dexecution_context, so an EC4 run against the EC1 binary silently measures
+# EC1 again. Separate output names keep the two from overwriting each other.
+#
+#   CRYSTAL_BUILD_FLAGS="-Dpreview_mt -Dexecution_context" \
+#   BENCH_BIN=kemal-gcry-sound-mt EC_PARALLELISM=4 ./bench/root_phase_ab.sh
+BUILD_FLAGS="${CRYSTAL_BUILD_FLAGS:-}"
+BIN_NAME="${BENCH_BIN:-kemal-gcry-sound}"
+
 cd "$KEMAL"
 shards install --production 2>/dev/null || shards install
-echo "Building kemal-gcry..."
-crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-sound"
+echo "Building $BIN_NAME ${BUILD_FLAGS:+($BUILD_FLAGS)}..."
+# $BUILD_FLAGS unquoted on purpose: a list of flags, not one word.
+crystal build -Dgc_none $BUILD_FLAGS --release src/server.cr -o "$BIN/$BIN_NAME"
 cd "$ROOT"
 
 SERVER_PID=""
@@ -60,7 +71,7 @@ probe() {
   local key="$1" rep="$2"; shift 2
   local trace="$RUN_DIR/$key-rep$rep.ndjson"
   env PORT="$PORT" GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$trace" \
-    "$@" "$BIN/kemal-gcry-sound" >/dev/null 2>&1 &
+    "$@" "$BIN/$BIN_NAME" >/dev/null 2>&1 &
   SERVER_PID=$!
   local ready=0
   for _ in $(seq 1 40); do
@@ -73,6 +84,11 @@ probe() {
   fi
   wrk -c "$CONNECTIONS" -d "${DURATION}s" "$BASE/json" >/dev/null 2>&1
   curl -sf "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
+  # Proof of the shape that actually ran: a binary built without -Dpreview_mt
+  # resizes the default context to a no-op, so an EC4 run would otherwise be
+  # indistinguishable from EC1 in the log.
+  awk '/^Threads:/ {print $2}' "/proc/$SERVER_PID/status" \
+    > "$RUN_DIR/$key-rep$rep-threads.txt" 2>/dev/null || true
   stop_server
   sleep 0.4
 }
@@ -91,6 +107,14 @@ EOF
 
 echo ""
 echo "reps=$REPS  duration=${DURATION}s  connections=$CONNECTIONS  skip=$SKIP collects/rep"
+echo "bin=$BIN_NAME  build_flags=${BUILD_FLAGS:-none}  EC_PARALLELISM=${EC_PARALLELISM:-1}"
+python3 -c "
+import json, os
+print(json.dumps({
+    'bin': '$BIN_NAME', 'build_flags': '${BUILD_FLAGS:-}',
+    'ec_parallelism': os.environ.get('EC_PARALLELISM', '1'),
+    'reps': $REPS, 'duration_s': $DURATION, 'connections': $CONNECTIONS,
+}, indent=2))" > "$RUN_DIR/meta.json"
 
 KEYS=()
 while read -r key rest; do
@@ -147,10 +171,15 @@ for k in keys:
             label = json.load(open(stats_path)).get("soundness")
         except ValueError:
             pass
+    threads_path = os.path.join(run_dir, f"{k}-rep1-threads.txt")
+    threads = None
+    if os.path.exists(threads_path):
+        threads = open(threads_path).read().strip() or None
     data[k] = {
         "n": len(recs),
         "env": env,
         "soundness": label,
+        "threads": threads,
         "median": {p: statistics.median([r.get(p, 0) for r in recs]) for p in PHASES},
         "iqr": {
             p: (
@@ -165,15 +194,34 @@ for k in keys:
 base = data["tuned"]["median"] if "tuned" in data else data[keys[0]]["median"]
 
 print("=== Per-collection phase cost, median over all steady-state collections ===")
-print("(microseconds; Δ is vs tuned on the root phase)\n")
+print("(microseconds; Δwork = roots+scrub+stacks vs tuned; thr = server threads)\n")
+# Two deltas, because neither alone is honest:
+#
+#   Δwork  = roots + scrub + stacks. `roots_ns` is `monotonic_ns - t0 -
+#            scrub_ns`, so it excludes scrub — and scrub is one of the knobs.
+#            `stacks_ns` is a SEPARATE additive phase, not a sub-timing of
+#            roots: GCRY_STW_PTHREAD_LAG=0 leaves roots flat and moves stacks
+#            15×, which a roots-only (or roots+scrub) basis reports as ~free.
+#   Δpause = what the mutator actually waits for, and the number a latency
+#            claim has to cite.
+def work_of(m):
+    return m["roots_ns"] + m["scrub_ns"] + m["stacks_ns"]
+
+
+base_work, base_pause = work_of(base), base["pause_ns"]
 hdr = f"{'config':18} {'n':>5} " + " ".join(f"{p[:-3]:>9}" for p in PHASES)
-print(hdr + f" {'Δroots':>9}  label")
+print(hdr + f" {'Δwork':>9} {'Δpause':>9} {'thr':>4}  label")
 for k in keys:
     d = data[k]
     cells = " ".join(f"{d['median'][p]/1000:>9.1f}" for p in PHASES)
-    droot = d["median"]["roots_ns"] - base["roots_ns"]
-    dpct = (droot / base["roots_ns"] * 100) if base["roots_ns"] else 0.0
-    print(f"{k:18} {d['n']:>5} {cells} {dpct:>+8.1f}%  {d['soundness'] or '-'}")
+    work = work_of(d["median"])
+    dwork = ((work - base_work) / base_work * 100) if base_work else 0.0
+    dpause = ((d["median"]["pause_ns"] - base_pause) / base_pause * 100) if base_pause else 0.0
+    d["work_ns"] = work
+    d["delta_work_pct"] = round(dwork, 2)
+    d["delta_pause_pct"] = round(dpause, 2)
+    print(f"{k:18} {d['n']:>5} {cells} {dwork:>+8.1f}% {dpause:>+8.1f}% "
+          f"{d['threads'] or '-':>4}  {d['soundness'] or '-'}")
 
 print("\nroot-phase spread (IQR as % of median) — how tight each config's own samples are:")
 for k in keys:
