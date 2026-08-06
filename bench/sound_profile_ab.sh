@@ -105,6 +105,7 @@ single_run() {
 # configuration actually ran (not merely which env var was exported).
 instrumented_run() {
   local bin="$1" label="$2" is_gcry="$3"; shift 3
+  local envdesc="$*"
   env PORT="$PORT" "$@" "$bin" >/dev/null 2>&1 &
   local pid=$!
   SERVER_PID=$pid
@@ -121,11 +122,12 @@ instrumented_run() {
   fi
   stop_server
   sleep 0.4
-  STATS="$stats" python3 -c "
+  STATS="$stats" ENVDESC="$envdesc" python3 -c "
 import json, os
 s = json.loads(os.environ.get('STATS') or '{}')
 print(json.dumps({
     'label': '$label',
+    'env': os.environ.get('ENVDESC', ''),
     'rps': float('$rps'),
     'rss_kib': int('$rss'),
     'soundness': s.get('soundness'),
@@ -198,17 +200,46 @@ if d.get('soundness'):
 print(f\"  rss={d['rss_kib']} KiB{extra}\")"
 }
 
-run_config boehm      "$BIN/kemal-boehm-sound" 0
-run_config tuned      "$BIN/kemal-gcry-sound"  1
-run_config sound      "$BIN/kemal-gcry-sound"  1 GCRY_SOUND=1
-run_config sound-cons "$BIN/kemal-gcry-sound"  1 GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1
+# Which configurations to run, one per line: `key [ENV=V ...]`. The key
+# `boehm` runs the Boehm binary; every other key runs the gcry binary with the
+# listed environment. Default is the four that answer "what does the sound
+# profile cost as a whole".
+#
+# Override to decompose it knob by knob — in ONE job, so every config sees the
+# same host conditions and the comparison is internal to the run:
+#
+#   BENCH_CONFIGS='boehm
+#   tuned
+#   unaligned GCRY_UNALIGNED_CANDIDATES=1
+#   interior GCRY_INTERIOR=1' ./bench/sound_profile_ab.sh
+CONFIGS="${BENCH_CONFIGS:-$(cat <<'EOF'
+boehm
+tuned
+sound GCRY_SOUND=1
+sound-cons GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1
+EOF
+)}"
+
+KEYS=()
+while read -r key rest; do
+  [ -n "$key" ] || continue
+  case "$key" in \#*) continue ;; esac
+  KEYS+=("$key")
+  # $rest is deliberately unquoted: it is a list of ENV=V words, not one word.
+  if [ "$key" = "boehm" ]; then
+    run_config "$key" "$BIN/kemal-boehm-sound" 0 $rest
+  else
+    run_config "$key" "$BIN/kemal-gcry-sound" 1 $rest
+  fi
+done <<< "$CONFIGS"
 
 echo ""
-python3 - "$RUN_DIR" <<'PY'
+python3 - "$RUN_DIR" "${KEYS[@]}" <<'PY'
 import json, os, sys
 
 run_dir = sys.argv[1]
-keys = ["boehm", "tuned", "sound", "sound-cons"]
+keys = sys.argv[2:]
+# Titles for the built-in configs; an ad-hoc key is titled by its own name.
 titles = {
     "boehm": "Boehm (baseline)",
     "tuned": "gcry tuned (defaults)",
@@ -222,8 +253,11 @@ for k in keys:
     inst = json.load(open(os.path.join(run_dir, f"{k}-inst.json")))
     data[k] = {"thr": thr, "inst": inst}
 
-base_rps = data["boehm"]["thr"]["median"]
-base_rss = float(data["boehm"]["inst"]["rss_kib"])
+# Boehm is the denominator when it was run; a knob-decomposition list that
+# omits it is scored against its own first config instead.
+base_key = "boehm" if "boehm" in data else keys[0]
+base_rps = data[base_key]["thr"]["median"]
+base_rss = float(data[base_key]["inst"]["rss_kib"])
 
 rows = []
 for k in keys:
@@ -231,7 +265,8 @@ for k in keys:
     rss = float(data[k]["inst"]["rss_kib"])
     rows.append({
         "key": k,
-        "title": titles[k],
+        "title": titles.get(k, k),
+        "env": data[k]["inst"].get("env", ""),
         "rps": rps,
         "pct": round(rps / base_rps * 100, 1) if base_rps else 0.0,
         "rss_kib": int(rss),
@@ -246,32 +281,67 @@ for k in keys:
         "knobs": data[k]["inst"].get("knobs"),
     })
 
+has_tuned = "tuned" in data
+tuned_rps = data["tuned"]["thr"]["median"] if has_tuned else 0.0
+for r in rows:
+    r["vs_tuned_pct"] = (
+        round((r["rps"] / tuned_rps - 1) * 100, 2) if tuned_rps else None
+    )
+
 print("=== Summary (same host, same run) ===")
-print(f"{'config':34} {'req/s':>10} {'% Boehm':>9} {'RSS x':>8} {'p50 ms':>8}  roots")
+head = f"{'config':34} {'req/s':>10} {'% Boehm':>9} {'RSS x':>8} {'p50 ms':>8}"
+head += f" {'vs tuned':>9}" if has_tuned else ""
+print(head + "  roots")
 for r in rows:
     p50 = "-" if not r["pause_p50_ms"] else f"{r['pause_p50_ms']:.2f}"
-    print(f"{r['title']:34} {r['rps']:>10.0f} {r['pct']:>8.1f}% {r['rss_x']:>8.2f} {p50:>8}  {r['soundness'] or '-'}")
+    line = f"{r['title']:34} {r['rps']:>10.0f} {r['pct']:>8.1f}% {r['rss_x']:>8.2f} {p50:>8}"
+    line += f" {r['vs_tuned_pct']:>+8.2f}%" if has_tuned else ""
+    print(line + f"  {r['soundness'] or '-'}")
 
-# Guard: a run where the sound config did not actually apply is not a
-# measurement, it is a duplicate of `tuned`.
-for k in ("sound", "sound-cons"):
-    got = data[k]["inst"].get("soundness")
-    if got != "sound":
-        print(f"\nERROR: config '{k}' reported soundness={got!r} (expected 'sound')")
+# Which knobs each config actually moved, read back off the live heap. A
+# per-knob decomposition where the knob silently failed to apply would
+# otherwise look like "this knob is free".
+if has_tuned:
+    tuned_knobs = data["tuned"]["inst"].get("knobs") or {}
+    print("\nknob deltas vs tuned:")
+    for r in rows:
+        if r["key"] in (base_key, "tuned") or not r["knobs"]:
+            continue
+        diff = {k: v for k, v in r["knobs"].items() if tuned_knobs.get(k) != v}
+        print(f"  {r['key']:16} {diff or '(NONE — identical to tuned)'}")
+
+# Guard: a config that asked for the sound profile and did not get it is not a
+# measurement, it is a duplicate of `tuned`. Keyed off the environment that was
+# actually passed, so an ad-hoc BENCH_CONFIGS list is held to the same terms.
+for r in rows:
+    if "GCRY_SOUND=1" not in r["env"]:
+        continue
+    expect = "sound"
+    if "GCRY_NURSERY=" in r["env"] or "GCRY_INCREMENTAL=1" in r["env"]:
+        expect = "sound-roots-only"
+    if r["soundness"] != expect:
+        print(f"\nERROR: config '{r['key']}' reported soundness={r['soundness']!r} "
+              f"(expected {expect!r}) for env: {r['env']}")
         sys.exit(1)
 
-out = {"rows": rows, "path": os.environ.get("BENCH_PATH", "/json")}
+out = {
+    "rows": rows,
+    "base": base_key,
+    "path": os.environ.get("BENCH_PATH", "/json"),
+}
 with open(os.path.join(run_dir, "summary.json"), "w") as f:
     f.write(json.dumps(out, indent=2) + "\n")
 
+# Spread rides along in the table: a gap smaller than the spread that produced
+# it is not a result, and the reader should not have to go find that out.
 print("\nMarkdown (for docs/SOUND-DEFAULTS.md):\n")
-print("| Config | req/s | % of Boehm | RSS × | pause p50 |")
-print("|--------|------:|-----------:|------:|----------:|")
+print("| Config | req/s | % of Boehm | RSS × | pause p50 | spread |")
+print("|--------|------:|-----------:|------:|----------:|-------:|")
 for r in rows:
     p50 = "—" if not r["pause_p50_ms"] else f"{r['pause_p50_ms']:.2f} ms"
-    pct = "—" if r["key"] == "boehm" else f"**{r['pct']:.1f}%**"
-    rssx = "—" if r["key"] == "boehm" else f"**{r['rss_x']:.2f}×**"
-    print(f"| {r['title']} | {r['rps']:.0f} | {pct} | {rssx} | {p50} |")
+    pct = "—" if r["key"] == base_key else f"**{r['pct']:.1f}%**"
+    rssx = "—" if r["key"] == base_key else f"**{r['rss_x']:.2f}×**"
+    print(f"| {r['title']} | {r['rps']:.0f} | {pct} | {rssx} | {p50} | {r['spread_pct']:.2f}% |")
 PY
 
 echo ""
