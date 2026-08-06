@@ -271,13 +271,16 @@ GCRY=()
 while read -r key rest; do
   [ -n "$key" ] || continue
   case "$key" in \#*) continue ;; esac
+  # `key@binary` runs a different build under the same harness — that is how a
+  # master-vs-branch control at default config is taken, with both builds
+  # interleaved in one job rather than compared across two runs.
+  case "$key" in
+    *@*) BINS+=("$BIN/${key#*@}"); GCRY+=(1); key="${key%@*}" ;;
+    boehm) BINS+=("$BIN/kemal-boehm-sound"); GCRY+=(0) ;;
+    *) BINS+=("$BIN/kemal-gcry-sound"); GCRY+=(1) ;;
+  esac
   KEYS+=("$key")
   ENVS+=("$rest")
-  if [ "$key" = "boehm" ]; then
-    BINS+=("$BIN/kemal-boehm-sound"); GCRY+=(0)
-  else
-    BINS+=("$BIN/kemal-gcry-sound"); GCRY+=(1)
-  fi
   : > "$RUN_DIR/$key-runs.txt"
 done <<< "$CONFIGS"
 
