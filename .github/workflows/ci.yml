@@ -198,6 +198,19 @@ jobs:
           crystal build -Dgc_none bench/pause_budget.cr -o bin/pause_budget --error-trace
           ./bin/pause_budget --live-mb=20
 
+      # The pause trap in the sound profile. `GCRY_SOUND=1` sets both STW
+      # root-scan lags to 0, and that pair is the *entire* pause cost of the
+      # profile — 19× at Kemal EC4, 14.5× on a fat app. The correctness suite
+      # below runs under GCRY_SOUND=1 and passes at any pause, so nothing caught
+      # it. Both assertions are host-independent (booted lag state, and an upper
+      # bound on the lag-0 penalty), so this does not need a quiet runner.
+      - name: STW lag pause trap
+        run: |
+          crystal build -Dgc_none bench/stw_lag_pause.cr -o bin/stw_lag_pause --error-trace
+          ./bin/stw_lag_pause --rounds=5
+          # Same binary, inverted expectation: the profile must still set 0/0.
+          GCRY_SOUND=1 ./bin/stw_lag_pause --rounds=5
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
