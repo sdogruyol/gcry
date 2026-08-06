@@ -1,5 +1,12 @@
 # Sound-roots profile — Kemal `/json` cut
 
+> **SUPERSEDED (sound rows only).** The `sound` and `sound-cons` rows below were
+> measured against a profile that still dropped interior edges out of raw
+> buffers (`scan_object` marked untyped allocations base-only regardless of
+> `allow_interior_pointers`). They under-price sound and must not be quoted.
+> Re-cut: `bench/log/linux/2026-08-06-052109-sound-profile/`. The `boehm` and
+> `tuned` rows are unaffected and remain the best low-noise cut on this host.
+
 **Question:** what does gcry cost when every root-completeness heuristic is off?
 
 Host: WSL2 x86_64 (i3-12100F), Crystal 1.21.0, `--release`, EC parallelism 1.
@@ -31,13 +38,14 @@ scrub_fibers_enabled=false  blacklist_enabled=false
 
 ## Reading
 
-**The whole root-heuristic class is worth ~1pp of throughput on this
-workload** (84.9% → 83.9%), and RSS does not move at all (0.756× → 0.754×) —
-sound is fractionally *lower*, which is inside noise. Dropping the layout
-tables on top costs a further ~0.1pp, also inside noise.
+~~The whole root-heuristic class is worth ~1pp of throughput on this
+workload.~~ **Retracted** — the sound rows were measured against a holed
+profile (see the banner above), and the re-cut cannot resolve the difference
+at all. Do not quote ~1pp.
 
-That is a much better answer than expected, and it inverts the usual framing:
-on Kemal these knobs are not buying performance, they are only buying risk.
+What survives: **RSS does not move** (0.756× → 0.754× → 0.746×), and the
+re-cut reproduces that (0.795× → 0.794× → 0.797×). Post-GC RSS is the
+low-variance measurement here; throughput on this host is not.
 
 **Do not over-read it.** Kemal `/json` is the workload where these knobs were
 *least* expected to matter. The arguments for them in-tree are fat-app RSS
