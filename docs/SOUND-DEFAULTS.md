@@ -128,9 +128,11 @@ added later and forgotten in `apply_sound_profile`.
 
 ## Numbers
 
-Host for both cuts: WSL2 x86_64 (i3-12100F), Crystal 1.21.0, `--release`,
-EC parallelism 1. Every `sound` row is confirmed applied from the run's own
-`/gc-stats` `root_soundness`, not assumed from the env var.
+Host for the two throughput cuts below: WSL2 x86_64 (i3-12100F), Crystal
+1.21.0, `--release`, EC parallelism 1. The pause-composition cuts that follow
+them ran on a 9950X and state their own shape. Every `sound` row is confirmed
+applied from the run's own `/gc-stats` `root_soundness`, not assumed from the
+env var.
 
 ### Kemal `/json` — throughput unresolved, RSS flat
 
@@ -183,11 +185,86 @@ RSS bands overlap, and p99 has a 3–4× outlier trial in *each* config in
 opposite directions. Boehm itself moved 102 → 141 req/s across three trials.
 `TRIALS=9`+ on a quiet host is needed before the fat app says anything.
 
-One thing the run does establish: `phase_stacks` is 0.02–0.54 ms in every
-trial, both configs. The STW lag knobs are **inert at parallelism 1** — which
-matches their rationale (they were introduced against EC4 `phase_roots`
-~100 ms/collect). The configuration most likely to show a real cost for the
-sound profile is `EC_PARALLELISM=4`, and nothing here has measured it.
+This run also reported `phase_stacks` at 0.02–0.54 ms in every trial and
+concluded from it that the STW lag knobs are "inert at parallelism 1".
+**That conclusion is withdrawn.** It generalised a Kemal-shaped observation:
+the later pause-composition cut finds those knobs costing 14.5× on this same
+fat app *at EC1*, once its heap crosses ~60 MiB. See below.
+
+### Pause composition — where the profile actually spends
+
+The throughput channel could not answer this, and more runs would not have
+fixed it. On a 9950X/WSL2 box, *one server process with no restart and no
+config change* varies 40,500–51,646 req/s across 8 consecutive 10 s passes —
+27% spread, at 99–100% idle. That is host scheduling, not the collector, and
+WSL2 does not expose cpufreq to pin it. Resolving a 2 pp effect through req/s
+there needs ~170 paired rounds per config pair.
+
+So measure the collector instead. `GCRY_TRACE=1` emits one `collect_end` record
+per collection with a full phase breakdown, giving ~370 samples per config at
+1–7% IQR. `bench/root_phase_ab.sh`. Basis is `roots + scrub + stacks`, because
+`roots_ns` excludes scrub (itself a knob) and `stacks_ns` is a separate
+additive phase, not a sub-timing of roots.
+
+**EC1** (`bench/log/linux/2026-08-06-081512-root-phase/`, 2873 collections):
+the profile is effectively free — **+1.3% root work, +0.1% pause**, ~1.9 µs on
+a 398 µs pause. Per knob, against tuned:
+
+| Knob | Δ work | Note |
+|------|-------:|------|
+| `GCRY_UNALIGNED_CANDIDATES=1` | +4.3% | largest single cost |
+| `GCRY_DISABLE_BLACKLIST=1` | +2.4% | a real cost, not free |
+| `GCRY_STW_*_LAG=0` | +1.1% | inert at EC1 — see below |
+| `GCRY_DISABLE_TYPE_ID_GATE=1` | +0.2% | |
+| `GCRY_INTERIOR=1` | −0.1% | |
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | **−1.7%** | **pays for itself** |
+
+Scrub zeroes the words below a parked fiber's estimated SP, and those zeros are
+then cheap to reject during the root scan. Dropping it makes root scanning
+~11 µs more expensive but removes a 14 µs phase, so the collection comes out
+ahead. That saving is most of why the whole profile lands at +1.3% and not at
+the +7.9% its cost knobs sum to.
+
+**EC4** (`…-085309-root-phase/` and the knob split `…-090503-root-phase/`,
+`-Dpreview_mt -Dexecution_context`, `EC_PARALLELISM=4`): the same profile is a
+**19× pause regression — 7.2 ms → 141.7 ms per collection (+1866%)**.
+
+All of it is the STW lag knobs. Zeroing them alone reproduces the entire
+profile to within the measurement's spread (+1866.3% vs +1866.5%); the other
+five heuristics together stay under 1.5%. Split:
+
+| Knob | Δ pause | Lands in |
+|------|--------:|----------|
+| `GCRY_STW_STACK_LAG=0` | **+1802%** | `roots_ns`, 6.4 ms → 137 ms |
+| `GCRY_STW_PTHREAD_LAG=0` | **+64%** | `stacks_ns`, 304 µs → 4.7 ms |
+
+The two are additive and act on different phases, so they are two pieces of
+work, not two dials on one mechanism. This is the cost the lag knobs were
+introduced to prevent (EC4 `phase_roots` ~100 ms/collect); `GCRY_SOUND=1`
+zeroes them and it returns.
+
+**acikturkiye (fat app), EC1** (`…-100611-root-phase/`, 2709 collections):
+the same knobs again, and the reason the EC1 Kemal number must not be
+generalised.
+
+This app has two collection regimes — heap ~43 MiB and heap ≥55 MiB — whose
+root-scan cost differs 15×, and the transition is driven by the app's growth,
+not the config. Medians over the mixture are meaningless (they make sound look
+*cheaper* than tuned); these are stratified, and stable across reps:
+
+| Stratum | tuned | `GCRY_SOUND=1` | `GCRY_STW_*_LAG=0` | other five |
+|---------|------:|---------------:|-------------------:|-----------:|
+| small heap (~43 MiB) | 1039 µs | 1042 µs (+0%) | 1002 µs (−4%) | ±7% |
+| large heap (≥55 MiB) | 14580 µs | **210970 µs (+1347%)** | **210504 µs (+1344%)** | ±6% |
+
+The large-heap pause is **213 ms against tuned's 17 ms**.
+
+So the three cuts tell one story. The five root-completeness heuristics are
+cheap everywhere measured. The STW lag knobs are the entire cost, and they bite
+whenever the root scan is expensive enough to matter — many threads (Kemal EC4,
+7.2 → 141.7 ms) *or* a large heap (acik EC1, 17 → 213 ms). Kemal at EC1 has
+neither, which is why it reads +0.1% and why that figure describes one small
+workload rather than the profile.
 
 ### What this does and does not license
 
@@ -197,8 +274,12 @@ sound profile is `EC_PARALLELISM=4`, and nothing here has measured it.
 | "Sound roots cost ~1pp of throughput" | **No — retracted.** Measured against a holed profile; the re-cut cannot resolve it |
 | "Sound roots are free in throughput" | **No** — unresolved is not free |
 | "The heuristics should be off by default" | **No** — one workload, one host, EC1 only |
-| "Sound roots are free on the fat app" | **No** — not measured to a usable precision |
-| "Sound roots are free under Parallel EC" | **No** — not measured at all, and this is where the lag knobs do work |
+| "Sound roots cost ~nothing in pause on Kemal at EC1" | Yes — +0.1% pause, 2873 collections at 1–7% IQR |
+| "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause |
+| "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
+| "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
+| "The cost is spread across the heuristics" | **No** — it is the two STW lag knobs, on every workload measured |
+| "Turning fiber scrub off costs throughput" | **No** — it is a net saving (−1.7% root work on Kemal at EC1) |
 
 ---
 
@@ -214,6 +295,24 @@ gcry sound + conservative bodies. Median of 5 with min and max discarded, then
 score is % of Boehm measured in the same job. The run aborts if a config
 labelled `sound` did not actually boot sound.
 
+Pause composition, per knob — the cut that works on a noisy host:
+
+```sh
+BENCH_REPS=3 WRK_DURATION=20 ./bench/root_phase_ab.sh
+
+# Parallel EC. The build flags are not optional: the server raises
+# parallelism with ExecutionContext.default.resize(n), which is a no-op
+# without them, so an EC4 run would silently measure EC1 again. Each rep
+# records the server's thread count as proof of the shape (5 at EC4, 2 at EC1).
+CRYSTAL_BUILD_FLAGS="-Dpreview_mt -Dexecution_context" \
+  BENCH_BIN=kemal-gcry-sound-mt EC_PARALLELISM=4 \
+  BENCH_REPS=3 WRK_DURATION=20 ./bench/root_phase_ab.sh
+```
+
+Both harnesses take a config list via `BENCH_CONFIGS` (one `key [ENV=V ...]`
+per line), which is how the per-knob decomposition is run — all knobs in one
+job, so they share host conditions.
+
 ---
 
 ## How to read this
@@ -223,19 +322,28 @@ conversation about becoming a language default has to start from. Publishing
 the tuned number alone means quoting a price for a collector that is allowed
 to lose objects.
 
-The tuned defaults remain the shipping default — not because this data
-vindicates them, but because it is not yet enough to overturn them. One
-workload, one host, parallelism 1. The knobs were argued on fat-app RSS and on
-EC4 root-scan cost, and neither of those has been measured to a usable
-precision here.
+The tuned defaults remain the shipping default, and there is now a positive
+reason rather than an absence of one. Flipping — shipping sound and demoting
+the heuristics to opt-in — was the open question earlier drafts of this
+document existed to settle. On the evidence here it is **not defensible in this
+shape**: it costs a 19× pause under the Parallel EC opt-in and 14.5× on an
+ordinary single-threaded fat app once its heap grows, in both cases a
+100-ms-scale pause where tuned is at 17 ms.
 
-What the data does say is narrower than the first draft of this document
-claimed: on Kemal at EC1 the heuristics buy **no RSS at all**, and their
-throughput value is currently **unmeasured** — not zero, unmeasured. If a quiet
-re-cut, a fat-app cut at `TRIALS=9`, and an EC4 cut all show the class buying
-little, the honest move is to flip: ship sound, and demote the heuristics to
-opt-in tuning profiles for applications that have measured their own workload.
-That is the open question this document exists to settle, not one it settles.
+The rest of the class is close to free everywhere it has been measured. The
+heuristics buy **no RSS at all**, **+0.1% of pause** on Kemal at EC1 and **+0%**
+on the fat app's small-heap collections; their throughput value remains
+**unmeasured** — not zero, unmeasured — because the host noise is three orders
+of magnitude larger than the effect. One of them (`scrub_fibers`) is a net loss
+even on tuned's own terms.
+
+That reshapes the question rather than closing it. The blocker is one pair of
+knobs, not a class: make root scanning cheap enough that
+`stw_multi_stack_lag = 0` is affordable when the scan is large — many threads
+or a big heap — and the case for sound defaults is back on the table. Until
+then, "sound by default" means "sound by default except when the root scan is
+big", which is exactly the case a soundness claim cannot carve out, because it
+is the case where dropping a root is most likely.
 
 See [PERF.md](PERF.md) for the full Linux methodology and the tuned-defaults
 history, and [COMPARISON.md](COMPARISON.md) for the feature-level gcry↔bdwgc

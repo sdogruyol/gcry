@@ -46,12 +46,50 @@ mkdir -p "$BIN"
 BUILD_FLAGS="${CRYSTAL_BUILD_FLAGS:-}"
 BIN_NAME="${BENCH_BIN:-kemal-gcry-sound}"
 
-cd "$KEMAL"
-shards install --production 2>/dev/null || shards install
-echo "Building $BIN_NAME ${BUILD_FLAGS:+($BUILD_FLAGS)}..."
-# $BUILD_FLAGS unquoted on purpose: a list of flags, not one word.
-crystal build -Dgc_none $BUILD_FLAGS --release src/server.cr -o "$BIN/$BIN_NAME"
-cd "$ROOT"
+# Driving a server other than the bundled Kemal one (the fat app, say). The
+# collector knobs are gcry-level env vars, so anything linked against gcry can
+# be measured — it just has to be built and launched on its own terms.
+#
+#   BENCH_SKIP_BUILD=1 BENCH_SERVER_BIN=../acikturkiye/bin/acikturkiye-gcry \
+#   BENCH_SERVER_DIR=../acikturkiye BENCH_ENV_FILE=.env.demo \
+#   BENCH_PORT_ENV=ACIKTURKIYE_SERVER_PORT BENCH_READY_PATH=/api/v1/ \
+#   BENCH_LOAD_PATH=/api/v1/ ./bench/root_phase_ab.sh
+SERVER_BIN="${BENCH_SERVER_BIN:-$BIN/$BIN_NAME}"
+SERVER_DIR="${BENCH_SERVER_DIR:-}"
+ENV_FILE="${BENCH_ENV_FILE:-}"
+PORT_ENV="${BENCH_PORT_ENV:-PORT}"
+READY_PATH="${BENCH_READY_PATH:-/}"
+LOAD_PATH="${BENCH_LOAD_PATH:-/json}"
+
+# Extra environment applied to every config (KEY=VAL per line) — app settings
+# like ACIKTURKIYE_ENV=demo, not collector knobs.
+SERVER_ENV=()
+if [ -n "${BENCH_SERVER_ENV:-}" ]; then
+  while IFS= read -r kv; do
+    [ -n "$kv" ] && SERVER_ENV+=("$kv")
+  done <<< "$BENCH_SERVER_ENV"
+fi
+
+# Request headers for the ready check and the load pass (`Name: value` per
+# line) — the fat app's API needs auth on every request.
+HDR=()
+if [ -n "${BENCH_HEADERS:-}" ]; then
+  while IFS= read -r h; do
+    [ -n "$h" ] && HDR+=(-H "$h")
+  done <<< "$BENCH_HEADERS"
+fi
+
+if [ "${BENCH_SKIP_BUILD:-0}" = "1" ]; then
+  echo "Using prebuilt server: $SERVER_BIN"
+  [ -x "$SERVER_BIN" ] || { echo "ERROR: $SERVER_BIN not executable"; exit 1; }
+else
+  cd "$KEMAL"
+  shards install --production 2>/dev/null || shards install
+  echo "Building $BIN_NAME ${BUILD_FLAGS:+($BUILD_FLAGS)}..."
+  # $BUILD_FLAGS unquoted on purpose: a list of flags, not one word.
+  crystal build -Dgc_none $BUILD_FLAGS --release src/server.cr -o "$BIN/$BIN_NAME"
+  cd "$ROOT"
+fi
 
 SERVER_PID=""
 stop_server() {
@@ -70,20 +108,34 @@ mkdir -p "$RUN_DIR"
 probe() {
   local key="$1" rep="$2"; shift 2
   local trace="$RUN_DIR/$key-rep$rep.ndjson"
-  env PORT="$PORT" GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$trace" \
-    "$@" "$BIN/$BIN_NAME" >/dev/null 2>&1 &
+  (
+    [ -n "$SERVER_DIR" ] && cd "$SERVER_DIR"
+    if [ -n "$ENV_FILE" ]; then
+      set -a; . "$ENV_FILE"; set +a
+      # The app's own env file may set GCRY_*. Strip it, so the config under
+      # test is the only thing steering the collector — otherwise a knob row
+      # silently measures whatever the deployment env happened to ask for.
+      while IFS= read -r k; do [ -n "$k" ] && unset "$k"; done \
+        < <(env | awk -F= '/^GCRY_/ {print $1}')
+    fi
+    export "$PORT_ENV=$PORT"
+    export GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$trace"
+    for kv in ${SERVER_ENV[@]+"${SERVER_ENV[@]}"}; do export "${kv?}"; done
+    for kv in "$@"; do export "${kv?}"; done
+    exec "$SERVER_BIN"
+  ) >/dev/null 2>&1 &
   SERVER_PID=$!
   local ready=0
-  for _ in $(seq 1 40); do
-    curl -sf -o /dev/null "$BASE/" && { ready=1; break; }
+  for _ in $(seq 1 120); do
+    curl -sf -o /dev/null ${HDR[@]+"${HDR[@]}"} "$BASE$READY_PATH" && { ready=1; break; }
     sleep 0.25
   done
   if [ "$ready" != "1" ]; then
-    echo "ERROR: server did not answer $BASE/ — key=$key env=$*" >&2
+    echo "ERROR: server did not answer $BASE$READY_PATH — key=$key env=$*" >&2
     exit 1
   fi
-  wrk -c "$CONNECTIONS" -d "${DURATION}s" "$BASE/json" >/dev/null 2>&1
-  curl -sf "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
+  wrk -c "$CONNECTIONS" -d "${DURATION}s" ${HDR[@]+"${HDR[@]}"} "$BASE$LOAD_PATH" >/dev/null 2>&1
+  curl -sf ${HDR[@]+"${HDR[@]}"} "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
   # Proof of the shape that actually ran: a binary built without -Dpreview_mt
   # resizes the default context to a no-op, so an EC4 run would otherwise be
   # indistinguishable from EC1 in the log.
@@ -228,6 +280,25 @@ for k in keys:
     d = data[k]
     m = d["median"]["roots_ns"]
     print(f"  {k:18} {d['iqr']['roots_ns']/m*100:>6.1f}%" if m else f"  {k:18}      -")
+
+# A median only summarises a unimodal sample. The fat app has two collection
+# regimes (heap ~43 MiB and heap ~60+ MiB) whose root cost differs 15×, and
+# each config lands a different share of its samples in each — which made the
+# raw medians say the sound profile was *cheaper* than tuned. Refuse to let
+# that read as a result.
+suspect = [k for k in keys
+           if data[k]["median"]["roots_ns"]
+           and data[k]["iqr"]["roots_ns"] / data[k]["median"]["roots_ns"] > 0.5]
+if suspect:
+    print("\n*** WARNING: multimodal samples — these medians are NOT comparable ***")
+    print(f"    configs with IQR > 50% of median: {', '.join(suspect)}")
+    print("    The run mixes collection regimes. Stratify (heap_size is the usual")
+    print("    discriminator) and compare within a stratum before quoting anything.")
+    for k in suspect:
+        hs = sorted(r.get("heap_size", 0) for r in samples(k))
+        print(f"      {k:18} heap MiB p10/p50/p90: "
+              f"{hs[len(hs)//10]/1048576:.0f} / {hs[len(hs)//2]/1048576:.0f} / "
+              f"{hs[9*len(hs)//10]/1048576:.0f}")
 
 out = {
     "reps": reps, "skip": skip,
