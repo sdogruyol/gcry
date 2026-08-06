@@ -47,13 +47,34 @@ so it biased the comparison, not just widened it. That is the mechanism behind
 "sound ahead of tuned", and the rows above should be read as suspect for that
 reason as well as the retracted ~1pp figure (which predated the raw-buffer fix).
 
-`bench/sound_profile_ab.sh` now times passes with `CLOCK_MONOTONIC`, takes wrk's
-request count rather than its rate, and redoes stepped passes. First cut after
-the fix (`bench/log/linux/2026-08-06-112252-sound-profile/`, 9950X, 7 runs at
-10 s): tuned **80.6%**, sound **78.8%** — sound *below* tuned for the first
-time, and tuned inside this host's 80–85% band. The −2.18% gap is still smaller
-than the 4.4–7.2% per-config spread, so it is a candidate, not a result; the
-9×30 s cut is now worth taking.
+`bench/sound_profile_ab.sh` now times passes with `CLOCK_MONOTONIC` and takes
+wrk's request count rather than its rate.
+
+That was one of four defects, all of them **bias rather than variance** — which
+is why more runs never helped:
+
+1. wrk's rate came from a clock WSL2 steps backwards (~19% on affected passes).
+2. The first fix *discarded* stepped passes, which made the 9×30 s methodology
+   impossible — steps arrive faster than a 30 s pass completes.
+3. Configs ran as consecutive blocks, confounding config with time: the three
+   gcry blocks came out monotonically faster in execution order (+0%, +2.11%,
+   +2.80%).
+4. Interleaving alone left a fixed order *within* each round. Whichever config
+   ran first came out ~2% slow — the same ~2% for three different knob
+   configurations, which is position, not knobs.
+
+Fixed: monotonic timing, round-robin interleaving, order rotated each round.
+The apparent sound-vs-tuned gap fell +2.27% → +2.11% → **+0.82%** as each
+confound came out.
+
+**Result** (`bench/log/linux/2026-08-06-140037-sound-profile/`, 9 rounds × 30 s,
+paired): the sound profile is **throughput-neutral** on Kemal `/json` at EC1 —
++0.82% at 1.7σ, not distinguishable from zero. The class costs under ~1% here,
+in either direction.
+
+The exception is `scrub_fibers`: disabling it *gains* **1.29%** (8/9 rounds,
+3.2σ), and the per-collection trace independently has it saving 1.7% of root
+work. It loses on throughput, pause and root completeness at once.
 
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW

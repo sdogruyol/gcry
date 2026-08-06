@@ -52,6 +52,12 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
       compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
+- [ ] **Turn `scrub_fibers` off by default.** It loses on every axis measured:
+      −1.29% throughput (8/9 paired rounds, 3.2σ) and −1.7% of root work on
+      Kemal at EC1, while also being a root-completeness heuristic that can
+      drop a live pointer. The only member of the class that can go today
+      without settling the wider defaults question —
+      `bench/log/linux/2026-08-06-140037-sound-profile/FINDINGS.md`
 - [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
       `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
       and 14.5× on acik at EC1 once its heap passes ~60 MiB (17 → 213 ms);

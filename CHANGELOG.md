@@ -61,14 +61,20 @@ Kemal `/json` (WSL2 i3-12100F, median of 7,
 `bench/log/linux/2026-08-06-052109-sound-profile/`): tuned **78.3%** @
 **0.795×**, sound **81.0%** @ **0.794×**, sound+conservative **84.4%** @
 **0.797×**. **RSS is flat across all three and reproduces across two
-sessions.** Throughput did not resolve in those sessions — but the clock bug
-above is why, and after fixing it the first cut
-(`bench/log/linux/2026-08-06-112252-sound-profile/`, 9950X, 7 runs at 10 s) puts
-tuned at **80.6%** and sound at **78.8%**: sound *below* tuned for the first
-time, which is the only physically possible ordering. The −2.18% gap is still
-smaller than the 4.4–7.2% per-config spread, so the cost is a candidate rather
-than a result. An earlier ~1pp claim was retracted: it was measured before the
-raw-buffer fix above.
+sessions.** Throughput did not, and four harness biases are why: the clock bug
+above; a retry loop that made the 9×30 s methodology impossible; blocked
+execution (config order confounded with time, ~2–3%); and a fixed config order
+within each round (~2% to whichever ran first). All four are bias, not
+variance, so run count never helped. With them out, the apparent gap fell
++2.27% → +2.11% → **+0.82%**.
+
+**The sound profile is throughput-neutral on Kemal `/json` at EC1** — +0.82% at
+1.7σ over 9 paired rounds, not distinguishable from zero
+(`bench/log/linux/2026-08-06-140037-sound-profile/`). The one knob with a real
+signal is `scrub_fibers`, and it argues against its own default: disabling it
+gains **1.29%** (8/9 rounds, 3.2σ), matching the per-collection trace, which has
+it saving 1.7% of root work. An earlier ~1pp claim was retracted separately: it
+was measured before the raw-buffer fix above.
 
 **Pause cost, however, is measured, and it is not small.** Per collection off
 the trace records: Kemal EC1 398 µs → 398 µs (+0.1%), but Kemal **EC4** 7.2 ms

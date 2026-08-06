@@ -231,11 +231,26 @@ its duration from that clock, so a pass containing a step reports ~19% high.
 Which config gets hit is random, so it biased rather than merely widened — that
 is how `sound` came out *ahead* of `tuned` despite doing strictly more work.
 
-Measuring the interval with `CLOCK_MONOTONIC` and redoing stepped passes
-restores the ordering (`sound` −2.18% against `tuned`) and puts tuned at 80.6%
-of Boehm, inside this host's historical band. The gap is still smaller than the
-per-config spread, so the throughput cost remains **unresolved, not zero** —
-but it is now a measurement worth taking rather than a broken channel.
+That was one of four biases in the harness — the others were blocked execution
+(config order confounded with time, worth ~2–3%) and a fixed config order
+within each round (whichever ran first came out ~2% slow). All four were bias,
+not variance, so no run count ever helped. Fixed: monotonic timing, round-robin
+interleaving, order rotated each round.
+
+With the confounds out (`bench/log/linux/2026-08-06-140037-sound-profile/`,
+9 rounds × 30 s, paired):
+
+| Config | vs tuned | rounds won | σ |
+|--------|---------:|-----------:|--:|
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | **+1.29%** | 8/9 | 3.2 |
+| `GCRY_SOUND=1` | +0.82% | 8/9 | 1.7 |
+| `GCRY_DISABLE_BLACKLIST=1` | +0.73% | 7/9 | 1.2 |
+
+**The whole class is throughput-neutral on this workload** — under ~1% either
+way, not distinguishable from zero. The one real signal is `scrub_fibers`, and
+it points against the default: turning it off *gains* throughput, and the
+per-collection trace independently has it saving 1.7% of root work. It loses on
+throughput, pause and soundness alike.
 
 Pause cost *is* resolved, measured per collection off the GC trace:
 

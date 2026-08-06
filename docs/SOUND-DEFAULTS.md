@@ -282,6 +282,8 @@ workload rather than the profile.
 | "Sound roots are free in throughput" | **No** — unresolved is not free |
 | "The heuristics should be off by default" | **No** — one workload, one host, EC1 only |
 | "Sound roots cost ~nothing in pause on Kemal at EC1" | Yes — +0.1% pause, 2873 collections at 1–7% IQR |
+| "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
+| "Parked-fiber scrub earns its default" | **No** — disabling it gains 1.29% throughput (8/9 rounds, 3.2σ) *and* 1.7% of root work |
 | "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause |
 | "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
 | "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
