@@ -254,6 +254,13 @@ module Gcry
     # Default 256 KiB (2026-08-01: soft 0/40; stacks ~7→~0.4 ms; thr ≥ 71.5% cut).
     property stw_multi_pthread_lag : UInt64 = 256_u64 * 1024
 
+    # One-shot stderr warning the first time a collect actually lands in the
+    # shape where lag 0 is expensive. Boot is the wrong place to warn: `GCRY_SOUND=1`
+    # sets lag 0 unconditionally, but the knob is *inert* until STW runs with more
+    # than two mutator threads, and at EC1 the whole profile is throughput-neutral.
+    # Warning at boot would cry wolf on the configuration that is fine.
+    @warned_stw_lag_zero = false
+
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
       return nil unless @world_stopped
@@ -300,11 +307,26 @@ module Gcry
       lagged < guard ? guard : lagged
     end
 
+    # Every parked fiber is about to be scanned guard→bottom (~8 MiB each).
+    # Measured 2026-08-06: 19× pause at Kemal EC4, 14.5× on a fat app once its
+    # heap passes ~60 MiB. LibC.write, not STDERR — this runs inside STW and must
+    # not allocate. See bench/stw_lag_pause.cr and ROADMAP "Cheap root scan at scale".
+    private def warn_stw_lag_zero_once : Nil
+      return if @warned_stw_lag_zero
+      @warned_stw_lag_zero = true
+      msg = "gcry: WARNING: stw_multi_stack_lag=0 under multi-mutator STW — every parked " \
+            "fiber stack is scanned in full (measured 19× pause at Parallel EC4, 14.5× on a " \
+            "large heap). GCRY_SOUND=1 sets this; it is a root-completeness profile, not a " \
+            "pause-safe default. Override with GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
+      LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
+    end
+
     private def scan_all_fiber_roots : Nil
       current = Fiber.current
       # Parallel / multi-thread STW: extend parked stack_top by LAG (and SP when
       # present). Single-mutator: cheap stack_top clamp (Kemal thr path).
       stw_multi = @world_stopped && multi_mutator_threads?
+      warn_stw_lag_zero_once if stw_multi && @stw_multi_stack_lag == 0
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
