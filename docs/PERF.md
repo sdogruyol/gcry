@@ -46,8 +46,23 @@ measured before `allow_interior_pointers` covered raw-buffer heap edges).
 
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW
-lags at EC4 `phase_roots`). Full method, per-knob rationale, known limits of
-the `sound` label, and the acik cut: [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
+lags at EC4 `phase_roots`).
+
+**Unmeasured in throughput is not free.** The pause cost *has* been measured,
+per collection off the `GCRY_TRACE=1` records (`bench/root_phase_ab.sh`), and
+it is not small where the root scan is large:
+
+| Cut | tuned pause | `GCRY_SOUND=1` pause | |
+|-----|------------:|---------------------:|--|
+| Kemal `/json`, EC1 | 398 µs | 398 µs | +0.1% |
+| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** | **+1866%** |
+| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** | **+1347%** |
+
+In every case the entire cost is the two STW lag knobs — the other five
+heuristics stay within ±6%. They are not EC4-specific: they bite whenever the
+root scan is expensive, whether from thread count or heap size. Full method,
+per-knob decomposition, and the limits of each cut:
+[SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 

@@ -227,9 +227,22 @@ GCRY_SOUND=1 ./your-app
 **RSS is flat across all three** — that much reproduces across two sessions.
 The throughput column does not: run spreads (5–10%) exceed the gaps, and sound
 lands *ahead* of tuned, which cannot be real since it does strictly more work.
-So the throughput cost of sound roots is **unresolved, not zero** — it needs a
-quiet host. Method, per-knob rationale, known limits of the label, and the
-fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+The throughput cost is **unresolved, not zero**, and a quieter host does not
+fix it — on a 9950X a single unchanged server process still varies 27% run to
+run under WSL2.
+
+Pause cost *is* resolved, measured per collection off the GC trace:
+
+| Cut | tuned | `GCRY_SOUND=1` |
+|-----|------:|---------------:|
+| Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
+| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** |
+| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** |
+
+In all three the whole cost is the two STW lag knobs — the other five
+heuristics are within ±6%, and parked-fiber scrub is a net saving. That is why
+the defaults stay tuned. Method, per-knob decomposition, known limits of the
+label, and the fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
 ### Pause distribution (Kemal `/json`, Linux)
 
@@ -296,7 +309,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved) |
+| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved; **large pause cost where the root scan is big** — EC4 or a big heap) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
 | `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |

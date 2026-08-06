@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1`. `samples/sound_profile.cr` fails the
   build if a root heuristic is added later and forgotten in
   `apply_sound_profile`.
+- **`bench/root_phase_ab.sh`** — per-collection pause composition from the
+  `GCRY_TRACE=1` records, which is what makes the profile measurable at all on
+  a host where throughput will not resolve it (a single unchanged server
+  process varies 27% run to run under WSL2). ~370 samples per config at 1–7%
+  IQR instead of one `/gc-stats` snapshot. Takes a config list, drives a
+  foreign server binary (the fat app), builds for Parallel EC, and warns rather
+  than reporting a median when the samples are multimodal.
 
 ### Fixed (root completeness)
 
@@ -52,6 +59,15 @@ sessions.** Throughput does not resolve — run spreads (5–10%) exceed the gap
 and sound lands ahead of tuned despite doing strictly more work, so its cost is
 unmeasured rather than zero. An earlier ~1pp claim was retracted: it was
 measured before the raw-buffer fix above.
+
+**Pause cost, however, is measured, and it is not small.** Per collection off
+the trace records: Kemal EC1 398 µs → 398 µs (+0.1%), but Kemal **EC4** 7.2 ms
+→ **141.7 ms** and acik at EC1 with a heap past ~60 MiB 17 ms → **213 ms**. In
+all three the entire cost is the two STW lag knobs; the other five
+root-completeness heuristics stay within ±6%, and parked-fiber scrub is a net
+saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
+reading — true of Kemal, false of the fat app — and it is why the defaults stay
+tuned for now.
 
 ### Fixed
 
