@@ -1,0 +1,190 @@
+{
+  "reps": 3,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 357,
+      "env": "",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 116669,
+        "static_ns": 80239,
+        "stacks_ns": 12881,
+        "scrub_ns": 14092,
+        "mark_ns": 167524,
+        "sweep_ns": 1135569,
+        "pause_ns": 397558
+      },
+      "iqr": {
+        "roots_ns": 5776.5,
+        "static_ns": 1052.5,
+        "stacks_ns": 1019.0,
+        "scrub_ns": 902.0,
+        "mark_ns": 12348.5,
+        "sweep_ns": 73384.0,
+        "pause_ns": 18773.5
+      }
+    },
+    "sound": {
+      "n": 366,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "median": {
+        "roots_ns": 132689.0,
+        "static_ns": 79842.0,
+        "stacks_ns": 12804.0,
+        "scrub_ns": 31.0,
+        "mark_ns": 168948.5,
+        "sweep_ns": 1139753.0,
+        "pause_ns": 397854.0
+      },
+      "iqr": {
+        "roots_ns": 7509.5,
+        "static_ns": 1155.25,
+        "stacks_ns": 794.0,
+        "scrub_ns": 1.0,
+        "mark_ns": 10067.5,
+        "sweep_ns": 57862.5,
+        "pause_ns": 19424.75
+      }
+    },
+    "unaligned": {
+      "n": 350,
+      "env": "GCRY_UNALIGNED_CANDIDATES=1",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 121634.0,
+        "static_ns": 80774.5,
+        "stacks_ns": 13295.5,
+        "scrub_ns": 14528.5,
+        "mark_ns": 168281.0,
+        "sweep_ns": 1178802.5,
+        "pause_ns": 406720.5
+      },
+      "iqr": {
+        "roots_ns": 8900.5,
+        "static_ns": 2775.5,
+        "stacks_ns": 1095.75,
+        "scrub_ns": 1232.5,
+        "mark_ns": 14667.5,
+        "sweep_ns": 74030.0,
+        "pause_ns": 25878.75
+      }
+    },
+    "interior": {
+      "n": 359,
+      "env": "GCRY_INTERIOR=1",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 116670,
+        "static_ns": 80054,
+        "stacks_ns": 12721,
+        "scrub_ns": 14041,
+        "mark_ns": 162052,
+        "sweep_ns": 1159706,
+        "pause_ns": 391465
+      },
+      "iqr": {
+        "roots_ns": 6595.0,
+        "static_ns": 1728.0,
+        "stacks_ns": 862.0,
+        "scrub_ns": 718.0,
+        "mark_ns": 9238.0,
+        "sweep_ns": 65289.0,
+        "pause_ns": 18129.0
+      }
+    },
+    "no-type-id-gate": {
+      "n": 360,
+      "env": "GCRY_DISABLE_TYPE_ID_GATE=1",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 116577.5,
+        "static_ns": 79961.5,
+        "stacks_ns": 12728.5,
+        "scrub_ns": 14239.5,
+        "mark_ns": 167444.5,
+        "sweep_ns": 1102736.0,
+        "pause_ns": 396718.0
+      },
+      "iqr": {
+        "roots_ns": 5513.0,
+        "static_ns": 1176.0,
+        "stacks_ns": 730.5,
+        "scrub_ns": 1324.0,
+        "mark_ns": 11649.75,
+        "sweep_ns": 69938.25,
+        "pause_ns": 18819.75
+      }
+    },
+    "no-stw-lag": {
+      "n": 359,
+      "env": "GCRY_STW_STACK_LAG=0 GCRY_STW_PTHREAD_LAG=0",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 117976,
+        "static_ns": 80755,
+        "stacks_ns": 13053,
+        "scrub_ns": 14170,
+        "mark_ns": 168675,
+        "sweep_ns": 1126492,
+        "pause_ns": 401478
+      },
+      "iqr": {
+        "roots_ns": 6806.0,
+        "static_ns": 898.0,
+        "stacks_ns": 740.0,
+        "scrub_ns": 855.0,
+        "mark_ns": 9429.0,
+        "sweep_ns": 67990.0,
+        "pause_ns": 18197.0
+      }
+    },
+    "no-scrub": {
+      "n": 363,
+      "env": "GCRY_DISABLE_SCRUB_FIBERS=1",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 127847,
+        "static_ns": 80307,
+        "stacks_ns": 13119,
+        "scrub_ns": 31,
+        "mark_ns": 166695,
+        "sweep_ns": 1148955,
+        "pause_ns": 394621
+      },
+      "iqr": {
+        "roots_ns": 6200.0,
+        "static_ns": 1146.0,
+        "stacks_ns": 820.0,
+        "scrub_ns": 1.0,
+        "mark_ns": 8317.0,
+        "sweep_ns": 67405.0,
+        "pause_ns": 18738.0
+      }
+    },
+    "no-blacklist": {
+      "n": 359,
+      "env": "GCRY_DISABLE_BLACKLIST=1",
+      "soundness": "tuned",
+      "median": {
+        "roots_ns": 118981,
+        "static_ns": 80125,
+        "stacks_ns": 12940,
+        "scrub_ns": 14829,
+        "mark_ns": 166162,
+        "sweep_ns": 1168568,
+        "pause_ns": 399237
+      },
+      "iqr": {
+        "roots_ns": 6607.0,
+        "static_ns": 887.0,
+        "stacks_ns": 814.0,
+        "scrub_ns": 1210.0,
+        "mark_ns": 8422.0,
+        "sweep_ns": 63584.0,
+        "pause_ns": 17468.0
+      }
+    }
+  }
+}
