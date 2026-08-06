@@ -65,7 +65,10 @@ Target: Match Boehm on the workloads Crystal users actually run.
       root-completeness heuristics are within ±6% on every workload measured,
       so this pair is the entire cost of `GCRY_SOUND=1`. Make the scan cheap
       enough that lag 0 is affordable and sound-by-default is back on the
-      table — `bench/log/linux/2026-08-06-085309-root-phase/FINDINGS.md`
+      table — `bench/log/linux/2026-08-06-085309-root-phase/FINDINGS.md`.
+      Guarded in the meantime by `make stw-lag-pause`, which reproduces 15× of
+      it in ~6 s with no server and no EC build; when this lands, that guard's
+      ratio collapses toward 1 and it keeps passing.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

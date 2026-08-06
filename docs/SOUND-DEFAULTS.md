@@ -273,6 +273,42 @@ whenever the root scan is expensive enough to matter — many threads (Kemal EC4
 neither, which is why it reads +0.1% and why that figure describes one small
 workload rather than the profile.
 
+### Guarding it
+
+None of the three cuts above is reproducible in CI — they need a server, a fat
+app, or an EC4 build. CI ran the correctness suite under `GCRY_SOUND=1` and
+passed at any pause, so the 19× was invisible to it.
+
+`bench/stw_lag_pause.cr` (`make stw-lag-pause`) closes that. The expensive path
+does not need EC: `stw_multi_stack_lag = 0` makes `fiber_stack_scan_top` return
+`guard` for every parked fiber under multi-mutator STW, so all it takes is >2
+live OS threads and a parked fiber population. 32 fibers reproduces **15×** in
+under 6 s on a stock runner, against the 19× measured at EC4.
+
+It asserts two things, both host-independent, so no quiet host is required:
+
+1. **The lags the process booted with match `GCRY_SOUND`** — non-zero without
+   it, zero with it. This is the one that fires if sound-by-default, or a lag
+   default of 0, is reintroduced before the cheap root scan lands. An absolute
+   ms budget was the obvious guard and is the wrong one: by the time it has
+   enough headroom not to flake on a shared runner, it no longer separates
+   30 ms from 480 ms.
+2. **The lag-0 penalty is at most 30×** the tuned path. Upper bound only — if
+   the root scan is ever made cheap enough that lag 0 is affordable, the ratio
+   collapses toward 1 and this must pass, not fail.
+
+The ratio is not a constant: it falls as the fiber population shrinks, because
+the fiber-count-independent part of `roots_ns` dilutes it. `--fibers` and
+`--live-mb` are therefore tied to `--max-ratio`; re-measure before changing
+either.
+
+Separately, the collector now warns once on stderr the first time a collect
+actually lands in the expensive shape — `stw_multi_stack_lag == 0` under
+multi-mutator STW. Boot is the wrong place for that warning: `GCRY_SOUND=1`
+sets lag 0 unconditionally, but the knob is inert until STW runs with more than
+two mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
+Warning at boot would cry wolf on the configuration that is fine.
+
 ### What this does and does not license
 
 | Claim | Supported? |

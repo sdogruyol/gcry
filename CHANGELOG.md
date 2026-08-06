@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merely widening them. That is the mechanism behind every "sound ahead of
   tuned" reading. Passes are now timed with `CLOCK_MONOTONIC` against wrk's
   request count, and a stepped pass is redone.
+- **`bench/stw_lag_pause.cr` / `make stw-lag-pause` — CI gate for the STW lag
+  pause trap.** `GCRY_SOUND=1` is a 19× pause regression at Kemal EC4 and 14.5×
+  on a fat app, and CI could not see it: the sound correctness suite passes at
+  any pause, and reproducing the regression needed a server, a fat app or an EC4
+  build. It does not — `stw_multi_stack_lag = 0` scans every parked fiber
+  guard→bottom under any multi-mutator STW, so >2 OS threads and a parked fiber
+  population are enough. 32 fibers reproduces 15× in under 6 s. Asserts the
+  booted lag state against `GCRY_SOUND` and caps the lag-0 penalty at 30×; both
+  host-independent, and the cap is an upper bound so making the root scan cheap
+  cannot break it.
+- **The collector warns once when `stw_multi_stack_lag` is 0 under
+  multi-mutator STW** — the shape where every parked fiber stack is scanned in
+  full. Deliberately not a boot warning: `GCRY_SOUND=1` sets lag 0
+  unconditionally, but the knob is inert until STW runs with more than two
+  mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
 
 ### Fixed (root completeness)
 

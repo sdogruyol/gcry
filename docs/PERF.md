@@ -206,6 +206,12 @@ Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numb
 
 Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier can re-scan pages before sweep; nursery (`GCRY_NURSERY`) stays off for process HTTP unless you are measuring p99. Soft-dirty is **Linux-only**.
 
+The one pause cliff worth knowing about is the STW root-scan lag pair, which
+`GCRY_SOUND=1` zeroes: 19× at Kemal EC4 and 14.5× on a fat app, and nothing
+outside those two shapes shows it. `make stw-lag-pause` (`bench/stw_lag_pause.cr`)
+reproduces it in ~6 s without a server or an EC build, and gates it in CI —
+[SOUND-DEFAULTS.md](SOUND-DEFAULTS.md#guarding-it).
+
 ## Secondary suite — crystal-metric (GC subset)
 
 **Not a ship headline.** Product bar stays Kemal `/json` + [ACIKTURKIYE.md](ACIKTURKIYE.md).
