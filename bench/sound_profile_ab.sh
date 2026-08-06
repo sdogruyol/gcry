@@ -65,15 +65,37 @@ wait_ready() {
   return 1
 }
 
+# Kill whatever server this shell last started. Idempotent, and safe to fire
+# from a RETURN trap after the pid is already reaped — a RETURN trap is not
+# scoped to the function that installed it, so it also runs on the next
+# function return, when there is nothing left to kill.
+SERVER_PID=""
+stop_server() {
+  [ -n "${SERVER_PID:-}" ] || return 0
+  kill "$SERVER_PID" 2>/dev/null || true
+  wait "$SERVER_PID" 2>/dev/null || true
+  SERVER_PID=""
+}
+trap stop_server EXIT INT TERM
+
+# A server that never came up is not a slow config, it is a broken run. Abort
+# rather than returning a sentinel: a 0 (or an empty JSON row) survives into
+# the median and silently halves a config's score.
+die_server() {
+  echo "ERROR: server did not answer $BASE/ within 10s — bin=$1 env=${*:2}" >&2
+  echo "       (port $PORT already held? stale server from an earlier run?)" >&2
+  exit 1
+}
+
 # single_run <binary> <env-assignments...>  → req/s on stdout
 single_run() {
   local bin="$1"; shift
   env PORT="$PORT" "$@" "$bin" >/dev/null 2>&1 &
-  local pid=$!
-  wait_ready || { kill $pid 2>/dev/null || true; echo 0; return; }
+  SERVER_PID=$!
+  trap stop_server RETURN
+  wait_ready || die_server "$bin" "$@"
   wrk -c "$CONNECTIONS" -d "${DURATION}s" "${BASE}${PATH_UNDER_TEST}" | parse_rps
-  kill $pid 2>/dev/null || true
-  wait $pid 2>/dev/null || true
+  stop_server
   sleep 0.4
 }
 
@@ -85,7 +107,9 @@ instrumented_run() {
   local bin="$1" label="$2" is_gcry="$3"; shift 3
   env PORT="$PORT" "$@" "$bin" >/dev/null 2>&1 &
   local pid=$!
-  wait_ready || { kill $pid 2>/dev/null || true; echo '{}'; return; }
+  SERVER_PID=$pid
+  trap stop_server RETURN
+  wait_ready || die_server "$bin" "$@"
   local rps
   rps="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "${BASE}${PATH_UNDER_TEST}" | parse_rps)"
   curl -sf "$BASE/gc-collect" >/dev/null || true
@@ -95,8 +119,7 @@ instrumented_run() {
   if [ "$is_gcry" = "1" ]; then
     stats="$(curl -sf "$BASE/gc-stats" || echo '{}')"
   fi
-  kill $pid 2>/dev/null || true
-  wait $pid 2>/dev/null || true
+  stop_server
   sleep 0.4
   STATS="$stats" python3 -c "
 import json, os
