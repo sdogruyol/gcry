@@ -118,6 +118,82 @@ it "follows a misaligned interior root under the sound profile" do
   end
 end
 
+# scan_object marks raw-buffer bodies base-only, keyed off type_id_plausible?.
+# That is a root-completeness heuristic on *heap edges* — an interior pointer
+# stored inside a Slice / untyped allocation is dropped — and a second, silent
+# consumer of the type_id heuristic. Both must follow allow_interior_pointers,
+# or `root_soundness=sound` reports a collector that still loses objects.
+it "drops an interior edge out of a raw buffer when interiors are off" do
+  heap = sound_heap
+  begin
+    heap.allow_interior_pointers = false
+
+    target = heap.malloc(64)
+    target.as(UInt8*).clear(64)
+
+    # Raw buffer: first Int32 is not a plausible Crystal type id.
+    buf = heap.malloc(64)
+    buf.as(UInt8*).clear(64)
+    buf.as(UInt64*).value = 0x00007ffff0000000_u64
+    # Sole reference to `target` is 8 bytes into its payload.
+    Pointer(Void*).new(buf.address + 8).value = Pointer(Void).new(target.address + 8)
+
+    heap.add_root(buf)
+    heap.collect(scan_stack: false)
+
+    heap.live?(buf).should be_true
+    heap.live?(target).should be_false
+  ensure
+    heap.destroy
+  end
+end
+
+it "follows an interior edge out of a raw buffer under the sound profile" do
+  heap = sound_heap
+  begin
+    target = heap.malloc(64)
+    target.as(UInt8*).clear(64)
+
+    buf = heap.malloc(64)
+    buf.as(UInt8*).clear(64)
+    buf.as(UInt64*).value = 0x00007ffff0000000_u64
+    Pointer(Void*).new(buf.address + 8).value = Pointer(Void).new(target.address + 8)
+
+    heap.add_root(buf)
+    heap.collect(scan_stack: false)
+
+    heap.live?(target).should be_true
+  ensure
+    heap.destroy
+  end
+end
+
+# A typed holder already kept interiors before the fix — pin it so the change
+# is shown to be additive, not a swap of which case works.
+it "follows an interior edge out of a typed object in both modes" do
+  [true, false].each do |interiors|
+    heap = sound_heap
+    begin
+      heap.allow_interior_pointers = interiors
+
+      target = heap.malloc(64)
+      target.as(UInt8*).clear(64)
+
+      holder = heap.malloc(64)
+      holder.as(UInt8*).clear(64)
+      holder.as(Int32*).value = 7 # plausible type id
+      Pointer(Void*).new(holder.address + 8).value = Pointer(Void).new(target.address + 8)
+
+      heap.add_root(holder)
+      heap.collect(scan_stack: false)
+
+      heap.live?(target).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+end
+
 # The type_id gate is the documented false-negative vector: a real reference
 # whose first Int32 does not look like a Crystal type id is discarded.
 it "keeps a gated-looking static root alive under the sound profile" do
