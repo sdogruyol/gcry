@@ -229,7 +229,10 @@ jobs:
           crystal build -Dgc_none samples/sound_profile.cr -o bin/sound_profile
           ./bin/sound_profile
           GCRY_SOUND=1 ./bin/sound_profile
+          # An explicit knob must still override the profile.
           GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./bin/sound_profile
+          # Barrier axis: sound roots + a page-dirty barrier must demote the label.
+          GCRY_SOUND=1 GCRY_NURSERY=262144 ./bin/sound_profile
 
       # The sound profile is the configuration a correctness claim cites, so it
       # has to stay green — a heuristic-off path that only runs at bench time

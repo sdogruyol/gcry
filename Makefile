@@ -229,6 +229,7 @@ sound-profile-smoke: $(BIN)
 	$(BIN)/sound_profile
 	GCRY_SOUND=1 $(BIN)/sound_profile
 	GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 $(BIN)/sound_profile
+	GCRY_SOUND=1 GCRY_NURSERY=262144 $(BIN)/sound_profile
 
 # Short A/B thr gate for CI (needs wrk). MIN_PCT=70 by default.
 bench-perf-smoke:

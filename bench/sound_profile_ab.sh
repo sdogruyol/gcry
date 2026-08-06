@@ -105,14 +105,18 @@ print(json.dumps({
     'label': '$label',
     'rps': float('$rps'),
     'rss_kib': int('$rss'),
+    'soundness': s.get('soundness'),
     'root_soundness': s.get('root_soundness'),
+    'barrier_soundness': s.get('barrier_soundness'),
     'pause_p50_ms': round(float(s.get('pause_p50_ns') or 0) / 1e6, 4),
     'pause_p99_ms': round(float(s.get('pause_p99_ns') or 0) / 1e6, 4),
     'collections': s.get('collections'),
     'knobs': {k: s.get(k) for k in (
-        'allow_interior_pointers', 'scan_unaligned_candidates', 'type_id_gate',
-        'type_id_gate_stacks', 'stw_multi_stack_lag', 'stw_multi_pthread_lag',
-        'scrub_fibers_enabled', 'blacklist_enabled', 'layout_precise')},
+        'allow_interior_pointers', 'scan_unaligned_candidates',
+        'scan_static_roots', 'type_id_gate', 'type_id_gate_stacks',
+        'stw_multi_stack_lag', 'stw_multi_pthread_lag', 'scrub_fibers_enabled',
+        'blacklist_enabled', 'nursery_enabled', 'incremental_auto',
+        'layout_precise')},
 }))
 "
 }
@@ -166,8 +170,8 @@ print(f\"  median={d['median']} req/s  spread={d['spread_pct']}%  noise={d['nois
 import json
 d = json.load(open('$RUN_DIR/$key-inst.json'))
 extra = ''
-if d.get('root_soundness'):
-    extra = f\"  root_soundness={d['root_soundness']}  pause_p50={d['pause_p50_ms']}ms\"
+if d.get('soundness'):
+    extra = f\"  soundness={d['soundness']}  pause_p50={d['pause_p50_ms']}ms\"
 print(f\"  rss={d['rss_kib']} KiB{extra}\")"
 }
 
@@ -211,7 +215,9 @@ for k in keys:
         "rss_x": round(rss / base_rss, 3) if base_rss else 0.0,
         "pause_p50_ms": data[k]["inst"].get("pause_p50_ms"),
         "pause_p99_ms": data[k]["inst"].get("pause_p99_ms"),
+        "soundness": data[k]["inst"].get("soundness"),
         "root_soundness": data[k]["inst"].get("root_soundness"),
+        "barrier_soundness": data[k]["inst"].get("barrier_soundness"),
         "noise_ratio": data[k]["thr"]["noise_ratio"],
         "spread_pct": data[k]["thr"]["spread_pct"],
         "knobs": data[k]["inst"].get("knobs"),
@@ -221,14 +227,14 @@ print("=== Summary (same host, same run) ===")
 print(f"{'config':34} {'req/s':>10} {'% Boehm':>9} {'RSS x':>8} {'p50 ms':>8}  roots")
 for r in rows:
     p50 = "-" if not r["pause_p50_ms"] else f"{r['pause_p50_ms']:.2f}"
-    print(f"{r['title']:34} {r['rps']:>10.0f} {r['pct']:>8.1f}% {r['rss_x']:>8.2f} {p50:>8}  {r['root_soundness'] or '-'}")
+    print(f"{r['title']:34} {r['rps']:>10.0f} {r['pct']:>8.1f}% {r['rss_x']:>8.2f} {p50:>8}  {r['soundness'] or '-'}")
 
 # Guard: a run where the sound config did not actually apply is not a
 # measurement, it is a duplicate of `tuned`.
 for k in ("sound", "sound-cons"):
-    got = data[k]["inst"].get("root_soundness")
+    got = data[k]["inst"].get("soundness")
     if got != "sound":
-        print(f"\nERROR: config '{k}' reported root_soundness={got!r} (expected 'sound')")
+        print(f"\nERROR: config '{k}' reported soundness={got!r} (expected 'sound')")
         sys.exit(1)
 
 out = {"rows": rows, "path": os.environ.get("BENCH_PATH", "/json")}
