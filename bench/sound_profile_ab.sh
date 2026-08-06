@@ -46,7 +46,50 @@ echo "Building kemal-gcry..."
 crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-sound"
 cd "$ROOT"
 
-parse_rps() { awk '/Requests\/sec/ {print $2; exit}'; }
+clock_pair() { python3 -c 'import time; print(time.time(), time.monotonic())'; }
+
+# One load pass, rate computed against CLOCK_MONOTONIC — not from wrk's own
+# Requests/sec.
+#
+# WSL2 steps CLOCK_REALTIME *backwards* ~1.6 s roughly every 32 s, syncing the
+# guest to the Windows host. wrk derives its duration from that clock, so a
+# pass containing a step divides its request count by ~8.4 s instead of 10 and
+# reports ~19% high. Which config gets hit is random, so it biases the
+# comparison rather than merely widening it — an inflated `sound` row is
+# exactly how a config that does strictly more work ends up "ahead" of tuned.
+#
+# Measure the interval ourselves with the monotonic clock, take wrk's request
+# *count* (which no clock can distort), and redo any pass where the two clocks
+# disagree by more than 1%.
+timed_wrk() {
+  local url="$1" attempt t0 t1 out rate
+  for attempt in 1 2 3; do
+    t0="$(clock_pair)"
+    out="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "$url")"
+    t1="$(clock_pair)"
+    if rate="$(WRK_OUT="$out" python3 -c '
+import os, re, sys
+r0, m0 = (float(x) for x in sys.argv[1].split())
+r1, m1 = (float(x) for x in sys.argv[2].split())
+dr, dm = r1 - r0, m1 - m0
+if dm <= 0 or abs(dr - dm) / dm > 0.01:
+    sys.exit(1)          # a clock step landed inside this pass
+o = os.environ["WRK_OUT"]
+m = re.search(r"(\d+) requests in", o)
+if not m:
+    sys.exit(2)
+print(round(int(m.group(1)) / dm, 2))
+' "$t0" "$t1")"; then
+      echo "$rate"
+      return 0
+    fi
+    echo "    (clock step inside the pass — redoing)" >&2
+  done
+  echo "ERROR: three consecutive passes hit a CLOCK_REALTIME step." >&2
+  echo "       The host is stepping its clock faster than a pass can complete;" >&2
+  echo "       shorten WRK_DURATION or fix host time sync before trusting rates." >&2
+  exit 1
+}
 
 rss_kib() {
   local pid="$1"
@@ -94,7 +137,7 @@ single_run() {
   SERVER_PID=$!
   trap stop_server RETURN
   wait_ready || die_server "$bin" "$@"
-  wrk -c "$CONNECTIONS" -d "${DURATION}s" "${BASE}${PATH_UNDER_TEST}" | parse_rps
+  timed_wrk "${BASE}${PATH_UNDER_TEST}"
   stop_server
   sleep 0.4
 }
@@ -112,7 +155,7 @@ instrumented_run() {
   trap stop_server RETURN
   wait_ready || die_server "$bin" "$@"
   local rps
-  rps="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "${BASE}${PATH_UNDER_TEST}" | parse_rps)"
+  rps="$(timed_wrk "${BASE}${PATH_UNDER_TEST}")"
   curl -sf "$BASE/gc-collect" >/dev/null || true
   sleep 0.4
   local rss; rss="$(rss_kib "$pid")"
