@@ -92,15 +92,20 @@ module Gcry
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement
         # should prove the profile applied, not trust that it did.
+        soundness:                             Gcry.soundness(heap),
         root_soundness:                        Gcry.root_soundness(heap),
+        barrier_soundness:                     Gcry.barrier_soundness(heap),
         allow_interior_pointers:               heap.allow_interior_pointers,
         scan_unaligned_candidates:             heap.scan_unaligned_candidates,
+        scan_static_roots:                     heap.scan_static_roots,
         type_id_gate:                          heap.type_id_gate,
         type_id_gate_stacks:                   heap.type_id_gate_stacks,
         stw_multi_stack_lag:                   heap.stw_multi_stack_lag,
         stw_multi_pthread_lag:                 heap.stw_multi_pthread_lag,
         scrub_fibers_enabled:                  heap.scrub_fibers_enabled,
         blacklist_enabled:                     heap.blacklist_enabled,
+        nursery_enabled:                       heap.nursery_enabled,
+        incremental_auto:                      heap.incremental_auto,
         layout_precise:                        heap.layout_precise,
         precise_stack_roots:                   heap.precise_stack_roots,
         precise_stack_exclusive:               heap.precise_stack_exclusive,

@@ -12,12 +12,17 @@ private def sound_heap : Gcry::Heap
   heap.layout_precise = false
   heap.allow_interior_pointers = true
   heap.scan_unaligned_candidates = true
+  # Library heaps default this off; sound roots require it (BSS/data would be
+  # missed by construction otherwise).
+  heap.scan_static_roots = true
   heap.type_id_gate = false
   heap.type_id_gate_stacks = false
   heap.stw_multi_stack_lag = 0_u64
   heap.stw_multi_pthread_lag = 0_u64
   heap.scrub_fibers_enabled = false
   heap.blacklist_enabled = false
+  heap.nursery_enabled = false
+  heap.incremental_auto = false
   heap
 end
 
@@ -63,7 +68,44 @@ it "reports sound only when every root heuristic is off" do
     Gcry.sound_roots?(heap).should be_false
     heap.precise_stack_exclusive = false
 
+    # A heap that never walks BSS/data misses roots by construction.
+    heap.scan_static_roots = false
+    Gcry.sound_roots?(heap).should be_false
+    heap.scan_static_roots = true
+
     Gcry.sound_roots?(heap).should be_true
+  ensure
+    heap.destroy
+  end
+end
+
+# Barrier soundness is a second axis: generational / incremental liveness
+# depends on the page-dirty remembered set, and soft-dirty has measured
+# false-negatives. GCRY_SOUND=1 GCRY_NURSERY=1 must not report a clean bill.
+it "separates barrier soundness from root soundness" do
+  heap = sound_heap
+  begin
+    Gcry.sound_roots?(heap).should be_true
+    Gcry.sound_barriers?(heap).should be_true
+    Gcry.sound?(heap).should be_true
+    Gcry.soundness(heap).should eq("sound")
+
+    heap.nursery_enabled = true
+    Gcry.sound_roots?(heap).should be_true # roots are still complete
+    Gcry.sound_barriers?(heap).should be_false
+    Gcry.sound?(heap).should be_false
+    Gcry.soundness(heap).should eq("sound-roots-only")
+    heap.nursery_enabled = false
+
+    heap.incremental_auto = true
+    Gcry.sound_barriers?(heap).should be_false
+    Gcry.soundness(heap).should eq("sound-roots-only")
+    heap.incremental_auto = false
+
+    # Both axes bad reads as plain tuned, not as a partial pass.
+    heap.nursery_enabled = true
+    heap.type_id_gate = true
+    Gcry.soundness(heap).should eq("tuned")
   ensure
     heap.destroy
   end
@@ -225,15 +267,27 @@ it "json_stats reports the live field values, not the requested profile" do
   heap = sound_heap
   begin
     json = Gcry::Observability.json_stats(heap)
+    json.should contain(%("soundness":"sound"))
     json.should contain(%("root_soundness":"sound"))
+    json.should contain(%("barrier_soundness":"sound"))
     json.should contain(%("allow_interior_pointers":true))
     json.should contain(%("scan_unaligned_candidates":true))
+    json.should contain(%("scan_static_roots":true))
     json.should contain(%("type_id_gate":false))
     json.should contain(%("stw_multi_stack_lag":0))
     json.should contain(%("scrub_fibers_enabled":false))
 
+    heap.nursery_enabled = true
+    nursery_json = Gcry::Observability.json_stats(heap)
+    nursery_json.should contain(%("soundness":"sound-roots-only"))
+    nursery_json.should contain(%("root_soundness":"sound"))
+    nursery_json.should contain(%("barrier_soundness":"tuned"))
+    heap.nursery_enabled = false
+
     heap.type_id_gate = true
-    Gcry::Observability.json_stats(heap).should contain(%("root_soundness":"tuned"))
+    tuned_json = Gcry::Observability.json_stats(heap)
+    tuned_json.should contain(%("soundness":"tuned"))
+    tuned_json.should contain(%("root_soundness":"tuned"))
   ensure
     heap.destroy
   end

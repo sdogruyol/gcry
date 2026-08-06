@@ -233,6 +233,13 @@ module GC
   #                            gate called false. With the gate off nothing
   #                            feeds it; keep it off so the profile has exactly
   #                            one meaning.
+  #   scan_static_roots        a heap that never walks BSS/data misses roots by
+  #                            construction (GCRY_DISABLE_STATIC_ROOTS=1).
+  #   nursery / incremental    the *barrier* axis: both make liveness depend on
+  #                            the page-dirty remembered set, and soft-dirty has
+  #                            measured false-negatives (see the nursery note in
+  #                            GC.init). Already off for process GC; set here so
+  #                            the profile does not rely on that default.
   #
   # Object-body scan precision (Gcry::Layout, keyed on the payload's first
   # Int32) is a *separate* axis and is deliberately not touched here — measure
@@ -243,12 +250,18 @@ module GC
   private def self.apply_sound_profile(heap : Gcry::Heap) : Nil
     heap.allow_interior_pointers = true
     heap.scan_unaligned_candidates = true
+    heap.scan_static_roots = true
     heap.type_id_gate = false
     heap.type_id_gate_stacks = false
     heap.stw_multi_stack_lag = 0_u64
     heap.stw_multi_pthread_lag = 0_u64
     heap.scrub_fibers_enabled = false
     heap.blacklist_enabled = false
+    # Barrier axis: liveness must not depend on the page-dirty remembered set.
+    # Both are already off for process GC — set them so the profile is
+    # self-contained rather than relying on a default that could move.
+    heap.nursery_enabled = false
+    heap.incremental_auto = false
   end
 
   # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
