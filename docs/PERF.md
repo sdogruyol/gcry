@@ -28,21 +28,26 @@ decline to mark a pointer that is genuinely live, so a throughput number
 produced with them on does not answer "what does a *correct* gcry cost?".
 
 `GCRY_SOUND=1` turns the whole class off. Same host, same session, `wrk -c 100
--d 20`, median of 5 — `bench/log/linux/2026-08-06-042555-sound-profile/`
+-d 20`, median of 7 — `bench/log/linux/2026-08-06-052109-sound-profile/`
 (`make bench-sound-profile`). Each `sound` row is confirmed applied via its own
 `/gc-stats` `root_soundness`, not assumed from the env var.
 
-| Kemal `/json` config | % of Boehm | post-GC RSS × |
-|----------------------|-----------:|--------------:|
-| tuned (process defaults) | **84.9%** | **0.76×** |
-| sound roots (`GCRY_SOUND=1`) | **83.9%** | **0.75×** |
-| sound + conservative bodies (`+GCRY_DISABLE_LAYOUT=1`) | **83.8%** | **0.75×** |
+| Kemal `/json` config | % of Boehm | post-GC RSS × | run spread |
+|----------------------|-----------:|--------------:|-----------:|
+| tuned (process defaults) | 78.3% | **0.795×** | 5.06% |
+| sound roots (`GCRY_SOUND=1`) | 81.0% | **0.794×** | 6.54% |
+| sound + conservative bodies (`+GCRY_DISABLE_LAYOUT=1`) | 84.4% | **0.797×** | 10.47% |
 
-**The entire root-heuristic class is worth ~1pp of throughput here, and RSS
-does not move.** Kemal is, however, the workload these knobs were *least*
-expected to matter on — they were argued on fat-app RSS (fiber scrub at acik
-3.00× → 2.65×, the STW lags at EC4 `phase_roots`). Full method, per-knob
-rationale, and the acik cut: [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
+**RSS does not move — that reproduces across two sessions.** Throughput does
+not resolve: spreads exceed the gaps, and sound lands ahead of tuned despite
+doing strictly more work. Treat the throughput cost of the sound profile as
+**unmeasured**, and note that an earlier ~1pp figure here was retracted (it was
+measured before `allow_interior_pointers` covered raw-buffer heap edges).
+
+Kemal is also the workload these knobs were *least* expected to matter on —
+they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW
+lags at EC4 `phase_roots`). Full method, per-knob rationale, known limits of
+the `sound` label, and the acik cut: [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 

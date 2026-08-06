@@ -218,15 +218,18 @@ guess. `GCRY_SOUND=1` turns the whole class off:
 GCRY_SOUND=1 ./your-app
 ```
 
-| Kemal `/json` (tip, i3, median of 5) | % of Boehm | RSS × |
+| Kemal `/json` (tip, i3, median of 7) | % of Boehm | RSS × |
 |--------------------------------------|-----------:|------:|
-| tuned (process defaults) | 84.9% | 0.76× |
-| **sound roots** (`GCRY_SOUND=1`) | **83.9%** | **0.75×** |
-| sound + fully conservative bodies | 83.8% | 0.75× |
+| tuned (process defaults) | 78.3% | 0.795× |
+| **sound roots** (`GCRY_SOUND=1`) | **81.0%** | **0.794×** |
+| sound + fully conservative bodies | 84.4% | 0.797× |
 
-**~1pp of throughput, no RSS change.** That is the number a correctness claim
-can cite. Method, per-knob rationale, and the fat-app cut:
-[docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+**RSS is flat across all three** — that much reproduces across two sessions.
+The throughput column does not: run spreads (5–10%) exceed the gaps, and sound
+lands *ahead* of tuned, which cannot be real since it does strictly more work.
+So the throughput cost of sound roots is **unresolved, not zero** — it needs a
+quiet host. Method, per-knob rationale, known limits of the label, and the
+fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
 ### Pause distribution (Kemal `/json`, Linux)
 
@@ -293,7 +296,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (~-1pp thr) |
+| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
 | `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |

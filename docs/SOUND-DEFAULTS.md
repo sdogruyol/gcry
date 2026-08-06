@@ -23,7 +23,7 @@ GCRY_SOUND=1 ./your-app
 
 | Knob | Default | What it can drop |
 |------|---------|------------------|
-| `allow_interior_pointers` | `false` | LLVM may keep only an **interior** pointer live in a register or spill slot while the base is dead — a strength-reduced loop over a `String`/`Array` buffer is the canonical shape. bdwgc as Crystal links it treats interiors as valid, so base-only ambient roots are strictly less conservative than what Crystal's codegen has ever been validated against. |
+| `allow_interior_pointers` | `false` | Two things at once. **(a) Ambient roots:** LLVM may keep only an **interior** pointer live in a register or spill slot while the base is dead — a strength-reduced loop over a `String`/`Array` buffer is the canonical shape. bdwgc as Crystal links it treats interiors as valid, so base-only ambient roots are strictly less conservative than what Crystal's codegen has ever been validated against. **(b) Heap edges out of raw buffers:** `scan_object`'s conservative fallback marks untyped allocations base-only, so an interior pointer stored *inside* a `Slice` or raw buffer is dropped too. That path also keys off `type_id_plausible?`, which made the type_id heuristic steer marking even with `type_id_gate` off — this flag switches both off together. |
 | `scan_unaligned_candidates` | `false` | The same, for `str.to_unsafe + 3`. A misaligned interior is a root bdwgc resolves via `GC_base`; gcry drops it before `find_block` ever runs. |
 | `type_id_gate` | `true` (static roots) | Rejects a static root whose payload's first `Int32` is `<= 0` or `> 1_000_000`. That is a heuristic applied to a real reference. The collector already counts when it was wrong: `type_id_root_false_negatives`. |
 | `stw_multi_stack_lag` | `256 KiB` | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. A live pointer deeper than the lag is never seen. `0` means full `guard → bottom`. |
@@ -53,6 +53,28 @@ attributable. Measure it separately:
 ```sh
 GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./app   # fully conservative
 ```
+
+Note that under `GCRY_SOUND` the `type_id_plausible?` heuristic no longer
+influences liveness *at all*: the ambient path is ungated (`type_id_gate`) and
+the raw-buffer heap-edge path is ungated (`allow_interior_pointers`). It
+survives only in `Gcry::Layout` entry lookup — the body-scan axis above — and
+in the `type_id_root_false_negatives` diagnostic counter.
+
+### Known limits of the label
+
+`root_soundness` covers **root completeness only**. It does not assert
+anything about:
+
+- **Barrier soundness.** `GCRY_SOUND=1 GCRY_NURSERY=1` or `GCRY_INCREMENTAL=1`
+  still reports `sound` while running a generational/incremental path whose
+  old→young remembered set depends on soft-dirty, which has measured
+  false-negatives under WSL (see the nursery note in `gc_override.cr`). Both
+  are off by default; do not turn them on and read `sound` as reassurance.
+- **Body-scan precision.** See the layout axis above.
+
+If you need a single configuration with neither caveat, that is
+`GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1` with nursery and incremental left off —
+the "sound + conservative bodies" row in the numbers below.
 
 ---
 
@@ -88,26 +110,38 @@ Host for both cuts: WSL2 x86_64 (i3-12100F), Crystal 1.21.0, `--release`,
 EC parallelism 1. Every `sound` row is confirmed applied from the run's own
 `/gc-stats` `root_soundness`, not assumed from the env var.
 
-### Kemal `/json` — quotable
+### Kemal `/json` — throughput unresolved, RSS flat
 
-`wrk -c 100 -d 20`, 5 runs, median with min/max discarded, then `/gc-collect`
-and post-GC `VmRSS`. Session:
-`bench/log/linux/2026-08-06-042555-sound-profile/`.
+`wrk -c 100 -d 20`, median with min/max discarded, then `/gc-collect` and
+post-GC `VmRSS`. Two sessions:
 
-| Config | req/s | % of Boehm | RSS × | pause p50 | run spread |
-|--------|------:|-----------:|------:|----------:|-----------:|
-| Boehm | 40999 | — | — | — | 3.87% |
-| gcry tuned (defaults) | 34796 | **84.9%** | **0.76×** | 0.56 ms | 0.73% |
-| gcry sound roots | 34398 | **83.9%** | **0.75×** | 0.55 ms | 3.96% |
-| gcry sound + conservative bodies | 34351 | **83.8%** | **0.75×** | 0.56 ms | 11.68% |
+| Config | session 1 (5 runs) | session 2 (7 runs) | RSS × s1 | RSS × s2 |
+|--------|-------------------:|-------------------:|---------:|---------:|
+| gcry tuned | 84.9% | 78.3% | 0.756× | 0.795× |
+| gcry sound roots | *(invalid)* | 81.0% | *(invalid)* | 0.794× |
+| gcry sound + conservative bodies | *(invalid)* | 84.4% | *(invalid)* | 0.797× |
 
-**The whole root-heuristic class is worth ~1pp of throughput here, and RSS
-does not move** (0.756× → 0.754×; sound is fractionally lower, inside noise).
-Dropping the layout tables on top costs a further ~0.1pp — also inside noise,
-and that row's 11.7% run spread means its median is approximate.
+Session 1 `bench/log/linux/2026-08-06-042555-sound-profile/` had tight spreads
+(0.73–3.96%) but its **sound rows are invalid**: they were measured before
+`allow_interior_pointers` covered raw-buffer heap edges, so they under-priced
+sound. Session 2 `…-052109-sound-profile/` is post-fix but ran on a busier
+host — spreads 5.1–10.5%, wider than the gaps being measured. It even puts
+sound *ahead* of tuned (81.0% vs 78.3%), which is not physically plausible
+since sound does strictly more work.
 
-This inverts the usual framing: on Kemal these knobs are not buying
-performance, they are only buying risk.
+**So: there is currently no valid cut that resolves what the sound profile
+costs in throughput on Kemal `/json`.** An earlier version of this document
+claimed ~1pp. That figure came from the holed profile and is retracted.
+
+**What both sessions agree on: RSS does not move.** 0.756/0.754/0.746× and
+0.795/0.794/0.797× — flat to three digits within each session, across all
+three configs. Post-GC RSS is a far lower-variance measurement here than wrk
+throughput, and it is the one claim the data supports.
+
+That is a real negative result, not a null one: closing the raw-buffer hole
+made sound retain strictly *more*, and post-GC RSS still did not move. On this
+workload those interior edges are either rare, or they resolve to objects that
+were already reachable another way.
 
 ### acikturkiye (fat app) — **inconclusive**
 
@@ -137,9 +171,10 @@ sound profile is `EC_PARALLELISM=4`, and nothing here has measured it.
 
 | Claim | Supported? |
 |-------|-----------|
-| "Sound roots cost ~1pp on Kemal `/json` at EC1" | Yes — clean cut, low spread |
-| "Sound roots cost nothing in RSS on Kemal" | Yes, at EC1 on this host |
-| "The heuristics should be off by default" | **No** — one workload, one host, EC1 only, and the fat-app cut is inconclusive |
+| "Sound roots cost nothing in RSS on Kemal at EC1" | Yes — two sessions, flat to three digits |
+| "Sound roots cost ~1pp of throughput" | **No — retracted.** Measured against a holed profile; the re-cut cannot resolve it |
+| "Sound roots are free in throughput" | **No** — unresolved is not free |
+| "The heuristics should be off by default" | **No** — one workload, one host, EC1 only |
 | "Sound roots are free on the fat app" | **No** — not measured to a usable precision |
 | "Sound roots are free under Parallel EC" | **No** — not measured at all, and this is where the lag knobs do work |
 
@@ -172,12 +207,13 @@ workload, one host, parallelism 1. The knobs were argued on fat-app RSS and on
 EC4 root-scan cost, and neither of those has been measured to a usable
 precision here.
 
-What the Kemal cut does say is that **the case for the defaults is weaker than
-the tree assumes**: on the flagship benchmark the entire heuristic class buys
-~1pp and no RSS. If `TRIALS=9` on the fat app and an EC4 cut agree, the honest
-move is to flip — ship sound, and demote the heuristics to opt-in tuning
-profiles for applications that have measured their own workload. That is the
-open question this document exists to settle, not one it settles.
+What the data does say is narrower than the first draft of this document
+claimed: on Kemal at EC1 the heuristics buy **no RSS at all**, and their
+throughput value is currently **unmeasured** — not zero, unmeasured. If a quiet
+re-cut, a fat-app cut at `TRIALS=9`, and an EC4 cut all show the class buying
+little, the honest move is to flip: ship sound, and demote the heuristics to
+opt-in tuning profiles for applications that have measured their own workload.
+That is the open question this document exists to settle, not one it settles.
 
 See [PERF.md](PERF.md) for the full Linux methodology and the tuned-defaults
 history, and [COMPARISON.md](COMPARISON.md) for the feature-level gcry↔bdwgc

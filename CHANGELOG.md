@@ -34,12 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build if a root heuristic is added later and forgotten in
   `apply_sound_profile`.
 
-First cut (Kemal `/json`, WSL2 i3-12100F, median of 5,
-`bench/log/linux/2026-08-06-042555-sound-profile/`): tuned **84.9%** @
-**0.76×**, sound **83.9%** @ **0.75×**, sound+conservative **83.8%** @
-**0.75×**. The whole heuristic class is worth ~1pp of throughput on this
-workload and does not move RSS — but Kemal is where these knobs were least
-expected to matter (they were argued on fat-app RSS).
+### Fixed (root completeness)
+
+- **`scan_object` ignored `allow_interior_pointers` for raw buffers.** The
+  conservative fallback marked untyped allocations base-only, so an interior
+  pointer stored inside a `Slice` / raw buffer was dropped — and the same line
+  was a second, silent consumer of `type_id_plausible?`, so the type_id
+  heuristic still steered marking with `type_id_gate` off. Both now follow
+  `allow_interior_pointers`, which is what makes `root_soundness=sound` a true
+  statement. Pinned by `spec/sound_defaults_spec.cr` in both directions.
+
+Kemal `/json` (WSL2 i3-12100F, median of 7,
+`bench/log/linux/2026-08-06-052109-sound-profile/`): tuned **78.3%** @
+**0.795×**, sound **81.0%** @ **0.794×**, sound+conservative **84.4%** @
+**0.797×**. **RSS is flat across all three and reproduces across two
+sessions.** Throughput does not resolve — run spreads (5–10%) exceed the gaps
+and sound lands ahead of tuned despite doing strictly more work, so its cost is
+unmeasured rather than zero. An earlier ~1pp claim was retracted: it was
+measured before the raw-buffer fix above.
 
 ### Fixed
 
