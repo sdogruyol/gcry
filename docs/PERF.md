@@ -38,11 +38,22 @@ produced with them on does not answer "what does a *correct* gcry cost?".
 | sound roots (`GCRY_SOUND=1`) | 81.0% | **0.794×** | 6.54% |
 | sound + conservative bodies (`+GCRY_DISABLE_LAYOUT=1`) | 84.4% | **0.797×** | 10.47% |
 
-**RSS does not move — that reproduces across two sessions.** Throughput does
-not resolve: spreads exceed the gaps, and sound lands ahead of tuned despite
-doing strictly more work. Treat the throughput cost of the sound profile as
-**unmeasured**, and note that an earlier ~1pp figure here was retracted (it was
-measured before `allow_interior_pointers` covered raw-buffer heap edges).
+**RSS does not move — that reproduces across two sessions.** Throughput did not
+resolve, and the table above carries the defect that explains why: **WSL2 steps
+`CLOCK_REALTIME` backwards ~1.6 s every ~32 s** and wrk derives its duration
+from that clock, so any pass containing a step reports ~19% high. A 10 s pass
+catches one about a third of the time, and which config it lands on is random —
+so it biased the comparison, not just widened it. That is the mechanism behind
+"sound ahead of tuned", and the rows above should be read as suspect for that
+reason as well as the retracted ~1pp figure (which predated the raw-buffer fix).
+
+`bench/sound_profile_ab.sh` now times passes with `CLOCK_MONOTONIC`, takes wrk's
+request count rather than its rate, and redoes stepped passes. First cut after
+the fix (`bench/log/linux/2026-08-06-112252-sound-profile/`, 9950X, 7 runs at
+10 s): tuned **80.6%**, sound **78.8%** — sound *below* tuned for the first
+time, and tuned inside this host's 80–85% band. The −2.18% gap is still smaller
+than the 4.4–7.2% per-config spread, so it is a candidate, not a result; the
+9×30 s cut is now worth taking.
 
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW

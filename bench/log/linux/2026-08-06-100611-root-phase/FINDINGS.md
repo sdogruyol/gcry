@@ -8,7 +8,8 @@ on `/api/v1/` with API auth. Instrument: `bench/root_phase_ab.sh`, 8 configs ×
 This supersedes the `TRIALS=3` throughput cut in
 `2026-08-06-acik-sound-profile/`, which was recorded INCONCLUSIVE. It does not
 report throughput — see `2026-08-06-081512-root-phase/FINDINGS.md` for why that
-channel is unusable on this host.
+channel would not resolve, and `2026-08-06-112252-sound-profile/FINDINGS.md`
+for the correction (a harness clock bug, not the host).
 
 ## Read the strata, not the medians
 

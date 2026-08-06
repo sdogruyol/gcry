@@ -8,9 +8,9 @@ analysed.
 
 ## Why this is not a throughput cut
 
-The throughput channel is unusable on this host, and the 9950X is not an
-improvement on the i3/WSL2 box — the noise is not the CPU. Evidence, in
-increasing order of how much it rules out:
+At the time of this cut the throughput channel would not resolve, and the 9950X
+looked no better than the i3/WSL2 box. Evidence gathered then, in increasing
+order of how much it rules out — see the correction below the table:
 
 | Test | Spread |
 |------|-------:|
@@ -19,11 +19,20 @@ increasing order of how much it rules out:
 | server + `wrk` pinned to disjoint cores | 14–30% |
 | **one server process, no restart, 8 × 10 s passes** | **27%** |
 
-The last row is decisive: same process, same configuration, box at 99–100%
-idle between passes. This is WSL2 host scheduling, and WSL2 does not expose
-cpufreq, so it cannot be pinned from inside. More runs shrink the *median's*
-standard error but never the per-run spread; resolving a 2 pp effect through
-this channel needs on the order of 170 paired rounds per config pair.
+The last row looked decisive: same process, same configuration, box at 99–100%
+idle between passes. It was attributed here to WSL2 host scheduling.
+
+**That attribution was wrong, and this section is superseded by
+`2026-08-06-112252-sound-profile/FINDINGS.md`.** The dominant cause was the
+harness: WSL2 steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s, and wrk
+derived its pass duration from that clock, so any pass catching a step reported
+~19% high. Timing with `CLOCK_MONOTONIC` and redoing stepped passes brings the
+spread to 4–7% and restores `sound` below `tuned`. The residual is real and
+still unattributed (the 9950X's two CCDs, boost behaviour, and Windows-side
+activity are all unruled-out), and it still exceeds the gap being measured — so
+the conclusion below (measure the collector, not the process around it) stands,
+but "unusable on this host class" was too strong and the reasoning for it was
+partly an instrument bug.
 
 So the sanity gate in the handover's §5 cannot pass here, and it is not
 supposed to be forced. Measure the collector instead of the process around it:

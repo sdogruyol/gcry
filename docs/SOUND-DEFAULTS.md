@@ -193,14 +193,21 @@ fat app *at EC1*, once its heap crosses ~60 MiB. See below.
 
 ### Pause composition — where the profile actually spends
 
-The throughput channel could not answer this, and more runs would not have
-fixed it. On a 9950X/WSL2 box, *one server process with no restart and no
-config change* varies 40,500–51,646 req/s across 8 consecutive 10 s passes —
-27% spread, at 99–100% idle. That is host scheduling, not the collector, and
-WSL2 does not expose cpufreq to pin it. Resolving a 2 pp effect through req/s
-there needs ~170 paired rounds per config pair.
+The throughput channel could not answer this at the time these cuts were taken.
+On a 9950X/WSL2 box, *one server process with no restart and no config change*
+appeared to vary 40,500–51,646 req/s across 8 consecutive 10 s passes — 27%
+spread, at 99–100% idle.
 
-So measure the collector instead. `GCRY_TRACE=1` emits one `collect_end` record
+Much of that was the harness: WSL2 steps `CLOCK_REALTIME` backwards ~1.6 s
+every ~32 s and wrk derived its duration from it, inflating any pass that
+caught a step by ~19%. Timing with `CLOCK_MONOTONIC` and redoing stepped passes
+cuts the apparent spread to 4–7% and restores the physically correct ordering
+(`bench/log/linux/2026-08-06-112252-sound-profile/`). The residual is real but
+unattributed, and the gap being measured is still smaller than it.
+
+Either way the collector is the better instrument for *attribution*, and it is
+the one these cuts use — it also has the property that the clock bug never
+touched it, since the collector timestamps its phases with `monotonic_ns`. `GCRY_TRACE=1` emits one `collect_end` record
 per collection with a full phase breakdown, giving ~370 samples per config at
 1–7% IQR. `bench/root_phase_ab.sh`. Basis is `roots + scrub + stacks`, because
 `roots_ns` excludes scrub (itself a knob) and `stacks_ns` is a separate

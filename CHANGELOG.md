@@ -34,12 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build if a root heuristic is added later and forgotten in
   `apply_sound_profile`.
 - **`bench/root_phase_ab.sh`** — per-collection pause composition from the
-  `GCRY_TRACE=1` records, which is what makes the profile measurable at all on
-  a host where throughput will not resolve it (a single unchanged server
-  process varies 27% run to run under WSL2). ~370 samples per config at 1–7%
-  IQR instead of one `/gc-stats` snapshot. Takes a config list, drives a
-  foreign server binary (the fat app), builds for Parallel EC, and warns rather
-  than reporting a median when the samples are multimodal.
+  `GCRY_TRACE=1` records: ~370 samples per config at 1–7% IQR instead of the
+  single `/gc-stats` snapshot, which is what makes per-knob attribution
+  possible at all. Takes a config list, drives a foreign server binary (the fat
+  app), builds for Parallel EC, and warns rather than reporting a median when
+  the samples are multimodal.
+- **`bench/sound_profile_ab.sh` no longer trusts wrk's `Requests/sec`.** WSL2
+  steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s and wrk derives its
+  duration from that clock, so a 10 s pass catching a step reports ~19% high —
+  and since which config it hits is random, it *biased* comparisons rather than
+  merely widening them. That is the mechanism behind every "sound ahead of
+  tuned" reading. Passes are now timed with `CLOCK_MONOTONIC` against wrk's
+  request count, and a stepped pass is redone.
 
 ### Fixed (root completeness)
 
@@ -55,10 +61,14 @@ Kemal `/json` (WSL2 i3-12100F, median of 7,
 `bench/log/linux/2026-08-06-052109-sound-profile/`): tuned **78.3%** @
 **0.795×**, sound **81.0%** @ **0.794×**, sound+conservative **84.4%** @
 **0.797×**. **RSS is flat across all three and reproduces across two
-sessions.** Throughput does not resolve — run spreads (5–10%) exceed the gaps
-and sound lands ahead of tuned despite doing strictly more work, so its cost is
-unmeasured rather than zero. An earlier ~1pp claim was retracted: it was
-measured before the raw-buffer fix above.
+sessions.** Throughput did not resolve in those sessions — but the clock bug
+above is why, and after fixing it the first cut
+(`bench/log/linux/2026-08-06-112252-sound-profile/`, 9950X, 7 runs at 10 s) puts
+tuned at **80.6%** and sound at **78.8%**: sound *below* tuned for the first
+time, which is the only physically possible ordering. The −2.18% gap is still
+smaller than the 4.4–7.2% per-config spread, so the cost is a candidate rather
+than a result. An earlier ~1pp claim was retracted: it was measured before the
+raw-buffer fix above.
 
 **Pause cost, however, is measured, and it is not small.** Per collection off
 the trace records: Kemal EC1 398 µs → 398 µs (+0.1%), but Kemal **EC4** 7.2 ms

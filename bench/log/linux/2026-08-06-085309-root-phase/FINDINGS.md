@@ -8,7 +8,9 @@ each rep dropped. 7883 collections analysed. The knob split in
 `2026-08-06-090503-root-phase/` is part of this result and is reported below.
 
 The EC1 companion cut is `2026-08-06-081512-root-phase/`. Read it first: it
-establishes the method and why the throughput channel is unusable on this host.
+establishes the method, and carries the correction on why the throughput
+channel would not resolve (a `CLOCK_REALTIME` stepping bug in the harness, not
+the host — see `2026-08-06-112252-sound-profile/FINDINGS.md`).
 
 ## Measurement basis
 

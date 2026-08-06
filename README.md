@@ -225,11 +225,17 @@ GCRY_SOUND=1 ./your-app
 | sound + fully conservative bodies | 84.4% | 0.797× |
 
 **RSS is flat across all three** — that much reproduces across two sessions.
-The throughput column does not: run spreads (5–10%) exceed the gaps, and sound
-lands *ahead* of tuned, which cannot be real since it does strictly more work.
-The throughput cost is **unresolved, not zero**, and a quieter host does not
-fix it — on a 9950X a single unchanged server process still varies 27% run to
-run under WSL2.
+The throughput column did not, and the reason turned out to be the harness:
+**WSL2 steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s**, and wrk derives
+its duration from that clock, so a pass containing a step reports ~19% high.
+Which config gets hit is random, so it biased rather than merely widened — that
+is how `sound` came out *ahead* of `tuned` despite doing strictly more work.
+
+Measuring the interval with `CLOCK_MONOTONIC` and redoing stepped passes
+restores the ordering (`sound` −2.18% against `tuned`) and puts tuned at 80.6%
+of Boehm, inside this host's historical band. The gap is still smaller than the
+per-config spread, so the throughput cost remains **unresolved, not zero** —
+but it is now a measurement worth taking rather than a broken channel.
 
 Pause cost *is* resolved, measured per collection off the GC trace:
 
