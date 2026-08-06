@@ -1,0 +1,8 @@
+{
+  "bin": "kemal-gcry-sound",
+  "build_flags": "",
+  "ec_parallelism": "1",
+  "reps": 3,
+  "duration_s": 40,
+  "connections": 100
+}

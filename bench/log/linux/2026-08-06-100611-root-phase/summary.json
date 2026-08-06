@@ -1,0 +1,222 @@
+{
+  "reps": 3,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 332,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "2",
+      "median": {
+        "roots_ns": 1487806.5,
+        "static_ns": 198787.0,
+        "stacks_ns": 63467.0,
+        "scrub_ns": 111803.5,
+        "mark_ns": 1502753.0,
+        "sweep_ns": 2224347.5,
+        "pause_ns": 3820846.0
+      },
+      "iqr": {
+        "roots_ns": 13187786.5,
+        "static_ns": 76967.25,
+        "stacks_ns": 368896.0,
+        "scrub_ns": 100800.25,
+        "mark_ns": 761025.25,
+        "sweep_ns": 396452.0,
+        "pause_ns": 14575359.75
+      },
+      "work_ns": 1663077.0,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "sound": {
+      "n": 314,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "3",
+      "median": {
+        "roots_ns": 1069827.5,
+        "static_ns": 139106.0,
+        "stacks_ns": 32075.5,
+        "scrub_ns": 63.0,
+        "mark_ns": 1243267.5,
+        "sweep_ns": 2179263.5,
+        "pause_ns": 2656031.0
+      },
+      "iqr": {
+        "roots_ns": 144254523.25,
+        "static_ns": 85672.0,
+        "stacks_ns": 1019865.0,
+        "scrub_ns": 11.0,
+        "mark_ns": 504574.75,
+        "sweep_ns": 521847.25,
+        "pause_ns": 149738065.75
+      },
+      "work_ns": 1101966.0,
+      "delta_work_pct": -33.74,
+      "delta_pause_pct": -30.49
+    },
+    "unaligned": {
+      "n": 351,
+      "env": "GCRY_UNALIGNED_CANDIDATES=1",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 955021,
+        "static_ns": 174499,
+        "stacks_ns": 30232,
+        "scrub_ns": 48117,
+        "mark_ns": 1178904,
+        "sweep_ns": 2234539,
+        "pause_ns": 2479426
+      },
+      "iqr": {
+        "roots_ns": 240389.0,
+        "static_ns": 77037.0,
+        "stacks_ns": 15516.0,
+        "scrub_ns": 48879.0,
+        "mark_ns": 358278.0,
+        "sweep_ns": 278842.0,
+        "pause_ns": 578574.0
+      },
+      "work_ns": 1033370,
+      "delta_work_pct": -37.86,
+      "delta_pause_pct": -35.11
+    },
+    "interior": {
+      "n": 351,
+      "env": "GCRY_INTERIOR=1",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 1101008,
+        "static_ns": 166590,
+        "stacks_ns": 42316,
+        "scrub_ns": 75438,
+        "mark_ns": 1362394,
+        "sweep_ns": 2116331,
+        "pause_ns": 2883504
+      },
+      "iqr": {
+        "roots_ns": 12248485.0,
+        "static_ns": 77353.0,
+        "stacks_ns": 376668.0,
+        "scrub_ns": 98544.0,
+        "mark_ns": 660694.0,
+        "sweep_ns": 381054.0,
+        "pause_ns": 13464888.0
+      },
+      "work_ns": 1218762,
+      "delta_work_pct": -26.72,
+      "delta_pause_pct": -24.53
+    },
+    "no-type-id-gate": {
+      "n": 349,
+      "env": "GCRY_DISABLE_TYPE_ID_GATE=1",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 10683143,
+        "static_ns": 176756,
+        "stacks_ns": 98357,
+        "scrub_ns": 110603,
+        "mark_ns": 1487105,
+        "sweep_ns": 2108627,
+        "pause_ns": 13053609
+      },
+      "iqr": {
+        "roots_ns": 12893941.0,
+        "static_ns": 74209.5,
+        "stacks_ns": 369177.5,
+        "scrub_ns": 97448.5,
+        "mark_ns": 776628.0,
+        "sweep_ns": 367058.5,
+        "pause_ns": 14319281.5
+      },
+      "work_ns": 10892103,
+      "delta_work_pct": 554.94,
+      "delta_pause_pct": 241.64
+    },
+    "no-stw-lag": {
+      "n": 322,
+      "env": "GCRY_STW_STACK_LAG=0 GCRY_STW_PTHREAD_LAG=0",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 967642.5,
+        "static_ns": 162510.5,
+        "stacks_ns": 30554.5,
+        "scrub_ns": 50505.5,
+        "mark_ns": 1162657.0,
+        "sweep_ns": 2233336.5,
+        "pause_ns": 2545468.5
+      },
+      "iqr": {
+        "roots_ns": 534135.0,
+        "static_ns": 82885.5,
+        "stacks_ns": 17760.5,
+        "scrub_ns": 63788.5,
+        "mark_ns": 266778.25,
+        "sweep_ns": 400166.75,
+        "pause_ns": 1203205.75
+      },
+      "work_ns": 1048702.5,
+      "delta_work_pct": -36.94,
+      "delta_pause_pct": -33.38
+    },
+    "no-scrub": {
+      "n": 341,
+      "env": "GCRY_DISABLE_SCRUB_FIBERS=1",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 13937731,
+        "static_ns": 193181,
+        "stacks_ns": 130305,
+        "scrub_ns": 63,
+        "mark_ns": 2083083,
+        "sweep_ns": 2057633,
+        "pause_ns": 16723021
+      },
+      "iqr": {
+        "roots_ns": 4166543.0,
+        "static_ns": 76831.0,
+        "stacks_ns": 306282.0,
+        "scrub_ns": 20.0,
+        "mark_ns": 589850.5,
+        "sweep_ns": 307446.5,
+        "pause_ns": 4470358.5
+      },
+      "work_ns": 14068099,
+      "delta_work_pct": 745.91,
+      "delta_pause_pct": 337.68
+    },
+    "no-blacklist": {
+      "n": 349,
+      "env": "GCRY_DISABLE_BLACKLIST=1",
+      "soundness": "tuned",
+      "threads": "3",
+      "median": {
+        "roots_ns": 1000480,
+        "static_ns": 178066,
+        "stacks_ns": 33207,
+        "scrub_ns": 54294,
+        "mark_ns": 1288399,
+        "sweep_ns": 2188389,
+        "pause_ns": 2664931
+      },
+      "iqr": {
+        "roots_ns": 11049416.0,
+        "static_ns": 77542.5,
+        "stacks_ns": 90945.5,
+        "scrub_ns": 84536.0,
+        "mark_ns": 555512.0,
+        "sweep_ns": 370488.0,
+        "pause_ns": 12241790.0
+      },
+      "work_ns": 1087981,
+      "delta_work_pct": -34.58,
+      "delta_pause_pct": -30.25
+    }
+  }
+}
