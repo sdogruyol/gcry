@@ -52,6 +52,14 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
       compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
+- [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
+      `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
+      and 14.5× on acik at EC1 once its heap passes ~60 MiB (17 → 213 ms);
+      `stw_multi_pthread_lag = 0` adds a further +64% at EC4. The other five
+      root-completeness heuristics are within ±6% on every workload measured,
+      so this pair is the entire cost of `GCRY_SOUND=1`. Make the scan cheap
+      enough that lag 0 is affordable and sound-by-default is back on the
+      table — `bench/log/linux/2026-08-06-085309-root-phase/FINDINGS.md`
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
