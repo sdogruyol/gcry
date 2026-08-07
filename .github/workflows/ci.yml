@@ -198,6 +198,31 @@ jobs:
           crystal build -Dgc_none bench/pause_budget.cr -o bin/pause_budget --error-trace
           ./bin/pause_budget --live-mb=20
 
+      # The pause trap in the sound profile. `GCRY_SOUND=1` sets both STW
+      # root-scan lags to 0, and that pair is the *entire* pause cost of the
+      # profile — 19× at Kemal EC4, 14.5× on a fat app. The correctness suite
+      # below runs under GCRY_SOUND=1 and passes at any pause, so nothing caught
+      # it. Both assertions are host-independent (booted lag state, and an upper
+      # bound on the lag-0 penalty), so this does not need a quiet runner.
+      - name: STW lag pause trap
+        run: |
+          crystal build -Dgc_none bench/stw_lag_pause.cr -o bin/stw_lag_pause --error-trace
+          ./bin/stw_lag_pause --rounds=5
+          # Same binary, inverted expectation: the profile must still set 0/0.
+          GCRY_SOUND=1 ./bin/stw_lag_pause --rounds=5
+          # The low-water skip took this from 13.9x to 1.03x, so the 30x ceiling
+          # above no longer catches its loss. Tighten it to 4x — enough headroom
+          # for a noisy shared runner, still failing if the full guard→bottom
+          # scan returns.
+          #
+          # The skip needs /proc/self/pagemap, which a hardened kernel or a
+          # restricted container can refuse; the collector then falls back to the
+          # full scan, which is correct but back at ~14x. The tool detects that
+          # and relaxes to --max-ratio-nolw rather than failing the build for a
+          # missing capability, so this step never goes red for something that is
+          # not a regression.
+          ./bin/stw_lag_pause --rounds=5 --max-ratio=4 --max-ratio-nolw=30
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -220,6 +245,37 @@ jobs:
       - name: Debug invariants
         run: |
           GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace
+
+      # Root-completeness profile (docs/SOUND-DEFAULTS.md). The sample asserts
+      # the *observed* heap state matches GCRY_SOUND, so a root heuristic added
+      # later but forgotten in apply_sound_profile fails here.
+      - name: Sound-roots profile smoke
+        run: |
+          crystal build -Dgc_none samples/sound_profile.cr -o bin/sound_profile
+          ./bin/sound_profile
+          GCRY_SOUND=1 ./bin/sound_profile
+          # An explicit knob must still override the profile.
+          GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./bin/sound_profile
+          # Barrier axis: sound roots + a page-dirty barrier must demote the label.
+          GCRY_SOUND=1 GCRY_NURSERY=262144 ./bin/sound_profile
+
+      # The sound profile is the configuration a correctness claim cites, so it
+      # has to stay green — a heuristic-off path that only runs at bench time
+      # would rot. Reuses binaries built above.
+      - name: Correctness suite under GCRY_SOUND=1
+        run: |
+          GCRY_SOUND=1 ./bin/stress 300
+          GCRY_SOUND=1 ./bin/json_churn 800
+          GCRY_SOUND=1 ./bin/alloc 500
+          GCRY_SOUND=1 ./bin/pattern_fuzz --seed=1 --phases=20 --objects-per-phase=1000
+          GCRY_SOUND=1 ./bin/thread_storm --iterations=100 --workers=4
+          GCRY_SOUND=1 ./bin/finalizer_complex
+          GCRY_SOUND=1 ./bin/nursery_headers
+          GCRY_SOUND=1 ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
+          timeout 120 env GCRY_SOUND=1 GCRY_STRESS=1 GCRY_STRESS_EVERY=32 ./bin/stress 100
+          # Fully conservative: sound roots + no layout tables.
+          GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/json_churn 800
+          GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/pattern_fuzz --seed=2 --phases=20 --objects-per-phase=1000
 
   coverage:
     runs-on: ubuntu-latest

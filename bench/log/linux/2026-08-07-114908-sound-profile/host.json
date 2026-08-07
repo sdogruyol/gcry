@@ -1,0 +1,9 @@
+{
+  "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor",
+  "ncpu": 32,
+  "l3_shared_cpu_list": "0-31",
+  "runs": 9,
+  "duration_s": 30,
+  "connections": 100,
+  "path": "/json"
+}

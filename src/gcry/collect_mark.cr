@@ -74,7 +74,9 @@ module Gcry
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
-      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+      # scan_unaligned_candidates keeps them (GCRY_SOUND) — a misaligned interior
+      # into a byte buffer is a root bdwgc would resolve via GC_base.
+      return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       header = find_block(pointer)
       return unless header
@@ -215,7 +217,7 @@ module Gcry
     private def mark_noscan_unlocked(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
-      return if (addr & (sizeof(Void*).to_u64 - 1)) != 0
+      return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       header = find_object(pointer)
       return unless header
@@ -327,7 +329,15 @@ module Gcry
       # Raw buffers (no Crystal type_id): object-base only — cuts interior false
       # hits from JSON/bytes. Typed References keep interiors so Array#shift and
       # layout-miss types with mid-object pointers stay correct.
-      base_only = size >= 4 && !type_id_plausible?(header)
+      #
+      # This is a root-completeness heuristic on *heap edges*, not just on
+      # ambient roots: an interior pointer stored inside a Slice / raw buffer is
+      # dropped. It is also a second, silent consumer of type_id_plausible? —
+      # so with @type_id_gate off, the type_id heuristic still steered marking
+      # from here. @allow_interior_pointers (GCRY_INTERIOR / GCRY_SOUND) now
+      # switches both off together, which is what makes `root_soundness=sound`
+      # a true statement. See docs/SOUND-DEFAULTS.md.
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(header)
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)

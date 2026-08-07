@@ -102,6 +102,69 @@ module Gcry
     default_heap.live?(pointer)
   end
 
+  # True when no root-completeness heuristic is armed: every ambient pointer
+  # the collector can see is followed, and nothing below a parked SP is wiped.
+  # Derived from the live fields, so it reports what the heap *is*, not what an
+  # env var asked for. See docs/SOUND-DEFAULTS.md.
+  #
+  # Note `scan_static_roots`: a heap that never walks BSS/data misses roots by
+  # construction. Process GC turns it on at boot; library heaps default it off,
+  # so a library heap must opt in before it can report sound roots.
+  def self.sound_roots?(heap : Heap = default_heap) : Bool
+    heap.allow_interior_pointers &&
+      heap.scan_unaligned_candidates &&
+      heap.scan_static_roots &&
+      !heap.type_id_gate &&
+      !heap.type_id_gate_stacks &&
+      heap.stw_multi_stack_lag == 0 &&
+      heap.stw_multi_pthread_lag == 0 &&
+      !heap.scrub_fibers_enabled &&
+      !heap.blacklist_enabled &&
+      # Exclusive stack maps replace conservative scans with incomplete
+      # compiler data — the opposite of this profile (docs/STACK_MAPS.md).
+      !heap.precise_stack_exclusive &&
+      !heap.precise_stack_fibers_exclusive
+  end
+
+  # True when liveness does not depend on a page-dirty barrier.
+  #
+  # A separate axis from root completeness, and a real one: generational and
+  # incremental collection both rely on the old→young / dirty-page remembered
+  # set, and soft-dirty has measured false-negatives (the nursery note in
+  # gc_override.cr cites Kemal Hash key UAF / SEGV under WSL). Both are off by
+  # default; this exists so `GCRY_SOUND=1 GCRY_NURSERY=1` cannot report a
+  # clean bill of health.
+  def self.sound_barriers?(heap : Heap = default_heap) : Bool
+    !heap.nursery_enabled && !heap.incremental_auto
+  end
+
+  # True only when both axes are sound. This is the label a correctness claim
+  # should cite; the per-axis ones say *which* assumption is in play.
+  def self.sound?(heap : Heap = default_heap) : Bool
+    sound_roots?(heap) && sound_barriers?(heap)
+  end
+
+  # "sound" | "tuned" — labels for `/gc-stats` and bench logs.
+  def self.root_soundness(heap : Heap = default_heap) : String
+    sound_roots?(heap) ? "sound" : "tuned"
+  end
+
+  def self.barrier_soundness(heap : Heap = default_heap) : String
+    sound_barriers?(heap) ? "sound" : "tuned"
+  end
+
+  # Aggregate label. Three values rather than two, so a failing config says
+  # *which* assumption is in play:
+  #
+  #   "sound"             both axes complete — the label a claim may cite
+  #   "sound-roots-only"  roots complete, but liveness depends on a page-dirty
+  #                       barrier (nursery / incremental)
+  #   "tuned"             a root-completeness heuristic is armed
+  def self.soundness(heap : Heap = default_heap) : String
+    return "tuned" unless sound_roots?(heap)
+    sound_barriers?(heap) ? "sound" : "sound-roots-only"
+  end
+
   def self.push_stack(stack_top : Void*, stack_bottom : Void*) : Nil
     default_heap.push_stack(stack_top, stack_bottom)
   end

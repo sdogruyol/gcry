@@ -1,0 +1,8 @@
+{
+  "bin": "kemal-gcry-sound-mt",
+  "build_flags": "-Dpreview_mt -Dexecution_context",
+  "ec_parallelism": "4",
+  "reps": 3,
+  "duration_s": 20,
+  "connections": 100
+}

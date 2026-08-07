@@ -3,6 +3,8 @@
   require "./platform/linux_stack"
   require "./platform/linux_softdirty"
   require "./platform/linux_stw"
+  require "./platform/linux_pagemap"
+  require "./platform/linux_proc_sp"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"
@@ -101,6 +103,13 @@ module Gcry
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false
+    # Follow candidates whose *value* is not word-aligned. Crystal-emitted
+    # references are aligned, so the default drops misaligned words cheaply
+    # before find_block. But an interior pointer into a byte buffer
+    # (`str.to_unsafe + 3`) is a legitimate misaligned root that bdwgc would
+    # honour via GC_base. Root-completeness knob — see docs/SOUND-DEFAULTS.md.
+    # GCRY_SOUND=1 turns it on; GCRY_ALIGNED_CANDIDATES=1 forces it back off.
+    property scan_unaligned_candidates : Bool = false
     # Reject ambient root candidates (stack/static) whose payload type_id looks
     # absurd. Heap-scan marks stay ungated so Array/Hash buffers remain reachable.
     # Process GC default-on; GCRY_DISABLE_TYPE_ID_GATE=1 escapes.

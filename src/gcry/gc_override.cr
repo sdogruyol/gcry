@@ -197,8 +197,79 @@ module GC
     end
   end
 
+  # Root-completeness profile (GCRY_SOUND=1). See docs/SOUND-DEFAULTS.md.
+  #
+  # Every knob here trades *root-scan completeness* for throughput or RSS:
+  # each one can decline to mark a pointer that is genuinely live. Each was
+  # argued individually, in place, against a measured regression. The sound
+  # profile turns the whole class off at once so a measurement can answer one
+  # question honestly: what does gcry cost when it is not allowed to guess?
+  #
+  # (First cut says: less than expected. Kemal /json is ~1pp of throughput and
+  # no RSS movement — see docs/SOUND-DEFAULTS.md. Whether that makes sound the
+  # right *default* is a separate call, and needs more than one host.)
+  #
+  #   allow_interior_pointers  LLVM may keep only an interior pointer live in a
+  #                            register / spill slot while the base is dead
+  #                            (strength-reduced loop over a String / Array
+  #                            buffer). bdwgc as Crystal links it treats
+  #                            interiors as valid, so base-only ambient roots
+  #                            are strictly less conservative than what
+  #                            Crystal's codegen has been validated against.
+  #   scan_unaligned_candidates  ditto for `str.to_unsafe + 3`: a misaligned
+  #                            interior is a root bdwgc resolves via GC_base.
+  #   type_id_gate             rejects a *static* root whose first Int32 is
+  #                            <= 0 or > 1_000_000 — a heuristic applied to a
+  #                            real reference (see type_id_root_false_negatives,
+  #                            which exists to count when it was wrong).
+  #   stw_multi_*_lag          bounds how far below a parked stack_top another
+  #                            thread's stack is scanned; a live pointer deeper
+  #                            than the lag is never seen. 0 == full scan.
+  #   scrub_fibers_enabled     zeroes bytes below a parked fiber's *estimated*
+  #                            SP, from another thread. bdwgc's GC_clear_stack
+  #                            only ever wipes below the calling thread's own
+  #                            hardware SP.
+  #   blacklist_enabled        steers allocation away from pages the type_id
+  #                            gate called false. With the gate off nothing
+  #                            feeds it; keep it off so the profile has exactly
+  #                            one meaning.
+  #   scan_static_roots        a heap that never walks BSS/data misses roots by
+  #                            construction (GCRY_DISABLE_STATIC_ROOTS=1).
+  #   nursery / incremental    the *barrier* axis: both make liveness depend on
+  #                            the page-dirty remembered set, and soft-dirty has
+  #                            measured false-negatives (see the nursery note in
+  #                            GC.init). Already off for process GC; set here so
+  #                            the profile does not rely on that default.
+  #
+  # Object-body scan precision (Gcry::Layout, keyed on the payload's first
+  # Int32) is a *separate* axis and is deliberately not touched here — measure
+  # it with GCRY_DISABLE_LAYOUT=1 so the two costs stay attributable.
+  #
+  # Applied before the individual knobs below, so an explicit GCRY_* still
+  # wins: `GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1` re-enables scrub.
+  private def self.apply_sound_profile(heap : Gcry::Heap) : Nil
+    heap.allow_interior_pointers = true
+    heap.scan_unaligned_candidates = true
+    heap.scan_static_roots = true
+    heap.type_id_gate = false
+    heap.type_id_gate_stacks = false
+    heap.stw_multi_stack_lag = 0_u64
+    heap.stw_multi_pthread_lag = 0_u64
+    heap.scrub_fibers_enabled = false
+    heap.blacklist_enabled = false
+    # Barrier axis: liveness must not depend on the page-dirty remembered set.
+    # Both are already off for process GC — set them so the profile is
+    # self-contained rather than relying on a default that could move.
+    heap.nursery_enabled = false
+    heap.incremental_auto = false
+  end
+
   # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
+    # First: whole-class root-completeness profile. Individual knobs below
+    # override it, so this must run before them.
+    apply_sound_profile(heap) if env_flag_one?("GCRY_SOUND")
+
     if env_flag_one?("GCRY_DISABLE_AUTO")
       heap.gc_threshold = UInt64::MAX
     elsif thr = env_u64("GCRY_THRESHOLD")
@@ -380,6 +451,16 @@ module GC
       heap.allow_interior_pointers = true
     end
 
+    # Follow misaligned candidate *values* (interiors into byte buffers).
+    # Implied by GCRY_SOUND; GCRY_ALIGNED_CANDIDATES=1 forces the cheap
+    # alignment filter back on so the two costs can be measured apart.
+    if env_flag_one?("GCRY_UNALIGNED_CANDIDATES")
+      heap.scan_unaligned_candidates = true
+    end
+    if env_flag_one?("GCRY_ALIGNED_CANDIDATES")
+      heap.scan_unaligned_candidates = false
+    end
+
     if env_flag_one?("GCRY_TYPE_ID_GATE")
       # Opt into pre-fix behavior: gate stack/thread ambient roots too.
       heap.type_id_gate = true
@@ -458,6 +539,12 @@ module GC
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
+    # Escape hatch for the low-water skip on the lag-0 path. It preserves
+    # semantics (untouched pages are zero), so this exists to A/B its cost and
+    # to disable it on a kernel whose pagemap misbehaves.
+    if env_flag_zero?("GCRY_STACK_LOW_WATER")
+      heap.stack_low_water_scan = false
+    end
     # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
     # Default 256 KiB from stack high; 0 = full pthread mapping.
     if plag = env_u64("GCRY_STW_PTHREAD_LAG")
@@ -481,6 +568,11 @@ module GC
     end
     if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = false
+    end
+    # Audit the EC1 foreign-SP exemption in scrub_parked_fiber_stacks. Costs a
+    # thread walk per parked fiber, so it is opt-in — see docs/SOUND-DEFAULTS.md.
+    if env_flag_one?("GCRY_SCRUB_AUDIT")
+      heap.scrub_audit_foreign_sp = true
     end
     # Parallel parked-fiber scrub window below saved SP (default 512).
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
@@ -549,6 +641,13 @@ module GC
     flag = LibC.getenv(name)
     return false if flag.null?
     flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+  end
+
+  # For knobs that default *on*: only an explicit "0" turns them off.
+  private def self.env_flag_zero?(name : String) : Bool
+    flag = LibC.getenv(name)
+    return false if flag.null?
+    flag.value == '0'.ord.to_u8 && (flag + 1).value == 0
   end
 
   # Single ASCII digit env (e.g. GCRY_PRECISE_STACK=1|2). Nil if unset/invalid.

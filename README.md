@@ -206,6 +206,71 @@ Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) 
 
 Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**0.63x** (was ~**18x** at v0.17). Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
 
+### What the default heuristics cost
+
+Every number above is measured with gcry's **root-completeness heuristics
+armed** — base-pointer-only ambient roots, the static-root `type_id` gate,
+256 KiB STW stack lags, parked-fiber scrub. Each can decline to mark a pointer
+that is genuinely live, so those numbers price a collector that is allowed to
+guess. `GCRY_SOUND=1` turns the whole class off:
+
+```sh
+GCRY_SOUND=1 ./your-app
+```
+
+| Kemal `/json` (tip, i3, median of 7) | % of Boehm | RSS × |
+|--------------------------------------|-----------:|------:|
+| tuned (process defaults) | 78.3% | 0.795× |
+| **sound roots** (`GCRY_SOUND=1`) | **81.0%** | **0.794×** |
+| sound + fully conservative bodies | 84.4% | 0.797× |
+
+**RSS is flat across all three** — that much reproduces across two sessions.
+The throughput column did not, and the reason turned out to be the harness:
+**WSL2 steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s**, and wrk derives
+its duration from that clock, so a pass containing a step reports ~19% high.
+Which config gets hit is random, so it biased rather than merely widened — that
+is how `sound` came out *ahead* of `tuned` despite doing strictly more work.
+
+That was one of four biases in the harness — the others were blocked execution
+(config order confounded with time, worth ~2–3%) and a fixed config order
+within each round (whichever ran first came out ~2% slow). All four were bias,
+not variance, so no run count ever helped. Fixed: monotonic timing, round-robin
+interleaving, order rotated each round.
+
+With the confounds out (`bench/log/linux/2026-08-06-140037-sound-profile/`,
+9 rounds × 30 s, paired):
+
+| Config | vs tuned | rounds won | σ |
+|--------|---------:|-----------:|--:|
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | **+1.29%** | 8/9 | 3.2 |
+| `GCRY_SOUND=1` | +0.82% | 8/9 | 1.7 |
+| `GCRY_DISABLE_BLACKLIST=1` | +0.73% | 7/9 | 1.2 |
+
+**The whole class is throughput-neutral on this workload** — under ~1% either
+way, not distinguishable from zero. The one real signal is `scrub_fibers`, and
+it points against the default: turning it off *gains* throughput, and the
+per-collection trace independently has it saving 1.7% of root work. It loses on
+throughput, pause and soundness alike.
+
+Pause cost *is* resolved, measured per collection off the GC trace:
+
+| Cut | tuned | `GCRY_SOUND=1` |
+|-----|------:|---------------:|
+| Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
+| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** → **13 ms** |
+| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** (not re-cut) |
+
+In all three the whole cost is the two STW lag knobs — the other five
+heuristics are within ±6%.
+
+The EC4 arrow is a fix, not a re-measurement. `lag = 0` was scanning each parked
+fiber's entire 8 MiB of reserved stack, **0.05% of which has ever been written**;
+the scan now starts at the stack's low-water mark. That is not a precision trade
+— a page with neither the present nor the swapped bit in `/proc/self/pagemap` has
+never been faulted, so both ranges see identical words. EC4 pause 147 ms → 13 ms
+in the same run, RSS unchanged. Method, per-knob decomposition, known limits of
+the label, and the fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+
 ### Pause distribution (Kemal `/json`, Linux)
 
 Illustrative histogram from an earlier cut (not the v0.16.0 median session). Prefer `Gcry.pause_stats` / `/gc-stats` on your host.
@@ -271,6 +336,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
+| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved; **large pause cost where the root scan is big** — EC4 or a big heap) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
 | `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
@@ -293,6 +359,7 @@ Full list: [docs/HARDENING.md](docs/HARDENING.md). Pauses: `Gcry.pause_stats`.
 | [docs/COMPARISON.md](docs/COMPARISON.md) | gcry vs Boehm head-to-head |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Crystal `GC` wiring |
 | [docs/HARDENING.md](docs/HARDENING.md) | All env knobs |
+| [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) | `GCRY_SOUND=1` — what gcry costs with no root heuristics |
 | [docs/STACK_MAPS.md](docs/STACK_MAPS.md) | Compiler stack maps (research; default off) |
 | [docs/API.md](docs/API.md) | Public API + `/metrics` |
 | [docs/POLICY.md](docs/POLICY.md) | OOM, fork, signals |

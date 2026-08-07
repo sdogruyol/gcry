@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_SOUND=1` — root-completeness profile.** gcry's process defaults
+  include a class of knobs that trade *root-scan completeness* for throughput
+  or RSS: base-pointer-only ambient roots, the static-root `type_id` gate, the
+  256 KiB STW stack/pthread lags, and parked-fiber scrub. Each can decline to
+  mark a pointer that is genuinely live, so throughput measured with them armed
+  does not answer "what does a correct gcry cost?". One flag turns the whole
+  class off. Applied before the individual knobs, so any explicit `GCRY_*`
+  still overrides it. [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)
+- **`scan_unaligned_candidates` / `GCRY_UNALIGNED_CANDIDATES=1`** (implied by
+  `GCRY_SOUND`). The mark path dropped misaligned candidate *values* before
+  `find_block` ever ran, so an interior pointer into a byte buffer
+  (`str.to_unsafe + 3`) — a root bdwgc resolves via `GC_base` — was never
+  followed. Escape back to the cheap filter: `GCRY_ALIGNED_CANDIDATES=1`.
+- **`Gcry.sound_roots?` / `Gcry.root_soundness`**, plus the underlying knob
+  values on `/gc-stats`. Derived from the live heap fields, so a benchmark can
+  *prove* which configuration ran instead of trusting that an env var took.
+- **`bench/sound_profile_ab.sh`** (`make bench-sound-profile`): Boehm vs gcry
+  tuned vs gcry sound vs gcry sound+conservative, one host, one run. Aborts if
+  a config labelled `sound` did not actually boot sound.
+- **CI:** `sound-profile-smoke` plus the stress / churn / pattern-fuzz /
+  thread-storm / finalizer / STW-MT suite re-run under `GCRY_SOUND=1` and under
+  `GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1`. `samples/sound_profile.cr` fails the
+  build if a root heuristic is added later and forgotten in
+  `apply_sound_profile`.
+- **`bench/root_phase_ab.sh`** — per-collection pause composition from the
+  `GCRY_TRACE=1` records: ~370 samples per config at 1–7% IQR instead of the
+  single `/gc-stats` snapshot, which is what makes per-knob attribution
+  possible at all. Takes a config list, drives a foreign server binary (the fat
+  app), builds for Parallel EC, and warns rather than reporting a median when
+  the samples are multimodal.
+- **`bench/sound_profile_ab.sh` no longer trusts wrk's `Requests/sec`.** WSL2
+  steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s and wrk derives its
+  duration from that clock, so a 10 s pass catching a step reports ~19% high —
+  and since which config it hits is random, it *biased* comparisons rather than
+  merely widening them. That is the mechanism behind every "sound ahead of
+  tuned" reading. Passes are now timed with `CLOCK_MONOTONIC` against wrk's
+  request count, and a stepped pass is redone.
+- **`bench/stw_lag_pause.cr` / `make stw-lag-pause` — CI gate for the STW lag
+  pause trap.** `GCRY_SOUND=1` is a 19× pause regression at Kemal EC4 and 14.5×
+  on a fat app, and CI could not see it: the sound correctness suite passes at
+  any pause, and reproducing the regression needed a server, a fat app or an EC4
+  build. It does not — `stw_multi_stack_lag = 0` scans every parked fiber
+  guard→bottom under any multi-mutator STW, so >2 OS threads and a parked fiber
+  population are enough. 32 fibers reproduces 15× in under 6 s. Asserts the
+  booted lag state against `GCRY_SOUND` and caps the lag-0 penalty at 30×; both
+  host-independent, and the cap is an upper bound so making the root scan cheap
+  cannot break it.
+- **The collector warns once when `stw_multi_stack_lag` is 0 under
+  multi-mutator STW** — the shape where every parked fiber stack is scanned in
+  full. Deliberately not a boot warning: `GCRY_SOUND=1` sets lag 0
+  unconditionally, but the knob is inert until STW runs with more than two
+  mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
+
+### Fixed (root completeness)
+
+- **`scan_object` ignored `allow_interior_pointers` for raw buffers.** The
+  conservative fallback marked untyped allocations base-only, so an interior
+  pointer stored inside a `Slice` / raw buffer was dropped — and the same line
+  was a second, silent consumer of `type_id_plausible?`, so the type_id
+  heuristic still steered marking with `type_id_gate` off. Both now follow
+  `allow_interior_pointers`, which is what makes `root_soundness=sound` a true
+  statement. Pinned by `spec/sound_defaults_spec.cr` in both directions.
+
+Kemal `/json` (WSL2 i3-12100F, median of 7,
+`bench/log/linux/2026-08-06-052109-sound-profile/`): tuned **78.3%** @
+**0.795×**, sound **81.0%** @ **0.794×**, sound+conservative **84.4%** @
+**0.797×**. **RSS is flat across all three and reproduces across two
+sessions.** Throughput did not, and four harness biases are why: the clock bug
+above; a retry loop that made the 9×30 s methodology impossible; blocked
+execution (config order confounded with time, ~2–3%); and a fixed config order
+within each round (~2% to whichever ran first). All four are bias, not
+variance, so run count never helped. With them out, the apparent gap fell
++2.27% → +2.11% → **+0.82%**.
+
+**The sound profile is throughput-neutral on Kemal `/json` at EC1** — +0.82% at
+1.7σ over 9 paired rounds, not distinguishable from zero
+(`bench/log/linux/2026-08-06-140037-sound-profile/`). The one knob with a real
+signal is `scrub_fibers`, and it argues against its own default: disabling it
+gains **1.29%** (8/9 rounds, 3.2σ), matching the per-collection trace, which has
+it saving 1.7% of root work. An earlier ~1pp claim was retracted separately: it
+was measured before the raw-buffer fix above.
+
+**Pause cost, however, is measured, and it is not small.** Per collection off
+the trace records: Kemal EC1 398 µs → 398 µs (+0.1%), but Kemal **EC4** 7.2 ms
+→ **141.7 ms** and acik at EC1 with a heap past ~60 MiB 17 ms → **213 ms**. In
+all three the entire cost is the two STW lag knobs; the other five
+root-completeness heuristics stay within ±6%, and parked-fiber scrub is a net
+saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
+reading — true of Kemal, false of the fat app — and it is why the defaults stay
+tuned for now.
+
 ### Fixed
 
 - **Process / backticks under `-Dgc_none`:** Crystal `prepare_args` omits the

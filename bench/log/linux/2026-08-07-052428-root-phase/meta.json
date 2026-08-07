@@ -1,0 +1,11 @@
+{
+  "bin": "kemal-gcry-sound",
+  "build_flags": "",
+  "ec_parallelism": "1",
+  "reps": 12,
+  "duration_s": 30,
+  "connections": 100,
+  "cpu_model": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "ncpu": 8,
+  "l3_shared_cpu_list": "0-7"
+}

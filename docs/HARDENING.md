@@ -23,6 +23,10 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
 - Fiber stack scrub **on** (Linux + Darwin; `GCRY_DISABLE_SCRUB_FIBERS=1` to opt out)
+- The five items above are **root-completeness heuristics**: each can decline to
+  mark a pointer that is genuinely live. `GCRY_SOUND=1` turns the whole class
+  off in one flag — that is the configuration whose numbers belong in a
+  correctness claim. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
 - Large-object freelist retain: Linux process **0**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive grows only from a non-zero floor, up to 32 MiB)
 - Free-page physical release: Darwin **on** (`MADV_FREE_REUSABLE`); Linux HOLED **opt-in** (`GCRY_PAGE_DONTNEED=1` — measured thr+RSS regression as default). Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
@@ -61,7 +65,10 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
 | `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
 | `GCRY_PARALLEL_RELEASE=1` | **Unsupported** — Parallel munmap excess (forces in-STW sweep; can hang). stderr warn; prefer `GCRY_PARALLEL_DORMANT=1` |
+| `GCRY_SOUND=1` | **Soundness profile** — turns off every heuristic that can decline to mark a live pointer (interiors on, misaligned interiors on, static roots on, type_id gate off, STW lags 0, fiber scrub off, blacklist off) and pins the barrier axis (nursery/incremental off). Applied before the individual knobs, so any explicit `GCRY_*` still wins — and the `soundness` field on `/gc-stats` demotes to `sound-roots-only` / `tuned` when one does. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) |
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
+| `GCRY_UNALIGNED_CANDIDATES=1` | Follow misaligned candidate values (`str.to_unsafe + 3`); implied by `GCRY_SOUND` |
+| `GCRY_ALIGNED_CANDIDATES=1` | Force the cheap alignment filter back on (escape from `GCRY_SOUND`) |
 | `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
 | `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **0**; Darwin **1 MiB**; adaptive from non-zero) |

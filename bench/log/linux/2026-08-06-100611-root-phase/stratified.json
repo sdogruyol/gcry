@@ -1,0 +1,136 @@
+{
+  "strata": {
+    "small": "heap_size < 55 MiB",
+    "large": "heap_size >= 55 MiB"
+  },
+  "configs": {
+    "tuned": {
+      "small": {
+        "n": 169,
+        "work_ns": 1039296,
+        "roots_ns": 948320,
+        "pause_ns": 2560578,
+        "delta_work_pct": 0.0
+      },
+      "large": {
+        "n": 163,
+        "work_ns": 14579937,
+        "roots_ns": 14135993,
+        "pause_ns": 17132423,
+        "delta_work_pct": 0.0
+      }
+    },
+    "sound": {
+      "small": {
+        "n": 235,
+        "work_ns": 1041994,
+        "roots_ns": 1012344,
+        "pause_ns": 2448254,
+        "delta_work_pct": 0.3
+      },
+      "large": {
+        "n": 79,
+        "work_ns": 210969855,
+        "roots_ns": 208911680,
+        "pause_ns": 213329161,
+        "delta_work_pct": 1347.0
+      }
+    },
+    "unaligned": {
+      "small": {
+        "n": 289,
+        "work_ns": 1005353,
+        "roots_ns": 924844,
+        "pause_ns": 2406239,
+        "delta_work_pct": -3.3
+      },
+      "large": {
+        "n": 62,
+        "work_ns": 15499379.0,
+        "roots_ns": 14968960.5,
+        "pause_ns": 17909940.5,
+        "delta_work_pct": 6.3
+      }
+    },
+    "interior": {
+      "small": {
+        "n": 185,
+        "work_ns": 977683,
+        "roots_ns": 896054,
+        "pause_ns": 2351308,
+        "delta_work_pct": -5.9
+      },
+      "large": {
+        "n": 166,
+        "work_ns": 13716010.5,
+        "roots_ns": 13214439.5,
+        "pause_ns": 15980564.5,
+        "delta_work_pct": -5.9
+      }
+    },
+    "no-type-id-gate": {
+      "small": {
+        "n": 164,
+        "work_ns": 962665.0,
+        "roots_ns": 891003.0,
+        "pause_ns": 2362748.0,
+        "delta_work_pct": -7.4
+      },
+      "large": {
+        "n": 185,
+        "work_ns": 14015627,
+        "roots_ns": 13577836,
+        "pause_ns": 16502417,
+        "delta_work_pct": -3.9
+      }
+    },
+    "no-stw-lag": {
+      "small": {
+        "n": 257,
+        "work_ns": 1002395,
+        "roots_ns": 927692,
+        "pause_ns": 2456282,
+        "delta_work_pct": -3.6
+      },
+      "large": {
+        "n": 65,
+        "work_ns": 210503990,
+        "roots_ns": 208862754,
+        "pause_ns": 212009619,
+        "delta_work_pct": 1343.8
+      }
+    },
+    "no-scrub": {
+      "small": {
+        "n": 55,
+        "work_ns": 997732,
+        "roots_ns": 965025,
+        "pause_ns": 2335104,
+        "delta_work_pct": -4.0
+      },
+      "large": {
+        "n": 286,
+        "work_ns": 14630368.0,
+        "roots_ns": 14464841.0,
+        "pause_ns": 17359467.5,
+        "delta_work_pct": 0.3
+      }
+    },
+    "no-blacklist": {
+      "small": {
+        "n": 225,
+        "work_ns": 995460,
+        "roots_ns": 913432,
+        "pause_ns": 2416706,
+        "delta_work_pct": -4.2
+      },
+      "large": {
+        "n": 124,
+        "work_ns": 13776215.5,
+        "roots_ns": 13353158.0,
+        "pause_ns": 16226674.0,
+        "delta_work_pct": -5.5
+      }
+    }
+  }
+}

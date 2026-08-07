@@ -1,13 +1,13 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke mutate soak soak-smoke format format-check lint samples"
-	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-crystal-metric bench-kemal-record"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint samples"
+	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
 
@@ -118,6 +118,13 @@ pause-budget: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/pause_budget.cr -o $(BIN)/pause_budget
 	$(BIN)/pause_budget --live-mb=$${LIVE_MB:-20}
 
+# STW root-scan lag pause trap: the whole pause cost of GCRY_SOUND=1.
+# Runs under both env shapes — the boot-lag assertion inverts with GCRY_SOUND.
+stw-lag-pause: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stw_lag_pause.cr -o $(BIN)/stw_lag_pause
+	$(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5}
+	GCRY_SOUND=1 $(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5}
+
 rss-leak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak
 	$(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000}
@@ -219,10 +226,26 @@ samples: $(BIN)
 	$(CRYSTAL) build -Dgc_none samples/stress.cr -o $(BIN)/stress
 	$(CRYSTAL) build -Dgc_none samples/json_churn.cr -o $(BIN)/json_churn
 	$(CRYSTAL) build -Dgc_none samples/stw_sp_clamp.cr -o $(BIN)/stw_sp_clamp
+	$(CRYSTAL) build -Dgc_none samples/sound_profile.cr -o $(BIN)/sound_profile
+
+# Root-completeness profile smoke: the reported heap state must match GCRY_SOUND,
+# and an explicit knob must still override the profile. Catches a new root
+# heuristic that was never added to apply_sound_profile.
+sound-profile-smoke: $(BIN)
+	$(CRYSTAL) build -Dgc_none samples/sound_profile.cr -o $(BIN)/sound_profile
+	$(BIN)/sound_profile
+	GCRY_SOUND=1 $(BIN)/sound_profile
+	GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 $(BIN)/sound_profile
+	GCRY_SOUND=1 GCRY_NURSERY=262144 $(BIN)/sound_profile
 
 # Short A/B thr gate for CI (needs wrk). MIN_PCT=70 by default.
 bench-perf-smoke:
 	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/perf_smoke.sh
+
+# Boehm vs gcry tuned vs gcry sound vs gcry sound+conservative, one host, one
+# run. Publishes the number a correctness claim can cite — docs/SOUND-DEFAULTS.md.
+bench-sound-profile:
+	BENCH_RUNS=$(BENCH_RUNS) PORT=$(PORT) ./bench/sound_profile_ab.sh
 
 # Secondary GC suite (vendored crystal-metric, process-fresh). Informational.
 # FILTER=core|stress|gc|all|A,B TRIALS=1 make bench-crystal-metric

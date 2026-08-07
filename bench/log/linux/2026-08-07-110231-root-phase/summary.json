@@ -1,0 +1,108 @@
+{
+  "reps": 4,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 1323,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "5",
+      "rss_kib": 89976.0,
+      "rss_reps": [
+        90112,
+        89840,
+        89840,
+        90112
+      ],
+      "median": {
+        "roots_ns": 6218269,
+        "static_ns": 80938,
+        "stacks_ns": 330459,
+        "scrub_ns": 45150,
+        "mark_ns": 214216,
+        "sweep_ns": 29498474,
+        "pause_ns": 7083581
+      },
+      "iqr": {
+        "roots_ns": 272492.0,
+        "static_ns": 1321.0,
+        "stacks_ns": 22610.0,
+        "scrub_ns": 3380.0,
+        "mark_ns": 17408.0,
+        "sweep_ns": 1990778.0,
+        "pause_ns": 336820.0
+      },
+      "work_ns": 6593878,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "sound": {
+      "n": 1276,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "5",
+      "rss_kib": 90238.0,
+      "rss_reps": [
+        90364,
+        89844,
+        90112,
+        90368
+      ],
+      "median": {
+        "roots_ns": 11048650.0,
+        "static_ns": 80853.0,
+        "stacks_ns": 1554911.5,
+        "scrub_ns": 30.0,
+        "mark_ns": 223237.0,
+        "sweep_ns": 29401100.0,
+        "pause_ns": 12983624.0
+      },
+      "iqr": {
+        "roots_ns": 7746365.5,
+        "static_ns": 1354.0,
+        "stacks_ns": 110719.25,
+        "scrub_ns": 10.0,
+        "mark_ns": 20322.75,
+        "sweep_ns": 1780516.0,
+        "pause_ns": 7791577.5
+      },
+      "work_ns": 12603591.5,
+      "delta_work_pct": 91.14,
+      "delta_pause_pct": 83.29
+    },
+    "sound-nolw": {
+      "n": 620,
+      "env": "GCRY_SOUND=1 GCRY_STACK_LOW_WATER=0",
+      "soundness": "sound",
+      "threads": "5",
+      "rss_kib": 90240.0,
+      "rss_reps": [
+        90368,
+        90112,
+        90112,
+        90368
+      ],
+      "median": {
+        "roots_ns": 140777343.0,
+        "static_ns": 84082.0,
+        "stacks_ns": 5725966.5,
+        "scrub_ns": 30.0,
+        "mark_ns": 372481.0,
+        "sweep_ns": 29464787.0,
+        "pause_ns": 147156710.0
+      },
+      "iqr": {
+        "roots_ns": 904433.0,
+        "static_ns": 1431.0,
+        "stacks_ns": 112538.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 40582.25,
+        "sweep_ns": 1947169.25,
+        "pause_ns": 958650.5
+      },
+      "work_ns": 146503339.5,
+      "delta_work_pct": 2121.81,
+      "delta_pause_pct": 1977.43
+    }
+  }
+}

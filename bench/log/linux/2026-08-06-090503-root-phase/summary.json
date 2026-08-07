@@ -1,0 +1,88 @@
+{
+  "reps": 3,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 1135,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "5",
+      "median": {
+        "roots_ns": 6413729,
+        "static_ns": 84097,
+        "stacks_ns": 303583,
+        "scrub_ns": 47113,
+        "mark_ns": 225133,
+        "sweep_ns": 14600961,
+        "pause_ns": 7249397
+      },
+      "iqr": {
+        "roots_ns": 301455.0,
+        "static_ns": 1395.0,
+        "stacks_ns": 131607.0,
+        "scrub_ns": 4027.0,
+        "mark_ns": 23746.0,
+        "sweep_ns": 1506139.0,
+        "pause_ns": 362288.0
+      },
+      "work_ns": 6764425,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "stack-lag-0": {
+      "n": 496,
+      "env": "GCRY_STW_STACK_LAG=0",
+      "soundness": "tuned",
+      "threads": "5",
+      "median": {
+        "roots_ns": 136875225.0,
+        "static_ns": 89200.0,
+        "stacks_ns": 327518.0,
+        "scrub_ns": 48382.0,
+        "mark_ns": 389212.0,
+        "sweep_ns": 14181805.0,
+        "pause_ns": 137876305.0
+      },
+      "iqr": {
+        "roots_ns": 2222866.25,
+        "static_ns": 1867.75,
+        "stacks_ns": 141036.0,
+        "scrub_ns": 3969.0,
+        "mark_ns": 25554.0,
+        "sweep_ns": 1298801.5,
+        "pause_ns": 2214286.75
+      },
+      "work_ns": 137251125.0,
+      "delta_work_pct": 1929.01,
+      "delta_pause_pct": 1801.9
+    },
+    "pthread-lag-0": {
+      "n": 1094,
+      "env": "GCRY_STW_PTHREAD_LAG=0",
+      "soundness": "tuned",
+      "threads": "5",
+      "median": {
+        "roots_ns": 6593807.0,
+        "static_ns": 83852.0,
+        "stacks_ns": 4658981.5,
+        "scrub_ns": 46859.0,
+        "mark_ns": 236954.0,
+        "sweep_ns": 14662495.0,
+        "pause_ns": 11915922.0
+      },
+      "iqr": {
+        "roots_ns": 840092.0,
+        "static_ns": 1753.0,
+        "stacks_ns": 217089.25,
+        "scrub_ns": 3148.5,
+        "mark_ns": 20036.0,
+        "sweep_ns": 1532909.0,
+        "pause_ns": 949012.5
+      },
+      "work_ns": 11299647.5,
+      "delta_work_pct": 67.05,
+      "delta_pause_pct": 64.37
+    }
+  },
+  "work_basis": "roots_ns + scrub_ns + stacks_ns"
+}

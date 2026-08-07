@@ -52,6 +52,70 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
       compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
+- [ ] **Settle `scrub_fibers` on correctness, not perf.** It was carried as
+      "loses on every axis measured"; a second session retired that framing.
+      The −1.29% throughput is **retracted** — it came back +1.22% with the
+      sign flipped, and the knob moves ~0.01% of wall time, so throughput
+      cannot resolve it in either direction. Root work is real but larger than
+      recorded (−9.1%, not −1.7%) and worth that same ~0.01%. Kemal RSS is
+      flat, and the fat-app RSS that put it on default (3.00× → 2.65×) does
+      **not** reproduce: n=3 said +46% worse, n=9 said −34.9% better, because
+      acik is bistable between a ~44 and a ~72 MiB heap regime. Stratified, it
+      is a wash. So no perf axis decides it, and the open question is the one
+      it was listed under to begin with: it zeroes memory below a parked
+      fiber's *estimated* SP, from another thread.
+      `bench/scrub_audit.cr` instruments that, and now **answers it for the two
+      shapes gcry ships**: reading foreign SPs from `/proc/self/task/<tid>/
+      syscall` removes the signal-path blindness, and separating "SP on a
+      *running* fiber" from "SP on a parked one" makes a zero readable. Result:
+      the wipe never reached live frames — EC1 200/200 collections, EC4 1170
+      sightings, all on fibers excluded as `running?` before any scrub logic
+      ran. So the Monitor's stack is protected by the `running?` check, not by
+      the EC1 exemption, whose stated rationale ("SYSMON is suspended on its
+      fiber") does not describe what happens. The Parallel mid-swap window was
+      not observed in 300 collections with the guard off — a bound on its rate,
+      not a licence to remove the guard. Still open: whether a pointer can live
+      only in the wiped region in a shape not exercised here.
+      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
+- [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
+      scatter between reps. Five hypotheses are now eliminated, and the harness's
+      own noise floor is measured rather than guessed —
+      `bench/log/linux/2026-08-07-050658-root-phase/FINDINGS.md`:
+      not the load generator and not the clock (the spread is in the collector's
+      own `monotonic_ns` phase medians, no wrk in the loop); not thermal or any
+      slow drift (no trend, no lag-1 autocorrelation); **not environmental at
+      all** — a null control running the same build against itself gives
+      within-rep correlation r ≈ 0 across every phase, so each server process is
+      an independent draw; not CCD/L3 placement (the i3-12100F has one L3 shared
+      by all 8 CPUs and shows the same spread); not ASLR (`setarch -R` leaves
+      scatter unchanged, F ≈ 0.6–1.1). Leading remaining candidate is **physical
+      page placement**, which ASLR cannot affect since it randomises virtual
+      addresses while L3 indexes physically; testing it needs THP or
+      hugepage-backed chunks, not a harness flag.
+      **Operative floor until then: ±2–3pp on phase timings, ±1pp on post-GC
+      RSS, at 12 reps.** Publish nothing smaller from this host.
+
+- [x] **Cheap root scan at scale — the stack axis.** `lag = 0` scanned every
+      parked fiber `guard → bottom`, 8 MiB of reserved address space each, of
+      which **0.05% has ever been written** (69 stacks: 552 MiB virtual,
+      284 KiB touched). Scanning starts at the stack's low-water mark instead,
+      which is not a precision trade — a page with neither the present nor the
+      swapped bit in `/proc/self/pagemap` has never been faulted, so it is zero
+      and the two ranges see identical words. (`mincore` is the wrong tool: it
+      says "resident", so a swapped-out page would be skipped and its pointer
+      lost.) Applied to the parked-fiber and pthread-mapping paths.
+      **EC4 pause 147 ms → 13 ms, 11.3×**; `make stw-lag-pause` 13.9× → 1.03×;
+      RSS unchanged — `bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`
+- [ ] **Cheap root scan at scale — what is left.** `GCRY_SOUND=1` is still
+      +83% pause at EC4 against tuned, and that residual is no longer a constant
+      worst case: it tracks how much stack was actually touched (p5 3.4 ms,
+      p95 19.1 ms, against tuned's 6.1/7.8). Open questions: which fibers are
+      deeply used and why; whether the low-water skip should also apply on the
+      `lag > 0` default path (sound's p5 is already *below* tuned's, because
+      tuned's fixed 256 KiB window can include untouched pages); re-cutting the
+      fat app's large-heap case (14.5× on `2026-08-06-100611-root-phase/`)
+      against the fix; and Darwin, which has no pagemap equivalent wired and
+      keeps the full scan.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
