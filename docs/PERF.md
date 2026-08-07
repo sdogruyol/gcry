@@ -98,6 +98,14 @@ worktree, both interleaved in one job at default configuration: **+0.12%, 95%
 CI −1.42% … +1.66%** — no measurable regression, and the −2.13% figure that
 had been carried for this is excluded.
 
+**Re-taken after the low-water skip** (`…-2026-08-07-113415/` and `…-114908/`),
+because that skip is *not* gated on `lag == 0` and so is live on the default
+path — the control above no longer described the code. Pooled over 18 paired
+rounds: **−1.33%, 95% CI −3.00 … +0.34%**, i.e. still no measurable regression.
+Read the pair rather than either cut: the first alone gave −2.09% at 2.2σ with
+an interval excluding zero, and did not replicate. Turning the skip off moves
+the default path by +0.32% (σ 0.4), so it is not the cost either way.
+
 Re-taken on the trace instrument (`…-2026-08-07-041413-root-phase/`), which was
 expected to tighten that to ~0.3% SEM. **It does not, and the reason is worth
 keeping:** pooling ~1690 collections per build does give SEM ≈ 0.28%, but
