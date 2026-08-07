@@ -1,0 +1,11 @@
+{
+  "bin": "kemal-gcry-lw-mt",
+  "build_flags": "-Dpreview_mt -Dexecution_context",
+  "ec_parallelism": "4",
+  "reps": 3,
+  "duration_s": 20,
+  "connections": 100,
+  "cpu_model": "AMD Ryzen 9 9950X 16-Core Processor",
+  "ncpu": 32,
+  "l3_shared_cpu_list": "0-31"
+}
