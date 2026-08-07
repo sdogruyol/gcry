@@ -73,6 +73,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       window: either capture the Monitor's SP cooperatively, or drive
       `swapcontext` from a harness that can suspend inside it.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
+- [ ] **Attribute the residual per-rep spread.** Every A/B on this host bottoms
+      out at 1.2–3% scatter between reps, which is what bounds the default-path
+      control at ±1.7pp and what made the `scrub_fibers` throughput reading flip
+      sign between sessions. New: it is **not the load generator and not the
+      clock** — the same 2–3% shows up in the collector's own `monotonic_ns`
+      phase medians with no wrk in the loop
+      (`bench/log/linux/2026-08-07-041413-root-phase/FINDINGS.md`). Something
+      per-process; the 9950X's two CCDs and L3 placement stay the live
+      hypothesis, and naive pinning made it worse without testing it. Until
+      this moves, no cut on this host resolves better than ~2%.
+
 - [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
       `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
       and 14.5× on acik at EC1 once its heap passes ~60 MiB (17 → 213 ms);

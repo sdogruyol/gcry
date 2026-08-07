@@ -93,6 +93,22 @@ worktree, both interleaved in one job at default configuration: **+0.12%, 95%
 CI −1.42% … +1.66%** — no measurable regression, and the −2.13% figure that
 had been carried for this is excluded.
 
+Re-taken on the trace instrument (`…-2026-08-07-041413-root-phase/`), which was
+expected to tighten that to ~0.3% SEM. **It does not, and the reason is worth
+keeping:** pooling ~1690 collections per build does give SEM ≈ 0.28%, but
+collections inside one rep share a server process, a heap layout and a CPU
+placement — they are not independent. The unit of replication is the rep (n=9),
+per-rep medians scatter 2–3%, and the paired bound comes out **+1.11%, 95% CI
+−0.63% … +2.85%** on `roots+static+stacks+mark` — no tighter than throughput
+gave. The added guards live in `mark_ns` as well as `roots_ns`, so a
+`roots_ns`-only bound would also have measured half the change.
+
+That run *does* resolve one thing: post-GC RSS is **+1.63%, 95% CI +0.58% …
++2.68%** (t=3.59), i.e. 264 KiB. Not binary size (the branch binary is 8 KiB
+larger); most likely two 128 KiB size-class chunks of allocator granularity,
+since both new flags default to false and the guarded expressions are then
+semantically identical to master's. Unproven either way.
+
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW
 lags at EC4 `phase_roots`).
