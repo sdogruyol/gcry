@@ -43,6 +43,17 @@ mkdir -p "$BIN"
 #
 #   CRYSTAL_BUILD_FLAGS="-Dpreview_mt -Dexecution_context" \
 #   BENCH_BIN=kemal-gcry-sound-mt EC_PARALLELISM=4 ./bench/root_phase_ab.sh
+#
+# A config key may also be written `key@binary` to run a *different build* under
+# this same harness, interleaved with the rest. That is how a master-vs-branch
+# control is taken on the default path: the added work lands directly in
+# roots_ns, so the trace bounds it far tighter than throughput can.
+#
+#   git worktree add /tmp/gcry-master master
+#   (cd /tmp/gcry-master/bench/kemal && shards install &&
+#    crystal build -Dgc_none --release src/server.cr -o "$PWD/../../../bin/kemal-master")
+#   BENCH_CONFIGS='branch
+#   master@kemal-master' ./bench/root_phase_ab.sh
 BUILD_FLAGS="${CRYSTAL_BUILD_FLAGS:-}"
 BIN_NAME="${BENCH_BIN:-kemal-gcry-sound}"
 
@@ -106,7 +117,7 @@ mkdir -p "$RUN_DIR"
 
 # One config × one rep: run under trace, capture the collector's own label.
 probe() {
-  local key="$1" rep="$2"; shift 2
+  local key="$1" rep="$2" bin="$3"; shift 3
   local trace="$RUN_DIR/$key-rep$rep.ndjson"
   (
     [ -n "$SERVER_DIR" ] && cd "$SERVER_DIR"
@@ -122,7 +133,7 @@ probe() {
     export GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$trace"
     for kv in ${SERVER_ENV[@]+"${SERVER_ENV[@]}"}; do export "${kv?}"; done
     for kv in "$@"; do export "${kv?}"; done
-    exec "$SERVER_BIN"
+    exec "$bin"
   ) >/dev/null 2>&1 &
   SERVER_PID=$!
   local ready=0
@@ -135,6 +146,14 @@ probe() {
     exit 1
   fi
   wrk -c "$CONNECTIONS" -d "${DURATION}s" ${HDR[@]+"${HDR[@]}"} "$BASE$LOAD_PATH" >/dev/null 2>&1
+  # Post-GC RSS. A phase breakdown cannot show retention, and retention is the
+  # only reason some of these knobs are on by default — scrub_fibers was turned
+  # on for RSS, not for time. Two collects: the first leaves finalizer-queued
+  # objects for the second to reclaim.
+  curl -sf -o /dev/null ${HDR[@]+"${HDR[@]}"} "$BASE/gc-collect" || true
+  curl -sf -o /dev/null ${HDR[@]+"${HDR[@]}"} "$BASE/gc-collect" || true
+  awk '/^VmRSS:/ {print $2}' "/proc/$SERVER_PID/status" \
+    > "$RUN_DIR/$key-rep$rep-rss.txt" 2>/dev/null || true
   curl -sf ${HDR[@]+"${HDR[@]}"} "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
   # Proof of the shape that actually ran: a binary built without -Dpreview_mt
   # resizes the default context to a no-op, so an EC4 run would otherwise be
@@ -169,20 +188,52 @@ print(json.dumps({
 }, indent=2))" > "$RUN_DIR/meta.json"
 
 KEYS=()
+ENVS=()
+BINS=()
 while read -r key rest; do
   [ -n "$key" ] || continue
   case "$key" in \#*) continue ;; esac
+  # `key@binary` drives a *different build* under this same harness, so a
+  # master-vs-branch control is one interleaved job rather than two runs
+  # compared across time. The named binary must already exist in bin/ — build
+  # it from a `git worktree` checkout; only $BIN_NAME is built here.
+  case "$key" in
+    *@*) BINS+=("$BIN/${key#*@}"); key="${key%@*}" ;;
+    *) BINS+=("$SERVER_BIN") ;;
+  esac
   KEYS+=("$key")
-  echo ""
-  echo "=== $key ${rest:+($rest)} ==="
+  ENVS+=("$rest")
   printf '%s\n' "$rest" > "$RUN_DIR/$key.env"
-  for rep in $(seq 1 "$REPS"); do
-    # $rest unquoted on purpose: a list of ENV=V words, not one word.
-    probe "$key" "$rep" $rest
-    n="$(grep -c collect_end "$RUN_DIR/$key-rep$rep.ndjson" || true)"
-    echo "  rep $rep: $n collections"
-  done
+  printf '%s\n' "${BINS[-1]}" > "$RUN_DIR/$key.bin"
 done <<< "$CONFIGS"
+
+for i in "${!KEYS[@]}"; do
+  [ -x "${BINS[$i]}" ] || {
+    echo "ERROR: ${BINS[$i]} not executable (key=${KEYS[$i]})" >&2; exit 1; }
+done
+
+# Reps interleaved and rotated, NOT all of one config's reps then the next.
+#
+# Blocked execution confounds config with time. In the throughput harness on
+# this host it was worth ~2-3% (see bench/sound_profile_ab.sh and the FINDINGS
+# it writes) — an order of magnitude more than the ~0.3% SEM this instrument
+# can otherwise resolve, and it is bias, so more reps never remove it. Rotating
+# the within-round order removes the residual position bias that interleaving
+# alone leaves behind.
+n_keys=${#KEYS[@]}
+for rep in $(seq 1 "$REPS"); do
+  echo ""
+  echo "=== rep $rep/$REPS ==="
+  for off in $(seq 0 $((n_keys - 1))); do
+    i=$(( (off + rep - 1) % n_keys ))
+    key="${KEYS[$i]}"
+    echo "  $key ${ENVS[$i]:+(${ENVS[$i]})}"
+    # ${ENVS[$i]} unquoted on purpose: a list of ENV=V words, not one word.
+    probe "$key" "$rep" "${BINS[$i]}" ${ENVS[$i]}
+    n="$(grep -c collect_end "$RUN_DIR/$key-rep$rep.ndjson" || true)"
+    echo "    $n collections"
+  done
+done
 
 echo ""
 python3 - "$RUN_DIR" "$SKIP" "$REPS" "${KEYS[@]}" <<'PY'
@@ -227,11 +278,23 @@ for k in keys:
     threads = None
     if os.path.exists(threads_path):
         threads = open(threads_path).read().strip() or None
+    # Median across reps, not one rep: a single post-GC RSS reading is one
+    # sample of a noisy quantity, and this is the axis some of these knobs
+    # exist for.
+    rss = []
+    for rep in range(1, reps + 1):
+        p = os.path.join(run_dir, f"{k}-rep{rep}-rss.txt")
+        if os.path.exists(p):
+            v = open(p).read().strip()
+            if v.isdigit():
+                rss.append(int(v))
     data[k] = {
         "n": len(recs),
         "env": env,
         "soundness": label,
         "threads": threads,
+        "rss_kib": statistics.median(rss) if rss else None,
+        "rss_reps": rss,
         "median": {p: statistics.median([r.get(p, 0) for r in recs]) for p in PHASES},
         "iqr": {
             p: (
@@ -275,6 +338,17 @@ for k in keys:
     print(f"{k:18} {d['n']:>5} {cells} {dwork:>+8.1f}% {dpause:>+8.1f}% "
           f"{d['threads'] or '-':>4}  {d['soundness'] or '-'}")
 
+base_rss = data["tuned"]["rss_kib"] if "tuned" in data else data[keys[0]]["rss_kib"]
+if base_rss:
+    print("\npost-GC RSS (median of reps; ΔRSS vs tuned) — the retention axis:")
+    for k in keys:
+        r = data[k]["rss_kib"]
+        if not r:
+            continue
+        d = (r - base_rss) / base_rss * 100
+        reps_s = ",".join(str(x) for x in data[k]["rss_reps"])
+        print(f"  {k:18} {r:>8} KiB  {d:>+7.1f}%   reps: {reps_s}")
+
 print("\nroot-phase spread (IQR as % of median) — how tight each config's own samples are:")
 for k in keys:
     d = data[k]
@@ -309,9 +383,20 @@ with open(os.path.join(run_dir, "summary.json"), "w") as f:
 
 # A knob config that reports `sound` (or a sound config that does not) means
 # the environment did not do what the row claims it did.
+#
+# `None` is a different failure and worth naming: /gc-stats answered but had no
+# `soundness` key, which means the server is linked against a gcry old enough to
+# predate it. That is a *stale binary*, and every number above was produced by a
+# collector other than the one in the tree — the most expensive way to be wrong
+# here, so it fails rather than warns.
 for k in keys:
     env, got = data[k]["env"], data[k]["soundness"]
     want = "sound" if "GCRY_SOUND=1" in env else "tuned"
+    if got is None:
+        print(f"\nERROR: config '{k}': /gc-stats has no 'soundness' field — the server "
+              f"binary predates it. Rebuild it against this checkout; the phase numbers "
+              f"above are from a different collector.")
+        sys.exit(1)
     if got != want:
         print(f"\nERROR: config '{k}' reported soundness={got!r}, expected {want!r} (env: {env or 'none'})")
         sys.exit(1)
