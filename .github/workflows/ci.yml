@@ -211,11 +211,17 @@ jobs:
           # Same binary, inverted expectation: the profile must still set 0/0.
           GCRY_SOUND=1 ./bin/stw_lag_pause --rounds=5
           # The low-water skip took this from 13.9x to 1.03x, so the 30x ceiling
-          # above no longer catches its loss. Tighten it: 4x leaves headroom for
-          # a noisy shared runner while still failing if the full guard→bottom
-          # scan returns. GCRY_STACK_LOW_WATER=0 is the same code path, so if
-          # this ever fails, run that locally to confirm which side moved.
-          ./bin/stw_lag_pause --rounds=5 --max-ratio=4
+          # above no longer catches its loss. Tighten it to 4x — enough headroom
+          # for a noisy shared runner, still failing if the full guard→bottom
+          # scan returns.
+          #
+          # The skip needs /proc/self/pagemap, which a hardened kernel or a
+          # restricted container can refuse; the collector then falls back to the
+          # full scan, which is correct but back at ~14x. The tool detects that
+          # and relaxes to --max-ratio-nolw rather than failing the build for a
+          # missing capability, so this step never goes red for something that is
+          # not a regression.
+          ./bin/stw_lag_pause --rounds=5 --max-ratio=4 --max-ratio-nolw=30
 
       - name: RSS leak detection
         run: |

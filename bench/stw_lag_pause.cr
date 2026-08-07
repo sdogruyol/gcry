@@ -68,15 +68,19 @@ dirty_kb = 256
 live_mb = 4
 rounds = 5
 max_ratio = 30.0
+# Bound to use when the low-water skip is not available (see below): the old,
+# pre-fix cost is the correct expectation there, not a regression.
+max_ratio_nolw = 30.0
 
 ARGV.each do |arg|
   case arg
-  when /--fibers=(\d+)/       then fibers = $1.to_i
-  when /--threads=(\d+)/      then threads_n = $1.to_i
-  when /--dirty-kb=(\d+)/     then dirty_kb = $1.to_i
-  when /--live-mb=(\d+)/      then live_mb = $1.to_i
-  when /--rounds=(\d+)/       then rounds = $1.to_i
-  when /--max-ratio=([\d.]+)/ then max_ratio = $1.to_f
+  when /--fibers=(\d+)/            then fibers = $1.to_i
+  when /--threads=(\d+)/           then threads_n = $1.to_i
+  when /--dirty-kb=(\d+)/          then dirty_kb = $1.to_i
+  when /--live-mb=(\d+)/           then live_mb = $1.to_i
+  when /--rounds=(\d+)/            then rounds = $1.to_i
+  when /--max-ratio-nolw=([\d.]+)/ then max_ratio_nolw = $1.to_f
+  when /--max-ratio=([\d.]+)/      then max_ratio = $1.to_f
   end
 end
 
@@ -265,15 +269,36 @@ end
 # 2. Characterise the known trap. Upper bound only — if the root scan is ever
 #    made cheap enough that lag 0 is affordable, the ratio collapses toward 1
 #    and this must pass, not fail.
+#
+#    A tightened bound (the low-water skip took this from ~14× to ~1×) must not
+#    make CI depend on an environment capability. The skip needs
+#    /proc/self/pagemap, which a hardened kernel or a restricted container can
+#    refuse; the collector then falls back to the full scan — correct, but back
+#    at ~14×. Asserting the tight bound there would fail the build for something
+#    that is not a regression, so the bound relaxes to --max-ratio-nolw and says
+#    why, loudly enough that nobody reads the pass as the fast path working.
+low_water = {% if flag?(:linux) %}
+              HEAP.stack_low_water_scan && Gcry::Platform.pagemap_available?
+            {% else %}
+              false
+            {% end %}
+effective_max = low_water ? max_ratio : max_ratio_nolw
+unless low_water
+  puts "  NOTE low-water skip unavailable here (pagemap unreadable, or disabled)."
+  puts "       Ratio bound relaxed #{max_ratio}× → #{effective_max}×; the scan is"
+  puts "       correct but back on the full guard→bottom path."
+end
+
 if tuned > 0
   CONFIGS.each do |cfg|
     next if cfg.key == "tuned"
     ratio = meds[cfg.key] / tuned
-    if ratio > max_ratio
-      failures << "#{cfg.key} pause ratio #{ratio.round(2)}× > #{max_ratio}×"
-      puts "  FAIL #{cfg.key} ratio: #{ratio.round(2)}× > #{max_ratio}×"
+    if ratio > effective_max
+      failures << "#{cfg.key} pause ratio #{ratio.round(2)}× > #{effective_max}×"
+      puts "  FAIL #{cfg.key} ratio: #{ratio.round(2)}× > #{effective_max}×"
     else
-      puts "  PASS #{cfg.key} ratio: #{ratio.round(2)}× <= #{max_ratio}×"
+      puts "  PASS #{cfg.key} ratio: #{ratio.round(2)}× <= #{effective_max}×" \
+           "#{low_water ? " (low-water on)" : ""}"
     end
   end
 else
