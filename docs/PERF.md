@@ -72,9 +72,20 @@ paired): the sound profile is **throughput-neutral** on Kemal `/json` at EC1 —
 +0.82% at 1.7σ, not distinguishable from zero. The class costs under ~1% here,
 in either direction.
 
-The exception is `scrub_fibers`: disabling it *gains* **1.29%** (8/9 rounds,
-3.2σ), and the per-collection trace independently has it saving 1.7% of root
-work. It loses on throughput, pause and root completeness at once.
+`scrub_fibers` was read as an exception — disabling it appearing to *gain*
+**1.29%** (8/9 rounds, 3.2σ). **That is retracted, along with its opposite.** A
+second session on the same host and harness measured **−1.22%** (3/9 rounds,
+1.25σ, 95% CI −3.47%…+1.04%): the sign flipped and the significance vanished.
+
+The arithmetic says why, and says no number of rounds would have helped. On
+Kemal `/json` at EC1 the collector takes 131 collections per 20 s and spends
+223 µs of each on `roots + scrub + stacks` — **0.146% of wall time**. Turning
+scrub off moves that by 9.1%, i.e. **0.013% of wall time**. Nothing indirect
+picks up the slack either: collection count is identical at 131, mark moves
+230→228 µs and sweep 2127→2140 µs. So the mechanism can produce ~0.01%, and
+both the +1.29% and the −1.22% are 100× larger than that. **Throughput cannot
+resolve this knob on this workload, in either direction** — that is a property
+of the effect size, not of the host.
 
 **Default-path control** (`…-153032-sound-profile/`): the branch adds an ivar
 load and a branch to the hot mark path. Against `master` built from its own

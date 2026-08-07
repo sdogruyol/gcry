@@ -224,7 +224,7 @@ a 398 µs pause. Per knob, against tuned:
 | `GCRY_STW_*_LAG=0` | +1.1% | inert at EC1 — see below |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | +0.2% | |
 | `GCRY_INTERIOR=1` | −0.1% | |
-| `GCRY_DISABLE_SCRUB_FIBERS=1` | **−1.7%** | **pays for itself** |
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | **−1.7%** | **pays for itself** (re-cut: −9.1%, below) |
 
 Scrub zeroes the words below a parked fiber's estimated SP, and those zeros are
 then cheap to reject during the root scan. Dropping it makes root scanning
@@ -309,6 +309,97 @@ sets lag 0 unconditionally, but the knob is inert until STW runs with more than
 two mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
 Warning at boot would cry wolf on the configuration that is fine.
 
+### What `scrub_fibers` costs — and why the axis that matters is not perf
+
+This one knob was carried as the class's exception: cheap to remove, a net gain,
+and the only member that could go without settling the wider question. A second
+session (`…-192859-sound-profile/`, `…-194128-root-phase/`, `…-195929-root-phase/`)
+re-cut every axis. None of it survived in the form it was written.
+
+**Throughput: retracted, and unresolvable.** The claimed +1.29% (8/9 rounds,
+3.2σ) came back as **−1.22%** (3/9 rounds, 1.25σ, 95% CI −3.47%…+1.04%) — same
+host, same fixed harness, sign flipped. The reason is not host noise, it is
+effect size: `roots + scrub + stacks` is 223 µs of each of 131 collections per
+20 s, i.e. **0.146% of wall time**, and the knob moves 9.1% of that — **0.013%**.
+Collections stay at 131, mark moves 230→228 µs, sweep 2127→2140 µs, so there is
+no indirect path either. Both readings are ~100× the largest effect the
+mechanism can produce. More rounds cannot fix an effect two orders of magnitude
+under the noise floor.
+
+**Root work: real, and larger than first measured.** −9.1% on Kemal at EC1 (379
+samples/config, IQR 8–11%), against the −1.7% recorded earlier. The likely
+reason for the gap is that the earlier cut ran blocked, one config's reps then
+the next; `bench/root_phase_ab.sh` now interleaves and rotates them, the same
+fix the throughput harness needed. Real, but see the arithmetic above for what
+−9.1% of root work is worth in wall time.
+
+**RSS on Kemal: flat.** 0.76× → 0.75× of Boehm, post-GC.
+
+**RSS on the fat app: the justification does not reproduce.** This is the axis
+scrub was turned on for (`gc_override.cr`: acik 3.00× → 2.65×). At n=3 reps
+scrub-off looked **+46%** worse; at n=9 the same comparison came out **−34.9%
+better**. The medians are not measuring the knob: acik is bistable between a
+~44 MiB and a ~72 MiB heap regime, and each rep's post-GC RSS is essentially a
+coin flip between them. tuned landed in the large regime 8/9 reps, scrub-off
+3/9 — Fisher exact p = 0.0498, at a threshold this document chose after seeing
+the data, with the transition falling in one unexplained block of reps. That is
+a lead, not a result.
+
+Stratified by regime, which is the only like-for-like comparison available, the
+knob is close to a wash on the fat app:
+
+| Stratum | n (tuned / off) | Δwork | Δpause |
+|---------|----------------:|------:|-------:|
+| small heap (~44 MiB) | 184 / 449 | −4.3% | −4.0% |
+| large heap (≥55 MiB) | 359 / 100 | +1.4% | +10.3% |
+
+So the honest position on `scrub_fibers` is that **no perf axis decides it**:
+its stated benefit does not reproduce, and its measured cost is too small to
+matter. What is left is the reason it appears in this document at all — it
+zeroes memory below a parked fiber's *estimated* SP, from another thread, where
+bdwgc only ever wipes below the calling thread's own hardware SP. The decision
+belongs on that question, and settling it means a test that either exhibits a
+dropped live pointer or shows the wipe window cannot contain one. Benchmarking
+it further is spending effort on the axis that has already answered.
+
+### Auditing the scrub — and why it does not yet answer
+
+`bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) exists to move the charge against
+`scrub_fibers` from argument to measurement. It counts, per collection, the
+parked fibers scrubbed while a suspended thread's SP was still on them, and —
+the number that would decide it — how often the wipe window reached at or above
+that SP, i.e. over live frames.
+
+**It has not produced an answer, and the reason is worth recording.**
+
+*The probe cannot see the EC1 case at all.* `Platform.thread_sp` is populated
+only by the STW suspend signal handler (`install_stw_sp_capture`). The EC
+Monitor (`SYSMON`) is signal-exempt — it cooperates through `@world_stopped`
+instead — so its SP is never recorded, and no foreign-SP logic, guard or audit,
+can observe it. Measured: 300 collections at EC1 yield **1** suspended-thread SP
+observation in total. So the comment justifying the EC1 exemption —
+
+> EC1: SYSMON is suspended on its fiber during our STW — foreign-SP skip would
+> never scrub it. Only skip under Parallel.
+
+— is right that the skip would not fire, but not for the reason it gives: the
+skip *cannot* fire, because the SP it tests for is never recorded. Whatever
+safety the EC1 path has rests entirely on `fiber.running?` being true for the
+Monitor's fiber, which nothing here checks.
+
+*The Parallel case has no positive control.* With the mid-swap guard deliberately
+disabled (`--no-skip`, `scrub_skip_foreign_sp = false`), 3000 collections across
+128 tightly-yielding fibers on 5 threads still observed **zero** foreign-SP
+scrubs. The window is a fraction of the time a thread spends inside
+`swapcontext`, and this workload never lands a suspend inside it. Until an
+unguarded run shows the counters can move, a zero from a guarded run is not
+evidence of anything.
+
+Both runs therefore exit **non-zero and INCONCLUSIVE** rather than printing a
+pass. That is the point of the tool as it stands: an audit whose green is
+reachable without observing anything is worse than no audit, because it would
+have closed this question with a number that meant nothing.
+
 ### What this does and does not license
 
 | Claim | Supported? |
@@ -319,12 +410,14 @@ Warning at boot would cry wolf on the configuration that is fine.
 | "The heuristics should be off by default" | **No** — one workload, one host, EC1 only |
 | "Sound roots cost ~nothing in pause on Kemal at EC1" | Yes — +0.1% pause, 2873 collections at 1–7% IQR |
 | "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
-| "Parked-fiber scrub earns its default" | **No** — disabling it gains 1.29% throughput (8/9 rounds, 3.2σ) *and* 1.7% of root work |
+| "Parked-fiber scrub earns its default" | **Unproven either way** — its RSS justification does not reproduce, and the throughput claim is retracted (see *What scrub_fibers costs*) |
+| "Disabling parked-fiber scrub gains 1.29% throughput" | **No — retracted.** A second session measured −1.22%; the effect is ~0.01% of wall time and unresolvable by throughput |
 | "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause |
 | "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
 | "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
 | "The cost is spread across the heuristics" | **No** — it is the two STW lag knobs, on every workload measured |
-| "Turning fiber scrub off costs throughput" | **No** — it is a net saving (−1.7% root work on Kemal at EC1) |
+| "Turning fiber scrub off costs throughput" | **No** — but neither does it gain any; it is a net saving in *root work* (−9.1% on Kemal at EC1) worth ~0.01% of wall time |
+| "Fiber scrub buys RSS on the fat app" | **Unreproduced.** The 3.00× → 2.65× that put it on default does not appear at n=9; the measurement is dominated by a bistable heap regime |
 
 ---
 
@@ -379,8 +472,10 @@ The rest of the class is close to free everywhere it has been measured. The
 heuristics buy **no RSS at all**, **+0.1% of pause** on Kemal at EC1 and **+0%**
 on the fat app's small-heap collections; their throughput value remains
 **unmeasured** — not zero, unmeasured — because the host noise is three orders
-of magnitude larger than the effect. One of them (`scrub_fibers`) is a net loss
-even on tuned's own terms.
+of magnitude larger than the effect. For one of them (`scrub_fibers`) that gap
+has since been quantified rather than merely asserted: the effect is ~0.01% of
+wall time, so throughput will never resolve it, and its own RSS justification
+does not reproduce either.
 
 That reshapes the question rather than closing it. The blocker is one pair of
 knobs, not a class: make root scanning cheap enough that

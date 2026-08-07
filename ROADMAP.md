@@ -52,12 +52,27 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
       compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
-- [ ] **Turn `scrub_fibers` off by default.** It loses on every axis measured:
-      −1.29% throughput (8/9 paired rounds, 3.2σ) and −1.7% of root work on
-      Kemal at EC1, while also being a root-completeness heuristic that can
-      drop a live pointer. The only member of the class that can go today
-      without settling the wider defaults question —
-      `bench/log/linux/2026-08-06-140037-sound-profile/FINDINGS.md`
+- [ ] **Settle `scrub_fibers` on correctness, not perf.** It was carried as
+      "loses on every axis measured"; a second session retired that framing.
+      The −1.29% throughput is **retracted** — it came back +1.22% with the
+      sign flipped, and the knob moves ~0.01% of wall time, so throughput
+      cannot resolve it in either direction. Root work is real but larger than
+      recorded (−9.1%, not −1.7%) and worth that same ~0.01%. Kemal RSS is
+      flat, and the fat-app RSS that put it on default (3.00× → 2.65×) does
+      **not** reproduce: n=3 said +46% worse, n=9 said −34.9% better, because
+      acik is bistable between a ~44 and a ~72 MiB heap regime. Stratified, it
+      is a wash. So no perf axis decides it, and the open question is the one
+      it was listed under to begin with: it zeroes memory below a parked
+      fiber's *estimated* SP, from another thread.
+      `bench/scrub_audit.cr` instruments that, and has **not** answered it:
+      the probe is structurally blind to EC1 (`Platform.thread_sp` is filled
+      only by the suspend signal handler; SYSMON is signal-exempt), and at
+      Parallel it has no positive control — 3000 collections with the mid-swap
+      guard off still observed zero foreign-SP scrubs. Both shapes exit
+      INCONCLUSIVE rather than green. Next step is a probe that can reach the
+      window: either capture the Monitor's SP cooperatively, or drive
+      `swapcontext` from a harness that can suspend inside it.
+      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
 - [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
       `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
       and 14.5× on acik at EC1 once its heap passes ~60 MiB (17 → 213 ms);
