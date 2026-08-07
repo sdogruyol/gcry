@@ -73,9 +73,14 @@ paired): the sound profile is **throughput-neutral** on Kemal `/json` at EC1 —
 in either direction.
 
 `scrub_fibers` was read as an exception — disabling it appearing to *gain*
-**1.29%** (8/9 rounds, 3.2σ). **That is retracted, along with its opposite.** A
-second session on the same host and harness measured **−1.22%** (3/9 rounds,
-1.25σ, 95% CI −3.47%…+1.04%): the sign flipped and the significance vanished.
+**1.29%** (8/9 rounds, 3.2σ) on the 9950X. **That is retracted, along with its
+opposite.** A second session, same harness but on the **i3-12100F** (4c/8t, one
+12 MiB L3 — not the same machine), measured **−1.22%** (3/9 rounds, 1.25σ, 95%
+CI −3.47%…+1.04%): the sign flipped and the significance vanished.
+
+Two different hosts is a weaker comparison than two sessions would have been,
+and it is not what retires the claim. What retires it is the arithmetic below,
+which is computed from each host's own trace and does not travel between them.
 
 The arithmetic says why, and says no number of rounds would have helped. On
 Kemal `/json` at EC1 the collector takes 131 collections per 20 s and spends
@@ -108,6 +113,29 @@ That run *does* resolve one thing: post-GC RSS is **+1.63%, 95% CI +0.58% …
 larger); most likely two 128 KiB size-class chunks of allocator granularity,
 since both new flags default to false and the guarded expressions are then
 semantically identical to master's. Unproven either way.
+
+### Noise floor — what this harness can and cannot resolve
+
+Measured, not assumed: the same build run against itself, 12 reps × 30 s
+(`bench/log/linux/2026-08-07-050658-root-phase/FINDINGS.md`). Paired deltas come
+out ~0 as they must; the interval is the point.
+
+| metric | null Δ | 95% CI | per-rep sd |
+|---|---:|---|---:|
+| roots | +0.21% | −1.98 … +2.40% | 1.99% |
+| mark | +0.92% | −2.41 … +4.26% | 2.08% |
+| pause | +0.72% | −1.73 … +3.17% | 1.95% |
+| **post-GC RSS** | **−0.07%** | **−0.99 … +0.86%** | **0.75%** |
+
+**±2–3pp on phase timings, ±1pp on RSS, at 12 reps.** Post-GC RSS is the
+tightest instrument here — roughly 3× tighter than any phase timing, and much
+tighter than throughput. Prefer it when a change could plausibly show up in
+retention.
+
+The residual scatter is per-process, not environmental: within-rep correlation
+between two *identical* configurations is r ≈ 0 in every phase. It is not the
+load generator, the clock, thermal drift, CCD/L3 placement, or ASLR — see
+ROADMAP. Physical page placement is the leading remaining candidate.
 
 Kemal is also the workload these knobs were *least* expected to matter on —
 they were argued on fat-app RSS (fiber scrub at acik 3.00× → 2.65×, the STW

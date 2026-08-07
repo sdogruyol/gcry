@@ -73,16 +73,23 @@ Target: Match Boehm on the workloads Crystal users actually run.
       window: either capture the Monitor's SP cooperatively, or drive
       `swapcontext` from a harness that can suspend inside it.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
-- [ ] **Attribute the residual per-rep spread.** Every A/B on this host bottoms
-      out at 1.2–3% scatter between reps, which is what bounds the default-path
-      control at ±1.7pp and what made the `scrub_fibers` throughput reading flip
-      sign between sessions. New: it is **not the load generator and not the
-      clock** — the same 2–3% shows up in the collector's own `monotonic_ns`
-      phase medians with no wrk in the loop
-      (`bench/log/linux/2026-08-07-041413-root-phase/FINDINGS.md`). Something
-      per-process; the 9950X's two CCDs and L3 placement stay the live
-      hypothesis, and naive pinning made it worse without testing it. Until
-      this moves, no cut on this host resolves better than ~2%.
+- [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
+      scatter between reps. Five hypotheses are now eliminated, and the harness's
+      own noise floor is measured rather than guessed —
+      `bench/log/linux/2026-08-07-050658-root-phase/FINDINGS.md`:
+      not the load generator and not the clock (the spread is in the collector's
+      own `monotonic_ns` phase medians, no wrk in the loop); not thermal or any
+      slow drift (no trend, no lag-1 autocorrelation); **not environmental at
+      all** — a null control running the same build against itself gives
+      within-rep correlation r ≈ 0 across every phase, so each server process is
+      an independent draw; not CCD/L3 placement (the i3-12100F has one L3 shared
+      by all 8 CPUs and shows the same spread); not ASLR (`setarch -R` leaves
+      scatter unchanged, F ≈ 0.6–1.1). Leading remaining candidate is **physical
+      page placement**, which ASLR cannot affect since it randomises virtual
+      addresses while L3 indexes physically; testing it needs THP or
+      hugepage-backed chunks, not a harness flag.
+      **Operative floor until then: ±2–3pp on phase timings, ±1pp on post-GC
+      RSS, at 12 reps.** Publish nothing smaller from this host.
 
 - [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
       `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
