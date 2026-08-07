@@ -157,6 +157,14 @@ root scan is expensive, whether from thread count or heap size. Full method,
 per-knob decomposition, and the limits of each cut:
 [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
 
+**Those rows are pre-fix.** `lag = 0` scanned each parked fiber's whole 8 MiB of
+reserved stack, of which 0.05% has ever been written. Scanning now starts at the
+stack's low-water mark — identical words, since a page that was never faulted is
+zero — and EC4 falls to **13 ms, +83% against tuned** (was 147 ms / +1977% in
+the same run). RSS unchanged.
+`bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`. The fat-app row has
+not been re-cut against the fix.
+
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 
 Not the process default — apps must `ExecutionContext.default.resize(N)`

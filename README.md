@@ -257,13 +257,19 @@ Pause cost *is* resolved, measured per collection off the GC trace:
 | Cut | tuned | `GCRY_SOUND=1` |
 |-----|------:|---------------:|
 | Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
-| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** |
-| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** |
+| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** → **13 ms** |
+| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** (not re-cut) |
 
 In all three the whole cost is the two STW lag knobs — the other five
-heuristics are within ±6%, and parked-fiber scrub is a net saving. That is why
-the defaults stay tuned. Method, per-knob decomposition, known limits of the
-label, and the fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+heuristics are within ±6%.
+
+The EC4 arrow is a fix, not a re-measurement. `lag = 0` was scanning each parked
+fiber's entire 8 MiB of reserved stack, **0.05% of which has ever been written**;
+the scan now starts at the stack's low-water mark. That is not a precision trade
+— a page with neither the present nor the swapped bit in `/proc/self/pagemap` has
+never been faulted, so both ranges see identical words. EC4 pause 147 ms → 13 ms
+in the same run, RSS unchanged. Method, per-knob decomposition, known limits of
+the label, and the fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
 ### Pause distribution (Kemal `/json`, Linux)
 

@@ -273,6 +273,46 @@ whenever the root scan is expensive enough to matter — many threads (Kemal EC4
 neither, which is why it reads +0.1% and why that figure describes one small
 workload rather than the profile.
 
+### The lag cost was 99.95% zeros — and is now mostly gone
+
+Everything above is **pre-fix**, and the fix says something about what those
+numbers were measuring.
+
+`lag = 0` scanned each parked fiber `guard → bottom`. A Crystal fiber stack is
+8 MiB of *reserved* address space, and measured on a Kemal-shaped population,
+69 parked stacks held 552 MiB of virtual stack and **284 KiB** of touched
+pages — 0.05%. The regression was almost entirely minor-faulting pages that had
+never been written, to read zeros out of them.
+
+Scanning now starts at the stack's low-water mark
+(`Platform.stack_low_water`), on both the parked-fiber and pthread-mapping
+paths. **This is not a precision trade.** A page with neither the present nor
+the swapped bit in `/proc/self/pagemap` has never been faulted, so it is zero:
+`guard → bottom` and `low_water → bottom` see exactly the same words.
+`mincore(2)` would have been the wrong instrument — it answers "resident", so a
+written page that was later swapped out reads absent, and skipping it would drop
+a root. Any failure to read pagemap falls back to the full range, so the
+degradation direction is always "scan more". `GCRY_STACK_LOW_WATER=0` restores
+the old behaviour for A/B.
+
+| Kemal EC4, same run | tuned | `GCRY_SOUND=1` | `+GCRY_STACK_LOW_WATER=0` |
+|---------------------|------:|---------------:|--------------------------:|
+| pause | 7.1 ms | **13.0 ms (+83%)** | 147.2 ms (+1977%) |
+| roots | 6.2 ms | 11.0 ms | 140.8 ms |
+| post-GC RSS | — | +0.3% | +0.3% |
+
+**147 ms → 13 ms, 11.3×**, nothing traded in RSS.
+`bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`.
+
+Two things follow. The residual +83% is no longer a constant worst case — it
+tracks how much stack was actually touched, so its distribution is wide (p5
+3.4 ms, p95 19.1 ms) where the old path's was flat (IQR 0.6%). And `sound`'s p5
+is now *below* `tuned`'s, because tuned's fixed 256 KiB window can itself
+include untouched pages: the same skip should help the default path, which is
+not done here.
+
+The fat-app large-heap case has **not** been re-cut against this fix.
+
 ### Guarding it
 
 None of the three cuts above is reproducible in CI — they need a server, a fat
@@ -282,8 +322,13 @@ passed at any pause, so the 19× was invisible to it.
 `bench/stw_lag_pause.cr` (`make stw-lag-pause`) closes that. The expensive path
 does not need EC: `stw_multi_stack_lag = 0` makes `fiber_stack_scan_top` return
 `guard` for every parked fiber under multi-mutator STW, so all it takes is >2
-live OS threads and a parked fiber population. 32 fibers reproduces **15×** in
+live OS threads and a parked fiber population. 32 fibers reproduced **15×** in
 under 6 s on a stock runner, against the 19× measured at EC4.
+
+Since the low-water skip landed, that ratio is **1.03×** — which is what the
+guard was designed for. It bounds the penalty from above rather than asserting a
+number, so it keeps passing as the cost falls, and it still fails if the full
+scan comes back. `GCRY_STACK_LOW_WATER=0` reproduces the old 13.9× on demand.
 
 It asserts two things, both host-independent, so no quiet host is required:
 
@@ -467,7 +512,8 @@ the answer turned out to be entirely the second.
 | "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
 | "Parked-fiber scrub earns its default" | **Unproven either way** — its RSS justification does not reproduce, and the throughput claim is retracted (see *What scrub_fibers costs*) |
 | "Disabling parked-fiber scrub gains 1.29% throughput" | **No — retracted.** A second session measured −1.22%; the effect is ~0.01% of wall time and unresolvable by throughput |
-| "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause |
+| "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause (pre-fix; not re-cut) |
+| "The lag-0 scan has to read the whole stack" | **No.** 0.05% of a fiber stack is ever written; the rest is provably zero and is now skipped — EC4 147 ms → 13 ms |
 | "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
 | "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
 | "The cost is spread across the heuristics" | **No** — it is the two STW lag knobs, on every workload measured |

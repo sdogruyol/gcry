@@ -95,17 +95,27 @@ Target: Match Boehm on the workloads Crystal users actually run.
       **Operative floor until then: ±2–3pp on phase timings, ±1pp on post-GC
       RSS, at 12 reps.** Publish nothing smaller from this host.
 
-- [ ] **Cheap root scan at scale — the one blocker to sound defaults.**
-      `stw_multi_stack_lag = 0` costs 19× pause at Kemal EC4 (7.2 → 141.7 ms)
-      and 14.5× on acik at EC1 once its heap passes ~60 MiB (17 → 213 ms);
-      `stw_multi_pthread_lag = 0` adds a further +64% at EC4. The other five
-      root-completeness heuristics are within ±6% on every workload measured,
-      so this pair is the entire cost of `GCRY_SOUND=1`. Make the scan cheap
-      enough that lag 0 is affordable and sound-by-default is back on the
-      table — `bench/log/linux/2026-08-06-085309-root-phase/FINDINGS.md`.
-      Guarded in the meantime by `make stw-lag-pause`, which reproduces 15× of
-      it in ~6 s with no server and no EC build; when this lands, that guard's
-      ratio collapses toward 1 and it keeps passing.
+- [x] **Cheap root scan at scale — the stack axis.** `lag = 0` scanned every
+      parked fiber `guard → bottom`, 8 MiB of reserved address space each, of
+      which **0.05% has ever been written** (69 stacks: 552 MiB virtual,
+      284 KiB touched). Scanning starts at the stack's low-water mark instead,
+      which is not a precision trade — a page with neither the present nor the
+      swapped bit in `/proc/self/pagemap` has never been faulted, so it is zero
+      and the two ranges see identical words. (`mincore` is the wrong tool: it
+      says "resident", so a swapped-out page would be skipped and its pointer
+      lost.) Applied to the parked-fiber and pthread-mapping paths.
+      **EC4 pause 147 ms → 13 ms, 11.3×**; `make stw-lag-pause` 13.9× → 1.03×;
+      RSS unchanged — `bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`
+- [ ] **Cheap root scan at scale — what is left.** `GCRY_SOUND=1` is still
+      +83% pause at EC4 against tuned, and that residual is no longer a constant
+      worst case: it tracks how much stack was actually touched (p5 3.4 ms,
+      p95 19.1 ms, against tuned's 6.1/7.8). Open questions: which fibers are
+      deeply used and why; whether the low-water skip should also apply on the
+      `lag > 0` default path (sound's p5 is already *below* tuned's, because
+      tuned's fixed 256 KiB window can include untouched pages); re-cutting the
+      fat app's large-heap case (14.5× on `2026-08-06-100611-root-phase/`)
+      against the fix; and Darwin, which has no pagemap equivalent wired and
+      keeps the full scan.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
