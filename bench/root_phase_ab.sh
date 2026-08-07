@@ -133,6 +133,14 @@ probe() {
     export GCRY_TRACE=1 GCRY_TRACE_ALLOC_SAMPLE=0 GCRY_TRACE_FILE="$trace"
     for kv in ${SERVER_ENV[@]+"${SERVER_ENV[@]}"}; do export "${kv?}"; done
     for kv in "$@"; do export "${kv?}"; done
+    # A config may ask for the server to run with address-space randomisation
+    # off (`key BENCH_NO_ASLR=1`). The null control showed the residual spread
+    # is per-process rather than environmental, and layout randomisation is the
+    # obvious per-process draw — this is how that gets tested rather than
+    # assumed.
+    if [ "${BENCH_NO_ASLR:-0}" = "1" ]; then
+      exec setarch "$(uname -m)" -R "$bin"
+    fi
     exec "$bin"
   ) >/dev/null 2>&1 &
   SERVER_PID=$!
@@ -179,12 +187,21 @@ EOF
 echo ""
 echo "reps=$REPS  duration=${DURATION}s  connections=$CONNECTIONS  skip=$SKIP collects/rep"
 echo "bin=$BIN_NAME  build_flags=${BUILD_FLAGS:-none}  EC_PARALLELISM=${EC_PARALLELISM:-1}"
+# Record the machine. A cut taken on a 4-core i3 was compared against figures
+# from a 16-core 9950X for a whole session before anyone noticed, because
+# nothing in the log said which host produced it.
+CPU_MODEL="$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+CPU_COUNT="$(nproc 2>/dev/null || echo 0)"
+L3_SHARED="$(cat /sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list 2>/dev/null || echo unknown)"
+echo "host: $CPU_MODEL  ncpu=$CPU_COUNT  L3 shared by: $L3_SHARED"
 python3 -c "
 import json, os
 print(json.dumps({
     'bin': '$BIN_NAME', 'build_flags': '${BUILD_FLAGS:-}',
     'ec_parallelism': os.environ.get('EC_PARALLELISM', '1'),
     'reps': $REPS, 'duration_s': $DURATION, 'connections': $CONNECTIONS,
+    'cpu_model': '''$CPU_MODEL''', 'ncpu': $CPU_COUNT,
+    'l3_shared_cpu_list': '$L3_SHARED',
 }, indent=2))" > "$RUN_DIR/meta.json"
 
 KEYS=()

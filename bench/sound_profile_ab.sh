@@ -221,7 +221,21 @@ RUN_LABEL="$(date -u +%Y-%m-%d-%H%M%S)-sound-profile"
 RUN_DIR="$LOG/linux/$RUN_LABEL"
 mkdir -p "$RUN_DIR"
 
+# Record the machine. "% of Boehm" is only portable within one host, and a
+# session's numbers were compared against another machine's for a full day
+# because nothing in the log said which one produced them.
+CPU_MODEL="$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+CPU_COUNT="$(nproc 2>/dev/null || echo 0)"
+L3_SHARED="$(cat /sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list 2>/dev/null || echo unknown)"
+python3 -c "
+import json
+print(json.dumps({'cpu_model': '''$CPU_MODEL''', 'ncpu': $CPU_COUNT,
+                  'l3_shared_cpu_list': '$L3_SHARED', 'runs': $RUNS,
+                  'duration_s': $DURATION, 'connections': $CONNECTIONS,
+                  'path': '$PATH_UNDER_TEST'}, indent=2))" > "$RUN_DIR/host.json"
+
 echo ""
+echo "host=$CPU_MODEL  ncpu=$CPU_COUNT  L3 shared by: $L3_SHARED"
 echo "path=$PATH_UNDER_TEST  runs=$RUNS  duration=${DURATION}s  connections=$CONNECTIONS"
 
 report_config() {
