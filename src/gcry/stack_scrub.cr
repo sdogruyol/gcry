@@ -26,12 +26,17 @@ module Gcry
     # stack an OS thread is still running on. Off by default; the probe walks
     # every thread per parked fiber.
     #
-    # Note what the probe can and cannot see: `Platform.thread_sp` is populated
-    # by the STW suspend signal handler, so it only knows about *signal-
-    # suspended* threads. The EC Monitor (SYSMON) is signal-exempt and
-    # cooperates via @world_stopped instead, so its SP is never recorded and no
-    # foreign-SP logic — guard or audit — can observe it. A zero from this
-    # counter is evidence about the Parallel mid-swap window only.
+    # What the probe sees: `Platform.thread_sp` is populated by the STW suspend
+    # signal handler, so on its own it knows about *signal-suspended* threads
+    # only. The EC Monitor (SYSMON) is signal-exempt (`stw_signal_exempt?`) and
+    # cooperates via @world_stopped, so its SP is never recorded there — and
+    # SYSMON is precisely the thread the EC1 exemption is about, which left this
+    # audit structurally blind to the shape it exists to test.
+    #
+    # With the audit on, `fiber_stack_foreign_sp` falls back to a /proc snapshot
+    # (`Platform.audit_snapshot_sps`), which reads every thread's SP without a
+    # signal. The guard path is unchanged — this only widens what the *probe*
+    # can observe.
     property scrub_audit_foreign_sp : Bool = false
 
     # Research only: stop skipping fibers a suspended thread's SP sits on.
@@ -52,6 +57,12 @@ module Gcry
     # root-completeness argument against scrub_fibers rests on.
     getter fiber_scrub_foreign_sp_scrubs : UInt64 = 0_u64
     getter fiber_scrub_live_frame_overlaps : UInt64 = 0_u64
+    # Fibers that hold a foreign thread's SP but were skipped as `running?`
+    # before any scrub logic ran. This separates the two readings of a zero
+    # above: "no thread's stack was ever in scrub range" (what we want to
+    # conclude) from "the thread's fiber was excluded earlier for an unrelated
+    # reason" (which would make the zero say nothing about the wipe).
+    getter fiber_scrub_running_foreign_sp : UInt64 = 0_u64
 
     @clear_stack_ops : UInt64 = 0_u64
 
@@ -164,14 +175,42 @@ module Gcry
       else
         wipe = DEFAULT_CLEAR_STACK_BYTES if wipe > DEFAULT_CLEAR_STACK_BYTES
       end
+      # One /proc pass per scrub run, not per fiber. Fills a preallocated table
+      # so the per-fiber check below costs a scan of an array.
+      {% if flag?(:linux) %}
+        Platform.audit_snapshot_sps if @scrub_audit_foreign_sp
+      {% end %}
+
       scrubbed = 0_u64
       Fiber.unsafe_each do |fiber|
         next if fiber == current
-        next if fiber.running?
+        if fiber.running?
+          # Audit only: a running fiber is never scrubbed, but we need to know
+          # whether it is where the foreign SPs actually live — otherwise a zero
+          # from the counters below is unreadable.
+          {% if flag?(:linux) %}
+            if @scrub_audit_foreign_sp
+              rstack = fiber.@stack
+              rbase = rstack.pointer.address
+              rbottom = rstack.bottom.address
+              if rbase != 0 && rbottom > rbase && Platform.audit_sp_within(rbase, rbottom)
+                @fiber_scrub_running_foreign_sp += 1
+              end
+            end
+          {% end %}
+          next
+        end
         # Mid-swap under Parallel: current_fiber already points at the next
         # fiber while SP (and live frames) remain on this "parked" stack.
-        # EC1: SYSMON is suspended on its fiber during our STW — foreign-SP
-        # skip would never scrub it. Only skip under Parallel.
+        # Only skip under Parallel.
+        #
+        # The EC1 exemption used to be justified as "SYSMON is suspended on its
+        # fiber during our STW, so the foreign-SP skip would never scrub it".
+        # `bench/scrub_audit.cr` measured that and it is not what happens:
+        # SYSMON's fiber reports `running?` at every collection (200/200 at EC1,
+        # 1170 sightings at EC4), so it is excluded above, before any of this
+        # runs. The exemption is harmless, but it is not what protects that
+        # stack — the `running?` check is. See docs/SOUND-DEFAULTS.md.
         #
         # That EC1 exemption is a throughput argument for not applying a safety
         # check, so GCRY_SCRUB_AUDIT=1 measures what it costs instead of leaving
@@ -239,6 +278,17 @@ module Gcry
         spa = sp.address
         return spa if spa >= base && spa < bottom
       end
+
+      # Audit path: the loop above can only see signal-suspended threads, and
+      # the EC Monitor is signal-exempt — which is exactly the thread the EC1
+      # scrub exemption is about. Fall back to the /proc snapshot so the probe
+      # is not blind to the one shape it exists to test.
+      {% if flag?(:linux) %}
+        if @scrub_audit_foreign_sp
+          return Platform.audit_sp_within(base, bottom)
+        end
+      {% end %}
+
       nil
     end
 
