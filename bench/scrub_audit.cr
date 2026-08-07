@@ -105,7 +105,24 @@ end
 # Let the population reach steady state before the first collect.
 sleep 50.milliseconds
 
+# The /proc fallback that lets the probe see signal-exempt threads needs its tid
+# table filled from *outside* STW — refreshing it allocates, and allocating
+# while the world is stopped can deadlock on a lock a suspended thread holds.
+# Do it after the fiber population has settled, so every thread is present.
+{% if flag?(:linux) %}
+  puts "audit tid table: #{Gcry::Platform.audit_refresh_tids} thread(s) at start " \
+       "(refreshed before every collect — EC workers spawn lazily)"
+{% end %}
+
 collects.times do
+  # Refresh every iteration, not once up front: EC worker threads come up
+  # lazily as fibers get scheduled, so a table built before the first collect
+  # covers 2 of 5 threads at parallelism 4 and the probe silently misses the
+  # very threads whose mid-swap window is under test. This is outside STW, so
+  # it may allocate.
+  {% if flag?(:linux) %}
+    Gcry::Platform.audit_refresh_tids
+  {% end %}
   GC.collect
   sleep 1.millisecond
 end
@@ -128,6 +145,8 @@ puts "  ...wipe reached live frames= #{overlaps}"
 # this, a zero above has two very different readings.
 puts "  suspended-thread SPs seen  = #{HEAP.sp_clamp_hits} on a mapping, " \
      "#{HEAP.sp_clamp_fallbacks} elsewhere"
+running_sp = HEAP.fiber_scrub_running_foreign_sp
+puts "  foreign SP on a *running*  = #{running_sp}  (skipped before any scrub)"
 puts ""
 
 if threads < 2
@@ -145,9 +164,21 @@ if no_skip
   puts "positive control (guard off): #{scrubs} foreign-SP scrub(s), " \
        "#{overlaps} reaching live frames (#{pct}%)"
   if scrubs == 0
-    STDERR.puts "INCONCLUSIVE: even with the guard off the probe saw no foreign SP. " \
-                "It cannot observe this window on this build/shape, so a zero from " \
-                "the guarded run says nothing. Raise --parallelism or --fibers."
+    if running_sp > 0
+      # The probe is demonstrably not blind — it located foreign SPs this many
+      # times — so a zero here is about the window, not about the instrument.
+      puts ""
+      puts "Window not observed: #{running_sp} foreign SP sighting(s) across " \
+           "#{HEAP.fiber_scrub_runs} scrub runs, every one of them on a fiber that was " \
+           "still `running?`. The mid-swap state this guard exists for — SP still on a " \
+           "stack whose fiber already reports parked — did not occur."
+      puts "That is evidence about the window, not a licence to remove the guard: " \
+           "not-observed over N collections bounds its rate, it does not make it zero."
+      exit 0
+    end
+    STDERR.puts "INCONCLUSIVE: no foreign SP was located anywhere — not on parked fibers " \
+                "and not on running ones. The probe saw nothing, so this says nothing. " \
+                "Check that the tid table is being refreshed (EC workers spawn lazily)."
     exit 1
   end
   exit 0
@@ -164,10 +195,26 @@ end
 # to print a pass for the first — an audit whose green is reachable without
 # observing anything is worse than no audit.
 if scrubs == 0
-  STDERR.puts "INCONCLUSIVE: 0 foreign-SP scrubs — the wipe was never seen landing on a " \
-              "stack a thread was on, so there was nothing to overlap. This is not a pass. " \
-              "Run --no-skip first: until that shows the probe can see the window, a zero " \
-              "here says only that the probe is blind to it."
+  # Two very different zeros, and only the first is a result.
+  if running_sp > 0
+    puts "ok — 0 foreign-SP scrubs out of #{HEAP.fiber_scrub_runs} scrub runs, and the " \
+         "foreign SPs were accounted for: #{running_sp} sat on fibers excluded as " \
+         "`running?` before any wipe logic ran."
+    puts ""
+    puts "So on this shape the wipe never reached a stack a thread was on, and the reason " \
+         "is the `running?` exclusion, not the foreign-SP skip: the fiber carrying the " \
+         "thread never qualifies as parked in the first place."
+    if parallelism <= 1
+      puts "At EC1 the foreign-SP skip is not even applied, so it cannot be what protects " \
+           "this — the exemption's stated justification (\"SYSMON is suspended on its " \
+           "fiber during our STW\") does not describe what was observed."
+    end
+    exit 0
+  end
+
+  STDERR.puts "INCONCLUSIVE: 0 foreign-SP scrubs and 0 foreign SPs on running fibers — " \
+              "no thread SP was located anywhere, so nothing was audited. Check that " \
+              "Platform.audit_refresh_tids ran outside STW and returned >1 thread."
   exit 1
 end
 
