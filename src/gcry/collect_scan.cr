@@ -247,6 +247,13 @@ module Gcry
     # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
     property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
 
+    # Skip the never-written head of a parked fiber stack when lag is 0
+    # (GCRY_STACK_LOW_WATER=0 to disable). Semantics-preserving: pages with
+    # neither the present nor the swapped bit set have never been faulted, so
+    # they are zero and cannot hold a pointer. Linux-only; falls back to the
+    # full guard→bottom scan whenever /proc/self/pagemap cannot answer.
+    property stack_low_water_scan : Bool = true
+
     # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
     # mapping for leftover scheduler frames. Full map (often ~8 MiB × N) dominates
     # phase_stacks after fiber-scan dedupe. Scan only the top *lag* bytes from
@@ -301,23 +308,47 @@ module Gcry
 
       lag = @stw_multi_stack_lag
       # 0 ⇒ classic full parked-fiber scan (correctness A/B; thr regresses).
-      return guard if lag == 0
+      #
+      # "Full" only has to mean every word that can hold a pointer. A fiber
+      # stack is 8 MiB of reserved address space and ~0.05% of it is ever
+      # written; the untouched remainder is provably zero, so starting at the
+      # low-water mark instead of at `guard` sees exactly the same words for a
+      # fraction of the faults. Falls back to `guard` whenever pagemap cannot
+      # answer, so a failure can only ever widen the scan.
+      if lag == 0
+        {% if flag?(:linux) %}
+          if @stack_low_water_scan
+            bottom = fiber.@stack.bottom.address
+            if bottom > guard
+              lw = Platform.stack_low_water(guard, bottom)
+              return lw > guard ? lw : guard
+            end
+          end
+        {% end %}
+        return guard
+      end
 
       lagged = t > lag ? t - lag : guard
       lagged < guard ? guard : lagged
     end
 
-    # Every parked fiber is about to be scanned guard→bottom (~8 MiB each).
-    # Measured 2026-08-06: 19× pause at Kemal EC4, 14.5× on a fat app once its
-    # heap passes ~60 MiB. LibC.write, not STDERR — this runs inside STW and must
-    # not allocate. See bench/stw_lag_pause.cr and ROADMAP "Cheap root scan at scale".
+    # lag=0 used to mean scanning every parked fiber guard→bottom, ~8 MiB each:
+    # 19× pause at Kemal EC4, 14.5× on a fat app past ~60 MiB (2026-08-06). The
+    # low-water skip removed that — 13.9× → 1.03× on bench/stw_lag_pause.cr —
+    # so the warning now fires only when the skip is not in play, which is the
+    # only case still carrying the old cost.
+    #
+    # LibC.write, not STDERR: this runs inside STW and must not allocate.
     private def warn_stw_lag_zero_once : Nil
       return if @warned_stw_lag_zero
+      {% if flag?(:linux) %}
+        return if @stack_low_water_scan && Platform.pagemap_available?
+      {% end %}
       @warned_stw_lag_zero = true
-      msg = "gcry: WARNING: stw_multi_stack_lag=0 under multi-mutator STW — every parked " \
-            "fiber stack is scanned in full (measured 19× pause at Parallel EC4, 14.5× on a " \
-            "large heap). GCRY_SOUND=1 sets this; it is a root-completeness profile, not a " \
-            "pause-safe default. Override with GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
+      msg = "gcry: WARNING: stw_multi_stack_lag=0 under multi-mutator STW without the " \
+            "low-water skip — every parked fiber stack is scanned in full (measured 19× " \
+            "pause at Parallel EC4, 14.5× on a large heap). Re-enable GCRY_STACK_LOW_WATER, " \
+            "or set GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
       LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
     end
 
@@ -628,6 +659,17 @@ module Gcry
           end
         end
       end
+
+      # Same removal as the parked-fiber path: with lag 0 this scans the whole
+      # ~8 MiB pthread mapping, nearly all of which was never written. Skipping
+      # the untouched head sees identical words — a page with neither the
+      # present nor the swapped bit has never been faulted, so it is zero.
+      {% if flag?(:linux) %}
+        if @stack_low_water_scan && low < high
+          lw = Platform.stack_low_water(low, high)
+          low = lw if lw > low && lw < high
+        end
+      {% end %}
 
       Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) do |candidate|
         mark_root_candidate(candidate, source: RootSource::Thread)

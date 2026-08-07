@@ -3,6 +3,7 @@
   require "./platform/linux_stack"
   require "./platform/linux_softdirty"
   require "./platform/linux_stw"
+  require "./platform/linux_pagemap"
   require "./platform/linux_proc_sp"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}

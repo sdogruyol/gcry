@@ -539,6 +539,12 @@ module GC
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
+    # Escape hatch for the low-water skip on the lag-0 path. It preserves
+    # semantics (untouched pages are zero), so this exists to A/B its cost and
+    # to disable it on a kernel whose pagemap misbehaves.
+    if env_flag_zero?("GCRY_STACK_LOW_WATER")
+      heap.stack_low_water_scan = false
+    end
     # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
     # Default 256 KiB from stack high; 0 = full pthread mapping.
     if plag = env_u64("GCRY_STW_PTHREAD_LAG")
@@ -635,6 +641,13 @@ module GC
     flag = LibC.getenv(name)
     return false if flag.null?
     flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
+  end
+
+  # For knobs that default *on*: only an explicit "0" turns them off.
+  private def self.env_flag_zero?(name : String) : Bool
+    flag = LibC.getenv(name)
+    return false if flag.null?
+    flag.value == '0'.ord.to_u8 && (flag + 1).value == 0
   end
 
   # Single ASCII digit env (e.g. GCRY_PRECISE_STACK=1|2). Nil if unset/invalid.
