@@ -210,6 +210,12 @@ jobs:
           ./bin/stw_lag_pause --rounds=5
           # Same binary, inverted expectation: the profile must still set 0/0.
           GCRY_SOUND=1 ./bin/stw_lag_pause --rounds=5
+          # The low-water skip took this from 13.9x to 1.03x, so the 30x ceiling
+          # above no longer catches its loss. Tighten it: 4x leaves headroom for
+          # a noisy shared runner while still failing if the full guard→bottom
+          # scan returns. GCRY_STACK_LOW_WATER=0 is the same code path, so if
+          # this ever fails, run that locally to confirm which side moved.
+          ./bin/stw_lag_pause --rounds=5 --max-ratio=4
 
       - name: RSS leak detection
         run: |
