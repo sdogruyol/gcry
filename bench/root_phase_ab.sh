@@ -197,14 +197,20 @@ while read -r key rest; do
   # master-vs-branch control is one interleaved job rather than two runs
   # compared across time. The named binary must already exist in bin/ — build
   # it from a `git worktree` checkout; only $BIN_NAME is built here.
+  alt=0
   case "$key" in
-    *@*) BINS+=("$BIN/${key#*@}"); key="${key%@*}" ;;
+    *@*) BINS+=("$BIN/${key#*@}"); key="${key%@*}"; alt=1 ;;
     *) BINS+=("$SERVER_BIN") ;;
   esac
   KEYS+=("$key")
   ENVS+=("$rest")
   printf '%s\n' "$rest" > "$RUN_DIR/$key.env"
   printf '%s\n' "${BINS[-1]}" > "$RUN_DIR/$key.bin"
+  # A `key@binary` row is a different build on purpose — usually an older one,
+  # since the point is to control against master. The stale-binary check below
+  # must not fire on it; it exists for the rows that are supposed to be *this*
+  # checkout.
+  [ "$alt" = "1" ] && : > "$RUN_DIR/$key.altbin"
 done <<< "$CONFIGS"
 
 for i in "${!KEYS[@]}"; do
@@ -392,7 +398,12 @@ with open(os.path.join(run_dir, "summary.json"), "w") as f:
 for k in keys:
     env, got = data[k]["env"], data[k]["soundness"]
     want = "sound" if "GCRY_SOUND=1" in env else "tuned"
+    alt = os.path.exists(os.path.join(run_dir, f"{k}.altbin"))
     if got is None:
+        if alt:
+            print(f"note: '{k}' is a foreign build (key@binary) and reports no 'soundness' "
+                  f"— expected when controlling against an older revision; not checked.")
+            continue
         print(f"\nERROR: config '{k}': /gc-stats has no 'soundness' field — the server "
               f"binary predates it. Rebuild it against this checkout; the phase numbers "
               f"above are from a different collector.")
