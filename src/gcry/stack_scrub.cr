@@ -22,6 +22,23 @@ module Gcry
     # When > 1, only every Nth allocate calls clear_stack (thr trade-off).
     property clear_stack_every : Int32 = 1
     property scrub_fibers_enabled : Bool = false
+    # GCRY_SCRUB_AUDIT=1 — probe whether the parked-fiber wipe ever lands on a
+    # stack an OS thread is still running on. Off by default; the probe walks
+    # every thread per parked fiber.
+    #
+    # Note what the probe can and cannot see: `Platform.thread_sp` is populated
+    # by the STW suspend signal handler, so it only knows about *signal-
+    # suspended* threads. The EC Monitor (SYSMON) is signal-exempt and
+    # cooperates via @world_stopped instead, so its SP is never recorded and no
+    # foreign-SP logic — guard or audit — can observe it. A zero from this
+    # counter is evidence about the Parallel mid-swap window only.
+    property scrub_audit_foreign_sp : Bool = false
+
+    # Research only: stop skipping fibers a suspended thread's SP sits on.
+    # That skip is the mid-swap safety guard under Parallel; disabling it is
+    # how the audit gets a positive control — a run where the counters are
+    # expected to move, proving they can. Do not ship with this off.
+    property scrub_skip_foreign_sp : Bool = true
     # Parallel multi-mutator parked-fiber wipe size (bytes below saved SP).
     property fiber_scrub_bytes : UInt64 = FIBER_CLEAR_STACK_CAP
 
@@ -29,6 +46,12 @@ module Gcry
     getter fiber_scrub_bytes_total : UInt64 = 0_u64
     getter clear_stack_calls : UInt64 = 0_u64
     getter fiber_scrub_runs : UInt64 = 0_u64
+    # Audit counters (GCRY_SCRUB_AUDIT=1). `overlaps` is the one that decides
+    # the knob: non-zero means the wipe zeroed memory at or above a suspended
+    # thread's SP — live frames — which is the failure mode the whole
+    # root-completeness argument against scrub_fibers rests on.
+    getter fiber_scrub_foreign_sp_scrubs : UInt64 = 0_u64
+    getter fiber_scrub_live_frame_overlaps : UInt64 = 0_u64
 
     @clear_stack_ops : UInt64 = 0_u64
 
@@ -149,7 +172,18 @@ module Gcry
         # fiber while SP (and live frames) remain on this "parked" stack.
         # EC1: SYSMON is suspended on its fiber during our STW — foreign-SP
         # skip would never scrub it. Only skip under Parallel.
-        next if multi && fiber_stack_holds_foreign_sp?(fiber)
+        #
+        # That EC1 exemption is a throughput argument for not applying a safety
+        # check, so GCRY_SCRUB_AUDIT=1 measures what it costs instead of leaving
+        # it to reasoning: it counts the fibers scrubbed with a foreign SP on
+        # them, and — the number that decides it — how often the wipe window
+        # reaches at or above that SP, i.e. over live frames. Off by default:
+        # the probe walks every thread per parked fiber.
+        foreign_sp = nil
+        if multi || @scrub_audit_foreign_sp
+          foreign_sp = fiber_stack_foreign_sp(fiber)
+          next if multi && foreign_sp && @scrub_skip_foreign_sp
+        end
 
         stack = fiber.@stack
         base = stack.pointer.address
@@ -165,6 +199,13 @@ module Gcry
         low = guard if low < guard
         next if low >= top
 
+        if fsp = foreign_sp
+          @fiber_scrub_foreign_sp_scrubs += 1
+          # Live frames occupy [sp, bottom). The wipe covers [low, top), so it
+          # is harmless only while the whole window sits strictly below sp.
+          @fiber_scrub_live_frame_overlaps += 1 if top > fsp
+        end
+
         if multi
           scrubbed += Roots.clear_range_safe(low, top)
         else
@@ -178,14 +219,17 @@ module Gcry
       @fiber_scrub_runs += 1
     end
 
-    # True when a suspended OS thread's SP still lies on *fiber*'s stack.
-    private def fiber_stack_holds_foreign_sp?(fiber : Fiber) : Bool
-      return false unless @world_stopped
+    # A suspended OS thread's SP that lies on *fiber*'s stack, or nil. The
+    # address, not a bool, because the audit needs to know where the live
+    # frames start — "a foreign SP is somewhere on this stack" does not say
+    # whether the wipe window reaches it.
+    private def fiber_stack_foreign_sp(fiber : Fiber) : UInt64?
+      return nil unless @world_stopped
 
       stack = fiber.@stack
       base = stack.pointer.address
       bottom = stack.bottom.address
-      return false if bottom <= base
+      return nil if bottom <= base
 
       current = Thread.current
       Thread.unsafe_each do |thread|
@@ -193,9 +237,14 @@ module Gcry
         sp = Platform.thread_sp(thread.to_unsafe)
         next unless sp
         spa = sp.address
-        return true if spa >= base && spa < bottom
+        return spa if spa >= base && spa < bottom
       end
-      false
+      nil
+    end
+
+    # True when a suspended OS thread's SP still lies on *fiber*'s stack.
+    private def fiber_stack_holds_foreign_sp?(fiber : Fiber) : Bool
+      !fiber_stack_foreign_sp(fiber).nil?
     end
 
     protected def maybe_clear_stack_on_alloc : Nil

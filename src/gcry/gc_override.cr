@@ -563,6 +563,11 @@ module GC
     if env_flag_one?("GCRY_DISABLE_SCRUB_FIBERS")
       heap.scrub_fibers_enabled = false
     end
+    # Audit the EC1 foreign-SP exemption in scrub_parked_fiber_stacks. Costs a
+    # thread walk per parked fiber, so it is opt-in — see docs/SOUND-DEFAULTS.md.
+    if env_flag_one?("GCRY_SCRUB_AUDIT")
+      heap.scrub_audit_foreign_sp = true
+    end
     # Parallel parked-fiber scrub window below saved SP (default 512).
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
