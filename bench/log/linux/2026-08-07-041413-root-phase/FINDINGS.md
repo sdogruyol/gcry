@@ -1,5 +1,8 @@
 # Default-path control, master vs branch, on the trace instrument
 
+**Host: i3-12100F (4c/8t, one 12 MiB L3), WSL2** — not the 9950X that the
+office session's figures come from.
+
 `feat/sound-defaults` adds three guards to the hot mark path. Against `master`,
 both builds interleaved in one job at default configuration, 9 reps × 30 s,
 ~1690 steady-state collections each:
@@ -55,13 +58,19 @@ So this instrument does not escape the spread that limits the throughput
 harness. It measures a different quantity, more directly — it does not measure
 it on a quieter host.
 
-**Clue for the residual-spread item.** That per-rep scatter (roots sd ≈ 2.7%) is
-the same magnitude as the unattributed per-round throughput spread (1.2–1.8%,
-2.9% in the 2026-08-06 evening cut). It shows up here in the collector's own
-`monotonic_ns` phase timings, with no wrk in the loop and no clock involved. So
-whatever it is, **it is not the load generator and not the timing path** — it is
-something per-process. That is consistent with the dual-CCD / L3-placement
-hypothesis and rules out a whole class of alternatives.
+**Clue for the residual-spread item, and it kills the standing hypothesis.**
+That per-rep scatter (roots sd ≈ 2.7%) is the same magnitude as the
+unattributed per-round throughput spread. It shows up here in the collector's
+own `monotonic_ns` phase timings, with no wrk in the loop and no clock involved,
+so **it is not the load generator and not the timing path** — it is something
+per-process.
+
+It is also **not CCD/L3 placement, at least not here**. The standing hypothesis
+was that the 9950X's two CCDs let a single-threaded server migrate across an L3
+boundary. This host is an **i3-12100F: 4 cores, 8 threads, one 12 MiB L3
+instance shared by every CPU**. There is no boundary to cross, and the spread is
+present anyway. Either the two hosts have different causes, or the CCD
+explanation is wrong for both.
 
 ## Post-GC RSS: +1.63%, and this one *is* significant
 

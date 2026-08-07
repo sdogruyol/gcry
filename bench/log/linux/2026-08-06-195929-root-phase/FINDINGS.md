@@ -1,6 +1,11 @@
 # `scrub_fibers` re-cut — every axis, second session
 
-Three runs, one host (9950X/WSL2), one evening, all on `feat/sound-defaults`:
+Three runs, one evening, all on `feat/sound-defaults`.
+
+**Host: i3-12100F (4c/8t, one 12 MiB L3), WSL2 — not the 9950X the office
+session's numbers come from.** Every comparison below against an earlier figure
+is therefore cross-host. That was not noticed while the runs were taken; the
+harnesses did not record the CPU, and they do now.
 
 - `../2026-08-06-192859-sound-profile/` — Kemal `/json` throughput + post-GC RSS,
   9 interleaved rounds × 20 s, `tuned` vs `GCRY_DISABLE_SCRUB_FIBERS=1` vs Boehm.
@@ -18,9 +23,11 @@ default: it loses on every axis measured". It does not.
 | rounds won | 8/9 | 3/9 |
 | significance | 3.2σ | 1.25σ, 95% CI −3.47%…+1.04% |
 
-Same host, same harness, opposite sign. Per-round sd was 2.93% here against the
-~1.2% the office run's 3.2σ implies, so this run is the noisier of the two —
-but that is not the reason to distrust either.
+Opposite sign — but on a different machine, so this is not the clean
+same-host contradiction it was first written up as. Per-round sd was 2.93% here
+against the ~1.2% the 9950X run's 3.2σ implies, which is what a 4-core part
+under the same load would be expected to do. Neither of those is the reason to
+distrust either number.
 
 The reason is the effect size. From the phase trace on the same workload:
 
