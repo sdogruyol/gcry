@@ -362,7 +362,52 @@ belongs on that question, and settling it means a test that either exhibits a
 dropped live pointer or shows the wipe window cannot contain one. Benchmarking
 it further is spending effort on the axis that has already answered.
 
-### Auditing the scrub — and why it does not yet answer
+### Auditing the scrub — what it now answers
+
+`bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) moves the charge against
+`scrub_fibers` from argument to measurement: per collection it counts the parked
+fibers scrubbed while a thread's SP was still on them, and how often the wipe
+reached at or above that SP — over live frames.
+
+The probe used to be structurally blind (see the history below). It now reads
+foreign thread SPs from `/proc/self/task/<tid>/syscall`
+(`Platform.audit_snapshot_sps`), which needs no signal and no cooperation, so it
+can see signal-exempt threads. The tid table is refreshed outside STW; the read
+path uses raw `open`/`read` into stack buffers, because allocating while the
+world is stopped can deadlock on a lock a suspended thread holds.
+
+**Result — the wipe never reached live frames, and not for the stated reason:**
+
+| Shape | scrub runs | foreign SP on a *parked* fiber | reached live frames | foreign SP on a *running* fiber |
+|-------|-----------:|-------------------------------:|--------------------:|--------------------------------:|
+| EC1 | 200 | 0 | 0 | 200 |
+| EC4, guard on | 300 | 0 | 0 | 1170 |
+| EC4, guard off (control) | 300 | 0 | 0 | 1167 |
+
+Every foreign SP sighting — 200 of 200 collections at EC1, 1170 at EC4 — was on
+a fiber that still reported `running?`, so it was excluded before any scrub
+logic ran. The Monitor's stack is protected by the `running?` check, not by the
+foreign-SP machinery. At EC1 that machinery is not even applied, so the
+exemption's justification —
+
+> EC1: SYSMON is suspended on its fiber during our STW — foreign-SP skip would
+> never scrub it. Only skip under Parallel.
+
+— does not describe what happens. SYSMON's fiber is *running*, not parked-with-a-
+thread-on-it. The exemption is harmless; its rationale was wrong.
+
+The Parallel guard now has a real negative rather than a blind one: with the
+mid-swap skip deliberately off, 300 collections produced 1167 SP sightings and
+**none** in the window the guard exists for (SP on a stack whose fiber already
+reports parked). That bounds the window's rate on this workload; it does not
+make it zero, and it is not a licence to remove the guard.
+
+What this does **not** settle: whether a pointer can live only in the wiped
+region in some shape not exercised here. It settles that the wipe is not
+landing on a thread's live frames in the two shapes gcry actually ships.
+
+<details>
+<summary>Why this took a second probe (kept — the failure mode is instructive)</summary>
 
 `bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) exists to move the charge against
 `scrub_fibers` from argument to measurement. It counts, per collection, the
@@ -395,10 +440,20 @@ scrubs. The window is a fraction of the time a thread spends inside
 unguarded run shows the counters can move, a zero from a guarded run is not
 evidence of anything.
 
-Both runs therefore exit **non-zero and INCONCLUSIVE** rather than printing a
-pass. That is the point of the tool as it stands: an audit whose green is
+Both runs therefore exited **non-zero and INCONCLUSIVE** rather than printing a
+pass. That was the point of the tool as it stood: an audit whose green is
 reachable without observing anything is worse than no audit, because it would
 have closed this question with a number that meant nothing.
+
+The fix was not to look harder at the signal path but to stop depending on it —
+`/proc` reports a blocked thread's SP without asking the thread for anything.
+The second thing that had to change was the *question*: counting only parked
+fibers made a zero unreadable, because it could not distinguish "no thread's
+stack was ever in range" from "the thread's fiber was excluded earlier for an
+unrelated reason". Counting the running-fiber sightings separated those, and
+the answer turned out to be entirely the second.
+
+</details>
 
 ### What this does and does not license
 

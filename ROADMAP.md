@@ -64,14 +64,18 @@ Target: Match Boehm on the workloads Crystal users actually run.
       is a wash. So no perf axis decides it, and the open question is the one
       it was listed under to begin with: it zeroes memory below a parked
       fiber's *estimated* SP, from another thread.
-      `bench/scrub_audit.cr` instruments that, and has **not** answered it:
-      the probe is structurally blind to EC1 (`Platform.thread_sp` is filled
-      only by the suspend signal handler; SYSMON is signal-exempt), and at
-      Parallel it has no positive control — 3000 collections with the mid-swap
-      guard off still observed zero foreign-SP scrubs. Both shapes exit
-      INCONCLUSIVE rather than green. Next step is a probe that can reach the
-      window: either capture the Monitor's SP cooperatively, or drive
-      `swapcontext` from a harness that can suspend inside it.
+      `bench/scrub_audit.cr` instruments that, and now **answers it for the two
+      shapes gcry ships**: reading foreign SPs from `/proc/self/task/<tid>/
+      syscall` removes the signal-path blindness, and separating "SP on a
+      *running* fiber" from "SP on a parked one" makes a zero readable. Result:
+      the wipe never reached live frames — EC1 200/200 collections, EC4 1170
+      sightings, all on fibers excluded as `running?` before any scrub logic
+      ran. So the Monitor's stack is protected by the `running?` check, not by
+      the EC1 exemption, whose stated rationale ("SYSMON is suspended on its
+      fiber") does not describe what happens. The Parallel mid-swap window was
+      not observed in 300 collections with the guard off — a bound on its rate,
+      not a licence to remove the guard. Still open: whether a pointer can live
+      only in the wiped region in a shape not exercised here.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
