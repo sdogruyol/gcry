@@ -272,13 +272,16 @@ Pause cost *is* resolved, measured per collection off the GC trace:
 | Cut | tuned | `GCRY_SOUND=1` |
 |-----|------:|---------------:|
 | Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
-| Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** → **13 ms** |
-| acik `/api/v1/`, EC1, heap ~70 MiB | 24.3 ms | **18.1 ms (−25%)** |
+| Kemal `/json`, **EC4** | **3.60 ms** | 16.39 ms (+356%) |
+| acik `/api/v1/`, EC1, heap ~72 MiB | **10.7 ms** | 18.2 ms (+70%) |
 
-The fat-app row used to read 17 ms → 213 ms. That was the pre-low-water
-collector; re-cut over 21 paired reps, `GCRY_SOUND=1` is now **cheaper** than
-the default there, because the low-water skip applies to `lag = 0` and not to
-the 256 KiB default window — [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+Both tuned figures moved this session, and downward: the low-water skip used to
+apply only when `lag = 0`, so the default was faulting in a fixed 256 KiB window
+per parked fiber that nothing had ever written. It now starts at
+`max(stack_top − lag, low_water)` — **Kemal EC4 pause 8.06 → 3.60 ms**, RSS flat.
+The fat-app row read 17 ms → 213 ms two sessions ago, then briefly had
+`GCRY_SOUND=1` *ahead* of the default; the skip on the default path reversed
+that back. [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)
 
 In all three the whole cost is the two STW lag knobs — the other five
 heuristics are within ±6%.

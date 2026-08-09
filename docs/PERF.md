@@ -205,11 +205,30 @@ heap regime (`bench/log/linux/2026-08-09-071144-root-phase/`):
 | small heap (~46 MiB) | 15 / 15 | 2.7 ms | 2.7 ms (+1.7%) | +2.7% |
 | large heap (~70 MiB) | 10 / 13 | 24.3 ms | **18.1 ms (−25.4%)** | **−43.8%** |
 
-`GCRY_SOUND=1` is now *cheaper* than the default on the fat app's large-heap
-regime, because the low-water skip applies to `lag = 0` and not to the 256 KiB
-default window: tuned still faults in a fixed window per parked fiber while
-sound starts at the low-water mark. Two independent cuts (9 and 21 reps) agree
-to 3pp on pause and 0.4pp on root work.
+That table is itself superseded, and the reason is worth keeping: it showed
+`GCRY_SOUND=1` coming out *cheaper* than the default, because the low-water skip
+applied to `lag = 0` and **not** to the 256 KiB default window. Tuned was
+faulting in a fixed window per parked fiber that nothing had ever written.
+
+The skip now applies on the default path too — `max(stack_top − lag, low_water)`
+— which reverses it back. Current numbers, Kemal EC4, 9 paired reps, single heap
+regime (`bench/log/linux/2026-08-09-104417-root-phase/`):
+
+| config | pause | root work | Δ pause | IQR |
+|--------|------:|----------:|--------:|----:|
+| `tuned` | **3.60 ms** | **3002 µs** | — | 24% |
+| `tuned` + `GCRY_STACK_LOW_WATER=0` | 8.06 ms | 7424 µs | +124.1% | 12% |
+| `GCRY_SOUND=1` | 16.39 ms | 15 777 µs | +355.8% | 63% |
+
+**Kemal EC4 pause 8.06 → 3.60 ms**, post-GC RSS flat to 0.2%, `mark` and `sweep`
+unchanged. On the fat app's ~72 MiB regime the same ordering holds — tuned
+10.7 ms, old default 28.8 ms, sound 18.2 ms (`…-105503-root-phase/`, softer:
+see that session's FINDINGS for the thread-count confound).
+
+`lag = 0` stays the wrong default: the skip makes the *bounded* scan cheap, not
+the complete scan affordable. Kemal EC1 is untouched by construction —
+`multi_mutator_threads?` is false at 2 threads, so the lag branch is
+unreachable there.
 
 In every case the entire cost is the two STW lag knobs — the other five
 heuristics stay within ±6%. They are not EC4-specific: they bite whenever the

@@ -64,6 +64,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The low-water skip now applies on the `lag > 0` default path.** It was
+  gated on `lag == 0`, so the default faulted in a fixed 256 KiB window per
+  parked fiber without asking whether those pages had ever been written — most
+  had not. `fiber_stack_scan_top` now starts at
+  `max(stack_top − lag, low_water)`: never wider than the lag window, never
+  narrower than what the words can hold, since a page with neither the present
+  nor the swapped bit has never been faulted. `scan_pthread_stack` already did
+  this; the two paths now agree.
+
+  **Kemal EC4 pause 8.06 → 3.60 ms** (−55%), root work 7424 → 3002 µs, post-GC
+  RSS flat to 0.2%, `mark` and `sweep` unchanged — 9 paired reps, ~2300
+  collections per config, single heap regime, IQR 24%/12%
+  (`bench/log/linux/2026-08-09-104417-root-phase/`). Fat app at its ~72 MiB
+  regime: **10.7 ms** against the old default's 28.8 ms and `GCRY_SOUND=1`'s
+  18.2 ms (`…-105503-root-phase/`, stratified; softer — that session's FINDINGS
+  records a thread-count confound).
+
+  `lag = 0` remains the wrong default: the skip makes the *bounded* scan cheap,
+  not the complete scan affordable (16.4 ms at EC4). Kemal at EC1 is unaffected
+  by construction — `multi_mutator_threads?` is false at 2 threads, so the lag
+  branch is unreachable. `GCRY_STACK_LOW_WATER=0` restores the old behaviour.
+
+### Added
+
+- **`low_water_skips` / `low_water_skipped_bytes` on `/gc-stats`**, reset per
+  collection. Whether the skip engages is not inferable from a pause number:
+  it needs `multi_mutator_threads?`, which is `Thread` count > 2, and a real
+  app can sit on that boundary — the fat app reported 2 threads from one build
+  and 3 from another. `bench/stw_lag_pause.cr` reports them per config.
+
+### Changed
+
 - **`scrub_fibers_enabled` now defaults to `false`** (Linux and macOS process
   GC; `GCRY_SCRUB_FIBERS=1` opts back in, `GCRY_DISABLE_SCRUB_FIBERS=1` still
   works). The parked-fiber scrub zeroes `[stack_top − 4 KiB, stack_top)` on

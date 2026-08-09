@@ -111,15 +111,20 @@ Target: Match Boehm on the workloads Crystal users actually run.
       lost.) Applied to the parked-fiber and pthread-mapping paths.
       **EC4 pause 147 ms → 13 ms, 11.3×**; `make stw-lag-pause` 13.9× → 1.03×;
       RSS unchanged — `bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`
-- [ ] **Apply the low-water skip to the `lag > 0` default path.** No longer a
-      hypothesis: the fat app's large-heap re-cut has `GCRY_SOUND=1` running
-      **−25.4% pause / −43.8% root work** against tuned (21 paired reps,
-      stratified; `bench/log/linux/2026-08-09-071144-root-phase/`, confirmed at
-      9 reps by `…-062117-`). The default is the slower path because the skip is
-      gated on `lag == 0`, so tuned still faults in a fixed 256 KiB window per
-      parked fiber while sound starts at the low-water mark. Either ungate the
-      skip or make `lag = 0` the default — both need a Kemal EC4 control, since
-      that shape is where lag 0 still costs (+83%).
+- [x] **Apply the low-water skip to the `lag > 0` default path.** Done by
+      ungating it: the default now starts at `max(stack_top − lag, low_water)`,
+      bounded by the lag *and* clear of the untouched head. **Kemal EC4 pause
+      8.06 → 3.60 ms** (−55%, root work −60%), RSS flat to 0.2%, `mark`/`sweep`
+      unchanged — 9 paired reps, single heap regime, IQR 24%/12%
+      (`bench/log/linux/2026-08-09-104417-root-phase/`). Fat app ~72 MiB:
+      tuned **10.7 ms** against the old default's 28.8 ms and sound's 18.2 ms
+      (`…-105503-`, softer — thread-count confound in its FINDINGS). The EC4
+      control the item asked for is what proved it: `lag = 0` stays the wrong
+      default there (16.4 ms), so the skip makes the *bounded* scan cheap, not
+      the complete scan affordable. Kemal EC1 is unreachable by construction
+      (`multi_mutator_threads?` false at 2 threads). Engagement is observable
+      via `low_water_skips` on `/gc-stats` — the gate is a thread count a real
+      app can sit on the boundary of.
 - [ ] **Cheap root scan at scale — what is left.** `GCRY_SOUND=1` is still
       +83% pause at EC4 against tuned, and that residual is no longer a constant
       worst case: it tracks how much stack was actually touched (p5 3.4 ms,
