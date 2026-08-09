@@ -28,7 +28,7 @@ GCRY_SOUND=1 ./your-app
 | `type_id_gate` | `true` (static roots) | Rejects a static root whose payload's first `Int32` is `<= 0` or `> 1_000_000`. That is a heuristic applied to a real reference. The collector already counts when it was wrong: `type_id_root_false_negatives`. |
 | `stw_multi_stack_lag` | `256 KiB` | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. A live pointer deeper than the lag is never seen. `0` means full `guard → bottom`. |
 | `stw_multi_pthread_lag` | `256 KiB` | Same, for the OS thread mapping when SP sits on a pool fiber. |
-| `scrub_fibers_enabled` | `true` | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. |
+| `scrub_fibers_enabled` | `false` (was `true`) | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. **Now off by default** — the audit never reached the EC1 window and its RSS justification does not reproduce; see *What `scrub_fibers` costs*. Opt in with `GCRY_SCRUB_FIBERS=1`. |
 | `blacklist_enabled` | `true` | Steers allocation away from pages the type_id gate called false. With the gate off nothing feeds it; the profile turns it off so `sound` has exactly one meaning. |
 | `scan_static_roots` | `true` (process) | A heap that never walks BSS/data misses roots by construction. `GCRY_DISABLE_STATIC_ROOTS=1` turns it off and will crash a real program — it is in the profile so the label can never report `sound` while it is off. Library heaps default it *off*, so a library heap must opt in before it can report sound roots. |
 
@@ -407,6 +407,14 @@ belongs on that question, and settling it means a test that either exhibits a
 dropped live pointer or shows the wipe window cannot contain one. Benchmarking
 it further is spending effort on the axis that has already answered.
 
+**Resolved by defaulting it off.** The audit below closes the foreign-thread
+half of the question and explicitly leaves the other half open. A knob that (a)
+cannot show a benefit, (b) cannot show a cost, and (c) is the only default-on
+heuristic that *writes* into memory the collector does not own does not get to
+keep its default while the correctness question is open — the burden runs the
+other way. It is now `false` on both platforms; `GCRY_SCRUB_FIBERS=1` opts back
+in, and `bench/root_phase_ab.sh` / `bench/scrub_audit.cr` still drive it.
+
 ### Auditing the scrub — what it now answers
 
 `bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) moves the charge against
@@ -510,7 +518,7 @@ the answer turned out to be entirely the second.
 | "The heuristics should be off by default" | **No** — one workload, one host, EC1 only |
 | "Sound roots cost ~nothing in pause on Kemal at EC1" | Yes — +0.1% pause, 2873 collections at 1–7% IQR |
 | "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
-| "Parked-fiber scrub earns its default" | **Unproven either way** — its RSS justification does not reproduce, and the throughput claim is retracted (see *What scrub_fibers costs*) |
+| "Parked-fiber scrub earns its default" | **No — and it no longer has one.** Its RSS justification does not reproduce, the throughput claim is retracted, and the correctness question is open, so it now defaults `false` (see *What scrub_fibers costs*) |
 | "Disabling parked-fiber scrub gains 1.29% throughput" | **No — retracted.** A second session measured −1.22%; the effect is ~0.01% of wall time and unresolvable by throughput |
 | "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause (pre-fix; not re-cut) |
 | "The lag-0 scan has to read the whole stack" | **No.** 0.05% of a fiber stack is ever written; the rest is provably zero and is now skipped — EC4 147 ms → 13 ms |

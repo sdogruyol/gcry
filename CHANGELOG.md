@@ -62,6 +62,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unconditionally, but the knob is inert until STW runs with more than two
   mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
 
+### Changed
+
+- **`scrub_fibers_enabled` now defaults to `false`** (Linux and macOS process
+  GC; `GCRY_SCRUB_FIBERS=1` opts back in, `GCRY_DISABLE_SCRUB_FIBERS=1` still
+  works). The parked-fiber scrub zeroes `[stack_top − 4 KiB, stack_top)` on
+  *another* fiber's stack, keyed on `@context.stack_top` — a saved value, i.e.
+  an estimate of where that fiber's live frames end. bdwgc's `GC_clear_stack`
+  only ever wipes below the *calling* thread's own hardware SP.
+
+  Nothing measured supports the default any more. The fat-app RSS that put it
+  on (acikturkiye 3.00× → 2.65×) does not reproduce — acik is bistable between
+  a ~44 and a ~72 MiB heap regime, so n=3 said +46% worse and n=9 said −34.9%
+  better; stratified it is a wash. Kemal RSS is flat (0.76× → 0.75×).
+  Throughput cannot resolve it in either direction: `roots + scrub + stacks` is
+  0.146% of wall time at EC1 and the knob moves 9.1% of that, ~0.013%, while
+  both published cuts (+1.29%, −1.22%) are ~100× that. `bench/scrub_audit.cr`
+  closes the foreign-thread half of the correctness question — the wipe never
+  reached a suspended thread's live frames across EC1 and EC4 — and explicitly
+  leaves open whether a pointer can live only in the wiped region in a shape
+  those runs never exercised.
+
+  A knob with no measurable benefit, no measurable cost, and an open
+  correctness question does not keep its default; it is also the only default-on
+  heuristic that *writes* into memory the collector does not own, and a wipe one
+  frame too high zeroes a live reference slot — an immediate nil deref when the
+  fiber resumes, or a dropped root and a use-after-free later.
+  [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) § "What `scrub_fibers` costs"
+
 ### Fixed (root completeness)
 
 - **`scan_object` ignored `allow_interior_pointers` for raw buffers.** The

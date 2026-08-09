@@ -52,7 +52,12 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (i3 + 9950X hunt MISS; KEEP ~90–95% @ ~3× only). Next lever:
       compiler stack maps — `bench/log/linux/2026-08-02-018-FINDINGS.md`
 - [ ] **Throughput parity with Boehm** on all Kemal-class workloads
-- [ ] **Settle `scrub_fibers` on correctness, not perf.** It was carried as
+- [x] **Settle `scrub_fibers` on correctness, not perf.** Settled by defaulting
+      it **off** on both platforms (`GCRY_SCRUB_FIBERS=1` opts back in): no perf
+      axis decides it, and the correctness question is open, so the default goes
+      to the side that does not write into memory the collector does not own.
+      Still open below: whether a pointer can live only in the wiped region.
+      It was carried as
       "loses on every axis measured"; a second session retired that framing.
       The −1.29% throughput is **retracted** — it came back +1.22% with the
       sign flipped, and the knob moves ~0.01% of wall time, so throughput
