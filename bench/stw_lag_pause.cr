@@ -194,12 +194,17 @@ end
 # Pause is the headline, but roots_ns is where the lag actually lands
 # (scan_all_fiber_roots is inside it, scrub excluded) — reporting both keeps the
 # guard readable against bench/root_phase_ab.sh, which ranks on the same phase.
-def measure(cfg : Config) : {Float64, Float64}
+def measure(cfg : Config) : {Float64, Float64, UInt64}
   HEAP.stw_multi_stack_lag = cfg.stack_lag
   HEAP.stw_multi_pthread_lag = cfg.pthread_lag
   HEAP.reset_pause_stats
   GC.collect
-  {ns_to_ms(Gcry.pause_stats.max_ns), ns_to_ms(HEAP.last_phase_roots_ns)}
+  # low_water_skips resets every collect, so it has to be read here, per config.
+  # Reading it once after an interleaved multi-config run reports whichever
+  # config happened to collect last — which is how the first version of this
+  # printed 2 skips for a lag-0 run that had made 34.
+  {ns_to_ms(Gcry.pause_stats.max_ns), ns_to_ms(HEAP.last_phase_roots_ns),
+   HEAP.low_water_skips}
 end
 
 # Warm up every config once — the first lag-0 collect faults the untouched half
@@ -208,14 +213,16 @@ CONFIGS.each { |c| measure(c) }
 
 samples = Hash(String, Array(Float64)).new { |h, k| h[k] = [] of Float64 }
 roots = Hash(String, Array(Float64)).new { |h, k| h[k] = [] of Float64 }
+skips = Hash(String, Array(UInt64)).new { |h, k| h[k] = [] of UInt64 }
 
 rounds.times do |r|
   # Round-robin *and* rotate: whichever config runs first in a fixed order
   # absorbs the round's warm-up and comes out slow. Rotating cancels it.
   CONFIGS.rotate(r % CONFIGS.size).each do |cfg|
-    pause_ms, roots_ms = measure(cfg)
+    pause_ms, roots_ms, lw_skips = measure(cfg)
     samples[cfg.key] << pause_ms
     roots[cfg.key] << roots_ms
+    skips[cfg.key] << lw_skips
   end
 end
 
@@ -241,6 +248,32 @@ CONFIGS.each do |cfg|
   meds[cfg.key] = med
   puts "  %-11s pause median=%8.2f  min=%8.2f  max=%8.2f   roots median=%8.2f" %
        [cfg.key, med, xs.min, xs.max, median(roots[cfg.key])]
+end
+puts ""
+
+# Whether the low-water skip engaged at all is not visible from the pause
+# numbers: it needs multi_mutator_threads? (> 2 threads), which a real app can
+# sit right on the boundary of. A ratio near 1.0 could mean "the skip worked"
+# or "the skip never ran and lag 0 was cheap here anyway" — these separate them.
+puts "=== Low-water skip (median skips per collect, by config) ==="
+CONFIGS.each do |cfg|
+  xs = skips[cfg.key].map(&.to_f)
+  puts "  %-11s skips median=%6.0f" % [cfg.key, median(xs)]
+end
+lw_on = HEAP.stack_low_water_scan && Gcry::Platform.pagemap_available?
+if lw_on && CONFIGS.all? { |c| skips[c.key].sum == 0 }
+  puts "  NOTE skip is enabled and pagemap readable, yet it never fired in any"
+  puts "       config — the ratios below say nothing about it."
+end
+# The default path can only skip what a fiber never wrote inside its lag window,
+# so `tuned` here is a function of --dirty-kb against the 256 KiB lag, not of the
+# collector: 16 KiB dirty → 34 skips, 256 KiB → 2, 1024 KiB → 2. Real workloads
+# do not dirty uniformly, which is why the default path skips heavily on Kemal
+# EC4 and the fat app and barely at all here.
+if lw_on
+  rel = dirty_kb < 256 ? "below" : (dirty_kb == 256 ? "equal to" : "above")
+  puts "  (--dirty-kb=#{dirty_kb} is #{rel} the 256 KiB lag — that, not the"
+  puts "   collector, sets how much `tuned` has left to skip)"
 end
 puts ""
 

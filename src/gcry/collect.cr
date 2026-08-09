@@ -252,6 +252,13 @@ module Gcry
     # Other-thread stack scans clamped to captured RSP (vs full pthread range).
     getter sp_clamp_hits : UInt64 = 0_u64
     getter sp_clamp_fallbacks : UInt64 = 0_u64
+    # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
+    # skip engages at all is not obvious from the outside: it needs multi-mutator
+    # STW, which is `Thread` count > 2, and a fat app can sit right on that
+    # boundary and cross it between collections. Without these you can only infer
+    # engagement from a benchmark delta.
+    getter low_water_skips : UInt64 = 0_u64
+    getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
     getter size_class_chunk_count : UInt64 = 0_u64
     getter fully_free_chunk_bytes : UInt64 = 0_u64
@@ -1294,6 +1301,8 @@ module Gcry
       @type_id_root_false_negatives = 0_u64
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
+      @low_water_skips = 0_u64
+      @low_water_skipped_bytes = 0_u64
     end
 
     # Returns true when a page-dirty barrier backend is available.
