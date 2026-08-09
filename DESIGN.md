@@ -44,7 +44,7 @@ As of **v0.18.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no 
 | **Allocation-free collect** | `mmap`, immortal arenas, stack buffers — never `GC.malloc` mid-mark. |
 | **STW before concurrent** | Correct fiber / thread roots first; concurrency is opt-in and measured. |
 | **Small modules** | Heap, roots, mark, sweep, platform — each testable in isolation. |
-| **Measure, then ship defaults** | Empty-chunk release, type_id gate, SP clamp, fiber scrub earned their defaults; parallel-mark stays experimental. |
+| **Measure, then ship defaults** | Empty-chunk release, type_id gate, SP clamp earned their defaults; parallel-mark stays experimental. A default is also *withdrawn* when the measurement stops supporting it — fiber scrub lost its on tip. |
 
 ## How it plugs in
 
@@ -153,7 +153,7 @@ Shipped and dogfooded on Linux + macOS; **v0.18.0** closes fat-app RSS on the sh
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
 | Fork reinit | ✅ `pthread_atfork` (default) |
-| Stack / fiber scrub | ✅ fiber scrub **default-on** (EC1 **4 KiB** blind; Parallel 512 B + safe); `GCRY_CLEAR_STACK` still opt-in |
+| Stack / fiber scrub | ⚠️ fiber scrub **opt-in** (`GCRY_SCRUB_FIBERS=1`; EC1 **4 KiB** blind, Parallel 512 B + safe) — it wipes below another fiber's *estimated* SP and no measurement supports the default it used to have; `GCRY_CLEAR_STACK` also opt-in |
 | Parallel EC (TLAB-off + lazy) | ✅ **supported opt-in** — EC4 `/json` ~**79%** Boehm; TLAB-on / munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
 | Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |

@@ -19,6 +19,43 @@ Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release
 
 Alloc-heavy `/json` is the gate. Idle `/` is sanity. **0.16.0 recovers EC1 thr** after Parallel-era STW/scrub/counter fallout (fair Boehm ~40k baseline). **v0.17–v0.18** carry this Linux Kemal headline. Fat-app (acikturkiye): tagged v0.17 i3 cut was thr **~90%** @ RSS **~3.43×** (`2026-08-02-064142/`); **v0.18 after finalizer + Linux retain=0** is thr **~90–96%** @ RSS **~1–1.6×** (i3 headline **~96%** @ **~1.63×**; 9950X **~90–102%** @ **~1.0–1.8×**) — [ACIKTURKIYE.md](ACIKTURKIYE.md). Opt-in `GCRY_TIGHT_GROW=1` closes the freelist residual on acik (**~103%** @ **~0.92×**, `…/acik-tight-grow-v2-med3/`); Kemal `/json` soft (~**78%**) — not default. Quiet Kemal smokes land **~80–85%** `/json` @ **~0.74–0.79×** (host/Boehm noise; retain=0 no cliff) — **headline stays the v0.16 cut above**.
 
+### Tip default-path re-cut — first cut with fiber scrub **off**
+
+The tip default drops parked-fiber scrub ([SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
+§ "What `scrub_fibers` costs"), so every number above was produced by a
+configuration that is no longer the default. Re-cut on the same host
+(i3-12100F), Crystal 1.21.0, median of 3, `wrk -c 100 -d 30`, `--release`.
+Session: `bench/log/linux/2026-08-09-060252/`.
+
+| Path | Boehm req/s | gcry req/s | % of Boehm | post-GC RSS × |
+|------|------------:|-----------:|-----------:|--------------:|
+| `/json` | 43,008 | 35,022 | **81.4%** | **0.77×** |
+| `/` | 84,482 | 74,725 | **88.5%** | **0.76×** |
+
+This lands inside the quiet-smoke band this host has carried since v0.16
+(~80–85% `/json` @ ~0.74–0.79×), so **the headline does not move on this
+evidence** — three trials cannot resolve a difference this size against a
+6–8% run spread. What it does establish is the thing that mattered: dropping
+the scrub default costs nothing visible end to end.
+
+The axis that *can* resolve the knob is the per-collection trace, where the
+effect is not diluted by the process around it. Kemal `/json`, EC1, 9 paired
+reps interleaved and order-rotated, ~1050 steady-state collections per config
+(`bench/log/linux/2026-08-09-061508-root-phase/`), `tuned` = the tip default
+(scrub off), `scrub` = the old default restored with `GCRY_SCRUB_FIBERS=1`:
+
+| Config | roots µs | scrub µs | stacks µs | Δ root work | Δ pause | post-GC RSS |
+|--------|---------:|---------:|----------:|------------:|--------:|------------:|
+| tuned (scrub off) | 196.6 | 0.0 | 14.0 | +0.0% | +0.0% | 12,220 KiB |
+| scrub on | 192.4 | 27.5 | 14.5 | **+11.2%** | **+5.9%** | 12,488 KiB |
+
+Turning scrub back on costs 11.2% more root work and 5.9% more pause, and
+**does not buy the retention it was turned on for** — post-GC RSS is 2.2%
+*higher* with it on, which at 9 reps is a wash rather than a reversal, but it
+is certainly not the reduction that justified the default. The +11.2% agrees
+in sign and rough magnitude with the −9.1% recorded for the opposite direction
+in `…-195929-root-phase/`.
+
 ### Sound-roots cut — what the default heuristics actually cost
 
 Every number above is measured with gcry's **root-completeness heuristics
@@ -157,7 +194,22 @@ it is not small where the root scan is large:
 |-----|------------:|---------------------:|--|
 | Kemal `/json`, EC1 | 398 µs | 398 µs | +0.1% |
 | Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** | **+1866%** |
-| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** | **+1347%** |
+| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** | **+1347%** *(pre-low-water; re-cut below)* |
+
+Both large numbers are **pre-low-water**. Kemal EC4 re-cut to 13 ms (11.3×
+better), and the fat-app row inverted outright — 21 paired reps, stratified by
+heap regime (`bench/log/linux/2026-08-09-071144-root-phase/`):
+
+| acik stratum | reps (tuned / sound) | tuned pause | `GCRY_SOUND=1` pause | Δ root work |
+|--------------|---------------------:|------------:|---------------------:|------------:|
+| small heap (~46 MiB) | 15 / 15 | 2.7 ms | 2.7 ms (+1.7%) | +2.7% |
+| large heap (~70 MiB) | 10 / 13 | 24.3 ms | **18.1 ms (−25.4%)** | **−43.8%** |
+
+`GCRY_SOUND=1` is now *cheaper* than the default on the fat app's large-heap
+regime, because the low-water skip applies to `lag = 0` and not to the 256 KiB
+default window: tuned still faults in a fixed window per parked fiber while
+sound starts at the low-water mark. Two independent cuts (9 and 21 reps) agree
+to 3pp on pause and 0.4pp on root work.
 
 In every case the entire cost is the two STW lag knobs — the other five
 heuristics stay within ±6%. They are not EC4-specific: they bite whenever the
@@ -278,8 +330,10 @@ Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numb
 Default process GC = **full STW majors**. `GCRY_INCREMENTAL=1` + a dirty barrier can re-scan pages before sweep; nursery (`GCRY_NURSERY`) stays off for process HTTP unless you are measuring p99. Soft-dirty is **Linux-only**.
 
 The one pause cliff worth knowing about is the STW root-scan lag pair, which
-`GCRY_SOUND=1` zeroes: 19× at Kemal EC4 and 14.5× on a fat app, and nothing
-outside those two shapes shows it. `make stw-lag-pause` (`bench/stw_lag_pause.cr`)
+`GCRY_SOUND=1` zeroes. It used to cost 19× at Kemal EC4 and 14.5× on a fat app;
+since the low-water skip that is 1.03× at the `make stw-lag-pause` shape, and on
+the fat app's large-heap regime `GCRY_SOUND=1` is now 25% *cheaper* than the
+default. `make stw-lag-pause` (`bench/stw_lag_pause.cr`)
 reproduces it in ~6 s without a server or an EC build, and gates it in CI —
 [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md#guarding-it).
 

@@ -210,19 +210,21 @@ Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 head
 
 Every number above is measured with gcry's **root-completeness heuristics
 armed** — base-pointer-only ambient roots, the static-root `type_id` gate,
-256 KiB STW stack lags, parked-fiber scrub. Each can decline to mark a pointer
-that is genuinely live, so those numbers price a collector that is allowed to
-guess. `GCRY_SOUND=1` turns the whole class off:
+256 KiB STW stack lags. Each can decline to mark a pointer that is genuinely
+live, so those numbers price a collector that is allowed to guess.
+(Parked-fiber scrub was in this list through v0.18; it is **opt-in** since
+tip — nothing measured kept its default alive.) `GCRY_SOUND=1` turns the
+whole class off:
 
 ```sh
 GCRY_SOUND=1 ./your-app
 ```
 
-| Kemal `/json` (tip, i3, median of 7) | % of Boehm | RSS × |
-|--------------------------------------|-----------:|------:|
-| tuned (process defaults) | 78.3% | 0.795× |
-| **sound roots** (`GCRY_SOUND=1`) | **81.0%** | **0.794×** |
-| sound + fully conservative bodies | 84.4% | 0.797× |
+| Kemal `/json` (i3, 9 rounds × 30 s) | % of Boehm | RSS × |
+|-------------------------------------|-----------:|------:|
+| tuned (process defaults) | 81.8% | 0.75× |
+| **sound roots** (`GCRY_SOUND=1`) | **83.0%** | **0.76×** |
+| sound + fully conservative bodies | 83.6% | 0.74× |
 
 **RSS is flat across all three** — that much reproduces across two sessions.
 The throughput column did not, and the reason turned out to be the harness:
@@ -242,15 +244,28 @@ With the confounds out (`bench/log/linux/2026-08-06-140037-sound-profile/`,
 
 | Config | vs tuned | rounds won | σ |
 |--------|---------:|-----------:|--:|
-| `GCRY_DISABLE_SCRUB_FIBERS=1` | **+1.29%** | 8/9 | 3.2 |
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | +1.29% *(retracted)* | 8/9 | 3.2 |
 | `GCRY_SOUND=1` | +0.82% | 8/9 | 1.7 |
 | `GCRY_DISABLE_BLACKLIST=1` | +0.73% | 7/9 | 1.2 |
 
 **The whole class is throughput-neutral on this workload** — under ~1% either
-way, not distinguishable from zero. The one real signal is `scrub_fibers`, and
-it points against the default: turning it off *gains* throughput, and the
-per-collection trace independently has it saving 1.7% of root work. It loses on
-throughput, pause and soundness alike.
+way, not distinguishable from zero.
+
+The `scrub_fibers` row was once read as the exception, the one knob with a real
+signal. **That is retracted:** a second session on the same host and harness
+measured **−1.22%** — sign flipped, significance gone. The arithmetic says why
+and says no run count would have helped. `roots + scrub + stacks` is 223 µs of
+each of 131 collections per 20 s, i.e. **0.146% of wall time**, and the knob
+moves ~9% of that — **~0.013%**. Both readings are ~100× the largest effect the
+mechanism can produce. Throughput cannot resolve this knob on this workload, in
+either direction.
+
+What settled it was the per-collection trace plus the fact that nothing else
+supported the default: the fat-app RSS it was turned on for does not reproduce,
+Kemal RSS is flat, and the wipe writes into another fiber's stack below an
+*estimated* SP. It is **opt-in** on tip (`GCRY_SCRUB_FIBERS=1`), and
+turning it back on costs 11.2% more root work and 5.9% more pause for no
+measured retention — [PERF.md](docs/PERF.md) § "Tip default-path re-cut".
 
 Pause cost *is* resolved, measured per collection off the GC trace:
 
@@ -258,7 +273,12 @@ Pause cost *is* resolved, measured per collection off the GC trace:
 |-----|------:|---------------:|
 | Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
 | Kemal `/json`, **EC4** | 7.2 ms | **141.7 ms** → **13 ms** |
-| acik `/api/v1/`, EC1, heap ≥55 MiB | 17 ms | **213 ms** (not re-cut) |
+| acik `/api/v1/`, EC1, heap ~70 MiB | 24.3 ms | **18.1 ms (−25%)** |
+
+The fat-app row used to read 17 ms → 213 ms. That was the pre-low-water
+collector; re-cut over 21 paired reps, `GCRY_SOUND=1` is now **cheaper** than
+the default there, because the low-water skip applies to `lag = 0` and not to
+the 256 KiB default window — [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
 In all three the whole cost is the two STW lag knobs — the other five
 heuristics are within ±6%.

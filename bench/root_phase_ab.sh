@@ -396,6 +396,11 @@ if suspect:
         print(f"      {k:18} heap MiB p10/p50/p90: "
               f"{hs[len(hs)//10]/1048576:.0f} / {hs[len(hs)//2]/1048576:.0f} / "
               f"{hs[9*len(hs)//10]/1048576:.0f}")
+    # Telling the reader to stratify without shipping the tool is how the fat
+    # app's numbers ended up being re-derived by hand each time.
+    print("\n    Stratify with:")
+    print(f"      bench/stratify_root_phase.py {os.path.relpath(run_dir)} --cut=<MiB>")
+    print("    Pick --cut in the trough between the p50 and p90 modes above.")
 
 out = {
     "reps": reps, "skip": skip,

@@ -19,7 +19,7 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Layout-precise scanning, type_id gate, SP clamp
 - [x] macOS Darwin Kemal RSS ~**0.93–1.01×** Boehm (MADV_FREE_REUSABLE, 256 KiB chunks)
 - [x] Shard-based integration: `require "gcry"` + `-Dgc_none` (stock Crystal ≥ 1.21)
-- [x] Fiber stack scrubbing (default-on since v0.13.0)
+- [x] Fiber stack scrubbing (default-on v0.13.0 → v0.18; **opt-in** on tip)
 - [x] 16-byte object header, deferred madvise (pause tail eliminated)
 - [x] Test suite hardening (invariants, property tests, ASan/Valgrind, soak)
 - [x] `GCRY_TRACE` + heap dump observability
@@ -111,16 +111,22 @@ Target: Match Boehm on the workloads Crystal users actually run.
       lost.) Applied to the parked-fiber and pthread-mapping paths.
       **EC4 pause 147 ms → 13 ms, 11.3×**; `make stw-lag-pause` 13.9× → 1.03×;
       RSS unchanged — `bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`
+- [ ] **Apply the low-water skip to the `lag > 0` default path.** No longer a
+      hypothesis: the fat app's large-heap re-cut has `GCRY_SOUND=1` running
+      **−25.4% pause / −43.8% root work** against tuned (21 paired reps,
+      stratified; `bench/log/linux/2026-08-09-071144-root-phase/`, confirmed at
+      9 reps by `…-062117-`). The default is the slower path because the skip is
+      gated on `lag == 0`, so tuned still faults in a fixed 256 KiB window per
+      parked fiber while sound starts at the low-water mark. Either ungate the
+      skip or make `lag = 0` the default — both need a Kemal EC4 control, since
+      that shape is where lag 0 still costs (+83%).
 - [ ] **Cheap root scan at scale — what is left.** `GCRY_SOUND=1` is still
       +83% pause at EC4 against tuned, and that residual is no longer a constant
       worst case: it tracks how much stack was actually touched (p5 3.4 ms,
-      p95 19.1 ms, against tuned's 6.1/7.8). Open questions: which fibers are
-      deeply used and why; whether the low-water skip should also apply on the
-      `lag > 0` default path (sound's p5 is already *below* tuned's, because
-      tuned's fixed 256 KiB window can include untouched pages); re-cutting the
-      fat app's large-heap case (14.5× on `2026-08-06-100611-root-phase/`)
-      against the fix; and Darwin, which has no pagemap equivalent wired and
-      keeps the full scan.
+      p95 19.1 ms, against tuned's 6.1/7.8). Open: which fibers are deeply used
+      and why; and Darwin, which has no pagemap equivalent wired and keeps the
+      full scan. **Closed:** the fat-app large-heap re-cut (above — the 14.5×
+      was pre-fix and the sign has since reversed).
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

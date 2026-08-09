@@ -1,0 +1,123 @@
+{
+  "reps": 9,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 244,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "2",
+      "rss_kib": 46444,
+      "rss_reps": [
+        39656,
+        44312,
+        76652,
+        65928,
+        46444,
+        41352,
+        72484,
+        46308,
+        74188
+      ],
+      "median": {
+        "roots_ns": 1152648.0,
+        "static_ns": 162021.0,
+        "stacks_ns": 35174.5,
+        "scrub_ns": 50.5,
+        "mark_ns": 1606929.5,
+        "sweep_ns": 3052312.0,
+        "pause_ns": 3424381.0
+      },
+      "iqr": {
+        "roots_ns": 14305700.25,
+        "static_ns": 22775.25,
+        "stacks_ns": 213318.5,
+        "scrub_ns": 53.0,
+        "mark_ns": 1557941.75,
+        "sweep_ns": 1414938.0,
+        "pause_ns": 17777242.5
+      },
+      "work_ns": 1187873.0,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "sound": {
+      "n": 246,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "3",
+      "rss_kib": 64112,
+      "rss_reps": [
+        66420,
+        46480,
+        45492,
+        44880,
+        72284,
+        50368,
+        64112,
+        65672,
+        74396
+      ],
+      "median": {
+        "roots_ns": 1263975.5,
+        "static_ns": 162406.0,
+        "stacks_ns": 37406.5,
+        "scrub_ns": 54.0,
+        "mark_ns": 1951826.5,
+        "sweep_ns": 3102700.5,
+        "pause_ns": 6952138.5
+      },
+      "iqr": {
+        "roots_ns": 4967273.5,
+        "static_ns": 21425.0,
+        "stacks_ns": 2699201.75,
+        "scrub_ns": 63.25,
+        "mark_ns": 2463896.5,
+        "sweep_ns": 2575573.0,
+        "pause_ns": 12357624.25
+      },
+      "work_ns": 1301436.0,
+      "delta_work_pct": 9.56,
+      "delta_pause_pct": 103.02
+    },
+    "scrub": {
+      "n": 237,
+      "env": "GCRY_SCRUB_FIBERS=1",
+      "soundness": "tuned",
+      "threads": "2",
+      "rss_kib": 71504,
+      "rss_reps": [
+        46092,
+        75888,
+        71292,
+        39804,
+        96040,
+        75808,
+        72544,
+        71504,
+        46380
+      ],
+      "median": {
+        "roots_ns": 1229176,
+        "static_ns": 164543,
+        "stacks_ns": 40780,
+        "scrub_ns": 83801,
+        "mark_ns": 1673700,
+        "sweep_ns": 2950661,
+        "pause_ns": 5629151
+      },
+      "iqr": {
+        "roots_ns": 17890515.0,
+        "static_ns": 26107.5,
+        "stacks_ns": 467458.5,
+        "scrub_ns": 101605.0,
+        "mark_ns": 1008131.0,
+        "sweep_ns": 1024624.5,
+        "pause_ns": 22187438.5
+      },
+      "work_ns": 1353757,
+      "delta_work_pct": 13.96,
+      "delta_pause_pct": 64.38
+    }
+  }
+}

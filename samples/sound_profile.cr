@@ -47,6 +47,17 @@ if ENV["GCRY_SCRUB_FIBERS"]? == "1"
   exit 0
 end
 
+# The parked-fiber scrub is opt-in, and nothing else here would notice if that
+# regressed: it is *off* under GCRY_SOUND too, so flipping the process default
+# back on still leaves the default run reading "tuned" and this sample green.
+# Assert the default itself. Only when no knob asked for it — GCRY_SCRUB_FIBERS=1
+# already returned above, and GCRY_DISABLE_SCRUB_FIBERS=1 agrees with the default.
+if ENV["GCRY_SCRUB_FIBERS"]?.nil? && heap.scrub_fibers_enabled
+  STDERR.puts "FAIL: scrub_fibers_enabled is on by default — it is opt-in " \
+              "(GCRY_SCRUB_FIBERS=1). See docs/SOUND-DEFAULTS.md."
+  exit 1
+end
+
 # Barrier axis: sound roots plus a page-dirty barrier must NOT read as "sound".
 # Only meaningful together with GCRY_SOUND — without it the roots axis already
 # reads tuned and the aggregate says so.

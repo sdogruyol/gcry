@@ -153,12 +153,33 @@ host — spreads 5.1–10.5%, wider than the gaps being measured. It even puts
 sound *ahead* of tuned (81.0% vs 78.3%), which is not physically plausible
 since sound does strictly more work.
 
-**So: there is currently no valid cut that resolves what the sound profile
-costs in throughput on Kemal `/json`.** An earlier version of this document
-claimed ~1pp. That figure came from the holed profile and is retracted.
+Session 3 `…-2026-08-09-063211-sound-profile/` re-took it on the tip default
+(scrub off) at the published methodology — 9 rounds × 30 s, interleaved,
+order rotated:
 
-**What both sessions agree on: RSS does not move.** 0.756/0.754/0.746× and
-0.795/0.794/0.797× — flat to three digits within each session, across all
+| Config | % of Boehm | RSS × | pause p50 | run spread |
+|--------|-----------:|------:|----------:|-----------:|
+| gcry tuned | 81.8% | 0.75× | 0.59 ms | 6.14% |
+| gcry sound roots | 83.0% | 0.76× | 0.59 ms | 5.98% |
+| gcry sound + conservative bodies | 83.6% | 0.74× | 0.59 ms | 8.77% |
+
+It puts sound ahead of tuned again, by +1.39% against a 6% spread — i.e. the
+same unresolved reading as session 2, not a confirmation of it. Note that
+"sound ahead of tuned is physically implausible" is no longer true *in
+general*: since the low-water skip, `lag = 0` starts the parked-fiber scan at
+the stack's low-water mark while the 256 KiB default window does not, so sound
+can genuinely scan **less** than tuned. That mechanism does not apply here —
+the lag knobs are inert on Kemal at EC1, where STW never sees more than two
+mutator threads — but it does apply on the fat app, and there it is measured
+(see *Pause composition*).
+
+**So: there is still no valid cut that resolves what the sound profile costs
+in throughput on Kemal `/json`** — three sessions, three unresolved readings.
+An earlier version of this document claimed ~1pp. That figure came from the
+holed profile and is retracted.
+
+**What all three sessions agree on: RSS does not move.** 0.756/0.754/0.746×,
+0.795/0.794/0.797×, and 0.75/0.76/0.74× — flat within each session, across all
 three configs. Post-GC RSS is a far lower-variance measurement here than wrk
 throughput, and it is the one claim the data supports.
 
@@ -188,8 +209,10 @@ opposite directions. Boehm itself moved 102 → 141 req/s across three trials.
 This run also reported `phase_stacks` at 0.02–0.54 ms in every trial and
 concluded from it that the STW lag knobs are "inert at parallelism 1".
 **That conclusion is withdrawn.** It generalised a Kemal-shaped observation:
-the later pause-composition cut finds those knobs costing 14.5× on this same
-fat app *at EC1*, once its heap crosses ~60 MiB. See below.
+the later pause-composition cut found those knobs costing 14.5× on this same
+fat app *at EC1*, once its heap crosses ~60 MiB. The knobs are emphatically not
+inert here — though the *sign* of their cost has since reversed, because the
+low-water skip reaches `lag = 0` and not the 256 KiB default. See below.
 
 ### Pause composition — where the profile actually spends
 
@@ -311,7 +334,39 @@ is now *below* `tuned`'s, because tuned's fixed 256 KiB window can itself
 include untouched pages: the same skip should help the default path, which is
 not done here.
 
-The fat-app large-heap case has **not** been re-cut against this fix.
+### The fat-app large-heap case, re-cut — the sign reversed
+
+`bench/log/linux/2026-08-09-071144-root-phase/` (21 paired reps, interleaved,
+order rotated; confirmed by `…-062117-root-phase/` at 9 reps). Same
+stratification as above, because the app is still bistable and the harness
+still refuses to compare the mixed medians — IQR ran 393–1455% unstratified.
+
+| Stratum | reps (tuned / sound) | tuned pause | `GCRY_SOUND=1` pause | tuned root work | sound root work |
+|---------|---------------------:|------------:|---------------------:|----------------:|----------------:|
+| small heap (~46 MiB) | 15 / 15 | 2.7 ms | 2.7 ms (**+1.7%**) | 1112 µs | 1142 µs (+2.7%) |
+| large heap (~70 MiB) | 10 / 13 | 24.3 ms | **18.1 ms (−25.4%)** | 20 364 µs | **11 449 µs (−43.8%)** |
+
+**`GCRY_SOUND=1` is now cheaper than the default on the shape it used to be
+1347% more expensive on.** The 9-rep run gives −28.8% / −44.2% against the
+21-rep run's −25.4% / −43.8% — two independent cuts agreeing to 3pp on pause
+and 0.4pp on root work.
+
+The mechanism is the one predicted above, and this is the measurement that
+settles it: the low-water skip applies on the `lag = 0` path and **not** on the
+`lag > 0` default, so tuned still faults in its fixed 256 KiB window per parked
+fiber while sound starts at the low-water mark and skips the untouched head.
+On a fat app with many parked fibers that inverts the ordering outright. It is
+no longer just "sound's p5 is below tuned's" — at the large-heap stratum it is
+the median. **Applying the skip to the default path is now a measured
+opportunity, not a hypothesis.**
+
+Caveats worth keeping: the large-heap stratum still carries 38–50% within-
+stratum IQR, so the *magnitude* is soft even though the sign is not; and the
+regime split is drawn per process, so rep counts per stratum are unequal
+(10 vs 13) and not controllable from the harness.
+
+**The 213 ms / 14.5× figure is retired.** It described the pre-low-water
+collector and should not be cited for the current one.
 
 ### Guarding it
 
@@ -520,7 +575,7 @@ the answer turned out to be entirely the second.
 | "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
 | "Parked-fiber scrub earns its default" | **No — and it no longer has one.** Its RSS justification does not reproduce, the throughput claim is retracted, and the correctness question is open, so it now defaults `false` (see *What scrub_fibers costs*) |
 | "Disabling parked-fiber scrub gains 1.29% throughput" | **No — retracted.** A second session measured −1.22%; the effect is ~0.01% of wall time and unresolvable by throughput |
-| "Sound roots are free on the fat app" | **No — measured, and false.** 14.5× on large-heap collections, a 213 ms pause (pre-fix; not re-cut) |
+| "Sound roots are free on the fat app" | **Re-cut, and the sign reversed.** Was 14.5× / 213 ms pre-low-water; now **−25.4% pause** and **−43.8% root work** on the large-heap stratum, ±0% on the small one. Cheaper than the default, because the skip applies to `lag = 0` and not to the 256 KiB default window |
 | "The lag-0 scan has to read the whole stack" | **No.** 0.05% of a fiber stack is ever written; the rest is provably zero and is now skipped — EC4 147 ms → 13 ms |
 | "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
 | "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
@@ -569,13 +624,24 @@ conversation about becoming a language default has to start from. Publishing
 the tuned number alone means quoting a price for a collector that is allowed
 to lose objects.
 
-The tuned defaults remain the shipping default, and there is now a positive
-reason rather than an absence of one. Flipping — shipping sound and demoting
-the heuristics to opt-in — was the open question earlier drafts of this
-document existed to settle. On the evidence here it is **not defensible in this
-shape**: it costs a 19× pause under the Parallel EC opt-in and 14.5× on an
-ordinary single-threaded fat app once its heap grows, in both cases a
-100-ms-scale pause where tuned is at 17 ms.
+The tuned defaults remain the shipping default — but the reason has narrowed,
+and the argument above is **partly superseded**. Flipping — shipping sound and
+demoting the heuristics to opt-in — was the open question earlier drafts of
+this document existed to settle, and on the pre-low-water evidence it was not
+defensible in any shape: a 19× pause under the Parallel EC opt-in, 14.5× on an
+ordinary single-threaded fat app, in both cases a 100-ms-scale pause where
+tuned sat at 17 ms.
+
+Both of those numbers are now stale. Kemal EC4 re-cut 147 ms → 13 ms, and the
+fat-app case reversed sign outright: at its large-heap stratum `GCRY_SOUND=1`
+is **25% cheaper in pause and 44% cheaper in root work** than the default
+(`…-2026-08-09-071144-root-phase/`). What is left holding the tuned default is
+one shape, not two — Kemal at **EC4**, where lag 0 still costs +83%. And the
+mechanism behind the fat-app reversal points at a fix rather than a trade: the
+low-water skip is gated on `lag == 0`, so the default path is paying for a
+fixed 256 KiB window it does not need. Ungate that (ROADMAP: "Apply the
+low-water skip to the `lag > 0` default path") and the EC4 residual is the only
+remaining argument for tuned.
 
 The rest of the class is close to free everywhere it has been measured. The
 heuristics buy **no RSS at all**, **+0.1% of pause** on Kemal at EC1 and **+0%**

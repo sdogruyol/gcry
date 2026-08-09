@@ -23,6 +23,30 @@ freelist / sparse chunks (`…/2026-08-04-acik-i3-residual/`) — not live-graph
 9950X verify had one unreproduced Monitor SEGV — `…/acik-segv-bisect/`.
 Stack-map notes: [STACK_MAPS.md](STACK_MAPS.md).
 
+### Tip re-cut on the new default (scrub off) — **n=3 says nothing here**
+
+First cut after the scrub default was dropped. Same host (i3-12100F), same
+methodology as the table above — `wrk -c 100 -d 30`, median of 3, dual
+`/gc-collect`. Session `bench/log/linux/2026-08-09-061012/`.
+
+| Trial | Boehm req/s | gcry req/s | thr % | gcry RSS (KiB) | RSS × |
+|------:|------------:|-----------:|------:|---------------:|------:|
+| 1 | 112 | 116 | 103.9% | 46,948 | 0.91× |
+| 2 | 124 | 132 | 107.0% | 64,328 | 1.15× |
+| 3 | 141 | 130 | 92.4% | 44,948 | 0.80× |
+| **median** | 124 | 130 | **105.1%** | 46,948 | **0.84×** |
+
+**Do not cite the median.** It is a median over two different machines: this
+app is bistable between a ~44 MiB and a ~72 MiB heap regime, and the three
+reps drew 46.9 / 64.3 / 44.9 MiB — the RSS column is reporting which regime
+each rep landed in, not what the collector did. Boehm itself moved 112 → 141
+req/s across the same three trials. This reproduces the n=3 failure recorded
+under *What `scrub_fibers` costs* in [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
+rather than adding to it, and it is the reason the tip band above is left
+where it is: **`TRIALS=3` on this app cannot move a headline in either
+direction.** Stratified per-collection numbers are the usable channel — see
+the pause re-cut in that document.
+
 ### Opt-in: `GCRY_TIGHT_GROW=1` *(closes freelist residual)*
 
 Sticky newest-chunk freelist + sparse GC-before-grow (no HOLED / DONTNEED).
@@ -140,7 +164,7 @@ not reclaim.
 | STW pauses ≪ wall | Thr gaps were mostly mutator / retention / VMA — fixed those first |
 | Empty-chunk release | Kemal RSS ≈ Boehm (0.9 era); acikturkiye chunks are **dense live** (~noop for RSS) |
 | Layout / type_id / SP clamp | Correct; ~no RSS move on this app |
-| Stack scrub (default-on since v0.13.0) | Kemal RSS ~**0.80×** (v0.16). Acik: scrub ≠ substitute for correct finalizers; tip closed with finalizer + retain=0 → **~1×** (9950X) |
+| Stack scrub (default-on v0.13.0→v0.18; **opt-in** on tip) | Kemal RSS ~**0.80×** (v0.16). Acik: scrub ≠ substitute for correct finalizers; tip closed with finalizer + retain=0 → **~1×** (9950X). The acik RSS that put it on default (3.00× → 2.65×) does **not** reproduce — this app is bistable between a ~44 and a ~72 MiB heap regime |
 | Finalizer Array tables as GC roots | Kept every finalizable alive — acik ~80–100 MiB IO atomics; LibC registry + resurrect → ~1.81×, then retain=0 → ~1× |
 | Linux large/empty retain defaults → 0 | Mapped-free caches were the residual after finalizer fix; escape via `GCRY_LARGE_CACHE` / `GCRY_EMPTY_CHUNK_RETAIN` |
 | Post-retain=0 ~1.4–1.6× | Idle live_sc falls; heap/RSS stay — **mapped freelist** / sparse chunks (`…/acik-i3-residual/`) |

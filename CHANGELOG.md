@@ -90,6 +90,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fiber resumes, or a dropped root and a use-after-free later.
   [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) § "What `scrub_fibers` costs"
 
+  **Measured after the flip** (`bench/log/linux/2026-08-09-061508-root-phase/`,
+  Kemal `/json` EC1, 9 paired reps, ~1050 steady-state collections per config):
+  turning scrub back on costs **+11.2%** root work and **+5.9%** pause, and
+  post-GC RSS is **2.2% higher** with it on — a wash at 9 reps, but not the
+  reduction that justified the default. The +11.2% agrees in sign and magnitude
+  with the −9.1% recorded for the opposite direction. End to end the flip is
+  invisible: Kemal `/json` **81.4%** of Boehm @ **0.77×**, `/` **88.5%** @
+  **0.76×** (`…-060252/`), inside this host's quiet-smoke band.
+
+### Changed (benchmarks / numbers)
+
+- **Kemal, sound-profile and fat-app cuts re-taken on the tip default.**
+  Sessions `bench/log/linux/2026-08-09-*`. The Kemal headline does **not** move
+  — three trials cannot resolve a difference against a 6–8% run spread, and the
+  re-cut lands inside the band this host has carried since v0.16. The
+  sound-profile table is refreshed (tuned **81.8%** / sound **83.0%** / sound +
+  conservative bodies **83.6%**, RSS 0.75/0.76/0.74×); it is a *third*
+  unresolved throughput reading, not a confirmation of the second.
+- **README's `scrub_fibers` +1.29% row is now marked retracted.** The docs
+  retracted it in `355febd`; the README kept carrying it, along with the
+  "loses on every axis" framing that the same commit retired.
+- **`make stw-lag-pause` now carries CI's `--max-ratio=4`** instead of the
+  program's loose 30× default. A local gate that passes where CI fails is not a
+  gate. Measured this run: `stack_lag0` **1.03×**, `sound` **1.47×**.
+- **`bench/stratify_root_phase.py`** — `root_phase_ab.sh` refuses to quote
+  medians when a config's IQR exceeds 50% and tells you to stratify by heap
+  regime, but shipped no tool to do it, so the fat app's numbers were
+  re-derived by hand every session. The harness now prints the exact command.
+- **`samples/sound_profile.cr` pins the scrub default.** Nothing did: scrub is
+  off under `GCRY_SOUND` too, so flipping the process default back on left the
+  default run still reading `tuned` and the sample still green. Verified by
+  negative control — flipping the default fails the sample.
+
 ### Fixed (root completeness)
 
 - **`scan_object` ignored `allow_interior_pointers` for raw buffers.** The

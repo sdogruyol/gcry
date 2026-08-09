@@ -120,10 +120,17 @@ pause-budget: $(BIN)
 
 # STW root-scan lag pause trap: the whole pause cost of GCRY_SOUND=1.
 # Runs under both env shapes — the boot-lag assertion inverts with GCRY_SOUND.
+#
+# Carries CI's ratio bound (--max-ratio=4), not the program's loose 30× default:
+# a local `make stw-lag-pause` that passes where CI fails is not a gate. The
+# relaxed --max-ratio-nolw applies only when pagemap is unreadable and the
+# low-water skip cannot run — see ci.yml and bench/stw_lag_pause.cr.
 stw-lag-pause: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_lag_pause.cr -o $(BIN)/stw_lag_pause
-	$(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5}
-	GCRY_SOUND=1 $(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5}
+	$(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} \
+		--max-ratio=$${STW_LAG_MAX_RATIO:-4} --max-ratio-nolw=$${STW_LAG_MAX_RATIO_NOLW:-30}
+	GCRY_SOUND=1 $(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} \
+		--max-ratio=$${STW_LAG_MAX_RATIO:-4} --max-ratio-nolw=$${STW_LAG_MAX_RATIO_NOLW:-30}
 
 rss-leak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak
