@@ -54,12 +54,15 @@ module GC
       # acikturkiye throughput to ~57% Boehm (vs ~79% at 256 KiB). Kemal RSS
       # barely moves (0.88× → 1.04× Boehm). Escape: GCRY_CHUNK_BYTES=131072.
       heap.small_chunk_bytes = 262144_u64
-      # Parked fiber stacks carry stale pointer values from prior activations
-      # — those become false roots during conservative scanning and inflate
-      # retention (acikturkiye macOS: ~1.2 GiB live set, where much of it is
-      # not real reachable). Default-on for macOS and Linux process GC.
-      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
-      heap.scrub_fibers_enabled = true
+      # Parked fiber stacks carry stale pointer values from prior activations,
+      # and those become false roots during conservative scanning. Scrubbing
+      # them was default-on to cut that retention. It is **off** now: the wipe
+      # zeroes memory below another fiber's *estimated* SP from a foreign
+      # thread, its RSS justification does not reproduce, and no perf axis
+      # decides it — see the Linux branch below and docs/SOUND-DEFAULTS.md
+      # § "What scrub_fibers costs".
+      # Opt back in: GCRY_SCRUB_FIBERS=1.
+      heap.scrub_fibers_enabled = false
       heap.blacklist_enabled = true
       # Large cache on Darwin starts at 1 MiB (adaptive can grow to LARGE_CACHE_LIMIT
       # if hit-rate warrants it). mach_vm reclaim already punches holes on free,
@@ -71,13 +74,37 @@ module GC
       # finalizer fix; release0 med3 (`…/acik-release0-med3/`) tied Boehm RSS at
       # ~94% thr. Escape: GCRY_EMPTY_CHUNK_RETAIN=<bytes>.
       heap.empty_chunk_retain = 0_u64
-      # Linux: scrub parked fiber stacks to cut false retention from stale
-      # pointer values on the stack. Proved: Kemal RSS 1.04× → 0.95×,
-      # acikturkiye RSS 3.00× → 2.65×, throughput preserved.
-      # Escape: GCRY_DISABLE_SCRUB_FIBERS=1.
+      # Parked-fiber scrub: **off**. It was turned on for fat-app RSS
+      # (acikturkiye 3.00× → 2.65×) and that number does not reproduce — acik is
+      # bistable between a ~44 and a ~72 MiB heap regime, so n=3 said +46% worse
+      # and n=9 said −34.9% better; stratified it is a wash. Kemal RSS is flat
+      # (0.76× → 0.75×). Throughput cannot decide it either: `roots + scrub +
+      # stacks` is 0.146% of wall time at EC1 and the knob moves 9.1% of that,
+      # i.e. ~0.013% — both the +1.29% and the −1.22% cuts are ~100× the largest
+      # effect the mechanism can produce.
+      #
+      # What is left is the correctness axis, and it is not settled in scrub's
+      # favour. The wipe zeroes `[stack_top − 4 KiB, stack_top)` on *another*
+      # fiber's stack, keyed on `@context.stack_top` — a saved value, i.e. an
+      # estimate of where that fiber's live frames end. bdwgc's `GC_clear_stack`
+      # only ever wipes below the *calling* thread's own hardware SP.
+      # `bench/scrub_audit.cr` answers one half of that: across EC1 and EC4 the
+      # window never reached a foreign thread's live frames, because every SP
+      # sighting was on a fiber still reporting `running?`. It explicitly does
+      # not answer the other half — whether a pointer can live only in the wiped
+      # region in a shape those runs never exercised. This document's own claims
+      # table rates the default "unproven either way".
+      #
+      # A wipe that lands one frame too high zeroes a live reference slot, which
+      # surfaces either as an immediate nil deref when the fiber resumes or as a
+      # dropped root → swept-while-live → SEGV at a small address. A knob whose
+      # benefit is a wash, whose cost is a wash, and which is the only default-on
+      # heuristic that *writes* to memory the collector does not own does not
+      # keep its default on "unproven". Opt back in: GCRY_SCRUB_FIBERS=1.
+      #
       # Collect-time mutator clear_stack was measured and dropped (below-SP wipe
       # is outside the root-scan window; no durable thr/RSS win).
-      heap.scrub_fibers_enabled = true
+      heap.scrub_fibers_enabled = false
       heap.blacklist_enabled = true
       # Large-object freelist: no retain (was 4 MiB floor, adaptive → 32 MiB).
       # Escape: GCRY_LARGE_CACHE=<bytes> (adaptive may grow from a non-zero floor).

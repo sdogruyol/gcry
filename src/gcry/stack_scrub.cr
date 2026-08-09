@@ -3,8 +3,9 @@
 # clear_stack: zero unused words below SP so later root scans do not treat
 # stale stack slots as live. scrub_parked_fibers: same for parked fiber stacks.
 #
-# Alloc-path: GCRY_CLEAR_STACK=1. Parked-fiber collect scrub: process default;
-# escape GCRY_DISABLE_SCRUB_FIBERS=1.
+# Alloc-path: GCRY_CLEAR_STACK=1. Parked-fiber collect scrub: opt-in,
+# GCRY_SCRUB_FIBERS=1 — it wipes below another fiber's *estimated* SP, which is
+# a correctness question nothing measured has closed (docs/SOUND-DEFAULTS.md).
 #
 # clear_stack must not call Fiber/Thread APIs — those malloc during early
 # Thread TLS publish and recurse into allocate. Bounds come from
