@@ -79,8 +79,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       the EC1 exemption, whose stated rationale ("SYSMON is suspended on its
       fiber") does not describe what happens. The Parallel mid-swap window was
       not observed in 300 collections with the guard off — a bound on its rate,
-      not a licence to remove the guard. Still open: whether a pointer can live
-      only in the wiped region in a shape not exercised here.
+      not a licence to remove the guard. The other half — whether a pointer can
+      live only in the wiped region — is now answered by `make scrub-margin`
+      (`GCRY_SCRUB_OVERSHOOT` slides the window into live frames, so the sweep
+      carries its own positive control): clean through **56 bytes** of
+      overshoot, corrupt at **60**. That boundary is `swapcontext`'s six
+      callee-saved registers plus the return address, so **the margin is zero** —
+      the wipe ends exactly where live data begins, and correctness rests
+      entirely on `@context.stack_top` being exact on every platform and through
+      any change to how Crystal spills. No defect at the shipping window; no
+      tolerance either. Still open: the mid-swap suspend, which no harness here
+      has hit.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's

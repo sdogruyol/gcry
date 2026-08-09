@@ -88,6 +88,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bench/scrub_margin.cr` (`make scrub-margin`) — the parked-fiber scrub has
+  zero margin.** The audit could close only half the scrub question: for a
+  genuinely parked fiber, `@context.stack_top` is the only record of its SP, so
+  there is nothing independent to check the wipe window against. This finds the
+  boundary instead. `GCRY_SCRUB_OVERSHOOT=<bytes>` (research only, default 0)
+  slides the window up into frames that must be live, and sweeping it in child
+  processes supplies the positive control the first audit lacked — without a run
+  that corrupts, a clean run at 0 proves nothing.
+
+  Result on x86_64: clean through **56 bytes** of overshoot, corrupt at **60**.
+  That is `swapcontext`'s six callee-saved registers plus the return address —
+  **the wipe window ends exactly where live data begins.** No defect at the
+  shipping window, but no tolerance either: correctness rests entirely on
+  `@context.stack_top` being exact, every collection, on every platform, through
+  any change to how Crystal spills registers. Further support for the knob being
+  opt-in. [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md) § "Auditing the scrub"
 - **`low_water_skips` / `low_water_skipped_bytes` on `/gc-stats`**, reset per
   collection. Whether the skip engages is not inferable from a pause number:
   it needs `multi_mutator_threads?`, which is `Thread` count > 2, and a real

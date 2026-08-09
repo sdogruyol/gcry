@@ -545,6 +545,49 @@ What this does **not** settle: whether a pointer can live only in the wiped
 region in some shape not exercised here. It settles that the wipe is not
 landing on a thread's live frames in the two shapes gcry actually ships.
 
+### The other half — how far the window sits from live data
+
+That remaining question cannot be answered the same way, and the reason is
+structural: for a *genuinely parked* fiber there is no foreign SP to compare
+against, because `@context.stack_top` is the only record of where its stack
+ends. Nothing independent exists to check the window against.
+
+So `bench/scrub_margin.cr` (`make scrub-margin`) does not check it. It finds the
+boundary instead. `GCRY_SCRUB_OVERSHOOT=N` — research only, default 0 — slides
+the wipe window *up* by N bytes, over `stack_top` and into frames that must be
+live. Sweeping N in child processes (most of the ladder is expected to die) buys
+two things at once: a **positive control**, so a clean run at 0 means something,
+and the **margin**. 64 fibers × 40 park/collect rounds, x86_64:
+
+| overshoot | verdict |
+|----------:|---------|
+| 0 … 56 bytes | clean |
+| **60 bytes** | **CORRUPT (SEGV)** |
+| 64 … 4096 bytes | CORRUPT |
+
+**The margin is zero.** 56 bytes is not an arbitrary boundary: on x86_64-sysv
+`swapcontext` saves six callee-saved registers plus the return address *above*
+the SP it records, i.e. seven words. The wipe window ends exactly where live
+data begins.
+
+That is the answer to the open half, and it is not the reassuring one. The
+scrub is not clearing a comfortable dead zone below live frames — it is
+clearing right up against them, with nothing in hand. Its correctness rests
+entirely on `@context.stack_top` being exact: every collection, on every
+platform, through any future change to how Crystal spills registers in
+`swapcontext`. A mid-swap window, a different ABI, or one extra pushed register
+lands on live data directly.
+
+This is why the knob is opt-in. It is not that a defect was found at the
+shipping window — none was, across the whole ladder at 0. It is that the design
+has no tolerance, and the argument for keeping it was already a wash on every
+other axis.
+
+Still genuinely open: the positive control shows this workload *can* detect
+corruption, which is what the first audit lacked. It does not prove the shipping
+window is safe under shapes this workload does not produce — a mid-swap suspend
+being the obvious one, and the one no harness here has managed to hit.
+
 <details>
 <summary>Why this took a second probe (kept — the failure mode is instructive)</summary>
 
