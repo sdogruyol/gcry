@@ -22,11 +22,13 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
-- Fiber stack scrub **on** (Linux + Darwin; `GCRY_DISABLE_SCRUB_FIBERS=1` to opt out)
-- The five items above are **root-completeness heuristics**: each can decline to
-  mark a pointer that is genuinely live. `GCRY_SOUND=1` turns the whole class
-  off in one flag — that is the configuration whose numbers belong in a
-  correctness claim. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
+- Fiber stack scrub **off** (was on through v0.18; `GCRY_SCRUB_FIBERS=1` to opt in)
+- Base-ptr roots, the type_id gate, the STW stack/pthread lags, the blacklist —
+  and fiber scrub when it is opted in — are **root-completeness heuristics**:
+  each can decline to mark a pointer that is genuinely live. (Layout scan is a
+  *separate* axis: body-scan precision, not root completeness.) `GCRY_SOUND=1`
+  turns the whole class off in one flag — that is the configuration whose
+  numbers belong in a correctness claim. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
 - Large-object freelist retain: Linux process **0**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive grows only from a non-zero floor, up to 32 MiB)
 - Free-page physical release: Darwin **on** (`MADV_FREE_REUSABLE`); Linux HOLED **opt-in** (`GCRY_PAGE_DONTNEED=1` — measured thr+RSS regression as default). Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
@@ -96,7 +98,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
-| `GCRY_SCRUB_FIBERS=1` | Force fiber scrub on (already process default) |
+| `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
@@ -115,7 +117,7 @@ Conservative GC keeps any aligned word that **looks** like a heap pointer.
 
 Common sources: stale stack slots, integer bit patterns, broad static scans.
 
-Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout builtins, SP clamp, blacklist, fiber scrub. Linux HOLED page release is opt-in (`GCRY_PAGE_DONTNEED=1`). Opt-in `GCRY_CLEAR_STACK=1` wipes **unused** stack on alloc — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
+Mitigations already on by default: empty-chunk release, base-ptr roots, type_id gate, layout builtins, SP clamp, blacklist. Fiber scrub is **opt-in** on tip (`GCRY_SCRUB_FIBERS=1`) — it cut false retention, but nothing measured kept its default alive. Linux HOLED page release is opt-in (`GCRY_PAGE_DONTNEED=1`). Opt-in `GCRY_CLEAR_STACK=1` wipes **unused** stack on alloc — not stack maps. Closing dense-live RSS on fat apps needs the compiler.
 
 ### Diagnosing via `/gc-stats`
 
