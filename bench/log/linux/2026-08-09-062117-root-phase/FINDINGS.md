@@ -24,6 +24,12 @@ Stratified at 55 MiB (the harness refused the unstratified medians — IQR
 Against the 21-rep run's −25.4% / −43.8%: agreement to 3pp on pause and 0.4pp
 on root work, from independent draws.
 
+Reproduce:
+
+```sh
+bench/stratify_root_phase.py bench/log/linux/2026-08-09-062117-root-phase --cut=55
+```
+
 The `scrub` column is incidental here — it tracks `tuned` closely, which is
 consistent with the Kemal finding that scrub is a root-work cost rather than a
 retention win. The Kemal cut (`../2026-08-09-061508-root-phase/`) is the one to

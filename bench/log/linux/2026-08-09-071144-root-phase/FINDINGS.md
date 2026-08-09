@@ -38,6 +38,12 @@ rule the harness itself uses.
 against this run's −25.4% / −43.8%: two independent cuts agreeing to 3pp on
 pause and 0.4pp on root work.
 
+Reproduce:
+
+```sh
+bench/stratify_root_phase.py bench/log/linux/2026-08-09-071144-root-phase --cut=55
+```
+
 ## Why the default is now the slower path
 
 The low-water skip is gated on `lag == 0` in `fiber_stack_scan_top`. So:

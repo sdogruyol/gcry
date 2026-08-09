@@ -114,6 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`make stw-lag-pause` now carries CI's `--max-ratio=4`** instead of the
   program's loose 30× default. A local gate that passes where CI fails is not a
   gate. Measured this run: `stack_lag0` **1.03×**, `sound` **1.47×**.
+- **`bench/stratify_root_phase.py`** — `root_phase_ab.sh` refuses to quote
+  medians when a config's IQR exceeds 50% and tells you to stratify by heap
+  regime, but shipped no tool to do it, so the fat app's numbers were
+  re-derived by hand every session. The harness now prints the exact command.
+- **`samples/sound_profile.cr` pins the scrub default.** Nothing did: scrub is
+  off under `GCRY_SOUND` too, so flipping the process default back on left the
+  default run still reading `tuned` and the sample still green. Verified by
+  negative control — flipping the default fails the sample.
 
 ### Fixed (root completeness)
 
