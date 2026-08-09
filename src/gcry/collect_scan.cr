@@ -247,11 +247,12 @@ module Gcry
     # (2026-08-01 A/B: soft 0/40; quiet thr ≥ 512 KiB default).
     property stw_multi_stack_lag : UInt64 = 256_u64 * 1024
 
-    # Skip the never-written head of a parked fiber stack when lag is 0
-    # (GCRY_STACK_LOW_WATER=0 to disable). Semantics-preserving: pages with
-    # neither the present nor the swapped bit set have never been faulted, so
-    # they are zero and cannot hold a pointer. Linux-only; falls back to the
-    # full guard→bottom scan whenever /proc/self/pagemap cannot answer.
+    # Skip the never-written head of a parked fiber stack — on *both* the lag-0
+    # and the lag>0 default path (GCRY_STACK_LOW_WATER=0 to disable).
+    # Semantics-preserving: pages with neither the present nor the swapped bit
+    # set have never been faulted, so they are zero and cannot hold a pointer.
+    # Linux-only; falls back to the unskipped range whenever
+    # /proc/self/pagemap cannot answer, so a failure only ever widens the scan.
     property stack_low_water_scan : Bool = true
 
     # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
@@ -321,7 +322,12 @@ module Gcry
             bottom = fiber.@stack.bottom.address
             if bottom > guard
               lw = Platform.stack_low_water(guard, bottom)
-              return lw > guard ? lw : guard
+              if lw > guard
+                @low_water_skips += 1
+                @low_water_skipped_bytes += lw - guard
+                return lw
+              end
+              return guard
             end
           end
         {% end %}
@@ -329,7 +335,36 @@ module Gcry
       end
 
       lagged = t > lag ? t - lag : guard
-      lagged < guard ? guard : lagged
+      lagged = guard if lagged < guard
+
+      # The same skip, on the default path. The lag window is a *bound* on how
+      # far below stack_top to look; it says nothing about whether those pages
+      # were ever written, and on a fat app most of them were not — measured
+      # 2026-08-09, tuned spent 20.4 ms of root work per large-heap collection
+      # against sound's 11.4 ms, because lag 0 got this skip and lag 256 KiB did
+      # not (`bench/log/linux/2026-08-09-071144-root-phase/FINDINGS.md`).
+      #
+      # Start at whichever is higher, the lag floor or the low-water mark. That
+      # is never wider than the lag window and never narrower than what the
+      # words can hold: everything skipped is a page with neither the present
+      # nor the swapped bit, i.e. never faulted, i.e. zero. Probing is cheap
+      # here in a way it is not at lag 0 — the live frames begin within `lag`
+      # bytes of `lagged`, so the walk stops after ~lag/PAGE_SIZE entries (64
+      # for the 256 KiB default), one pread.
+      {% if flag?(:linux) %}
+        if @stack_low_water_scan
+          bottom = fiber.@stack.bottom.address
+          if bottom > lagged
+            lw = Platform.stack_low_water(lagged, bottom)
+            if lw > lagged
+              @low_water_skips += 1
+              @low_water_skipped_bytes += lw - lagged
+              lagged = lw
+            end
+          end
+        end
+      {% end %}
+      lagged
     end
 
     # lag=0 used to mean scanning every parked fiber guard→bottom, ~8 MiB each:
@@ -667,7 +702,11 @@ module Gcry
       {% if flag?(:linux) %}
         if @stack_low_water_scan && low < high
           lw = Platform.stack_low_water(low, high)
-          low = lw if lw > low && lw < high
+          if lw > low && lw < high
+            @low_water_skips += 1
+            @low_water_skipped_bytes += lw - low
+            low = lw
+          end
         end
       {% end %}
 

@@ -83,6 +83,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_SP_CLAMP=1` | Full pthread range on other threads |
 | `GCRY_STW_STACK_LAG` | Multi-mutator parked-fiber scan depth below `stack_top` (bytes; default **256 KiB**; `0` = full guard→bottom) |
 | `GCRY_STW_PTHREAD_LAG` | Multi-mutator pthread scan from stack high when SP is on a fiber (bytes; default **256 KiB**; `0` = full map) |
+| `GCRY_STACK_LOW_WATER=0` | Disable the low-water skip (Linux; default **on**). The scan starts at `max(stack_top − lag, low_water)` — a page with neither the present nor the swapped bit in `/proc/self/pagemap` was never faulted, so it is zero and skipping it cannot lose a root. Not a conservatism knob: setting `0` only makes the scan *wider* and slower (Kemal EC4 pause 3.60 → 8.06 ms). Exists for A/B and for a kernel whose pagemap misbehaves; unreadable pagemap already falls back on its own |
 | `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: EC1 and Parallel reclaim-off / TLAB-off sweep after `start_world`) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |

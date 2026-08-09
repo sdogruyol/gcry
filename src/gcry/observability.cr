@@ -159,6 +159,8 @@ module Gcry
         type_id_root_false_negatives:          heap.type_id_root_false_negatives,
         sp_clamp_hits:                         heap.sp_clamp_hits,
         sp_clamp_fallbacks:                    heap.sp_clamp_fallbacks,
+        low_water_skips:                       heap.low_water_skips,
+        low_water_skipped_bytes:               heap.low_water_skipped_bytes,
         finalizer_entries:                     heap.finalizer_entry_count,
         weak_links:                            heap.finalizer_link_count,
         blacklist_hits:                        heap.blacklist_hits,

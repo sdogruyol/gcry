@@ -48,6 +48,13 @@ module Gcry
     # Parallel multi-mutator parked-fiber wipe size (bytes below saved SP).
     property fiber_scrub_bytes : UInt64 = FIBER_CLEAR_STACK_CAP
 
+    # Research only — GCRY_SCRUB_OVERSHOOT=<bytes>, default 0. Slides the wipe
+    # window above `stack_top`, into frames that should be live. It exists to
+    # give the scrub audit a positive control: a run that is *expected* to
+    # corrupt, so a clean run at overshoot 0 means something. **Never ship
+    # non-zero** — this deliberately destroys live data.
+    property scrub_overshoot_bytes : UInt64 = 0_u64
+
     getter clear_stack_bytes_total : UInt64 = 0_u64
     getter fiber_scrub_bytes_total : UInt64 = 0_u64
     getter clear_stack_calls : UInt64 = 0_u64
@@ -238,6 +245,25 @@ module Gcry
         low = top > wipe ? top - wipe : guard
         low = guard if low < guard
         next if low >= top
+
+        # Research only (GCRY_SCRUB_OVERSHOOT, default 0). Slide the window *up*
+        # by N bytes, deliberately over `stack_top` and into what should be live
+        # frames.
+        #
+        # This exists because the open half of the scrub question cannot be
+        # observed directly: for a genuinely parked fiber, `@context.stack_top`
+        # is the only record of its SP, so there is nothing independent to check
+        # the window against. What can be done is locate the boundary — if the
+        # shipping window (overshoot 0) never breaks and a small overshoot
+        # always does, that is a positive control for the instrument *and* a
+        # measurement of the margin. A harness that can only ever report "no
+        # crash" is the thing this repo already refused once, in scrub_audit.
+        if (over = @scrub_overshoot_bytes) > 0
+          low += over
+          top += over
+          top = bottom if top > bottom
+          next if low >= top
+        end
 
         if fsp = foreign_sp
           @fiber_scrub_foreign_sp_scrubs += 1

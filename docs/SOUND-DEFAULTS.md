@@ -346,27 +346,58 @@ still refuses to compare the mixed medians — IQR ran 393–1455% unstratified.
 | small heap (~46 MiB) | 15 / 15 | 2.7 ms | 2.7 ms (**+1.7%**) | 1112 µs | 1142 µs (+2.7%) |
 | large heap (~70 MiB) | 10 / 13 | 24.3 ms | **18.1 ms (−25.4%)** | 20 364 µs | **11 449 µs (−43.8%)** |
 
-**`GCRY_SOUND=1` is now cheaper than the default on the shape it used to be
-1347% more expensive on.** The 9-rep run gives −28.8% / −44.2% against the
-21-rep run's −25.4% / −43.8% — two independent cuts agreeing to 3pp on pause
-and 0.4pp on root work.
+At the time, `GCRY_SOUND=1` was cheaper than the default on the shape it used to
+be 1347% more expensive on. The mechanism was clear: the low-water skip applied
+on the `lag = 0` path and **not** on the `lag > 0` default, so tuned still
+faulted in its fixed 256 KiB window per parked fiber while sound started at the
+low-water mark and skipped the untouched head.
 
-The mechanism is the one predicted above, and this is the measurement that
-settles it: the low-water skip applies on the `lag = 0` path and **not** on the
-`lag > 0` default, so tuned still faults in its fixed 256 KiB window per parked
-fiber while sound starts at the low-water mark and skips the untouched head.
-On a fat app with many parked fibers that inverts the ordering outright. It is
-no longer just "sound's p5 is below tuned's" — at the large-heap stratum it is
-the median. **Applying the skip to the default path is now a measured
-opportunity, not a hypothesis.**
-
-Caveats worth keeping: the large-heap stratum still carries 38–50% within-
-stratum IQR, so the *magnitude* is soft even though the sign is not; and the
-regime split is drawn per process, so rep counts per stratum are unequal
-(10 vs 13) and not controllable from the harness.
+> **Superseded.** The skip now applies on the default path too, and that
+> reverses this table again — the default is the cheapest of the three. The
+> rows above are kept because they are what identified the mechanism; do not
+> cite them as current. See *The skip on the default path*, below.
 
 **The 213 ms / 14.5× figure is retired.** It described the pre-low-water
 collector and should not be cited for the current one.
+
+### The skip on the default path
+
+`fiber_stack_scan_top` gated the low-water skip on `lag == 0`. It no longer
+does: the default path starts at `max(stack_top − lag, low_water)` — bounded by
+the lag *and* clear of the untouched head, where `lag = 0` has only the second
+protection and `lag > 0` previously had only the first.
+
+**Kemal EC4** (`bench/log/linux/2026-08-09-104417-root-phase/`, 9 paired reps,
+~2300 collections per config, single ~93 MiB heap regime so no stratification
+is needed). This is the shape the change had to be proven on: `lag = 0` still
+costs here, so a skip on the default path could plausibly have cost too.
+
+| config | pause | Δ | root work | Δ | IQR |
+|--------|------:|--:|----------:|--:|----:|
+| `tuned` (with the skip) | **3.60 ms** | — | **3002 µs** | — | 24% |
+| `tuned` + `GCRY_STACK_LOW_WATER=0` | 8.06 ms | +124.1% | 7424 µs | +147.3% | 12% |
+| `GCRY_SOUND=1` | 16.39 ms | +355.8% | 15 777 µs | +425.6% | 63% |
+
+**Pause 8.06 → 3.60 ms**, RSS flat to 0.2% across all three, `mark` and `sweep`
+unchanged — the saving is entirely in `roots + stacks`, which is what a
+root-scan change should look like.
+
+**Fat app** (`…-105503-root-phase/`, 21 reps, stratified): at the ~72 MiB
+regime `tuned` 10.7 ms against the old default's 28.8 ms and sound's 18.2 ms;
+±2% at the ~46 MiB regime. Softer than the EC4 number — see that session's
+FINDINGS for the thread-count confound.
+
+Two things this settles and one it does not. It settles that the default path
+was paying for pages nothing ever wrote, on both shapes. It settles that
+`lag = 0` remains the wrong default at EC4 — the skip makes the *bounded* scan
+cheap, it does not make the complete scan affordable (16.4 ms against 3.6 ms).
+It does **not** touch Kemal at EC1, where `multi_mutator_threads?` is false at
+2 threads and the lag branch is unreachable.
+
+Engagement is now observable rather than inferred: `low_water_skips` and
+`low_water_skipped_bytes` on `/gc-stats`, reset per collection. That matters
+because the gate is `Thread` count > 2 and a real app can sit on that boundary
+— the fat app reported 2 threads from one build and 3 from another.
 
 ### Guarding it
 
@@ -514,6 +545,49 @@ What this does **not** settle: whether a pointer can live only in the wiped
 region in some shape not exercised here. It settles that the wipe is not
 landing on a thread's live frames in the two shapes gcry actually ships.
 
+### The other half — how far the window sits from live data
+
+That remaining question cannot be answered the same way, and the reason is
+structural: for a *genuinely parked* fiber there is no foreign SP to compare
+against, because `@context.stack_top` is the only record of where its stack
+ends. Nothing independent exists to check the window against.
+
+So `bench/scrub_margin.cr` (`make scrub-margin`) does not check it. It finds the
+boundary instead. `GCRY_SCRUB_OVERSHOOT=N` — research only, default 0 — slides
+the wipe window *up* by N bytes, over `stack_top` and into frames that must be
+live. Sweeping N in child processes (most of the ladder is expected to die) buys
+two things at once: a **positive control**, so a clean run at 0 means something,
+and the **margin**. 64 fibers × 40 park/collect rounds, x86_64:
+
+| overshoot | verdict |
+|----------:|---------|
+| 0 … 56 bytes | clean |
+| **60 bytes** | **CORRUPT (SEGV)** |
+| 64 … 4096 bytes | CORRUPT |
+
+**The margin is zero.** 56 bytes is not an arbitrary boundary: on x86_64-sysv
+`swapcontext` saves six callee-saved registers plus the return address *above*
+the SP it records, i.e. seven words. The wipe window ends exactly where live
+data begins.
+
+That is the answer to the open half, and it is not the reassuring one. The
+scrub is not clearing a comfortable dead zone below live frames — it is
+clearing right up against them, with nothing in hand. Its correctness rests
+entirely on `@context.stack_top` being exact: every collection, on every
+platform, through any future change to how Crystal spills registers in
+`swapcontext`. A mid-swap window, a different ABI, or one extra pushed register
+lands on live data directly.
+
+This is why the knob is opt-in. It is not that a defect was found at the
+shipping window — none was, across the whole ladder at 0. It is that the design
+has no tolerance, and the argument for keeping it was already a wash on every
+other axis.
+
+Still genuinely open: the positive control shows this workload *can* detect
+corruption, which is what the first audit lacked. It does not prove the shipping
+window is safe under shapes this workload does not produce — a mid-swap suspend
+being the obvious one, and the one no harness here has managed to hit.
+
 <details>
 <summary>Why this took a second probe (kept — the failure mode is instructive)</summary>
 
@@ -575,7 +649,7 @@ the answer turned out to be entirely the second.
 | "Sound roots cost ~nothing in throughput on Kemal at EC1" | Yes — +0.82% at 1.7σ over 9 paired rounds, i.e. under ~1% either way |
 | "Parked-fiber scrub earns its default" | **No — and it no longer has one.** Its RSS justification does not reproduce, the throughput claim is retracted, and the correctness question is open, so it now defaults `false` (see *What scrub_fibers costs*) |
 | "Disabling parked-fiber scrub gains 1.29% throughput" | **No — retracted.** A second session measured −1.22%; the effect is ~0.01% of wall time and unresolvable by throughput |
-| "Sound roots are free on the fat app" | **Re-cut, and the sign reversed.** Was 14.5× / 213 ms pre-low-water; now **−25.4% pause** and **−43.8% root work** on the large-heap stratum, ±0% on the small one. Cheaper than the default, because the skip applies to `lag = 0` and not to the 256 KiB default window |
+| "Sound roots are free on the fat app" | **No, and the 14.5× / 213 ms is retired.** Pre-low-water it was 1347%; with the skip on `lag = 0` only, sound briefly came out *cheaper* than the default; with the skip on the default path too, the default is cheapest again — fat app ~72 MiB: tuned 10.7 ms, sound 18.2 ms |
 | "The lag-0 scan has to read the whole stack" | **No.** 0.05% of a fiber stack is ever written; the rest is provably zero and is now skipped — EC4 147 ms → 13 ms |
 | "Sound roots are free under Parallel EC" | **No — measured, and false.** 19× pause at EC4 |
 | "The STW lag knobs are inert at parallelism 1" | **No — withdrawn.** True of Kemal, false of the fat app at EC1 |
@@ -632,16 +706,23 @@ defensible in any shape: a 19× pause under the Parallel EC opt-in, 14.5× on an
 ordinary single-threaded fat app, in both cases a 100-ms-scale pause where
 tuned sat at 17 ms.
 
-Both of those numbers are now stale. Kemal EC4 re-cut 147 ms → 13 ms, and the
-fat-app case reversed sign outright: at its large-heap stratum `GCRY_SOUND=1`
-is **25% cheaper in pause and 44% cheaper in root work** than the default
-(`…-2026-08-09-071144-root-phase/`). What is left holding the tuned default is
-one shape, not two — Kemal at **EC4**, where lag 0 still costs +83%. And the
-mechanism behind the fat-app reversal points at a fix rather than a trade: the
-low-water skip is gated on `lag == 0`, so the default path is paying for a
-fixed 256 KiB window it does not need. Ungate that (ROADMAP: "Apply the
-low-water skip to the `lag > 0` default path") and the EC4 residual is the only
-remaining argument for tuned.
+Both of those numbers are stale, and so is their replacement. Kemal EC4 re-cut
+147 ms → 13 ms; the fat-app case then reversed sign, with `GCRY_SOUND=1` coming
+out cheaper than the default; and ungating the skip on the default path — the
+fix that reversal pointed at — has now reversed it back. Current standing:
+
+| Shape | tuned | `GCRY_SOUND=1` |
+|-------|------:|---------------:|
+| Kemal EC1 | 398 µs | 398 µs (+0.1%) |
+| Kemal **EC4** | **3.60 ms** | 16.39 ms (+356%) |
+| fat app, ~72 MiB heap | **10.7 ms** | 18.2 ms (+70%) |
+| fat app, ~46 MiB heap | 2.9 ms | 3.0 ms (+6.5%) |
+
+So the case for the tuned default is **stronger** than it was a session ago, not
+weaker: the skip made the bounded scan cheap without making the complete scan
+affordable, and the one shape that briefly argued for flipping no longer does.
+The remaining argument for `lag = 0` is correctness, which is the argument this
+document was always about — not pause, on any shape currently measured.
 
 The rest of the class is close to free everywhere it has been measured. The
 heuristics buy **no RSS at all**, **+0.1% of pause** on Kemal at EC1 and **+0%**

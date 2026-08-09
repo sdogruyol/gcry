@@ -605,6 +605,12 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+    # Research only: slide the parked-fiber wipe above stack_top, into live
+    # frames. The positive control for bench/scrub_audit.cr — see
+    # docs/SOUND-DEFAULTS.md § "Auditing the scrub". Corrupts on purpose.
+    if so = env_u64("GCRY_SCRUB_OVERSHOOT")
+      heap.scrub_overshoot_bytes = so if so <= 65536
+    end
     # Compiler stack maps (docs/STACK_MAPS.md). Section load is lazy on first
     # collect. Needs CRYSTAL_EMIT_STACKMAP=1 binaries for real hits.
     #   GCRY_PRECISE_STACK=1 — hybrid (precise + conservative stacks)

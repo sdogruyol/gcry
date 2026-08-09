@@ -1,0 +1,123 @@
+{
+  "reps": 9,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 2415,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "5",
+      "rss_kib": 90960,
+      "rss_reps": [
+        90828,
+        91064,
+        91436,
+        91004,
+        90720,
+        90760,
+        90960,
+        90848,
+        90996
+      ],
+      "median": {
+        "roots_ns": 2787365,
+        "static_ns": 97979,
+        "stacks_ns": 240207,
+        "scrub_ns": 44,
+        "mark_ns": 321346,
+        "sweep_ns": 16840437,
+        "pause_ns": 3595955
+      },
+      "iqr": {
+        "roots_ns": 857681.0,
+        "static_ns": 4667.0,
+        "stacks_ns": 59555.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 47260.0,
+        "sweep_ns": 1235926.0,
+        "pause_ns": 876392.0
+      },
+      "work_ns": 3027616,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "tuned-nolw": {
+      "n": 2244,
+      "env": "GCRY_STACK_LOW_WATER=0",
+      "soundness": "tuned",
+      "threads": "5",
+      "rss_kib": 91184,
+      "rss_reps": [
+        91276,
+        91044,
+        91420,
+        91592,
+        91184,
+        91468,
+        91160,
+        91016,
+        90932
+      ],
+      "median": {
+        "roots_ns": 7063290.0,
+        "static_ns": 98742.5,
+        "stacks_ns": 372834.0,
+        "scrub_ns": 44.0,
+        "mark_ns": 342529.0,
+        "sweep_ns": 16860854.5,
+        "pause_ns": 8059675.0
+      },
+      "iqr": {
+        "roots_ns": 887512.75,
+        "static_ns": 6652.5,
+        "stacks_ns": 54592.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 72452.5,
+        "sweep_ns": 1240148.25,
+        "pause_ns": 947618.75
+      },
+      "work_ns": 7436168.0,
+      "delta_work_pct": 145.61,
+      "delta_pause_pct": 124.13
+    },
+    "sound": {
+      "n": 2227,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "5",
+      "rss_kib": 91100,
+      "rss_reps": [
+        91320,
+        90936,
+        90812,
+        91224,
+        91004,
+        91100,
+        91000,
+        91372,
+        91208
+      ],
+      "median": {
+        "roots_ns": 14179538,
+        "static_ns": 97706,
+        "stacks_ns": 1658315,
+        "scrub_ns": 44,
+        "mark_ns": 367871,
+        "sweep_ns": 16827962,
+        "pause_ns": 16389771
+      },
+      "iqr": {
+        "roots_ns": 10293823.0,
+        "static_ns": 5476.0,
+        "stacks_ns": 65344.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 68011.0,
+        "sweep_ns": 1296503.0,
+        "pause_ns": 10322914.0
+      },
+      "work_ns": 15837897,
+      "delta_work_pct": 423.11,
+      "delta_pause_pct": 355.78
+    }
+  }
+}
