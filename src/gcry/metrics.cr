@@ -39,6 +39,8 @@ module Gcry
     getter layout_unsafe_skips : UInt64
     getter sp_clamp_hits : UInt64
     getter sp_clamp_fallbacks : UInt64
+    getter low_water_skips : UInt64
+    getter low_water_skipped_bytes : UInt64
     getter barrier_backend : String
     getter barrier_dirty_rescans : UInt64
     getter size_class_live_bytes : UInt64
@@ -68,6 +70,7 @@ module Gcry
       @layout_precise_scans : UInt64, @layout_conservative_scans : UInt64,
       @layout_entries : Int32, @layout_unsafe_skips : UInt64,
       @sp_clamp_hits : UInt64, @sp_clamp_fallbacks : UInt64,
+      @low_water_skips : UInt64, @low_water_skipped_bytes : UInt64,
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
       @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
@@ -123,6 +126,8 @@ module Gcry
       Layout.unsafe_skips_count,
       heap.sp_clamp_hits,
       heap.sp_clamp_fallbacks,
+      heap.low_water_skips,
+      heap.low_water_skipped_bytes,
       heap.barrier_backend_name,
       heap.barrier_dirty_rescans,
       heap.size_class_live_bytes,
@@ -235,6 +240,14 @@ module Gcry
       io << "# HELP #{prefix}_sp_clamp_hits_total Other-thread stacks clamped to SP\n"
       io << "# TYPE #{prefix}_sp_clamp_hits_total counter\n"
       io << "#{prefix}_sp_clamp_hits_total #{m.sp_clamp_hits}\n"
+      # Reset every collection, so this is "last collect", not a running total —
+      # a gauge, not a counter. Naming it _total would make a rate() query lie.
+      io << "# HELP #{prefix}_low_water_skips Parked-fiber scans started at the stack low-water mark, last collect\n"
+      io << "# TYPE #{prefix}_low_water_skips gauge\n"
+      io << "#{prefix}_low_water_skips #{m.low_water_skips}\n"
+      io << "# HELP #{prefix}_low_water_skipped_bytes Never-faulted stack bytes skipped, last collect\n"
+      io << "# TYPE #{prefix}_low_water_skipped_bytes gauge\n"
+      io << "#{prefix}_low_water_skipped_bytes #{m.low_water_skipped_bytes}\n"
       io << "# HELP #{prefix}_barrier_dirty_rescans_total Dirty-page rescans before sweep\n"
       io << "# TYPE #{prefix}_barrier_dirty_rescans_total counter\n"
       io << "#{prefix}_barrier_dirty_rescans_total #{m.barrier_dirty_rescans}\n"
