@@ -299,6 +299,25 @@ want_sound = ENV["GCRY_SOUND"]? == "1"
   end
 end
 
+# 1b. The skip on the *default* path has to be exercised, not just present.
+#     Every assertion above and below is about lag 0; the default path could
+#     regress to the pre-2026-08-09 behaviour (skip gated on lag == 0) and this
+#     instrument would stay green, because at --dirty-kb=256 the lag window is
+#     fully written and `tuned` has nothing to skip either way.
+#
+#     So: only when the run is set up to give the default path something to skip
+#     (dirty depth below the lag) is `tuned` required to actually skip. Silent
+#     otherwise — this is a gate, not a preference for one --dirty-kb.
+if lw_on && dirty_kb < 256 && !want_sound
+  tuned_skips = skips["tuned"].sum
+  if tuned_skips == 0
+    failures << "default path never skipped with --dirty-kb=#{dirty_kb} below the 256 KiB lag"
+    puts "  FAIL default-path skip: 0 skips across #{rounds} rounds"
+  else
+    puts "  PASS default-path skip: tuned skipped in #{skips["tuned"].count(&.>(0))}/#{rounds} rounds"
+  end
+end
+
 # 2. Characterise the known trap. Upper bound only — if the root scan is ever
 #    made cheap enough that lag 0 is affordable, the ratio collapses toward 1
 #    and this must pass, not fail.
