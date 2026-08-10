@@ -13,6 +13,16 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | Soft-dirty / nursery barrier | N/A — majors stay full STW |
 | Host page | **16 KiB** on Apple Silicon — large mmap + free-page reclaim use `host_page_size` |
 | CI | `macos-latest` correctness only — **not** a thr gate |
+| Low-water root-scan skip | **Linux-only — Darwin keeps the full scan.** `Platform.stack_low_water` reads `/proc/self/pagemap`; Darwin has no equivalent wired, so the parked-fiber scan still faults its whole lag window. The change that took Kemal EC4 pause 8.06 → 3.60 ms on Linux does **not** apply here |
+| Parked-fiber scrub | **Opt-in** (`GCRY_SCRUB_FIBERS=1`), on Darwin as well as Linux. Every number in this file predates that flip and was taken with scrub **on** |
+
+> **Every cut below was measured under a default configuration that no longer
+> exists**, on both counts in the table above. Linux was re-cut on 2026-08-09
+> and the scrub flip proved invisible end to end there (inside a 6–8% run
+> spread); the low-water divergence is Darwin-specific and has no Linux
+> analogue to borrow from. Neither has been re-measured on a Darwin host, so
+> read these as the last good cut of the *previous* defaults rather than as
+> current. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
 
 ## Headline (v0.12.0 — in-header MARK default) — macOS aarch64
 

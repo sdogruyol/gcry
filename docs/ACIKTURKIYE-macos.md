@@ -4,6 +4,18 @@
 
 Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--release`, median-of-3 vs Boehm, post-`/gc-collect` RSS.
 
+> **Defaults moved after these cuts.** Parked-fiber scrub is opt-in as of
+> 2026-08-09 (every number here was taken with it on), and the low-water
+> root-scan skip that landed the same day is Linux-only — Darwin still faults
+> the whole lag window. Not re-cut on a Darwin host. See
+> [PERF-macos.md](PERF-macos.md) § "Platform notes".
+>
+> One warning carries over from the Linux re-cut and is *worse* here: this app
+> is bistable between heap regimes, and `TRIALS=3` medians turned out to be
+> reporting which regime each rep drew rather than what the collector did.
+> Linux numbers below `n=9` were retracted for that reason. The macOS cuts here
+> are median-of-3.
+
 ## Platform notes
 
 | | |
