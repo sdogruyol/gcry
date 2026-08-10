@@ -1,62 +1,56 @@
-# `stop_world` can wait forever for a worker that has not started yet.
+# The collector must not call libc while the world is stopped.
 #
-# Found while building `bench/scrub_midswap.cr`, and it has nothing to do with
-# the scrub: it reproduces with the scrub off, no manufactured state, and nothing
-# in the program but EC parallelism, one fiber, and one collection.
+# `scan_other_thread_stacks` used to ask `pthread_getattr_np` for each thread's
+# stack bounds *after* STW had frozen those threads. That call takes the target
+# thread's descriptor lock, and for the main thread glibc has no recorded
+# stackblock, so it parses `/proc/self/maps` through stdio — which mallocs. Both
+# can be held by a thread the collector has just suspended, and then the
+# collector waits for it forever: no crash, no output, no diagnostic.
+#
+# Located by marker, not by argument. The hang is inside that one call:
+#
+#     DBG pass2 done, world stopped     <- the world stops fine
+#     DBG static-done
+#     DBG scan_other_thread_stacks begin
+#     DBG about to getattr_np / returned   (thread 1)
+#     DBG about to getattr_np / returned   (thread 2)
+#     DBG about to getattr_np              (thread 3 — never returns)
+#
+# Fixed by taking the bounds in `stop_world`, under `Thread.lock` and before the
+# first suspend signal, and doing a table lookup under STW
+# (`Platform.snapshotted_stack_bounds`). Same number of `pthread_getattr_np`
+# calls per collection; they just no longer run inside the suspension window.
 #
 # Bisected by ingredient on this host (9950X/WSL2, EC parallelism 4):
 #
-#     resize(4) + GC.collect                          0 of 200 hang
+#     resize(4) + GC.collect                           0 of 200 hang
 #     resize(4) + a fiber that never yields + collect  18 of 150 hang   (12%)
+#     the same, with the fix                            0 of 500
+#     the same, fix reverted (both hunks)              12 of 150 hang    (8%)
 #
-# So the trigger is a fiber that takes a worker and does not give it back while
-# the first collection runs. `--scrub` adds nothing; it was in the shape that
-# found it, not in the cause.
+# The trigger is a fiber that holds a worker across the first collection: it
+# keeps another thread busy in the window where startup still mallocs, which is
+# what puts a frozen thread inside the arena lock. `--scrub` adds nothing; it was
+# in the shape that found this, not in the cause.
 #
-# `Heap#stop_world` (collect_stw.cr) signals every non-exempt thread and then
-# spins, unbounded, until each one sets `@suspended`:
+# Two earlier readings of this were wrong and are recorded because they are the
+# kind of wrong that looks convincing. `utime=0` on the waiting thread does not
+# mean "never scheduled" — it means under one 10 ms tick, and that thread had
+# already run `Thread#start`. And the two threads reporting `comm=SYSMON` are a
+# Linux artefact: a new thread inherits its creator's name until it sets its own.
+# Neither observation had anything to do with the cause.
 #
-#     Thread.unsafe_each { |t| ... t.suspend }
-#     Thread.unsafe_each { |t| ... until t.@suspended.get; Intrinsics.pause; end }
-#
-# Nothing bounds that second loop, and nothing re-signals. At the hang, every
-# time:
-#
-#     tid A  comm=<program>  sigsuspend    utime=9     suspended, acked
-#     tid B  comm=SYSMON     R, spinning   utime=533   the collector, in the loop above
-#     tid C  comm=DEFAULT-1  futex_wait    utime=0     never executed a single instruction
-#     tid D  comm=SYSMON     sigsuspend    utime=0     suspended, acked
-#
-# `DEFAULT-1` is the EC worker the collector is waiting for, and its `utime=0`
-# says it has never run — so it cannot have taken the SIGPWR, and the pending
-# signal cannot be handled until it is scheduled. It is parked in the futex of
-# its own startup handshake, whose other side is a thread the collector has
-# already frozen. Three-way: the worker waits on a suspended thread, the
-# collector waits on the worker.
-#
-# (Two threads report `comm=SYSMON` because Linux gives a new thread its
-# creator's name until it sets its own, so the collector here is a worker spawned
-# by the Monitor. `stw_signal_exempt?` reads Crystal's `Thread#@name`, not `comm`,
-# so that is cosmetic — but it is why the thread dump looks impossible at first.)
-#
-# This is the same family as the hang already recorded in `collect_stw.cr`
-# ("GCRY_STRESS hang: main=futex_do_wait, SYSMON=sigsuspend"), which was closed
-# by exempting SYSMON. A worker still inside startup is a second member of it,
-# and it is not exempt.
-#
-# Not a crash, so it is not the acikturkiye SIGSEGV. It is a startup-window
-# hang: an EC app whose first collection lands within milliseconds of raising
-# parallelism can stop dead, with no diagnostic at all.
+# Not a crash, so it was never the acikturkiye SIGSEGV.
 #
 #   crystal build -Dgc_none -Dpreview_mt -Dexecution_context \
 #     bench/stw_startup_hang.cr -o bin/stw_startup_hang
-#   bin/stw_startup_hang --spin               # 200 starts, the shape that hangs
+#   bin/stw_startup_hang --spin               # the shape that used to hang
 #   bin/stw_startup_hang --spin --children=500 --timeout=5
-#   bin/stw_startup_hang                      # control: no spinner, expected green
+#   bin/stw_startup_hang                      # control: no spinner
 #   bin/stw_startup_hang --child --spin       # one attempt (used as the child)
 #
-# Exits non-zero if any child hangs — i.e. it is red today, on purpose, and
-# becomes a gate the moment the wait is bounded.
+# Exits non-zero if any child hangs. Green since the fix; it stays as the gate
+# against calling anything lock-taking from inside STW again.
 
 require "../src/gcry"
 
@@ -73,8 +67,8 @@ PARALLELISM = 4
 if ARGV.includes?("--child")
   Fiber::ExecutionContext.default.resize(PARALLELISM)
 
-  # `resize` + `GC.collect` alone does NOT hang — measured, 0 of 200. The
-  # ingredient is a fiber that takes a worker and never gives it back, so the
+  # `resize` + `GC.collect` alone did NOT hang — measured, 0 of 200. The
+  # ingredient is a fiber that holds a worker across the first collection, so the
   # child is built from flags and the parent reports which combination wedges.
   if ARGV.includes?("--spin")
     spinning = Atomic(Int32).new(0)
@@ -169,16 +163,19 @@ puts "  hung      : #{hangs}  (killed after #{timeout_s}s)"
 puts ""
 
 if dump = first_dump
-  puts "First hang, from /proc — the collector is the spinning thread, and the"
-  puts "thread it is waiting for has utime=0, i.e. has never been scheduled:"
+  puts "First hang, from /proc. Read it carefully: `utime=0` means under one"
+  puts "10 ms tick, not \"never scheduled\", and comm=SYSMON on two threads is"
+  puts "name inheritance. Both misled this investigation once:"
   puts dump
 end
 
 if hangs > 0
   pct = (hangs * 100.0 / children).round(2)
-  STDERR.puts "FAIL: stop_world hung on #{hangs}/#{children} starts (#{pct}%). " \
-              "The ack wait in Heap#stop_world is unbounded and does not re-signal, " \
-              "so a worker that has not been scheduled yet wedges the collection."
+  STDERR.puts "FAIL: the collector hung on #{hangs}/#{children} starts (#{pct}%). " \
+              "Something called under STW is waiting on a lock a suspended thread " \
+              "holds — pthread_getattr_np was the first one (fixed via " \
+              "Platform.snapshotted_stack_bounds); check what else the collect " \
+              "path calls into libc while the world is stopped."
   exit 1
 end
 

@@ -199,11 +199,12 @@ scrub-midswap: $(BIN)
 	  bench/scrub_midswap.cr -o $(BIN)/scrub_midswap --error-trace
 	$(BIN)/scrub_midswap
 
-# RED ON PURPOSE. `Heap#stop_world` waits unbounded for each thread to ack the
-# suspend signal, and a worker that has not been scheduled yet never does:
-# resize(4) + one non-yielding fiber + one collect hangs 18/150 starts on this
-# host. Becomes a gate the moment that wait is bounded and re-signals.
-# The no-flag run is the control (resize + collect alone: 0/200).
+# The collector must not call libc under STW. `scan_other_thread_stacks` used to
+# call pthread_getattr_np after suspending the threads it was asking about, which
+# waits on a lock a frozen thread holds: resize(4) + one non-yielding fiber + one
+# collect hung 18/150 starts. Fixed by snapshotting bounds before the first
+# suspend signal; 0/500 since. This is the gate against reintroducing any such
+# call. The no-flag run is the control (resize + collect alone never hung).
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
 	  bench/stw_startup_hang.cr -o $(BIN)/stw_startup_hang --error-trace
