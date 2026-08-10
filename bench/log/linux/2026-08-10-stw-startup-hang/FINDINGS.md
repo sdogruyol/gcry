@@ -54,6 +54,14 @@ first suspend signal; the scan under STW does a table lookup
 - Darwin needs none of this — `pthread_get_stackaddr_np` only reads the
   descriptor. The API is stubbed there so the scan stays platform-free, and the
   divergence is written down at both definition sites.
+- `spec/stack_bounds_snapshot_spec.cr` pins the substitution itself: the table
+  answers what the live call would have, for every thread in the list, and
+  refuses to answer for one it did not record. Nothing else could see it go
+  wrong — a table that returned a *shifted* range would keep the hang gate green
+  (there is no hang) and quietly move thread-stack root coverage, and
+  `pthread_bounds_misses` only counts an absent entry, never a wrong one.
+  Verified by breaking it both ways: a one-page shift and an always-nil lookup
+  each turn the spec red.
 
 ## What was ruled out
 
