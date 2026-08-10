@@ -87,8 +87,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       callee-saved registers plus the return address, so **the margin is zero** —
       the wipe ends exactly where live data begins, and correctness rests
       entirely on `@context.stack_top` being exact on every platform and through
-      any change to how Crystal spills. No defect at the shipping window; no
-      tolerance either. **The mid-swap suspend is now closed too**, and the
+      any change to how Crystal spills. Now measured on a **second ABI**
+      (aarch64, Darwin host, 2026-08-10): clean through **64**, corrupt at
+      **72**, 3/3 reps per rung, every failure at address `0x0`. The prediction
+      from `PARKED_AARCH64_SPILL_WORDS = 22` — a 176-byte boundary — is
+      **falsified**; the constant is right but describes where the caller's SP
+      lands, not which word must survive. Both platforms obey one rule: *the
+      window ends immediately below the saved return address* (x86_64 +56,
+      aarch64 +64, where `lr` is the ninth spilled word of twenty-two). x86_64
+      alone could not distinguish that rule from "end of the spill block". No
+      defect at the shipping window; no tolerance either. **The mid-swap suspend
+      is now closed too**, and the
       reason no harness hit it is structural rather than luck: on all five
       Crystal context-switch backends `stack_top` is written (behind a `dmb ish`
       on aarch64) *before* the running flag is cleared, and a resumed fiber is
