@@ -196,12 +196,22 @@ Target: Match Boehm on the workloads Crystal users actually run.
       (`multi_mutator_threads?` false at 2 threads). Engagement is observable
       via `low_water_skips` on `/gc-stats` — the gate is a thread count a real
       app can sit on the boundary of.
-- [ ] **Cheap root scan at scale — what is left.** `GCRY_SOUND=1` is still
-      +83% pause at EC4 against tuned, and that residual is no longer a constant
-      worst case: it tracks how much stack was actually touched (p5 3.4 ms,
-      p95 19.1 ms, against tuned's 6.1/7.8). Open: which fibers are deeply used
-      and why. **Closed:** the fat-app large-heap re-cut (above — the 14.5×
-      was pre-fix and the sign has since reversed).
+- [ ] **Cheap root scan at scale — what is left.** The EC4 residual is
+      `GCRY_SOUND=1`'s, and quoting it as a ratio has become misleading twice
+      over. **9950X, before the default path got the skip:** tuned 7.1 ms,
+      sound 13.0 ms — **+83%**. **i3-12100F, after:** tuned 3.60 ms, sound
+      16.39 ms — **+356%** (`bench/log/linux/2026-08-09-104417-root-phase/`).
+      Different hosts, so the absolute numbers do not compare; but the *ratio*
+      grew mostly because the denominator halved, not because `sound` got
+      worse — lag 0 already had the skip and did not change. Cite the pair, not
+      the percentage.
+      What is genuinely open is the same as before: sound's cost tracks how much
+      stack was actually touched, so its distribution is wide where the old flat
+      scan's was not (9950X: p5 3.4 ms, p95 19.1 ms). **Which fibers are deeply
+      used, and why** — `low_water_skipped_bytes` per collection is now the
+      handle for that, and did not exist when the question was written.
+      **Closed:** the fat-app large-heap re-cut (above — the 14.5× was pre-fix
+      and the sign has since reversed).
 - [ ] **Low-water skip on Darwin.** Linux-only today, so macOS still faults the
       whole lag window per parked fiber and gets none of the EC4 win
       (8.06 → 3.60 ms there). The soundness argument needs a primitive that
