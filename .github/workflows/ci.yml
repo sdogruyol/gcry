@@ -230,6 +230,28 @@ jobs:
           # then requires that it does.
           ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --max-ratio=4 --max-ratio-nolw=30
 
+      # A collector that asks glibc about a thread it has just suspended waits
+      # forever, silently. Nothing else in CI can see it: the correctness suite
+      # would simply never finish, and a job timeout points at nothing. This
+      # reproduces the shape (one fiber holding a worker across the first
+      # collection) and was 18/150 before the fix.
+      - name: STW hang trap (libc query on a suspended thread)
+        run: |
+          crystal build -Dgc_none -Dpreview_mt -Dexecution_context \
+            bench/stw_startup_hang.cr -o bin/stw_startup_hang --error-trace
+          ./bin/stw_startup_hang --spin --children=60 --timeout=10
+          # Negative controls: real libc allocation under STW, which is *not* the
+          # hazard. They must stay green — if one of these starts hanging, the
+          # rule this gate encodes is wrong, not just the code.
+          ./bin/stw_startup_hang --spin --finalizers --children=30 --timeout=10
+
+      # The diagnostic that makes the trap above debuggable when it does fire.
+      # Driven from both sides in one run: fires on a stall, silent otherwise.
+      - name: STW watchdog
+        run: |
+          crystal build -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog --error-trace
+          ./bin/stw_watchdog
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
