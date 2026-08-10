@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -182,6 +182,33 @@ trace-smoke: $(BIN)
 scrub-margin: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scrub_margin.cr -o $(BIN)/scrub_margin
 	$(BIN)/scrub_margin
+
+# The mid-swap guard, the last open half of the scrub question. The window
+# cannot be hunted (Crystal writes `stack_top` before it clears the running
+# flag), so this manufactures it: the scrub is told to treat one fiber as parked
+# while a thread runs deep below its recorded `stack_top`. Guard off must corrupt
+# (positive control), guard on must skip and survive. ~1 s.
+#
+# One child dies by design, so expect a SEGV backtrace on stderr from
+# `stale-off`. A child can also hang before reaching the scrub — that is the
+# separate `stw-startup-hang` bug below, which this shape trips on ~12% of
+# starts; the tool retries and prints how many retries it needed.
+# docs/SOUND-DEFAULTS.md § "The mid-swap window".
+scrub-midswap: $(BIN)
+	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+	  bench/scrub_midswap.cr -o $(BIN)/scrub_midswap --error-trace
+	$(BIN)/scrub_midswap
+
+# RED ON PURPOSE. `Heap#stop_world` waits unbounded for each thread to ack the
+# suspend signal, and a worker that has not been scheduled yet never does:
+# resize(4) + one non-yielding fiber + one collect hangs 18/150 starts on this
+# host. Becomes a gate the moment that wait is bounded and re-signals.
+# The no-flag run is the control (resize + collect alone: 0/200).
+stw-startup-hang: $(BIN)
+	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+	  bench/stw_startup_hang.cr -o $(BIN)/stw_startup_hang --error-trace
+	$(BIN)/stw_startup_hang --spin --children=$${STW_HANG_CHILDREN:-150} \
+	  --timeout=$${STW_HANG_TIMEOUT:-6}
 
 mutate:
 	./bench/mutations/run.sh
