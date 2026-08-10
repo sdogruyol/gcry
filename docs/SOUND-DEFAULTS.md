@@ -28,7 +28,7 @@ GCRY_SOUND=1 ./your-app
 | `type_id_gate` | `true` (static roots) | Rejects a static root whose payload's first `Int32` is `<= 0` or `> 1_000_000`. That is a heuristic applied to a real reference. The collector already counts when it was wrong: `type_id_root_false_negatives`. |
 | `stw_multi_stack_lag` | `256 KiB` | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. A live pointer deeper than the lag is never seen. `0` means full `guard → bottom`. |
 | `stw_multi_pthread_lag` | `256 KiB` | Same, for the OS thread mapping when SP sits on a pool fiber. |
-| `scrub_fibers_enabled` | `false` (was `true`) | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. **Now off by default** — the audit never reached the EC1 window and its RSS justification does not reproduce; see *What `scrub_fibers` costs*. Opt in with `GCRY_SCRUB_FIBERS=1`. |
+| `scrub_fibers_enabled` | `false` (was `true`) | Zeroes bytes below a parked fiber's **estimated** SP, from another thread. bdwgc's `GC_clear_stack` only ever wipes below the *calling* thread's own hardware SP — a much stronger guarantee. **Now off by default** — the audit never reached the EC1 window and its RSS justification does not reproduce; see *What `scrub_fibers` costs*. The estimate is exact only because Crystal records `stack_top` before it clears the running flag; when it is not, the wipe lands on live frames and the mid-swap guard is the only thing that prevents it — measured, see *The mid-swap window*. Opt in with `GCRY_SCRUB_FIBERS=1`. |
 | `blacklist_enabled` | `true` | Steers allocation away from pages the type_id gate called false. With the gate off nothing feeds it; the profile turns it off so `sound` has exactly one meaning. |
 | `scan_static_roots` | `true` (process) | A heap that never walks BSS/data misses roots by construction. `GCRY_DISABLE_STATIC_ROOTS=1` turns it off and will crash a real program — it is in the profile so the label can never report `sound` while it is off. Library heaps default it *off*, so a library heap must opt in before it can report sound roots. |
 
@@ -587,6 +587,78 @@ Still genuinely open: the positive control shows this workload *can* detect
 corruption, which is what the first audit lacked. It does not prove the shipping
 window is safe under shapes this workload does not produce — a mid-swap suspend
 being the obvious one, and the one no harness here has managed to hit.
+
+### The mid-swap window — why it cannot be hunted, and what the guard is worth
+
+That last shape is now answered, in two parts: reading the ABI says why no
+harness ever hit it, and `bench/scrub_midswap.cr` (`make scrub-midswap`) measures
+what the guard against it is worth.
+
+**Why it cannot be hunted.** Crystal's context switch fixes the order, and all
+five backends (`x86_64-sysv`, `x86_64-microsoft`, `aarch64-generic`,
+`aarch64-microsoft`, `arm`) do the same thing:
+
+```
+stack_top = sp          # exact — every saved register sits at an address >= sp
+(dmb ish on aarch64)    # the register stores are ordered before the flag
+current.resumable = 1   # only now does running? go false, i.e. "parked"
+new.resumable = 0       # the resumed fiber is marked running...
+sp = new.stack_top      # ...before any SP lands on its stack
+```
+
+So the window where a fiber reports parked while a thread's SP is still on its
+stack is real, and a few instructions wide — but in it `stack_top == sp` exactly,
+and the wipe covers `[stack_top - wipe, stack_top)`, strictly below that SP. It
+cannot reach live frames. This is the same boundary the overshoot ladder found
+from the other side: the wipe ends exactly where the saved registers begin.
+
+The *dangerous* shape is the opposite one — a fiber reporting parked while a
+thread runs **deeper** than its recorded `stack_top`, so the window sits above
+the SP, over live frames. Two orderings rule it out. On resume, the fiber is
+marked running *before* the SP moves onto its stack (last two lines). On
+teardown, `Fiber#run` calls `Fiber.inactive` — delisting the fiber from
+`Fiber.unsafe_each` — before the stack is handed to the pool, so the scrub never
+sees a fiber whose stack now belongs to someone else.
+
+That is an argument from source, not a measurement, and it is pinned to Crystal
+at `c361ac6e7`. It is exactly the kind of thing that changes silently.
+
+**What the guard is worth.** `scrub_skip_foreign_sp` exists for that state, and
+the audit could never observe it doing anything — 0 sightings over 300
+collections, 0 over 3000. So manufacture it: `Heap#scrub_force_parked`
+(research only, default nil) makes the scrub treat one nominated fiber as parked
+while a thread spins six frames below its recorded `stack_top`.
+
+| scenario | verdict | overlaps | `midswap_skips` | canaries |
+|----------|---------|---------:|----------------:|----------|
+| `stale-off` — guard off | **SEGV at 0x0** | **1 of 1** | 0 | destroyed |
+| `stale-on` — guard on | clean | 0 | **1** | intact |
+| `real` — no manufacturing (control) | clean | 0 | 0 | intact |
+
+30 runs, all three rows identical. The guard-off child dies because the wipe
+zeroed a return address in the frames it was standing on; that is the first time
+`fiber_scrub_live_frame_overlaps` has ever moved, so the counter is now known to
+work rather than assumed to. The guard-on row is the first observation of the
+guard doing its job, and it is readable only because the skip is now counted —
+`fiber_scrub_midswap_skips` on `/gc-stats`. Before that counter, a guarded run
+reported `overlaps == 0` whether the guard saved something or had nothing to do.
+
+Both directions of the gate were broken on purpose and observed to fail:
+deleting the guard's `next` turns `stale-on` red (and note it still counts the
+skip — so asserting on the counter alone would have been a false green, the
+assertion pair is skip *and* survival); disabling the scrub turns `stale-off`
+green and the tool then refuses the run for having no positive control.
+
+**What this does not license.** It does not show the genuine window occurs — the
+`real` row is a control, not a rate, and the spinner never yields so it cannot
+produce the window at all. `bench/scrub_audit.cr`'s 0-of-300 and 0-of-3000
+remain the only bound on that. What it settles is the conditional: *if*
+`stack_top` is ever stale while a thread is on the stack, the wipe lands on live
+frames and the process dies, and the guard is what stands between those two
+outcomes. The scrub's correctness rests on the ordering above holding, on every
+platform, through any future change to how Crystal spills — which is the same
+conclusion the zero margin reached, now with the guard's value measured instead
+of argued.
 
 <details>
 <summary>Why this took a second probe (kept — the failure mode is instructive)</summary>

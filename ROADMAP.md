@@ -88,9 +88,44 @@ Target: Match Boehm on the workloads Crystal users actually run.
       the wipe ends exactly where live data begins, and correctness rests
       entirely on `@context.stack_top` being exact on every platform and through
       any change to how Crystal spills. No defect at the shipping window; no
-      tolerance either. Still open: the mid-swap suspend, which no harness here
-      has hit.
-      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
+      tolerance either. **The mid-swap suspend is now closed too**, and the
+      reason no harness hit it is structural rather than luck: on all five
+      Crystal context-switch backends `stack_top` is written (behind a `dmb ish`
+      on aarch64) *before* the running flag is cleared, and a resumed fiber is
+      marked running *before* the SP moves onto its stack, so while the genuine
+      window is open `stack_top == sp` and the wipe stays strictly below it.
+      `Fiber#run` delists a dying fiber before its stack reaches the pool, which
+      closes the other direction. That is an argument from source (Crystal
+      `c361ac6e7`), so `make scrub-midswap` measures what the guard against it is
+      worth instead: `Heap#scrub_force_parked` manufactures the state, and with
+      the guard off the wipe reaches live frames **1 of 1** and the process dies
+      (SEGV at 0x0 — the first time `fiber_scrub_live_frame_overlaps` has ever
+      moved, so the counter is now known to work); with the guard on it is
+      skipped and the canaries survive. Readable only because the skip is now
+      counted — `fiber_scrub_midswap_skips` on `/gc-stats`. 30 runs identical,
+      both gate directions broken on purpose and observed red.
+      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
+      § "The mid-swap window"
+- [ ] **`stop_world` can hang on a worker that has not started.** Found
+      2026-08-10 while building the mid-swap harness; unrelated to the scrub.
+      `Heap#stop_world` signals every non-exempt thread, then spins **unbounded**
+      on `until thread.@suspended.get` with no re-signal and no diagnostic. An EC
+      worker whose `Thread` is already in `Thread.unsafe_each` but which has never
+      been scheduled cannot ack: at the hang its `utime` is 0 and it sits in the
+      futex of its own startup handshake, whose other side is a thread STW has
+      already frozen. Three-way — the worker waits on a suspended thread, the
+      collector waits on the worker. Bisected by ingredient (9950X/WSL2, EC4):
+      `resize(4) + collect` **0 of 200**; `resize(4) + one non-yielding fiber +
+      collect` **18 of 150 (12%)**. Same four-thread signature every time.
+      Reproducer: `make stw-startup-hang` (`bench/stw_startup_hang.cr`), red on
+      purpose — it becomes a gate the moment the wait is bounded and re-signals.
+      Same family as the hang already recorded in `collect_stw.cr` ("GCRY_STRESS
+      hang: main=`futex_do_wait`, SYSMON=`sigsuspend`"), which was closed by
+      exempting SYSMON; a worker still inside startup is a second member and is
+      not exempt. **Not** the acikturkiye SIGSEGV — this hangs, it does not crash.
+      Open: whether the fix is a bounded wait + re-signal, skipping threads that
+      have not reached their first checkpoint, or making `resize` publish workers
+      only once they can take a signal.
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —
