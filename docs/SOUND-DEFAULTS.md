@@ -501,6 +501,30 @@ keep its default while the correctness question is open — the burden runs the
 other way. It is now `false` on both platforms; `GCRY_SCRUB_FIBERS=1` opts back
 in, and `bench/root_phase_ab.sh` / `bench/scrub_audit.cr` still drive it.
 
+#### The flip on Darwin — verified, belatedly
+
+"Both platforms" was a code change on both platforms and a *verification* on
+one. macOS CI runs `crystal spec`, `process_spec` and a few samples; the 18
+fuzz/property/soak targets the flip was cleared against on Linux have no macOS
+gate at all. Closed on a Darwin host (Apple M2 Pro, Darwin 25.5.0 arm64, Crystal
+1.21.0, 2026-08-10):
+
+| target | default (scrub off) | `GCRY_SCRUB_FIBERS=1` |
+|--------|--------------------|------------------------|
+| `pattern-fuzz` (200 phases × 5000 objs) | PASS, 520 s | PASS, 516 s |
+| `stw-mt-property-test` (200 iters, workers 2,4) | PASS | — |
+| `thread-storm` | PASS | — |
+| `soak-smoke` | PASS | — |
+| `oom-test` | PASS | — |
+| `finalizer-complex` | PASS | — |
+
+Nothing broke either way, so there was nothing to attribute to the flip. The
+`GCRY_SCRUB_FIBERS=1` column is only worth reading because the knob was shown to
+engage in these binaries first — a `-Dgc_none` probe reports `runs=0 bytes=0`
+unset against `runs=10 bytes=1171456` set. Without that, a green under the old
+default would only have proved the env var was ignored, which is the failure
+mode `scrub_audit` was rewritten to avoid.
+
 ### Auditing the scrub — what it now answers
 
 `bench/scrub_audit.cr` (`GCRY_SCRUB_AUDIT=1`) moves the charge against
@@ -587,6 +611,51 @@ Still genuinely open: the positive control shows this workload *can* detect
 corruption, which is what the first audit lacked. It does not prove the shipping
 window is safe under shapes this workload does not produce — a mid-swap suspend
 being the obvious one, and the one no harness here has managed to hit.
+
+#### The same measurement on aarch64 — and what it corrects
+
+"A different ABI lands on live data directly" was the argument. It is now a
+measurement: the same ladder, refined around the two numbers this ABI can
+distinguish, on a Darwin host (Apple M2 Pro, Darwin 25.5.0 arm64, Crystal
+1.21.0, 2026-08-10).
+
+| overshoot | verdict |
+|----------:|---------|
+| 0 … 64 bytes | clean |
+| **72 bytes** | **CORRUPT (exit 11, `address 0x0`)** |
+| 80 … 4096 bytes | CORRUPT |
+
+Deterministic: 3/3 reps per rung at 48/56/64/72/80 on an idle machine. Every
+failing rung dies at **address 0x0** — a return through a zeroed `lr`, which
+makes this a confirmation of the mechanism rather than an unexplained crash.
+(Darwin reports these as `exit 11` rather than a signal death, because Crystal's
+own SIGSEGV handler prints a backtrace and exits 11 itself.)
+
+**The number this was expected to land on was 176, and that is falsified.**
+`stack_maps.cr` records `PARKED_AARCH64_SPILL_WORDS = 22` — Crystal's aarch64
+`swapcontext` spills 22 words, 176 bytes, and the caller's SP on return is
+`stack_top + 176`. The constant is not wrong; the step from it to a margin was.
+It answers where the caller's frame starts, not which word has to survive.
+
+What the two platforms agree on is the *rule*, which now has two instances
+instead of one:
+
+> The wipe window ends immediately below the **saved return address**.
+
+x86_64 puts the return address at `stack_top + 56`, as the last word of its
+spill block, so "end of the block" and "first word that must survive" name the
+same byte — 56 could be read either way, and was. aarch64 separates them: its
+layout is `[0..7]` d15…d8, `[8]` **x30/lr**, `[9]` x29/fp, `[10..19]` x28…x19,
+`[20..21]` x0,x1, so the return address is the *ninth* word of twenty-two. The
+boundary follows `lr` to 64 and ignores 176.
+
+So aarch64 reaches the same conclusion, slightly sharper. The 64 bytes below the
+boundary are not margin the design reserved: they are eight callee-saved **FP**
+registers, and they read clean only because this workload has no reason to hold
+a pointer in one. A workload keeping a `Float64` live across a yield has less
+room than the table suggests, and the shipping window still has none. What the
+scrub depends on is now two things, not one: `@context.stack_top` being exact,
+*and* where the platform's `swapcontext` happens to spill the return address.
 
 ### The mid-swap window — why it cannot be hunted, and what the guard is worth
 
@@ -728,6 +797,8 @@ the answer turned out to be entirely the second.
 | "The cost is spread across the heuristics" | **No** — it is the two STW lag knobs, on every workload measured |
 | "Turning fiber scrub off costs throughput" | **No** — but neither does it gain any; it is a net saving in *root work* (−9.1% on Kemal at EC1) worth ~0.01% of wall time |
 | "Fiber scrub buys RSS on the fat app" | **Unreproduced.** The 3.00× → 2.65× that put it on default does not appear at n=9; the measurement is dominated by a bistable heap regime |
+| "The scrub margin is the size of the `swapcontext` spill block" | **No — falsified on aarch64.** It is the offset of the saved return address: 56 on x86_64 (last word of the block), 64 on aarch64 (ninth word of twenty-two, so the block's 176 is not the boundary) |
+| "The 56/64 bytes below the boundary are margin" | **No.** They are spill slots the harness workload has no reason to hold a pointer in — GPRs on x86_64, FP registers on aarch64. The shipping window's margin is still zero |
 
 ---
 
