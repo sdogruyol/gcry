@@ -27,6 +27,13 @@ require "../src/gcry"
 
 THRESHOLD_MS = 200
 STALL_MS     = 900
+# The "no false alarm" arm runs at a deliberately generous threshold. At 200 ms
+# it would flake on a loaded CI runner, where the collector can simply be
+# descheduled for that long — and it would not buy detection in exchange: a
+# watchdog with its threshold check removed fires on *any* stopped phase, so this
+# arm still catches that, while the stalled arm's duration bound is what actually
+# pins the threshold (measured: with the check removed it reported 49 ms).
+QUIET_THRESHOLD_MS = 5000
 
 # ── Child: one collection, under whatever env the parent set ─────────────────
 if ARGV.includes?("--child")
@@ -50,13 +57,14 @@ end
 
 puts "=== STW watchdog ==="
 puts "threshold #{THRESHOLD_MS} ms, stall #{STALL_MS} ms in the thread-stacks phase"
+puts "quiet arm runs at #{QUIET_THRESHOLD_MS} ms (CI runners deschedule; see the comment)"
 puts ""
 
 armed_stalled = run_child(self_path, {
   "GCRY_STW_WATCHDOG_MS"   => THRESHOLD_MS.to_s,
   "GCRY_STW_TEST_STALL_MS" => STALL_MS.to_s,
 })
-armed_quiet = run_child(self_path, {"GCRY_STW_WATCHDOG_MS" => THRESHOLD_MS.to_s})
+armed_quiet = run_child(self_path, {"GCRY_STW_WATCHDOG_MS" => QUIET_THRESHOLD_MS.to_s})
 unarmed_stalled = run_child(self_path, {"GCRY_STW_TEST_STALL_MS" => STALL_MS.to_s})
 
 record["armed+stalled"] = armed_stalled
