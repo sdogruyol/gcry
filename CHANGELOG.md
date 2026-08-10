@@ -209,6 +209,20 @@ saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
 reading — true of Kemal, false of the fat app — and it is why the defaults stay
 tuned for now.
 
+### Added
+
+- **`GCRY_STW_WATCHDOG_MS` — a stop-the-world hang says something now.** When the
+  collector wedges under STW every mutator is frozen in `sigsuspend`, so the
+  process cannot report anything: no crash, no output, and `/gc-stats` cannot
+  answer because its thread is suspended too. Finding the `pthread_getattr_np`
+  hang below took inserting markers and rebuilding. Armed, a raw watcher thread
+  (not a `Crystal::Thread` — STW must not suspend it) prints the phase that is
+  stuck: `gcry: STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. Validated
+  against that real hang, where it names the exact phase the bug was in, and
+  driven from both sides by `make stw-watchdog`: it must fire on a deliberate
+  stall (`GCRY_STW_TEST_STALL_MS`, research only) and stay silent on an ordinary
+  collection. Default off; the phase breadcrumb it reads is recorded either way.
+
 ### Fixed
 
 - **Collector hang: `pthread_getattr_np` was called with the world stopped.**

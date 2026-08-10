@@ -141,12 +141,18 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `scan_static_roots` and the blacklist / chunk-index growth. The rule that
       survives is narrow — do not ask glibc about a suspended thread — and
       `pthread_getattr_np` was its only instance in the collect path.
-- [ ] **Make a hang under STW audible.** It is currently **silent**: locating the
-      one above took markers and a rebuild. A phase watchdog ("stopped N s in
-      phase X") would have made it minutes. Note re-signalling is *not* the tool
-      to reach for: `Thread#suspend` clears `@suspended` before it signals, so a
-      re-signal can clobber an in-flight ack and create the hang it is meant to
-      break.
+- [x] **Make a hang under STW audible.** Done — `GCRY_STW_WATCHDOG_MS` arms a raw
+      watcher thread (not a `Crystal::Thread`, or STW would suspend the one thread
+      that has to keep running) which prints the stuck phase:
+      `STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. That line is from
+      the *real* hang, reproduced with the fix reverted — it names the exact phase
+      the bug was in, so the next one costs a line instead of a bisect. Gated by
+      `make stw-watchdog` from both sides (fires on a deliberate stall, silent on
+      an ordinary collection; both directions broken on purpose and observed red),
+      and wired into CI along with the hang trap itself. Default off. Note
+      re-signalling remains *not* the tool to reach for: `Thread#suspend` clears
+      `@suspended` before it signals, so a re-signal can clobber an in-flight ack
+      and create the hang it is meant to break.
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —
