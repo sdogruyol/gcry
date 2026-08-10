@@ -93,9 +93,12 @@ REAL_COLLECTS = 20
 # Ceiling per child. The 20 s spin deadline bounds the harness's own loop; this
 # bounds everything else, including a runtime that never finishes dying.
 CHILD_TIMEOUT_SECONDS = 60
-# Attempts per scenario when a child hangs before it reaches the scrub. That is
-# a different, real bug (`bench/stw_startup_hang.cr`) which this shape trips on
-# ~12% of starts; retrying keeps this tool measuring the guard instead of that.
+# Attempts per scenario when a child hangs before it reaches the scrub. That was
+# a different, real bug — the collector calling pthread_getattr_np under STW,
+# which this shape tripped on ~8% of starts — now fixed and gated by
+# `bench/stw_startup_hang.cr`. Kept because the retry is what told us this tool's
+# flakiness was not its own: it reports the count, so a hang coming back here is
+# visible rather than absorbed.
 HANG_RETRIES = 4
 
 # Atomics are structs, so these must be touched through the ivars — a getter
@@ -349,12 +352,11 @@ MODES.each do |mode|
     end
 
     # A child that hung *before* printing its counters never reached the scrub,
-    # so it says nothing about the guard. That is `bench/stw_startup_hang.cr`'s
-    # bug, not this one: `stop_world` waits unbounded for a worker that has not
-    # been scheduled, and this harness parks a fiber on a worker and collects
-    # immediately, which is exactly the shape that trips it (~12% of starts).
-    # Retry rather than fail — and say how often, so it never quietly becomes
-    # this tool's own flake budget.
+    # so it says nothing about the guard. That was the STW libc-under-suspension
+    # hang (`bench/stw_startup_hang.cr`): this harness parks a fiber on a worker
+    # and collects immediately, which is exactly the shape that tripped it. Fixed,
+    # and 0 retries in 15 runs since. Retry rather than fail — and say how often,
+    # so a return of it is visible instead of absorbed.
     startup_hang = status.nil? && fields.empty?
     if startup_hang && attempt < HANG_RETRIES
       retries[mode] = attempt
