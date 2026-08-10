@@ -516,7 +516,10 @@ module Gcry
         end
 
         sp = Platform.thread_sp(pthread)
-        pthread_bounds = Platform.pthread_stack_bounds(pthread)
+        # Snapshot taken in stop_world before any thread was suspended. Calling
+        # pthread_getattr_np here instead is what hung the collector — it waits on
+        # a lock a frozen thread holds. See Platform.snapshotted_stack_bounds.
+        pthread_bounds = Platform.snapshotted_stack_bounds(pthread)
 
         # Precise stack-map roots (additive). Prefer fiber bounds when SP is on
         # a fiber; else pthread mapping.
