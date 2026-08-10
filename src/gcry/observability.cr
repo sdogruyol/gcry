@@ -183,6 +183,7 @@ module Gcry
         fiber_scrub_foreign_sp_scrubs:         heap.fiber_scrub_foreign_sp_scrubs,
         fiber_scrub_live_frame_overlaps:       heap.fiber_scrub_live_frame_overlaps,
         fiber_scrub_running_foreign_sp:        heap.fiber_scrub_running_foreign_sp,
+        fiber_scrub_midswap_skips:             heap.fiber_scrub_midswap_skips,
         barrier_backend:                       heap.barrier_backend_name,
         barrier_dirty_rescans:                 heap.barrier_dirty_rescans,
         nursery_survival_bytes:                heap.nursery_survival_bytes,
