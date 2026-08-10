@@ -244,7 +244,12 @@ build_kemal() {
   cd "$ROOT"
 }
 
-build_acik() {
+# Subshell body (parens, not braces): every early return below used to leave the
+# shell parked in $AT, and the rest of the script — including the `crystal
+# --version` that writes metadata.yaml — then ran under acikturkiye's asdf
+# context instead of gcry's. A session was recorded as Crystal 1.18.1 that way
+# while kemal had actually been built with 1.21.0.
+build_acik() (
   echo "=== Build acikturkiye binaries ($BUILD_MODE, GC=${GC_TAGS[*]}) ==="
   echo "  crystal build flags: ${CRYSTAL_BUILD_FLAGS[*]}"
   cd "$AT"
@@ -252,8 +257,33 @@ build_acik() {
   if [[ "$FORCE_REBUILD" == "1" ]]; then
     rm -f bin/acikturkiye-gcry bin/acikturkiye-boehm
   fi
+
+  # $AT may pin its own toolchain. gcry's tip needs Crystal >= 1.21 (1.18.1
+  # fails on `LibC.clock_gettime`), and a sibling stuck on an older pin fails
+  # the build here rather than in gcry's own targets, where the version is fine.
+  echo "  crystal in $AT: $(crystal --version 2>/dev/null | head -1)"
+
+  # A failed rebuild must leave *no* binary behind. `acik_ready` tests only for
+  # existence, so a surviving one from a previous session gets benchmarked and
+  # reported under today's commit — which is how an Aug-2 binary, predating two
+  # default flips, produced "current" macOS numbers.
+  build_one() {
+    local tag="$1"; shift
+    local out="bin/acikturkiye-${tag}"
+    echo -n "  acik-${tag} "
+    if ACIKTURKIYE_ENV=demo crystal build "$@" "${CRYSTAL_BUILD_FLAGS[@]}" \
+        src/acikturkiye.cr -o "${out}.new" 2>&1 | tail -1; then
+      mv -f "${out}.new" "$out"
+      [[ -e "${out}.new.dwarf" ]] && mv -f "${out}.new.dwarf" "${out}.dwarf"
+      return 0
+    fi
+    rm -f "${out}.new" "${out}.new.dwarf" "$out"
+    echo "  BUILD FAILED — removed $out so no stale binary can be benchmarked" >&2
+    return 1
+  }
+
   if gc_wants gcry; then
-    echo -n "  acik-gcry "; ACIKTURKIYE_ENV=demo crystal build -Dgc_none "${CRYSTAL_BUILD_FLAGS[@]}" src/acikturkiye.cr -o bin/acikturkiye-gcry 2>&1 | tail -1 || return 1
+    build_one gcry -Dgc_none || exit 1
   else
     echo "  acik-gcry (skipped)"
   fi
@@ -261,13 +291,12 @@ build_acik() {
     if [[ "$FORCE_REBUILD" != "1" && -f "bin/acikturkiye-boehm" ]]; then
       echo "  acik-boehm (cached)"
     else
-      echo -n "  acik-boehm "; ACIKTURKIYE_ENV=demo crystal build "${CRYSTAL_BUILD_FLAGS[@]}" src/acikturkiye.cr -o bin/acikturkiye-boehm 2>&1 | tail -1 || return 1
+      build_one boehm || exit 1
     fi
   else
     echo "  acik-boehm (skipped)"
   fi
-  cd "$ROOT"
-}
+)
 
 ###############################################################################
 # Helpers
@@ -513,7 +542,14 @@ esac
 case "$cmd" in
   acik|all|"")
     if [[ "$HAS_ACIK" == "yes" ]]; then
-      build_acik || echo "  SKIP acikturkiye (build failed)"
+      build_acik || {
+        echo ""
+        echo "!!! acikturkiye BUILD FAILED — no acik numbers this session." >&2
+        echo "!!! Its binaries were removed, so nothing stale gets benchmarked." >&2
+        echo "!!! Common cause: $AT pins an older Crystal in .tool-versions;" >&2
+        echo "!!! gcry needs >= 1.21. Check the version printed above." >&2
+        echo ""
+      }
     elif [[ "$cmd" == "acik" ]]; then
       echo ""
       echo "=== SKIP acikturkiye (not found at $AT/.env.demo) ==="
@@ -521,11 +557,17 @@ case "$cmd" in
     ;;
 esac
 
+# Every *requested* tag must be present. The old form returned ready when only
+# one was, so a missing gcry binary still produced a table — with 0 req/s, 0.0%
+# and 0.00× in it, which is a row that can be read and quoted rather than an
+# obvious absence.
 acik_ready() {
   [[ "$HAS_ACIK" == "yes" ]] || return 1
-  gc_wants gcry && [[ -x "$AT/bin/acikturkiye-gcry" ]] && return 0
-  gc_wants boehm && [[ -x "$AT/bin/acikturkiye-boehm" ]] && return 0
-  return 1
+  local tag
+  for tag in "${GC_TAGS[@]}"; do
+    [[ -x "$AT/bin/acikturkiye-${tag}" ]] || return 1
+  done
+  return 0
 }
 
 for RUN in $(seq 1 "$COUNT"); do
