@@ -211,6 +211,23 @@ tuned for now.
 
 ### Fixed
 
+- **Collector hang: `pthread_getattr_np` was called with the world stopped.**
+  `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
+  frozen those threads. That call takes the target thread's descriptor lock and,
+  for the main thread, parses `/proc/self/maps` through stdio — which mallocs.
+  Either lock can be held by a thread the collector just suspended, and the
+  collector then waited forever: no crash, no output, no diagnostic. Measured at
+  EC parallelism 4 with one fiber holding a worker across the first collection:
+  **18 of 150 process starts hung**. Bounds are now snapshotted in `stop_world`
+  under `Thread.lock`, before the first suspend signal, and the scan under STW is
+  a table lookup (`Platform.snapshotted_stack_bounds`) — same number of
+  `pthread_getattr_np` calls per collection, none of them inside the suspension
+  window. **0 of 500** after the fix, 12 of 150 again when reverted. Misses in the
+  table are counted as `pthread_bounds_misses` on `/gc-stats`, because a miss
+  costs the pthread-mapping half of that thread's root coverage. Darwin is
+  unaffected: `pthread_get_stackaddr_np` only reads the descriptor. Gate:
+  `make stw-startup-hang`.
+  [bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md](bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md)
 - **Process / backticks under `-Dgc_none`:** Crystal `prepare_args` omits the
   argv NULL terminator; Boehm size-class padding hid it, gcry exact classes
   surfaced `EFAULT` (`Bad address`). Shard workaround:

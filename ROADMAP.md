@@ -106,26 +106,38 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
-- [ ] **`stop_world` can hang on a worker that has not started.** Found
-      2026-08-10 while building the mid-swap harness; unrelated to the scrub.
-      `Heap#stop_world` signals every non-exempt thread, then spins **unbounded**
-      on `until thread.@suspended.get` with no re-signal and no diagnostic. An EC
-      worker whose `Thread` is already in `Thread.unsafe_each` but which has never
-      been scheduled cannot ack: at the hang its `utime` is 0 and it sits in the
-      futex of its own startup handshake, whose other side is a thread STW has
-      already frozen. Three-way — the worker waits on a suspended thread, the
-      collector waits on the worker. Bisected by ingredient (9950X/WSL2, EC4):
-      `resize(4) + collect` **0 of 200**; `resize(4) + one non-yielding fiber +
-      collect` **18 of 150 (12%)**. Same four-thread signature every time.
-      Reproducer: `make stw-startup-hang` (`bench/stw_startup_hang.cr`), red on
-      purpose — it becomes a gate the moment the wait is bounded and re-signals.
-      Same family as the hang already recorded in `collect_stw.cr` ("GCRY_STRESS
-      hang: main=`futex_do_wait`, SYSMON=`sigsuspend`"), which was closed by
-      exempting SYSMON; a worker still inside startup is a second member and is
-      not exempt. **Not** the acikturkiye SIGSEGV — this hangs, it does not crash.
-      Open: whether the fix is a bounded wait + re-signal, skipping threads that
-      have not reached their first checkpoint, or making `resize` publish workers
-      only once they can take a signal.
+- [x] **The collector called libc with the world stopped, and hung.** Found and
+      fixed 2026-08-10 while building the mid-swap harness; unrelated to the
+      scrub. `scan_other_thread_stacks` asked `pthread_getattr_np` for each
+      thread's stack bounds *after* STW had frozen those threads — a call that
+      takes the target's descriptor lock and, for the main thread, parses
+      `/proc/self/maps` through stdio (**malloc**). Either lock can be held by a
+      thread the collector just suspended, and then it waits forever with no
+      crash and no output. Located by marker, inside that one call, on the third
+      thread of the scan; the world itself stopped fine. **Fixed** by snapshotting
+      the bounds in `stop_world` under `Thread.lock` before the first suspend
+      signal and doing a table lookup under STW
+      (`Platform.snapshotted_stack_bounds`): same call count per collection, out
+      of the suspension window. Measured (9950X/WSL2, EC4, one fiber holding a
+      worker across the first collect): **18 of 150 starts hung → 0 of 500**, and
+      **12 of 150** again when both hunks are reverted. `resize(4) + collect`
+      alone never hung (0 of 200). Independently confirmed by the mid-swap
+      harness, which needed a retry on ~8% of runs before and 0 of 15 after.
+      Gate: `make stw-startup-hang`. Misses in the bounds table are counted
+      (`pthread_bounds_misses` on `/gc-stats`) because a miss costs the
+      pthread-mapping half of a thread's root coverage. Darwin needs none of it —
+      `pthread_get_stackaddr_np` only reads the descriptor.
+      `bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md`
+- [ ] **Audit the rest of the STW body for libc calls, and make a hang audible.**
+      The above was one instance of a class: anything under STW that can take a
+      lock a suspended thread holds is the same bug. `scan_static_roots` reaches
+      `dl_iterate_phdr` (loader lock) — cached, and it did not hang, but the
+      argument applies. Second half: a hang under STW is currently **silent**, so
+      locating this one took markers and a rebuild. A phase watchdog ("stopped
+      N s in phase X") would have made it minutes. Note re-signalling is *not*
+      the tool to reach for: `Thread#suspend` clears `@suspended` before it
+      signals, so a re-signal can clobber an in-flight ack and create the hang it
+      is meant to break.
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —
