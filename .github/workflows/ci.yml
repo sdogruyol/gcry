@@ -222,6 +222,13 @@ jobs:
           # missing capability, so this step never goes red for something that is
           # not a regression.
           ./bin/stw_lag_pause --rounds=5 --max-ratio=4 --max-ratio-nolw=30
+          # None of the runs above can see the *default* path regress. They
+          # dirty 256 KiB per fiber, exactly the lag, so `tuned` has nothing to
+          # skip whether or not the skip reaches it — the low-water code could
+          # go back to being gated on lag == 0 and this step would stay green.
+          # Shallow fibers give the default path something to skip, and the tool
+          # then requires that it does.
+          ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --max-ratio=4 --max-ratio-nolw=30
 
       - name: RSS leak detection
         run: |
