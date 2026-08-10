@@ -26,6 +26,7 @@ end
 
 require "./gcry/metrics"
 require "./gcry/observability"
+require "./gcry/stw_watchdog"
 
 module Gcry
   @@default_heap : Heap? = nil

@@ -605,6 +605,18 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+    # A hang with the world stopped is otherwise silent — every mutator is in
+    # sigsuspend and /gc-stats cannot answer. Arms a raw watcher thread that
+    # prints which phase is stuck. Default off; see src/gcry/stw_watchdog.cr.
+    if wd = env_u64("GCRY_STW_WATCHDOG_MS")
+      Gcry::StwWatchdog.threshold_ms = wd if wd > 0
+    end
+    # Research only: stall inside the thread-stacks phase with the world stopped,
+    # so the watchdog above has a positive control. Never ship non-zero — it
+    # freezes every mutator for that long, on purpose.
+    if st = env_u64("GCRY_STW_TEST_STALL_MS")
+      heap.stw_test_stall_ms = st if st <= 60_000
+    end
     # Research only: slide the parked-fiber wipe above stack_top, into live
     # frames. The positive control for bench/scrub_audit.cr — see
     # docs/SOUND-DEFAULTS.md § "Auditing the scrub". Corrupts on purpose.

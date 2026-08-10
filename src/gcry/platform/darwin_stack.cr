@@ -27,5 +27,24 @@ module Gcry
         nil
       {% end %}
     end
+
+    # Same API as the Linux snapshot, and deliberately not the same mechanism.
+    # Linux cannot call `pthread_getattr_np` under STW — it locks the target's
+    # descriptor, which a frozen thread can be holding (see linux_stack.cr).
+    # Darwin's accessors only read the descriptor: no lock, no allocation. So
+    # there is nothing to snapshot here and the lookup answers directly.
+    def self.begin_stack_bounds_snapshot : Nil
+    end
+
+    def self.snapshot_pthread_stack_bounds(thread : LibC::PthreadT) : Nil
+    end
+
+    def self.snapshotted_stack_bounds(thread : LibC::PthreadT) : {Void*, Void*}?
+      pthread_stack_bounds(thread)
+    end
+
+    def self.stack_bounds_snapshot_misses : UInt64
+      0_u64
+    end
   end
 end

@@ -55,6 +55,21 @@ module Gcry
     # non-zero** — this deliberately destroys live data.
     property scrub_overshoot_bytes : UInt64 = 0_u64
 
+    # Research only, default nil — treat this one fiber as parked even though it
+    # reports `running?`, so the mid-swap state can be manufactured: a stale
+    # `stack_top` with a thread still on the stack below it. That is the state
+    # `scrub_skip_foreign_sp` exists for and which no workload has produced, so
+    # without it the guard cannot be observed doing anything.
+    #
+    # It is a heap property, and not `bench/` reaching in to flip the fiber's own
+    # `Context.resumable`, because that lies to Crystal's scheduler too: the
+    # fiber reads back *resumable*, so a worker may legitimately decide to resume
+    # a stack another thread is running on. Measured, doing it that way hung
+    # 1 run in 26 inside STW. Here the lie exists only inside
+    # `scrub_parked_fiber_stacks`, with the world already stopped, so nothing but
+    # the scrub can observe it. **Never ship non-nil.**
+    property scrub_force_parked : Fiber? = nil
+
     getter clear_stack_bytes_total : UInt64 = 0_u64
     getter fiber_scrub_bytes_total : UInt64 = 0_u64
     getter clear_stack_calls : UInt64 = 0_u64
@@ -71,6 +86,13 @@ module Gcry
     # conclude) from "the thread's fiber was excluded earlier for an unrelated
     # reason" (which would make the zero say nothing about the wipe).
     getter fiber_scrub_running_foreign_sp : UInt64 = 0_u64
+    # Times the mid-swap guard actually fired: a fiber reporting parked with a
+    # foreign thread's SP still on its stack, skipped instead of wiped. Without
+    # this the guard is invisible — `overlaps == 0` from a guarded run cannot be
+    # told apart from "the guard never had anything to do", which is exactly the
+    # unreadable zero `fiber_scrub_running_foreign_sp` exists to prevent one
+    # branch earlier. `bench/scrub_midswap.cr` reads it.
+    getter fiber_scrub_midswap_skips : UInt64 = 0_u64
 
     @clear_stack_ops : UInt64 = 0_u64
 
@@ -190,9 +212,10 @@ module Gcry
       {% end %}
 
       scrubbed = 0_u64
+      forced = @scrub_force_parked
       Fiber.unsafe_each do |fiber|
         next if fiber == current
-        if fiber.running?
+        if fiber.running? && !(forced && fiber.same?(forced))
           # Audit only: a running fiber is never scrubbed, but we need to know
           # whether it is where the foreign SPs actually live — otherwise a zero
           # from the counters below is unreadable.
@@ -229,7 +252,10 @@ module Gcry
         foreign_sp = nil
         if multi || @scrub_audit_foreign_sp
           foreign_sp = fiber_stack_foreign_sp(fiber)
-          next if multi && foreign_sp && @scrub_skip_foreign_sp
+          if multi && foreign_sp && @scrub_skip_foreign_sp
+            @fiber_scrub_midswap_skips += 1
+            next
+          end
         end
 
         stack = fiber.@stack

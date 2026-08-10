@@ -209,8 +209,43 @@ saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
 reading — true of Kemal, false of the fat app — and it is why the defaults stay
 tuned for now.
 
+### Added
+
+- **`GCRY_STW_WATCHDOG_MS` — a stop-the-world hang says something now.** When the
+  collector wedges under STW every mutator is frozen in `sigsuspend`, so the
+  process cannot report anything: no crash, no output, and `/gc-stats` cannot
+  answer because its thread is suspended too. Finding the `pthread_getattr_np`
+  hang below took inserting markers and rebuilding. Armed, a raw watcher thread
+  (not a `Crystal::Thread` — STW must not suspend it) prints the phase that is
+  stuck: `gcry: STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. Validated
+  against that real hang, where it names the exact phase the bug was in, and
+  driven from both sides by `make stw-watchdog`: it must fire on a deliberate
+  stall (`GCRY_STW_TEST_STALL_MS`, research only) and stay silent on an ordinary
+  collection. Default off; the phase breadcrumb it reads is recorded either way.
+
 ### Fixed
 
+- **Collector hang: `pthread_getattr_np` was called with the world stopped.**
+  `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
+  frozen those threads. That call locks the *target* thread's descriptor, which a
+  suspended thread can be holding, and the collector then waited forever: no
+  crash, no output, no diagnostic. It is specifically a query about a frozen
+  thread and not libc under STW in general — isolated against a positive control
+  in the same binary: non-main threads 9/100, main thread only 0/100,
+  `LibC.malloc` 64 KiB under STW 0/100, `fopen` 0/100, and ~1999 finalizer
+  `queue_pending` mallocs under STW 0/150 (which is why the finalizer registry
+  was left alone). Measured at
+  EC parallelism 4 with one fiber holding a worker across the first collection:
+  **18 of 150 process starts hung**. Bounds are now snapshotted in `stop_world`
+  under `Thread.lock`, before the first suspend signal, and the scan under STW is
+  a table lookup (`Platform.snapshotted_stack_bounds`) — same number of
+  `pthread_getattr_np` calls per collection, none of them inside the suspension
+  window. **0 of 500** after the fix, 12 of 150 again when reverted. Misses in the
+  table are counted as `pthread_bounds_misses` on `/gc-stats`, because a miss
+  costs the pthread-mapping half of that thread's root coverage. Darwin is
+  unaffected: `pthread_get_stackaddr_np` only reads the descriptor. Gate:
+  `make stw-startup-hang`.
+  [bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md](bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md)
 - **Process / backticks under `-Dgc_none`:** Crystal `prepare_args` omits the
   argv NULL terminator; Boehm size-class padding hid it, gcry exact classes
   surfaced `EFAULT` (`Bad address`). Shard workaround:

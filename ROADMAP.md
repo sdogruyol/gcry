@@ -88,9 +88,71 @@ Target: Match Boehm on the workloads Crystal users actually run.
       the wipe ends exactly where live data begins, and correctness rests
       entirely on `@context.stack_top` being exact on every platform and through
       any change to how Crystal spills. No defect at the shipping window; no
-      tolerance either. Still open: the mid-swap suspend, which no harness here
-      has hit.
-      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub"
+      tolerance either. **The mid-swap suspend is now closed too**, and the
+      reason no harness hit it is structural rather than luck: on all five
+      Crystal context-switch backends `stack_top` is written (behind a `dmb ish`
+      on aarch64) *before* the running flag is cleared, and a resumed fiber is
+      marked running *before* the SP moves onto its stack, so while the genuine
+      window is open `stack_top == sp` and the wipe stays strictly below it.
+      `Fiber#run` delists a dying fiber before its stack reaches the pool, which
+      closes the other direction. That is an argument from source (Crystal
+      `c361ac6e7`), so `make scrub-midswap` measures what the guard against it is
+      worth instead: `Heap#scrub_force_parked` manufactures the state, and with
+      the guard off the wipe reaches live frames **1 of 1** and the process dies
+      (SEGV at 0x0 — the first time `fiber_scrub_live_frame_overlaps` has ever
+      moved, so the counter is now known to work); with the guard on it is
+      skipped and the canaries survive. Readable only because the skip is now
+      counted — `fiber_scrub_midswap_skips` on `/gc-stats`. 30 runs identical,
+      both gate directions broken on purpose and observed red.
+      `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
+      § "The mid-swap window"
+- [x] **The collector asked glibc about a thread it had suspended, and hung.** Found and
+      fixed 2026-08-10 while building the mid-swap harness; unrelated to the
+      scrub. `scan_other_thread_stacks` asked `pthread_getattr_np` for each
+      thread's stack bounds *after* STW had frozen those threads — a call that
+      locks the *target's* descriptor, which a suspended thread can be holding.
+      The collector then waits forever with no crash and no output. Located by
+      marker, inside that one call, on the third thread of the scan; the world
+      itself stopped fine. Isolated afterwards against a positive control in the
+      same binary: non-main threads **9 of 100**, main thread only **0 of 100**,
+      `LibC.malloc` 64 KiB under STW **0 of 100**, `fopen` under STW **0 of
+      100** — so it is the query about a frozen thread, not libc under STW. **Fixed** by snapshotting
+      the bounds in `stop_world` under `Thread.lock` before the first suspend
+      signal and doing a table lookup under STW
+      (`Platform.snapshotted_stack_bounds`): same call count per collection, out
+      of the suspension window. Measured (9950X/WSL2, EC4, one fiber holding a
+      worker across the first collect): **18 of 150 starts hung → 0 of 500**, and
+      **12 of 150** again when both hunks are reverted. `resize(4) + collect`
+      alone never hung (0 of 200). Independently confirmed by the mid-swap
+      harness, which needed a retry on ~8% of runs before and 0 of 15 after.
+      Gate: `make stw-startup-hang`. Misses in the bounds table are counted
+      (`pthread_bounds_misses` on `/gc-stats`) because a miss costs the
+      pthread-mapping half of a thread's root coverage. Darwin needs none of it —
+      `pthread_get_stackaddr_np` only reads the descriptor.
+      `bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md`
+- [x] **Audit the rest of the STW body for libc calls.** Closed by measurement
+      rather than by inspection, and it narrowed the rule instead of widening it.
+      Allocation under a suspension is not the hazard: `LibC.malloc` 64 KiB × 8
+      under STW is 0 of 100, `fopen` is 0 of 100, and the finalizer registry's
+      `queue_pending` — which really does call `LibC.malloc` once per unreachable
+      finalizable object with the world stopped, measured at ~1999 in one
+      collection — is 0 of 150, all against a control firing at 4–9%. So the
+      registry was **left alone**, as were `Platform.push_range`'s realloc inside
+      `scan_static_roots` and the blacklist / chunk-index growth. The rule that
+      survives is narrow — do not ask glibc about a suspended thread — and
+      `pthread_getattr_np` was its only instance in the collect path.
+- [x] **Make a hang under STW audible.** Done — `GCRY_STW_WATCHDOG_MS` arms a raw
+      watcher thread (not a `Crystal::Thread`, or STW would suspend the one thread
+      that has to keep running) which prints the stuck phase:
+      `STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. That line is from
+      the *real* hang, reproduced with the fix reverted — it names the exact phase
+      the bug was in, so the next one costs a line instead of a bisect. Gated by
+      `make stw-watchdog` from both sides (fires on a deliberate stall, silent on
+      an ordinary collection; both directions broken on purpose and observed red),
+      and wired into CI along with the hang trap itself. Default off. Note
+      re-signalling remains *not* the tool to reach for: `Thread#suspend` clears
+      `@suspended` before it signals, so a re-signal can clobber an in-flight ack
+      and create the hang it is meant to break.
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —
