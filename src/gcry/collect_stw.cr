@@ -70,6 +70,7 @@ module Gcry
       return if @world_stopped
 
       current_thread = Thread.current
+      StwWatchdog.enter(StwWatchdog::PHASE_SUSPEND)
       @stw_owner = current_thread
       {% if flag?(:darwin) %}
         Platform.stop_world_threads(current_thread)
@@ -144,6 +145,7 @@ module Gcry
         Platform.clear_thread_sps
         @world_stopped = false
         @stw_owner = nil
+        StwWatchdog.leave
       {% else %}
         begin
           Thread.unsafe_each do |thread|
@@ -163,6 +165,7 @@ module Gcry
           Platform.clear_thread_sps
           @world_stopped = false
           @stw_owner = nil
+          StwWatchdog.leave
         ensure
           Thread.unlock
         end

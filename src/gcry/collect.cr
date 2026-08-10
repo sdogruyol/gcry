@@ -257,6 +257,12 @@ module Gcry
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
     # boundary and cross it between collections. Without these you can only infer
     # engagement from a benchmark delta.
+    # Research only (GCRY_STW_TEST_STALL_MS, default 0): hold the world stopped
+    # inside the thread-stacks phase. It exists so the STW watchdog has a run it
+    # is *expected* to fire on — a watchdog whose green is reachable without ever
+    # seeing it trigger says nothing. Never ship non-zero.
+    property stw_test_stall_ms : UInt64 = 0_u64
+
     getter low_water_skips : UInt64 = 0_u64
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
@@ -947,6 +953,9 @@ module Gcry
       return unless acquire_post_stw(coalesce, cols_before, major)
 
       begin
+        # World is running here: pthread_create asks libc for a stack, which is
+        # exactly what must not happen once threads are frozen.
+        StwWatchdog.ensure_started if @stop_the_world
         # Auto-collect coalescing: peer finished while we acquired — skip STW.
         if coalesce && @collections > cols_before && debt_under_threshold?(major)
           @collect_coalesced += 1
@@ -972,6 +981,7 @@ module Gcry
           t0 = monotonic_ns
           stop_world_quiescing_roots
           @last_phase_stw_stop_ns = monotonic_ns - t0
+          StwWatchdog.enter(StwWatchdog::PHASE_FLUSH)
           flush_all_tlabs
           # TLAB-off USED stash → freelist before mark (unscanned thread locals).
           flush_all_alloc_batches
@@ -979,6 +989,7 @@ module Gcry
           # those nodes before mark/sweep (see scrub_freelists / unlink_freelist_range).
           scrub_freelists
           note_collection_begin
+          StwWatchdog.enter(StwWatchdog::PHASE_CLEAR)
           @mark_stack.clear
 
           t0 = monotonic_ns
@@ -988,6 +999,7 @@ module Gcry
             clear_nursery_marks
           end
           @last_phase_clear_ns = monotonic_ns - t0
+          StwWatchdog.enter(StwWatchdog::PHASE_ROOTS)
 
           t0 = monotonic_ns
           @before_collect_callbacks.each(&.call)
@@ -1005,6 +1017,7 @@ module Gcry
           scan_all_fiber_roots if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
+          StwWatchdog.enter(StwWatchdog::PHASE_STATIC)
 
           t0 = monotonic_ns
           if @scan_static_roots
@@ -1015,6 +1028,14 @@ module Gcry
             end
           end
           @last_phase_static_ns = monotonic_ns - t0
+          StwWatchdog.enter(StwWatchdog::PHASE_STACKS)
+          if (stall = @stw_test_stall_ms) > 0
+            ts = uninitialized LibC::Timespec
+            ts.tv_sec = typeof(ts.tv_sec).new(stall // 1000)
+            ts.tv_nsec = typeof(ts.tv_nsec).new((stall % 1000) * 1_000_000)
+            rem = uninitialized LibC::Timespec
+            LibC.nanosleep(pointerof(ts), pointerof(rem))
+          end
 
           t0 = monotonic_ns
           if scan_stack
@@ -1022,6 +1043,7 @@ module Gcry
             scan_other_thread_stacks
           end
           @last_phase_stacks_ns = monotonic_ns - t0
+          StwWatchdog.enter(StwWatchdog::PHASE_MARK)
 
           # Conservatively find nursery pointers from old objects.
           # Official path: page-dirty remembered set (soft-dirty / mprotect).
@@ -1030,6 +1052,7 @@ module Gcry
           t0 = monotonic_ns
           mark_loop
           @last_phase_mark_ns = monotonic_ns - t0
+          StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
           # Claiming FREE mid-alloc blocks during mark can leave USED-on-freelist;
           # drop them before sweep / empty-chunk unlink.
@@ -1048,6 +1071,7 @@ module Gcry
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.
           @lazy_sweep_pending = sweep_after_world?
+          StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
             t0 = monotonic_ns
             sweep(major: major, after_world: false)
@@ -1079,6 +1103,7 @@ module Gcry
           @collections += 1
         ensure
           t0 = monotonic_ns
+          StwWatchdog.enter(StwWatchdog::PHASE_RESUME)
           start_world
           @last_phase_stw_start_ns = monotonic_ns - t0
           unlock_write
