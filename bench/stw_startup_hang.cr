@@ -1,11 +1,9 @@
-# The collector must not call libc while the world is stopped.
+# The collector must not ask glibc about a thread it has suspended.
 #
-# `scan_other_thread_stacks` used to ask `pthread_getattr_np` for each thread's
-# stack bounds *after* STW had frozen those threads. That call takes the target
-# thread's descriptor lock, and for the main thread glibc has no recorded
-# stackblock, so it parses `/proc/self/maps` through stdio — which mallocs. Both
-# can be held by a thread the collector has just suspended, and then the
-# collector waits for it forever: no crash, no output, no diagnostic.
+# `scan_other_thread_stacks` used to call `pthread_getattr_np` for each thread's
+# stack bounds *after* STW had frozen those threads. That call locks the target
+# thread's descriptor, and a suspended thread can be holding its own — so the
+# collector waited forever: no crash, no output, no diagnostic.
 #
 # Located by marker, not by argument. The hang is inside that one call:
 #
@@ -21,6 +19,23 @@
 # (`Platform.snapshotted_stack_bounds`). Same number of `pthread_getattr_np`
 # calls per collection; they just no longer run inside the suspension window.
 #
+# **It is not "libc under STW" in general.** That was the first reading and it is
+# wrong. Isolated against a positive control firing in the same binary:
+#
+#     live getattr for every thread        4 of 100 hang   (positive control)
+#     live getattr for non-main threads    9 of 100 hang
+#     live getattr for the main thread     0 of 100
+#     LibC.malloc 64 KiB x8 under STW      0 of 100
+#     fopen("/proc/self/maps") under STW   0 of 100
+#     ~1999 finalizer queue_pending mallocs under STW (--finalizers)  0 of 150
+#     the same plus four fibers churning the malloc arena (--libc-churn)  0 of 120
+#
+# So the main thread's `/proc/self/maps` parse is not the trigger, malloc is not
+# the trigger, and the collector's other libc use — notably the finalizer
+# registry's `LibC.malloc` per queued finalizer, which really does run with the
+# world stopped — is not implicated. The rule this gate enforces is the narrow
+# one: do not ask glibc about a suspended thread.
+#
 # Bisected by ingredient on this host (9950X/WSL2, EC parallelism 4):
 #
 #     resize(4) + GC.collect                           0 of 200 hang
@@ -28,17 +43,15 @@
 #     the same, with the fix                            0 of 500
 #     the same, fix reverted (both hunks)              12 of 150 hang    (8%)
 #
-# The trigger is a fiber that holds a worker across the first collection: it
-# keeps another thread busy in the window where startup still mallocs, which is
-# what puts a frozen thread inside the arena lock. `--scrub` adds nothing; it was
-# in the shape that found this, not in the cause.
+# The trigger is a fiber that holds a worker across the first collection, which
+# is what puts a frozen worker in the window where glibc still holds its
+# descriptor lock.
 #
-# Two earlier readings of this were wrong and are recorded because they are the
-# kind of wrong that looks convincing. `utime=0` on the waiting thread does not
-# mean "never scheduled" — it means under one 10 ms tick, and that thread had
-# already run `Thread#start`. And the two threads reporting `comm=SYSMON` are a
-# Linux artefact: a new thread inherits its creator's name until it sets its own.
-# Neither observation had anything to do with the cause.
+# Two earlier readings were wrong and are recorded because they are the kind of
+# wrong that looks convincing. `utime=0` on the waiting thread does not mean
+# "never scheduled" — it means under one 10 ms tick, and that thread had already
+# run `Thread#start`. And the two threads reporting `comm=SYSMON` are a Linux
+# artefact: a new thread inherits its creator's name until it sets its own.
 #
 # Not a crash, so it was never the acikturkiye SIGSEGV.
 #
@@ -49,8 +62,11 @@
 #   bin/stw_startup_hang                      # control: no spinner
 #   bin/stw_startup_hang --child --spin       # one attempt (used as the child)
 #
+# `--finalizers` and `--libc-churn` are negative controls kept from that
+# isolation: both put real libc allocation under STW and neither hangs.
+#
 # Exits non-zero if any child hangs. Green since the fix; it stays as the gate
-# against calling anything lock-taking from inside STW again.
+# against reintroducing a glibc query about a suspended thread.
 
 require "../src/gcry"
 
@@ -62,6 +78,18 @@ require "../src/gcry"
 {% end %}
 
 PARALLELISM = 4
+
+# A class with `finalize` gets a finalizer entry per instance.
+class Finalizable
+  @@sink = 0
+
+  def initialize(@n : Int32)
+  end
+
+  def finalize
+    @@sink = @@sink &+ @n
+  end
+end
 
 # ── Child: the whole reproducer ──────────────────────────────────────────────
 if ARGV.includes?("--child")
@@ -86,6 +114,37 @@ if ARGV.includes?("--child")
     until ready.get != 0
       Fiber.yield
     end
+  end
+
+  # Negative control. `enqueue_unreachable_finalizers` runs inside STW and queues
+  # each unreachable entry through `Finalizers::Registry#queue_pending`, which
+  # calls LibC.malloc — one per object, with the world stopped. Measured here:
+  # 2022 entries in, 23 left, so ~1999 of those mallocs really do run under STW,
+  # and it does not hang (0 of 150). That is why the finalizer registry was left
+  # alone: the danger is querying a suspended thread, not allocating.
+  if ARGV.includes?("--finalizers")
+    2000.times { |i| Finalizable.new(i) }
+  end
+
+  # Negative control, stronger: keep other threads inside libc malloc when STW
+  # freezes them, at sizes above glibc's tcache ceiling (1032 bytes) where the
+  # arena lock is actually taken. Not a synthetic shape — any app with C bindings
+  # mallocs on its mutator threads (acikturkiye runs pg + openssl). Still 0 of
+  # 120, so arena contention across STW is not what wedges the collector.
+  if ARGV.includes?("--libc-churn")
+    4.times do
+      spawn do
+        n = 0_u64
+        while true
+          sz = LibC::SizeT.new(2048 + (n % 16) * 4096)
+          p1 = LibC.malloc(sz)
+          LibC.free(p1) unless p1.null?
+          n &+= 1
+          Fiber.yield if (n & 0x3ff) == 0
+        end
+      end
+    end
+    Fiber.yield
   end
 
   if ARGV.includes?("--scrub")
@@ -114,7 +173,9 @@ ARGV.each do |arg|
 end
 
 self_path = Process.executable_path || "bin/stw_startup_hang"
-child_flags = ARGV.select { |a| a == "--spin" || a == "--scrub" }
+child_flags = ARGV.select { |a|
+  a == "--spin" || a == "--scrub" || a == "--finalizers" || a == "--libc-churn"
+}
 
 hangs = 0
 ok = 0
@@ -172,10 +233,10 @@ end
 if hangs > 0
   pct = (hangs * 100.0 / children).round(2)
   STDERR.puts "FAIL: the collector hung on #{hangs}/#{children} starts (#{pct}%). " \
-              "Something called under STW is waiting on a lock a suspended thread " \
-              "holds — pthread_getattr_np was the first one (fixed via " \
-              "Platform.snapshotted_stack_bounds); check what else the collect " \
-              "path calls into libc while the world is stopped."
+              "Something under STW is waiting on a lock a suspended thread holds. " \
+              "pthread_getattr_np was the one this gate was built for (fixed via " \
+              "Platform.snapshotted_stack_bounds) — check what else the collect " \
+              "path asks glibc about a thread it has just frozen."
   exit 1
 end
 
