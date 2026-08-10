@@ -106,15 +106,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
-- [x] **The collector called libc with the world stopped, and hung.** Found and
+- [x] **The collector asked glibc about a thread it had suspended, and hung.** Found and
       fixed 2026-08-10 while building the mid-swap harness; unrelated to the
       scrub. `scan_other_thread_stacks` asked `pthread_getattr_np` for each
       thread's stack bounds *after* STW had frozen those threads — a call that
-      takes the target's descriptor lock and, for the main thread, parses
-      `/proc/self/maps` through stdio (**malloc**). Either lock can be held by a
-      thread the collector just suspended, and then it waits forever with no
-      crash and no output. Located by marker, inside that one call, on the third
-      thread of the scan; the world itself stopped fine. **Fixed** by snapshotting
+      locks the *target's* descriptor, which a suspended thread can be holding.
+      The collector then waits forever with no crash and no output. Located by
+      marker, inside that one call, on the third thread of the scan; the world
+      itself stopped fine. Isolated afterwards against a positive control in the
+      same binary: non-main threads **9 of 100**, main thread only **0 of 100**,
+      `LibC.malloc` 64 KiB under STW **0 of 100**, `fopen` under STW **0 of
+      100** — so it is the query about a frozen thread, not libc under STW. **Fixed** by snapshotting
       the bounds in `stop_world` under `Thread.lock` before the first suspend
       signal and doing a table lookup under STW
       (`Platform.snapshotted_stack_bounds`): same call count per collection, out
@@ -128,16 +130,23 @@ Target: Match Boehm on the workloads Crystal users actually run.
       pthread-mapping half of a thread's root coverage. Darwin needs none of it —
       `pthread_get_stackaddr_np` only reads the descriptor.
       `bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md`
-- [ ] **Audit the rest of the STW body for libc calls, and make a hang audible.**
-      The above was one instance of a class: anything under STW that can take a
-      lock a suspended thread holds is the same bug. `scan_static_roots` reaches
-      `dl_iterate_phdr` (loader lock) — cached, and it did not hang, but the
-      argument applies. Second half: a hang under STW is currently **silent**, so
-      locating this one took markers and a rebuild. A phase watchdog ("stopped
-      N s in phase X") would have made it minutes. Note re-signalling is *not*
-      the tool to reach for: `Thread#suspend` clears `@suspended` before it
-      signals, so a re-signal can clobber an in-flight ack and create the hang it
-      is meant to break.
+- [x] **Audit the rest of the STW body for libc calls.** Closed by measurement
+      rather than by inspection, and it narrowed the rule instead of widening it.
+      Allocation under a suspension is not the hazard: `LibC.malloc` 64 KiB × 8
+      under STW is 0 of 100, `fopen` is 0 of 100, and the finalizer registry's
+      `queue_pending` — which really does call `LibC.malloc` once per unreachable
+      finalizable object with the world stopped, measured at ~1999 in one
+      collection — is 0 of 150, all against a control firing at 4–9%. So the
+      registry was **left alone**, as were `Platform.push_range`'s realloc inside
+      `scan_static_roots` and the blacklist / chunk-index growth. The rule that
+      survives is narrow — do not ask glibc about a suspended thread — and
+      `pthread_getattr_np` was its only instance in the collect path.
+- [ ] **Make a hang under STW audible.** It is currently **silent**: locating the
+      one above took markers and a rebuild. A phase watchdog ("stopped N s in
+      phase X") would have made it minutes. Note re-signalling is *not* the tool
+      to reach for: `Thread#suspend` clears `@suspended` before it signals, so a
+      re-signal can clobber an in-flight ack and create the hang it is meant to
+      break.
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —

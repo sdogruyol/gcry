@@ -213,10 +213,14 @@ tuned for now.
 
 - **Collector hang: `pthread_getattr_np` was called with the world stopped.**
   `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
-  frozen those threads. That call takes the target thread's descriptor lock and,
-  for the main thread, parses `/proc/self/maps` through stdio — which mallocs.
-  Either lock can be held by a thread the collector just suspended, and the
-  collector then waited forever: no crash, no output, no diagnostic. Measured at
+  frozen those threads. That call locks the *target* thread's descriptor, which a
+  suspended thread can be holding, and the collector then waited forever: no
+  crash, no output, no diagnostic. It is specifically a query about a frozen
+  thread and not libc under STW in general — isolated against a positive control
+  in the same binary: non-main threads 9/100, main thread only 0/100,
+  `LibC.malloc` 64 KiB under STW 0/100, `fopen` 0/100, and ~1999 finalizer
+  `queue_pending` mallocs under STW 0/150 (which is why the finalizer registry
+  was left alone). Measured at
   EC parallelism 4 with one fiber holding a worker across the first collection:
   **18 of 150 process starts hung**. Bounds are now snapshotted in `stop_world`
   under `Thread.lock`, before the first suspend signal, and the scan under STW is
