@@ -138,9 +138,23 @@ Target: Match Boehm on the workloads Crystal users actually run.
       +83% pause at EC4 against tuned, and that residual is no longer a constant
       worst case: it tracks how much stack was actually touched (p5 3.4 ms,
       p95 19.1 ms, against tuned's 6.1/7.8). Open: which fibers are deeply used
-      and why; and Darwin, which has no pagemap equivalent wired and keeps the
-      full scan. **Closed:** the fat-app large-heap re-cut (above — the 14.5×
+      and why. **Closed:** the fat-app large-heap re-cut (above — the 14.5×
       was pre-fix and the sign has since reversed).
+- [ ] **Low-water skip on Darwin.** Linux-only today, so macOS still faults the
+      whole lag window per parked fiber and gets none of the EC4 win
+      (8.06 → 3.60 ms there). The soundness argument needs a primitive that
+      separates "never faulted" from "written then evicted" — residency alone is
+      wrong, because a page that was written and later swapped reads absent and
+      skipping it drops a root. That is why `mincore` was rejected on Linux, and
+      it rules `mincore` out on Darwin too: macOS compresses and swaps.
+      **Candidate:** `mach_vm_page_query` / `vm_map_page_query_info`, whose
+      disposition bits include `VM_PAGE_QUERY_PAGE_PRESENT` **and**
+      `VM_PAGE_QUERY_PAGE_PAGED_OUT` — the same present-or-swapped test pagemap
+      gives, if those bits mean what they appear to. *Unverified: no Darwin host
+      on this bench.* Before shipping it, port `spec/stack_low_water_spec.cr` —
+      it pins the claim ("never reports above a written word") rather than the
+      pause number, which is exactly the assertion a second implementation has
+      to earn on its own.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
