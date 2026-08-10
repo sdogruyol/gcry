@@ -36,13 +36,24 @@ module Gcry
 
     # ── Stack bounds snapshot: bounds without libc, for use under STW ─────────
     #
-    # `pthread_getattr_np` is not callable with the world stopped. It takes the
-    # *target* thread's descriptor lock, and for the main thread glibc has no
-    # recorded stackblock so it parses `/proc/self/maps` through stdio — which
-    # mallocs. Either lock can be held by a thread STW has already frozen, and
-    # then the collector waits for it forever. That was a real hang, not a
-    # theoretical one: `bench/stw_startup_hang.cr` reproduced it on 18 of 150
-    # starts, wedged inside this call on the third thread of the scan.
+    # `pthread_getattr_np` is not callable with the world stopped: it takes the
+    # *target* thread's descriptor lock, and a thread STW has frozen can be
+    # holding its own. The collector then waits for it forever. That was a real
+    # hang, not a theoretical one: `bench/stw_startup_hang.cr` reproduced it on
+    # 18 of 150 starts, wedged inside this call.
+    #
+    # It is specifically about *asking glibc about a suspended thread*, and not
+    # about libc under STW in general — which was measured, against a positive
+    # control firing at 4–9% in the same binary:
+    #
+    #   live call for every thread          4 of 100 hang   (control)
+    #   live call for non-main threads      9 of 100 hang
+    #   live call for the main thread only  0 of 100
+    #   LibC.malloc 64 KiB x8 under STW     0 of 100
+    #   fopen("/proc/self/maps") under STW  0 of 100
+    #
+    # So the main thread's `/proc/self/maps` parse is not the trigger, malloc is
+    # not the trigger, and the collector's other libc use is not implicated.
     #
     # So the bounds are taken while every thread is still running — from
     # `stop_world`, under `Thread.lock` and before the first suspend signal — and

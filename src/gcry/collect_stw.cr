@@ -78,13 +78,13 @@ module Gcry
         Thread.lock
         begin
           # Take every thread's stack bounds while they are all still running.
-          # `pthread_getattr_np` locks the target's descriptor and, for the main
-          # thread, parses /proc/self/maps through stdio (malloc) — so calling it
-          # after the suspend signals deadlocks against whichever frozen thread
-          # holds either. It did: 18 of 150 starts, wedged in that call
-          # (`bench/stw_startup_hang.cr`). Same call count as before, moved out of
-          # the suspension window; `Thread.lock` is already held, so the set
-          # snapshotted here is exactly the set scanned below.
+          # `pthread_getattr_np` locks the *target's* descriptor, so asking it
+          # about a thread the suspend signals have already frozen deadlocks the
+          # collector. It did: 18 of 150 starts, wedged in that call
+          # (`bench/stw_startup_hang.cr`; isolated to non-main threads, 9 of 100,
+          # against 0 of 100 for the main thread). Same call count as before,
+          # moved out of the suspension window; `Thread.lock` is already held, so
+          # the set snapshotted here is exactly the set scanned below.
           Platform.begin_stack_bounds_snapshot
           Thread.unsafe_each do |thread|
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
