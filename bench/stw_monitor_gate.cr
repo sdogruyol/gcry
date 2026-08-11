@@ -34,7 +34,10 @@ require "../src/gcry"
   {% raise "stw_monitor_gate requires -Dtracing" %}
 {% end %}
 
-STALL_MS = 8000
+# Longer than COLLECT_STACKS_EVERY (5 s) several times over, so the control gets
+# multiple chances to run inside the stop and a *count* can separate "the Monitor
+# kept working" from "one call was already in flight when the stop began".
+STALL_MS = 20_000
 
 if ARGV.includes?("--child")
   # Give the stack pool something to hand back, so `collect_stacks` has work.
@@ -42,8 +45,10 @@ if ARGV.includes?("--child")
   sleep 1.second
 
   STDERR.puts "MARK begin"
+  STDERR.flush
   GC.collect
   STDERR.puts "MARK end"
+  STDERR.flush
   STDERR.puts "GATE enabled=#{Gcry::MonitorGate.enabled?} " \
               "blocks=#{Gcry::MonitorGate.monitor_blocks} " \
               "stw_waits=#{Gcry::MonitorGate.stw_waits} " \
@@ -64,15 +69,28 @@ def run(self_path : String, gate : Bool) : String
   err.to_s
 end
 
-# True when a collect_stacks trace line falls between the two marks.
-def collected_inside?(text : String) : Bool
+# How many collect_stacks trace lines fall between the two marks.
+#
+# A count, not a boolean, and the reason is a CI failure: `Crystal.trace` emits
+# its line *after* the work finishes (it reports `duration=`), so a call already
+# in flight when the stop began lands after "MARK begin" even though the
+# collector correctly waited it out. On a 2-vCPU runner that overlap is likely;
+# on a 32-thread box it is rare, which is why this passed locally and failed in
+# CI. One line is the in-flight case the handshake is documented to allow.
+# Several lines mean the Monitor kept starting work inside the stop, which is
+# the thing the gate exists to prevent.
+def count_inside(text : String) : Int32
   inside = false
+  count = 0
   text.each_line do |line|
-    inside = true if line.includes?("MARK begin")
-    return true if inside && line.includes?("sched.collect_stacks")
-    return false if line.includes?("MARK end")
+    if line.includes?("MARK begin")
+      inside = true
+      next
+    end
+    break if line.includes?("MARK end")
+    count += 1 if inside && line.includes?("sched.collect_stacks")
   end
-  false
+  count
 end
 
 def field(text : String, key : String) : Int64
@@ -90,23 +108,37 @@ puts ""
 on = run(self_path, true)
 off = run(self_path, false)
 
-on_inside = collected_inside?(on)
-off_inside = collected_inside?(off)
+on_inside = count_inside(on)
+off_inside = count_inside(off)
 on_blocks = field(on, "blocks")
+on_waits = field(on, "stw_waits")
 
-puts "  gate on   collect_stacks inside the stop: #{on_inside}   monitor held off #{on_blocks}x"
+puts "  gate on   collect_stacks inside the stop: #{on_inside}   held off #{on_blocks}x   stw_waits=#{on_waits}"
 puts "  gate off  collect_stacks inside the stop: #{off_inside}   (control)"
 puts ""
 
 failures = [] of String
 
-unless off_inside
-  failures << "control (gate off) showed no collect_stacks inside the stopped window — " \
-              "the probe saw nothing, so the passing case below would mean nothing"
+# The control must show the Monitor working *repeatedly* inside the stop. One
+# line could be a single in-flight call; several can only be work it started
+# while the world was stopped.
+if off_inside < 2
+  failures << "control (gate off) showed #{off_inside} collect_stacks inside a " \
+              "#{STALL_MS} ms stop — expected several. The probe is not seeing the " \
+              "behaviour the gate is supposed to prevent, so the passing case means nothing"
 end
 
-if on_inside
-  failures << "gate on: the Monitor still ran collect_stacks inside the stopped world"
+if on_inside > 1
+  failures << "gate on: #{on_inside} collect_stacks inside the stopped world — the Monitor " \
+              "started new work after the stop began"
+end
+
+# The one line the handshake does allow is a call already running when the stop
+# began, and that case is only benign because stop_world waited it out. If a line
+# appears without a recorded wait, the Monitor got in on its own.
+if on_inside == 1 && on_waits < 1
+  failures << "gate on: a collect_stacks landed inside the stop with stw_waits=#{on_waits} — " \
+              "it was not an in-flight call the collector waited out"
 end
 
 if on_blocks <= 0

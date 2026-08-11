@@ -103,16 +103,28 @@ through, so every access is sequentially consistent. The Monitor clears `busy`
 in 6.5 s on a plain `-Dgc_none` build). `run_loop` itself is not wrappable: it
 never returns, so a wrapper around it could check exactly once.
 
-**Verified both ways** (`make stw-monitor-gate`, `bench/stw_monitor_gate.cr`):
+**Verified both ways** (`make stw-monitor-gate`, `bench/stw_monitor_gate.cr`),
+over a 20 s stop so the control gets several chances at the 5 s collect interval:
 
 | run | `collect_stacks` inside the stop | Monitor held off |
-|-----|----------------------------------|-----------------:|
-| gate on | **no** | 1× |
-| gate off (`GCRY_MONITOR_GATE=0`, control) | yes | 0 |
+|-----|---------------------------------:|-----------------:|
+| gate on | **0** | 1× |
+| gate off (`GCRY_MONITOR_GATE=0`, control) | 4 | 0 |
 
 The "held off" column is load-bearing: a clean window with the Monitor never
 blocked would mean nothing happened to be scheduled, not that anything closed.
-Removing `MonitorGate.close` from `stop_world` turns both assertions red.
+Removing `MonitorGate.close` from `stop_world` turns both assertions red (4
+inside, 0 held off).
+
+**The first version of this gate was wrong, and CI caught it.** It asserted
+*no* trace line between the marks. But `Crystal.trace` emits its line when the
+work *finishes* — it reports `duration=` — so a `collect_stacks` already in
+flight when the stop began lands after the begin mark even though `stop_world`
+correctly waited it out. On a 2-vCPU runner that overlap is likely; on a
+32-thread box it is rare, so it passed locally and failed on master. The
+invariant is not "no line" but "no work *started* after the stop began", which is
+a count: the control must show several, the gated run at most the one in-flight
+call, and that one only if `stw_waits` records the collector waiting for it.
 
 **Cost, measured rather than argued.** Over 3000 collections with 200 busy
 fibers: `stw_waits=0`, `stw_wait_max_ns=0`, `monitor_blocks=397`. The collector

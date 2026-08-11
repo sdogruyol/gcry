@@ -203,7 +203,10 @@ scrub-midswap: $(BIN)
 # the stopped world — including StackPool#collect, which munmaps fiber stacks.
 # Gcry::MonitorGate handshakes it out. Needs -Dtracing: the Monitor's work is
 # stdlib-internal and CRYSTAL_TRACE=sched is the only way to see it from outside.
-# Both directions in one run; GCRY_MONITOR_GATE=0 is the control. ~20 s.
+# Both directions in one run; GCRY_MONITOR_GATE=0 is the control. ~45 s: the
+# stop is held 20 s so the control gets several 5 s collect intervals, and the
+# assertion counts them — one line can be a call already in flight when the stop
+# began, which the handshake waits out rather than prevents.
 stw-monitor-gate: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dtracing bench/stw_monitor_gate.cr \
 	  -o $(BIN)/stw_monitor_gate --error-trace
