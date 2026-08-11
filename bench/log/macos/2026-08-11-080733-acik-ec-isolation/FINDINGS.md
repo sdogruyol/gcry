@@ -85,6 +85,73 @@ expensive search, and probably the wrong one to run before the mechanism is
 understood. It reproduces at 30 s on demand; debugging it directly is cheaper
 than dating it.
 
+## It requires a collection — so it is a dropped root, not an overflow
+
+The competing reading was that nothing is dropped at all: that a neighbouring
+allocation (or the object's own code) writes past its end, and gcry's exact size
+classes expose what Boehm's rounding slack absorbs. This repo has that exact
+precedent — `eed00fb`, where Crystal's `prepare_args` omitted a trailing NUL and
+"Boehm size-class padding hid it, gcry exact classes surfaced EFAULT". The
+signature fits it well: the damage is in the object's *own* tail, it is always
+the same 5 bytes, and it depends on codegen.
+
+It is ruled out. With `GCRY_DISABLE_AUTO=1` (`gc_threshold = UInt64::MAX`) the
+same binary in the same harness is **0/5** — `../2026-08-11-085538-acik-nogc/`.
+Verified from `/gc-stats`: `collections = 2` in every trial, both of them the
+harness's post-`wrk` `/gc-collect` calls, so the load ran with **zero**
+collections. Against the 8/10 that binary produces with automatic collection on,
+a clean 5 is p ≈ 0.0003.
+
+Nothing that is a write bug cares whether the collector ran. This one does. A
+live object is being reclaimed.
+
+## Root cause — Darwin never scans a suspended thread's registers
+
+`collect_scan.cr:513` states the requirement in its own comment:
+
+```crystal
+# Always spill GP registers at suspend — may hold the only live copy.
+Platform.each_thread_greg(pthread) do |candidate|
+  mark_root_candidate(candidate, source: RootSource::Thread)
+end
+```
+
+`linux_stw.cr:148` implements it, yielding every greg via `with_thread_gregs`.
+`darwin_stw.cr:135` is an **empty stub**:
+
+```crystal
+def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
+  # Mach path records SP via thread_get_state; full greg dump not wired yet.
+end
+```
+
+So on Darwin a reference whose only live copy sits in a suspended thread's
+register is not a root, and the object is swept. That accounts for every
+observation above without exception:
+
+| observation | accounted for |
+|---|---|
+| needs a collection | registers only matter while marking |
+| `GCRY_SOUND=1` no help | this is a missing root *source*, not a heuristic |
+| `GCRY_DISABLE_LAYOUT=1` no help | not body-scan precision |
+| scrub irrelevant, both ways | unrelated path |
+| compiler-dependent | register-vs-spill for the only live copy is a codegen choice |
+| Boehm clean on the same build | bdwgc scans suspended threads' registers |
+| older than `75a9d25` | the stub is, so there is no regression to bisect |
+| Linux never reproduced it | Linux implements it |
+
+**The data is already fetched.** `sp_from_mach_thread` pulls the full
+`arm_thread_state64_t` / `x86_thread_state64_t` into a
+`StaticArray(UInt32, 68)` and reads only `THREAD_STATE_SP_OFFSET` out of it,
+discarding x0…x28, fp and lr. The fix is to yield those words as root
+candidates — either by storing the state per thread at suspend, next to
+`@@stw_sps`, or by re-calling `thread_get_state` inside `each_thread_greg`,
+which is valid because the thread is still suspended during mark.
+
+Both directions of the fix should be verified the way everything else here was:
+`VARIANTS="tipnoec" TRIALS=10` should go from ~8/10 to 0/10, and reverting the
+fix should bring it back.
+
 ## What has been ruled out
 
 * **Both precision axes.** `GCRY_SOUND=1` (verified `root_soundness: sound`,
