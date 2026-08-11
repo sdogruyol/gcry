@@ -148,9 +148,40 @@ candidates — either by storing the state per thread at suspend, next to
 `@@stw_sps`, or by re-calling `thread_get_state` inside `each_thread_greg`,
 which is valid because the thread is still suspended during mark.
 
-Both directions of the fix should be verified the way everything else here was:
-`VARIANTS="tipnoec" TRIALS=10` should go from ~8/10 to 0/10, and reverting the
-fix should bring it back.
+## The fix, and what validating it took
+
+Implemented in `darwin_stw.cr`: one `thread_get_state` per suspended thread now
+feeds both root sources — the SP (knob-gated, as before) and the GP registers
+(never gated; skipping them drops roots). Registers land in a slot-parallel
+table cleared at every `start_world`, with a per-slot validity flag so an
+unfilled slot cannot read as "no roots" and a stale one cannot be marked.
+
+**Validation, and a false start worth recording.** The first attempt paired
+fixed-vs-reverted at `d36effe` and got **0/10 both ways** — the reverted build
+was supposed to be the positive control and produced nothing. That is a green
+reachable without observing anything, so it settled nothing in either direction.
+The cause is rate drift: `tipnoec` at `d36effe` measured 2/5 earlier the same
+day and was evidently lower by then.
+
+Redone on the high-rate baseline, both arms back to back in one session, same
+worktree, same commit, the only difference being `darwin_stw.cr`:
+
+| arm | corrupt |
+|-----|--------:|
+| `75a9d25` plain | **4/10** |
+| `75a9d25` + the fix | **0/10** |
+
+p ≈ 0.006 binomial against a 0.4 base rate (Fisher ≈ 0.04). Throughput steadied
+too — 817–931 req/s across the fixed arm against 490–943 on the plain one, where
+the corrupting trials throw.
+
+**Strength of the claim.** The source argument is the strong part and does not
+depend on any of this: the mark phase asks for a root source that Darwin does
+not provide, which is a dropped root whether or not this workload happens to
+show it. The A/B supports it at one commit with one workload; it is not, on its
+own, proof that this is the *only* path by which the defect appears. Repeating
+it while the base rate is high (it was 8/10 in the morning) is cheap and would
+tighten it.
 
 ## What has been ruled out
 
