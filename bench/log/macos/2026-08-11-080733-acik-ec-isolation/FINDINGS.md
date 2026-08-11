@@ -1,6 +1,26 @@
-# gcry drops a live object — a regression in `75a9d25..d36effe`, exposed only by the probe compiler
+# gcry drops a live object under the probe compiler — older than any range tried here
 
-**Status: reproduced on demand, isolated to a gcry commit range. No root cause.**
+**Status: reproduced on demand at up to 8/10. Not bisected — it predates the
+range. No root cause.**
+
+> **The "regression in `75a9d25..d36effe`" claim below is WITHDRAWN.** Bisect
+> step one measured the supposed good end and got **8 of 10 corrupt** at
+> `75a9d25` (`bisect-75a9d25/`). The bug is older than the range.
+>
+> Two errors produced that claim, both mine:
+>
+> * The 2026-08-04 session was cited as "clean, 0/15". Only **3** of those
+>   trials were the matching arm (`base`); the other 12 were `hybrid` /
+>   `exclusive` / `exclusivef`, which enable `PRECISE_STACK` and are different
+>   code paths. The real evidence was 0/3.
+> * 0/3 was then treated as strong. Against the rates measured since it is
+>   surprising but not decisive, and the session differs in uncontrolled ways
+>   (machine state, demo-DB contents) that three trials cannot separate.
+>
+> A further caution for anyone resuming: the per-trial rate is **noisy across
+> configurations that should behave alike** — `tipnoec` 2/5 at `d36effe` but
+> 8/10 at `75a9d25`, `base` 5/6. Bisecting on a signal that unstable needs far
+> more than 10 trials per candidate to call a commit clean.
 
 A fat-app re-cut lost trials to `Non-2xx=1`. The cause is memory corruption, not
 a flaky demo DB. This file is the isolation; the session that first hit it is
@@ -50,16 +70,20 @@ compiler corrupts with or without the EC flags. `sys` and `tipnoec` run in *this
 harness with the same load and the same detection, differing only in compiler,
 so the harness is not the explanation either.
 
-## It is a gcry regression, not a compiler incompatibility
+## Age — older than `75a9d25`
 
 `../2026-08-04-acik-stackmap/` built `base` with the **same probe compiler**
-(`4a965f423`) and is **clean — 0 NULs across all 15 trials**, signature absent.
-That session was gcry `75a9d25`; these are `d36effe`.
+(`4a965f423`) at gcry `75a9d25` and shows no signature. That looked like a
+regression boundary and is not one: re-measured today at `75a9d25` with 10
+trials, `tipnoec` is **8/10 corrupt** (`../bisect-75a9d25/`). See the withdrawal
+at the top.
 
-So the probe compiler is the *exposure condition*, not the change. Something in
-gcry between **`75a9d25`** and **`d36effe`** introduced this, and only the code
-the probe compiler generates reveals it. That range is bisectable with this
-harness — 5 trials at 30 s per candidate, ~8 min per step.
+So there is no known-good gcry commit. The bug predates the whole
+`75a9d25..d36effe` range, and finding its introduction would mean bisecting much
+further back with enough trials per candidate to survive the rate noise — an
+expensive search, and probably the wrong one to run before the mechanism is
+understood. It reproduces at 30 s on demand; debugging it directly is cheaper
+than dating it.
 
 ## What has been ruled out
 
