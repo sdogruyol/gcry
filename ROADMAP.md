@@ -264,11 +264,16 @@ Target: Match Boehm on the workloads Crystal users actually run.
       **Candidate:** `mach_vm_page_query` / `vm_map_page_query_info`, whose
       disposition bits include `VM_PAGE_QUERY_PAGE_PRESENT` **and**
       `VM_PAGE_QUERY_PAGE_PAGED_OUT` — the same present-or-swapped test pagemap
-      gives, if those bits mean what they appear to. *Unverified: no Darwin host
-      on this bench.* Before shipping it, port `spec/stack_low_water_spec.cr` —
-      it pins the claim ("never reports above a written word") rather than the
-      pause number, which is exactly the assertion a second implementation has
-      to earn on its own.
+      gives, if those bits mean what they appear to. *The disposition bits are
+      still unverified*, but the bench gap is closed: a Darwin host cut Kemal
+      and the fat app under current defaults on 2026-08-10
+      (`bench/log/macos/2026-08-10-053800/`, n=9), and `low_water_skips = 0` in
+      every draw confirms Darwin takes none of the Linux win rather than
+      assuming it. That is the **baseline** this item needed — without one, an
+      implementation could not say what it bought. Before shipping it, port
+      `spec/stack_low_water_spec.cr` — it pins the claim ("never reports above a
+      written word") rather than the pause number, which is exactly the
+      assertion a second implementation has to earn on its own.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
