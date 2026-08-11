@@ -44,10 +44,15 @@ would be comparing a single-collect number to a double-collect one.
 `VARIANTS="boehm base" TRIALS=3` on `acik_stackmap_ab.sh` at `d36effe`
 (`bench/log/macos/2026-08-10-093443-acik-stackmap-tip/`) lost **2 of 3** `base`
 trials to `Non-2xx=1`, which the harness rules invalid for the RSS gate. Its
-printed median is therefore one draw. Not quoted here, in either direction. The
-Non-2xx cause is undiagnosed — demo-DB flakiness and a real fault under gcry
-look the same from the trial count, and that distinction has to be settled
-before the run is repeated.
+printed median is therefore one draw. Not quoted here, in either direction.
+
+**That failure was not flakiness.** It is memory corruption — a live String's
+tail overwritten in place — and it reproduces 5 of 6 trials under gcry with
+`-Dpreview_mt -Dexecution_context`, while Boehm on the identical compiler and
+flags is 0 of 3. See
+[`bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`](../bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md).
+Until that is fixed there is no point re-running this cut: the configuration it
+would measure is one that corrupts.
 
 ### The scrub flip, isolated — a wash on Darwin too
 
