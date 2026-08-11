@@ -22,7 +22,14 @@ require "../src/gcry"
 # ---- CLI args ----
 duration = 24 * 3600
 telemetry_path = "/tmp/gcry-soak.log"
-rss_limit_pct = 10
+# Absolute, not a percentage of the starting RSS. Measured on this collector:
+# RSS is a step function of gcry's 256 KiB chunk granularity plus a one-off
+# warm-up, and the step total does not grow with duration — ~960 kB over a 4 h
+# run (6400 → 7360 kB, two plateaus, heap *shrinking* 2244 → 2116 kB) against
+# ~752 kB over a 10 s smoke. A percentage bound on a ~6 MB base turned that into
+# a failure: three chunks were enough to cross 10%. A leak looks nothing like it
+# — it ramps — so the ceiling is an absolute headroom over the warm-up plateau.
+rss_limit_kb = 4096
 
 ARGV.each do |arg|
   case arg
@@ -30,8 +37,15 @@ ARGV.each do |arg|
     duration = $1.to_i
   when /--telemetry=(.+)/
     telemetry_path = $1
+  when /--rss-limit-kb=(\d+)/
+    rss_limit_kb = $1.to_i64
   when /--rss-limit=(\d+)/
-    rss_limit_pct = $1.to_i
+    # Deliberately fatal rather than reinterpreted: the old flag was a percent,
+    # so silently reading "30" as 30 kB would turn a loose bound into an
+    # impossible one and every soak would fail for the wrong reason.
+    STDERR.puts "--rss-limit is gone (it was a percentage of a ~6 MB base, which " \
+                "one 256 KiB chunk could move by 4%). Use --rss-limit-kb=<kB>."
+    exit 64
   end
 end
 
@@ -86,7 +100,10 @@ class SoakTest
   @total_finalizable : UInt64
   @total_weakref : UInt64
 
-  def initialize(@telemetry_path : String, @rss_limit_pct : Int32 = 10)
+  @rss_max = 0_u64
+  @rss_samples = 0
+
+  def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -202,6 +219,8 @@ class SoakTest
       if current_hour > last_telemetry_hour
         m = Gcry.metrics(@heap)
         rss = read_rss_kb
+        @rss_max = rss if rss > @rss_max
+        @rss_samples += 1
         telemetry.puts "#{current_hour}\t#{elapsed}\t#{m.heap_size / 1024}\t#{m.free_bytes / 1024}\t#{m.live_objects}\t#{m.collections}\t#{m.pause_p50_ns}\t#{m.pause_p99_ns}\t#{rss}\t#{SoakFinalizable.seen}"
         telemetry.flush
         last_telemetry_hour = current_hour
@@ -243,10 +262,14 @@ class SoakTest
 
     # RSS growth ceil (default 10%). Short CI smokes use a looser --rss-limit:
     # DONTNEED re-fault / page-cache noise on shared GHA hosts often lands ~11%.
-    if start_rss > 0 && @rss_limit_pct >= 0
-      limit = start_rss + start_rss * @rss_limit_pct.to_u64 / 100
+    if start_rss > 0 && @rss_limit_kb >= 0
+      limit = start_rss + @rss_limit_kb.to_u64
       if rss_end > limit
-        msg = "RSS leak: start=#{start_rss}kB end=#{rss_end}kB (> #{@rss_limit_pct}%)"
+        grew = rss_end - start_rss
+        msg = "RSS grew #{grew}kB (start=#{start_rss}kB end=#{rss_end}kB " \
+              "max=#{@rss_max}kB over #{@rss_samples} samples, ceiling +#{@rss_limit_kb}kB). " \
+              "If end == max and the samples sit on a few plateaus this is chunk " \
+              "granularity, not a leak; a leak ramps."
         telemetry.puts "# result: FAIL: #{msg}"
         telemetry.close
         STDERR.puts "  SOAK FAIL: #{msg}"
@@ -265,7 +288,7 @@ class SoakTest
     puts "  allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers}"
     puts "  finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
     puts "  finalized=#{SoakFinalizable.seen}"
-    puts "  RSS: #{start_rss}kB → #{rss_end}kB (#{(rss_end * 100.0 / start_rss).round(1)}%)"
+    puts "  RSS: #{start_rss}kB → #{rss_end}kB (+#{rss_end.to_i64 - start_rss.to_i64}kB, max #{@rss_max}kB, ceiling +#{@rss_limit_kb}kB)"
     puts "  Telemetry: #{@telemetry_path}"
 
     true
@@ -273,6 +296,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path, rss_limit_pct)
+test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64)
 success = test.run(duration)
 exit(1) unless success

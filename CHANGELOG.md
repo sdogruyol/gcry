@@ -225,6 +225,21 @@ tuned for now.
 
 ### Fixed
 
+- **The 24 h soak's RSS gate failed on warm-up, not on a leak.** It bounded final
+  RSS at 10% of the *starting* RSS — a percentage of a ~6 MB base, where gcry's
+  chunk granularity is 256 KiB, so three chunks crossed it. Measured over a 4 h
+  run: RSS took exactly two values (7104 kB for 1296 samples, 7360 kB for 1583)
+  with a single blip, while the heap *shrank* 2244 → 2116 kB and 1.33 M objects
+  were finalized. That is a step function, not a ramp, and the total delta does
+  not grow with duration — ~960 kB at 4 h against ~752 kB at 10 s. The bound is
+  now absolute (`--rss-limit-kb`, default 4096 kB) and the failure message
+  reports start/end/max and sample count so a step can be told from a ramp. The
+  old `--rss-limit` percentage flag is a hard error rather than reinterpreted, so
+  a stale `--rss-limit=30` cannot silently become a 30 kB ceiling. `make
+  soak-smoke` now runs the same ceiling as the real gate instead of a looser one.
+
+### Fixed
+
 - **Collector hang: `pthread_getattr_np` was called with the world stopped.**
   `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
   frozen those threads. That call locks the *target* thread's descriptor, which a

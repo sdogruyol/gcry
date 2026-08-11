@@ -229,9 +229,11 @@ soak: $(BIN)
 
 soak-smoke: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/soak.cr -o $(BIN)/soak
-	# Looser RSS ceil than the 24h soak: 10s GHA smokes re-fault ~0.5–1 MiB
-	# after drain (seen 6968→7720 kB, ~11%) and are not a durable leak signal.
-	$(BIN)/soak --duration=10 --rss-limit=$${SOAK_SMOKE_RSS_LIMIT:-30} --telemetry=/tmp/gcry-soak-smoke.log
+	# Same ceiling as the 24h soak, and that is the point: the ~0.5–1 MiB this
+	# re-faults after drain is warm-up plus 256 KiB chunk granularity, not a
+	# signal that scales with duration (4 h measured the same ~960 kB). A smoke
+	# that passes under a looser bound than the real gate is not a smoke test.
+	$(BIN)/soak --duration=10 --rss-limit-kb=$${SOAK_RSS_LIMIT_KB:-4096} --telemetry=/tmp/gcry-soak-smoke.log
 
 format:
 	$(CRYSTAL) tool format
