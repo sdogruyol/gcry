@@ -115,7 +115,8 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
-- [ ] **gcry drops a live object under the probe compiler.** Found
+- [x] **gcry drops a live object under the probe compiler — Darwin never scanned
+      a suspended thread's registers.** Fixed 2026-08-11. Found
       2026-08-11 on Darwin aarch64 while re-cutting the fat app. A live
       `String`'s tail is overwritten in place — `user_profile_picture` +
       `\0\0\0\0<` where `user_profile_picture_path` should be, same 25-byte
@@ -143,7 +144,15 @@ Target: Match Boehm on the workloads Crystal users actually run.
       root and its object is swept. Accounts for every observation, including the
       compiler dependence (register-vs-spill is a codegen choice) and why Linux
       never saw it. The state is already fetched: `sp_from_mach_thread` reads the
-      full thread state and keeps only SP.
+      full thread state and keeps only SP. **Fixed and A/B'd:** the same
+      `thread_get_state` now feeds both, registers ungated by the SP-clamp knob,
+      per-STW validity so a stale slot is never marked. At `75a9d25`, both arms
+      back to back: plain **4/10**, fixed **0/10** (p ≈ 0.006). A first attempt
+      at `d36effe` was discarded — 0/10 *both* ways, because the rate had drifted
+      and the reverted arm produced no positive control. Still open: whether
+      Linux has an analogous gap on any path, and which compiler and gcry commit
+      prod builds from — that is what would connect this to the 2026-08-08
+      SIGSEGV, which remains an unproven bet.
       Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
       `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
       **both** directions (forced on it is 4/5 and *worse* per trial), and thread
