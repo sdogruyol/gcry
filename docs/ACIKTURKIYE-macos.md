@@ -106,6 +106,15 @@ Primary: `bench/log/macos/2026-08-04-acik-stackmap/` (`75a9d25` + Darwin Mach-O/
 |--|-------------------:|--------------:|
 | **gcry tip base vs Boehm** | **~90%** | **~0.63×** |
 
+> **These three trials are draws from a configuration now known to corrupt.**
+> The same arm (`base`, probe compiler) at this same commit `75a9d25` measures
+> **8/10** corrupt on re-test — a live object reused, see
+> [`bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`](../bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md).
+> The session reported 0 Non-2xx, so nothing was wrong with *these* draws as
+> throughput/RSS samples, and the numbers are not retracted. But a collector that
+> is dropping objects is not measuring the heap it would have had, so treat
+> `0.63×` as provisional until the defect is understood.
+
 Closes the v0.17 **~18×** Darwin RSS gate on the **product path** (no `PRECISE_STACK`). Live_sc ~6–9 MiB post-GC (was ~1.1 GiB dense false-live). Stackmap hybrid/exclusive load maps and mark roots but **do not** beat tip base RSS (~0.86–1.27×) — research only; see [FINDINGS](../bench/log/macos/2026-08-04-acik-stackmap/FINDINGS.md). Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 
 ### Trial detail (tip base, 2026-08-04)
