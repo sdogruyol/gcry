@@ -131,6 +131,19 @@ Target: Match Boehm on the workloads Crystal users actually run.
       than the 0/15 first claimed (12 of those trials were `PRECISE_STACK`
       builds). There is no known-good commit, and the per-trial rate is too noisy
       (2/5 … 8/10 on arms that should match) to call one clean cheaply.
+      **It requires a collection:** with `GCRY_DISABLE_AUTO=1` the same binary is
+      **0/5** against its own 8/10 (verified zero collections during load), which
+      rules out the competing reading that nothing is dropped and a neighbour
+      overflows into exact size classes — the `eed00fb` shape. A live object is
+      being reclaimed. **Root cause found:** `Platform.each_thread_greg` is an
+      **empty stub on Darwin** (`darwin_stw.cr:135`, "full greg dump not wired
+      yet") while `collect_scan.cr:513` calls it precisely because a suspended
+      thread's registers "may hold the only live copy" — Linux implements it,
+      Darwin yields nothing, so a reference living only in a register is not a
+      root and its object is swept. Accounts for every observation, including the
+      compiler dependence (register-vs-spill is a codegen choice) and why Linux
+      never saw it. The state is already fetched: `sp_from_mach_thread` reads the
+      full thread state and keeps only SP.
       Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
       `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
       **both** directions (forced on it is 4/5 and *worse* per trial), and thread
