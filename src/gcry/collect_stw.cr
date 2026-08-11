@@ -71,6 +71,9 @@ module Gcry
 
       current_thread = Thread.current
       StwWatchdog.enter(StwWatchdog::PHASE_SUSPEND)
+      # The Monitor is never signal-suspended, so it is shut out by handshake
+      # instead — before anything it could be mutating is touched.
+      MonitorGate.close
       @stw_owner = current_thread
       {% if flag?(:darwin) %}
         Platform.stop_world_threads(current_thread)
@@ -145,6 +148,7 @@ module Gcry
         Platform.clear_thread_sps
         @world_stopped = false
         @stw_owner = nil
+        MonitorGate.open
         StwWatchdog.leave
       {% else %}
         begin
@@ -165,6 +169,7 @@ module Gcry
           Platform.clear_thread_sps
           @world_stopped = false
           @stw_owner = nil
+          MonitorGate.open
           StwWatchdog.leave
         ensure
           Thread.unlock

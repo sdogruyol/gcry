@@ -25,6 +25,7 @@ module Gcry
 end
 
 require "./gcry/metrics"
+require "./gcry/monitor_gate"
 require "./gcry/observability"
 require "./gcry/stw_watchdog"
 

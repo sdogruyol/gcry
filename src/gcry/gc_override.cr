@@ -605,6 +605,9 @@ module GC
     if fsb = env_u64("GCRY_FIBER_SCRUB_BYTES")
       heap.fiber_scrub_bytes = fsb if fsb >= 64 && fsb <= 8192
     end
+    # The Monitor runs inside the stopped world unless it is handshaken out
+    # (src/gcry/monitor_gate.cr). Default on; 0 restores the old behaviour for A/B.
+    Gcry::MonitorGate.enabled = false if env_flag_zero?("GCRY_MONITOR_GATE")
     # A hang with the world stopped is otherwise silent — every mutator is in
     # sigsuspend and /gc-stats cannot answer. Arms a raw watcher thread that
     # prints which phase is stuck. Default off; see src/gcry/stw_watchdog.cr.
