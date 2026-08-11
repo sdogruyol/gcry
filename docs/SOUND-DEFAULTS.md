@@ -607,10 +607,11 @@ shipping window — none was, across the whole ladder at 0. It is that the desig
 has no tolerance, and the argument for keeping it was already a wash on every
 other axis.
 
-Still genuinely open: the positive control shows this workload *can* detect
-corruption, which is what the first audit lacked. It does not prove the shipping
-window is safe under shapes this workload does not produce — a mid-swap suspend
-being the obvious one, and the one no harness here has managed to hit.
+What this does establish: the positive control shows this workload *can* detect
+corruption, which is what the first audit lacked. What it does not establish is
+safety under shapes this workload never produces — a mid-swap suspend being the
+obvious one. That shape is answered separately, and not by this ladder: see
+§ *The mid-swap window* below.
 
 #### The same measurement on aarch64 — and what it corrects
 
@@ -653,15 +654,20 @@ So aarch64 reaches the same conclusion, slightly sharper. The 64 bytes below the
 boundary are not margin the design reserved: they are eight callee-saved **FP**
 registers, and they read clean only because this workload has no reason to hold
 a pointer in one. A workload keeping a `Float64` live across a yield has less
-room than the table suggests, and the shipping window still has none. What the
-scrub depends on is now two things, not one: `@context.stack_top` being exact,
-*and* where the platform's `swapcontext` happens to spill the return address.
+room than the table suggests, and the shipping window still has none. And it
+names a second dependency alongside `@context.stack_top` being exact: *where*
+the platform's `swapcontext` spills the return address. The first is discharged
+by construction — Crystal's context switch writes `stack_top` before it clears
+the running flag, which is what § *The mid-swap window* establishes. The second
+is not discharged by anything; it is a layout this document happens to have read
+twice, on the two ABIs gcry ships. A third would have to be read again.
 
 ### The mid-swap window — why it cannot be hunted, and what the guard is worth
 
-That last shape is now answered, in two parts: reading the ABI says why no
-harness ever hit it, and `bench/scrub_midswap.cr` (`make scrub-midswap`) measures
-what the guard against it is worth.
+The mid-swap suspend — the shape the overshoot ladder above cannot reach, on
+either ABI — is now answered, in two parts: reading the ABI says why no harness
+ever hit it, and `bench/scrub_midswap.cr` (`make scrub-midswap`) measures what
+the guard against it is worth.
 
 **Why it cannot be hunted.** Crystal's context switch fixes the order, and all
 five backends (`x86_64-sysv`, `x86_64-microsoft`, `aarch64-generic`,
