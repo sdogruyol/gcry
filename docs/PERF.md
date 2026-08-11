@@ -239,10 +239,15 @@ per-knob decomposition, and the limits of each cut:
 **Those rows are pre-fix.** `lag = 0` scanned each parked fiber's whole 8 MiB of
 reserved stack, of which 0.05% has ever been written. Scanning now starts at the
 stack's low-water mark — identical words, since a page that was never faulted is
-zero — and EC4 falls to **13 ms, +83% against tuned** (was 147 ms / +1977% in
-the same run). RSS unchanged.
-`bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`. The fat-app row has
-not been re-cut against the fix.
+zero — and EC4 falls to **13 ms against tuned's 7.1 ms** (was 147 ms in the same
+run). RSS unchanged. 9950X:
+`bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`.
+
+Quote that as a pair rather than as "+83%". The default path has since been
+given the same skip, which halves `tuned` and leaves `sound` where it was, so
+the ratio moved without the residual moving — i3 after the change: tuned
+3.60 ms, sound 16.39 ms. The fat-app row was re-cut too, and reversed sign; see
+the stratified table above.
 
 ### Supported Parallel opt-in (TLAB off + lazy sweep) — v0.17.0
 

@@ -318,8 +318,8 @@ a root. Any failure to read pagemap falls back to the full range, so the
 degradation direction is always "scan more". `GCRY_STACK_LOW_WATER=0` restores
 the old behaviour for A/B.
 
-| Kemal EC4, same run | tuned | `GCRY_SOUND=1` | `+GCRY_STACK_LOW_WATER=0` |
-|---------------------|------:|---------------:|--------------------------:|
+| Kemal EC4, same run (9950X) | tuned | `GCRY_SOUND=1` | `+GCRY_STACK_LOW_WATER=0` |
+|-----------------------------|------:|---------------:|--------------------------:|
 | pause | 7.1 ms | **13.0 ms (+83%)** | 147.2 ms (+1977%) |
 | roots | 6.2 ms | 11.0 ms | 140.8 ms |
 | post-GC RSS | — | +0.3% | +0.3% |
@@ -327,12 +327,20 @@ the old behaviour for A/B.
 **147 ms → 13 ms, 11.3×**, nothing traded in RSS.
 `bench/log/linux/2026-08-07-110231-root-phase/FINDINGS.md`.
 
-Two things follow. The residual +83% is no longer a constant worst case — it
-tracks how much stack was actually touched, so its distribution is wide (p5
-3.4 ms, p95 19.1 ms) where the old path's was flat (IQR 0.6%). And `sound`'s p5
-is now *below* `tuned`'s, because tuned's fixed 256 KiB window can itself
-include untouched pages: the same skip should help the default path, which is
-not done here.
+Two things follow. The residual is no longer a constant worst case — it tracks
+how much stack was actually touched, so its distribution is wide (p5 3.4 ms,
+p95 19.1 ms) where the old path's was flat (IQR 0.6%). And `sound`'s p5 is
+*below* `tuned`'s here, because tuned's fixed 256 KiB window can itself include
+untouched pages — which is what led to giving the default path the same skip
+(below).
+
+> **The +83% does not survive that change, and not because anything regressed.**
+> Once the default path skips too, `tuned` roughly halves while `sound` — which
+> already had the skip at lag 0 — does not move. On the i3 after the change:
+> tuned 3.60 ms, sound 16.39 ms, i.e. **+356%**. Same residual in absolute
+> terms, a much larger ratio, because the denominator shrank. Quote the pair,
+> not the percentage, and note the host: these two cuts are a 9950X and an i3
+> and their absolute numbers do not compare.
 
 ### The fat-app large-heap case, re-cut — the sign reversed
 
