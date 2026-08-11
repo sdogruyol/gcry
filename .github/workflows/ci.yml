@@ -245,6 +245,15 @@ jobs:
           # rule this gate encodes is wrong, not just the code.
           ./bin/stw_startup_hang --spin --finalizers --children=30 --timeout=10
 
+      # The Monitor is not signal-suspended by STW and was measured running —
+      # and munmapping fiber stacks — inside the stopped world. This asserts the
+      # handshake shuts it out, with GCRY_MONITOR_GATE=0 as the positive control.
+      - name: EC Monitor vs the stopped world
+        run: |
+          crystal build -Dgc_none -Dtracing bench/stw_monitor_gate.cr \
+            -o bin/stw_monitor_gate --error-trace
+          ./bin/stw_monitor_gate
+
       # The diagnostic that makes the trap above debuggable when it does fire.
       # Driven from both sides in one run: fires on a stall, silent otherwise.
       - name: STW watchdog
