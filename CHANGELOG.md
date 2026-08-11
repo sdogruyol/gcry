@@ -211,6 +211,20 @@ tuned for now.
 
 ### Added
 
+- **`Gcry::MonitorGate` — the EC Monitor no longer runs inside the stopped
+  world.** `stop_world` never signal-suspends the Monitor (resume races wedged it
+  in `sigsuspend`) and assumed it would cooperate by blocking in `allocate` /
+  `lock_read`. Measured, it did not: through a 4 s stop it woke ~100×/s and ran
+  `StackPool#collect` — `Crystal::System::Fiber.free_stack`, i.e. munmap of fiber
+  stacks — *inside* the stop, while the collector scanned thread stacks. It is
+  now handshaken out: the Monitor marks itself busy and backs off if the world is
+  stopping, `stop_world` waits for in-flight work to finish. No compiler fork —
+  the Monitor's three per-iteration calls are wrapped from the shard with
+  `previous_def`. Cost over 3000 collections: **zero** added pause
+  (`monitor_gate_stw_waits=0`), worst case one in-flight Monitor call; the wait is
+  counted on `/gc-stats`. `GCRY_MONITOR_GATE=0` restores the old behaviour for
+  A/B. Gate: `make stw-monitor-gate`, both directions.
+  [bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md](bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md)
 - **`GCRY_STW_WATCHDOG_MS` — a stop-the-world hang says something now.** When the
   collector wedges under STW every mutator is frozen in `sigsuspend`, so the
   process cannot report anything: no crash, no output, and `/gc-stats` cannot

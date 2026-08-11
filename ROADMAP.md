@@ -153,6 +153,19 @@ Target: Match Boehm on the workloads Crystal users actually run.
       re-signalling remains *not* the tool to reach for: `Thread#suspend` clears
       `@suspended` before it signals, so a re-signal can clobber an in-flight ack
       and create the hang it is meant to break.
+- [x] **The EC Monitor ran inside the stopped world.** Found and fixed
+      2026-08-11 while looking for the nightly soak SEGV. `stop_world` never
+      signal-suspends the Monitor and assumed cooperative blocking in
+      `allocate`/`lock_read`; measured, its loop reaches neither — it woke ~100×/s
+      through a 4 s stop and ran `StackPool#collect` (munmap of fiber stacks)
+      inside it, 250 µs, while the collector scanned thread stacks. Replaced the
+      assumption with a handshake (`Gcry::MonitorGate`), shard-side via
+      `previous_def` — **no compiler fork**, verified before relying on it. Both
+      directions gated (`make stw-monitor-gate`); measured cost zero added pause
+      over 3000 collections, worst case one in-flight call, counted on
+      `/gc-stats`. Whether this was the nightly SEGV is **still open** — the crash
+      is unexplained and did not reproduce in 4 h.
+      `bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md`
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —
