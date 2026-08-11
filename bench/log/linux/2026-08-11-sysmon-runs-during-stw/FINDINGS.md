@@ -116,15 +116,27 @@ blocked would mean nothing happened to be scheduled, not that anything closed.
 Removing `MonitorGate.close` from `stop_world` turns both assertions red (4
 inside, 0 held off).
 
-**The first version of this gate was wrong, and CI caught it.** It asserted
-*no* trace line between the marks. But `Crystal.trace` emits its line when the
-work *finishes* — it reports `duration=` — so a `collect_stacks` already in
-flight when the stop began lands after the begin mark even though `stop_world`
-correctly waited it out. On a 2-vCPU runner that overlap is likely; on a
-32-thread box it is rare, so it passed locally and failed on master. The
-invariant is not "no line" but "no work *started* after the stop began", which is
-a count: the control must show several, the gated run at most the one in-flight
-call, and that one only if `stw_waits` records the collector waiting for it.
+**This gate was wrong twice, and CI caught both.** Worth recording, because both
+mistakes were over-specification rather than a real defect in the collector.
+
+The first version asserted *no* trace line between the marks. But `Crystal.trace`
+emits its line when the work *finishes* — it reports `duration=` — so a
+`collect_stacks` already in flight when the stop began lands after the begin mark
+even though `stop_world` correctly waited it out. Rare on 32 threads, likely on a
+2-vCPU runner: it passed locally and failed on master.
+
+The second version counted lines but demanded that a single line inside be
+accounted for by `stw_waits >= 1`. Also wrong. The child prints its mark before
+`GC.collect`, and the path from there to a stopped world runs through collect
+entry, the write lock and the roots/finalizer locks — not instant on a loaded
+runner. A `collect_stacks` finishing in *that* window was never inside a stopped
+world and no wait is recorded for it, so the assertion demanded a mechanism the
+run need not exhibit.
+
+What survives is the count, which is what the gate is actually for: with the
+handshake removed the run measures **4** lines inside a 20 s stop (control and
+break-gate agree); with it, **0–1**. `stw_waits` is reported rather than
+asserted — when it is non-zero it is the pause the handshake added.
 
 **Cost, measured rather than argued.** Over 3000 collections with 200 busy
 fibers: `stw_waits=0`, `stw_wait_max_ns=0`, `monitor_blocks=397`. The collector

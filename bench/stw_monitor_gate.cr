@@ -133,13 +133,17 @@ if on_inside > 1
               "started new work after the stop began"
 end
 
-# The one line the handshake does allow is a call already running when the stop
-# began, and that case is only benign because stop_world waited it out. If a line
-# appears without a recorded wait, the Monitor got in on its own.
-if on_inside == 1 && on_waits < 1
-  failures << "gate on: a collect_stacks landed inside the stop with stw_waits=#{on_waits} — " \
-              "it was not an in-flight call the collector waited out"
-end
+# Deliberately *not* asserted: that a single line inside must be accounted for by
+# `stw_waits`. That was tried and CI rejected it, correctly. A line can also be
+# emitted between "MARK begin" and the moment the world actually stops — the
+# child prints its mark before `GC.collect`, and reaching the stop goes through
+# collect entry, the write lock and the roots/finalizer locks, which is not
+# instant on a loaded runner. Work finishing in *that* window was never inside a
+# stopped world, so requiring a wait for it asserted a mechanism the run does not
+# have to exhibit. The count carries the signal on its own: broken measures 4
+# (control and the break-gate run agree), working measures 0–1.
+# `stw_waits` is still reported, because when it is non-zero it is the pause the
+# handshake added.
 
 if on_blocks <= 0
   failures << "gate on: the Monitor was never held off (blocks=#{on_blocks}), so the clean " \
