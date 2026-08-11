@@ -115,7 +115,7 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
-- [ ] **gcry drops a live object — a regression in `75a9d25..d36effe`.** Found
+- [ ] **gcry drops a live object under the probe compiler.** Found
       2026-08-11 on Darwin aarch64 while re-cutting the fat app. A live
       `String`'s tail is overwritten in place — `user_profile_picture` +
       `\0\0\0\0<` where `user_profile_picture_path` should be, same 25-byte
@@ -124,11 +124,14 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `DB::MappingException` and a `Non-2xx`, which is the only reason a
       benchmark caught it. **Both factors necessary, neither sufficient:** Boehm
       on the probe compiler 0/3, gcry on asdf 1.21.0 **0/23**, gcry on the probe
-      compiler **2/5** without EC flags and **5/6** with them. So the probe
-      compiler is the *exposure condition*, not the change — and the change is in
-      gcry, because the 2026-08-04 session built the same arm with the same probe
-      compiler at gcry `75a9d25` and is **clean, 0/15**. Bisectable at ~8 min per
-      candidate. Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
+      compiler **2/5** without EC flags and **5/6** with them. **Not bisected —
+      it predates the range tried:** `75a9d25`, taken as the good end because a
+      2026-08-04 session showed no signature there, measures **8/10 corrupt** on
+      re-test, and that session's evidence was 0/3 for the matching arm rather
+      than the 0/15 first claimed (12 of those trials were `PRECISE_STACK`
+      builds). There is no known-good commit, and the per-trial rate is too noisy
+      (2/5 … 8/10 on arms that should match) to call one clean cheaply.
+      Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
       `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
       **both** directions (forced on it is 4/5 and *worse* per trial), and thread
       count (2 under load either way). Open: which commit, which root, whether
