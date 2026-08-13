@@ -161,11 +161,31 @@ Target: Match Boehm on the workloads Crystal users actually run.
       inside it, 250 µs, while the collector scanned thread stacks. Replaced the
       assumption with a handshake (`Gcry::MonitorGate`), shard-side via
       `previous_def` — **no compiler fork**, verified before relying on it. Both
-      directions gated (`make stw-monitor-gate`); measured cost zero added pause
-      over 3000 collections, worst case one in-flight call, counted on
-      `/gc-stats`. Whether this was the nightly SEGV is **still open** — the crash
-      is unexplained and did not reproduce in 4 h.
+      directions gated (`make stw-monitor-gate`); cost is now measured over a long
+      run rather than a short one — **one wait of 263 ns in 3411 collections**
+      (`stw_waits=1`), worst case one in-flight call, counted on `/gc-stats`.
+      **It was not the nightly SEGV**, and that is now measured rather than
+      unknown. `GCRY_MONITOR_GATE=0` restores the pre-fix behaviour and
+      `GCRY_STW_TEST_STALL_MS` widens the stopped window on every collection, so
+      the overlap can be manufactured instead of waited for: three control arms
+      accumulated **438 overlaps** — ~340× the ~1.3 the crashing CI run had seen
+      when it died — with no crash. The other half needs no soak, only a number:
+      the thread-stacks phase is **30 µs** of a 2.76 ms pause, so a 5 s
+      `collect_stacks` period expects one hit inside the scan every ~46 h, and
+      that run died after 1.4 h. So the crash is **unattributed again**: what
+      overwrote a pointer in `Parallel::Scheduler`'s queue is open.
+      `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md`
+- [ ] **What crashed the 2026-08-10 soak.** `Invalid memory access at
+      0x7f1700000149` inside `Parallel::Scheduler#quick_dequeue?`, 1h24m in — a
+      heap pointer with its low bytes overwritten, i.e. a slot freed and reused
+      while the scheduler still pointed at it. The standing candidate (the EC
+      Monitor running inside the stopped world) is now **excluded by rate**, so
+      nothing explains it. Two things that were in the way are gone: the soak can
+      now finish in CI at all (it asked for 24 h on a 6 h job), and a crashing run
+      keeps its telemetry. Next: reproduce with the 5 h CI arm, and consider
+      whether anything else mutates scheduler state outside the collector's view.
+      `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`
 - [ ] **Attribute the residual per-rep spread.** Every A/B bottoms out at 1.2–3%
       scatter between reps. Five hypotheses are now eliminated, and the harness's
       own noise floor is measured rather than guessed —

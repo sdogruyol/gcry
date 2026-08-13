@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Monitor-inside-STW overlap is excluded as the cause of the 2026-08-10
+  soak SEGV** — measured, not assumed. `GCRY_MONITOR_GATE=0` restores the pre-fix
+  behaviour and `GCRY_STW_TEST_STALL_MS` holds the world stopped on every
+  collection, so the overlap can be manufactured rather than waited for: three
+  control arms accumulated **438 overlaps** against the ~1.3 the crashing CI run
+  had seen when it died, and none crashed. The narrower race the stall cannot
+  amplify — a `munmap` landing while the collector walks thread stacks — needs
+  only a number: that phase is **30 µs** of a 2.76 ms pause, one expected hit per
+  ~46 h. `MonitorGate` stands on its own terms and its cost is now measured over
+  a long run (**one wait of 263 ns in 3411 collections**), but the crash is
+  unattributed again. `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`
 - **The soak is dispatchable** (`workflow_dispatch`), with `soak_duration`,
   `monitor_gate` (`on` = tip default, `off` = pre-fix behaviour) and `stall_ms`
   inputs — so a rare cross-thread corruption can be chased without waiting for
