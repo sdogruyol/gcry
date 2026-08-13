@@ -141,8 +141,16 @@ class SoakTest
     telemetry = File.open(@telemetry_path, "w")
     telemetry.puts "gcry soak telemetry"
     telemetry.puts "start=#{start_time} duration=#{duration_sec}s start_rss=#{start_rss}kB"
+    # Which configuration actually booted, read from the collector rather than
+    # from the environment. A soak arm labelled "gate off" that quietly booted
+    # with the gate on measures nothing, and a crash logged without this line
+    # cannot be attributed to either arm afterwards.
+    telemetry.puts "config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
+                   "stw_test_stall_ms=#{@heap.stw_test_stall_ms}"
     telemetry.puts "hour\telapsed\theap_kb\tfree_kb\tlive_objects\tcollections\tpause_p50\tpause_p99\trss_kb\tfinalized"
     telemetry.flush
+    puts "Config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
+         "stw_test_stall_ms=#{@heap.stw_test_stall_ms}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -207,6 +215,11 @@ class SoakTest
     # Coordinator loop
     deadline = start_time + duration_sec.seconds
     last_telemetry_hour = 0
+    # The hourly line is too coarse to say how much of the window under test a
+    # run reached before it died. `monitor_blocks` is the direct count of the
+    # Monitor being held off at the edge of a stopped world, i.e. of the overlap
+    # that used to run through it.
+    last_gate_beat = 0
 
     loop do
       now = Time.instant
@@ -228,6 +241,16 @@ class SoakTest
         puts "[hour #{current_hour}] elapsed=#{elapsed}s remaining=#{remaining}s " +
              "heap=#{m.heap_size / 1024}kB live=#{m.live_objects} " +
              "rss=#{rss}kB finalized=#{SoakFinalizable.seen} errors=#{@errors.size}"
+      end
+
+      if elapsed - last_gate_beat >= 60
+        last_gate_beat = elapsed
+        m = Gcry.metrics(@heap)
+        telemetry.puts "# gate elapsed=#{elapsed}s collections=#{m.collections} " \
+                       "monitor_blocks=#{Gcry::MonitorGate.monitor_blocks} " \
+                       "stw_waits=#{Gcry::MonitorGate.stw_waits} " \
+                       "stw_wait_max_ns=#{Gcry::MonitorGate.stw_wait_max_ns}"
+        telemetry.flush
       end
 
       # Check errors
@@ -281,6 +304,10 @@ class SoakTest
     telemetry.puts "end=#{Time.instant}"
     telemetry.puts "end_rss=#{rss_end}kB"
     telemetry.puts "allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers} finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
+    telemetry.puts "monitor_gate=#{Gcry::MonitorGate.enabled?} " \
+                   "monitor_blocks=#{Gcry::MonitorGate.monitor_blocks} " \
+                   "stw_waits=#{Gcry::MonitorGate.stw_waits} " \
+                   "stw_wait_max_ns=#{Gcry::MonitorGate.stw_wait_max_ns}"
     telemetry.close
 
     puts "Soak test PASSED"
