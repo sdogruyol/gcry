@@ -36,6 +36,11 @@ jobs:
             crystal: "1.21.0"
             arch_label: x86_64
     runs-on: ${{ matrix.os }}
+    # This job takes ~7 minutes. It once took six hours: on 2026-08-10 it hung in
+    # `stw_mt_property_test` (the collector asking glibc about a thread it had
+    # suspended, fixed in 8f2cdad) and only stopped when the runner cancelled it
+    # at GitHub's 6 h ceiling. A hang should cost minutes and say so.
+    timeout-minutes: 30
     name: test (${{ matrix.arch_label }}, crystal ${{ matrix.crystal }})
     steps:
       - uses: actions/checkout@v4
@@ -148,16 +153,26 @@ jobs:
           ./bin/mt_property_test --seed=1 --iterations=50 --workers=2,4
 
       - name: Process-GC STW MT property test (50 iterations, 2+4 workers)
+        env:
+          # A hang here prints `STOP-THE-WORLD STALLED <n> ms in phase=<name>`
+          # instead of going quiet for six hours. 10 s, well clear of the 5 s
+          # that `bench/stw_watchdog.cr` already established as CI-proof against
+          # a runner simply descheduling the collector.
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
 
       - name: Process-GC STW MT property test with TLAB (50 iterations, 2+4 workers)
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
 
       - name: Process-GC STW MT property test with TLAB+nursery (50 iterations, 2+4 workers)
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
@@ -176,6 +191,8 @@ jobs:
         run: make soak-smoke
 
       - name: Thread storm (100 iterations, 4 workers)
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           crystal build -Dgc_none bench/thread_storm.cr -o bin/thread_storm
           ./bin/thread_storm --iterations=100 --workers=4
@@ -201,6 +218,8 @@ jobs:
           ./bin/nursery_headers
 
       - name: Process parallel mark
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           crystal build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
           ./bin/parallel_mark_process
@@ -318,6 +337,8 @@ jobs:
       # has to stay green — a heuristic-off path that only runs at bench time
       # would rot. Reuses binaries built above.
       - name: Correctness suite under GCRY_SOUND=1
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           GCRY_SOUND=1 ./bin/stress 300
           GCRY_SOUND=1 ./bin/json_churn 800
@@ -334,6 +355,7 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     name: coverage
     steps:
       - uses: actions/checkout@v4
@@ -387,6 +409,7 @@ jobs:
 
   asan:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     name: asan
     steps:
       - uses: actions/checkout@v4
@@ -406,6 +429,7 @@ jobs:
 
   valgrind:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     name: valgrind
     steps:
       - uses: actions/checkout@v4
@@ -440,6 +464,7 @@ jobs:
   # Short Kemal thr gate vs Boehm (needs wrk).
   perf-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     name: perf smoke (kemal /json vs Boehm)
     steps:
       - uses: actions/checkout@v4
@@ -523,6 +548,7 @@ jobs:
   # aarch64 cross-compile smoke (object emit). Runs on PR + push.
   test-aarch64:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     name: test (aarch64 cross-compile)
     steps:
       - uses: actions/checkout@v4
@@ -545,6 +571,7 @@ jobs:
   # mismatches that glibc hosts do not exercise (Alpine / static musl).
   test-musl:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     name: test (musl cross-compile)
     strategy:
       fail-fast: false
@@ -573,6 +600,7 @@ jobs:
   # Native aarch64 (GitHub ubuntu-24.04-arm).
   test-aarch64-native:
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
     name: test (aarch64 native)
     steps:
       - uses: actions/checkout@v4
@@ -596,6 +624,7 @@ jobs:
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
     runs-on: macos-latest
+    timeout-minutes: 20
     name: test (darwin native)
     steps:
       - uses: actions/checkout@v4
