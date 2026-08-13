@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The weekly soak asked for 24 h on a runner GitHub cancels at 6 h, so it
+  never once passed.** Both scheduled runs that ever reached it prove it:
+  2026-08-03 was **cancelled at 6h00m14s**, and 2026-08-10 only reported at all
+  because it crashed first (SEGV at 1h24m). A gate that cannot pass is not a
+  gate. The CI arm is now **5 h** with `timeout-minutes: 330`; 24 h stays the
+  local number (`make soak`, `SOAK_DURATION`). The crashing run also threw its
+  own evidence away — `Upload telemetry` had no `if: always()`, so the hours of
+  heap / pause / RSS history before the SEGV were discarded. It does now.
+  `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`
+- **CI jobs have timeouts, and the STW-heavy steps arm the watchdog.** On
+  2026-08-10 both `test` jobs hung in `stw_mt_property_test` — the
+  `pthread_getattr_np`-under-suspension bug fixed later that day in `8f2cdad` —
+  and, with no `timeout-minutes` anywhere in the workflow, each burned **6h00m**
+  in silence before the runner cancelled it. The hang was identifiable only from
+  the last line printed (`STW-MT workers=4 iterations=50 seed=10001`) and the
+  orphan process the runner killed. `GCRY_STW_WATCHDOG_MS=10000` is now set on
+  the six steps that can wedge (the three STW MT property tests, thread storm,
+  process parallel mark, the `GCRY_SOUND` correctness suite), so the next one
+  prints `STOP-THE-WORLD STALLED <n> ms in phase=<name>` instead. Step-level and
+  not job-level on purpose: `bench/stw_watchdog.cr` runs an unarmed child to
+  prove the knob gates the print, and a job-wide env would quietly arm it.
+
+### Added
+
+- **The soak is dispatchable** (`workflow_dispatch`), with `soak_duration`,
+  `monitor_gate` (`on` = tip default, `off` = pre-fix behaviour) and `stall_ms`
+  inputs — so a rare cross-thread corruption can be chased without waiting for
+  Monday. Inputs reach the step through `env:` rather than the script body, so a
+  dispatch cannot inject shell.
+- **`bench/soak.cr` records which configuration actually booted** — a `config:`
+  line with `monitor_gate` / `stw_test_stall_ms` read from the collector, plus a
+  60-second `# gate` heartbeat carrying `monitor_blocks` / `stw_waits`. An A/B
+  arm labelled "gate off" that quietly booted with the gate on measures nothing,
+  and a crash logged without that line cannot be attributed to either arm
+  afterwards. Same rule `bench/sound_profile_ab.sh` already applies to `sound`.
+
 ### Added
 
 - **`GCRY_SOUND=1` — root-completeness profile.** gcry's process defaults
