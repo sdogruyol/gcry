@@ -1,0 +1,14 @@
+{
+  "date": "2026-08-13",
+  "host": "WSL2 x86_64, 16 CPU, 15.9 GiB",
+  "crystal": "Crystal 1.21.0 [57cf7da50] (2026-07-16)",
+  "head": "c0ba2fa0ad08865dd91401f0159531b0870522de",
+  "dirty": "bench/soak.cr (MonitorGate telemetry, uncommitted at launch)",
+  "question": "Does the pre-fix Monitor-inside-STW overlap reproduce the 2026-08-10 soak SEGV?",
+  "arms": {
+    "gate-off-50": "GCRY_MONITOR_GATE=0 GCRY_STW_TEST_STALL_MS=50 (pre-fix behaviour, positive control)",
+    "gate-on-50": "GCRY_STW_TEST_STALL_MS=50 (tip default)",
+    "gate-off-200": "GCRY_MONITOR_GATE=0 GCRY_STW_TEST_STALL_MS=200 (accelerated control)"
+  },
+  "duration_s": 3600
+}
