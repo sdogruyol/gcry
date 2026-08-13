@@ -5,6 +5,23 @@ on:
   pull_request:
   schedule:
     - cron: "0 6 * * 1"  # weekly Monday 06:00 UTC
+  # The soak is the only gate that can see a rare cross-thread corruption, and
+  # until now the only way to run it was to wait for Monday. Inputs are passed
+  # through `env:` rather than interpolated into a script body, so a dispatch
+  # cannot inject shell.
+  workflow_dispatch:
+    inputs:
+      soak_duration:
+        description: "Soak duration in seconds (a GitHub-hosted job is cancelled at 6 h)"
+        default: "18000"
+      monitor_gate:
+        description: "MonitorGate: on = tip default, off = pre-fix behaviour (positive control)"
+        type: choice
+        options: ["on", "off"]
+        default: "on"
+      stall_ms:
+        description: "GCRY_STW_TEST_STALL_MS — widens the stopped window so a rare overlap becomes frequent. Research only; 0 for a normal soak."
+        default: "0"
 
 jobs:
   test:
@@ -461,11 +478,17 @@ jobs:
           path: bench/log/
           retention-days: 30
 
-  # Weekly soak test (24h, Monday 06:00 UTC — see schedule cron above).
+  # Weekly soak (Monday 06:00 UTC — see schedule cron above), and on demand.
+  #
+  # It used to ask for 24 h on a runner GitHub cancels at 6 h, so it could not
+  # pass: 2026-08-03 was cancelled at 6h00m14s, and 2026-08-10 only ever reported
+  # because it crashed first (SEGV at 1h24m). 5 h fits, with headroom for the
+  # build and the drain. The 24 h number lives on locally — `make soak`.
   soak:
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    name: soak (24h)
+    timeout-minutes: 330
+    name: soak (5h)
     steps:
       - uses: actions/checkout@v4
 
@@ -478,11 +501,19 @@ jobs:
           mkdir -p bin
           crystal build -Dgc_none bench/soak.cr -o bin/soak --error-trace
 
-      - name: Run soak test (24h)
+      - name: Run soak test
+        env:
+          SOAK_DURATION: ${{ github.event.inputs.soak_duration || '18000' }}
+          GCRY_MONITOR_GATE: ${{ github.event.inputs.monitor_gate == 'off' && '0' || '1' }}
+          GCRY_STW_TEST_STALL_MS: ${{ github.event.inputs.stall_ms || '0' }}
         run: |
-          ./bin/soak --duration=86400 --telemetry=/tmp/gcry-soak.log
+          ./bin/soak --duration="$SOAK_DURATION" --telemetry=/tmp/gcry-soak.log
 
+      # The run that fails is the one whose telemetry is worth having, and it was
+      # the one run that discarded it: 2026-08-10 crashed, so this step was
+      # skipped and the hours before the SEGV went with it.
       - name: Upload telemetry
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: soak-telemetry
