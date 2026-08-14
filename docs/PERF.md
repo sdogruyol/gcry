@@ -331,7 +331,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | **0.15.0** | **~86%** | **~86%** | **~0.77×** | Correctness: TLAB+process STW freelist fix + STW MT harness. Kemal re-cut `2026-07-29-151144`; acik ~90% / ~2.54× (`112202`). |
 | **0.16.0** | **~82%** | **~87%** | **~0.80×** | EC1 thr recover after Parallel fallout (cheap STW scans, 4 KiB scrub, non-atomic counters, sweep batch). Cut `2026-08-01-093130` (+ `/` slash-recut). |
 | **0.17.0** | *(carry 0.16)* | *(carry 0.16)* | *(carry)* | Darwin Kemal re-cut; Parallel TLAB-off + lazy **supported opt-in** (~79% EC4 `/json`, ~5.8× RSS). Linux Kemal not re-cut. `2026-08-01-ec4-lazy-sweep/`. |
-| **0.18.0** | *(carry 0.16)* | *(carry 0.16)* | *(carry)* | Finalizer + Linux retain=0; fat-app tip ~**90–96%** @ ~**1–1.6×**; Darwin acik tip ~**0.63×**; `GCRY_TIGHT_GROW` opt-in; stack maps **dormant**. Linux Kemal not re-cut. |
+| **0.18.0** | *(carry 0.16)* | *(carry 0.16)* | *(carry)* | Finalizer + Linux retain=0; fat-app tip ~**90–96%** @ ~**1–1.6×**; Darwin acik tip ~**0.63×** *(does not reproduce — the 2026-08-14 re-cut on the same harness gives ~**0.97×** at n=9; gcry's RSS is within 0.6% of that cut and Boehm's arm is what fell 35%)*; `GCRY_TIGHT_GROW` opt-in; stack maps **dormant**. Linux Kemal not re-cut. |
 
 **Escape knobs (same era, not defaults):**
 

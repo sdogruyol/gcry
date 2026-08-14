@@ -260,7 +260,14 @@ CONFIGS.each do |cfg|
   xs = skips[cfg.key].map(&.to_f)
   puts "  %-11s skips median=%6.0f" % [cfg.key, median(xs)]
 end
-lw_on = HEAP.stack_low_water_scan && Gcry::Platform.pagemap_available?
+# Same guard as the bound below: `pagemap_available?` only exists on Linux
+# (`platform/linux_pagemap.cr`), so calling it unguarded made this whole bench
+# fail to *compile* on Darwin — which is why nothing here had ever run there.
+lw_on = {% if flag?(:linux) %}
+          HEAP.stack_low_water_scan && Gcry::Platform.pagemap_available?
+        {% else %}
+          false
+        {% end %}
 if lw_on && CONFIGS.all? { |c| skips[c.key].sum == 0 }
   puts "  NOTE skip is enabled and pagemap readable, yet it never fired in any"
   puts "       config — the ratios below say nothing about it."

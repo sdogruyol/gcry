@@ -1,0 +1,248 @@
+# gcry drops a live object under the probe compiler — older than any range tried here
+
+**Status: root-caused and fixed 2026-08-11 — Darwin never scanned a suspended
+thread's registers (§ "Root cause", § "The fix"). Reproduced on demand at up to
+8/10 before the fix; 0/10 after, at the same commit, back to back. Never
+bisected, and it did not need to be: it predates every range tried here, and the
+source argument does not rest on a commit range. Still open — whether Linux has
+the same gap, and any link to the 2026-08-08 production SIGSEGV (§ "Not
+established").**
+
+> The line above replaces "No root cause", which stood while §§ "Root cause"
+> and "The fix" were appended underneath it. Left as it was, the first thing
+> this file said contradicted the rest of it.
+
+> **The "regression in `75a9d25..d36effe`" claim below is WITHDRAWN.** Bisect
+> step one measured the supposed good end and got **8 of 10 corrupt** at
+> `75a9d25` (`bisect-75a9d25/`). The bug is older than the range.
+>
+> Two errors produced that claim, both mine:
+>
+> * The 2026-08-04 session was cited as "clean, 0/15". Only **3** of those
+>   trials were the matching arm (`base`); the other 12 were `hybrid` /
+>   `exclusive` / `exclusivef`, which enable `PRECISE_STACK` and are different
+>   code paths. The real evidence was 0/3.
+> * 0/3 was then treated as strong. Against the rates measured since it is
+>   surprising but not decisive, and the session differs in uncontrolled ways
+>   (machine state, demo-DB contents) that three trials cannot separate.
+>
+> A further caution for anyone resuming: the per-trial rate is **noisy across
+> configurations that should behave alike** — `tipnoec` 2/5 at `d36effe` but
+> 8/10 at `75a9d25`, `base` 5/6. Bisecting on a signal that unstable needs far
+> more than 10 trials per candidate to call a commit clean.
+
+A fat-app re-cut lost trials to `Non-2xx=1`. The cause is memory corruption, not
+a flaky demo DB. This file is the isolation; the session that first hit it is
+`../2026-08-10-093443-acik-stackmap-tip/`.
+
+## The signature — always the same object
+
+```
+ERR ... > Unknown column: user_profile_picture\0\0\0\0<
+  deserializing AcikTurkiye::DB::Submission::SubmissionStruct  (DB::MappingException)
+|   from array.cr:1414 in 'on_unknown_db_column'
+|   from lib/db/src/db/serializable.cr:105:7 in 'read'
+```
+
+The real alias (`acikturkiye/src/models/submission.cr:146`) is
+`u.profile_picture_path AS user_profile_picture_path` — **25 characters**. The
+corrupted name is also **25 bytes**: `user_profile_picture` intact, then
+`\0\0\0\0<` where `_path` should be.
+
+Correct length, correct head, clobbered tail. Not a truncated read, not a
+corrupted `bytesize`, not a misparse of the row description — the allocation is
+intact and correctly sized and **its tail was written over in place**: four
+bytes of zeroed storage plus one byte (`0x3C`) of a later write. That is a live
+object whose memory was reissued.
+
+It is always this same string, never another, across every failing trial in four
+sessions. That points at one allocation site rather than at general heap damage.
+
+## Arms — the 2×2 that isolates it
+
+Detection is NUL bytes in the server log (nothing in a clean run of this app
+emits one), cross-checked against `wrk`'s `Non-2xx`. The two agree trial for
+trial, in every session.
+
+| arm | GC | compiler | EC flags | corrupt |
+|-----|----|----------|----------|--------:|
+| `boehm` | Boehm | asdf 1.21.0 | no | 0/3 |
+| `boehmec` | Boehm | probe 1.22.0-dev `4a965f423` | **yes** | 0/3 |
+| `sys` | **gcry** | asdf 1.21.0 | no | **0/5** |
+| `run_all.sh` gcry | **gcry** | asdf 1.21.0 | no | **0/18** |
+| `tipnoec` | **gcry** | probe 1.22.0-dev | no | **2/5** |
+| `base` | **gcry** | probe 1.22.0-dev | **yes** | **5/6** |
+
+Both factors are necessary and neither is sufficient: Boehm on the probe
+compiler is clean, gcry on 1.21.0 is clean across 23 trials, gcry on the probe
+compiler corrupts with or without the EC flags. `sys` and `tipnoec` run in *this*
+harness with the same load and the same detection, differing only in compiler,
+so the harness is not the explanation either.
+
+## Age — older than `75a9d25`
+
+`../2026-08-04-acik-stackmap/` built `base` with the **same probe compiler**
+(`4a965f423`) at gcry `75a9d25` and shows no signature. That looked like a
+regression boundary and is not one: re-measured today at `75a9d25` with 10
+trials, `tipnoec` is **8/10 corrupt** (`../bisect-75a9d25/`). See the withdrawal
+at the top.
+
+So there is no known-good gcry commit. The bug predates the whole
+`75a9d25..d36effe` range, and finding its introduction would mean bisecting much
+further back with enough trials per candidate to survive the rate noise — an
+expensive search, and probably the wrong one to run before the mechanism is
+understood. It reproduces at 30 s on demand; debugging it directly is cheaper
+than dating it.
+
+## It requires a collection — so it is a dropped root, not an overflow
+
+The competing reading was that nothing is dropped at all: that a neighbouring
+allocation (or the object's own code) writes past its end, and gcry's exact size
+classes expose what Boehm's rounding slack absorbs. This repo has that exact
+precedent — `eed00fb`, where Crystal's `prepare_args` omitted a trailing NUL and
+"Boehm size-class padding hid it, gcry exact classes surfaced EFAULT". The
+signature fits it well: the damage is in the object's *own* tail, it is always
+the same 5 bytes, and it depends on codegen.
+
+It is ruled out. With `GCRY_DISABLE_AUTO=1` (`gc_threshold = UInt64::MAX`) the
+same binary in the same harness is **0/5** — `../2026-08-11-085538-acik-nogc/`.
+Verified from `/gc-stats`: `collections = 2` in every trial, both of them the
+harness's post-`wrk` `/gc-collect` calls, so the load ran with **zero**
+collections. Against the 8/10 that binary produces with automatic collection on,
+a clean 5 is p ≈ 0.0003.
+
+Nothing that is a write bug cares whether the collector ran. This one does. A
+live object is being reclaimed.
+
+## Root cause — Darwin never scans a suspended thread's registers
+
+`collect_scan.cr:513` states the requirement in its own comment:
+
+```crystal
+# Always spill GP registers at suspend — may hold the only live copy.
+Platform.each_thread_greg(pthread) do |candidate|
+  mark_root_candidate(candidate, source: RootSource::Thread)
+end
+```
+
+`linux_stw.cr:148` implements it, yielding every greg via `with_thread_gregs`.
+`darwin_stw.cr:135` is an **empty stub**:
+
+```crystal
+def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
+  # Mach path records SP via thread_get_state; full greg dump not wired yet.
+end
+```
+
+So on Darwin a reference whose only live copy sits in a suspended thread's
+register is not a root, and the object is swept. That accounts for every
+observation above without exception:
+
+| observation | accounted for |
+|---|---|
+| needs a collection | registers only matter while marking |
+| `GCRY_SOUND=1` no help | this is a missing root *source*, not a heuristic |
+| `GCRY_DISABLE_LAYOUT=1` no help | not body-scan precision |
+| scrub irrelevant, both ways | unrelated path |
+| compiler-dependent | register-vs-spill for the only live copy is a codegen choice |
+| Boehm clean on the same build | bdwgc scans suspended threads' registers |
+| older than `75a9d25` | the stub is, so there is no regression to bisect |
+| Linux never reproduced it | Linux implements it |
+
+**The data is already fetched.** `sp_from_mach_thread` pulls the full
+`arm_thread_state64_t` / `x86_thread_state64_t` into a
+`StaticArray(UInt32, 68)` and reads only `THREAD_STATE_SP_OFFSET` out of it,
+discarding x0…x28, fp and lr. The fix is to yield those words as root
+candidates — either by storing the state per thread at suspend, next to
+`@@stw_sps`, or by re-calling `thread_get_state` inside `each_thread_greg`,
+which is valid because the thread is still suspended during mark.
+
+## The fix, and what validating it took
+
+Implemented in `darwin_stw.cr`: one `thread_get_state` per suspended thread now
+feeds both root sources — the SP (knob-gated, as before) and the GP registers
+(never gated; skipping them drops roots). Registers land in a slot-parallel
+table cleared at every `start_world`, with a per-slot validity flag so an
+unfilled slot cannot read as "no roots" and a stale one cannot be marked.
+
+**Validation, and a false start worth recording.** The first attempt paired
+fixed-vs-reverted at `d36effe` and got **0/10 both ways** — the reverted build
+was supposed to be the positive control and produced nothing. That is a green
+reachable without observing anything, so it settled nothing in either direction.
+The cause is rate drift: `tipnoec` at `d36effe` measured 2/5 earlier the same
+day and was evidently lower by then.
+
+Redone on the high-rate baseline, both arms back to back in one session, same
+worktree, same commit, the only difference being `darwin_stw.cr`:
+
+| arm | corrupt |
+|-----|--------:|
+| `75a9d25` plain | **4/10** |
+| `75a9d25` + the fix | **0/10** |
+
+p ≈ 0.006 binomial against a 0.4 base rate (Fisher ≈ 0.04). Throughput steadied
+too — 817–931 req/s across the fixed arm against 490–943 on the plain one, where
+the corrupting trials throw.
+
+**Strength of the claim.** The source argument is the strong part and does not
+depend on any of this: the mark phase asks for a root source that Darwin does
+not provide, which is a dropped root whether or not this workload happens to
+show it. The A/B supports it at one commit with one workload; it is not, on its
+own, proof that this is the *only* path by which the defect appears. Repeating
+it while the base rate is high (it was 8/10 in the morning) is cheap and would
+tighten it.
+
+## What has been ruled out
+
+* **Both precision axes.** `GCRY_SOUND=1` (verified `root_soundness: sound`,
+  lags 0, gate off, blacklist off) corrupts 2/5 —
+  `../2026-08-11-081725-acik-ec-sound/`. Adding `GCRY_DISABLE_LAYOUT=1`
+  (verified `layout_precise: false`, `layout_precise_scans: 0`) corrupts 4/5 —
+  `../2026-08-11-082032-acik-ec-nolayout/`. The most conservative configuration
+  gcry offers still drops the object, so this is not something the collector
+  decided to skip.
+* **The parked-fiber scrub, in both directions.** Off by default in every arm
+  above. Forced **on** (verified `runs=710`, 306 MB wiped) it corrupts **4/5** —
+  `../2026-08-11-083653-acik-scrubon/` — with more damage per trial (`non2xx` 1,
+  2, 2, 17 against a uniform 1 elsewhere; 16 NULs in two trials, i.e. two
+  separate corruptions). Consistent with the mechanism: scrub *writes*, so it can
+  only add risk here. It does not mask the bug and did not cause it.
+* **Thread count.** Measured under load with `top -stats th`: 2 OS threads in
+  both the `base` and `run_all.sh` gcry builds, and `CRYSTAL_WORKERS=1` changes
+  neither. Parallelism is not the variable.
+
+## Scope corrections, kept on purpose
+
+This was mis-scoped three times before it was pinned, each reading defensible on
+the evidence available and each falsified by the next arm:
+
+1. *"multi-threaded EC"* — killed by the thread count: there is no extra thread.
+2. *"the `-Dpreview_mt -Dexecution_context` runtime"* — killed by `tipnoec`,
+   which corrupts without the EC flags.
+3. *"gcry + Crystal 1.22.0-dev"* — killed by the 2026-08-04 session, which is
+   that pair, clean, at an older gcry.
+
+Anyone extending this should expect the fourth reading to be wrong too until a
+bisect names a commit.
+
+## Not established
+
+* **No root cause.** "A live object was reused" is the observation.
+* **Linux.** Never tried.
+* **No link to the 2026-08-08 production SIGSEGV.** Same class, and prod runs
+  this app on gcry, so it is worth asking which compiler and which gcry commit
+  prod builds from. Nothing here connects them, and that diagnosis remains an
+  unproven bet.
+
+## Reproducing
+
+```sh
+ACIK_STACKMAP_OUT=bench/log/macos/$(date +%Y-%m-%d-%H%M%S)-acik-repro \
+VARIANTS="sys tipnoec" TRIALS=5 WRK_DURATION=30 \
+  bash bench/acik_stackmap_ab.sh
+```
+
+`sys` is the clean control and `tipnoec` the reproducer; they differ only in the
+compiler. `REQUIRE_2XX=1` already rules a corrupted trial invalid for the RSS
+gate, which is why this surfaced as a failed benchmark rather than a silently
+wrong number.

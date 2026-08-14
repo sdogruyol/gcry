@@ -14,15 +14,60 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | Host page | **16 KiB** on Apple Silicon — large mmap + free-page reclaim use `host_page_size` |
 | CI | `macos-latest` correctness only — **not** a thr gate |
 | Low-water root-scan skip | **Linux-only — Darwin keeps the full scan.** `Platform.stack_low_water` reads `/proc/self/pagemap`; Darwin has no equivalent wired, so the parked-fiber scan still faults its whole lag window. The change that took Kemal EC4 pause 8.06 → 3.60 ms on Linux does **not** apply here |
-| Parked-fiber scrub | **Opt-in** (`GCRY_SCRUB_FIBERS=1`), on Darwin as well as Linux. Every number in this file predates that flip and was taken with scrub **on** |
+| Parked-fiber scrub | **Opt-in** (`GCRY_SCRUB_FIBERS=1`), on Darwin as well as Linux. Correctness of the flip is verified on a Darwin host — fuzz / property / soak / OOM / finalizer, both settings — see [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) § "The flip on Darwin". Every cut in this file *below the 2026-08-10 section* predates the flip and was taken with scrub **on** |
 
-> **Every cut below was measured under a default configuration that no longer
-> exists**, on both counts in the table above. Linux was re-cut on 2026-08-09
-> and the scrub flip proved invisible end to end there (inside a 6–8% run
-> spread); the low-water divergence is Darwin-specific and has no Linux
-> analogue to borrow from. Neither has been re-measured on a Darwin host, so
-> read these as the last good cut of the *previous* defaults rather than as
-> current. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md).
+> **Cuts below the 2026-08-10 section were measured under defaults that no
+> longer exist**, on both counts in the table above. The Kemal side is now
+> re-cut on a Darwin host under current defaults (next section); the fat-app
+> headline is **not** — see [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+
+## Headline (2026-08-10 — current defaults, Darwin re-cut) — macOS aarch64
+
+Primary: `bench/log/macos/2026-08-10-053800/` (`d36effe`, Crystal 1.21.0, Apple
+M2 Pro, Darwin 25.5.0 arm64). Scrub **off** and low-water **absent**, both
+confirmed per draw from `/gc-stats` (`fiber_scrub_runs = 0`,
+`low_water_skips = 0`) rather than assumed from the defaults.
+
+**Cut at `d36effe`, which was tip when it was taken; tip has since moved.** The
+STW watchdog, phase breadcrumbs, the mid-swap guard's counters and the glibc
+STW-hang fix all landed after. None of them moves this cut, and the reason is
+per-change rather than a blanket claim: the watchdog is default-off (two plain
+stores per phase when disarmed), `scrub_force_parked` is default-nil and
+research-only, and the `pthread_getattr_np` deadlock the snapshot API exists for
+is Linux-only — Darwin's `begin_stack_bounds_snapshot` is a no-op that delegates
+to the same `pthread_stack_bounds` this cut already called. Behaviourally the
+Darwin default path is unchanged. That is an argument from the diff, not a
+measurement: if a Darwin cut at tip is wanted, it has to be run.
+
+To reproduce, take `run_all.sh` from **`f21cdb7` or later**, not from the
+`d36effe` in the metadata: at `d36effe` a failed acikturkiye build fell through
+to whatever binary was already on disk, and `../acikturkiye` pins its own
+Crystal — 1.18.1 there, which cannot build gcry's tip
+(`LibC.clock_gettime`). This session was run with those guards applied and
+`ASDF_CRYSTAL_VERSION=1.21.0` exported, which is what a sibling on an older pin
+needs. The guards touch build and port handling only; nothing they change is
+measured.
+
+`wrk -c 100 -d 30`, `--release`, fresh process per path, post-`/gc-collect` RSS.
+**n = 9 draws** per cell (`TRIALS=3 COUNT=3`), pooled — not a median-of-3, so
+the IQR below is a spread over nine server processes rather than three.
+
+| Path | Boehm req/s (med) | gcry req/s (med) | % Boehm | post-GC RSS × |
+|------|------------------:|-----------------:|--------:|--------------:|
+| `/` | 87,001 (IQR 3.5%) | 77,573 (IQR 2.7%) | **89.2%** | **0.96×** |
+| `/json` | 61,064 (IQR 0.9%) | 53,590 (IQR 2.2%) | **87.8%** | **0.96×** |
+
+Against the last pre-flip Darwin Kemal cut (`2026-08-04-172842`, scrub on):
+`/json` **84.0% → 87.8%**, `/` **90.7% → 89.2%**, RSS flat at Boehm-class both
+paths. Two defaults and a commit range moved between those cuts, so read the
+deltas as "where the tip sits now", not as an attribution to the flip — the
+A/B that isolates the flip is on the fat app, in
+[ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md), and it is a wash.
+
+One RSS cell is noisier than it looks: Boehm `/json` RSS carries a 10.2% IQR
+against gcry's 0.1%, from two draws that came in at 17.6 MiB instead of 19.6.
+The ratio is quoted off medians and is not sensitive to it, but a single Boehm
+RSS draw from this host is not.
 
 ## Headline (v0.12.0 — in-header MARK default) — macOS aarch64
 
@@ -37,10 +82,26 @@ RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on b
 
 ## Fat-app note (tip / stack-maps)
 
-acikturkiye Darwin tip base closed the old ~18× RSS gate (~**90%** thr @
-~**0.63×** RSS). Numbers live only in [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md)
-/ `bench/log/macos/2026-08-04-acik-stackmap/` — do **not** fold into Kemal
+acikturkiye Darwin tip base closed the old ~18× RSS gate and now runs at
+~**98%** thr @ ~**0.97×** RSS (2026-08-14, n = 9 per arm,
+`bench/log/macos/2026-08-14-acik-recut/`). Numbers live only in
+[ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md) — do **not** fold into Kemal
 tables below.
+
+**This replaces the ~0.63× that stood here, and gcry is not what moved.** Same
+harness (`acik_stackmap_ab.sh`, two `/gc-collect` passes), same `base` variant,
+so it is a replacement rather than a different measurement — which the
+2026-08-10 `run_all.sh` cut (0.98×) never was, because that one collects once
+and is a different post-GC state. gcry's own post-GC RSS is within **0.6%** of
+the 2026-08-04 draws (36,480 → 36,272 KiB); Boehm's fell **35%** (57,568 →
+37,392 KiB). The old ratio was in substantial part a statement about that
+session's three Boehm draws, and Boehm is the noisy arm here as well —
+RSS IQR 16.8% against gcry's 4.5%.
+
+The ~18× gate stays closed. What changes is that gcry is at **parity** with
+Boehm on this app, not a third below it. Throughput 89.9% → 98.0% is real at
+this n but not attributable: a commit range, the scrub flip and the register fix
+all sit between the cuts.
 
 ## Headline (tip / stack-maps) — macOS aarch64
 

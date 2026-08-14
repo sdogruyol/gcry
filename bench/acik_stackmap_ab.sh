@@ -21,7 +21,9 @@ DURATION="${WRK_DURATION:-30}"
 CONNECTIONS="${WRK_CONNECTIONS:-100}"
 PORT_BASE="${ACIK_PORT_BASE:-3600}"
 OUT="${ACIK_STACKMAP_OUT:-$ROOT/bench/log/linux/$(date +%Y-%m-%d-%H%M%S)-acik-stackmap}"
-# space-separated: boehm base hybrid exclusive exclusivef sys tipec
+# space-separated: boehm boehmec base tipnoec hybrid exclusive exclusivef sys tipec
+# boehmec = Boehm + probe compiler + EC flags — the collector-only control for
+# `base` (plain `boehm` differs in toolchain and EC as well)
 # exclusivef = exclusive + GCRY_PRECISE_FIBERS=1 (pure parked-fiber exclusive)
 # sys = system Crystal + gcry (-Dgc_none); tipec = tip Crystal + EC + gcry
 VARIANTS="${VARIANTS:-boehm base hybrid}"
@@ -90,6 +92,24 @@ else
         [[ "$SKIP_BOEHM" == "1" ]] && continue
         rm -f "$BIN_DIR/acikturkiye-boehm"
         build_one boehm "$SYS_CRYSTAL" build --release
+        ;;
+      tipnoec)
+        # gcry on the probe compiler with **no** EC flags. `base` differs from a
+        # clean `run_all.sh` gcry build in two ways at once — the EC runtime and
+        # the compiler version — and `boehmec` does not tell those apart. This
+        # arm drops the EC flags and keeps everything else, so a clean run here
+        # points at the runtime and a dirty one at the compiler.
+        rm -f "$BIN_DIR/acikturkiye-tipnoec"
+        build_one tipnoec "$CUS" build -Dgc_none --release
+        ;;
+      boehmec)
+        # Boehm on the *probe* compiler with the EC flags — i.e. `base` with the
+        # collector swapped and nothing else. The plain `boehm` variant is the
+        # system compiler with no EC flags, so `boehm` vs `base` confounds the
+        # collector with both the toolchain and multi-threaded EC. Without this
+        # arm the harness cannot attribute a corruption seen only in `base`.
+        rm -f "$BIN_DIR/acikturkiye-boehmec"
+        build_one boehmec "$CUS" build "${TIP_FLAGS[@]}"
         ;;
       sys)
         rm -f "$BIN_DIR/acikturkiye-sys"

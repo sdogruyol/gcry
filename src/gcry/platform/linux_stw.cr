@@ -35,9 +35,23 @@ module Gcry
       UCONTEXT_NGREGS       = 23
     {% elsif flag?(:aarch64) %}
       UCONTEXT_SP_OFFSET = 432
-      # Skip full mcontext register dump on aarch64 for now (SP clamp only).
-      UCONTEXT_GREGS_OFFSET = 0
-      UCONTEXT_NGREGS       = 0
+      # `sigcontext` is { fault_address, regs[31], sp, pc, pstate, ... } and
+      # `uc_mcontext` sits at 176, so regs[0] is at 176 + 8 = 184 and the 31
+      # words are x0…x30 (x29 fp, x30 lr) — no sp or pc, which is right: the
+      # stack is scanned by range and pc is not a heap pointer.
+      #
+      # The offset is cross-checked against a constant already known good rather
+      # than trusted on its own: sp follows regs[30], so 184 + 31*8 = 432, which
+      # is the SP offset above that the aarch64 clamp has been using in
+      # production. If one is right the other is.
+      #
+      # This read "skip full mcontext register dump on aarch64 for now (SP clamp
+      # only)" until 2026-08-14. `collect_scan` calls `each_thread_greg` because
+      # a register can hold the only live copy of a reference, so "for now" was
+      # the same dropped-root defect Darwin had — found by `make greg-roots` on
+      # its first CI run, reporting 0 candidates with a thread suspended.
+      UCONTEXT_GREGS_OFFSET = 184
+      UCONTEXT_NGREGS       =  31
     {% else %}
       UCONTEXT_SP_OFFSET    = 0
       UCONTEXT_GREGS_OFFSET = 0

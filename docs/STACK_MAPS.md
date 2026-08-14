@@ -10,8 +10,10 @@ retain=0: ~**1–1.6×** RSS, thr ~**90–96%** (i3 headline **~1.63×** /
 mapped freelist (`…/acik-i3-residual/`); opt-in `GCRY_TIGHT_GROW=1` →
 ~**0.92×** @ ~**103%** thr (`…/acik-tight-grow-v2-med3/`). Post-finalizer with
 old caches was ~**1.81×**; v0.17 i3 cut ~**3.43×**. Darwin tip base
-~**0.63×** @ ~**90%** (`…/macos/2026-08-04-acik-stackmap/` — was ~**18×** at
-v0.17). Kemal thr is **not** the success bar.
+~**0.97×** @ ~**98%** (`…/macos/2026-08-14-acik-recut/`, n=9 — was ~**18×** at
+v0.17; the ~**0.63×** from the 2026-08-04 session does not reproduce, and gcry's
+RSS is within 0.6% of it — Boehm's arm is what fell). Kemal thr is **not** the
+success bar.
 
 Hub parent: [ROADMAP.md](../ROADMAP.md) Phase 2 · [DESIGN.md](../DESIGN.md)
 Frontier · thr residual [FINDINGS](../bench/log/linux/2026-08-02-018-FINDINGS.md).
@@ -26,7 +28,7 @@ objects alive → false retention.
 |----------|----------------:|------|
 | Kemal `/json` | ~**0.80×** | scrub + empty-chunk release enough |
 | acikturkiye `/api/v1/` (Linux) | ~**1–1.6×** | finalizer + retain=0; was ~3.43× (v0.17 i3) / ~8.5× (pre-fix tip) |
-| acikturkiye `/api/v1/` (Darwin) | ~**0.63×** | tip base; was ~18× at v0.17 |
+| acikturkiye `/api/v1/` (Darwin) | ~**0.97×** | tip base, n=9 (2026-08-14); was ~18× at v0.17. The ~0.63× does not reproduce |
 
 Stack scrub / type_id / layout are **not** substitutes for knowing which
 slots are pointers.

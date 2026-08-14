@@ -197,14 +197,14 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 | Kemal `/json` throughput | **~84%** |
 | Kemal `/json` post-GC RSS | **~1.01x** |
 | Kemal `/` throughput | **~91%** |
-| Fat app `/api/v1/` throughput | **~90%** |
-| Fat app `/api/v1/` RSS | **~0.63x** |
+| Fat app `/api/v1/` throughput | **~98%** |
+| Fat app `/api/v1/` RSS | **~0.97x** |
 
-\*Kemal: `bench/log/macos/2026-08-04-172842/` (median-of-3, scrub on). Fat app: `…/2026-08-04-acik-stackmap/` tip base — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md). Tagged v0.17 carry was Kemal ~84% @ ~0.93× / acik ~71% @ ~18×.
+\*Kemal: `bench/log/macos/2026-08-04-172842/` (median-of-3, scrub on). Fat app: `…/2026-08-14-acik-recut/` tip base, n=9 per arm, 0 Non-2xx in 18 trials — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md). Tagged v0.17 carry was Kemal ~84% @ ~0.93× / acik ~71% @ ~18×.
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**0.63x** (was ~**18x** at v0.17). Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
+Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**98%** thr @ ~**0.97x** RSS at n=9 (2026-08-14 re-cut; was ~**18x** at v0.17). The ~**0.63x** this line used to carry does not reproduce — gcry's post-GC RSS is within 0.6% of that cut, and what fell 35% between the two sessions is Boehm's arm. Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
 
 ### What the default heuristics cost
 

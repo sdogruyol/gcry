@@ -11,7 +11,7 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Kemal `/json`: **~87%** Boehm throughput (v0.16 Linux carry; tip smoke ~80–85% host-soft)
 - [x] Post-GC RSS: **~0.80×** Linux (Kemal, v0.16 carry), **~0.95–1.01×** macOS (Kemal tip)
 - [x] EC1 thr recovery after Parallel-era STW / scrub / counter fallout (v0.16.0)
-- [x] Fat app (acikturkiye): Linux ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; i3 ~1.63× / 9950X ~1.0–1.8×; was ~3.43× at v0.17); opt-in `GCRY_TIGHT_GROW` ~**103%** @ ~**0.92×**; Darwin tip ~**90%** @ ~**0.63×** (was ~18×)
+- [x] Fat app (acikturkiye): Linux ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; i3 ~1.63× / 9950X ~1.0–1.8×; was ~3.43× at v0.17); opt-in `GCRY_TIGHT_GROW` ~**103%** @ ~**0.92×**; Darwin tip ~**98%** @ ~**0.97×** at n=9 (2026-08-14 re-cut; was ~18× at v0.17. The ~0.63× carried before does not reproduce — gcry's RSS is within 0.6% of that cut and Boehm's arm is what fell 35%)
 - [x] Stack-map machinery ships **dormant** (`GCRY_PRECISE_STACK` default off) — research only
 - [x] Parallel **TLAB-off + lazy sweep** supported opt-in (~79% `/json`; not default)
 - [x] Process-STW × TLAB freelist UAF class fixed; `stw_mt_property_test` CI-gated
@@ -87,8 +87,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       callee-saved registers plus the return address, so **the margin is zero** —
       the wipe ends exactly where live data begins, and correctness rests
       entirely on `@context.stack_top` being exact on every platform and through
-      any change to how Crystal spills. No defect at the shipping window; no
-      tolerance either. **The mid-swap suspend is now closed too**, and the
+      any change to how Crystal spills. Now measured on a **second ABI**
+      (aarch64, Darwin host, 2026-08-10): clean through **64**, corrupt at
+      **72**, 3/3 reps per rung, every failure at address `0x0`. The prediction
+      from `PARKED_AARCH64_SPILL_WORDS = 22` — a 176-byte boundary — is
+      **falsified**; the constant is right but describes where the caller's SP
+      lands, not which word must survive. Both platforms obey one rule: *the
+      window ends immediately below the saved return address* (x86_64 +56,
+      aarch64 +64, where `lr` is the ninth spilled word of twenty-two). x86_64
+      alone could not distinguish that rule from "end of the spill block". No
+      defect at the shipping window; no tolerance either. **The mid-swap suspend
+      is now closed too**, and the
       reason no harness hit it is structural rather than luck: on all five
       Crystal context-switch backends `stack_top` is written (behind a `dmb ish`
       on aarch64) *before* the running flag is cleared, and a resumed fiber is
@@ -106,6 +115,77 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
+- [x] **gcry drops a live object under the probe compiler — Darwin never scanned
+      a suspended thread's registers.** Fixed 2026-08-11. Found
+      2026-08-11 on Darwin aarch64 while re-cutting the fat app. A live
+      `String`'s tail is overwritten in place — `user_profile_picture` +
+      `\0\0\0\0<` where `user_profile_picture_path` should be, same 25-byte
+      length, head intact — so the allocation was freed and part of its storage
+      reissued while still referenced. Always that same string. Surfaces as
+      `DB::MappingException` and a `Non-2xx`, which is the only reason a
+      benchmark caught it. **Both factors necessary, neither sufficient:** Boehm
+      on the probe compiler 0/3, gcry on asdf 1.21.0 **0/23**, gcry on the probe
+      compiler **2/5** without EC flags and **5/6** with them. **Not bisected —
+      it predates the range tried:** `75a9d25`, taken as the good end because a
+      2026-08-04 session showed no signature there, measures **8/10 corrupt** on
+      re-test, and that session's evidence was 0/3 for the matching arm rather
+      than the 0/15 first claimed (12 of those trials were `PRECISE_STACK`
+      builds). There is no known-good commit, and the per-trial rate is too noisy
+      (2/5 … 8/10 on arms that should match) to call one clean cheaply.
+      **It requires a collection:** with `GCRY_DISABLE_AUTO=1` the same binary is
+      **0/5** against its own 8/10 (verified zero collections during load), which
+      rules out the competing reading that nothing is dropped and a neighbour
+      overflows into exact size classes — the `eed00fb` shape. A live object is
+      being reclaimed. **Root cause found:** `Platform.each_thread_greg` is an
+      **empty stub on Darwin** (`darwin_stw.cr:135`, "full greg dump not wired
+      yet") while `collect_scan.cr:513` calls it precisely because a suspended
+      thread's registers "may hold the only live copy" — Linux implements it,
+      Darwin yields nothing, so a reference living only in a register is not a
+      root and its object is swept. Accounts for every observation, including the
+      compiler dependence (register-vs-spill is a codegen choice) and why Linux
+      never saw it. The state is already fetched: `sp_from_mach_thread` reads the
+      full thread state and keeps only SP. **Fixed and A/B'd:** the same
+      `thread_get_state` now feeds both, registers ungated by the SP-clamp knob,
+      per-STW validity so a stale slot is never marked. At `75a9d25`, both arms
+      back to back: plain **4/10**, fixed **0/10** (p ≈ 0.006). A first attempt
+      at `d36effe` was discarded — 0/10 *both* ways, because the rate had drifted
+      and the reverted arm produced no positive control.
+      **Control re-established 2026-08-14** on probe compiler `656fc4620` (the
+      A/B ran on `4a965f423`, and a codegen-dependent defect does not inherit a
+      base rate across compilers): `75a9d25` plain is **7/10**, tip with the fix
+      **0/10**, same host and morning (binomial vs a 0.7 base rate p ≈ 6e-6;
+      Fisher ≈ 0.003). Those two arms differ by a commit range as well as by the
+      fix, so the single-commit attribution is still the 4/10 → 0/10 above; what
+      this adds is that the workload still produces the defect on the current
+      toolchain, so a clean fixed arm is not a rate artefact. It also cost one
+      wasted run: `acikturkiye/lib/gcry` is a **symlink to the main checkout**,
+      so running the harness from a worktree selects the script, not the
+      collector — the first "control" compiled against the fixed tree and its
+      0/10 meant the opposite of what it was labelled.
+      **Now gated** in `process_spec` and `make greg-roots` on a
+      `thread_greg_candidates` counter (also on `/gc-stats`), verified red by
+      stubbing the method out; the same gate runs on Linux x86_64 and aarch64.
+      **Linux had the same gap, on aarch64 — answered by the gate on its first
+      CI run.** `linux_stw.cr` set `UCONTEXT_NGREGS = 0` there under the comment
+      "skip full mcontext register dump on aarch64 for now (SP clamp only)",
+      so `each_thread_greg` yielded nothing while `collect_scan` called it:
+      the same dropped-root defect Darwin had, by a different route. x86_64
+      (`NGREGS = 23`) was never affected. Fixed by giving aarch64 its real
+      offsets — `regs[0]` at `uc_mcontext + 8` = **184**, **31** words x0…x30 —
+      cross-checked against a constant already known good rather than trusted
+      alone: `sp` follows `regs[30]`, so `184 + 31*8 = 432`, the SP offset the
+      aarch64 clamp already runs on.
+      Still open: which compiler and gcry commit prod builds from, which is what
+      would connect this to the 2026-08-08 SIGSEGV, which remains an unproven
+      bet.
+      `bench/log/macos/2026-08-14-greg-control-75a9d25/FINDINGS.md`
+      Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
+      `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
+      **both** directions (forced on it is 4/5 and *worse* per trial), and thread
+      count (2 under load either way). Open: which commit, which root, whether
+      Linux reproduces, and which compiler and gcry commit prod builds from —
+      that last is what would connect it to the unproven 2026-08-08 SIGSEGV.
+      `bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`
 - [x] **The collector asked glibc about a thread it had suspended, and hung.** Found and
       fixed 2026-08-10 while building the mid-swap harness; unrelated to the
       scrub. `scan_other_thread_stacks` asked `pthread_getattr_np` for each
@@ -255,11 +335,34 @@ Target: Match Boehm on the workloads Crystal users actually run.
       **Candidate:** `mach_vm_page_query` / `vm_map_page_query_info`, whose
       disposition bits include `VM_PAGE_QUERY_PAGE_PRESENT` **and**
       `VM_PAGE_QUERY_PAGE_PAGED_OUT` — the same present-or-swapped test pagemap
-      gives, if those bits mean what they appear to. *Unverified: no Darwin host
-      on this bench.* Before shipping it, port `spec/stack_low_water_spec.cr` —
-      it pins the claim ("never reports above a written word") rather than the
-      pause number, which is exactly the assertion a second implementation has
-      to earn on its own.
+      gives, if those bits mean what they appear to. *The disposition bits are
+      still unverified*, but the bench gap is closed: a Darwin host cut Kemal
+      and the fat app under current defaults on 2026-08-10
+      (`bench/log/macos/2026-08-10-053800/`, n=9), and `low_water_skips = 0` in
+      every draw confirms Darwin takes none of the Linux win rather than
+      assuming it. That is the **baseline** this item needed — without one, an
+      implementation could not say what it bought. Before shipping it, port
+      `spec/stack_low_water_spec.cr` — it pins the claim ("never reports above a
+      written word") rather than the pause number, which is exactly the
+      assertion a second implementation has to earn on its own.
+- [ ] **`make invariants` has never passed on Darwin.** `GCRY_DEBUG_INVARIANTS=1`
+      fails `spec/collect_spec.cr:202` ("keeps empty chunks dormant within
+      empty_chunk_retain") with `live_objects mismatch: actual=6364 reported=1`.
+      Found 2026-08-14 running the suite locally on a Darwin host for the 0.19.0
+      release; it is **not new** — the same failure reproduces at `master`,
+      **`v0.18.0` and `v0.17.0`**, so it shipped in two releases unnoticed. It is
+      unnoticed because nothing runs it: Linux CI has a "Debug invariants" step
+      and is green, and `test-macos` runs `spec` / `process_spec` / samples only.
+      Debug-only — the shipping path does not call the checker, and the same spec
+      passes under `make spec`, so what disagrees is the walker and not the
+      collector's own accounting. **Hypothesis, not a finding:**
+      `Invariant.count_live_blocks` walks dormant chunks and counts any block
+      whose header does not read free, and Darwin's reclaim leaves those headers
+      alone (`MADV_FREE_REUSABLE` does not zero them — `collect_sweep.cr:439`),
+      where Linux's `MADV_DONTNEED` does not leave the same residue. What would
+      settle it: count what the walker sees on a chunk the sweep has just made
+      dormant, on both platforms. Until then this is "the checker and Darwin
+      disagree", which is worth exactly as much as that.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

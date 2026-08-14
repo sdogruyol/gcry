@@ -1,0 +1,6 @@
+variant	trial	rps	rss_kib	marked	records	non2xx
+base	1	1101.97	0	0	0	1
+base	2	1134.55	0	0	0	1
+base	3	1116.68	45392	0	0	0
+base	4	1122.82	34576	0	0	0
+base	5	1015.27	37728	0	0	0

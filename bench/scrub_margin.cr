@@ -32,11 +32,51 @@
 
 require "../src/gcry"
 
-# Fine around 56: that is where the boundary sits on x86_64-sysv, and it is not
-# an arbitrary number — `swapcontext` saves 6 callee-saved registers plus the
-# return address above the SP it records in `@context.stack_top`, i.e. 7 words.
-# The wipe window ends exactly where those begin.
-OVERSHOOTS = [0, 8, 16, 32, 40, 48, 56, 60, 64, 128, 512, 4096]
+# The ladder has to be fine wherever the boundary is predicted to sit, and that
+# prediction is per-ABI: the margin is the offset of the first word above
+# `stack_top` whose value must survive the park, which is a property of what
+# `swapcontext` spills and in what order.
+#
+# x86_64-sysv — spill block is [r15,r14,r13,r12,rbp,rbx,rdi] then the return
+# address at +56, SP-at-return +64. The return address is the *last* word, so
+# the boundary is 56. Measured: clean through 56, corrupt at 60.
+#
+# aarch64 — Crystal's `fiber/context/aarch64-generic.cr` spills 22 words, but
+# they are not in the same order: [0..7] d15..d8, [8] x30/lr, [9] x29/fp,
+# [10..19] x28..x19, [20..21] x0,x1, SP-at-return +176. The return address is
+# the *ninth* word, not the last, so two different numbers are defensible and
+# the ladder has to separate them:
+#
+#   64  — the offset of `lr`, if the boundary is "the first word that must
+#         survive" (the mechanism that produced 56 on x86_64: the eight words
+#         below it there are callee-saved GPRs, here they are callee-saved FP
+#         registers, which this workload has no reason to hold a pointer in).
+#   176 — `PARKED_AARCH64_SPILL_WORDS * 8`, if the boundary is instead the whole
+#         spill block, i.e. every saved register matters.
+#
+# So: 8-byte steps through 96 to resolve the first, and through 160…192 to
+# resolve the second. A result at neither is the interesting one.
+#
+# Measured (Apple M2 Pro, Darwin 25.5.0 arm64, Crystal 1.21.0, 2026-08-10):
+# clean through **64**, first corruption at **72**, deterministic at 3/3 reps
+# per rung on an idle machine. So it is the return address, not the spill
+# block: 176 is falsified, and `PARKED_AARCH64_SPILL_WORDS = 22` is not wrong —
+# it answers a different question (where the caller's SP is), and the step from
+# it to a margin was the wrong inference. The crash confirms the mechanism
+# rather than merely accompanying it: every failing rung dies at **address
+# 0x0**, i.e. a return through a zeroed `lr`.
+#
+# The rule both ABIs obey: the wipe window ends immediately below the saved
+# return address. 56 on x86_64 and 64 on aarch64 are two instances of it. On
+# x86_64 the return address happens to be the *last* spilled word, which is why
+# "end of block" and "first word that must survive" give the same number there
+# and only aarch64 can tell them apart.
+{% if flag?(:aarch64) %}
+  OVERSHOOTS = [0, 8, 16, 32, 48, 56, 64, 72, 80, 88, 96,
+                128, 144, 152, 160, 168, 176, 184, 192, 512, 4096]
+{% else %}
+  OVERSHOOTS = [0, 8, 16, 32, 40, 48, 56, 60, 64, 128, 512, 4096]
+{% end %}
 
 # ── Child mode: one overshoot value, one verdict ─────────────────────────────
 #
@@ -102,6 +142,13 @@ OVERSHOOTS.each do |n|
   # A signal death has no exit code — reading one raises. That is the *expected*
   # outcome for most of this ladder, so the parent has to branch on how the
   # child died before asking why.
+  #
+  # Not every platform reports it that way. On Darwin the child does not die by
+  # signal at all: Crystal's own SIGSEGV handler prints "Invalid memory access
+  # (signal 11) at address 0x0" and exits **11**, so the ladder reads
+  # `CORRUPT (exit 11)` where Linux reads `CORRUPT (SEGV)`. Both are deaths —
+  # the child only ever returns 0 or 2 — which is why the fallthrough below
+  # reports an unexpected exit code as corruption rather than trusting it.
   verdict =
     if status.success?
       "clean"
@@ -135,11 +182,20 @@ else
   last_clean = results.select { |n, v| v == "clean" }.keys.max
   puts "margin: clean through #{last_clean} bytes, first corruption at #{first}"
   puts ""
-  puts "That margin is the whole finding. On x86_64-sysv `swapcontext` saves six"
-  puts "callee-saved registers plus the return address above the SP it records,"
-  puts "so live data begins ~56 bytes above `stack_top` and the wipe window ends"
-  puts "exactly there. There is no slack: the scrub is correct only while"
-  puts "`@context.stack_top` is exact, every time, on every platform."
+  puts "That margin is the whole finding: the wipe window ends `first` bytes"
+  puts "below the first word above `stack_top` that a resumed fiber still needs,"
+  puts "and everything below that boundary is spill slots the workload happened"
+  puts "not to need — not slack the design reserved. The scrub is correct only"
+  puts "while `@context.stack_top` is exact, every time, on every platform."
+  puts ""
+  {% if flag?(:aarch64) %}
+    puts "aarch64: `lr` sits at stack_top+64 and the full spill block is 176"
+    puts "bytes (22 words), so 64 and 176 mean different things — see the ladder"
+    puts "comment in bench/scrub_margin.cr."
+  {% else %}
+    puts "x86_64-sysv: the return address is the last word of the spill block,"
+    puts "at stack_top+56, with SP-at-return at +64."
+  {% end %}
 end
 
 if failures.empty?

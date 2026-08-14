@@ -1,0 +1,27 @@
+timestamp_utc: "2026-08-10T05:57:32Z"
+session: "2026-08-10-053800"
+run: 3
+count: 3
+hostname: "Uzumakis-MacBook-Pro"
+os: "Darwin"
+os_release: "25.5.0"
+os_version: "Darwin Kernel Version 25.5.0: Mon Apr 27 20:39:09 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T6020"
+arch: "arm64"
+cpu: "Apple M2 Pro"
+cpu_cores: "10"
+crystal_version: "1.21.0"
+crystal_commit: "unknown"
+gcry_version: "0.18.0"
+git_commit: "d36effe"
+git_tag: "v0.18.0-90-gd36effe"
+wrk_connections: 100
+wrk_duration_seconds: 30
+trials: 3
+gc: "boehm gcry"
+gcry_flags: ""
+ec_parallelism: ""
+ambient_gcry: |
+
+build_mode: "release"
+crystal_flags: ""
+crystal_build_flags: "--release"
