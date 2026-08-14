@@ -82,19 +82,26 @@ RSS is now **1.3×** Boehm (down from ~10× in v0.11.0). Throughput is ~85% on b
 
 ## Fat-app note (tip / stack-maps)
 
-acikturkiye Darwin tip base closed the old ~18× RSS gate (~**90%** thr @
-~**0.63×** RSS). Numbers live only in [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md)
-/ `bench/log/macos/2026-08-04-acik-stackmap/` — do **not** fold into Kemal
+acikturkiye Darwin tip base closed the old ~18× RSS gate and now runs at
+~**98%** thr @ ~**0.97×** RSS (2026-08-14, n = 9 per arm,
+`bench/log/macos/2026-08-14-acik-recut/`). Numbers live only in
+[ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md) — do **not** fold into Kemal
 tables below.
 
-That **0.63× still stands on the pre-flip cut and has not been re-cut**. A
-2026-08-10 fat-app cut exists (`bench/log/macos/2026-08-10-053800/`, 0.98×) but
-it is **not** a replacement: it comes from `run_all.sh`, which collects once,
-while the 0.63× comes from `acik_stackmap_ab.sh`, which collects twice because
-finalizer resurrect needs a second pass to drop dead sockets. Those are
-different post-GC states, not two measurements of one. The re-cut on the
-matching harness was attempted and did not produce a quotable number — see
-[ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md) § "Re-cut status".
+**This replaces the ~0.63× that stood here, and gcry is not what moved.** Same
+harness (`acik_stackmap_ab.sh`, two `/gc-collect` passes), same `base` variant,
+so it is a replacement rather than a different measurement — which the
+2026-08-10 `run_all.sh` cut (0.98×) never was, because that one collects once
+and is a different post-GC state. gcry's own post-GC RSS is within **0.6%** of
+the 2026-08-04 draws (36,480 → 36,272 KiB); Boehm's fell **35%** (57,568 →
+37,392 KiB). The old ratio was in substantial part a statement about that
+session's three Boehm draws, and Boehm is the noisy arm here as well —
+RSS IQR 16.8% against gcry's 4.5%.
+
+The ~18× gate stays closed. What changes is that gcry is at **parity** with
+Boehm on this app, not a third below it. Throughput 89.9% → 98.0% is real at
+this n but not attributable: a commit range, the scrub flip and the register fix
+all sit between the cuts.
 
 ## Headline (tip / stack-maps) — macOS aarch64
 

@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.18.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**0.63×** (was ~**18×**) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
+As of **v0.18.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
 
 ## Goals
 
@@ -164,7 +164,7 @@ Shipped and dogfooded on Linux + macOS; **v0.18.0** closes fat-app RSS on the sh
 
 **Kemal macOS (tip):** `/` ~**91%**, `/json` ~**84%**, post-GC RSS ~**0.95–1.01×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin tip ~**90%** @ ~**0.63×** — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin tip ~**98%** @ ~**0.97×** at n=9 (2026-08-14 re-cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 

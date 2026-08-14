@@ -220,6 +220,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **0.76×** (`…-060252/`), inside this host's quiet-smoke band.
 
 
+- **The Darwin fat-app headline is re-cut, and `~0.63×` does not reproduce.**
+  It is **~98.0%** of Boehm throughput @ **~0.97×** post-GC RSS, n = 9 per arm,
+  0 Non-2xx across all 18 trials (`bench/log/macos/2026-08-14-acik-recut/`).
+  Same harness and same `base` variant as the 0.63×, so this is a replacement —
+  which the 2026-08-10 `run_all.sh` cut never was, because that one collects
+  once and is a different post-GC state.
+
+  **gcry is not what moved.** Its post-GC RSS is within **0.6%** of the
+  2026-08-04 draws (36,480 → 36,272 KiB) across ten days, two default flips and
+  a commit range; Boehm's fell **35%** (57,568 → 37,392 KiB). The old ratio was
+  in substantial part a statement about that session's three Boehm draws, and
+  Boehm is the noisy arm here too — RSS IQR 16.8% against gcry's 4.5%. The
+  v0.17-era ~18× gate stays closed; what changes is that gcry is at **parity**
+  with Boehm on this app rather than a third below it. Throughput 89.9% → 98.0%
+  is real at this n but not attributable — a commit range, the scrub flip and
+  the register fix all sit between the cuts.
+
+  Defaults confirmed **per draw** from `/gc-stats` rather than assumed:
+  `fiber_scrub_runs = 0`, `low_water_skips = 0`, `thread_greg_candidates = 23`
+  in all nine gcry draws. Two caveats are kept in the FINDINGS rather than
+  smoothed over: n = 9 is below this repo's own 12-rep publishing floor, and one
+  draw's `Requests/sec` (254.40) is a wrk artefact — it ended with `timeout 100`
+  socket errors after 1.81 min instead of 30 s, so its rate divides real
+  requests by stalled wall time. The median is insensitive; a mean would have
+  been wrong by 8%.
 - **Kemal, sound-profile and fat-app cuts re-taken on the tip default.**
   Sessions `bench/log/linux/2026-08-09-*`. The Kemal headline does **not** move
   — three trials cannot resolve a difference against a 6–8% run spread, and the

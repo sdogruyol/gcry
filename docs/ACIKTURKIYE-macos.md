@@ -16,10 +16,53 @@ Same app and script as Linux: sibling `../acikturkiye`, `wrk -c 100 -d 30`, `--r
 > Linux numbers below `n=9` were retracted for that reason. The macOS cuts
 > below the re-cut section are median-of-3.
 
-## Re-cut status (2026-08-10, Darwin host)
+## Re-cut, on the matching harness (2026-08-14, Darwin host)
 
-The headline **0.63×** below is **not** re-cut, and the number measured on
-2026-08-10 does not replace it. Both facts matter, so both are here.
+**The headline is now ~98.0% of Boehm @ ~0.97× post-GC RSS**, n = 9 per arm,
+0 Non-2xx in all 18 trials. `bench/log/macos/2026-08-14-acik-recut/`. This
+replaces the provisional **0.63×** — same harness, same `base` variant, so it is
+a replacement rather than a different measurement.
+
+gcry at `ed8a8e5` (Crystal 1.21.0), app built by probe compiler 1.22.0-dev
+`656fc4620`, Apple M2 Pro, Darwin 25.5.0 arm64. Defaults confirmed **per draw**
+from `/gc-stats`: `fiber_scrub_runs = 0`, `low_water_skips = 0`, and
+`thread_greg_candidates = 23` in all nine gcry draws — the register scan is
+engaged in every trial rather than assumed.
+
+| | Boehm | gcry `base` | % Boehm | post-GC RSS × |
+|--|------:|------------:|--------:|--------------:|
+| req/s median | 945.3 (IQR 4.4%) | 926.7 (IQR 7.2%) | **98.0%** | |
+| RSS KiB median | 37,392 (IQR 16.8%) | 36,272 (IQR 4.5%) | | **0.97×** |
+
+**gcry's RSS did not move; Boehm's did.** Against 2026-08-04, gcry is 36,480 →
+**36,272** KiB (0.6% apart, across ten days, two default flips and a commit
+range) while Boehm is 57,568 → **37,392** KiB. The whole 0.63 → 0.97 move is the
+Boehm arm. So `0.63×` was in substantial part a statement about that session's
+*Boehm* draws — three of them — and the Boehm side is the noisy one here too:
+IQR **16.8%** against gcry's 4.5%. The same asymmetry appears in the 2026-08-10
+Kemal cut (Boehm `/json` RSS IQR 10.2% against gcry's 0.1%).
+
+What does not change: the v0.17-era **~18×** Darwin RSS gate is closed and stays
+closed. What changes is that gcry is at **parity** with Boehm here, not a third
+below it.
+
+Throughput 89.9% → **98.0%** is real at this n but **not attributable** — a
+commit range, the scrub going opt-in, and the register fix all sit between the
+two cuts. Read it as where tip sits.
+
+Two caveats are carried in
+[`FINDINGS.md`](../bench/log/macos/2026-08-14-acik-recut/FINDINGS.md) rather than
+smoothed over: n = 9 is below this repo's own 12-rep publishing floor
+(`ROADMAP.md`), and one draw's `Requests/sec` (254.40) is a wrk artefact — it
+finished with `timeout 100` socket errors after 1.81 min instead of 30 s, so its
+rate divides real requests by stalled wall time. Per-thread `Req/Sec` was 463,
+in line with every other draw. The median is insensitive (926.69 → 927.08); a
+mean would have been wrong by 8%.
+
+### The 2026-08-10 `run_all.sh` cut, and why it was never the replacement
+
+The number measured on 2026-08-10 does not replace the 0.63× either. Both facts
+mattered, so both are here.
 
 **What was measured** — `bench/log/macos/2026-08-10-053800/` (`d36effe`, which
 was tip when taken; see [PERF-macos.md](PERF-macos.md) for why the commits that
@@ -47,12 +90,20 @@ trials to `Non-2xx=1`, which the harness rules invalid for the RSS gate. Its
 printed median is therefore one draw. Not quoted here, in either direction.
 
 **That failure was not flakiness.** It is memory corruption — a live String's
-tail overwritten in place — and it reproduces 5 of 6 trials under gcry with
+tail overwritten in place — and it reproduced 5 of 6 trials under gcry with
 `-Dpreview_mt -Dexecution_context`, while Boehm on the identical compiler and
-flags is 0 of 3. See
+flags was 0 of 3. See
 [`bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`](../bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md).
-Until that is fixed there is no point re-running this cut: the configuration it
-would measure is one that corrupts.
+
+**It was root-caused and fixed on 2026-08-11**, in `2936248`: Darwin's
+`each_thread_greg` was an empty stub while `collect_scan` called it, so a
+reference the compiler kept in a register and never spilled had no root and its
+object was swept. At `75a9d25`, both arms back to back: plain **4/10** corrupt,
+fixed **0/10**. The control was re-established on the current probe compiler on
+2026-08-14 — `75a9d25` plain **7/10**, tip with the fix **0/10**
+(`bench/log/macos/2026-08-14-greg-control-75a9d25/`). That is what unblocked the
+re-cut, which is now the section above: 18 trials, 0 Non-2xx, on the arm that
+was 5 of 6 corrupt before.
 
 ### The scrub flip, isolated — a wash on Darwin too
 
@@ -106,14 +157,18 @@ Primary: `bench/log/macos/2026-08-04-acik-stackmap/` (`75a9d25` + Darwin Mach-O/
 |--|-------------------:|--------------:|
 | **gcry tip base vs Boehm** | **~90%** | **~0.63×** |
 
-> **These three trials are draws from a configuration now known to corrupt.**
-> The same arm (`base`, probe compiler) at this same commit `75a9d25` measures
-> **8/10** corrupt on re-test — a live object reused, see
+> **Superseded — see § "Re-cut, on the matching harness" at the top of this
+> file.** These three trials are draws from a configuration now known to
+> corrupt: the same arm (`base`, probe compiler) at this same commit `75a9d25`
+> measures **8/10** corrupt on re-test, and **7/10** again on 2026-08-14 under a
+> newer probe compiler — a live object reused, see
 > [`bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`](../bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md).
 > The session reported 0 Non-2xx, so nothing was wrong with *these* draws as
-> throughput/RSS samples, and the numbers are not retracted. But a collector that
-> is dropping objects is not measuring the heap it would have had, so treat
-> `0.63×` as provisional until the defect is understood.
+> throughput/RSS samples, and the numbers are not retracted as a record of what
+> that session measured. But the **0.63× no longer stands as the headline**: the
+> 2026-08-14 re-cut on the same harness gives **0.97×** at n = 9, and gcry's own
+> RSS is within 0.6% of these draws — what fell by 35% between the two sessions
+> is *Boehm's* arm, not gcry's.
 
 Closes the v0.17 **~18×** Darwin RSS gate on the **product path** (no `PRECISE_STACK`). Live_sc ~6–9 MiB post-GC (was ~1.1 GiB dense false-live). Stackmap hybrid/exclusive load maps and mark roots but **do not** beat tip base RSS (~0.86–1.27×) — research only; see [FINDINGS](../bench/log/macos/2026-08-04-acik-stackmap/FINDINGS.md). Do not average with [ACIKTURKIYE.md](ACIKTURKIYE.md).
 

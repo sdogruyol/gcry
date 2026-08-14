@@ -11,7 +11,7 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 - [x] Kemal `/json`: **~87%** Boehm throughput (v0.16 Linux carry; tip smoke ~80–85% host-soft)
 - [x] Post-GC RSS: **~0.80×** Linux (Kemal, v0.16 carry), **~0.95–1.01×** macOS (Kemal tip)
 - [x] EC1 thr recovery after Parallel-era STW / scrub / counter fallout (v0.16.0)
-- [x] Fat app (acikturkiye): Linux ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; i3 ~1.63× / 9950X ~1.0–1.8×; was ~3.43× at v0.17); opt-in `GCRY_TIGHT_GROW` ~**103%** @ ~**0.92×**; Darwin tip ~**90%** @ ~**0.63×** (was ~18×)
+- [x] Fat app (acikturkiye): Linux ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; i3 ~1.63× / 9950X ~1.0–1.8×; was ~3.43× at v0.17); opt-in `GCRY_TIGHT_GROW` ~**103%** @ ~**0.92×**; Darwin tip ~**98%** @ ~**0.97×** at n=9 (2026-08-14 re-cut; was ~18× at v0.17. The ~0.63× carried before does not reproduce — gcry's RSS is within 0.6% of that cut and Boehm's arm is what fell 35%)
 - [x] Stack-map machinery ships **dormant** (`GCRY_PRECISE_STACK` default off) — research only
 - [x] Parallel **TLAB-off + lazy sweep** supported opt-in (~79% `/json`; not default)
 - [x] Process-STW × TLAB freelist UAF class fixed; `stw_mt_property_test` CI-gated
