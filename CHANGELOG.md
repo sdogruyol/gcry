@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-14
+
+Correctness release on **two** platforms. `collect_scan` asks the platform for a
+suspended thread's GP registers, because a reference can live only in a register
+— and on **Darwin** that call was an empty stub, while on **Linux aarch64** it
+returned nothing under a "for now". Both dropped live objects. The second was
+found by the gate written for the first, on its first CI run.
+
 ### Added
 
 - **The Monitor-inside-STW overlap is excluded as the cause of the 2026-08-10
@@ -278,11 +286,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already read SP and discarded the rest. The mark phase asked for a root source
   the platform did not provide, so those objects were swept.
 
-  Found on the fat app as a live `String`'s tail overwritten in place —
+  Observed on the fat app as a live `String`'s tail overwritten in place —
   `user_profile_picture\0\0\0\0<` where `user_profile_picture_path` should be,
   the same 25 bytes, the same allocation, across four sessions. It needed a
   collection to appear (`GCRY_DISABLE_AUTO=1` is 0/5 against 8/10, p ≈ 0.0003),
   which is what makes it a dropped root rather than a write bug.
+
+  **Scope, because the defect is codegen-dependent:** every reproduction came
+  from a **1.22.0-dev** probe compiler (2/5 without execution contexts, 5/6
+  with). Under **stock Crystal 1.21.0 it never reproduced** — 0/5 on the
+  system-compiler arm and 0/18 across `run_all.sh`, 0/23 combined. Whether a
+  pointer lives in a register or is spilled is a codegen choice, which is also
+  why Linux x86_64 never saw it. So the hole was real by construction on any
+  compiler — the mark phase asked for a root source the platform did not
+  provide — but stock-1.21 users have no reproduction, and no evidence of
+  safety either.
 
   The same `thread_get_state` now fills a slot-parallel register table, cleared
   per STW with a validity flag so an unfilled slot cannot read as "no roots".
@@ -1210,7 +1228,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/sdogruyol/gcry/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sdogruyol/gcry/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/sdogruyol/gcry/compare/v0.15.0...v0.16.0

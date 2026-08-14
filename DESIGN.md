@@ -4,7 +4,7 @@
 
 Crystal runs on [Boehm](https://github.com/ivmai/bdwgc) today. That works — and it also means the language’s most intimate runtime piece lives in C, behind a wall. **gcry** is the other path: a conservative mark–sweep collector written in Crystal, shipped as a shard, plugged in with `-Dgc_none`. No compiler fork. No waiting for upstream to grow a third backend.
 
-This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.18**.
+This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.19**.
 
 ---
 
@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.18.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
+As of **v0.19.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
 
 ## Goals
 
@@ -140,9 +140,9 @@ src/gcry/
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.18)
+## Where we are (v0.19)
 
-Shipped and dogfooded on Linux + macOS; **v0.18.0** closes fat-app RSS on the shard-only path (finalizer + retain=0) and keeps stack maps **dormant**. Parallel TLAB-off + lazy sweep remains a **supported opt-in**. Default path: EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
+Shipped and dogfooded on Linux + macOS; **v0.19.0** closes a dropped-root class on two platforms — a suspended thread's GP registers were unscanned on Darwin (empty stub) and on Linux aarch64 (`NGREGS = 0`), so a reference the compiler never spilled had no root. v0.18.0 closed fat-app RSS on the shard-only path (finalizer + retain=0); stack maps stay **dormant**. Parallel TLAB-off + lazy sweep remains a **supported opt-in**. Default path: EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
 
 | Area | State |
 |------|--------|

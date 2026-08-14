@@ -4,7 +4,16 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-## Current (v0.18.0) — "Fat-app RSS; shard-only; stack maps dormant"
+## Current (v0.19.0) — "Suspended-thread register roots, on both platforms that lacked them"
+
+- [x] **Suspended threads' GP registers are scanned everywhere the collector
+      claims to support.** They were not: Darwin's `each_thread_greg` was an
+      empty stub, and Linux **aarch64** returned nothing (`UCONTEXT_NGREGS = 0`,
+      "for now"), while `collect_scan` called both. A reference the compiler
+      kept in a register and never spilled had no root, and its object was
+      swept. Gated by `thread_greg_candidates` in `process_spec` and
+      `make greg-roots`, on Darwin + Linux x86_64 + Linux aarch64 — the aarch64
+      half was found by that gate on its first CI run
 
 - [x] Conservative mark-sweep, stop-the-world
 - [x] Linux + macOS process GC (x86_64 + ARM64)

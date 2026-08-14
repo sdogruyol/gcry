@@ -1,7 +1,7 @@
 # Compiler stack maps (spike)
 
 **Status:** spike **GO** — parser + hybrid walker landed (default off).
-Not a release feature / not the v0.18 product win. Product = **v0.18.0**
+Not a release feature / not the v0.19 product win. Product = **v0.19.0**
 shard-only; `GCRY_PRECISE_STACK` stays **off**.
 
 **Gate metric:** acikturkiye post-GC RSS × Boehm. Linux tip after finalizer +
@@ -230,7 +230,7 @@ product reason to invest.
     but **worse RSS** than base (~0.86–1.27×) — research only. Product path:
     tip without `PRECISE_STACK` (same as Linux).
 30. **PR stack-maps → master** — exclusive stabilize + TIGHT_GROW opt-in +
-    Darwin loader/walker + docs. No v0.18 tag.
+    Darwin loader/walker + docs. No v0.18 tag; still untagged at v0.19.
 
-**Do not:** tag `v0.18.0` for this spike; enable precise stacks by default;
+**Do not:** tag a release (`v0.18.0`, `v0.19.0`, …) for this spike; enable precise stacks by default;
 open write-barrier work yet; ship PAGE_DONTNEED / mostly-empty as defaults.

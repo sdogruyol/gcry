@@ -7,7 +7,16 @@
 
 ## Current State Assessment
 
-**Grade: A- / "Industry-grade suite for a shard GC."** *(v0.15.0 — process-STW MT + TLAB gates)*
+**Grade: A- / "Industry-grade suite for a shard GC."** *(v0.19.0 — suspended-thread register roots gated on all three platforms)*
+
+> The grade is carried, not re-derived. v0.19.0 is a reminder of what it does
+> not cover: `each_thread_greg` was unscanned on Darwin and on Linux aarch64,
+> and nothing caught it for months because macOS CI runs `spec` / `process_spec`
+> / samples only and the ~20 fuzz / property / STW targets are Linux-only. The
+> Linux aarch64 half was found by `make greg-roots` on its **first** CI run.
+> Two gates are still not gates: CI's Ameba step lints `lib/ameba` rather than
+> gcry (346 files inspected, not 109), and `make invariants` has never passed on
+> Darwin — see `ROADMAP.md`.
 
 Phases 1–7 from the plan below are largely **done**. Remaining gaps are narrower than the original Critical list.
 
