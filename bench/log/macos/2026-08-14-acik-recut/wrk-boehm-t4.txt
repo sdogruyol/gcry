@@ -1,0 +1,8 @@
+Running 30s test @ http://127.0.0.1:3845/api/v1/
+  2 threads and 100 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   105.55ms   56.50ms 355.35ms   65.95%
+    Req/Sec   475.28     89.40   740.00     67.83%
+  28443 requests in 30.07s, 0.96GB read
+Requests/sec:    946.02
+Transfer/sec:     32.85MB
