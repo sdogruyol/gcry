@@ -149,10 +149,27 @@ Target: Match Boehm on the workloads Crystal users actually run.
       per-STW validity so a stale slot is never marked. At `75a9d25`, both arms
       back to back: plain **4/10**, fixed **0/10** (p ≈ 0.006). A first attempt
       at `d36effe` was discarded — 0/10 *both* ways, because the rate had drifted
-      and the reverted arm produced no positive control. Still open: whether
-      Linux has an analogous gap on any path, and which compiler and gcry commit
-      prod builds from — that is what would connect this to the 2026-08-08
+      and the reverted arm produced no positive control.
+      **Control re-established 2026-08-14** on probe compiler `656fc4620` (the
+      A/B ran on `4a965f423`, and a codegen-dependent defect does not inherit a
+      base rate across compilers): `75a9d25` plain is **7/10**, tip with the fix
+      **0/10**, same host and morning (binomial vs a 0.7 base rate p ≈ 6e-6;
+      Fisher ≈ 0.003). Those two arms differ by a commit range as well as by the
+      fix, so the single-commit attribution is still the 4/10 → 0/10 above; what
+      this adds is that the workload still produces the defect on the current
+      toolchain, so a clean fixed arm is not a rate artefact. It also cost one
+      wasted run: `acikturkiye/lib/gcry` is a **symlink to the main checkout**,
+      so running the harness from a worktree selects the script, not the
+      collector — the first "control" compiled against the fixed tree and its
+      0/10 meant the opposite of what it was labelled.
+      **Now gated** in `process_spec` and `make greg-roots` on a
+      `thread_greg_candidates` counter (also on `/gc-stats`), verified red by
+      stubbing the method out; the same gate runs on Linux x86_64 and aarch64.
+      Still open: whether Linux has an analogous gap on any path — the gate
+      above is what will answer it — and which compiler and gcry commit prod
+      builds from, which is what would connect this to the 2026-08-08
       SIGSEGV, which remains an unproven bet.
+      `bench/log/macos/2026-08-14-greg-control-75a9d25/FINDINGS.md`
       Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
       `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
       **both** directions (forced on it is 4/5 and *worse* per trial), and thread

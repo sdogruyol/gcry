@@ -7,30 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The weekly soak asked for 24 h on a runner GitHub cancels at 6 h, so it
-  never once passed.** Both scheduled runs that ever reached it prove it:
-  2026-08-03 was **cancelled at 6h00m14s**, and 2026-08-10 only reported at all
-  because it crashed first (SEGV at 1h24m). A gate that cannot pass is not a
-  gate. The CI arm is now **5 h** with `timeout-minutes: 330`; 24 h stays the
-  local number (`make soak`, `SOAK_DURATION`). The crashing run also threw its
-  own evidence away — `Upload telemetry` had no `if: always()`, so the hours of
-  heap / pause / RSS history before the SEGV were discarded. It does now.
-  `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`
-- **CI jobs have timeouts, and the STW-heavy steps arm the watchdog.** On
-  2026-08-10 both `test` jobs hung in `stw_mt_property_test` — the
-  `pthread_getattr_np`-under-suspension bug fixed later that day in `8f2cdad` —
-  and, with no `timeout-minutes` anywhere in the workflow, each burned **6h00m**
-  in silence before the runner cancelled it. The hang was identifiable only from
-  the last line printed (`STW-MT workers=4 iterations=50 seed=10001`) and the
-  orphan process the runner killed. `GCRY_STW_WATCHDOG_MS=10000` is now set on
-  the six steps that can wedge (the three STW MT property tests, thread storm,
-  process parallel mark, the `GCRY_SOUND` correctness suite), so the next one
-  prints `STOP-THE-WORLD STALLED <n> ms in phase=<name>` instead. Step-level and
-  not job-level on purpose: `bench/stw_watchdog.cr` runs an unarmed child to
-  prove the knob gates the print, and a job-wide env would quietly arm it.
-
 ### Added
 
 - **The Monitor-inside-STW overlap is excluded as the cause of the 2026-08-10
@@ -56,7 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a crash logged without that line cannot be attributed to either arm
   afterwards. Same rule `bench/sound_profile_ab.sh` already applies to `sound`.
 
-### Added
 
 - **`GCRY_SOUND=1` — root-completeness profile.** gcry's process defaults
   include a class of knobs that trade *root-scan completeness* for throughput
@@ -111,31 +86,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unconditionally, but the knob is inert until STW runs with more than two
   mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
 
-### Changed
-
-- **The low-water skip now applies on the `lag > 0` default path.** It was
-  gated on `lag == 0`, so the default faulted in a fixed 256 KiB window per
-  parked fiber without asking whether those pages had ever been written — most
-  had not. `fiber_stack_scan_top` now starts at
-  `max(stack_top − lag, low_water)`: never wider than the lag window, never
-  narrower than what the words can hold, since a page with neither the present
-  nor the swapped bit has never been faulted. `scan_pthread_stack` already did
-  this; the two paths now agree.
-
-  **Kemal EC4 pause 8.06 → 3.60 ms** (−55%), root work 7424 → 3002 µs, post-GC
-  RSS flat to 0.2%, `mark` and `sweep` unchanged — 9 paired reps, ~2300
-  collections per config, single heap regime, IQR 24%/12%
-  (`bench/log/linux/2026-08-09-104417-root-phase/`). Fat app at its ~72 MiB
-  regime: **10.7 ms** against the old default's 28.8 ms and `GCRY_SOUND=1`'s
-  18.2 ms (`…-105503-root-phase/`, stratified; softer — that session's FINDINGS
-  records a thread-count confound).
-
-  `lag = 0` remains the wrong default: the skip makes the *bounded* scan cheap,
-  not the complete scan affordable (16.4 ms at EC4). Kemal at EC1 is unaffected
-  by construction — `multi_mutator_threads?` is false at 2 threads, so the lag
-  branch is unreachable. `GCRY_STACK_LOW_WATER=0` restores the old behaviour.
-
-### Added
 
 - **`bench/scrub_margin.cr` (`make scrub-margin`) — the parked-fiber scrub has
   zero margin.** The audit could close only half the scrub question: for a
@@ -159,7 +109,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app can sit on that boundary — the fat app reported 2 threads from one build
   and 3 from another. `bench/stw_lag_pause.cr` reports them per config.
 
+
+- **`Gcry::MonitorGate` — the EC Monitor no longer runs inside the stopped
+  world.** `stop_world` never signal-suspends the Monitor (resume races wedged it
+  in `sigsuspend`) and assumed it would cooperate by blocking in `allocate` /
+  `lock_read`. Measured, it did not: through a 4 s stop it woke ~100×/s and ran
+  `StackPool#collect` — `Crystal::System::Fiber.free_stack`, i.e. munmap of fiber
+  stacks — *inside* the stop, while the collector scanned thread stacks. It is
+  now handshaken out: the Monitor marks itself busy and backs off if the world is
+  stopping, `stop_world` waits for in-flight work to finish. No compiler fork —
+  the Monitor's three per-iteration calls are wrapped from the shard with
+  `previous_def`. Cost over 3000 collections: **zero** added pause
+  (`monitor_gate_stw_waits=0`), worst case one in-flight Monitor call; the wait is
+  counted on `/gc-stats`. `GCRY_MONITOR_GATE=0` restores the old behaviour for
+  A/B. Gate: `make stw-monitor-gate`, both directions.
+  [bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md](bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md)
+- **`GCRY_STW_WATCHDOG_MS` — a stop-the-world hang says something now.** When the
+  collector wedges under STW every mutator is frozen in `sigsuspend`, so the
+  process cannot report anything: no crash, no output, and `/gc-stats` cannot
+  answer because its thread is suspended too. Finding the `pthread_getattr_np`
+  hang below took inserting markers and rebuilding. Armed, a raw watcher thread
+  (not a `Crystal::Thread` — STW must not suspend it) prints the phase that is
+  stuck: `gcry: STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. Validated
+  against that real hang, where it names the exact phase the bug was in, and
+  driven from both sides by `make stw-watchdog`: it must fire on a deliberate
+  stall (`GCRY_STW_TEST_STALL_MS`, research only) and stay silent on an ordinary
+  collection. Default off; the phase breadcrumb it reads is recorded either way.
+
 ### Changed
+
+- **The weekly soak asked for 24 h on a runner GitHub cancels at 6 h, so it
+  never once passed.** Both scheduled runs that ever reached it prove it:
+  2026-08-03 was **cancelled at 6h00m14s**, and 2026-08-10 only reported at all
+  because it crashed first (SEGV at 1h24m). A gate that cannot pass is not a
+  gate. The CI arm is now **5 h** with `timeout-minutes: 330`; 24 h stays the
+  local number (`make soak`, `SOAK_DURATION`). The crashing run also threw its
+  own evidence away — `Upload telemetry` had no `if: always()`, so the hours of
+  heap / pause / RSS history before the SEGV were discarded. It does now.
+  `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`
+- **CI jobs have timeouts, and the STW-heavy steps arm the watchdog.** On
+  2026-08-10 both `test` jobs hung in `stw_mt_property_test` — the
+  `pthread_getattr_np`-under-suspension bug fixed later that day in `8f2cdad` —
+  and, with no `timeout-minutes` anywhere in the workflow, each burned **6h00m**
+  in silence before the runner cancelled it. The hang was identifiable only from
+  the last line printed (`STW-MT workers=4 iterations=50 seed=10001`) and the
+  orphan process the runner killed. `GCRY_STW_WATCHDOG_MS=10000` is now set on
+  the six steps that can wedge (the three STW MT property tests, thread storm,
+  process parallel mark, the `GCRY_SOUND` correctness suite), so the next one
+  prints `STOP-THE-WORLD STALLED <n> ms in phase=<name>` instead. Step-level and
+  not job-level on purpose: `bench/stw_watchdog.cr` runs an unarmed child to
+  prove the knob gates the print, and a job-wide env would quietly arm it.
+
+
+- **The low-water skip now applies on the `lag > 0` default path.** It was
+  gated on `lag == 0`, so the default faulted in a fixed 256 KiB window per
+  parked fiber without asking whether those pages had ever been written — most
+  had not. `fiber_stack_scan_top` now starts at
+  `max(stack_top − lag, low_water)`: never wider than the lag window, never
+  narrower than what the words can hold, since a page with neither the present
+  nor the swapped bit has never been faulted. `scan_pthread_stack` already did
+  this; the two paths now agree.
+
+  **Kemal EC4 pause 8.06 → 3.60 ms** (−55%), root work 7424 → 3002 µs, post-GC
+  RSS flat to 0.2%, `mark` and `sweep` unchanged — 9 paired reps, ~2300
+  collections per config, single heap regime, IQR 24%/12%
+  (`bench/log/linux/2026-08-09-104417-root-phase/`). Fat app at its ~72 MiB
+  regime: **10.7 ms** against the old default's 28.8 ms and `GCRY_SOUND=1`'s
+  18.2 ms (`…-105503-root-phase/`, stratified; softer — that session's FINDINGS
+  records a thread-count confound).
+
+  `lag = 0` remains the wrong default: the skip makes the *bounded* scan cheap,
+  not the complete scan affordable (16.4 ms at EC4). Kemal at EC1 is unaffected
+  by construction — `multi_mutator_threads?` is false at 2 threads, so the lag
+  branch is unreachable. `GCRY_STACK_LOW_WATER=0` restores the old behaviour.
+
 
 - **`scrub_fibers_enabled` now defaults to `false`** (Linux and macOS process
   GC; `GCRY_SCRUB_FIBERS=1` opts back in, `GCRY_DISABLE_SCRUB_FIBERS=1` still
@@ -196,7 +219,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invisible: Kemal `/json` **81.4%** of Boehm @ **0.77×**, `/` **88.5%** @
   **0.76×** (`…-060252/`), inside this host's quiet-smoke band.
 
-### Changed (benchmarks / numbers)
 
 - **Kemal, sound-profile and fat-app cuts re-taken on the tip default.**
   Sessions `bench/log/linux/2026-08-09-*`. The Kemal headline does **not** move
@@ -220,8 +242,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default run still reading `tuned` and the sample still green. Verified by
   negative control — flipping the default fails the sample.
 
-### Fixed (root completeness)
+### Fixed
 
+- **gcry dropped live objects on Darwin: a suspended thread's registers were
+  never scanned.** `collect_scan` asks `Platform.each_thread_greg` for them,
+  because a reference can live only in a register — the compiler is free to keep
+  an object pointer in a callee-saved register and never spill it, and a
+  conservative scan of that thread's stack then sees nothing. On Darwin that
+  method was an **empty stub**, sitting next to a `thread_get_state` that
+  already read SP and discarded the rest. The mark phase asked for a root source
+  the platform did not provide, so those objects were swept.
+
+  Found on the fat app as a live `String`'s tail overwritten in place —
+  `user_profile_picture\0\0\0\0<` where `user_profile_picture_path` should be,
+  the same 25 bytes, the same allocation, across four sessions. It needed a
+  collection to appear (`GCRY_DISABLE_AUTO=1` is 0/5 against 8/10, p ≈ 0.0003),
+  which is what makes it a dropped root rather than a write bug.
+
+  The same `thread_get_state` now fills a slot-parallel register table, cleared
+  per STW with a validity flag so an unfilled slot cannot read as "no roots".
+  **Ungated by `GCRY_DISABLE_SP_CLAMP`:** that knob trades precision for speed,
+  whereas skipping the registers drops roots. A/B at `75a9d25`, both arms back
+  to back: plain **4/10** corrupt, fixed **0/10** (p ≈ 0.006).
+
+  The control was **re-established on the current probe compiler** before this
+  release, because the A/B ran on an older one and a codegen-dependent defect
+  does not inherit a base rate across compilers: `75a9d25` plain is **7/10**,
+  tip with the fix **0/10**, same host and morning. Those arms differ by a
+  commit range as well as by the fix, so the single-commit attribution stays the
+  4/10 → 0/10 above; what the re-run establishes is that the workload still
+  produces the defect on the current toolchain.
+
+  Now gated, in `process_spec` and in `bench/greg_roots.cr` (`make greg-roots`),
+  on a `thread_greg_candidates` counter that also appears on `/gc-stats` — 0 is
+  what a platform that never reports registers looks like from the outside, and
+  is exactly what the stub produced. The gate is verified red: stubbing the
+  method out fails the spec and drops the count to 0, 5/5. The same gate now
+  runs on Linux x86_64 and aarch64, where the contract has a different
+  implementation (signal ucontext).
+
+  **Still open:** nothing here connects this to the 2026-08-08 production
+  SIGSEGV, and that diagnosis remains an unproven bet.
+  `bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`
+- **`bench/stw_lag_pause.cr` did not compile on Darwin.** Line 263 called
+  `Platform.pagemap_available?`, which exists only in
+  `platform/linux_pagemap.cr`; the same file already guards the identical call
+  further down, and this one was missed. So the target had never run on macOS —
+  the failure was a build error, not a test result. Guarded, and it now passes
+  at the relaxed `--max-ratio-nolw` bound, which supplies a number the
+  "low-water skip on Darwin" item wanted: **21.3× pause ratio** is what Darwin
+  pays for not having the skip (348 ms against 16 ms), measured on a Darwin host
+  rather than inferred from the Linux 8.06 → 3.60 ms delta.
+  `bench/log/macos/2026-08-14-release-validation/FINDINGS.md`
 - **`scan_object` ignored `allow_interior_pointers` for raw buffers.** The
   conservative fallback marked untyped allocations base-only, so an interior
   pointer stored inside a `Slice` / raw buffer was dropped — and the same line
@@ -258,35 +330,6 @@ saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
 reading — true of Kemal, false of the fat app — and it is why the defaults stay
 tuned for now.
 
-### Added
-
-- **`Gcry::MonitorGate` — the EC Monitor no longer runs inside the stopped
-  world.** `stop_world` never signal-suspends the Monitor (resume races wedged it
-  in `sigsuspend`) and assumed it would cooperate by blocking in `allocate` /
-  `lock_read`. Measured, it did not: through a 4 s stop it woke ~100×/s and ran
-  `StackPool#collect` — `Crystal::System::Fiber.free_stack`, i.e. munmap of fiber
-  stacks — *inside* the stop, while the collector scanned thread stacks. It is
-  now handshaken out: the Monitor marks itself busy and backs off if the world is
-  stopping, `stop_world` waits for in-flight work to finish. No compiler fork —
-  the Monitor's three per-iteration calls are wrapped from the shard with
-  `previous_def`. Cost over 3000 collections: **zero** added pause
-  (`monitor_gate_stw_waits=0`), worst case one in-flight Monitor call; the wait is
-  counted on `/gc-stats`. `GCRY_MONITOR_GATE=0` restores the old behaviour for
-  A/B. Gate: `make stw-monitor-gate`, both directions.
-  [bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md](bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md)
-- **`GCRY_STW_WATCHDOG_MS` — a stop-the-world hang says something now.** When the
-  collector wedges under STW every mutator is frozen in `sigsuspend`, so the
-  process cannot report anything: no crash, no output, and `/gc-stats` cannot
-  answer because its thread is suspended too. Finding the `pthread_getattr_np`
-  hang below took inserting markers and rebuilding. Armed, a raw watcher thread
-  (not a `Crystal::Thread` — STW must not suspend it) prints the phase that is
-  stuck: `gcry: STOP-THE-WORLD STALLED 514 ms in phase=thread-stacks`. Validated
-  against that real hang, where it names the exact phase the bug was in, and
-  driven from both sides by `make stw-watchdog`: it must fire on a deliberate
-  stall (`GCRY_STW_TEST_STALL_MS`, research only) and stay silent on an ordinary
-  collection. Default off; the phase breadcrumb it reads is recorded either way.
-
-### Fixed
 
 - **The 24 h soak's RSS gate failed on warm-up, not on a leak.** It bounded final
   RSS at 10% of the *starting* RSS — a percentage of a ~6 MB base, where gcry's
@@ -301,7 +344,6 @@ tuned for now.
   a stale `--rss-limit=30` cannot silently become a 30 kB ceiling. `make
   soak-smoke` now runs the same ceiling as the real gate instead of a looser one.
 
-### Fixed
 
 - **Collector hang: `pthread_getattr_np` was called with the world stopped.**
   `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
