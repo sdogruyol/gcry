@@ -252,6 +252,13 @@ module Gcry
     # Other-thread stack scans clamped to captured RSP (vs full pthread range).
     getter sp_clamp_hits : UInt64 = 0_u64
     getter sp_clamp_fallbacks : UInt64 = 0_u64
+    # Candidate words read out of a *suspended* thread's GP registers, last
+    # collect. Zero here does not mean "those registers held nothing" — it is
+    # also what a platform that never reports them looks like, which is exactly
+    # how Darwin dropped live objects until 2026-08-11 (`each_thread_greg` was an
+    # empty stub while this scan called it). The two readings are worth
+    # separating from the outside, so `bench/greg_roots.cr` gates on it.
+    getter thread_greg_candidates : UInt64 = 0_u64
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -1326,6 +1333,7 @@ module Gcry
       @type_id_root_false_negatives = 0_u64
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
+      @thread_greg_candidates = 0_u64
       @low_water_skips = 0_u64
       @low_water_skipped_bytes = 0_u64
     end

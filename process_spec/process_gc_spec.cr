@@ -174,6 +174,21 @@ end
       h = Gcry.default_heap
       (h.sp_clamp_hits + h.sp_clamp_fallbacks).should be > 0
 
+      # The same thread_get_state feeds the register scan. Until 2026-08-11 it
+      # fed only the clamp above: `each_thread_greg` was an empty stub while
+      # `collect_scan` called it, so a reference the compiler kept in a register
+      # and never spilled had no root and its object was swept. Zero here is
+      # what that stub looks like from the outside.
+      h.thread_greg_candidates.should be > 0
+
+      # And the table must not outlive the stop: start_world clears it, so no
+      # thread can read registers out of it now. A stale slot marked next
+      # collection would be naming objects that have since been freed.
+      after = 0
+      Gcry::Platform.each_thread_greg(worker.to_unsafe) { after += 1 }
+      Gcry::Platform.each_thread_greg(Thread.current.to_unsafe) { after += 1 }
+      after.should eq(0)
+
       release.set(1)
       worker.join
     end

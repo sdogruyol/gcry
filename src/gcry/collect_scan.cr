@@ -512,6 +512,7 @@ module Gcry
 
         # Always spill GP registers at suspend — may hold the only live copy.
         Platform.each_thread_greg(pthread) do |candidate|
+          @thread_greg_candidates += 1
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
 

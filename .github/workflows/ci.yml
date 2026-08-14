@@ -297,6 +297,16 @@ jobs:
           crystal build -Dgc_none bench/stw_watchdog.cr -o bin/stw_watchdog --error-trace
           ./bin/stw_watchdog
 
+      # A suspended thread's registers can hold the only live copy of a
+      # reference. Darwin asked for them and got an empty stub, and swept live
+      # objects for it (2936248). Linux reads them from the signal ucontext, so
+      # this is a different implementation of the same contract — running the
+      # gate here is what turns "does Linux have the same gap?" from an open
+      # question into an answered one.
+      - name: Suspended-thread register roots
+        run: |
+          make greg-roots
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -620,6 +630,7 @@ jobs:
           ./bin/stw_sp_clamp
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
+          make greg-roots
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
@@ -652,3 +663,4 @@ jobs:
           ./bin/stw_sp_clamp
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
+          make greg-roots
