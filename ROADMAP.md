@@ -319,6 +319,24 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `spec/stack_low_water_spec.cr` — it pins the claim ("never reports above a
       written word") rather than the pause number, which is exactly the
       assertion a second implementation has to earn on its own.
+- [ ] **`make invariants` has never passed on Darwin.** `GCRY_DEBUG_INVARIANTS=1`
+      fails `spec/collect_spec.cr:202` ("keeps empty chunks dormant within
+      empty_chunk_retain") with `live_objects mismatch: actual=6364 reported=1`.
+      Found 2026-08-14 running the suite locally on a Darwin host for the 0.19.0
+      release; it is **not new** — the same failure reproduces at `master`,
+      **`v0.18.0` and `v0.17.0`**, so it shipped in two releases unnoticed. It is
+      unnoticed because nothing runs it: Linux CI has a "Debug invariants" step
+      and is green, and `test-macos` runs `spec` / `process_spec` / samples only.
+      Debug-only — the shipping path does not call the checker, and the same spec
+      passes under `make spec`, so what disagrees is the walker and not the
+      collector's own accounting. **Hypothesis, not a finding:**
+      `Invariant.count_live_blocks` walks dormant chunks and counts any block
+      whose header does not read free, and Darwin's reclaim leaves those headers
+      alone (`MADV_FREE_REUSABLE` does not zero them — `collect_sweep.cr:439`),
+      where Linux's `MADV_DONTNEED` does not leave the same residue. What would
+      settle it: count what the walker sees on a chunk the sweep has just made
+      dormant, on both platforms. Until then this is "the checker and Darwin
+      disagree", which is worth exactly as much as that.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

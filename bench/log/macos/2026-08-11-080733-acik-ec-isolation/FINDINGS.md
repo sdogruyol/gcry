@@ -1,7 +1,16 @@
 # gcry drops a live object under the probe compiler — older than any range tried here
 
-**Status: reproduced on demand at up to 8/10. Not bisected — it predates the
-range. No root cause.**
+**Status: root-caused and fixed 2026-08-11 — Darwin never scanned a suspended
+thread's registers (§ "Root cause", § "The fix"). Reproduced on demand at up to
+8/10 before the fix; 0/10 after, at the same commit, back to back. Never
+bisected, and it did not need to be: it predates every range tried here, and the
+source argument does not rest on a commit range. Still open — whether Linux has
+the same gap, and any link to the 2026-08-08 production SIGSEGV (§ "Not
+established").**
+
+> The line above replaces "No root cause", which stood while §§ "Root cause"
+> and "The fix" were appended underneath it. Left as it was, the first thing
+> this file said contradicted the rest of it.
 
 > **The "regression in `75a9d25..d36effe`" claim below is WITHDRAWN.** Bisect
 > step one measured the supposed good end and got **8 of 10 corrupt** at
