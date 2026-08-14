@@ -309,6 +309,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Still open:** nothing here connects this to the 2026-08-08 production
   SIGSEGV, and that diagnosis remains an unproven bet.
   `bench/log/macos/2026-08-11-080733-acik-ec-isolation/FINDINGS.md`
+- **Linux aarch64 had the same gap, and the new gate found it on its first CI
+  run.** `linux_stw.cr` set `UCONTEXT_NGREGS = 0` on aarch64 under the comment
+  "skip full mcontext register dump on aarch64 for now (SP clamp only)", so
+  `copy_ucontext_gregs` returned immediately and `each_thread_greg` yielded
+  nothing while `collect_scan` called it — the same dropped-root defect as
+  Darwin's stub, by a different route. `make greg-roots` reported 0 candidates
+  with a thread suspended. x86_64 (`NGREGS = 23`) was never affected, and
+  `process_spec` could not have caught it: that assertion is Darwin-gated.
+
+  Fixed by giving aarch64 its real offsets: `regs[0]` at `uc_mcontext + 8` =
+  **184**, **31** words x0…x30 (fp, lr included; no sp or pc — the stack is
+  scanned by range and pc is not a heap pointer). The offset is cross-checked
+  against a constant already known good rather than trusted on its own: `sp`
+  follows `regs[30]`, so `184 + 31*8 = 432`, which is the SP offset the aarch64
+  clamp has been running on in production.
 - **`bench/stw_lag_pause.cr` did not compile on Darwin.** Line 263 called
   `Platform.pagemap_available?`, which exists only in
   `platform/linux_pagemap.cr`; the same file already guards the identical call

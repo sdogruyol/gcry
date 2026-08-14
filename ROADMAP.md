@@ -165,10 +165,19 @@ Target: Match Boehm on the workloads Crystal users actually run.
       **Now gated** in `process_spec` and `make greg-roots` on a
       `thread_greg_candidates` counter (also on `/gc-stats`), verified red by
       stubbing the method out; the same gate runs on Linux x86_64 and aarch64.
-      Still open: whether Linux has an analogous gap on any path — the gate
-      above is what will answer it — and which compiler and gcry commit prod
-      builds from, which is what would connect this to the 2026-08-08
-      SIGSEGV, which remains an unproven bet.
+      **Linux had the same gap, on aarch64 — answered by the gate on its first
+      CI run.** `linux_stw.cr` set `UCONTEXT_NGREGS = 0` there under the comment
+      "skip full mcontext register dump on aarch64 for now (SP clamp only)",
+      so `each_thread_greg` yielded nothing while `collect_scan` called it:
+      the same dropped-root defect Darwin had, by a different route. x86_64
+      (`NGREGS = 23`) was never affected. Fixed by giving aarch64 its real
+      offsets — `regs[0]` at `uc_mcontext + 8` = **184**, **31** words x0…x30 —
+      cross-checked against a constant already known good rather than trusted
+      alone: `sp` follows `regs[30]`, so `184 + 31*8 = 432`, the SP offset the
+      aarch64 clamp already runs on.
+      Still open: which compiler and gcry commit prod builds from, which is what
+      would connect this to the 2026-08-08 SIGSEGV, which remains an unproven
+      bet.
       `bench/log/macos/2026-08-14-greg-control-75a9d25/FINDINGS.md`
       Ruled out: both precision axes (`GCRY_SOUND=1` 2/5,
       `+GCRY_DISABLE_LAYOUT=1` 4/5, both verified from `/gc-stats`), the scrub in
