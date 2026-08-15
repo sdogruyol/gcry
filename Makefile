@@ -323,10 +323,17 @@ darwin-page-query: $(BIN)
 perf-baseline:
 	python3 bench/perf_compare.py --selftest
 
+# The two diagnostics travel with this gate because it is one that dies: on
+# 2026-08-15 it took SIGSEGV twice on aarch64 inside `Parallel::Scheduler` →
+# `swapcontext`, and left `Invalid memory access at 0xff851bc00008` and nothing
+# else — one hex number, the exact problem `GCRY_SEGV_REPORT` was written to fix
+# eight commits earlier. A gate that plants corruption on purpose is the last
+# place a crash should be allowed to stay anonymous. Measured: both arms pass
+# with them on, five runs of each, and the poison run says more.
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
-	GCRY_EC_QUEUE_AUDIT=1 $(BIN)/ec_queue_audit
-	$(BIN)/ec_queue_audit --control
+	GCRY_EC_QUEUE_AUDIT=1 GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1 $(BIN)/ec_queue_audit
+	GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1 $(BIN)/ec_queue_audit --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
