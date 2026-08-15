@@ -90,6 +90,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
   artifacts. No fault reproduced yet; what changed is the rate at which a run
   could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+- **Three readings of the 2026-08-10 soak SEGV closed by audit.** gcry writes
+  outside its own chunks in exactly two places and **neither was active in that
+  run**: the parked-fiber scrub — the one with a measured-zero margin — was
+  already default-off in that build (`93776f4` is an ancestor of `d36effe`), and
+  the soak's disappearing links point into a fiber loop that never returns. No
+  chunk was released either (`release_empty_chunks_this_collect?` is false under
+  multi-mutator unless a Parallel reclaim knob is set; both default off), which
+  rules out "a valid pointer into an unmapped chunk"; and the soak calls no
+  `GC.free`, which rules out an explicit free of a live block. What survives is a
+  block freed by the **sweep** while still referenced. The two root defects fixed
+  in this release are not it either — the soak sets no `GCRY_AUTO_LAYOUTS`, so
+  its `Fiber` / `GlobalQueue` / `Runnables` are scanned word by word.
+  `bench/log/linux/2026-08-15-segv-write-path-audit/FINDINGS.md`
 - **`GCRY_SEGV_REPORT=1` — the crash says what gcry knows about the address.**
   `Invalid memory access at 0x7f1700000149` is everything the 2026-08-10 soak
   left behind, and at that moment the collector could have said whether the

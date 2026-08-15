@@ -534,7 +534,21 @@ Target: Match Boehm on the workloads Crystal users actually run.
       overwrote a pointer in `Parallel::Scheduler`'s queue is open.
       `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md`
-- [ ] **What crashed the 2026-08-10 soak.** `Invalid memory access at
+- [ ] **What crashed the 2026-08-10 soak.** *(2026-08-15: three readings closed
+      by audit, one survives —
+      `bench/log/linux/2026-08-15-segv-write-path-audit/FINDINGS.md`.* gcry writes
+      outside its own chunks in exactly two places, and **neither was active**:
+      the parked-fiber scrub was already default-off in that build (`93776f4` is
+      an ancestor of `d36effe`), and the soak's disappearing links point at a
+      frame that never returns. **No chunk was released** either —
+      `release_empty_chunks_this_collect?` is false under multi-mutator unless a
+      Parallel reclaim knob is set, and both default off — so "a valid pointer
+      into an unmapped chunk" is out. The soak calls no `GC.free`, so "an
+      explicit free of a live block" is out. What survives is a block freed by
+      the **sweep** while still referenced, i.e. a missed root. Note the two root
+      defects fixed on 2026-08-15 cannot be it: the soak sets no
+      `GCRY_AUTO_LAYOUTS`, so its `Fiber` / `GlobalQueue` / `Runnables` are
+      scanned word by word and the queue chain was covered either way.) `Invalid memory access at
       0x7f1700000149` inside `Parallel::Scheduler#quick_dequeue?`, 1h24m in — a
       heap pointer with its low bytes overwritten, i.e. a slot freed and reused
       while the scheduler still pointed at it. The standing candidate (the EC
