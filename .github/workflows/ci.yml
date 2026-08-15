@@ -747,6 +747,29 @@ jobs:
           make scheduler-roots
           make ivar-layout-roots
           make ec-queue-audit
+          make perf-baseline
+
+      # Two more of the ~40 gates the Linux job runs and this one did not. The
+      # STW × TLAB property test is a correctness gate for a UAF class that was
+      # real (process-STW × TLAB freelist), and it is platform code on both
+      # sides of the suspend. The soak smoke needed a Darwin RSS reader first —
+      # its `/proc/self/status` reader returned 0 here, which passed the RSS
+      # ceiling by measuring nothing (bench/bench_rss.cr).
+      - name: STW × TLAB property test
+        run: |
+          make stw-mt-property-test-short
+
+      # Reported, not gated, and only until the number exists: the smoke asserts
+      # an absolute +4 MB RSS ceiling that was measured on Linux, and Darwin
+      # reclaims differently (MADV_FREE_REUSABLE keeps pages mapped where
+      # MADV_DONTNEED drops them). Inventing a Darwin ceiling here would be a
+      # number nobody measured; the first runs are what sets it, and then this
+      # loses `continue-on-error`. The crash / drain / finalizer assertions in
+      # the same run are platform-independent and do gate on Linux.
+      - name: Soak smoke
+        continue-on-error: true
+        run: |
+          make soak-smoke
 
       # First run of the debug invariant checker on Darwin. It failed on Linux
       # and Darwin alike until 2026-08-15 (the walk counted every block of a

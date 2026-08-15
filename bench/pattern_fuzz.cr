@@ -13,6 +13,7 @@
 # Run:   ./bin/pattern_fuzz [--seed=1] [--phases=200] [--objects-per-phase=5000]
 
 require "../src/gcry"
+require "./bench_rss"
 
 {% unless flag?(:gc_none) %}
   raise "pattern_fuzz requires -Dgc_none (gcry as process GC)"
@@ -49,19 +50,11 @@ def check(label, val, baseline, limit, failures)
   end
 end
 
-# ---- RSS helper (Linux /proc/self/status) ----
+# ---- RSS ----
+# Reported, not gated on, so this one tolerates a platform that cannot answer —
+# it prints 0 and says nothing else. bench/bench_rss.cr carries the reader.
 def read_rss_kb : UInt64
-  File.open("/proc/self/status") do |f|
-    f.each_line do |line|
-      if line.starts_with?("VmRSS:")
-        parts = line.split
-        return parts[1].to_u64 if parts.size >= 2
-      end
-    end
-  end
-  0_u64
-rescue
-  0_u64
+  BenchRss.read_kb
 end
 
 # ---- Allocation distributions ----

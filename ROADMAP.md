@@ -136,11 +136,25 @@ CI asymmetry that hid both.
       both cases are pinned by `spec/invariant_spec.cr` without the env var.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
-      `make scheduler-roots`, `make ivar-layout-roots` and now **Debug
-      invariants** (added 2026-08-15 — exactly what hid the item above for three
-      releases); the Linux job runs those plus ~40 further gates. Still missing on
-      Darwin, in the order they would pay: `stw_mt_property_test`, the soak, a
-      perf gate.
+      `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
+      `make perf-baseline`, and — all added 2026-08-15 — **Debug invariants**
+      (exactly what hid the item above for three releases),
+      **`stw_mt_property_test`** and a **soak smoke**.
+      The soak needed a Darwin RSS reader before it could run there at all: its
+      `/proc/self/status` reader returned 0 under a `rescue`, so the RSS ceiling
+      compared 0 against a start of 0 and passed by measuring nothing.
+      `bench/bench_rss.cr` reads `task_info(MACH_TASK_BASIC_INFO)` instead, is
+      shared by the three harnesses that each had their own copy, and returns
+      **nil rather than 0** so a caller that gates on RSS refuses instead. Two
+      consistency checks on the Darwin read (`resident != 0`, `resident_max >=
+      resident`) turn a wrong struct offset into "cannot answer" rather than a
+      plausible wrong number. Cross-compiled for `aarch64-apple-darwin` to
+      type-check the mach path; not yet *run* on a Darwin host.
+      Still missing: a **perf gate** (needs wrk on the macOS runner, and a
+      baseline recorded there — see the item below). And the Darwin soak smoke is
+      `continue-on-error` for now: its +4 MB RSS ceiling was measured on Linux,
+      Darwin reclaims differently, and inventing a Darwin number would be exactly
+      the thing this board refuses. The first runs set it, and then it gates.
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

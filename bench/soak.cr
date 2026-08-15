@@ -16,6 +16,7 @@
 #         ./bin/soak --fiber-churn=512 --rss-limit-kb=131072   # queue-audit arm
 
 require "../src/gcry"
+require "./bench_rss"
 
 {% unless flag?(:gc_none) %}
   raise "soak test requires -Dgc_none (gcry as process GC)"
@@ -73,19 +74,20 @@ if fiber_churn > 0 && rss_limit_kb <= 4096
   exit 64
 end
 
-# ---- Process RSS helper (Linux /proc/self/status) ----
+# ---- Process RSS ----
+# The RSS ceiling is one of two things this soak asserts, so a platform that
+# cannot answer must stop the run rather than compare zeros. That is not
+# hypothetical: the reader this replaced was `/proc/self/status` with a
+# `rescue 0_u64`, which on Darwin passes the ceiling by measuring nothing.
+unless BenchRss.available?
+  STDERR.puts "cannot read this process's RSS on this platform, and the soak's " \
+              "second assertion is an RSS ceiling — refusing to run a gate that " \
+              "would compare zeros and pass."
+  exit 64
+end
+
 def read_rss_kb : UInt64
-  File.open("/proc/self/status") do |f|
-    f.each_line do |line|
-      if line.starts_with?("VmRSS:")
-        parts = line.split
-        return parts[1].to_u64 if parts.size >= 2
-      end
-    end
-  end
-  0_u64
-rescue
-  0_u64
+  BenchRss.read_kb
 end
 
 # ---- Finalizer class ----

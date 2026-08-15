@@ -40,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The soak, the STW × TLAB property test and the invariant checker now run on
+  Darwin — and the soak's RSS gate stopped passing by measuring nothing.** Three
+  bench harnesses each carried a `/proc/self/status` reader with a
+  `rescue 0_u64`. On Darwin that is not a fallback: the file does not exist,
+  every sample reads 0, and the soak's RSS ceiling compares 0 against a start of
+  0 and passes. `bench/bench_rss.cr` replaces all three — `task_info(MACH_TASK_BASIC_INFO)`
+  on Darwin, `/proc` on Linux, and **nil rather than 0** when the platform cannot
+  answer, so `soak` and `rss_leak` refuse to run instead of gating on zeros
+  (`pattern_fuzz` only reports RSS, so it tolerates it). The Darwin read carries
+  two consistency checks — `resident != 0` and `resident_max >= resident` — so a
+  wrong struct offset surfaces as "cannot answer" rather than as a plausible
+  wrong number. Type-checked by cross-compiling for `aarch64-apple-darwin`; not
+  yet run on a Darwin host. The macOS job gained `stw-mt-property-test-short`,
+  `soak-smoke` (as `continue-on-error` until a Darwin RSS ceiling is *measured*
+  rather than guessed), `ec-queue-audit` and `perf-baseline`.
 - **`bench/perf_compare.py` — perf against a recorded baseline, not just against
   a floor.** `perf_smoke.sh` gates on thr ≥65% of Boehm, RSS ≤1.25×, p50 ≤2.5 ms,
   and quiet tip holds ~85% @ ~0.8× @ ~0.6 ms, so **85% → 70% clears every gate in
