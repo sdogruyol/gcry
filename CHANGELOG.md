@@ -202,6 +202,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-Dexecution_context` / `-Dpreview_mt`, so plain `spawn` is covered by this and
   by the pin block. `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
 
+### Fixed
+
+- **`make scheduler-roots` measured from a baseline that had not settled, and it
+  cut both ways.** The gate went red three times on 2026-08-15 (aarch64 once,
+  Darwin twice) on `the pin count moved by 2 with no Parallel EC in the process`,
+  which read like a platform difference and was not: reproduced on x86_64 at **1
+  run in 25**. Not a thread arriving either — the count jumps with
+  `/proc/self/status` `Threads:` flat at 2 — but the runtime still finishing its
+  asynchronous boot, since a 50 ms sleep before the first collection makes it
+  stable on 10 of 10. Both arms baselined off that first collection, so the same
+  line turned `--control` red *and* inflated the hold arm's `delta` by 2,
+  discounting the threshold it must clear (the failing Darwin run: `before: 23`,
+  delta 49 against 45 expected; settled it was 47). `settled_pins` now collects
+  until two readings agree. No threshold changed; `--control` is 0 in 40 runs and
+  the gate 8/8. `bench/log/linux/2026-08-15-ec-pin-baseline-settles/FINDINGS.md`
+
 ### Changed
 
 - **`--collect-hz=N` — the soak's collect cadence is a knob, and it was the

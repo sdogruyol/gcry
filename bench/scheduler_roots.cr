@@ -107,6 +107,31 @@ end
 # has to be a macro rather than a runtime `if` — on a compiler without execution
 # contexts `Fiber::ExecutionContext::Parallel` does not exist, so a reference to
 # it would fail to compile rather than be skipped.
+# The ambient pin count is not constant at process start — it **settles**. Two
+# pins arrive in the first milliseconds: measured on an idle x86_64 host, the
+# first collection reads 23 where every later one reads 25, in 1 run in 25, with
+# the thread count flat at 2 throughout (so it is not a worker starting late).
+# A 50 ms sleep before the first collection makes it 25 on 10 of 10, which is
+# what says the settling is the runtime's own asynchronous boot and not
+# something the collection does.
+#
+# Reading the baseline off the first collection therefore did two things, and
+# both were wrong in the gate's favour or against it: `--control` went red at
+# `delta: 2` (three CI runs on 2026-08-15, on aarch64 and twice on Darwin), and
+# the hold arm's `delta = after - before` came out **2 too high**, discounting
+# the threshold it is supposed to clear. Settle first, then measure.
+def settled_pins : UInt64
+  GC.collect
+  prev = HEAP.ec_root_pins
+  8.times do
+    GC.collect
+    now = HEAP.ec_root_pins
+    return now if now == prev
+    prev = now
+  end
+  prev
+end
+
 def run(control : Bool) : Int32
   {% unless Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
     puts
@@ -116,11 +141,11 @@ def run(control : Bool) : Int32
   {% else %}
     failures = [] of String
 
-    # Baseline: a collection with no Parallel EC in existence. Whatever the
-    # ambient Thread-level pins cost, they cost it here too, so the delta below
-    # is the Parallel block's own contribution and nothing else.
-    GC.collect
-    before = HEAP.ec_root_pins
+    # Baseline: a settled collection with no Parallel EC in existence. Whatever
+    # the ambient Thread-level pins cost, they cost it here too, so the delta
+    # below is the Parallel block's own contribution and nothing else — provided
+    # the ambient number has stopped moving, which is what `settled_pins` is for.
+    before = settled_pins
     puts "pins on a collection before any Parallel EC: #{before}"
 
     if control
