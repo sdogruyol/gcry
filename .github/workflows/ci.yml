@@ -26,6 +26,14 @@ on:
         description: "GCRY_EC_QUEUE_AUDIT — walk the Parallel run queues each collection and report the first slot that stops being a live Fiber. 'off' to disable."
         required: false
         default: "on"
+      fiber_churn:
+        description: "Soak --fiber-churn=N: fibers per 1 ms burst, to keep the run queues occupied so the queue audit has something to look at. 0 = the baseline workload every earlier soak ran."
+        required: false
+        default: "0"
+      soak_rss_limit_kb:
+        description: "Soak --rss-limit-kb. Churn holds thousands of fiber stacks (+44.7 MB measured over 25 s at 512), so a churn arm needs this raised."
+        required: false
+        default: "4096"
 
 jobs:
   test:
@@ -555,7 +563,16 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 330
-    name: soak (5h)
+    # Three arms, concurrently. One 5 h arm a week cannot chase a crash that took
+    # 1h24m to arrive — at that cadence a candidate fix and a quiet run are the
+    # same observation. Three tripled the sample rate for the same wall clock,
+    # and `fail-fast: false` is the point: an arm that crashes must not cancel
+    # the two that might have crashed differently.
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [1, 2, 3]
+    name: soak (5h, arm ${{ matrix.arm }})
     steps:
       - uses: actions/checkout@v4
 
@@ -580,8 +597,16 @@ jobs:
           # it did. Costs a bounded walk inside the pause; on by default here
           # because that is what this job is for.
           GCRY_EC_QUEUE_AUDIT: ${{ github.event.inputs.ec_queue_audit == 'off' && '0' || '1' }}
+          FIBER_CHURN: ${{ github.event.inputs.fiber_churn || '0' }}
+          SOAK_RSS_LIMIT_KB: ${{ github.event.inputs.soak_rss_limit_kb || '4096' }}
         run: |
-          ./bin/soak --duration="$SOAK_DURATION" --telemetry=/tmp/gcry-soak.log
+          # --fiber-churn=0 is the baseline every earlier soak ran on, and the
+          # one the open 2026-08-10 SEGV is measured against; raise it (with the
+          # RSS ceiling) only for a hunting run.
+          ./bin/soak --duration="$SOAK_DURATION" \
+            --fiber-churn="$FIBER_CHURN" \
+            --rss-limit-kb="$SOAK_RSS_LIMIT_KB" \
+            --telemetry=/tmp/gcry-soak.log
 
       # The run that fails is the one whose telemetry is worth having, and it was
       # the one run that discarded it: 2026-08-10 crashed, so this step was
@@ -590,7 +615,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: soak-telemetry
+          name: soak-telemetry-arm-${{ matrix.arm }}
           path: /tmp/gcry-soak.log
           retention-days: 30
 

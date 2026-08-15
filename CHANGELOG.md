@@ -40,6 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The soak can now keep its run queues occupied, and CI runs three arms at
+  once.** The queue audit below can only catch a slot that is corrupt *while* a
+  collection sees it, and the baseline workload gave it almost nothing: measured,
+  **1 collection in 24** had a non-empty queue when the world stopped (10 Hz
+  spawn against ~1 collection/s, each fiber returning immediately).
+  `--fiber-churn=N` spawns N fibers per 1 ms burst that yield four times each —
+  four because a fiber that returns immediately is drained in microseconds and
+  the ring is empty again before any collection sees it. At **512**: 23 of 24
+  collections non-empty, 2486 slots, max 508 per collect. Default **0**, the
+  baseline every earlier soak ran on and the one the open 2026-08-10 SEGV is
+  measured against. Churn holds thousands of fiber stacks (**+44.7 MB** over
+  25 s), so a churn run whose `--rss-limit-kb` is still the baseline +4 MB is
+  **refused** rather than failed on a bound nobody chose. The CI soak is now a
+  `fail-fast: false` matrix of three concurrent arms — one 5 h arm a week cannot
+  chase a crash that took 1h24m to arrive, and an arm that dies must not cancel
+  the two that might have died differently — with `fiber_churn` and
+  `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
+  artifacts. No fault reproduced yet; what changed is the rate at which a run
+  could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
 - **`GCRY_EC_QUEUE_AUDIT=1` — name the corrupt run-queue slot at the next
   collection instead of at the crash.** The 2026-08-10 soak died in
   `Parallel::Scheduler#quick_dequeue?` on `0x7f1700000149`, 1h24m in; the dequeue

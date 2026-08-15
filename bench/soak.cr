@@ -4,6 +4,7 @@
 #   - Alloc storm: ~1000 objects/s
 #   - Periodic collect: 1 Hz
 #   - Fiber spawn: ~10 Hz
+#   - Run-queue churn: opt-in, --fiber-churn=N fibers per 1 ms burst (default 0)
 #   - Finalizer load: ~100 objects/s
 #   - WeakRef / disappearing links: ~10 Hz
 #
@@ -11,7 +12,8 @@
 # After soak: RSS within --rss-limit % of start (default 10), no crashes.
 #
 # Build:  crystal build -Dgc_none bench/soak.cr -o bin/soak
-# Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit=10]
+# Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit-kb=4096]
+#         ./bin/soak --fiber-churn=512 --rss-limit-kb=131072   # queue-audit arm
 
 require "../src/gcry"
 
@@ -30,6 +32,13 @@ telemetry_path = "/tmp/gcry-soak.log"
 # a failure: three chunks were enough to cross 10%. A leak looks nothing like it
 # — it ramps — so the ceiling is an absolute headroom over the warm-up plateau.
 rss_limit_kb = 4096
+# Fibers per 10 ms burst, on top of the ~10 Hz spawn above. Default 0 — the
+# baseline every earlier soak ran on, and the one the open 2026-08-10 SEGV is
+# measured against. It exists because `GCRY_EC_QUEUE_AUDIT` can only catch a slot
+# that is corrupt *while* a collection sees it, and the default workload's run
+# queues hold 0–1 slots per collection (~10 Hz spawn against ~1 Hz collect). This
+# raises queue occupancy without touching anything else about the workload.
+fiber_churn = 0
 
 ARGV.each do |arg|
   case arg
@@ -39,6 +48,8 @@ ARGV.each do |arg|
     telemetry_path = $1
   when /--rss-limit-kb=(\d+)/
     rss_limit_kb = $1.to_i64
+  when /--fiber-churn=(\d+)/
+    fiber_churn = $1.to_i
   when /--rss-limit=(\d+)/
     # Deliberately fatal rather than reinterpreted: the old flag was a percent,
     # so silently reading "30" as 30 kB would turn a loose bound into an
@@ -47,6 +58,19 @@ ARGV.each do |arg|
                 "one 256 KiB chunk could move by 4%). Use --rss-limit-kb=<kB>."
     exit 64
   end
+end
+
+# Churn holds thousands of fiber stacks in the stack pool, so the RSS ceiling
+# the baseline workload is gated on cannot hold: measured **+44.7 MB** over 25 s
+# at `--fiber-churn=512` against a +4 MB default. Refuse rather than fail the run
+# on a bound nobody chose — the same call the `--rss-limit` removal above makes,
+# and for the same reason: a gate that trips for an unrelated reason teaches
+# nothing.
+if fiber_churn > 0 && rss_limit_kb <= 4096
+  STDERR.puts "--fiber-churn=#{fiber_churn} needs a raised --rss-limit-kb: the churn keeps " \
+              "thousands of fiber stacks in the pool (+44.7 MB measured over 25 s at 512), and " \
+              "a #{rss_limit_kb} kB ceiling is for the baseline workload."
+  exit 64
 end
 
 # ---- Process RSS helper (Linux /proc/self/status) ----
@@ -99,11 +123,23 @@ class SoakTest
   @total_fibers : UInt64
   @total_finalizable : UInt64
   @total_weakref : UInt64
+  @total_churn : UInt64
+  # Queue occupancy seen by the audit, accumulated at the soak's own 1 Hz
+  # collections. Sampling the counter from the telemetry loop instead would read
+  # whatever the *last* collection happened to see, which is 0 most of the time
+  # even under churn — the thing being measured is bursty by construction.
+  @queue_slots_total : UInt64
+  @queue_slots_max : UInt64
+  # Collections whose walk had something to walk. This is the number the audit's
+  # usefulness actually turns on: a corrupt slot is only caught if a collection
+  # lands while it is inside head..tail, so "how often is the queue non-empty
+  # when the world stops" bounds what the instrument can ever see.
+  @queue_slots_hits : UInt64
 
   @rss_max = 0_u64
   @rss_samples = 0
 
-  def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64)
+  def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64, @fiber_churn : Int32 = 0)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -114,6 +150,10 @@ class SoakTest
     @total_fibers = 0_u64
     @total_finalizable = 0_u64
     @total_weakref = 0_u64
+    @total_churn = 0_u64
+    @queue_slots_total = 0_u64
+    @queue_slots_max = 0_u64
+    @queue_slots_hits = 0_u64
   end
 
   def add_live(s : String)
@@ -147,15 +187,15 @@ class SoakTest
     # cannot be attributed to either arm afterwards.
     telemetry.puts "config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
                    "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
-                   "ec_queue_audit=#{@heap.ec_queue_audit}"
+                   "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn}"
     # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
     # SEGV'd in the dequeue an unknown time after the write that caused it, and a
     # cumulative fault count here says which hour the slot went bad.
-    telemetry.puts "hour\telapsed\theap_kb\tfree_kb\tlive_objects\tcollections\tpause_p50\tpause_p99\trss_kb\tfinalized\tqueue_slots\tqueue_faults"
+    telemetry.puts "hour\telapsed\theap_kb\tfree_kb\tlive_objects\tcollections\tpause_p50\tpause_p99\trss_kb\tfinalized\tqueue_slots_total\tqueue_slots_max\tqueue_slots_hits\tqueue_faults"
     telemetry.flush
     puts "Config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
          "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
-         "ec_queue_audit=#{@heap.ec_queue_audit}"
+         "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -177,6 +217,10 @@ class SoakTest
         begin
           GC.collect
           @total_collect += 1
+          slots = @heap.ec_queue_audit_ring_slots + @heap.ec_queue_audit_list_slots
+          @queue_slots_total += slots
+          @queue_slots_max = slots if slots > @queue_slots_max
+          @queue_slots_hits += 1 if slots > 0
         rescue ex
           record_error("collect: #{ex}")
         end
@@ -193,6 +237,29 @@ class SoakTest
           add_live(s)
         end
         @total_fibers += 1
+      end
+    end
+
+    # Run-queue churn (opt-in, --fiber-churn=N). Each fiber does nothing but
+    # yield once and exit, so they queue and drain rather than accumulate live
+    # data: what this adds is *occupancy* of the scheduler's ring and the global
+    # queue, which is what the queue audit needs in order to have anything to
+    # look at.
+    if @fiber_churn > 0
+      spawn do
+        loop do
+          sleep(0.001.seconds)
+          @fiber_churn.times do
+            spawn do
+              # Four yields, not one: a fiber that returns immediately is drained
+              # by a worker in microseconds and the ring is empty again before
+              # any collection can see it. Yielding puts it back on the queue, so
+              # a burst keeps depth for as long as it takes to round-robin.
+              4.times { Fiber.yield }
+            end
+            @total_churn += 1
+          end
+        end
       end
     end
 
@@ -239,8 +306,7 @@ class SoakTest
         rss = read_rss_kb
         @rss_max = rss if rss > @rss_max
         @rss_samples += 1
-        queue_slots = @heap.ec_queue_audit_ring_slots + @heap.ec_queue_audit_list_slots
-        telemetry.puts "#{current_hour}\t#{elapsed}\t#{m.heap_size / 1024}\t#{m.free_bytes / 1024}\t#{m.live_objects}\t#{m.collections}\t#{m.pause_p50_ns}\t#{m.pause_p99_ns}\t#{rss}\t#{SoakFinalizable.seen}\t#{queue_slots}\t#{@heap.ec_queue_audit_faults}"
+        telemetry.puts "#{current_hour}\t#{elapsed}\t#{m.heap_size / 1024}\t#{m.free_bytes / 1024}\t#{m.live_objects}\t#{m.collections}\t#{m.pause_p50_ns}\t#{m.pause_p99_ns}\t#{rss}\t#{SoakFinalizable.seen}\t#{@queue_slots_total}\t#{@queue_slots_max}\t#{@queue_slots_hits}\t#{@heap.ec_queue_audit_faults}"
         telemetry.flush
         last_telemetry_hour = current_hour
 
@@ -309,7 +375,7 @@ class SoakTest
     telemetry.puts "# result: PASS"
     telemetry.puts "end=#{Time.instant}"
     telemetry.puts "end_rss=#{rss_end}kB"
-    telemetry.puts "allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers} finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
+    telemetry.puts "allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers} churn=#{@total_churn} finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
     telemetry.puts "monitor_gate=#{Gcry::MonitorGate.enabled?} " \
                    "monitor_blocks=#{Gcry::MonitorGate.monitor_blocks} " \
                    "stw_waits=#{Gcry::MonitorGate.stw_waits} " \
@@ -318,7 +384,9 @@ class SoakTest
 
     puts "Soak test PASSED"
     puts "  duration=#{duration_sec}s"
-    puts "  allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers}"
+    puts "  allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers} churn=#{@total_churn}"
+    puts "  queue slots seen: total=#{@queue_slots_total} max_per_collect=#{@queue_slots_max} " \
+         "non_empty=#{@queue_slots_hits}/#{@total_collect} faults=#{@heap.ec_queue_audit_faults}"
     puts "  finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
     puts "  finalized=#{SoakFinalizable.seen}"
     puts "  RSS: #{start_rss}kB → #{rss_end}kB (+#{rss_end.to_i64 - start_rss.to_i64}kB, max #{@rss_max}kB, ceiling +#{@rss_limit_kb}kB)"
@@ -329,6 +397,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64)
+test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn)
 success = test.run(duration)
 exit(1) unless success

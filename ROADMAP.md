@@ -106,14 +106,27 @@ CI asymmetry that hid both.
       `queue_slots` / `queue_faults`. Also settled on the way: the **default**
       execution context is `Parallel` on 1.21.0 with or without EC flags, so this
       and the pin block cover ordinary `spawn`.
-      **Why the item stays open:** exposure, not mechanism. The soak's
-      `queue_slots` reads **0–1 per collection** — it spawns at ~10 Hz against
-      ~1 collection/s, so the queues are nearly always empty when the world stops,
-      and the audit only catches a slot that is corrupt *while* a collection sees
-      it. Next: a fiber-churn knob on the soak to keep the queues populated (it
-      changes the soak's shape, so it is a deliberate step, not a fold-in), and
-      the first handle — dispatch N arms concurrently — is still untried.
-      `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
+      **Both handles are now built.** Exposure was the gap the audit left: the
+      baseline workload spawns at ~10 Hz against ~1 collection/s, so **1
+      collection in 24** had a non-empty queue when the world stopped, and the
+      audit can only catch a slot that is corrupt *while* a collection sees it.
+      `--fiber-churn=N` (default **0**, the baseline every earlier soak ran on)
+      spawns N fibers per 1 ms burst that yield four times each; at **512** it is
+      **23 of 24** collections, 2486 slots, max 508. The audit's cost measured at
+      that occupancy rather than at zero: p50 8.41/8.34/8.77 ms on against
+      8.29/8.58/8.67 ms off. Churn moves RSS +44.7 MB (stack pool), so the soak
+      **refuses** a churn run whose `--rss-limit-kb` is still the baseline +4 MB
+      instead of failing on a bound nobody chose. And the CI soak is now a
+      `fail-fast: false` matrix of **three concurrent arms** — one arm a week
+      cannot chase a 1h24m crash, and an arm that dies must not cancel the two
+      that might have died differently — with `fiber_churn` /
+      `soak_rss_limit_kb` as dispatch inputs, both defaulting to the baseline.
+      **Why the item stays open:** no fault has been reproduced. This raises the
+      rate at which a run could catch one (1/24 → 23/24 collections, ×3 arms) and
+      shortens the report from "an hour later, in the consumer" to "the next
+      collection"; whether that is enough is the next scheduled run's answer.
+      `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`,
+      `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
 - [x] **Fix `make invariants`, and run it on Darwin.** Done 2026-08-15 — and it
       was never a Darwin problem: the walk counted every block of a **dormant**
       chunk (headers the sweep has advised away read as neither used nor FREE on
