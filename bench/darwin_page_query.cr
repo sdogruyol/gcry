@@ -117,10 +117,22 @@ module DarwinPageQuery
 end
 
 {% if flag?(:darwin) %}
-  KERN_SUCCESS =        0
-  PAGE         = 4096_u64
-  PAGES        =      256
-  FILL         =  0x5A_u8
+  KERN_SUCCESS = 0
+  # Asked, not assumed. This was `4096_u64`, and the "page size 4096" the probe
+  # printed on 2026-08-15 was therefore that constant talking, not a
+  # measurement — the probe never asked the host. The collector's own
+  # `Platform.host_page_size` records Apple Silicon as 16 KiB, so if this runs on
+  # one, every "page" counted here was a quarter of a real one: the region called
+  # 256 pages would be 64, each query answered four times over, and "0 of 256
+  # written pages left residency" counted 4 KiB slices. A probe built to
+  # establish per-page semantics cannot have a unit the kernel does not use, and
+  # cannot report an assumption in the position where a reader expects a fact.
+  PAGE = begin
+    sz = LibC.sysconf(LibC::SC_PAGESIZE)
+    sz > 0 ? sz.to_u64 : 16384_u64
+  end
+  PAGES =     256
+  FILL  = 0x5A_u8
 
   # {disposition, ok} — a query that fails is not a skippable page, and the
   # caller must treat it as "scan it".
@@ -159,7 +171,7 @@ end
   end
 
   puts "=== mach_vm_page_query disposition bits ==="
-  puts "page size #{PAGE}, region #{PAGES} pages"
+  puts "page size #{PAGE} (sysconf), region #{PAGES} pages, #{PAGES.to_u64 * PAGE // 1024} KiB"
   failures = [] of String
 
   # ── Arm 1: untouched ────────────────────────────────────────────────────────
