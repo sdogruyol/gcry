@@ -85,7 +85,7 @@ class OomTest
     # that every malloc re-enters collect (stack overflow under -Dgc_none).
     heap.gc_threshold = 256_000_u64 # ~256KB
 
-    start = Time.monotonic
+    start = Time.instant
     iterations = 200
     errors = 0
 
@@ -130,7 +130,7 @@ class OomTest
 
     heap.gc_threshold = saved_threshold
 
-    elapsed = (Time.monotonic - start).total_seconds
+    elapsed = start.elapsed.total_seconds
     puts "  Phase 1 done: #{iterations} iterations, #{elapsed.round(2)}s, #{errors} errors"
     errors
   end
@@ -201,7 +201,7 @@ class OomTest
 
     Finalizable.reset_stats
     errors = 0
-    start = Time.monotonic
+    start = Time.instant
     iterations = 500
 
     iterations.times do |i|
@@ -219,7 +219,7 @@ class OomTest
     GC.collect rescue nil
     GC.collect rescue nil
 
-    elapsed = (Time.monotonic - start).total_seconds
+    elapsed = start.elapsed.total_seconds
     finalized = Finalizable.finalized
     created = Finalizable.created
 

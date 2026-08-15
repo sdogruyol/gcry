@@ -204,6 +204,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Gcry::Clock.monotonic_ns` — one clock reader, and no deprecated `Time` call
+  left in the tree.** `Time.monotonic` is deprecated on the Crystal versions this
+  shard supports, and every job printed the warning from `trace.cr`. The trace
+  emitter could not simply move to `Time.instant`: `Time::Instant` is opaque by
+  design and yields only a `Time::Span` between two readings, while `ts_ns` is an
+  absolute stamp written into a stack buffer from inside the stopped world. The
+  collector had already solved that — a bare `clock_gettime(CLOCK_MONOTONIC)` —
+  and so had `MonitorGate` and `StwWatchdog`, each with its own copy of the same
+  three lines. All four now call one, for the reason `RawOut` exists. The bench
+  harnesses, which only ever wanted deltas, use `Time.instant` as intended.
+
 - **The set of execution-context types is derived too — an `Isolated` context had
   no explicit pin at all.** The pin list stopped being seven names earlier in this
   cycle; the dispatch *into* it was still one: `if ec.is_a?(Parallel)`. There are

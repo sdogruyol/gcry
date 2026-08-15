@@ -4,6 +4,7 @@
 #   require "gcry"  and  crystal build -Dgc_none
 #
 # See DESIGN.md and docs/INTEGRATION.md.
+require "./gcry/clock"
 require "./gcry/heap"
 require "./gcry/layout"
 

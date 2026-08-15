@@ -109,9 +109,7 @@ module Gcry
     end
 
     private def self.now_ns : UInt64
-      ts = uninitialized LibC::Timespec
-      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      Clock.monotonic_ns
     end
   end
 end
