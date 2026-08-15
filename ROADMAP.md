@@ -183,20 +183,23 @@ CI asymmetry that hid both.
       Darwin), where one promptly failed on a threshold calibrated against the
       vacuous run and now asserts the drift the defect actually produced.
       `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
-- [ ] **`live_objects` comes back on x86_64 and does not on arm64.** The
-      regression above, on its first honest run, is **red on `aarch64` and on
-      `darwin` and green on `x86_64`** — allocate 10 000, free all 10 000,
-      collect four times, and the counter sits **1005** (darwin: 1004) above
-      where it started. Measured on x86_64 the same delta is **≤ 4**, across
-      `GCRY_CHUNK_BYTES` 64 KiB → 512 KiB, so this is not the assertion's slack
-      being tight on a noisier host and raising the bound would bury it. The
-      counter is what every GC decision reads, and this is the drift the v0.14.0
-      defect produced, on the two platforms that were not under CI when it was
-      fixed. The spec now reports what separates the readings — the drift at two
-      counts an order of magnitude apart, and gcry's own invariant walk, which
-      skips dormant chunks and so reads high against a counter that stranded
-      objects in one. Next arm64 run says which. No Darwin or aarch64 host here;
-      CI is the instrument.
+- [x] **The arm64 `live_objects` drift was the collector working.** The
+      regression above went red on `aarch64` and `darwin` and stayed green on
+      `x86_64` — |drift| 1005 against ≤ 4 — which read like a counter defect on
+      the two platforms that were not under CI when v0.14.0 fixed one. It was
+      not. Reporting the drift signed, at two counts an order of magnitude
+      apart, and against gcry's own heap walk settled it in one run: the drift
+      was **negative** (−1007 / −1006), did **not** scale with the allocation
+      count (−2 at 1 000), and the **walk agreed with the counter**. The cycle's
+      collections were reclaiming ambient garbage that everything before it had
+      left, in an amount that is a property of the spec suite and the platform,
+      not of the heap. A pre-baseline collect removes it — x86_64 −110 → −8 — and
+      the assertion now measures stranding, which is what the defect did and
+      what a bound can honestly hold. The walk verdict is not kept:
+      `Gcry::Invariant.enable` is global and checks after every malloc, so a
+      spec that turns it on fires the documented off-by-one race from an
+      arbitrary allocation site and kills the process. `GCRY_DEBUG_INVARIANTS=1`
+      and the `make invariants` gate are where that check belongs.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
