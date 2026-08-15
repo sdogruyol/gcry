@@ -797,15 +797,19 @@ jobs:
       - name: mach_vm_page_query disposition bits
         run: make darwin-page-query
 
-      # Reported, not gated, and only until the number exists: the smoke asserts
-      # an absolute +4 MB RSS ceiling that was measured on Linux, and Darwin
-      # reclaims differently (MADV_FREE_REUSABLE keeps pages mapped where
-      # MADV_DONTNEED drops them). Inventing a Darwin ceiling here would be a
-      # number nobody measured; the first runs are what sets it, and then this
-      # loses `continue-on-error`. The crash / drain / finalizer assertions in
-      # the same run are platform-independent and do gate on Linux.
+      # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
+      # measured on Linux and Darwin reclaims differently (MADV_FREE_REUSABLE
+      # keeps pages mapped where MADV_DONTNEED drops them), so nobody knew what
+      # Darwin does. Four green runs now say, and they say the Linux number
+      # holds — no Darwin ceiling had to be invented after all:
+      #
+      #   +2880 kB  +3136 kB  +2384 kB  +2640 kB   (max RSS 10.6–11.4 MB)
+      #
+      # Worst is +3136 against a +4096 ceiling: 960 kB of headroom, 1.28x the
+      # 752 kB spread across the four. Darwin does run ~2.9x Linux's ~1 MB
+      # re-fault, which is why this needed measuring rather than assuming.
+      # Raise the ceiling only against more runs, never to quiet one red.
       - name: Soak smoke
-        continue-on-error: true
         run: |
           make soak-smoke
 

@@ -217,10 +217,14 @@ CI asymmetry that hid both.
       plausible wrong number. Cross-compiled for `aarch64-apple-darwin` to
       type-check the mach path; not yet *run* on a Darwin host.
       Still missing: a **perf gate** (needs wrk on the macOS runner, and a
-      baseline recorded there — see the item below). And the Darwin soak smoke is
-      `continue-on-error` for now: its +4 MB RSS ceiling was measured on Linux,
-      Darwin reclaims differently, and inventing a Darwin number would be exactly
-      the thing this board refuses. The first runs set it, and then it gates.
+      baseline recorded there — see the item below). **The Darwin soak smoke now
+      gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
+      measured on Linux and Darwin reclaims differently, and inventing a Darwin
+      number would be the thing this board refuses. Four green runs on 2026-08-15
+      measured it instead — **+2880 / +3136 / +2384 / +2640 kB** — and the Linux
+      ceiling turned out to hold: worst +3136 against +4096 is 960 kB of
+      headroom, 1.28× the 752 kB spread. Darwin does re-fault ~2.9× what Linux
+      does, which is why it needed measuring and not assuming.
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
