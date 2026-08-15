@@ -67,12 +67,15 @@ jobs:
       - name: Check formatting
         run: crystal tool format --check
 
+      # `make lint`, not an inline script: the inline one `cd lib/ameba`'d to build
+      # the binary and never came back, so `../../bin/ameba` ran with the working
+      # directory still inside ameba's own checkout. It linted **ameba** — 346
+      # files, gcry's config not even loaded — and had done so for every green run
+      # on record. The Makefile target runs each line in its own shell, so the
+      # binary runs from the repo root. gcry is 82 files, and the first honest run
+      # found 10 issues.
       - name: Ameba
-        run: |
-          shards install --development
-          cd lib/ameba && shards build
-          cp -f bin/ameba ../../bin/ameba
-          ../../bin/ameba
+        run: make lint
 
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace

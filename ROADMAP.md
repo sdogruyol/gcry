@@ -88,8 +88,20 @@ CI asymmetry that hid both.
       residue — a pointer-bearing ivar narrower than a pointer, which has no sound
       answer — is counted by `ec_root_unpinned_ivars` and asserted zero. Both arms
       broken on purpose and observed red.
+      **And the dispatch into that list was itself a name.** `if ec.is_a?(Parallel)`
+      — there are two context types on 1.21.0, so an `Fiber::ExecutionContext::Isolated`
+      contributed **3 pins**, all ambient per-thread ones, and its `@main_fiber`,
+      `@thread`, `@wait_list` and the user's `@func` closure had no explicit pin
+      at all (15 slots; 18 pins after). Now dispatched over
+      `Fiber::ExecutionContext.includers` + subclasses, most-derived first, with
+      an Isolated arm in `make scheduler-roots` and the queue audit asking the
+      type whether it has queues rather than naming Parallel. It meets the layout
+      item below: `Isolated#func` and `#spawn_context` are two of the 19 dropped
+      ivars, so under `GCRY_AUTO_LAYOUTS=1` that closure had neither route.
+      `bench/log/linux/2026-08-15-isolated-context-unpinned/FINDINGS.md`
       **Still open, and the reason this item stays unchecked:** none of this
-      explains the 2026-08-10 soak SEGV. The soak sets no `GCRY_AUTO_LAYOUTS`, so
+      explains the 2026-08-10 soak SEGV. `Isolated` is opt-in and the soak uses
+      plain `spawn`, so it cannot have hit that hole either. The soak sets no `GCRY_AUTO_LAYOUTS`, so
       those ivars were reached conservatively there anyway — what changed is that
       they no longer depend on it.
       `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
@@ -134,6 +146,16 @@ CI asymmetry that hid both.
       mallocs rather than a drift. 163 examples, 0 failures. Detail in Phase 3
       below; `GCRY_DEBUG_INVARIANTS=1 crystal spec` now runs in the macOS job, and
       both cases are pinned by `spec/invariant_spec.cr` without the env var.
+- [x] **The Ameba gate lints gcry now.** It linted **ameba's own 346 files** on
+      every green run on record: the CI step `cd lib/ameba`'d to build the binary
+      and never came back, so it ran with the working directory inside ameba's
+      checkout and never loaded gcry's config. `make lint` was always right; CI
+      calls it now. The first honest run found 10 issues, and four of them were
+      `Lint/SpecFilename` on `spec/regression/*.cr` — four regression tests, one
+      per historical GC defect, that **`crystal spec` had never run** (it collects
+      `*_spec.cr`). Renamed: 163 → 167 examples, and they now run on every
+      platform rather than only inside the kcov / ASan entrypoint.
+      `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,

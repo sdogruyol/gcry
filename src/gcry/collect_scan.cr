@@ -106,16 +106,38 @@ module Gcry
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|
           mark_ref_slot(pointerof(ec).address)
-          # Parallel: also pin queues / event loop / schedulers explicitly. Body
+          # Pin each context's queues / event loop / schedulers explicitly. Body
           # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
-          # Every pointer ivar, not the four this was written with — see
-          # `pin_ec_ivars`.
-          if ec.is_a?(Fiber::ExecutionContext::Parallel)
-            pin_ec_ivars(ec, Fiber::ExecutionContext::Parallel)
-            ec.@schedulers.each do |sched|
-              pin_ec_root(sched)
-              pin_ec_ivars(sched, Fiber::ExecutionContext::Parallel::Scheduler)
-            end
+          #
+          # The *set of context types* is derived too, not just each type's
+          # ivars: this named `Parallel` and nothing else, so an
+          # `Fiber::ExecutionContext::Isolated` — which holds `@main_fiber`,
+          # `@thread`, `@wait_list` and the user's `@func` closure — got no
+          # explicit pin at all, and the block looked like it had run. Same
+          # shape as the seven-name list it replaced, one level up.
+          # Subclasses are listed before their parents so a `Concurrent` is
+          # pinned with `Concurrent.instance_vars` rather than `Parallel`'s; it
+          # adds none today, and a future one would be covered without an edit.
+          {% ec_types = [] of Nil %}
+          {% for includer in Fiber::ExecutionContext.includers %}
+            {% for sub in includer.all_subclasses %}
+              {% ec_types << sub %}
+            {% end %}
+            {% ec_types << includer %}
+          {% end %}
+          case ec
+          {% for t in ec_types %}
+          when {{t}}
+            pin_ec_ivars(ec, {{t}})
+            # Derived rather than named: a context that owns schedulers has an
+            # `@schedulers` ivar, and each scheduler is a root in its own right.
+            {% if t.instance_vars.any? { |v| v.name == "schedulers" } %}
+              ec.@schedulers.each do |sched|
+                pin_ec_root(sched)
+                pin_ec_ivars(sched, Fiber::ExecutionContext::Parallel::Scheduler)
+              end
+            {% end %}
+          {% end %}
           end
         end
       {% end %}
@@ -155,10 +177,33 @@ module Gcry
       return unless @ec_queue_audit
       {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
         Fiber::ExecutionContext.unsafe_each do |ec|
-          next unless ec.is_a?(Fiber::ExecutionContext::Parallel)
-          audit_ec_global_queue(ec.@global_queue)
-          ec.@schedulers.each_with_index do |sched, i|
-            audit_ec_runnables(sched.@runnables, i)
+          # Which contexts have queues is asked of the types, not written down:
+          # `Isolated` has neither a global queue nor schedulers and is skipped
+          # for that reason rather than by name. A context type added upstream
+          # with a queue is audited without an edit here.
+          {% ec_types = [] of Nil %}
+          {% for includer in Fiber::ExecutionContext.includers %}
+            {% for sub in includer.all_subclasses %}
+              {% ec_types << sub %}
+            {% end %}
+            {% ec_types << includer %}
+          {% end %}
+          case ec
+          {% for t in ec_types %}
+            {% has_queue = t.instance_vars.any? { |v| v.name == "global_queue" } %}
+            {% has_scheds = t.instance_vars.any? { |v| v.name == "schedulers" } %}
+            {% if has_queue || has_scheds %}
+          when {{t}}
+              {% if has_queue %}
+                audit_ec_global_queue(ec.@global_queue)
+              {% end %}
+              {% if has_scheds %}
+                ec.@schedulers.each_with_index do |sched, i|
+                  audit_ec_runnables(sched.@runnables, i)
+                end
+              {% end %}
+            {% end %}
+          {% end %}
           end
         end
       {% end %}

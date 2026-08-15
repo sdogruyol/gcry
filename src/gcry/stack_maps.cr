@@ -906,8 +906,7 @@ module Gcry
         v = @@constants[loc.offset]
         return nil if v == 0
         Pointer(Void).new(v)
-      else
-        nil
+        # No `else`: an unrecognised location kind yields nil, i.e. no root.
       end
     end
 

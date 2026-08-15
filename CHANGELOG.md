@@ -117,6 +117,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The set of execution-context types is derived too — an `Isolated` context had
+  no explicit pin at all.** The pin list stopped being seven names earlier in this
+  cycle; the dispatch *into* it was still one: `if ec.is_a?(Parallel)`. There are
+  two context types on Crystal 1.21.0. Measured, with an `Isolated` context up:
+  **3 pins**, all of them the ambient per-thread slots any thread contributes, so
+  its `@main_fiber`, `@thread`, `@wait_list` and the user's `@func` closure were
+  left to the conservative body scan the pin block exists because it does not
+  trust. Now dispatched over `Fiber::ExecutionContext.includers` plus their
+  subclasses, most-derived first (so a `Concurrent` is pinned with its own
+  `instance_vars`, not `Parallel`'s): **18 pins against 15 expected** for its own
+  slots. `make scheduler-roots` gained an Isolated arm that derives its
+  expectation the same way, and the queue audit asks the type whether it has
+  queues rather than naming Parallel — `Isolated` has none, and is skipped for
+  that reason. Note where this meets the layout fix below: `Isolated#func` and
+  `#spawn_context` are two of the 19 ivars that walk dropped, so under
+  `GCRY_AUTO_LAYOUTS=1` that closure was reachable by neither route.
+  `bench/log/linux/2026-08-15-isolated-context-unpinned/FINDINGS.md`
 - **The Parallel EC pin list is derived from the types, not written beside them.**
   `scan_thread_roots` pinned seven names; the structures carry **ten** pointer
   ivars on the context and **seven** on the scheduler, so `@mutex`, `@condition`,
@@ -142,6 +159,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The lint gate linted ameba, and four regression specs had never run.** CI's
+  Ameba step `cd lib/ameba`'d to build the binary and never came back, so
+  `../../bin/ameba` ran with its working directory inside ameba's own checkout:
+  it inspected **346 files of ameba**, never loaded gcry's `.ameba.yml`, and
+  every green Ameba check on record is that. gcry is 82 files. `make lint` was
+  always correct — make runs each recipe line in its own shell — so CI now calls
+  it. The config also had `ExcludedPaths`, a key ameba does not read (it reads
+  `Excluded`); harmless, since `Globs` already bounded the walk, but a line that
+  looked like a rule and was not. The first honest run found **10 issues**, nine
+  of them style — and four `Lint/SpecFilename` warnings that were the real find:
+  `spec/regression/{1..4}_*.cr` are one regression test per historical GC defect,
+  and `crystal spec` never ran any of them, because it collects `*_spec.cr`. They
+  ran only inside `spec/all_specs.cr`, the kcov / ASan entrypoint, i.e. in two
+  Linux-only jobs. Renamed: **163 → 167 examples**, and they now run everywhere
+  `crystal spec` does, Darwin included. `spec/all_specs.cr` keeps its name and is
+  excluded from the rule with the reason written beside it — renaming *it* would
+  make `crystal spec` run the whole suite twice.
+  `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
 - **`make invariants` passes — and it was never a Darwin problem.** Two failures,
   two causes, neither platform-specific. `count_live_blocks` walked **dormant**
   chunks, whose headers the sweep has advised away: Linux zeroes them

@@ -5,10 +5,23 @@ Globs:
   - process_spec/**/*.cr
   - samples/**/*.cr
 
-ExcludedPaths:
+# `Excluded`, not `ExcludedPaths`: ameba reads the former (config/loader.cr) and
+# silently ignores anything else, so the previous key excluded nothing. `lib` is
+# ameba's own default and has to be repeated here, because setting the key
+# replaces the default rather than adding to it.
+Excluded:
   - lib
   - bin
   - bench
+
+Lint/SpecFilename:
+  # `spec/all_specs.cr` is the kcov / ASan entrypoint that requires every spec
+  # file. Renaming it to `*_spec.cr` would make `crystal spec` load it *and* the
+  # files it requires, running the whole suite twice. The four
+  # `spec/regression/*.cr` files this rule also flagged were a real finding and
+  # were renamed instead: they had never run under `crystal spec` at all.
+  Excluded:
+    - spec/all_specs.cr
 
 Metrics/CyclomaticComplexity:
   Enabled: false

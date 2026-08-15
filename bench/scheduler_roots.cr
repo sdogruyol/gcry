@@ -45,11 +45,22 @@
 #               fibers whether or not the pin block compiled in. A green here is
 #               not evidence that the pins ran — the delta above is.
 #
-#   --control   no Parallel EC is ever created, and the delta across two
-#               collections must be 0. This is what stops the gate from being
-#               vacuous in the other direction: if the counter drifted on its own
-#               (ambient pins counted twice, a stale accumulator not reset per
-#               collect) the mechanism arm would pass without a context.
+#   isolated    the same expectation for `Fiber::ExecutionContext::Isolated`,
+#               which until 2026-08-15 got **no explicit pin at all** — the block
+#               named `Parallel` and nothing else, so an Isolated context's
+#               `@main_fiber`, `@thread`, `@wait_list` and the user's `@func`
+#               closure were left to the conservative body scan the block exists
+#               because it does not trust. The set of context types is derived
+#               from `Fiber::ExecutionContext.includers` now, so this arm also
+#               fails if a type is added upstream and the collector's dispatch
+#               does not pick it up.
+#
+#   --control   no execution context beyond the default is ever created, and the
+#               delta across two collections must be 0. This is what stops the
+#               gate from being vacuous in the other direction: if the counter
+#               drifted on its own (ambient pins counted twice, a stale
+#               accumulator not reset per collect) the mechanism arm would pass
+#               without a context.
 #
 #   crystal build -Dgc_none bench/scheduler_roots.cr -o bin/scheduler_roots
 #   bin/scheduler_roots
@@ -174,7 +185,31 @@ def run(control : Bool) : Int32
                     "of marking them — whatever lives only behind one of those has no explicit root"
       end
 
-      # ── Arm 3: end to end ────────────────────────────────────────────────────
+      # ── Arm 3: Isolated ──────────────────────────────────────────────────────
+      # A second context type, and the one the block used to skip entirely.
+      iso_before = HEAP.ec_root_pins
+      iso_ran = Channel(Nil).new
+      iso_hold = Atomic(Int32).new(0)
+      iso = Fiber::ExecutionContext::Isolated.new("gcry-isolated-roots") do
+        iso_ran.send(nil)
+        while iso_hold.get == 0
+        end
+      end
+      iso_ran.receive
+
+      GC.collect
+      iso_delta = HEAP.ec_root_pins.to_i64 - iso_before.to_i64
+      iso_expected = pin_slots(Fiber::ExecutionContext::Isolated)
+      puts "Isolated: #{iso_delta} further pins with it up (at least #{iso_expected} expected " \
+           "for its own ivars)"
+      if iso_delta < iso_expected
+        failures << "an Isolated context contributed #{iso_delta} pins where #{iso_expected} " \
+                    "pointer-ivar slots are reachable from it — the collector's context dispatch " \
+                    "does not cover Fiber::ExecutionContext::Isolated"
+      end
+      iso_hold.set(1)
+
+      # ── Arm 4: end to end ────────────────────────────────────────────────────
       swept = 0
       hidden.each do |h|
         swept += 1 unless HEAP.live?(Pointer(Void).new(h ^ KEY))

@@ -717,7 +717,7 @@ module Gcry
       splice = @prefer_freelists[index]
       return if splice.null?
       tail = splice
-      while true
+      loop do
         th = BlockHeader.from_user(tail)
         nxt = th.value.next_free
         break if nxt.null?
@@ -761,7 +761,7 @@ module Gcry
         unless splice.null?
           # append global onto end of prefer chain, then move all to global
           tail = splice
-          while true
+          loop do
             th = BlockHeader.from_user(tail)
             nxt = th.value.next_free
             break if nxt.null?

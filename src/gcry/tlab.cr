@@ -716,7 +716,7 @@ module Gcry
         begin
           # Prepend new stash in front of any residual (should be empty).
           tail = stash_head
-          while true
+          loop do
             h = BlockHeader.from_user(tail)
             nxt = h.value.next_free
             break if nxt.null?
