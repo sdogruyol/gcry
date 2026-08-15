@@ -90,6 +90,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
   artifacts. No fault reproduced yet; what changed is the rate at which a run
   could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+- **`make darwin-page-query` — the experiment the Darwin low-water skip is
+  blocked on.** macOS takes none of the 8.06 → 3.60 ms EC4 pause the parked-fiber
+  low-water skip bought on Linux, because the skip rests on a primitive Darwin
+  does not have. `mincore` cannot supply it on either platform — it answers
+  *resident*, so a page written and later evicted reads absent and skipping it
+  loses a pointer. The candidate is `mach_vm_page_query`, and whether its
+  `PRESENT` / `PAGED_OUT` bits actually cover the written-then-evicted case has
+  been the open blocker. `bench/darwin_page_query.cr` carries the candidate
+  predicate — the exact logic a `darwin_pagemap.cr` would use — and five arms:
+  untouched pages must read skippable, written ones must not, **every skippable
+  page must read back zero** (the claim `spec/stack_low_water_spec.cr` pins on
+  Linux, checked exhaustively here), an `MADV_FREE_REUSABLE` page must read zero
+  whatever its bits say, and a page that leaves residency with its contents
+  intact must not read skippable. Runs in the macOS job; type-checked by
+  cross-compiling for `aarch64-apple-darwin`, **not yet run on a Darwin host**.
+  The eviction arm is expected to be INCONCLUSIVE on a runner that will not
+  compress — it exits 0 and says exactly that, because a probe that cannot
+  produce the case must not report that it passed.
 - **The queue audit also checks the structures, not only the slots in them.** A
   slot walk cannot report a reissued *container*: if the `Runnables` block is
   freed and reused, its head, tail and ring are read out of whatever the block

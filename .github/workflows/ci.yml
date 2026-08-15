@@ -762,6 +762,15 @@ jobs:
         run: |
           make stw-mt-property-test-short
 
+      # The v0.21.0 Darwin low-water skip is blocked on one question, and it is
+      # not a code question: does `mach_vm_page_query`'s disposition separate
+      # "never faulted" from "written then evicted"? Only a Darwin host can
+      # answer it. Expect INCONCLUSIVE on the eviction arm from a runner that
+      # will not compress — that outcome exits 0 and says so; a non-zero exit
+      # means the bits are demonstrably wrong, which is itself the answer.
+      - name: mach_vm_page_query disposition bits
+        run: make darwin-page-query
+
       # Reported, not gated, and only until the number exists: the smoke asserts
       # an absolute +4 MB RSS ceiling that was measured on Linux, and Darwin
       # reclaims differently (MADV_FREE_REUSABLE keeps pages mapped where

@@ -216,7 +216,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
 - [ ] **Low-water skip on Darwin** — open below. The first blocker is not code: the
       `mach_vm_page_query` disposition bits are still unverified, and residency
       alone is the wrong test (a page written then swapped reads absent, and
-      skipping it drops a root).
+      skipping it drops a root). **The experiment now exists**:
+      `make darwin-page-query` / `bench/darwin_page_query.cr` carries the
+      candidate predicate and five arms — untouched pages must read skippable,
+      written ones must not, every skippable page must read back zero, an
+      `MADV_FREE_REUSABLE` page must read zero whatever its bits say, and a page
+      that leaves residency with its contents intact must not read skippable.
+      It runs in the macOS job. Type-checked by cross-compiling for
+      `aarch64-apple-darwin`; **not yet run on a Darwin host**, so no bit is
+      verified yet. Expect the eviction arm to come back INCONCLUSIVE from a
+      runner that will not compress — the probe exits 0 and says so rather than
+      claiming a pass it could not produce (`PAGE_QUERY_PRESSURE=<MiB>` forces
+      the attempt).
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.
