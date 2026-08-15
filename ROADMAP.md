@@ -158,8 +158,13 @@ CI asymmetry that hid both.
       calls it now. The first honest run found 10 issues, and four of them were
       `Lint/SpecFilename` on `spec/regression/*.cr` — four regression tests, one
       per historical GC defect, that **`crystal spec` had never run** (it collects
-      `*_spec.cr`). Renamed: 163 → 167 examples, and they now run on every
-      platform rather than only inside the kcov / ASan entrypoint.
+      `*_spec.cr`). Making them run showed something worse: they call `GC.malloc`
+      / `GC.collect`, and gcry only takes over `GC` under `-Dgc_none`, which
+      `spec/` does not pass — measured, three `GC.collect` calls move gcry's
+      collection count 0 → 0. **They were testing Boehm**, in every job that ran
+      them. Moved to `process_spec/regression/` (13 → 17 examples, Linux and
+      Darwin), where one promptly failed on a threshold calibrated against the
+      vacuous run and now asserts the drift the defect actually produced.
       `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,

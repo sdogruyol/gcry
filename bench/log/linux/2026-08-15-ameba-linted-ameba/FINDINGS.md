@@ -64,9 +64,10 @@ spec/regression/4_signal_stack_false_root.cr
 Four regression tests, one per historical GC defect, and **`crystal spec` never
 ran any of them** — it collects `*_spec.cr`, and these are not. They ran only
 inside `spec/all_specs.cr`, the kcov / ASan entrypoint, so they were exercised in
-two Linux-only jobs and in none of the per-platform spec runs. Renamed: the suite
-goes **163 → 167 examples**, and the four now run everywhere `crystal spec` does,
-Darwin included. All four pass.
+two Linux-only jobs and in none of the per-platform spec runs.
+
+Renaming them made them run — and running them showed they were testing the
+wrong collector. See the next section.
 
 `spec/all_specs.cr` keeps its name and is excluded from that rule with the reason
 written next to it: renaming *it* would make `crystal spec` load the entrypoint
@@ -74,8 +75,9 @@ and every file it requires, running the whole suite twice.
 
 ## After
 
-`make lint`: **82 inspected, 0 failures**. `crystal spec`: 167 examples, 0
-failures. The CI step now runs `make lint`.
+`make lint`: **82 inspected, 0 failures**. `crystal spec`: 163 examples,
+`crystal spec -Dgc_none process_spec`: 17 (was 13), 0 failures either way. The CI
+step now runs `make lint`.
 
 One of the four is worth a second look on its own: `1_live_objects_dormant.cr`
 was written for a v0.14.0 counter drift whose signature is
@@ -83,3 +85,47 @@ was written for a v0.14.0 counter drift whose signature is
 morning from the *other* side of the comparison. It asserts the counter, so it
 could not have caught the walker bug; the coincidence is that dormant chunks have
 now produced that exact pair twice, from opposite directions.
+
+---
+
+## They were testing Boehm
+
+Renamed and running, the four regression specs still proved nothing about gcry:
+every one of them calls `GC.malloc` / `GC.collect`, and gcry only takes over the
+`GC` module under **`-Dgc_none`** (`src/gcry.cr` requires `gc_override` behind
+that flag). `spec/` is compiled without it. So was `spec/all_specs.cr`, in both
+the kcov and the ASan jobs.
+
+Measured, requiring gcry without the flag:
+
+```
+gc_none flag: false
+gcry default_heap present: true
+gcry collections across 3 GC.collect calls: 0 -> 0
+is_heap_ptr(GC.malloc result): false
+```
+
+Three `GC.collect` calls move gcry's collection count by nothing, and
+`GC.malloc`'s result is not in gcry's heap. Four regression tests for four
+historical **gcry** defects, exercising Boehm, in every job that ran them.
+
+Moved to `process_spec/regression/`, which is the tree that runs under
+`-Dgc_none`: **13 → 17 examples**, on Linux and Darwin both. `spec/` returns to
+163 and `spec/all_specs.cr` drops the require with the reason written in.
+
+One of them then failed, which is the whole point of moving them:
+
+```
+1) Regression: live_objects counter drift on dormant chunks
+   Expected 153 to be LessThan 100
+```
+
+Not a defect — a threshold calibrated against the vacuous run. It asserted
+`live_objects < 100` on a heap that, under Boehm, held nothing at all; under
+`-Dgc_none` the entire Crystal runtime lives in it and the ambient count is
+~150. The v0.14.0 defect it pins was the *allocated* objects being stranded in
+the counter when their chunk went dormant, so the assertion is now the delta:
+baseline, allocate 10 000, free, collect, and the count must come back within 500
+of where it started (the defect was 10 000 wide). It also asserts the count
+*rises* by at least 10 000 first, so the arm cannot pass by allocating nothing.
+5/5 stable.

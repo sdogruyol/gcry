@@ -28,4 +28,8 @@ require "./platform_darwin_spec"
 require "./trace_dump_spec"
 require "./stack_low_water_spec"
 require "./stack_bounds_snapshot_spec"
-require "./regression/**"
+# The regression specs moved to `process_spec/regression/` on 2026-08-15. They
+# call `GC.malloc` / `GC.collect`, and gcry only takes over `GC` under
+# `-Dgc_none` — measured: without the flag, three `GC.collect` calls move gcry's
+# collection count 0 → 0 and `GC.malloc`'s result is not in gcry's heap. Here
+# they were exercising Boehm.

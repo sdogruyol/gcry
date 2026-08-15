@@ -206,10 +206,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/regression/{1..4}_*.cr` are one regression test per historical GC defect,
   and `crystal spec` never ran any of them, because it collects `*_spec.cr`. They
   ran only inside `spec/all_specs.cr`, the kcov / ASan entrypoint, i.e. in two
-  Linux-only jobs. Renamed: **163 → 167 examples**, and they now run everywhere
-  `crystal spec` does, Darwin included. `spec/all_specs.cr` keeps its name and is
-  excluded from the rule with the reason written beside it — renaming *it* would
-  make `crystal spec` run the whole suite twice.
+  Linux-only jobs. `spec/all_specs.cr` keeps its name and is excluded from the
+  rule with the reason written beside it — renaming *it* would make
+  `crystal spec` run the whole suite twice.
+- **Those four regression specs were testing Boehm.** Making them run showed it:
+  each calls `GC.malloc` / `GC.collect`, and gcry only takes over `GC` under
+  `-Dgc_none`, which neither `spec/` nor the `all_specs` builds pass. Measured —
+  requiring gcry without the flag, three `GC.collect` calls move gcry's
+  collection count **0 → 0** and `GC.malloc`'s result is **not in gcry's heap**.
+  Moved to `process_spec/regression/`, the tree that does pass the flag:
+  **process_spec 13 → 17 examples**, Linux and Darwin both. One then failed, which
+  is why moving them was worth it — `live_objects < 100` was calibrated against a
+  heap that held nothing; under `-Dgc_none` the whole runtime lives there (~150
+  ambient). It now asserts the **delta** the v0.14.0 defect actually produced:
+  the count must rise by at least the 10 000 allocated and come back within 500
+  of baseline after they are freed and collected.
   `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
 - **`make invariants` passes — and it was never a Darwin problem.** Two failures,
   two causes, neither platform-specific. `count_live_blocks` walked **dormant**
