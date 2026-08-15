@@ -316,6 +316,16 @@ jobs:
         run: |
           make scheduler-roots
 
+      # And one level down: a precise layout is a claim about *every* pointer in
+      # the object, and `Layout.register` had a bucket it never named — an ivar it
+      # could not classify (module-typed, Proc, Tuple) got no offset and did not
+      # force the conservative fallback, so the word was never scanned. 19 such
+      # ivars in 186 stdlib types, `Fiber#proc` among them. Same shape as the two
+      # register gaps above: a root the caller assumed was covered.
+      - name: Unclassified ivar layout roots
+        run: |
+          make ivar-layout-roots
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -641,6 +651,7 @@ jobs:
           ./bin/fork_reinit
           make greg-roots
           make scheduler-roots
+          make ivar-layout-roots
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
@@ -675,3 +686,4 @@ jobs:
           ./bin/fork_reinit
           make greg-roots
           make scheduler-roots
+          make ivar-layout-roots

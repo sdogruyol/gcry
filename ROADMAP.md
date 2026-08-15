@@ -59,18 +59,20 @@ CI asymmetry that hid both.
       — measured on 1.21.0: open by default and under `-Dexecution_context`,
       closed only under `-Dpreview_mt`, where the pre-EC scheduler means there is
       nothing to pin — so the block is not compiled out there. And the
-      precise-offset path does drop module-typed ivars (`@event_loop :
-      Crystal::EventLoop` is neither Reference, Pointer, Value-with-ivars nor
-      StaticArray, so it is omitted *without* forcing the conservative fallback),
-      but that path only installs under `GCRY_AUTO_LAYOUTS=1`; the default
-      `register_scan_caps` installs a cap and no offsets, so the scan stays
-      conservative and covers the slot. The soak sets no such flag.
-      Still open, and worth keeping apart from the SEGV: whether that module-ivar
-      drop is a real defect **under `GCRY_AUTO_LAYOUTS=1`** — the gate is green
-      there, but it cannot discriminate, because the explicit pins cover the
-      scheduler graph either way. A probe that registers a class whose *only* path
-      to a live object is a module-typed ivar would settle it.
-      **Also still open, and the reason this item stays unchecked:** the gate
+      precise-offset path did drop ivars it could not classify, but that path only
+      installs under `GCRY_AUTO_LAYOUTS=1`; the default `register_scan_caps`
+      installs a cap and no offsets, so the scan stays conservative and covers the
+      slot. The soak sets no such flag.
+      **That second candidate is now settled as a defect in its own right, and
+      fixed** (Phase 3 below, and `bench/log/linux/2026-08-15-ivar-layout-drop/`):
+      an ivar that is neither Reference, Pointer, pointer-safe union,
+      Value-with-ivars nor StaticArray got no offset *and* no conservative
+      fallback, so its word was never scanned — 19 such ivars in 186 stdlib types,
+      `Fiber#proc` among them. It is **not** an explanation for the SEGV, and the
+      ivar it was recorded against is not an instance: `Crystal::EventLoop` is an
+      abstract *class* on 1.21.0, so `@event_loop` was always emitted, and every
+      ivar of `Parallel::Scheduler` classifies.
+      **Still open, and the reason this item stays unchecked:** the gate
       proves the named pins ran, not that the list is complete. Nothing yet checks
       the scheduler's ivars against what is pinned, so a structure added upstream
       would be missed exactly the way the two register gaps were.
@@ -221,6 +223,33 @@ Target: Match Boehm on the workloads Crystal users actually run.
       both gate directions broken on purpose and observed red.
       `docs/SOUND-DEFAULTS.md` § "What `scrub_fibers` costs", § "Auditing the scrub",
       § "The mid-swap window"
+- [x] **A precise layout could skip an ivar and still call itself precise.**
+      Found and fixed 2026-08-15, out of the scheduler-root audit above, which
+      could not settle it — the explicit pins cover the scheduler graph whether
+      or not the layout drops an ivar, so that harness is green either way.
+      `Layout.register` sorts each ivar into a scan offset, a noscan offset, or
+      `force_scan_cap`; an ivar that is none of `Reference`, `Pointer`, a
+      pointer-safe union, a `Value`-with-ivars or a `StaticArray` reached none of
+      the three, so the entry installed as **precise** with the word omitted and
+      nothing ever read it. Measured on both shapes that ship — a module-typed
+      ivar, and a `Proc` whose second word is the only pointer to the closure's
+      environment — each **swept** before the fix and live after, on both
+      registration routes (explicit and `GCRY_AUTO_LAYOUTS=1`), against a
+      Reference-typed control that survives either way. **19 dropped ivars in 186
+      stdlib types** for a `json`/`http/server`/`socket` program, `Fiber#proc` and
+      `Thread#func` among them: under auto layouts a fiber's captured environment
+      had no root *from the fiber*, and survived only by the fiber's own stack and
+      its spawner. Fixed by adding `has_inner_pointers?` to the fallback — the
+      predicate `register_hash` already applies to its key and value types, and
+      the plain-ivar walk beside it did not. Strictly more conservative: 9 of the
+      186 move precise → `scan_cap`, none the other way, and the scan mix on the
+      `json_churn` shape is unchanged (4012/45 both directions). Gated by
+      `make ivar-layout-roots` on all three CI platforms; the gate is the
+      installed entry, which is static, not the survival, which codegen could
+      carry. Correction it forced: `@event_loop : Crystal::EventLoop`, recorded
+      2026-08-14 as the shipping instance, is an abstract *class* on 1.21.0 and
+      was never dropped.
+      `bench/log/linux/2026-08-15-ivar-layout-drop/FINDINGS.md`
 - [x] **gcry drops a live object under the probe compiler — Darwin never scanned
       a suspended thread's registers.** Fixed 2026-08-11. Found
       2026-08-11 on Darwin aarch64 while re-cutting the fat app. A live
@@ -467,8 +496,14 @@ Target: Match Boehm on the workloads Crystal users actually run.
       alone (`MADV_FREE_REUSABLE` does not zero them — `collect_sweep.cr:439`),
       where Linux's `MADV_DONTNEED` does not leave the same residue. What would
       settle it: count what the walker sees on a chunk the sweep has just made
-      dormant, on both platforms. Until then this is "the checker and Darwin
-      disagree", which is worth exactly as much as that.
+      dormant, on both platforms.
+      **The Darwin framing is already falsified, and the item needs re-scoping
+      before it is worked.** 2026-08-15, WSL2 x86_64 / Crystal 1.21.0 / tip
+      `f396fc4`: the same spec fails on **Linux** with the same signature
+      (`actual=6502 reported=1`), plus `spec/mt_spec.cr:118`. Linux CI runs the
+      identical command and is green, so what differs is the host or the compiler
+      build, not the platform — and the `MADV_FREE_REUSABLE` hypothesis does not
+      survive that. `bench/log/linux/2026-08-15-ivar-layout-drop/FINDINGS.md` § last
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

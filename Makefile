@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -246,6 +246,25 @@ scheduler-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
 	$(BIN)/scheduler_roots
 	$(BIN)/scheduler_roots --control
+
+# A precise layout is a claim that every pointer in the object is at one of the
+# offsets it lists. `Layout.register` had a third outcome it never named: an ivar
+# it could not classify — module-typed (`Log::Dispatcher`), `Proc`, `Tuple` — got
+# no offset *and* did not force the conservative fallback, so the type stayed
+# precise and the word was never scanned. 19 such ivars in 186 stdlib types.
+# The gate is the installed entry, which is static; the sweep arm is the
+# consequence (both shapes were swept before the fix, on both registration
+# routes). `--control` types the same ivar as the class and must survive, or the
+# other two arms prove nothing. Run under GCRY_AUTO_LAYOUTS=1 as well: that is
+# the shipping route into the same macro. ~1 s.
+ivar-layout-roots: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/ivar_layout_roots.cr -o $(BIN)/ivar_layout_roots --error-trace
+	$(BIN)/ivar_layout_roots
+	$(BIN)/ivar_layout_roots --proc
+	$(BIN)/ivar_layout_roots --control
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --proc
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \

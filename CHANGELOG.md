@@ -28,14 +28,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds — measured on Crystal 1.21.0, open by default and under
   `-Dexecution_context`, closed only under `-Dpreview_mt`, where the pre-EC
   scheduler means there is nothing to pin — so the pins do run there; (2) the
-  precise-offset path drops module-typed ivars (`@event_loop : Crystal::EventLoop`
-  is neither Reference, Pointer, Value-with-ivars nor StaticArray, so it is
-  omitted without forcing the conservative fallback), but that path only installs
-  under `GCRY_AUTO_LAYOUTS=1`, which the soak does not set — the default
+  precise-offset path drops module-typed ivars (neither Reference, Pointer,
+  Value-with-ivars nor StaticArray, so they are omitted without forcing the
+  conservative fallback — `@event_loop : Crystal::EventLoop` was named here as
+  the instance and is **not** one, see the correction below), but that path only
+  installs under `GCRY_AUTO_LAYOUTS=1`, which the soak does not set — the default
   `register_scan_caps` installs a cap and no offsets, so the scan stays
-  conservative and covers the slot. The second remains **unverified as a defect**:
-  the harness is green under `GCRY_AUTO_LAYOUTS=1`, but it cannot discriminate
-  there, since the explicit pins cover the scheduler graph either way.
+  conservative and covers the slot. The second is now **verified as a defect** in
+  its own right and fixed — see below — though not as an explanation for the
+  SEGV, and not on the ivar it was recorded against.
+
+### Fixed
+
+- **A precise layout could skip an ivar and still call itself precise.**
+  `Layout.register` sorts every ivar into a scan offset, a noscan offset, or
+  `force_scan_cap` (give up on precision for the whole type, scan its body
+  conservatively). An ivar that is none of `Reference`, `Pointer`, a pointer-safe
+  union, a `Value`-with-ivars or a `StaticArray` reached **none** of the three:
+  no offset, and no fallback. The entry installed as precise, `scan_object`
+  scanned exactly the offsets it listed, and the word was never read — so
+  anything reachable only through that ivar was swept. Measured on both shapes
+  that ship: a module-typed ivar and a `Proc` (whose second word is the only
+  pointer to the closure's environment), each swept before the fix and live
+  after, on both registration routes, with a Reference-typed control that
+  survives either way — `bench/ivar_layout_roots.cr`, `make ivar-layout-roots`,
+  gated on all three CI platforms. **19 such ivars in 186 stdlib types** for a
+  program requiring `json`/`http/server`/`socket`, `Fiber#proc` and
+  `Thread#func` among them. Fixed by adding `has_inner_pointers?` to the
+  fallback — the same predicate `register_hash` already applies to its key and
+  value types, and the one the plain-ivar walk beside it did not. Strictly more
+  conservative: 9 of those 186 types move from precise to `scan_cap`, none the
+  other way, and the precise/conservative scan mix on the `json_churn` shape is
+  unchanged (4012/45 in both directions).
+  **Correction:** `@event_loop : Crystal::EventLoop`, recorded above as the
+  shipping instance, is not one — on Crystal 1.21.0 `Crystal::EventLoop` is an
+  abstract *class*, so it is `< Reference` and its offset was always emitted.
+  Every ivar of `Fiber::ExecutionContext::Parallel::Scheduler` classifies. The
+  defect was real; that example was wrong, and the 2026-08-10 soak SEGV is
+  unaffected either way (the soak sets no `GCRY_AUTO_LAYOUTS`).
+  `bench/log/linux/2026-08-15-ivar-layout-drop/FINDINGS.md`
 
 ## [0.19.0] - 2026-08-14
 

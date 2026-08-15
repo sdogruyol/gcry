@@ -48,6 +48,17 @@ produced real use-after-frees before (see the `size_match` and
 added after a crash). That is a *different* risk from root completeness — it is
 about how an object's body is scanned once it is already known live.
 
+Type-id collision is one way this axis fails; the other is a layout that is
+simply incomplete. `Layout.register` sorts each ivar into a scan offset, a
+noscan offset, or a conservative `scan_cap` for the whole type — and until
+2026-08-15 an ivar that was none of `Reference`, `Pointer`, a pointer-safe
+union, a `Value`-with-ivars or a `StaticArray` reached none of the three: no
+offset, no fallback, and the word was never scanned (module-typed ivars, `Proc`,
+`Tuple` — 19 of them in 186 stdlib types, `Fiber#proc` included). The rule now
+is that anything `has_inner_pointers?` and unclassified forces the fallback, and
+`make ivar-layout-roots` gates it by inspecting the installed entry rather than
+by watching an object survive.
+
 `GCRY_SOUND` deliberately does **not** touch it, so the two costs stay
 attributable. Measure it separately:
 
