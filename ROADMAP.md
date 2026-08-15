@@ -290,12 +290,26 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       written ones must not, every skippable page must read back zero, an
       `MADV_FREE_REUSABLE` page must read zero whatever its bits say, and a page
       that leaves residency with its contents intact must not read skippable.
-      It runs in the macOS job. Type-checked by cross-compiling for
-      `aarch64-apple-darwin`; **not yet run on a Darwin host**, so no bit is
-      verified yet. Expect the eviction arm to come back INCONCLUSIVE from a
-      runner that will not compress — the probe exits 0 and says so rather than
-      claiming a pass it could not produce (`PAGE_QUERY_PRESSURE=<MiB>` forces
-      the attempt).
+      **It has now run on a Darwin host (2026-08-15), and four of the five arms
+      hold** — the macOS job could not reach this step until the soak-smoke
+      failure ahead of it was fixed:
+
+          page size 4096, region 256 pages
+          untouched:  256/256 skippable;     dispositions none×256
+          written:    256/256 not skippable; dispositions PRESENT|REF|DIRTY×256
+          zero-proof: 27/256 skippable, 0 of them non-zero
+          reclaimed:  0/256 skippable, 0 non-zero; dispositions PRESENT|0x800
+          paged-out:  0 of 256 written pages left residency (no pressure requested)
+          VERDICT: INCONCLUSIVE
+
+      So the disposition does separate untouched from written, and every page it
+      called skippable read back zero. What is still unverified is the only case
+      the soundness argument turns on: a page that **leaves residency with its
+      contents intact**. The runner will not compress on its own, so that arm
+      returns INCONCLUSIVE and exits 0 rather than claiming a pass it could not
+      produce. `page_query_pressure` is now a `workflow_dispatch` input (default
+      0, which is what every push runs) so the arm can be attempted; the wiring
+      existed in the Makefile and had no way to be set from CI.
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.

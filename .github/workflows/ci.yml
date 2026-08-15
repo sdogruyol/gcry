@@ -42,6 +42,10 @@ on:
         description: "Soak --collect-hz=N: collections per second. The audit only sees a slot that is corrupt while a collection looks at it, so chances = collections x occupancy; churn raised occupancy, this raises the other factor. 20 measured 19x the collections at a *lower* pause. 1 = the baseline every earlier soak ran."
         required: false
         default: "1"
+      page_query_pressure:
+        description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm; too much can take the job down with it."
+        required: false
+        default: "0"
 
 jobs:
   test:
@@ -797,10 +801,22 @@ jobs:
       # The v0.21.0 Darwin low-water skip is blocked on one question, and it is
       # not a code question: does `mach_vm_page_query`'s disposition separate
       # "never faulted" from "written then evicted"? Only a Darwin host can
-      # answer it. Expect INCONCLUSIVE on the eviction arm from a runner that
-      # will not compress — that outcome exits 0 and says so; a non-zero exit
-      # means the bits are demonstrably wrong, which is itself the answer.
+      # answer it. It has now answered four fifths of it (2026-08-15): untouched
+      # pages read skippable, written ones do not, every skippable page read
+      # zero, and an `MADV_FREE_REUSABLE` page read zero whatever its bits said.
+      # The fifth arm — a page that leaves residency with its contents intact —
+      # needs the host to compress, and a runner will not do that on its own, so
+      # it returns INCONCLUSIVE and exits 0. `page_query_pressure` is how a
+      # dispatch attempts it; a non-zero exit means the bits are demonstrably
+      # wrong, which is itself the answer.
       - name: mach_vm_page_query disposition bits
+        env:
+          # Empty rather than '0' on the push path: the Makefile expands this
+          # with `${VAR:+…}`, so empty means the flag is not passed at all and a
+          # push runs the exact command line it ran before this input existed.
+          # A dispatch that leaves the field at its 0 default passes
+          # `--pressure=0`, which the probe already treats as no pressure.
+          PAGE_QUERY_PRESSURE: ${{ github.event.inputs.page_query_pressure || '' }}
         run: make darwin-page-query
 
       # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
