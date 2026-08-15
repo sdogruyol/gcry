@@ -138,11 +138,17 @@ CI asymmetry that hid both.
       sat hardcoded at `sleep(1.seconds)`. `GCRY_THRESHOLD` does not move it —
       118/119/119 collections over 120 s at 32 MiB, 8 MiB, 2 MiB — because these
       collections are the harness's timer, not the allocator's. `--collect-hz=N`
-      (default **1**) is the knob: at 20 it measured **19× the collections and
-      16× the slot walks** with occupancy undiluted (47%→43%), the workload down
-      3.9%, and the pause and RSS *lower* than the baseline (2.04 → 1.84 ms p50,
-      30.4 → 10.8 MB max) because each collection has less garbage in front of
-      it. A `workflow_dispatch` input like the others.
+      (default **1**) is the knob, and **two 5 h CI arms then priced it honestly**:
+      three arms at 1 Hz against three at 20 Hz, identical otherwise, gave
+      **×14.6 the collections but only ×2.56 the slot walks** (710 307 →
+      1 818 412), because occupancy fell from **24.2% to 3.4%** — collecting 20×
+      more often leaves 20× less time for fibers to pile into a queue, so the two
+      factors are not independent and raising one eats the other. The 120 s local
+      arms had projected ×16 with occupancy flat; a cadence knob has to be
+      measured at the duration it runs at. Pause and RSS do improve (2.04 → 1.84
+      ms p50, 30.4 → 10.8 MB max at 120 s); the workload cost at 5 h is −13% to
+      −40%, not the −3.9% the short run showed. A `workflow_dispatch` input like
+      the others.
       `bench/log/linux/2026-08-15-soak-collect-cadence/FINDINGS.md`
       **Why the item stays open:** no fault has been reproduced. All of this
       raises the rate at which a run could catch one and shortens the report from

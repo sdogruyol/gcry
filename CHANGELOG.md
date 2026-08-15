@@ -226,11 +226,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--fiber-churn` bought the occupancy factor; the other sat hardcoded at
   `sleep(1.seconds)`, and `GCRY_THRESHOLD` does not move it (118/119/119
   collections over 120 s at 32 MiB / 8 MiB / 2 MiB) because these collections are
-  the harness's timer and not the allocator's. At `--collect-hz=20`: **19× the
-  collections, 16× the slot walks**, occupancy undiluted, workload down 3.9% —
-  and the pause and RSS *lower* than the baseline (2.04 → 1.84 ms p50, 30.4 →
-  10.8 MB max), because each collection has less garbage in front of it. Default
-  1, the cadence every earlier soak ran; 0 is refused rather than divided by.
+  the harness's timer and not the allocator's. Priced on two 5 h CI dispatches, three
+  arms each and identical but for the cadence: **×14.6 the collections, ×2.56 the
+  slot walks**, because occupancy falls from 24.2% to 3.4% — 20× more collections
+  leaves 20× less time for fibers to pile into a queue, so the two factors are
+  not independent. The 120 s local arms had projected ×16 with occupancy flat,
+  which is the lesson: measure a cadence knob at the duration it runs at. Pause
+  and RSS do improve (2.04 → 1.84 ms p50, 30.4 → 10.8 MB max); the workload cost
+  at 5 h is −13% to −40%. Default 1, the cadence every earlier soak ran; 0 is
+  refused rather than divided by.
   `bench/log/linux/2026-08-15-soak-collect-cadence/FINDINGS.md`
 
 - **`Gcry::Clock.monotonic_ns` — one clock reader, and no deprecated `Time` call

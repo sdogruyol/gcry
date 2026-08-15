@@ -35,15 +35,19 @@ own timer fiber calling `GC.collect`, and the workload never allocates its way t
 | **5** | 587 | 286 (49%) | 23 643 | 1.90 ms | 117 380 | 13 600 kB |
 | **20** | 2 262 | 984 (43%) | 88 579 | 1.84 ms | 113 140 | 10 820 kB |
 
-**16× the slot walks for 4% of the workload**, and three things that could have
-gone wrong did not:
+**16× the slot walks for 4% of the workload** over 120 s here — and the 5 h CI
+arms then said that number does not hold. See the correction below before using
+it. What did hold:
 
-- **Occupancy does not dilute.** 47% → 49% → 43%: collecting more often does not
-  mean catching emptier queues, so the product really does scale with the factor.
 - **The pause does not grow — it shrinks.** 2.04 → 1.84 ms p50. Each collection
   has less garbage in front of it, which is the same reason max RSS falls from
   30.4 MB to 10.8 MB.
-- **The workload survives.** 117 740 → 113 140 allocations, −3.9%.
+- **The workload survives** at this duration: 117 740 → 113 140 allocations,
+  −3.9%.
+
+Read at 120 s, occupancy looked flat (47% → 49% → 43%), and this file originally
+concluded from that that "occupancy does not dilute, so the product really does
+scale with the factor". That conclusion was wrong.
 
 ## What this does not claim
 
@@ -60,3 +64,35 @@ holding churn fixed is what makes the three rows comparable.
 Default is **1**, the cadence every earlier soak ran on and the one the open
 2026-08-10 SEGV is measured against. `--collect-hz=0` is refused rather than
 divided by.
+
+
+## Correction: at 5 h on CI, occupancy dilutes and the gain is 2.6x
+
+Two `workflow_dispatch` runs, three 5 h arms each, `--fiber-churn=128`,
+identical in every input but the cadence:
+
+| | collections | non-empty | slots walked | faults |
+|---|---|---|---|---|
+| **1 Hz** (31880856352) | 52 469 | 12 674 (**24.2%**) | 710 307 | 0 |
+| **20 Hz** (31886802497) | 768 550 | 26 146 (**3.4%**) | 1 818 412 | 0 |
+| ratio | **x14.6** | | **x2.56** | |
+
+Collections scaled as expected. Occupancy did not hold: it fell by 7x, because
+collecting 20x more often leaves 20x less time for fibers to pile into a run
+queue before the world stops. The two factors are not independent — raising one
+eats the other — so the knob is worth **2.6x more slot walks**, not the 16x the
+120 s arms projected.
+
+The workload cost is also larger at 5 h than at 120 s: 17.4 M allocations per
+control arm against 10.4-15.1 M at 20 Hz, so -13% to -40% rather than -3.9%.
+Between-arm spread is wide on both sides (207 k to 301 k collections; 212 k to
+1.04 M slots), which is its own reason not to read a single arm as a measurement.
+
+**Why the short run misled.** At 120 s the process is still filling: churn is
+ramping, the heap has not reached steady state, and the queues carry a backlog
+that a faster cadence can still find. At 5 h the workload is in equilibrium and
+the cadence competes directly with the fibers' arrival rate. A cadence knob has
+to be measured at the duration it will run at.
+
+2.6x is still 2.6x, and the pause and RSS gains are real, so the knob keeps its
+place — but the number to quote is 2.6, and the default stays 1.
