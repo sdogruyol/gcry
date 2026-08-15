@@ -614,6 +614,11 @@ module GC
     if wd = env_u64("GCRY_STW_WATCHDOG_MS")
       Gcry::StwWatchdog.threshold_ms = wd if wd > 0
     end
+    # Walk the Parallel EC run queues inside STW and check every slot is still a
+    # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
+    # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from
+    # "an hour after the write" into "the first collection after it".
+    heap.ec_queue_audit = true if env_flag_one?("GCRY_EC_QUEUE_AUDIT")
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

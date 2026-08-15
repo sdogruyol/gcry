@@ -38,6 +38,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own right and fixed — see below — though not as an explanation for the
   SEGV, and not on the ivar it was recorded against.
 
+### Added
+
+- **`GCRY_EC_QUEUE_AUDIT=1` — name the corrupt run-queue slot at the next
+  collection instead of at the crash.** The 2026-08-10 soak died in
+  `Parallel::Scheduler#quick_dequeue?` on `0x7f1700000149`, 1h24m in; the dequeue
+  is where the damage surfaces, and the write that caused it is an unknown time
+  earlier. The audit walks both structures that dequeue reads — each scheduler's
+  `Runnables` ring between head and tail, and the context's `GlobalQueue` list —
+  inside the stopped world, where they are quiescent, and requires every slot to
+  be a **live Fiber** (in the heap, in an allocated block, `Fiber`'s type_id at
+  offset 0). The first collection that sees otherwise prints the structure, index
+  and value; `ec_queue_audit_ring_slots` / `ec_queue_audit_list_slots` /
+  `ec_queue_audit_faults` / `ec_queue_audit_last_fault` are on `/gc-stats`, faults
+  cumulative on purpose. Off by default (bounded, but inside the pause); on for
+  the CI soak, whose telemetry now carries `queue_slots` and `queue_faults` per
+  hour. Gated by `make ec-queue-audit` with two planted values that fail different
+  halves of the test — one outside the heap, one a live object of the wrong type —
+  and the gate asserts the report names *the planted value*: with the type check
+  removed the second poison is accepted and the walk trips one hop later on
+  garbage, which a fault count alone could not tell from a catch. Measured cost on
+  the soak: none (p50 2.51–2.65 ms with, 2.66–2.81 ms without, n=3), because that
+  workload's queues hold 0–1 slots per collection — thin exposure, not thin
+  coverage. Also settled: the **default** execution context is
+  `Fiber::ExecutionContext::Parallel` on Crystal 1.21.0 with or without
+  `-Dexecution_context` / `-Dpreview_mt`, so plain `spawn` is covered by this and
+  by the pin block. `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
+
 ### Changed
 
 - **The Parallel EC pin list is derived from the types, not written beside them.**

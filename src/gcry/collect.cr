@@ -276,6 +276,26 @@ module Gcry
     # it stays zero, because an upstream ivar of that shape is a root the block
     # would otherwise drop without a word about it.
     getter ec_root_unpinned_ivars : UInt64 = 0_u64
+    # Execution-context queue audit (`GCRY_EC_QUEUE_AUDIT=1`, default off).
+    # `slots` is per-collect — it says the walk engaged, and a walk that silently
+    # covered nothing is the failure mode every gate in this milestone is about.
+    # `faults` is **cumulative on purpose**: it is evidence of a corruption that
+    # already happened, and a per-collect reset would erase it by the next
+    # collection, which is exactly what makes the soak SEGV unbisectable today.
+    # Split by structure so "the walk engaged" can be told apart from "the walk
+    # engaged on the half that happened to be busy": the ring and the global list
+    # are populated by different traffic, and a harness that only ever fills one
+    # would report coverage it does not have.
+    getter ec_queue_audit_ring_slots : UInt64 = 0_u64
+    getter ec_queue_audit_list_slots : UInt64 = 0_u64
+    getter ec_queue_audit_faults : UInt64 = 0_u64
+    # The word the most recent fault was reported for. Cumulative like the count:
+    # it is the evidence, and it is also what makes a gate able to say *which*
+    # slot was rejected rather than only that something was.
+    getter ec_queue_audit_last_fault : UInt64 = 0_u64
+    # Walk the Parallel EC run queues inside STW and check every slot is a live
+    # Fiber. Off by default: bounded, but it is inside the pause.
+    property ec_queue_audit : Bool = false
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -1353,6 +1373,8 @@ module Gcry
       @thread_greg_candidates = 0_u64
       @ec_root_pins = 0_u64
       @ec_root_unpinned_ivars = 0_u64
+      @ec_queue_audit_ring_slots = 0_u64
+      @ec_queue_audit_list_slots = 0_u64
       @low_water_skips = 0_u64
       @low_water_skipped_bytes = 0_u64
     end

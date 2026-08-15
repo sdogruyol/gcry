@@ -22,6 +22,10 @@ on:
       stall_ms:
         description: "GCRY_STW_TEST_STALL_MS — widens the stopped window so a rare overlap becomes frequent. Research only; 0 for a normal soak."
         default: "0"
+      ec_queue_audit:
+        description: "GCRY_EC_QUEUE_AUDIT — walk the Parallel run queues each collection and report the first slot that stops being a live Fiber. 'off' to disable."
+        required: false
+        default: "on"
 
 jobs:
   test:
@@ -326,6 +330,15 @@ jobs:
         run: |
           make ivar-layout-roots
 
+      # And the consumer side: the run queues the scheduler dequeues from. The
+      # 2026-08-10 soak SEGV'd on a slot whose pointer had been partly
+      # overwritten, an hour after whatever wrote it. `GCRY_EC_QUEUE_AUDIT=1`
+      # names the first collection that sees such a slot; this gate proves it
+      # names the planted value rather than something downstream of it.
+      - name: EC run-queue audit
+        run: |
+          make ec-queue-audit
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -560,6 +573,13 @@ jobs:
           SOAK_DURATION: ${{ github.event.inputs.soak_duration || '18000' }}
           GCRY_MONITOR_GATE: ${{ github.event.inputs.monitor_gate == 'off' && '0' || '1' }}
           GCRY_STW_TEST_STALL_MS: ${{ github.event.inputs.stall_ms || '0' }}
+          # The 2026-08-10 SEGV surfaced in the dequeue, an unknown time after the
+          # write that caused it. This walks the run queues at every collection
+          # and prints the first one that holds something other than a live Fiber,
+          # so a crashing run says *when* the slot went bad instead of only that
+          # it did. Costs a bounded walk inside the pause; on by default here
+          # because that is what this job is for.
+          GCRY_EC_QUEUE_AUDIT: ${{ github.event.inputs.ec_queue_audit == 'off' && '0' || '1' }}
         run: |
           ./bin/soak --duration="$SOAK_DURATION" --telemetry=/tmp/gcry-soak.log
 
@@ -652,6 +672,7 @@ jobs:
           make greg-roots
           make scheduler-roots
           make ivar-layout-roots
+          make ec-queue-audit
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
@@ -687,6 +708,7 @@ jobs:
           make greg-roots
           make scheduler-roots
           make ivar-layout-roots
+          make ec-queue-audit
 
       # First run of the debug invariant checker on Darwin. It failed on Linux
       # and Darwin alike until 2026-08-15 (the walk counted every block of a

@@ -95,10 +95,25 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
 - [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
       chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
-      indistinguishable from a quiet run inside a release cycle. Two handles,
-      neither tried — dispatch N arms concurrently, and poison/canary scheduler
-      slots so the *first* overwrite fails loudly instead of the SEGV an hour
-      downstream.
+      indistinguishable from a quiet run inside a release cycle. Two handles were
+      named; **the second is now built.** `GCRY_EC_QUEUE_AUDIT=1` walks the ring
+      and the global list inside STW at every collection and names the first one
+      that holds something other than a live Fiber — structure, index and value —
+      instead of waiting for the dequeue to SEGV on it. Gated by
+      `make ec-queue-audit` (the report must name the *planted* value, which is
+      what separates a working type check from a walk that trips one hop later),
+      on for the CI soak, and carried per hour in the soak telemetry as
+      `queue_slots` / `queue_faults`. Also settled on the way: the **default**
+      execution context is `Parallel` on 1.21.0 with or without EC flags, so this
+      and the pin block cover ordinary `spawn`.
+      **Why the item stays open:** exposure, not mechanism. The soak's
+      `queue_slots` reads **0–1 per collection** — it spawns at ~10 Hz against
+      ~1 collection/s, so the queues are nearly always empty when the world stops,
+      and the audit only catches a slot that is corrupt *while* a collection sees
+      it. Next: a fiber-churn knob on the soak to keep the queues populated (it
+      changes the soak's shape, so it is a deliberate step, not a fold-in), and
+      the first handle — dispatch N arms concurrently — is still untried.
+      `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
 - [x] **Fix `make invariants`, and run it on Darwin.** Done 2026-08-15 — and it
       was never a Darwin problem: the walk counted every block of a **dormant**
       chunk (headers the sweep has advised away read as neither used nor FREE on

@@ -28,6 +28,7 @@ require "./gcry/metrics"
 require "./gcry/monitor_gate"
 require "./gcry/observability"
 require "./gcry/stw_watchdog"
+require "./gcry/ec_queue_audit"
 
 module Gcry
   @@default_heap : Heap? = nil

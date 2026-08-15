@@ -119,6 +119,101 @@ module Gcry
           end
         end
       {% end %}
+
+      audit_ec_queues
+    end
+
+    # ── Execution-context queue audit ─────────────────────────────────────────
+    #
+    # The 2026-08-10 soak died in `Parallel::Scheduler#quick_dequeue?` on
+    # `0x7f1700000149` — a heap pointer with its low bytes overwritten — 1h24m
+    # in. The dequeue is where the damage *surfaces*; the write that did it
+    # happened an unknown time earlier, and at one crash per five hours the gap
+    # cannot be bisected. This walks the two structures that dequeue reads —
+    # each scheduler's `Runnables` ring between head and tail, and the context's
+    # `GlobalQueue` list — and names the first *collection* at which a slot
+    # stops being a live Fiber.
+    #
+    # It runs inside the stopped world, which is what makes it readable at all:
+    # the queues are quiescent there, so a slot that fails the test failed it
+    # before the world stopped rather than under the walk.
+    #
+    # Off by default (`GCRY_EC_QUEUE_AUDIT=1`) — it is a bounded walk (≤ ring
+    # capacity per scheduler, plus the global list) but it is inside the pause.
+    private def ec_queue_slot_live_fiber?(bits : UInt64) : Bool
+      return false if bits == 0
+      ptr = Pointer(Void).new(bits)
+      return false unless is_heap_ptr(ptr)
+      return false unless live?(ptr)
+      # A queue slot holds a Fiber and nothing else, so the type_id is an exact
+      # test rather than a plausibility one — which is the difference between
+      # this and the conservative marking path.
+      ptr.as(Int32*).value == Fiber.crystal_instance_type_id
+    end
+
+    private def audit_ec_queues : Nil
+      return unless @ec_queue_audit
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
+        Fiber::ExecutionContext.unsafe_each do |ec|
+          next unless ec.is_a?(Fiber::ExecutionContext::Parallel)
+          audit_ec_global_queue(ec.@global_queue)
+          ec.@schedulers.each_with_index do |sched, i|
+            audit_ec_runnables(sched.@runnables, i)
+          end
+        end
+      {% end %}
+    end
+
+    # No macro gate on these two: `instance_vars` cannot be called at class-body
+    # scope, and none is needed. They take untyped parameters, so a compiler
+    # without execution contexts never instantiates them — the only call site is
+    # inside the gate above.
+    private def audit_ec_runnables(runnables, scheduler_index : Int32) : Nil
+      capacity = runnables.capacity.to_u32
+      head = runnables.@head.get(:relaxed)
+      tail = runnables.@tail.get(:relaxed)
+      # head and tail are a wrapping pair, so the size is their difference. A
+      # difference past capacity is itself corruption; clamp so the walk cannot
+      # run away, and let the slots it does read report what they are.
+      size = tail &- head
+      count = size > capacity ? capacity : size
+      # `pointerof`, not `.to_unsafe`: reading the ivar would copy the whole
+      # ring (N Fiber-sized words) into a temporary first.
+      base = pointerof(runnables.@buffer).as(UInt64*)
+      i = 0_u32
+      while i < count
+        slot = (head &+ i) % capacity
+        bits = base[slot]
+        @ec_queue_audit_ring_slots += 1
+        unless ec_queue_slot_live_fiber?(bits)
+          @ec_queue_audit_faults += 1
+          @ec_queue_audit_last_fault = bits
+          EcQueueAudit.report(EcQueueAudit::KIND_RUNNABLES, scheduler_index, slot, bits)
+        end
+        i += 1
+      end
+    end
+
+    private def audit_ec_global_queue(queue) : Nil
+      size = queue.@list.size
+      return if size <= 0
+      bits = pointerof(queue.@list.@head).as(UInt64*).value
+      walked = 0_u32
+      # Bounded twice: by the list's own size (plus slack, since the size
+      # itself could be the corrupt word) and by a hard cap against a cycle.
+      limit = size > 65_536 ? 65_536_u32 : (size.to_u32 &+ 8_u32)
+      while bits != 0 && walked < limit
+        @ec_queue_audit_list_slots += 1
+        unless ec_queue_slot_live_fiber?(bits)
+          @ec_queue_audit_faults += 1
+          @ec_queue_audit_last_fault = bits
+          EcQueueAudit.report(EcQueueAudit::KIND_GLOBAL_LIST, -1, walked, bits)
+          # The chain cannot be followed past a node that is not a Fiber.
+          return
+        end
+        bits = Pointer(UInt64).new(bits &+ offsetof(Fiber, @list_next).to_u64).value
+        walked &+= 1
+      end
     end
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.

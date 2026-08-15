@@ -146,11 +146,16 @@ class SoakTest
     # with the gate on measures nothing, and a crash logged without this line
     # cannot be attributed to either arm afterwards.
     telemetry.puts "config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
-                   "stw_test_stall_ms=#{@heap.stw_test_stall_ms}"
-    telemetry.puts "hour\telapsed\theap_kb\tfree_kb\tlive_objects\tcollections\tpause_p50\tpause_p99\trss_kb\tfinalized"
+                   "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
+                   "ec_queue_audit=#{@heap.ec_queue_audit}"
+    # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
+    # SEGV'd in the dequeue an unknown time after the write that caused it, and a
+    # cumulative fault count here says which hour the slot went bad.
+    telemetry.puts "hour\telapsed\theap_kb\tfree_kb\tlive_objects\tcollections\tpause_p50\tpause_p99\trss_kb\tfinalized\tqueue_slots\tqueue_faults"
     telemetry.flush
     puts "Config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
-         "stw_test_stall_ms=#{@heap.stw_test_stall_ms}"
+         "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
+         "ec_queue_audit=#{@heap.ec_queue_audit}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -234,7 +239,8 @@ class SoakTest
         rss = read_rss_kb
         @rss_max = rss if rss > @rss_max
         @rss_samples += 1
-        telemetry.puts "#{current_hour}\t#{elapsed}\t#{m.heap_size / 1024}\t#{m.free_bytes / 1024}\t#{m.live_objects}\t#{m.collections}\t#{m.pause_p50_ns}\t#{m.pause_p99_ns}\t#{rss}\t#{SoakFinalizable.seen}"
+        queue_slots = @heap.ec_queue_audit_ring_slots + @heap.ec_queue_audit_list_slots
+        telemetry.puts "#{current_hour}\t#{elapsed}\t#{m.heap_size / 1024}\t#{m.free_bytes / 1024}\t#{m.live_objects}\t#{m.collections}\t#{m.pause_p50_ns}\t#{m.pause_p99_ns}\t#{rss}\t#{SoakFinalizable.seen}\t#{queue_slots}\t#{@heap.ec_queue_audit_faults}"
         telemetry.flush
         last_telemetry_hour = current_hour
 
