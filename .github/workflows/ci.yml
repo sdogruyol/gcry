@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 30
     name: test (${{ matrix.arch_label }}, crystal ${{ matrix.crystal }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -438,7 +438,7 @@ jobs:
     timeout-minutes: 20
     name: coverage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -481,7 +481,7 @@ jobs:
           fi
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -492,7 +492,7 @@ jobs:
     timeout-minutes: 20
     name: asan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -512,7 +512,7 @@ jobs:
     timeout-minutes: 20
     name: valgrind
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -547,7 +547,7 @@ jobs:
     timeout-minutes: 30
     name: perf smoke (kemal /json vs Boehm)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -582,7 +582,7 @@ jobs:
           make soft-soak-ec4-smoke
 
       - name: Upload perf report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-smoke-report
           path: bench/log/
@@ -609,7 +609,7 @@ jobs:
         arm: [1, 2, 3]
     name: soak (5h, arm ${{ matrix.arm }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -655,7 +655,7 @@ jobs:
       # skipped and the hours before the SEGV went with it.
       - name: Upload telemetry
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: soak-telemetry-arm-${{ matrix.arm }}
           path: /tmp/gcry-soak.log
@@ -667,7 +667,7 @@ jobs:
     timeout-minutes: 20
     name: test (aarch64 cross-compile)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -696,7 +696,7 @@ jobs:
           - x86_64-linux-musl
           - aarch64-linux-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -719,7 +719,7 @@ jobs:
     timeout-minutes: 20
     name: test (aarch64 native)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -747,7 +747,7 @@ jobs:
     timeout-minutes: 20
     name: test (darwin native)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
