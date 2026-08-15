@@ -5,7 +5,18 @@ module Gcry
   # Linux soft-dirty page tracking for nursery old→young edges without
   # compiler write barriers. See `/proc/pid/clear_refs` (4) and pagemap bit 55.
   module Platform
-    PAGE_SIZE          = 4096_u64
+    # Asked, not assumed. This indexes `/proc/self/pagemap` — `(addr //
+    # PAGE_SIZE) * 8` is a virtual page number, so on a host whose pages are not
+    # 4 KiB it reads entries belonging to some other address entirely. That was
+    # fail-safe rather than unsound, because `soft_dirty_tracks_writes?` writes a
+    # page and requires the bit back, so a wrong stride makes the probe fail and
+    # the backend is never selected — but it fails silently, and the Darwin side
+    # of this module has always called `sysconf`. Linux x86_64 and Ubuntu arm64
+    # both return 4096, so this changes nothing on either.
+    PAGE_SIZE = begin
+      sz = LibC.sysconf(LibC::SC_PAGESIZE)
+      sz > 0 ? sz.to_u64 : 4096_u64
+    end
     PAGEMAP_SOFT_DIRTY = 1_u64 << 55
     PAGEMAP_BATCH      = 64
 

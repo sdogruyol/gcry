@@ -204,6 +204,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The page size was asked for on Darwin and assumed on Linux.** Three
+  constants read `4096_u64`: the pagemap stride in `linux_softdirty.cr`, the
+  `mprotect` alignment in `linux_mprotect.cr`, and a dead one in
+  `darwin_stubs.cr` — in the same file whose `host_page_size` documents Apple
+  Silicon as 16 KiB. `Platform.host_page_size` on Linux returned that constant
+  rather than a reading, and eight call sites in `collect_sweep.cr` plus
+  `heap.cr`'s mmap `align_up` trust it. Nothing was unsound: the pagemap stride
+  is gated by `soft_dirty_tracks_writes?`, which writes a page and requires the
+  bit back, so a wrong stride fails the probe and the backend is never selected —
+  but it fails *silently*, and `mprotect` on a misaligned address fails the same
+  quiet way. All three now call `sysconf(_SC_PAGESIZE)`. Linux x86_64 and Ubuntu
+  arm64 both return 4096, so no supported host changes behaviour; measured
+  identical backend selection before and after. Found by sweeping for the
+  defect that produced three CI reds today — an assumption sitting where a
+  measurement belongs — after the same shape turned up in
+  `bench/darwin_page_query.cr`, whose hardcoded 4096 was a *quarter* of the
+  runner's real 16384.
+
 - **`make scheduler-roots` measured from a baseline that had not settled, and it
   cut both ways.** The gate went red three times on 2026-08-15 (aarch64 once,
   Darwin twice) on `the pin count moved by 2 with no Parallel EC in the process`,

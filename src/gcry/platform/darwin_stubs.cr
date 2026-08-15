@@ -14,7 +14,11 @@ module Gcry
         Mprotect
       end
 
-      PAGE_SIZE = 4096_u64
+      # Dead on this platform — the soft-dirty paths that read it are guarded on
+      # the linux flag — but it was 4096 in a file whose own `host_page_size`
+      # documents Apple Silicon as 16 KiB. A constant that is both wrong and
+      # unused is one refactor away from being wrong and used.
+      PAGE_SIZE = host_page_size
 
       def self.darwin_process_gc_supported? : Bool
         true
