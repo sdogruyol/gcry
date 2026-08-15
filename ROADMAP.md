@@ -82,14 +82,20 @@ CI asymmetry that hid both.
       neither tried — dispatch N arms concurrently, and poison/canary scheduler
       slots so the *first* overwrite fails loudly instead of the SEGV an hour
       downstream.
-- [ ] **Fix `make invariants` on Darwin, and run it there.** Open below, with a
-      stated hypothesis and a decisive experiment already written down. Cheapest
-      correctness debt on the board, and it shipped in three releases.
-- [ ] **Close the Darwin CI asymmetry.** It is why both items above are open.
-      `test-macos` runs `spec`, `process_spec`, the samples and `make greg-roots`;
-      the Linux job runs those plus ~43 further gates. Missing on Darwin, in the
-      order they would have paid: **Debug invariants** (exactly what hid the item
-      above for three releases), `stw_mt_property_test`, the soak, a perf gate.
+- [x] **Fix `make invariants`, and run it on Darwin.** Done 2026-08-15 — and it
+      was never a Darwin problem: the walk counted every block of a **dormant**
+      chunk (headers the sweep has advised away read as neither used nor FREE on
+      either platform), and `spec/mt_spec.cr:118` was a *race* against concurrent
+      mallocs rather than a drift. 163 examples, 0 failures. Detail in Phase 3
+      below; `GCRY_DEBUG_INVARIANTS=1 crystal spec` now runs in the macOS job, and
+      both cases are pinned by `spec/invariant_spec.cr` without the env var.
+- [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
+      `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
+      `make scheduler-roots`, `make ivar-layout-roots` and now **Debug
+      invariants** (added 2026-08-15 — exactly what hid the item above for three
+      releases); the Linux job runs those plus ~40 further gates. Still missing on
+      Darwin, in the order they would pay: `stw_mt_property_test`, the soak, a
+      perf gate.
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
@@ -480,30 +486,29 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `spec/stack_low_water_spec.cr` — it pins the claim ("never reports above a
       written word") rather than the pause number, which is exactly the
       assertion a second implementation has to earn on its own.
-- [ ] **`make invariants` has never passed on Darwin.** `GCRY_DEBUG_INVARIANTS=1`
-      fails `spec/collect_spec.cr:202` ("keeps empty chunks dormant within
-      empty_chunk_retain") with `live_objects mismatch: actual=6364 reported=1`.
-      Found 2026-08-14 running the suite locally on a Darwin host for the 0.19.0
-      release; it is **not new** — the same failure reproduces at `master`,
-      **`v0.18.0` and `v0.17.0`**, so it shipped in two releases unnoticed. It is
-      unnoticed because nothing runs it: Linux CI has a "Debug invariants" step
-      and is green, and `test-macos` runs `spec` / `process_spec` / samples only.
-      Debug-only — the shipping path does not call the checker, and the same spec
-      passes under `make spec`, so what disagrees is the walker and not the
-      collector's own accounting. **Hypothesis, not a finding:**
-      `Invariant.count_live_blocks` walks dormant chunks and counts any block
-      whose header does not read free, and Darwin's reclaim leaves those headers
-      alone (`MADV_FREE_REUSABLE` does not zero them — `collect_sweep.cr:439`),
-      where Linux's `MADV_DONTNEED` does not leave the same residue. What would
-      settle it: count what the walker sees on a chunk the sweep has just made
-      dormant, on both platforms.
-      **The Darwin framing is already falsified, and the item needs re-scoping
-      before it is worked.** 2026-08-15, WSL2 x86_64 / Crystal 1.21.0 / tip
-      `f396fc4`: the same spec fails on **Linux** with the same signature
-      (`actual=6502 reported=1`), plus `spec/mt_spec.cr:118`. Linux CI runs the
-      identical command and is green, so what differs is the host or the compiler
-      build, not the platform — and the `MADV_FREE_REUSABLE` hypothesis does not
-      survive that. `bench/log/linux/2026-08-15-ivar-layout-drop/FINDINGS.md` § last
+- [x] **`make invariants` has never passed — and it was never a Darwin problem.**
+      Fixed 2026-08-15. Two failures, two causes, neither platform-specific.
+      (1) `count_live_blocks` walked **dormant** chunks, whose headers the sweep
+      has advised away — Linux zeroes them (`flags == 0` is not FREE) and Darwin
+      leaves them stale (also not FREE), so both read as live. The decisive
+      experiment the item asked for, run on Linux: 4 dormant chunks, **6 501
+      blocks counted against `live_objects = 1`**, of which 6 348 headers read
+      all-zero and 153 stale. A dormant chunk is empty by construction (the sweep
+      sets DORMANT only `unless any_live`) and the sweep already skips them, so
+      the walker was the last reader that believed those headers.
+      (2) `spec/mt_spec.cr:118` is a **race**, not a drift: `after_malloc` runs
+      outside the allocation lock, so with four threads allocating the walk and
+      the counter are different instants — `actual=40 reported=41`, off by the one
+      allocation in flight. Skipped when more than main+monitor threads exist, and
+      the skip is counted (`Invariant.concurrent_skips`) rather than silent.
+      **163 examples, 0 failures** — first green run recorded. Both halves broken
+      on purpose and observed red separately; both pinned by
+      `spec/invariant_spec.cr` under plain `crystal spec` (no env var), so they
+      gate on every platform including Darwin, and
+      `GCRY_DEBUG_INVARIANTS=1 crystal spec` is now a step in the macOS job.
+      Open: whether Darwin has a *third* failure behind these two — no Darwin host
+      was available, and that CI run is what will say.
+      `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production

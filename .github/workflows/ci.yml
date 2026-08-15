@@ -687,3 +687,12 @@ jobs:
           make greg-roots
           make scheduler-roots
           make ivar-layout-roots
+
+      # First run of the debug invariant checker on Darwin. It failed on Linux
+      # and Darwin alike until 2026-08-15 (the walk counted every block of a
+      # dormant chunk), and nothing ran it here — which is why it shipped in
+      # three releases. `spec/invariant_spec.cr` pins the two cases without the
+      # env var; this step is the whole suite under the checker.
+      - name: Debug invariants on Darwin
+        run: |
+          GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

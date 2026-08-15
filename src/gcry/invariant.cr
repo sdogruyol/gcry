@@ -36,11 +36,32 @@ module Gcry
       end
     end
 
+    # Checks skipped because another thread could be mutating the heap under the
+    # walk. Counted rather than silent: a checker that quietly stops checking
+    # looks exactly like one that runs and finds nothing.
+    @@concurrent_skips = 0_u64
+
+    def self.concurrent_skips : UInt64
+      @@concurrent_skips
+    end
+
     # Verify that `live_objects` matches the actual number of live (non-free)
     # blocks in the heap. This is the most important invariant: if the counter
     # drifts, every GC decision based on it is suspect.
+    #
+    # Only meaningful on a quiescent heap. `after_malloc` runs outside the
+    # allocation lock and `note_alloc_bytes` bumps the counter at a different
+    # instant than `set_used` writes the header, so with a second mutator thread
+    # allocating the walk and the counter are two different points in time —
+    # measured as `actual=40 reported=41` in `spec/mt_spec.cr:118`, off by
+    # exactly the one allocation in flight. Skip rather than report a drift that
+    # is really a race.
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
+      if heap.concurrent_mutators?
+        @@concurrent_skips += 1
+        return
+      end
       actual = count_live_blocks(heap)
       reported = heap.live_objects
       return if actual == reported
@@ -121,6 +142,9 @@ module Gcry
       # Collect all free block ranges.
       free_ranges = [] of {UInt64, UInt64}
       heap.each_chunk do |chunk|
+        # Dormant chunks hold no live blocks and their headers were advised
+        # away — see count_live_blocks.
+        next if ChunkHeader.dormant?(chunk)
         next if ChunkHeader.large?(chunk)
         class_index = chunk.value.size_class.to_i32
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -139,6 +163,7 @@ module Gcry
 
       # Check each live block against free ranges.
       heap.each_chunk do |chunk|
+        next if ChunkHeader.dormant?(chunk)
         next if ChunkHeader.large?(chunk)
         class_index = chunk.value.size_class.to_i32
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -148,7 +173,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
+          if counts_live?(header)
             addr = header.address
             free_ranges.each do |free_lo, free_hi|
               if addr >= free_lo && addr < free_hi
@@ -182,12 +207,43 @@ module Gcry
       check_all_freelists(heap)
     end
 
+    # A block header the walk must not read as live. Two cases, and neither is
+    # the collector's accounting being wrong:
+    #
+    #   dormant chunk  the sweep marks a chunk dormant only `unless any_live`, so
+    #                  it holds nothing by construction — and then advises the
+    #                  pages away, which destroys the headers. On Linux
+    #                  `MADV_DONTNEED` zeroes them, and `flags == 0` does not
+    #                  read as FREE, so every block in the chunk counted live; on
+    #                  Darwin `MADV_FREE_REUSABLE` leaves them stale, which does
+    #                  not read as FREE either. Measured on Linux, one 8 000-block
+    #                  collection: 6 501 counted in 4 dormant chunks against
+    #                  `live_objects = 1`, of which 6 348 headers read all-zero
+    #                  and 153 were stale. The sweep already skips dormant chunks
+    #                  for the same reason (`collect_sweep.cr:47`).
+    #
+    #   zero size      a live block always has a non-zero size (`set_used`), so a
+    #                  zeroed header is a page the kernel dropped, not an object.
+    #                  Reasoned, not measured, and kept because the chunk flag
+    #                  above cannot cover it: `MADV_FREE` on a SPARSE chunk lets
+    #                  the kernel discard a page under pressure at any later
+    #                  moment, and SPARSE chunks do hold live blocks.
+    #
+    # Both are strictly one-directional — they can only stop garbage being
+    # counted live, never hide a live block the counter forgot: that direction
+    # still fails as `actual < reported`.
+    @[AlwaysInline]
+    private def self.counts_live?(header : BlockHeader*) : Bool
+      !BlockHeader.free?(header) && header.value.size != 0
+    end
+
     private def self.count_live_blocks(heap : Heap) : UInt64
       count = 0_u64
       heap.each_chunk do |chunk|
+        next if ChunkHeader.dormant?(chunk)
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-          count += 1 unless BlockHeader.free?(header)
+          count += 1 if counts_live?(header)
         else
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -197,7 +253,7 @@ module Gcry
           limit = ChunkHeader.data_end(chunk).as(UInt8*)
           while (cursor + block_bytes) <= limit
             header = cursor.as(BlockHeader*)
-            count += 1 unless BlockHeader.free?(header)
+            count += 1 if counts_live?(header)
             cursor += block_bytes
           end
         end

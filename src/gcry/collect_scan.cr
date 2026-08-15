@@ -193,6 +193,14 @@ module Gcry
       false
     end
 
+    # For `Invariant`: its walks are snapshots, and the counters they compare
+    # against are bumped by whichever thread allocates. With another mutator
+    # running the two are sampled at different instants and disagree by the
+    # allocations in flight — a race, not a drift.
+    def concurrent_mutators? : Bool
+      multi_mutator_threads?
+    end
+
     # Empty-chunk reclaim after major.
     # - EC1: dormant (DONTNEED within retain) + munmap excess (default).
     # - Parallel default: no empty reclaim (munmap amplified soft realloc;

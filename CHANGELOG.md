@@ -40,6 +40,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`make invariants` passes — and it was never a Darwin problem.** Two failures,
+  two causes, neither platform-specific. `count_live_blocks` walked **dormant**
+  chunks, whose headers the sweep has advised away: Linux zeroes them
+  (`flags == 0` is not FREE), Darwin leaves them stale (also not FREE), so both
+  read as live. Measured on Linux — 4 dormant chunks, **6 501 blocks counted
+  against `live_objects = 1`**, 6 348 headers all-zero and 153 stale. A dormant
+  chunk is empty by construction and the sweep already skips it; the walker was
+  the last reader that believed those headers. The second failure
+  (`spec/mt_spec.cr:118`) is a **race**: `after_malloc` runs outside the
+  allocation lock, so with four threads allocating the walk and the counter are
+  different instants — `actual=40 reported=41`, off by the allocation in flight.
+  It is skipped above main+monitor threads, and the skip is counted
+  (`Invariant.concurrent_skips`) rather than silent. **163 examples, 0 failures**,
+  first green run recorded; both halves broken on purpose and observed red
+  separately, both pinned by `spec/invariant_spec.cr` under plain `crystal spec`
+  so they gate on every platform, and `GCRY_DEBUG_INVARIANTS=1 crystal spec` is
+  now a step in the macOS job for the first time.
+  `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
 - **A precise layout could skip an ivar and still call itself precise.**
   `Layout.register` sorts every ivar into a scan offset, a noscan offset, or
   `force_scan_cap` (give up on precision for the whole type, scan its body
