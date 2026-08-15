@@ -137,6 +137,11 @@ CI asymmetry that hid both.
       rate at which a run could catch one (1/24 → 23/24 collections, ×3 arms) and
       shortens the report from "an hour later, in the consumer" to "the next
       collection"; whether that is enough is the next scheduled run's answer.
+      The audit now also checks the **structures**, not only their slots: a
+      reissued `Runnables` makes every slot garbage rather than one slot bad, so
+      the slot walk could not have reported the very shape the SEGV is read as.
+      Each ivar with a concrete Reference type must be a live object of that
+      type, and a container that fails is not then walked.
       `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`,
       `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
 - [x] **Fix `make invariants`, and run it on Darwin.** Done 2026-08-15 — and it

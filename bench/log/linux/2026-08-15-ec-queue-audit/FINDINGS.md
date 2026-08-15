@@ -87,3 +87,49 @@ the open SEGV, so it is left as the next step rather than folded in here.
 `ec_queue_audit`), and the telemetry now carries `queue_slots` and
 `queue_faults` per hour, so a crashing run says which hour the slot went bad
 instead of only that it did.
+
+---
+
+## Follow-up, same day: the walk could not report a reissued *container*
+
+The audit above validates queue **slots**. The standing reading of the SEGV is a
+block freed and reused while the scheduler still pointed at it — and the object
+that *holds* the slots can be reissued exactly the same way. In that case the
+slot walk reads a head, a tail and a ring out of whatever the block became, and
+reports nothing useful: everything it finds is garbage rather than a slot that
+stopped being a Fiber.
+
+`audit_ec_structs` now checks, for every ivar whose declared type is a concrete
+Reference class, that the referent is a **live object of that type** (heap +
+allocated + exact type_id). Abstract and module-typed ivars
+(`@event_loop : Crystal::EventLoop`) are skipped rather than guessed at: the
+runtime type is a subclass and there is no single id to compare against. Derived
+from `instance_vars`, like the pins.
+
+Two things the first run taught, both now in the code:
+
+- **Outside the heap is not a fault.** Every context's `@name` is a `String`
+  literal living in the program image, so `is_heap_ptr` is false for it — the
+  first run reported `Parallel@name` as corrupt on every collection. gcry never
+  sweeps what it did not allocate, so a non-heap referent is out of this check's
+  scope. That is also its limit, and it is worth stating: a wild pointer that
+  lands outside the heap passes here.
+- **A container that fails identity must not then be walked.** The first run
+  reported the planted `@runnables` correctly and then walked the decoy as if it
+  were a 256-slot ring, burying that line under 255 garbage slot faults (2 → 257).
+  The walks are now gated on the container's identity, which is what the report
+  line ("the walk below cannot be trusted") already claimed.
+
+Gated by a fifth arm in `make ec-queue-audit`: a scheduler's `@runnables` is
+pointed at a live object of the wrong type, and the report must name **that**
+value. Broken on purpose — with the identity check compiled out:
+
+```
+FAIL: a scheduler whose @runnables is a live object of the wrong type was
+      collected over without a word — the audit checks the slots and not the
+      structure that holds them
+```
+
+Silent on healthy processes: 0 faults across the gate's own churn context, its
+one-worker context, and a 15 s soak at `--fiber-churn=128` (388 slots walked, 6
+of 14 collections non-empty).

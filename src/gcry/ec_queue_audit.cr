@@ -31,6 +31,26 @@ module Gcry
       LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
     end
 
+    # A structure the context points at that is no longer that structure — the
+    # shape a freed-and-reissued block has. Reported separately from a slot
+    # because the consequence is different: a bad slot loses one fiber, a bad
+    # structure means every slot it holds is being read out of some other
+    # object's bytes.
+    def self.report_struct(owner : String, ivar : String, bits : UInt64) : Nil
+      buf = uninitialized UInt8[320]
+      len = 0
+      len = append(buf.to_unsafe, len, "gcry: EC STRUCTURE CORRUPT ")
+      len = append(buf.to_unsafe, len, owner)
+      len = append(buf.to_unsafe, len, "@")
+      len = append(buf.to_unsafe, len, ivar)
+      len = append(buf.to_unsafe, len, " = 0x")
+      len = append_hex(buf.to_unsafe, len, bits)
+      len = append(buf.to_unsafe, len, " — not a live object of the declared type\n")
+      len = append(buf.to_unsafe, len, "gcry: the slots it holds are being read out of whatever that block " \
+                                       "became; the walk below cannot be trusted\n")
+      LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
+    end
+
     private def self.append(buf : UInt8*, len : Int32, str : String) : Int32
       i = 0
       n = str.bytesize

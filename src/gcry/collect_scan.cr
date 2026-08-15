@@ -194,18 +194,82 @@ module Gcry
             {% has_scheds = t.instance_vars.any? { |v| v.name == "schedulers" } %}
             {% if has_queue || has_scheds %}
           when {{t}}
+              # Before the slots, the structures that hold them. The standing
+              # reading of the 2026-08-10 SEGV is that a slot was freed and
+              # reused while the scheduler still pointed at it — and the object
+              # that holds the slots can be reissued the same way, in which case
+              # a slot walk reads a head, a tail and a ring out of whatever the
+              # block became and reports nothing, because everything it finds is
+              # garbage rather than a bad Fiber.
+              audit_ec_structs(ec, {{t}})
               {% if has_queue %}
-                audit_ec_global_queue(ec.@global_queue)
+                # Only walk a container that is still that container. The report
+                # from `audit_ec_structs` already named it; walking it anyway
+                # would bury that line under a ring's worth of garbage slots,
+                # which is what the first run of this gate did.
+                if ec_struct_ok?(pointerof(ec.@global_queue).as(UInt64*).value,
+                     typeof(ec.@global_queue).crystal_instance_type_id)
+                  audit_ec_global_queue(ec.@global_queue)
+                end
               {% end %}
               {% if has_scheds %}
                 ec.@schedulers.each_with_index do |sched, i|
-                  audit_ec_runnables(sched.@runnables, i)
+                  audit_ec_structs(sched, Fiber::ExecutionContext::Parallel::Scheduler)
+                  if ec_struct_ok?(pointerof(sched.@runnables).as(UInt64*).value,
+                       typeof(sched.@runnables).crystal_instance_type_id)
+                    audit_ec_runnables(sched.@runnables, i)
+                  end
                 end
               {% end %}
             {% end %}
           {% end %}
           end
         end
+      {% end %}
+    end
+
+    # Is `bits` a live object of exactly type `type_id`? Same three questions as
+    # a queue slot, with the type it must be passed in rather than fixed to
+    # Fiber.
+    private def ec_struct_ok?(bits : UInt64, type_id : Int32) : Bool
+      return false if bits == 0
+      ptr = Pointer(Void).new(bits)
+      # Outside the heap is not a fault: a `String` literal — every context's
+      # `@name` — lives in the program image, and gcry never sweeps what it did
+      # not allocate. It is also the limit of this check, and worth stating: a
+      # wild pointer that happens to land outside the heap passes here. Only
+      # objects the collector manages can be swept, so only those are the
+      # question. (Measured the hard way: without this, every collection
+      # reported `Parallel@name` as corrupt.)
+      return true unless is_heap_ptr(ptr)
+      return false unless live?(ptr)
+      ptr.as(Int32*).value == type_id
+    end
+
+    # Check every ivar of an EC structure whose declared type is a **concrete**
+    # Reference class, i.e. every one whose runtime type_id is known at compile
+    # time. Abstract and module-typed ivars (`@event_loop : Crystal::EventLoop`)
+    # are skipped rather than guessed at: their runtime type is a subclass and
+    # there is no single id to compare against. Derived from `instance_vars` for
+    # the same reason the pins are — a structure added upstream is checked
+    # without an edit here.
+    #
+    # This is the check that would name a *reissued* structure. The slot walks
+    # cannot: if a `Runnables` block is freed and reused, its head, tail and ring
+    # are whatever the new owner wrote, and a walk over them finds garbage
+    # everywhere rather than a slot that stopped being a Fiber.
+    private macro audit_ec_structs(obj, type)
+      {% for ivar in type.resolve.instance_vars %}
+        {% ty = ivar.type %}
+        {% if ty < Reference && !ty.abstract? %}
+          unless ec_struct_ok?(pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value,
+                   {{ty}}.crystal_instance_type_id)
+            @ec_queue_audit_faults += 1
+            @ec_queue_audit_last_fault = pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value
+            EcQueueAudit.report_struct({{type.resolve.name.stringify}}, {{ivar.name.stringify}},
+              pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value)
+          end
+        {% end %}
       {% end %}
     end
 

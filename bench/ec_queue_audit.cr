@@ -15,7 +15,7 @@
 # moves the report from "an hour after the write, in the consumer" to "the next
 # collection after the write, with the slot index and the value in it".
 #
-# Four arms:
+# Five arms:
 #
 #   engagement  with real fiber traffic the audit must actually walk both
 #               structures — `ec_queue_audit_ring_slots > 0` **and**
@@ -28,6 +28,14 @@
 #               worker is held inside a fiber that never yields, so nothing
 #               dequeues while the harness pokes the value, collects, and puts
 #               the original back.
+#
+#   structure   a slot walk cannot report a reissued *container*: with the ring
+#               object replaced, head, tail and the slots are all read out of
+#               some other object's bytes and the walk finds garbage rather than
+#               a bad Fiber. `audit_ec_structs` checks each structure is still a
+#               live object of its declared type; this arm plants a live object
+#               of the wrong type in a scheduler's `@runnables` and requires the
+#               report to name it.
 #
 #   recovery    after the value is restored the queue drains normally and every
 #               spawned fiber runs. What is being checked is that the arm above
@@ -200,7 +208,36 @@ def run(control : Bool) : Int32
       failures << "the audit is off but the global-queue walk ran"
     end
 
-    # ── Arm 3: recovery ──────────────────────────────────────────────────────
+    # ── Arm 3: structure identity ────────────────────────────────────────────
+    # A slot walk cannot report a *reissued container*: if the `Runnables` block
+    # is freed and reused, its head, tail and ring are whatever the new owner
+    # wrote, and the walk finds garbage everywhere rather than a slot that
+    # stopped being a Fiber. That is the standing reading of the 2026-08-10
+    # SEGV, so it is the case the audit has to name.
+    sched_slot = pointerof(ec.@schedulers.to_unsafe[0].@runnables).as(UInt64*)
+    sched_saved = sched_slot.value
+    struct_before = HEAP.ec_queue_audit_faults
+    sched_slot.value = decoy.object_id
+    GC.collect
+    struct_after = HEAP.ec_queue_audit_faults
+    sched_slot.value = sched_saved
+    puts "faults: #{struct_before} → #{struct_after} (scheduler @runnables pointed at a live " \
+         "non-Runnables object)"
+
+    if audit_on
+      if struct_after == struct_before
+        failures << "a scheduler whose @runnables is a live object of the wrong type was collected " \
+                    "over without a word — the audit checks the slots and not the structure that " \
+                    "holds them"
+      elsif HEAP.ec_queue_audit_last_fault != decoy.object_id
+        failures << "the fault named 0x#{HEAP.ec_queue_audit_last_fault.to_s(16)}, not the planted " \
+                    "0x#{decoy.object_id.to_s(16)} — something downstream tripped first"
+      end
+    elsif struct_after != struct_before
+      failures << "the audit is off but a structure fault was still counted"
+    end
+
+    # ── Arm 4: recovery ──────────────────────────────────────────────────────
     release.set(1)
     QUEUED.times { ran.receive }
     GC.collect

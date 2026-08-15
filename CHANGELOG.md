@@ -90,6 +90,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
   artifacts. No fault reproduced yet; what changed is the rate at which a run
   could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+- **The queue audit also checks the structures, not only the slots in them.** A
+  slot walk cannot report a reissued *container*: if the `Runnables` block is
+  freed and reused, its head, tail and ring are read out of whatever the block
+  became, and the walk finds garbage everywhere rather than a slot that stopped
+  being a Fiber — which is the standing reading of the 2026-08-10 SEGV.
+  `audit_ec_structs` checks every ivar whose declared type is a concrete
+  Reference class for a **live object of that type** (heap + allocated + exact
+  type_id), derived from `instance_vars`; abstract and module-typed ivars are
+  skipped rather than guessed at. Two lessons are in the code: a referent
+  *outside* the heap is not a fault (every context's `@name` is a String literal
+  in the program image, which the first run reported as corrupt on every
+  collection), and a container that fails identity is **not then walked** — the
+  first run buried the real line under 255 garbage slot faults. Gated by a fifth
+  arm in `make ec-queue-audit` that plants a live object of the wrong type in a
+  scheduler's `@runnables` and requires the report to name it; silent across a
+  15 s soak at `--fiber-churn=128`.
 - **`GCRY_EC_QUEUE_AUDIT=1` — name the corrupt run-queue slot at the next
   collection instead of at the crash.** The 2026-08-10 soak died in
   `Parallel::Scheduler#quick_dequeue?` on `0x7f1700000149`, 1h24m in; the dequeue
