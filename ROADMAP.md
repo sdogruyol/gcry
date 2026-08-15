@@ -316,6 +316,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       produce. `page_query_pressure` is now a `workflow_dispatch` input (default
       0, which is what every push runs) so the arm can be attempted; the wiring
       existed in the Makefile and had no way to be set from CI.
+      **First attempt: 2048 MiB, still INCONCLUSIVE** — 0 of 256 written pages
+      left residency. `macos-latest` has ~7 GB, so 2 GB of churn was never going
+      to pressure it. **And the probe was measuring in the wrong unit**: `PAGE`
+      was hardcoded `4096_u64`, so the `page size 4096` it printed was that
+      constant and not a reading — the probe never asked the host.
+      `Platform.host_page_size` in the collector already records Apple Silicon as
+      16 KiB, which if that is the runner makes the region a quarter of its
+      intended size, every query answered four times over, and the eviction count
+      a count of 4 KiB slices. It now calls `sysconf(_SC_PAGESIZE)` and prints
+      the region in KiB, so the next Darwin run reports the host's page size
+      instead of the probe's opinion of it — and that number is what decides how
+      the eviction arm has to be sized.
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.
