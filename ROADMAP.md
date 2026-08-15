@@ -237,14 +237,26 @@ CI asymmetry that hid both.
       in each metric's direction, an improvement, a within-noise run, both gate
       modes, a tolerance-less baseline and the unrecorded file the repo ships), so
       it is covered without wrk or a quiet host.
-      **What is left is the number, and it is the hard half.** No baseline is
-      recorded because none has been measured on the runner class that would use
-      it, and the perf job's own comment records **~68–88%** thr across runs
-      there — a spread that makes a tight gate flaky and an honest gate wide.
-      Next: collect the `summary.json` files that job already uploads from N green
-      pushes to master, `--record` from them, commit the file, and set
-      `PERF_GATE_BASELINE=1` once the recorded tolerance is narrow enough to be
-      worth blocking a PR on.
+      **The number is now recorded, and it is worth having for two metrics of
+      four.** `bench/baseline/perf_smoke.json` carries five green `ubuntu-latest`
+      runs from 2026-08-15 (`7709898`), taken from the `perf-smoke-report`
+      artifacts that job already uploads, so no quiet host was needed:
+
+      | metric | baseline | tolerance | gate fires at | fixed floor today |
+      |---|---|---|---|---|
+      | `pct_json` | 76.0 | ±9.375 | below **66.6** | 65 |
+      | `rss_x` | 0.884 | ±0.0795 | above **0.964** | 1.25 |
+      | `pause_p50_ms` | 0.7606 | ±0.2 | above **0.96** | 2.5 |
+      | `pct_root` | 83.0 | ±12.525 | warn-only | — |
+
+      So the throughput half of this item did not land: the runner's own spread
+      (70.6–81.9 across the five) makes an honest `pct_json` tolerance so wide
+      that the baseline gate sits **1.6 pp** below the fixed floor it was meant
+      to tighten. The file's own note predicted exactly this before it was
+      measured. The RSS and pause halves did land — **1.3×** and **2.6×** tighter
+      than their floors — and those are the two a collector change is most likely
+      to move quietly. Next: set `PERF_GATE_BASELINE=1` if that trade is worth
+      blocking a PR on, and re-record when the runner class changes.
 
 ## Then (v0.21.0) — Darwin performance parity
 
