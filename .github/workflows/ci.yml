@@ -347,6 +347,14 @@ jobs:
         run: |
           make ec-queue-audit
 
+      # The perf gates are floors far below tip, so a regression that lands
+      # inside one is invisible (85% -> 70% clears all of them). The baseline
+      # comparator closes that; this gates the comparator itself, which needs
+      # neither wrk nor a quiet host.
+      - name: Perf baseline comparator
+        run: |
+          make perf-baseline
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -532,8 +540,13 @@ jobs:
           # Thr floor 65%: GHA often lands ~68–88% and has flaked at 68.1/68.4
           # under a 70% gate. RSS×/pause catch pause-campaign regressions;
           # quiet tip ~85% @ ~0.8× @ ~0.6ms.
+          # The floors below are the catastrophe net. The baseline comparison
+          # perf_smoke.sh runs at the end is the sensitive half — report-only
+          # until a baseline with a tolerance measured on this runner class is
+          # recorded and committed (bench/baseline/perf_smoke.json).
           PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
             MIN_PCT=65 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
+            RUNNER_LABEL=ubuntu-latest \
             ./bench/perf_smoke.sh
 
       - name: Kemal E2E (endpoints + 60s load)

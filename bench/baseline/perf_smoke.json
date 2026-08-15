@@ -1,0 +1,31 @@
+{
+  "provenance": {
+    "runner": null,
+    "commit": null,
+    "runs": 0,
+    "recorded": null,
+    "note": "No baseline recorded yet. `bench/perf_compare.py` therefore reports and does not gate — see the metrics note below. Record one with: bench/perf_compare.py --record --out bench/baseline/perf_smoke.json --runner <label> --commit <sha> --recorded <date> bench/log/<run>/summary.json ... (three or more green runs on the same runner class; fewer and no spread is measured, so no tolerance is written and the file keeps reporting)."
+  },
+  "metrics": {
+    "pct_json": {
+      "value": null,
+      "tolerance": null,
+      "note": "gcry /json throughput as a percentage of Boehm, same host, same run. Quiet tip holds ~85%; the fixed floor in perf_smoke.sh is 65%, which is what this file exists to tighten. Note before recording one on GitHub: that job's own comment records ~68-88% across runs, so a tolerance measured there will be wide, and a wide honest tolerance is worth more than a narrow flaky one."
+    },
+    "pct_root": {
+      "value": null,
+      "tolerance": null,
+      "note": "Warn-only, matching perf_smoke.sh: `/` is not the critical path."
+    },
+    "rss_x": {
+      "value": null,
+      "tolerance": null,
+      "note": "Post-GC RSS as a multiple of Boehm's, same host, after /json load. Quiet tip ~0.80x on Linux; the fixed ceiling is 1.25x."
+    },
+    "pause_p50_ms": {
+      "value": null,
+      "tolerance": null,
+      "note": "From /gc-stats after load. Quiet tip ~0.6 ms; the fixed ceiling is 2.5 ms."
+    }
+  }
+}

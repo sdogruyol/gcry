@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bench/perf_compare.py` — perf against a recorded baseline, not just against
+  a floor.** `perf_smoke.sh` gates on thr ≥65% of Boehm, RSS ≤1.25×, p50 ≤2.5 ms,
+  and quiet tip holds ~85% @ ~0.8× @ ~0.6 ms, so **85% → 70% clears every gate in
+  the suite**. The comparator reads the same `summary.json` and compares the four
+  ratio metrics against `bench/baseline/perf_smoke.json`; it runs at the end of
+  `perf_smoke.sh`, report-only unless `PERF_GATE_BASELINE=1`. One rule holds it
+  up: a baseline gates only if it carries a **tolerance derived from measured
+  spread** — `--record` needs ≥3 runs and otherwise writes no tolerance, so the
+  file reports rather than gating against a noise floor nobody measured. Runs
+  now stamp the runner class into the summary, and a comparison across classes
+  says so. `make perf-baseline` gates the comparator on fixtures — a regression
+  in each metric's direction, an improvement, a within-noise run, both gate
+  modes, a tolerance-less baseline, and the unrecorded file the repo ships —
+  which needs neither wrk nor a quiet host. **No baseline is recorded yet**, and
+  the perf job's own comment records ~68–88% thr across runs there, so the honest
+  next step is N green runs on that runner class before any number is committed.
 - **The soak can now keep its run queues occupied, and CI runs three arms at
   once.** The queue audit below can only catch a slot that is corrupt *while* a
   collection sees it, and the baseline workload gave it almost nothing: measured,

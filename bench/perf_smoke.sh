@@ -19,6 +19,11 @@
 #
 # Floors/ceilings are intentionally loose for CI host noise. Tip quiet holds
 # ~85% thr @ ~0.8× RSS @ ~0.6 ms pause_p50; CI defaults leave headroom.
+#
+# That headroom is also the hole: a regression that lands inside a floor is
+# invisible. `bench/perf_compare.py` compares the same summary against a
+# recorded baseline and runs at the end of this script — report-only until a
+# baseline with a measured tolerance exists (PERF_GATE_BASELINE=1 to gate).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -247,6 +252,10 @@ summary = {
     'pause_p50_ms': float('$PAUSE_P50_MS'),
     'max_pause_p50_ms': float('$MAX_PAUSE_P50_MS'),
     'timestamp': '$(date -u +%Y-%m-%dT%H:%M:%SZ)',
+    # Which machine class this was measured on. The ratios are same-host, but a
+    # baseline recorded on a GitHub runner still does not describe a laptop —
+    # perf_compare.py says so out loud rather than comparing silently.
+    'runner': '${RUNNER_LABEL:-$(uname -s)-$(uname -m)}',
 }
 open('$RUN_DIR/summary.json', 'w').write(json.dumps(summary) + '\n')
 print(json.dumps(summary, indent=2))
@@ -279,6 +288,24 @@ if python3 -c "import sys; exit(0 if float('$PAUSE_P50_MS') <= float('$MAX_PAUSE
 else
   echo "FAIL: gcry pause_p50 = ${PAUSE_P50_MS} ms > ${MAX_PAUSE_P50_MS} ms"
   FAIL=1
+fi
+
+# ── baseline comparison ──────────────────────────────────────────────
+#
+# The gates above are floors, and they sit far below tip on purpose (CI host
+# noise): 85% -> 70% clears every one of them. This compares the same numbers
+# against a recorded baseline instead. Report-only by default — set
+# PERF_GATE_BASELINE=1 to make a regression fail the run, which is worth doing
+# only once the baseline carries a tolerance measured on this runner class.
+BASELINE="${PERF_BASELINE:-$ROOT/bench/baseline/perf_smoke.json}"
+if [ -f "$BASELINE" ]; then
+  echo ""
+  GATE_ARG=""
+  [ "${PERF_GATE_BASELINE:-0}" = "1" ] && GATE_ARG="--gate"
+  if ! python3 "$ROOT/bench/perf_compare.py" --baseline "$BASELINE" \
+      --summary "$RUN_DIR/summary.json" $GATE_ARG; then
+    FAIL=1
+  fi
 fi
 
 echo ""

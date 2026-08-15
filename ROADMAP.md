@@ -147,6 +147,24 @@ CI asymmetry that hid both.
       (~85% @ ~0.8× @ ~0.6 ms). Compare a PR against a stored baseline instead, and
       against the measured noise floor (±2–3pp on phase timings, ±1pp on post-GC
       RSS at 12 reps — open below), not against zero.
+      **The comparator is built and gated; the baseline is not recorded.**
+      `bench/perf_compare.py` compares a run's `summary.json` against
+      `bench/baseline/perf_smoke.json` on the four ratio metrics, and runs at the
+      end of `perf_smoke.sh`. Its design turns on one rule: a baseline gates only
+      if it carries a **tolerance derived from measured spread** — recording needs
+      ≥3 runs, and with fewer it writes no tolerance and the file reports instead.
+      `make perf-baseline` gates the comparator itself on fixtures (a regression
+      in each metric's direction, an improvement, a within-noise run, both gate
+      modes, a tolerance-less baseline and the unrecorded file the repo ships), so
+      it is covered without wrk or a quiet host.
+      **What is left is the number, and it is the hard half.** No baseline is
+      recorded because none has been measured on the runner class that would use
+      it, and the perf job's own comment records **~68–88%** thr across runs
+      there — a spread that makes a tight gate flaky and an honest gate wide.
+      Next: collect the `summary.json` files that job already uploads from N green
+      pushes to master, `--record` from them, commit the file, and set
+      `PERF_GATE_BASELINE=1` once the recorded tolerance is narrow enough to be
+      worth blocking a PR on.
 
 ## Then (v0.21.0) — Darwin performance parity
 
