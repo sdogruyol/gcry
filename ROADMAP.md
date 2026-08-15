@@ -328,6 +328,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the region in KiB, so the next Darwin run reports the host's page size
       instead of the probe's opinion of it — and that number is what decides how
       the eviction arm has to be sized.
+      **Measured: `page size 16384 (sysconf), region 256 pages, 4096 KiB`.** The
+      runner is Apple Silicon and the probe had been a factor of four out. The
+      cost was not cosmetic: the zero-proof arm — the one the soundness argument
+      rests on — went from **27/256 skippable to 219/256**, so it now exercises
+      eight times the pages it did while reporting the same verdict. Every arm's
+      qualitative result is unchanged (untouched skippable, written not,
+      every skippable page zero, `MADV_FREE_REUSABLE` zero); what changed is how
+      much they cover. The eviction arm is still the open one.
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.
