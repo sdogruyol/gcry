@@ -379,7 +379,7 @@ MODES.each do |mode|
       else        "CORRUPT (exit #{status.exit_code})"
       end
     else
-      "CORRUPT (#{status.exit_signal})"
+      "CORRUPT (#{status.exit_signal? || status.exit_reason})"
     end
 
   note = (r = retries[mode]?) ? "  [#{r} startup-hang retry(ies)]" : ""

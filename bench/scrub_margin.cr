@@ -155,7 +155,7 @@ OVERSHOOTS.each do |n|
     elsif status.normal_exit?
       status.exit_code == 2 ? "CORRUPT (checksum)" : "CORRUPT (exit #{status.exit_code})"
     else
-      "CORRUPT (#{status.exit_signal})"
+      "CORRUPT (#{status.exit_signal? || status.exit_reason})"
     end
   results[n] = verdict
   puts "  overshoot=%5d  %s" % [n, verdict]
