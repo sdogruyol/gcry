@@ -35,6 +35,83 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 
 ---
 
+## Next (v0.20.0) — "Prove root coverage, and put Darwin under the gates"
+
+Both defects v0.19.0 closed were the same shape: a root the caller assumed was
+scanned and the platform returned nothing for — Darwin's empty `each_thread_greg`
+stub, and Linux aarch64's `UCONTEXT_NGREGS = 0`. Neither was visible until a
+counter was wired to a gate and the gate was broken on purpose. The largest open
+item fits that shape too, so 0.20.0 spends its budget on root coverage and on the
+CI asymmetry that hid both.
+
+- [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
+      SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
+      it (open below), i.e. a missed root — and its only named candidate is now
+      excluded by rate, so nothing explains it. Ask of the scheduler's runnable
+      queues, thread-local slots and `Thread` internals the question the greg stub
+      failed: is each range actually pushed as a root? Method is the one that has
+      now worked twice — a per-structure counter on `/gc-stats` and a
+      `make scheduler-roots` gate, verified red by stubbing the push out.
+      **Hypothesis, not a finding:** no missed range has been identified yet, and
+      the shape-match to the greg defect is an argument for looking, not evidence.
+- [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
+      chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
+      indistinguishable from a quiet run inside a release cycle. Two handles,
+      neither tried — dispatch N arms concurrently, and poison/canary scheduler
+      slots so the *first* overwrite fails loudly instead of the SEGV an hour
+      downstream.
+- [ ] **Fix `make invariants` on Darwin, and run it there.** Open below, with a
+      stated hypothesis and a decisive experiment already written down. Cheapest
+      correctness debt on the board, and it shipped in three releases.
+- [ ] **Close the Darwin CI asymmetry.** It is why both items above are open.
+      `test-macos` runs `spec`, `process_spec`, the samples and `make greg-roots`;
+      the Linux job runs those plus ~43 further gates. Missing on Darwin, in the
+      order they would have paid: **Debug invariants** (exactly what hid the item
+      above for three releases), `stw_mt_property_test`, the soak, a perf gate.
+- [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
+      on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
+      lands inside the floor is invisible, and the floors sit far below tip
+      (~85% @ ~0.8× @ ~0.6 ms). Compare a PR against a stored baseline instead, and
+      against the measured noise floor (±2–3pp on phase timings, ±1pp on post-GC
+      RSS at 12 reps — open below), not against zero.
+
+## Then (v0.21.0) — Darwin performance parity
+
+Linux took an 8.06 → 3.60 ms EC4 pause from the low-water skip and macOS takes none
+of it. The gap is measured rather than assumed — `low_water_skips = 0` in every
+draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedulable.
+
+- [ ] **Low-water skip on Darwin** — open below. The first blocker is not code: the
+      `mach_vm_page_query` disposition bits are still unverified, and residency
+      alone is the wrong test (a page written then swapped reads absent, and
+      skipping it drops a root).
+- [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
+      tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
+      `low_water_skipped_bytes` is the handle and postdates the question.
+- [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
+      bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
+      on post-GC RSS, at 12 reps.
+
+## After that — lift the ceiling
+
+- [ ] **Compiler stack maps** (Phase 2). Shard-only levers for EC1 `/json` ≥95% @
+      ≤1.0× RSS are **exhausted** (i3 + 9950X hunt MISS), so this is the only one
+      left. It should end in a decision rather than an implementation: either
+      precise roots pay measurably, or `GCRY_PRECISE_STACK` stays research and the
+      ≥95% target is restated.
+- [ ] **Write barrier** (Phase 2) — precondition for a sound concurrent /
+      incremental backend, and therefore for "nursery + incremental on by default"
+      (Phase 3). Ordering, not a new item.
+- [ ] **Windows process GC** (Phase 2) — `src/gcry/platform/` is `linux_*` and
+      `darwin_*` only. The widest good-first-issue surface on the board.
+
+Ecosystem work runs alongside and blocks none of the above: the `-Dgc_gcry`
+compiler PR, production dogfood (which would also settle **which compiler and gcry
+commit prod builds from** — open below, and the missing link to the 2026-08-08
+SIGSEGV), the leaderboard, and per-release write-ups.
+
+---
+
 ## Phase 2: Community & Production Readiness
 
 Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
