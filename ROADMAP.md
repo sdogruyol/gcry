@@ -183,6 +183,20 @@ CI asymmetry that hid both.
       Darwin), where one promptly failed on a threshold calibrated against the
       vacuous run and now asserts the drift the defect actually produced.
       `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
+- [ ] **`live_objects` comes back on x86_64 and does not on arm64.** The
+      regression above, on its first honest run, is **red on `aarch64` and on
+      `darwin` and green on `x86_64`** — allocate 10 000, free all 10 000,
+      collect four times, and the counter sits **1005** (darwin: 1004) above
+      where it started. Measured on x86_64 the same delta is **≤ 4**, across
+      `GCRY_CHUNK_BYTES` 64 KiB → 512 KiB, so this is not the assertion's slack
+      being tight on a noisier host and raising the bound would bury it. The
+      counter is what every GC decision reads, and this is the drift the v0.14.0
+      defect produced, on the two platforms that were not under CI when it was
+      fixed. The spec now reports what separates the readings — the drift at two
+      counts an order of magnitude apart, and gcry's own invariant walk, which
+      skips dormant chunks and so reads high against a counter that stranded
+      objects in one. Next arm64 run says which. No Darwin or aarch64 host here;
+      CI is the instrument.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
