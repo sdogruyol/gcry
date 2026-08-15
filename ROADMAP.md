@@ -72,10 +72,27 @@ CI asymmetry that hid both.
       ivar it was recorded against is not an instance: `Crystal::EventLoop` is an
       abstract *class* on 1.21.0, so `@event_loop` was always emitted, and every
       ivar of `Parallel::Scheduler` classifies.
-      **Still open, and the reason this item stays unchecked:** the gate
-      proves the named pins ran, not that the list is complete. Nothing yet checks
-      the scheduler's ivars against what is pinned, so a structure added upstream
-      would be missed exactly the way the two register gaps were.
+      **The list is now complete by construction** (2026-08-15). The block pinned
+      seven names; the structures carry **ten pointer ivars on the context and
+      seven on the scheduler**, so `@mutex`, `@condition`, `@rng`, `@next`,
+      `@previous`, `@name`, `@thread` and the scheduler's own `@global_queue` /
+      `@event_loop` were covered only by the conservative body scan the pin block
+      exists because it does not trust. `pin_ec_ivars` now derives the pins from
+      `instance_vars` at compile time — a list drifts, `instance_vars` cannot —
+      and marks **every word** of any slot that is not plainly a `Reference`,
+      because `sizeof(Fiber::ExecutionContext | Nil)` is 16 on 1.21.0 and pinning
+      "the pointer word" would have pinned the type_id and looked covered.
+      45 named slots per collection for a 4-worker context against the old 16.
+      `make scheduler-roots` computes its expectation from the same
+      `instance_vars`, so an upstream addition moves both sides together; the
+      residue — a pointer-bearing ivar narrower than a pointer, which has no sound
+      answer — is counted by `ec_root_unpinned_ivars` and asserted zero. Both arms
+      broken on purpose and observed red.
+      **Still open, and the reason this item stays unchecked:** none of this
+      explains the 2026-08-10 soak SEGV. The soak sets no `GCRY_AUTO_LAYOUTS`, so
+      those ivars were reached conservatively there anyway — what changed is that
+      they no longer depend on it.
+      `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
 - [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
       chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
       indistinguishable from a quiet run inside a release cycle. Two handles,

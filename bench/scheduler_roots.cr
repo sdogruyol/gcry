@@ -1,9 +1,10 @@
 # Does the collector actually pin the Parallel execution context's structures?
 #
-# `collect_scan.cr#scan_thread_roots` names them one by one — global queue,
-# event loop, stack pool, the scheduler array, and per scheduler its runnables
-# and main fiber — because relying on the conservative scan of the `Thread` body
-# to reach them was measured insufficient once already (Kemal EC4 SEGV @ …0008).
+# `collect_scan.cr#scan_thread_roots` pins them explicitly — every pointer-bearing
+# ivar of the context and of each of its schedulers, derived from `instance_vars`
+# rather than from a list of names — because relying on the conservative scan of
+# the `Thread` body to reach them was measured insufficient once already
+# (Kemal EC4 SEGV @ …0008).
 #
 # The whole block sits behind a macro gate on `Thread.@execution_context`. That
 # gate is right for what it was written for — Crystal 1.21.0 release declares the
@@ -14,13 +15,28 @@
 # `UCONTEXT_NGREGS = 0`: a root the caller assumed was covered, and no counter
 # that could say otherwise. `ec_root_pins` is that counter.
 #
-# Two arms, and only one of them is the gate:
+# Three arms, and the first two are the gate:
 #
-#   mechanism   with a Parallel EC up, a collection must pin at least the named
-#               structures: 4 per context + 3 per scheduler. Measured as a
-#               *delta* across a collection taken before the context exists, so
-#               the ambient Thread-level pins (`@scheduler`, `@execution_context`)
-#               cannot carry the arm on their own. **This is the gate.**
+#   mechanism   with a Parallel EC up, a collection must pin at least one slot
+#               per pointer-bearing ivar — of the context, and of each of its
+#               schedulers. The expectation is computed below from
+#               `instance_vars`, the same place the collector's `pin_ec_ivars`
+#               derives the pins from, so upstream adding a queue moves both
+#               sides together instead of leaving a hardcoded "4 per context +
+#               3 per scheduler" behind. Measured as a *delta* across a
+#               collection taken before the context exists, so the ambient
+#               Thread-level pins (`@scheduler`, `@execution_context`) cannot
+#               carry the arm on their own. **This is the gate.**
+#
+#   complete    `ec_root_unpinned_ivars` must be 0. The arm above proves the pins
+#               ran and reached every ivar the block *can* cover; this one proves
+#               there is none it cannot. Wide ivars are covered — a `Proc`, a
+#               `Tuple`, `(Fiber::ExecutionContext | Nil)` get every word of the
+#               slot marked rather than a guessed one — so what is left is the
+#               shape with no sound answer: pointer-bearing and *narrower* than a
+#               pointer. Zero on Crystal 1.21.0, and counted rather than skipped
+#               so it cannot arrive quietly. This is the half that answers "is the
+#               list complete", which `ec_root_pins` alone could not.
 #
 #   end-to-end  fibers parked in that context, whose addresses this harness holds
 #               only obfuscated, must survive the collection. Worth having, but
@@ -52,6 +68,28 @@ FIBERS  = 16
 # Same trick as bench/greg_roots.cr: `addr ^ KEY` is not itself a heap pointer,
 # so the table this harness keeps cannot root the fibers it is testing.
 KEY = 0x9E3779B97F4A7C15_u64
+
+# How many slots the collector's `pin_ec_ivars` visits for one object of this
+# type: one per `Reference` ivar, and one per pointer-sized word of any other
+# ivar that can hold a pointer. Deriving the expectation here rather than writing
+# a number down is the point of the arm — both sides read the same
+# `instance_vars`, so upstream cannot add a structure that only one of them knows
+# about. (`@next : (Fiber::ExecutionContext | Nil)` is two words, not one, which
+# is also why the collector marks the whole slot instead of picking a word.)
+macro pin_slots(type)
+  begin
+    slots = 0
+    {% for ivar in type.resolve.instance_vars %}
+      {% ty = ivar.type %}
+      {% if ty < Reference %}
+        slots += 1
+      {% elsif ty.has_inner_pointers? %}
+        slots += sizeof({{ty}}) // sizeof(Pointer(Void))
+      {% end %}
+    {% end %}
+    slots
+  end
+end
 
 # The body lives in a method for a macro reason, not a style one:
 # `TypeNode#instance_vars` cannot be called in the top-level scope, and the guard
@@ -105,22 +143,38 @@ def run(control : Bool) : Int32
       FIBERS.times { ready.receive }
 
       schedulers = ec.@schedulers.size
-      expected = 4 + 3 * schedulers
+      # One slot per pointer-bearing ivar, plus the context object itself and
+      # each scheduler object. Derived from the types, not written down: the
+      # collector's `pin_ec_ivars` classifies the same way, so a queue added
+      # upstream raises this number and the pin that satisfies it together.
+      per_context = pin_slots(Fiber::ExecutionContext::Parallel)
+      per_scheduler = pin_slots(Fiber::ExecutionContext::Parallel::Scheduler)
+      expected = 1 + per_context + schedulers * (1 + per_scheduler)
 
       GC.collect
       after = HEAP.ec_root_pins
       delta = after.to_i64 - before.to_i64
       puts "schedulers: #{schedulers} (asked for #{WORKERS})"
+      puts "pin slots per object: context #{per_context}, scheduler #{per_scheduler}"
       puts "pins with the context up: #{after} (delta #{delta}, at least #{expected} expected)"
+      puts "ivars too wide to pin: #{HEAP.ec_root_unpinned_ivars}"
 
       # ── Arm 1: the mechanism ─────────────────────────────────────────────────
       if delta < expected
-        failures << "the Parallel pin block contributed #{delta} pins where #{expected} are named " \
-                    "in scan_thread_roots — the block did not run (macro gate compiled it out, or " \
-                    "the context was not on Fiber::ExecutionContext.unsafe_each)"
+        failures << "the Parallel pin block contributed #{delta} pins where #{expected} pointer " \
+                    "ivars are reachable from the context — the block did not run (macro gate " \
+                    "compiled it out, or the context was not on " \
+                    "Fiber::ExecutionContext.unsafe_each), or it no longer covers every ivar"
       end
 
-      # ── Arm 2: end to end ────────────────────────────────────────────────────
+      # ── Arm 2: is the list complete ──────────────────────────────────────────
+      if HEAP.ec_root_unpinned_ivars > 0
+        failures << "#{HEAP.ec_root_unpinned_ivars} pointer-bearing ivars of the Parallel EC " \
+                    "structures are narrower than a pointer, so pin_ec_ivars counted them instead " \
+                    "of marking them — whatever lives only behind one of those has no explicit root"
+      end
+
+      # ── Arm 3: end to end ────────────────────────────────────────────────────
       swept = 0
       hidden.each do |h|
         swept += 1 unless HEAP.live?(Pointer(Void).new(h ^ KEY))

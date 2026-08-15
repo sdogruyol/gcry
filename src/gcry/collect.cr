@@ -268,6 +268,14 @@ module Gcry
     # comment on that block already records as insufficient (Kemal EC4 SEGV
     # @ …0008). Zero and "compiled out" are indistinguishable without this.
     getter ec_root_pins : UInt64 = 0_u64
+    # Pointer-bearing ivars of the Parallel EC structures that the pin block
+    # could *not* cover. Wide ones it can — a Proc, a Tuple,
+    # `(Fiber::ExecutionContext | Nil)` get every word of the slot marked — so
+    # this is the shape with no sound answer left: pointer-bearing and narrower
+    # than a pointer. Zero on Crystal 1.21.0, and `make scheduler-roots` asserts
+    # it stays zero, because an upstream ivar of that shape is a root the block
+    # would otherwise drop without a word about it.
+    getter ec_root_unpinned_ivars : UInt64 = 0_u64
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -1344,6 +1352,7 @@ module Gcry
       @sp_clamp_fallbacks = 0_u64
       @thread_greg_candidates = 0_u64
       @ec_root_pins = 0_u64
+      @ec_root_unpinned_ivars = 0_u64
       @low_water_skips = 0_u64
       @low_water_skipped_bytes = 0_u64
     end

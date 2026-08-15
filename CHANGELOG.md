@@ -38,6 +38,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own right and fixed — see below — though not as an explanation for the
   SEGV, and not on the ivar it was recorded against.
 
+### Changed
+
+- **The Parallel EC pin list is derived from the types, not written beside them.**
+  `scan_thread_roots` pinned seven names; the structures carry **ten** pointer
+  ivars on the context and **seven** on the scheduler, so `@mutex`, `@condition`,
+  `@rng`, `@next`, `@previous`, `@name`, `@thread` and the scheduler's own
+  `@global_queue` / `@event_loop` were left to the conservative body scan the pin
+  block exists because it does not trust (Kemal EC4 SEGV @ …0008). `pin_ec_ivars`
+  now walks `instance_vars` at compile time — a list drifts, `instance_vars`
+  cannot — giving **45 named slots per collection** for a 4-worker context
+  against the old 16. Anything not plainly a `Reference` gets **every word** of
+  its slot marked rather than a guessed one: `sizeof(Fiber::ExecutionContext | Nil)`
+  is 16 on Crystal 1.21.0 (a module union carries a type_id word), so pinning
+  "the pointer word" would have pinned the type_id and looked covered. Two knock-on
+  changes: `ec_root_pins` counts the *slot* rather than the mark, so a nil ivar
+  and an ivar nobody visited stop being indistinguishable; and a new
+  `ec_root_unpinned_ivars` on `/gc-stats` counts the one shape with no sound
+  answer — pointer-bearing and narrower than a pointer — which
+  `make scheduler-roots` asserts is zero. That gate computes its expectation from
+  the same `instance_vars`, so an upstream addition moves both sides together.
+  Both arms broken on purpose and observed red. It does **not** explain the
+  2026-08-10 soak SEGV: the soak sets no `GCRY_AUTO_LAYOUTS`, so those ivars were
+  reached conservatively there anyway — what changed is that they no longer
+  depend on it. `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
+
 ### Fixed
 
 - **`make invariants` passes — and it was never a Darwin problem.** Two failures,

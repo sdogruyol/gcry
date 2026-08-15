@@ -13,10 +13,15 @@ module Gcry
 
     # Module-typed Reference ivars (Scheduler, ExecutionContext) cannot
     # `.as(Reference)` / `unsafe_as(Reference)` yet — load the pointer bits.
+    #
+    # The counter counts the slot, not the mark: a nil ivar is a slot the block
+    # visited and found empty, and a gate that could not tell that from a slot
+    # the block never looked at would be the same blind spot this counter exists
+    # to remove.
     private def mark_ref_slot(slot_addr : UInt64) : Nil
+      @ec_root_pins += 1
       bits = Pointer(UInt64).new(slot_addr).value
       return if bits == 0
-      @ec_root_pins += 1
       mark_root_candidate(Pointer(Void).new(bits), source: RootSource::Thread)
     end
 
@@ -26,6 +31,50 @@ module Gcry
     private def pin_ec_root(obj) : Nil
       @ec_root_pins += 1
       mark_root_candidate(Pointer(Void).new(obj.object_id), source: RootSource::Thread)
+    end
+
+    # Mark every word of one ivar slot. For anything that is not plainly a
+    # `Reference`, guessing which word holds the pointer is worse than not
+    # guessing: `@next : (Fiber::ExecutionContext | Nil)` is **16 bytes** on
+    # Crystal 1.21.0 — a module union carries a type_id word — so pinning "the
+    # pointer word" would pin the type_id and look covered. A `Proc` is 16 bytes
+    # for the same practical reason (function, then closure environment).
+    private def pin_ec_slot(slot_addr : UInt64, bytes : Int32) : Nil
+      word = sizeof(Void*)
+      if bytes < word
+        # Pointer-bearing and narrower than a pointer: nothing sound to mark.
+        # Cannot happen on 1.21.0; counted so it cannot happen quietly.
+        @ec_root_unpinned_ivars += 1
+        return
+      end
+      offset = 0
+      while offset + word <= bytes
+        mark_ref_slot(slot_addr + offset)
+        offset += word
+      end
+    end
+
+    # Pin every pointer-bearing ivar of an EC structure, derived from the type
+    # itself rather than from a list of names written beside it. A list drifts:
+    # upstream adds a queue, the block keeps pinning the four it was written
+    # with, and nothing says otherwise — the shape of both v0.19.0 register gaps,
+    # and the reason this item stayed open after `ec_root_pins` proved the block
+    # *ran*. `instance_vars` cannot drift.
+    #
+    # Two outcomes per ivar, and no third one to forget about: a `Reference` is
+    # one word, and anything else that can hold a pointer gets every word of its
+    # slot marked. Values (`Int32`, `Bool`, `Atomic(Int32)`, an enum) are skipped
+    # because `has_inner_pointers?` says there is nothing in them — the same
+    # predicate `Layout.register` was fixed to ask on 2026-08-15.
+    private macro pin_ec_ivars(obj, type)
+      {% for ivar in type.resolve.instance_vars %}
+        {% ty = ivar.type %}
+        {% if ty < Reference %}
+          mark_ref_slot(pointerof({{obj}}.@{{ivar.name}}).address)
+        {% elsif ty.has_inner_pointers? %}
+          pin_ec_slot(pointerof({{obj}}.@{{ivar.name}}).address, sizeof({{ty}}))
+        {% end %}
+      {% end %}
     end
 
     # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
@@ -59,15 +108,13 @@ module Gcry
           mark_ref_slot(pointerof(ec).address)
           # Parallel: also pin queues / event loop / schedulers explicitly. Body
           # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
+          # Every pointer ivar, not the four this was written with — see
+          # `pin_ec_ivars`.
           if ec.is_a?(Fiber::ExecutionContext::Parallel)
-            pin_ec_root(ec.@global_queue)
-            pin_ec_root(ec.@event_loop)
-            pin_ec_root(ec.@stack_pool)
-            pin_ec_root(ec.@schedulers)
+            pin_ec_ivars(ec, Fiber::ExecutionContext::Parallel)
             ec.@schedulers.each do |sched|
               pin_ec_root(sched)
-              pin_ec_root(sched.@runnables)
-              pin_ec_root(sched.@main_fiber)
+              pin_ec_ivars(sched, Fiber::ExecutionContext::Parallel::Scheduler)
             end
           end
         end
