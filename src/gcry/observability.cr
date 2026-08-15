@@ -160,6 +160,7 @@ module Gcry
         sp_clamp_hits:                         heap.sp_clamp_hits,
         sp_clamp_fallbacks:                    heap.sp_clamp_fallbacks,
         thread_greg_candidates:                heap.thread_greg_candidates,
+        ec_root_pins:                          heap.ec_root_pins,
         low_water_skips:                       heap.low_water_skips,
         low_water_skipped_bytes:               heap.low_water_skipped_bytes,
         finalizer_entries:                     heap.finalizer_entry_count,

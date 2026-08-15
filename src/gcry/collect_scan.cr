@@ -16,7 +16,16 @@ module Gcry
     private def mark_ref_slot(slot_addr : UInt64) : Nil
       bits = Pointer(UInt64).new(slot_addr).value
       return if bits == 0
+      @ec_root_pins += 1
       mark_root_candidate(Pointer(Void).new(bits), source: RootSource::Thread)
+    end
+
+    # An EC structure pinned by name rather than reached by scanning something
+    # else. Counted so the pin block's engagement is readable from outside the
+    # collector — see `ec_root_pins`.
+    private def pin_ec_root(obj) : Nil
+      @ec_root_pins += 1
+      mark_root_candidate(Pointer(Void).new(obj.object_id), source: RootSource::Thread)
     end
 
     # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
@@ -51,14 +60,14 @@ module Gcry
           # Parallel: also pin queues / event loop / schedulers explicitly. Body
           # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
           if ec.is_a?(Fiber::ExecutionContext::Parallel)
-            mark_root_candidate(Pointer(Void).new(ec.@global_queue.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@event_loop.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@stack_pool.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@schedulers.object_id), source: RootSource::Thread)
+            pin_ec_root(ec.@global_queue)
+            pin_ec_root(ec.@event_loop)
+            pin_ec_root(ec.@stack_pool)
+            pin_ec_root(ec.@schedulers)
             ec.@schedulers.each do |sched|
-              mark_root_candidate(Pointer(Void).new(sched.object_id), source: RootSource::Thread)
-              mark_root_candidate(Pointer(Void).new(sched.@runnables.object_id), source: RootSource::Thread)
-              mark_root_candidate(Pointer(Void).new(sched.@main_fiber.object_id), source: RootSource::Thread)
+              pin_ec_root(sched)
+              pin_ec_root(sched.@runnables)
+              pin_ec_root(sched.@main_fiber)
             end
           end
         end

@@ -259,6 +259,15 @@ module Gcry
     # empty stub while this scan called it). The two readings are worth
     # separating from the outside, so `bench/greg_roots.cr` gates on it.
     getter thread_greg_candidates : UInt64 = 0_u64
+    # Execution-context structures pinned explicitly by `scan_thread_roots`
+    # (schedulers, run queues, event loop, stack pool), last collect. Same
+    # reading problem as the counter above, and a sharper one: the whole pin
+    # block sits behind a macro gate on `Thread.@execution_context`, so on a
+    # compiler that does not declare that ivar it compiles out entirely and the
+    # only coverage left is the conservative Thread body scan — which the
+    # comment on that block already records as insufficient (Kemal EC4 SEGV
+    # @ …0008). Zero and "compiled out" are indistinguishable without this.
+    getter ec_root_pins : UInt64 = 0_u64
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -1334,6 +1343,7 @@ module Gcry
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
       @thread_greg_candidates = 0_u64
+      @ec_root_pins = 0_u64
       @low_water_skips = 0_u64
       @low_water_skipped_bytes = 0_u64
     end

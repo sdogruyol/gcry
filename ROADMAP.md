@@ -47,13 +47,33 @@ CI asymmetry that hid both.
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now
-      excluded by rate, so nothing explains it. Ask of the scheduler's runnable
-      queues, thread-local slots and `Thread` internals the question the greg stub
-      failed: is each range actually pushed as a root? Method is the one that has
-      now worked twice — a per-structure counter on `/gc-stats` and a
-      `make scheduler-roots` gate, verified red by stubbing the push out.
-      **Hypothesis, not a finding:** no missed range has been identified yet, and
-      the shape-match to the greg defect is an argument for looking, not evidence.
+      excluded by rate, so nothing explains it.
+      **The instrument exists now**: `ec_root_pins` on `/gc-stats` counts the
+      structures `scan_thread_roots` pins by name, and `make scheduler-roots`
+      gates on it as a delta across a collection taken before the context exists,
+      so the ambient Thread-level pins cannot carry the arm. Both directions
+      broken on purpose and observed red (stub → 7 of 16 named; reset removed →
+      control off zero). It runs on all three platforms that have a CI job.
+      **Two candidates eliminated, no root cause yet.** The macro gate on
+      `Thread.@execution_context` is **open** on the configuration the soak builds
+      — measured on 1.21.0: open by default and under `-Dexecution_context`,
+      closed only under `-Dpreview_mt`, where the pre-EC scheduler means there is
+      nothing to pin — so the block is not compiled out there. And the
+      precise-offset path does drop module-typed ivars (`@event_loop :
+      Crystal::EventLoop` is neither Reference, Pointer, Value-with-ivars nor
+      StaticArray, so it is omitted *without* forcing the conservative fallback),
+      but that path only installs under `GCRY_AUTO_LAYOUTS=1`; the default
+      `register_scan_caps` installs a cap and no offsets, so the scan stays
+      conservative and covers the slot. The soak sets no such flag.
+      Still open, and worth keeping apart from the SEGV: whether that module-ivar
+      drop is a real defect **under `GCRY_AUTO_LAYOUTS=1`** — the gate is green
+      there, but it cannot discriminate, because the explicit pins cover the
+      scheduler graph either way. A probe that registers a class whose *only* path
+      to a live object is a module-typed ivar would settle it.
+      **Also still open, and the reason this item stays unchecked:** the gate
+      proves the named pins ran, not that the list is complete. Nothing yet checks
+      the scheduler's ivars against what is pinned, so a structure added upstream
+      would be missed exactly the way the two register gaps were.
 - [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
       chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
       indistinguishable from a quiet run inside a release cycle. Two handles,

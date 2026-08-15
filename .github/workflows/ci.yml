@@ -307,6 +307,15 @@ jobs:
         run: |
           make greg-roots
 
+      # The same question one level up: scan_thread_roots pins the Parallel EC's
+      # queues, event loop and schedulers by name, and the whole block sits behind
+      # a macro gate on Thread.@execution_context. A gate that compiles a root
+      # scan out looks, from outside, exactly like one that ran and found
+      # nothing — which is how the two register gaps above went unnoticed.
+      - name: Parallel EC scheduler root pins
+        run: |
+          make scheduler-roots
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -631,6 +640,7 @@ jobs:
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
           make greg-roots
+          make scheduler-roots
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
@@ -664,3 +674,4 @@ jobs:
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
           make greg-roots
+          make scheduler-roots

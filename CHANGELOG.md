@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ec_root_pins` — the Parallel EC pin block is now readable from outside the
+  collector.** `scan_thread_roots` names the execution context's queues, event
+  loop, stack pool and schedulers, and the whole block sits behind a macro gate
+  on `Thread.@execution_context`. A gate that compiles a root scan out looks
+  exactly like one that ran and found nothing — the shape of both v0.19.0
+  defects. The counter is on `/gc-stats`; `bench/scheduler_roots.cr` and
+  `make scheduler-roots` gate on it, measured as a delta across a collection
+  taken before the context exists so ambient Thread-level pins cannot carry the
+  arm. Both directions broken on purpose and observed red: stubbing `pin_ec_root`
+  drops the delta to 7 against 16 named, and removing the per-collect reset moves
+  the control arm off zero. Runs on Linux x86_64, Linux aarch64 and Darwin.
+  Note what the gate is *not*: with the pins stubbed the parked fibers still
+  survived 16/16, because the conservative scan reaches them anyway — the delta
+  discriminates, the survival does not.
+- Two candidate explanations for the 2026-08-10 soak SEGV are **eliminated**, and
+  neither is a fix: (1) the macro gate is **open** on the configuration the soak
+  builds — measured on Crystal 1.21.0, open by default and under
+  `-Dexecution_context`, closed only under `-Dpreview_mt`, where the pre-EC
+  scheduler means there is nothing to pin — so the pins do run there; (2) the
+  precise-offset path drops module-typed ivars (`@event_loop : Crystal::EventLoop`
+  is neither Reference, Pointer, Value-with-ivars nor StaticArray, so it is
+  omitted without forcing the conservative fallback), but that path only installs
+  under `GCRY_AUTO_LAYOUTS=1`, which the soak does not set — the default
+  `register_scan_caps` installs a cap and no offsets, so the scan stays
+  conservative and covers the slot. The second remains **unverified as a defect**:
+  the harness is green under `GCRY_AUTO_LAYOUTS=1`, but it cannot discriminate
+  there, since the explicit pins cover the scheduler graph either way.
+
 ## [0.19.0] - 2026-08-14
 
 Correctness release on **two** platforms. `collect_scan` asks the platform for a
