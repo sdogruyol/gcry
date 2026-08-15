@@ -202,6 +202,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-Dexecution_context` / `-Dpreview_mt`, so plain `spawn` is covered by this and
   by the pin block. `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
 
+### Added
+
+- **`bench/nested_spawn_uaf.cr` — a use-after-free in fiber creation, in seconds
+  instead of 1h24m.** `make ec-queue-audit` went red three times on 2026-08-15
+  (aarch64, Darwin, x86_64) and looked like a flaky gate. It was not: every crash
+  cut off *before* that harness plants anything, and with `GCRY_POISON_FREED=1`
+  it said what it was — `the poison is in the faulting context … a
+  use-after-free, not a wild pointer`, in `Fiber#initialize` → `makecontext`.
+  Stripped to the churn that provokes it — a fiber that spawns a fiber and
+  yields, collections underneath — it is **16 crashes in 25 runs under gcry and
+  0 in 25 under Boehm**, same file, so the collector is the subject and not
+  Crystal's execution context. It does not need parallelism either: one worker
+  reproduces it 7 times in 12. Not wired into CI, because it fails most runs on
+  purpose; `make nested-spawn-uaf`, and it becomes the regression test when the
+  defect is fixed.
+  `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
+
 ### Fixed
 
 - **The page size was asked for on Darwin and assumed on Linux.** Three
