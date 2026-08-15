@@ -41,6 +41,16 @@ rss_limit_kb = 4096
 # raises queue occupancy without touching anything else about the workload.
 fiber_churn = 0
 
+# The other multiplier on the same product. The audit can only catch a slot that
+# is corrupt *while a collection sees it*, so the rate at which a run could catch
+# a fault is (collections) x (occupancy). `--fiber-churn` raised occupancy from
+# 1-in-24 to 23-in-24; the collect cadence was never touched and sat hardcoded at
+# 1 Hz. `GCRY_THRESHOLD` does not move it — measured 118/119/119 collections over
+# 120 s at the 32 MiB default, 8 MiB and 2 MiB — because these collections are
+# the harness's own timer, not the allocator's. Default **1**, the cadence every
+# earlier soak ran on and the one the open 2026-08-10 SEGV is measured against.
+collect_hz = 1
+
 ARGV.each do |arg|
   case arg
   when /--duration=(\d+)/
@@ -51,6 +61,8 @@ ARGV.each do |arg|
     rss_limit_kb = $1.to_i64
   when /--fiber-churn=(\d+)/
     fiber_churn = $1.to_i
+  when /--collect-hz=(\d+)/
+    collect_hz = $1.to_i
   when /--rss-limit=(\d+)/
     # Deliberately fatal rather than reinterpreted: the old flag was a percent,
     # so silently reading "30" as 30 kB would turn a loose bound into an
@@ -71,6 +83,12 @@ if fiber_churn > 0 && rss_limit_kb <= 4096
   STDERR.puts "--fiber-churn=#{fiber_churn} needs a raised --rss-limit-kb: the churn keeps " \
               "thousands of fiber stacks in the pool (+44.7 MB measured over 25 s at 512), and " \
               "a #{rss_limit_kb} kB ceiling is for the baseline workload."
+  exit 64
+end
+
+if collect_hz < 1
+  STDERR.puts "--collect-hz=#{collect_hz} would divide by zero or stop collecting altogether. " \
+              "Use 1 for the baseline cadence, or a higher integer to raise it."
   exit 64
 end
 
@@ -141,7 +159,8 @@ class SoakTest
   @rss_max = 0_u64
   @rss_samples = 0
 
-  def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64, @fiber_churn : Int32 = 0)
+  def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64, @fiber_churn : Int32 = 0,
+                 @collect_hz : Int32 = 1)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -189,7 +208,8 @@ class SoakTest
     # cannot be attributed to either arm afterwards.
     telemetry.puts "config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
                    "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
-                   "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn}"
+                   "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
+                   "collect_hz=#{@collect_hz}"
     # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
     # SEGV'd in the dequeue an unknown time after the write that caused it, and a
     # cumulative fault count here says which hour the slot went bad.
@@ -197,7 +217,8 @@ class SoakTest
     telemetry.flush
     puts "Config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
          "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
-         "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn}"
+         "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
+         "collect_hz=#{@collect_hz}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -212,10 +233,11 @@ class SoakTest
       end
     end
 
-    # Periodic collect (1 Hz)
+    # Periodic collect (`--collect-hz`, 1 Hz baseline)
+    collect_interval = (1.0 / @collect_hz).seconds
     spawn do
       loop do
-        sleep(1.seconds)
+        sleep(collect_interval)
         begin
           GC.collect
           @total_collect += 1
@@ -399,6 +421,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn)
+test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn, collect_hz)
 success = test.run(duration)
 exit(1) unless success

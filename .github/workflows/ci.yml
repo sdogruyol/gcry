@@ -38,6 +38,10 @@ on:
         description: "Soak --rss-limit-kb. Churn holds thousands of fiber stacks (+44.7 MB measured over 25 s at 512), so a churn arm needs this raised."
         required: false
         default: "4096"
+      collect_hz:
+        description: "Soak --collect-hz=N: collections per second. The audit only sees a slot that is corrupt while a collection looks at it, so chances = collections x occupancy; churn raised occupancy, this raises the other factor. 20 measured 19x the collections at a *lower* pause. 1 = the baseline every earlier soak ran."
+        required: false
+        default: "1"
 
 jobs:
   test:
@@ -641,12 +645,14 @@ jobs:
           GCRY_SEGV_REPORT: "1"
           FIBER_CHURN: ${{ github.event.inputs.fiber_churn || '0' }}
           SOAK_RSS_LIMIT_KB: ${{ github.event.inputs.soak_rss_limit_kb || '4096' }}
+          COLLECT_HZ: ${{ github.event.inputs.collect_hz || '1' }}
         run: |
           # --fiber-churn=0 is the baseline every earlier soak ran on, and the
           # one the open 2026-08-10 SEGV is measured against; raise it (with the
           # RSS ceiling) only for a hunting run.
           ./bin/soak --duration="$SOAK_DURATION" \
             --fiber-churn="$FIBER_CHURN" \
+            --collect-hz="$COLLECT_HZ" \
             --rss-limit-kb="$SOAK_RSS_LIMIT_KB" \
             --telemetry=/tmp/gcry-soak.log
 

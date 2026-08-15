@@ -133,10 +133,23 @@ CI asymmetry that hid both.
       cannot chase a 1h24m crash, and an arm that dies must not cancel the two
       that might have died differently — with `fiber_churn` /
       `soak_rss_limit_kb` as dispatch inputs, both defaulting to the baseline.
-      **Why the item stays open:** no fault has been reproduced. This raises the
-      rate at which a run could catch one (1/24 → 23/24 collections, ×3 arms) and
-      shortens the report from "an hour later, in the consumer" to "the next
-      collection"; whether that is enough is the next scheduled run's answer.
+      **And the other factor in the same product is now a knob too.** Chances =
+      collections × occupancy; churn raised occupancy, and the collect cadence
+      sat hardcoded at `sleep(1.seconds)`. `GCRY_THRESHOLD` does not move it —
+      118/119/119 collections over 120 s at 32 MiB, 8 MiB, 2 MiB — because these
+      collections are the harness's timer, not the allocator's. `--collect-hz=N`
+      (default **1**) is the knob: at 20 it measured **19× the collections and
+      16× the slot walks** with occupancy undiluted (47%→43%), the workload down
+      3.9%, and the pause and RSS *lower* than the baseline (2.04 → 1.84 ms p50,
+      30.4 → 10.8 MB max) because each collection has less garbage in front of
+      it. A `workflow_dispatch` input like the others.
+      `bench/log/linux/2026-08-15-soak-collect-cadence/FINDINGS.md`
+      **Why the item stays open:** no fault has been reproduced. All of this
+      raises the rate at which a run could catch one and shortens the report from
+      "an hour later, in the consumer" to "the next collection"; whether that is
+      enough is the next scheduled run's answer. And note what the cadence knob
+      does *not* claim: it raises the rate a corrupt slot could be **seen**, not
+      the rate one is **created**.
       **And a crash explains itself** (`GCRY_SEGV_REPORT=1`, on for the CI soak):
       the faulting address is checked against the heap's own tables — in the span
       or not, which block, used or free, what its first word is — and the poison
