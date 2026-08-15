@@ -296,6 +296,15 @@ module Gcry
     # Walk the Parallel EC run queues inside STW and check every slot is a live
     # Fiber. Off by default: bounded, but it is inside the pause.
     property ec_queue_audit : Bool = false
+
+    # Overwrite a block's payload when it is freed (`GCRY_POISON_FREED=1`).
+    # Default off — it is a memset per freed block. What it buys is the
+    # difference between a crash on `0x7f1700000149`, which three sessions have
+    # argued about, and a crash on `0xdeadf2eedeadf2ee`, which says
+    # use-after-free and nothing else. Every small free funnels through
+    # `push_size_class_free`; large blocks are poisoned at their own site.
+    property poison_freed : Bool = false
+    getter poisoned_blocks : UInt64 = 0_u64
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -352,8 +361,10 @@ module Gcry
     # Monotonic span of every address ever mapped — never shrinks on munmap.
     # Used by GC.realloc/free to refuse LibC fallback after empty-chunk release
     # tightened @heap_min/@heap_max around a dangling pointer.
-    @heap_span_lo : UInt64 = UInt64::MAX
-    @heap_span_hi : UInt64 = 0_u64
+    # Public for `SegvReport`: a crash handler has to be able to say whether the
+    # faulting address was ever in this heap's span at all.
+    getter heap_span_lo : UInt64 = UInt64::MAX
+    getter heap_span_hi : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -645,6 +656,27 @@ module Gcry
 
     # Block header for an address in a managed chunk, including FREE blocks.
     # Prefer find_object for mutator-facing queries (rejects FREE).
+    # What this heap knows about an arbitrary address, for a crash handler. Reads
+    # a handful of words and reports what they said — the heap may be
+    # mid-mutation, which is usually why anyone is asking.
+    def debug_block_info(pointer : Void*)
+      header = find_block(pointer)
+      unless header
+        return {found: false, free: false, size: 0_u32, flags: 0_u32,
+                first_word: 0_u64, offset: 0_u64}
+      end
+      user = BlockHeader.user_from(header)
+      addr = pointer.address
+      offset = addr >= user.address ? addr - user.address : 0_u64
+      first = header.value.size >= 8 ? user.as(UInt64*).value : 0_u64
+      {found:      true,
+       free:       BlockHeader.free?(header),
+       size:       header.value.size,
+       flags:      header.value.flags,
+       first_word: first,
+       offset:     offset}
+    end
+
     def find_block(pointer : Void*) : BlockHeader*?
       return nil if pointer.null?
       addr = pointer.address

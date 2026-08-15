@@ -166,6 +166,7 @@ module Gcry
         ec_queue_audit_list_slots:             heap.ec_queue_audit_list_slots,
         ec_queue_audit_faults:                 heap.ec_queue_audit_faults,
         ec_queue_audit_last_fault:             heap.ec_queue_audit_last_fault,
+        poisoned_blocks:                       heap.poisoned_blocks,
         low_water_skips:                       heap.low_water_skips,
         low_water_skipped_bytes:               heap.low_water_skipped_bytes,
         finalizer_entries:                     heap.finalizer_entry_count,

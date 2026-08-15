@@ -689,7 +689,32 @@ module Gcry
       u
     end
 
+    # Fill a block's payload with a pattern that is neither zero nor a pointer,
+    # so that a use-after-free reads something no one can mistake for data and
+    # dereferences to an address no one can mistake for a heap address. The
+    # 2026-08-10 soak died on `0x7f1700000149` — a value plausible enough that
+    # three sessions have argued about what it was. `0xdeadf2ee…` is not.
+    #
+    # Sound because the freelist link lives in the *header* (`next_free`), not in
+    # the payload, so nothing the collector reads afterwards is in this range —
+    # and because every path that gets here sets `@freelist_clean` false, so a
+    # later `malloc(clear: true)` still zeroes what it hands out. That pairing is
+    # the whole safety argument: `bench/poison_freed.cr` gates both halves.
+    POISON_WORD = 0xDEADF2EEDEADF2EE_u64
+
+    private def poison_payload(pointer : Void*, payload : UInt32) : Nil
+      words = pointer.as(UInt64*)
+      n = payload // sizeof(UInt64)
+      i = 0
+      while i < n
+        words[i] = POISON_WORD
+        i += 1
+      end
+      @poisoned_blocks &+= 1
+    end
+
     private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32) : Nil
+      poison_payload(pointer, payload) if @poison_freed
       if nursery
         header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
@@ -882,6 +907,7 @@ module Gcry
         break if tnxt.null?
         tail = tnxt
       end
+      poison_payload(user, payload) if @poison_freed
       header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
       if tail.null?
         @large_freelists[bucket] = user

@@ -141,6 +141,10 @@ module GC
     # refresh the running fiber bottom each collect.
     heap.before_collect do
       heap.set_stackbottom(Fiber.current.@stack.bottom)
+      # Arm the crash reporter here rather than above: Crystal installs its own
+      # SIGSEGV handler after GC.init and does not chain, so anything installed
+      # earlier is discarded. See Gcry::SegvReport.install_if_requested.
+      Gcry::SegvReport.install_if_requested
     end
 
     # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
@@ -619,6 +623,15 @@ module GC
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from
     # "an hour after the write" into "the first collection after it".
     heap.ec_queue_audit = true if env_flag_one?("GCRY_EC_QUEUE_AUDIT")
+    # Overwrite freed payloads so a use-after-free reads 0xdeadf2ee… instead of
+    # something that looks like data (bench/poison_freed.cr). Costs a memset per
+    # free; the soak turns it on.
+    heap.poison_freed = true if env_flag_one?("GCRY_POISON_FREED")
+    # Explain the address a crash died on against the heap's own tables
+    # (src/gcry/segv_report.cr). Costs nothing until something faults; default
+    # off because it installs a signal handler, and a collector should not do
+    # that to a process that did not ask.
+    Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

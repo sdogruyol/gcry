@@ -137,6 +137,23 @@ CI asymmetry that hid both.
       rate at which a run could catch one (1/24 → 23/24 collections, ×3 arms) and
       shortens the report from "an hour later, in the consumer" to "the next
       collection"; whether that is enough is the next scheduled run's answer.
+      **And a crash explains itself** (`GCRY_SEGV_REPORT=1`, on for the CI soak):
+      the faulting address is checked against the heap's own tables — in the span
+      or not, which block, used or free, what its first word is — and the poison
+      is looked for in the faulting context's registers, because
+      `0xdeadf2ee…` is non-canonical and the kernel reports `si_addr` as 0 for
+      it. Gated by `make segv-report`, one forked child per fault shape. Two
+      lessons are in the code because the first versions were wrong: installing
+      at `GC.init` is discarded by Crystal's own handler, and matching the poison
+      on the address never fires.
+      **And freed blocks can be poisoned** (`GCRY_POISON_FREED=1`, on for the CI
+      soak): a freed payload becomes `0xdeadf2eedeadf2ee`, so the next crash of
+      this shape says use-after-free instead of leaving another plausible hex
+      value to argue about. Gated by `make poison-freed`, whose second arm is the
+      dangerous half — poisoning must not defeat the freelist-clean fast path, or
+      a cleared `malloc` hands out poison (broken on purpose: 10560/10560 words).
+      Costs **+40% on the soak's pause** (2.72 → 3.81 ms p50, n=5), which is why
+      it is opt-in.
       The audit now also checks the **structures**, not only their slots: a
       reissued `Runnables` makes every slot garbage rather than one slot bad, so
       the slot walk could not have reported the very shape the SEGV is read as.

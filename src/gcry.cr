@@ -28,7 +28,9 @@ require "./gcry/metrics"
 require "./gcry/monitor_gate"
 require "./gcry/observability"
 require "./gcry/stw_watchdog"
+require "./gcry/raw_out"
 require "./gcry/ec_queue_audit"
+require "./gcry/segv_report"
 
 module Gcry
   @@default_heap : Heap? = nil
@@ -36,6 +38,12 @@ module Gcry
   # Process-wide heap used by the module-level allocators.
   def self.default_heap : Heap
     @@default_heap ||= Heap.new
+  end
+
+  # The heap if one exists, without creating it. `default_heap` would `Heap.new`
+  # a missing one, which mmaps — not something a signal handler may do.
+  def self.default_heap? : Heap?
+    @@default_heap
   end
 
   # Replace the default heap (mainly for tests). Does NOT destroy the previous

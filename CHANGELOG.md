@@ -90,6 +90,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
   artifacts. No fault reproduced yet; what changed is the rate at which a run
   could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+- **`GCRY_SEGV_REPORT=1` — the crash says what gcry knows about the address.**
+  `Invalid memory access at 0x7f1700000149` is everything the 2026-08-10 soak
+  left behind, and at that moment the collector could have said whether the
+  address was in its heap span, which chunk and size class, whether the block
+  read used or free, and what sat at its start. On SIGSEGV/SIGBUS it now prints
+  that and hands the signal back to Crystal's handler — adding lines, removing
+  none. Two things it had to be taught by being wrong first: **installing at
+  `GC.init` accomplishes nothing** (Crystal installs its own handler afterwards
+  with `sigaction(..., nil)`, discarding it — the first version printed nothing
+  at all, so it now arms from the first collection), and **the poison is
+  invisible to `si_addr`** (`0xdeadf2ee…` is non-canonical on x86_64, so a
+  dereference raises #GP and the kernel reports address 0 — the report asks the
+  faulting context's *registers* instead, reusing the ucontext offsets the
+  collector already scans suspended threads with). `make segv-report` forks a
+  child per fault shape — poison, FREE block, USED block, an address gcry never
+  mapped — and requires each to be named for what it is; `--control` requires no
+  gcry line at all. Default off: it installs a signal handler, which a collector
+  should not do to a process that did not ask. On for the CI soak.
+  `bench/log/linux/2026-08-15-segv-report/FINDINGS.md`
+- **`GCRY_POISON_FREED=1` — a freed payload becomes `0xdeadf2eedeadf2ee`.** The
+  2026-08-10 soak died on `0x7f1700000149`, and three sessions have argued about
+  what that value was — a partially overwritten pointer, a reissued object's
+  first two `Int32`s, a valid pointer into an unmapped chunk. The argument is
+  unresolvable because the value is *plausible*. Poison is not: it is not a
+  pointer, not zero, not anyone's data, and non-canonical on x86_64, so
+  dereferencing it faults at an address that reads as a sentence. Every small
+  used→free transition funnels through `push_size_class_free` (`GC.free`, the
+  sweep's `reclaim_small`, and the warm-retain path), so one hook covers them;
+  large blocks are poisoned at their own site, and `poisoned_blocks` on
+  `/gc-stats` counts both. Sound because the freelist link lives in the header,
+  not the payload. **The half that could have broken the collector is the one
+  the gate is built around:** gcry skips `malloc`'s clearing memset when a size
+  class's freelist is known clean, so poisoning without clearing that flag would
+  hand poison to a caller expecting zeros — `make poison-freed` frees and
+  re-allocates 64 blocks per class and checks every word, and deleting the line
+  that clears the flag turns it red (10560 of 10560 words came back poisoned).
+  Measured cost, soak pause p50 at n=5: **2.72 → 3.81 ms median, about +40%** —
+  visible, unlike the queue audit's, which is why the default is off and the soak
+  job is where it is turned on.
+  `bench/log/linux/2026-08-15-poison-freed/FINDINGS.md`
 - **`make darwin-page-query` — the experiment the Darwin low-water skip is
   blocked on.** macOS takes none of the 8.06 → 3.60 ms EC4 pause the parked-fiber
   low-water skip bought on Linux, because the skip rests on a primitive Darwin

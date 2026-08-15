@@ -26,6 +26,10 @@ on:
         description: "GCRY_EC_QUEUE_AUDIT — walk the Parallel run queues each collection and report the first slot that stops being a live Fiber. 'off' to disable."
         required: false
         default: "on"
+      poison_freed:
+        description: "GCRY_POISON_FREED — overwrite freed payloads with 0xdeadf2ee… so a use-after-free reads poison instead of plausible data. 'off' to disable."
+        required: false
+        default: "on"
       fiber_churn:
         description: "Soak --fiber-churn=N: fibers per 1 ms burst, to keep the run queues occupied so the queue audit has something to look at. 0 = the baseline workload every earlier soak ran."
         required: false
@@ -350,6 +354,21 @@ jobs:
         run: |
           make ec-queue-audit
 
+      # And the other half of "make the next crash legible": a freed payload
+      # becomes 0xdeadf2eedeadf2ee. The gate's second arm is the one that
+      # matters — poisoning must not break the freelist-clean fast path, or a
+      # cleared malloc hands out poison.
+      - name: Poison on free
+        run: |
+          make poison-freed
+
+      # And the reporter that reads the poison back: a crash now says whether
+      # the address was in the heap, in a free block, in a used one, or nowhere
+      # gcry mapped. Tested by crashing, one child process per shape.
+      - name: SIGSEGV report
+        run: |
+          make segv-report
+
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
       # comparator closes that; this gates the comparator itself, which needs
@@ -613,6 +632,13 @@ jobs:
           # it did. Costs a bounded walk inside the pause; on by default here
           # because that is what this job is for.
           GCRY_EC_QUEUE_AUDIT: ${{ github.event.inputs.ec_queue_audit == 'off' && '0' || '1' }}
+          # A use-after-free then reads 0xdeadf2eedeadf2ee instead of something
+          # that looks like data. Costs a memset per free; this job is where
+          # that is worth paying.
+          GCRY_POISON_FREED: ${{ github.event.inputs.poison_freed == 'off' && '0' || '1' }}
+          # And explain whatever address the run dies on against the heap's own
+          # tables, instead of leaving one hex number behind like 2026-08-10 did.
+          GCRY_SEGV_REPORT: "1"
           FIBER_CHURN: ${{ github.event.inputs.fiber_churn || '0' }}
           SOAK_RSS_LIMIT_KB: ${{ github.event.inputs.soak_rss_limit_kb || '4096' }}
         run: |
