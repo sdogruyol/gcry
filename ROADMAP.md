@@ -140,17 +140,24 @@ CI asymmetry that hid both.
       from inside another fiber, so the half-built `Fiber` lives only in a
       register or a frame on that fiber's stack while the world is stopped.
       The `Deque` buffer the earlier rounds chased is downstream of that.
-      **And CI shows the other free path.** The first tagged catch there
-      (`31963103652`, `make ec-queue-audit`, aarch64) reports `flags 0x1` —
+      **RETRACTED — there was no other free path.** The first tagged CI catch
+      (`31963103652`, `make ec-queue-audit`, aarch64) reported `flags 0x1` —
       `SWEPT` **clear**, i.e. freed by an explicit `Heap#free`, where every
       locally measured crash was `0x81` (the sweep). Its block is 384 bytes (16
       entries, the smallest capacity) against 1536/3072 locally, its holder's
       pointer sits at **block+24** rather than block+0, and it lands 3
       collections in rather than 16–200. So either the defect is reachable
       through two free paths or the two harnesses hit two different defects —
-      unsettled, and the report truncated before its stacks section because
-      several threads faulted at once. The `SWEPT` bit paid for itself on its
-      first CI catch.
+      and that was **the flag's own bug**: `SWEPT` was set only in
+      `push_size_class_free`, and four freelist **rebuild** sites in
+      `collect_sweep.cr` — which re-link already-free blocks after a chunk is
+      emptied — reconstructed the header with a bare `FREE` and erased it.
+      Measured: on a chunk-emptying workload the bit survives 278 of 278 with
+      the fix and 0 of 278 without. Also checked, since the retracted reading
+      rested on it — `Heap#free` and `realloc(size: 0)` fire **zero** times in a
+      fiber-spawning workload, and Crystal calls `GC.free` only from the zlib
+      and GMP hooks, so there was never a plausible caller. Now gated in
+      `process_spec`, both directions, broken on purpose at `Expected: 278`.
       **Correction, and it retires the line above.** The grace now carries its
       saves into the next collection and asks whether they are marked there:
       across three runs **0, 0 and 1** were live, against **80–106 garbage**. So

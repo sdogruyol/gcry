@@ -195,6 +195,49 @@ end
   end
 {% end %}
 
+describe "process GC free-path flag" do
+  # `Flags::SWEPT` is what lets a use-after-free report say whether the
+  # collector decided the block was garbage or the program asked. It is only
+  # worth having if it survives everything that rewrites a free block's header
+  # — the freelist *rebuild* paths re-link blocks that are already free, and
+  # constructing the header with a bare `FREE` erased the bit. A CI catch on
+  # 2026-08-16 was then written up as "an explicit free" and was in fact a
+  # swept block whose flag a rebuild had dropped.
+  it "marks swept blocks and leaves explicitly freed ones clear" do
+    heap = Gcry.default_heap
+    addrs = [] of UInt64
+    # Enough to fill and empty whole chunks, which is what makes the sweep run
+    # its freelist *rebuild* — the path that used to drop the flag. Measured:
+    # with the rebuild constructing a bare `FREE`, 0 of 278 surviving free
+    # blocks carry SWEPT; with the flag carried, 278 of 278 do.
+    20_000.times { addrs << GC.malloc(256).address }
+    4.times { GC.collect }
+
+    freed = 0
+    swept = 0
+    addrs.each do |a|
+      info = heap.debug_block_info(Pointer(Void).new(a))
+      next unless info[:free]
+      freed += 1
+      swept += 1 if (info[:flags] & Gcry::BlockHeader::Flags::SWEPT) != 0
+    end
+
+    # Most chunks are released outright and report no block at all; what is left
+    # is plenty, and the point is that every block the sweep reclaimed still
+    # says so after the rebuild.
+    freed.should be > 50
+    swept.should eq(freed)
+
+    # And the other direction, which is what makes the flag a discriminator
+    # rather than a decoration.
+    ptr = GC.malloc(256)
+    GC.free(ptr)
+    info = heap.debug_block_info(ptr)
+    info[:free].should be_true
+    (info[:flags] & Gcry::BlockHeader::Flags::SWEPT).should eq(0)
+  end
+end
+
 {% if flag?(:linux) %}
   describe "process GC pthread stack-bounds snapshot" do
     # The other half of "the platform answered nothing", on the pthread side.

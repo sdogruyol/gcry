@@ -679,7 +679,13 @@ module Gcry
         addr = user.address
         if (addr < lo || addr >= hi) && BlockHeader.free?(header)
           payload = header.value.size
-          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, new_head)
+          # Carry SWEPT: this is a freelist *rebuild* of blocks that are already
+          # free, not a free. Constructing the header with a bare `FREE` erased
+          # the bit, so a block the sweep had reclaimed later read as an
+          # explicit `Heap#free` in the crash report — measured on 2026-08-16,
+          # when a CI catch was written up as "the other free path exists" and
+          # was in fact this.
+          header.value = BlockHeader.new(payload, swept_flag(header), new_head)
           new_head = user
         end
         user = nxt
@@ -750,7 +756,7 @@ module Gcry
             next unless on_live_page
           end
           user = BlockHeader.user_from(header)
-          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, head)
+          header.value = BlockHeader.new(payload, swept_flag(header), head)
           head = user
         end
       end
@@ -796,10 +802,10 @@ module Gcry
         nxt = header.value.next_free
         payload = header.value.size
         if tight_addr_in_grow?(class_index, user.address)
-          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, prefer)
+          header.value = BlockHeader.new(payload, swept_flag(header), prefer)
           prefer = user
         else
-          header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, global)
+          header.value = BlockHeader.new(payload, swept_flag(header), global)
           global = user
         end
         user = nxt
@@ -912,6 +918,14 @@ module Gcry
         end
       end
       @free_bytes.set(total)
+    end
+
+    # `FREE`, plus `SWEPT` if the block already carried it. The freelist rebuild
+    # paths re-link blocks that are *already free*; they must not silently
+    # relabel how those blocks were released, which a bare `Flags::FREE` did.
+    @[AlwaysInline]
+    private def swept_flag(header : BlockHeader*) : UInt32
+      BlockHeader::Flags::FREE | (header.value.flags & BlockHeader::Flags::SWEPT)
     end
 
     private def reclaim_small(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32 = 0_u32) : Nil

@@ -1,5 +1,9 @@
 # The fiber-creation use-after-free: the sweep freed it, and the mark was complete
 
+> **Note (later the same day):** the "CI qualifies this" section below is
+> **retracted** — see the correction that precedes it. The CI catch was a swept
+> block whose `SWEPT` flag a freelist rebuild had erased, not an explicit free.
+
 2026-08-16, x86_64 WSL2, Crystal 1.21.0, `bench/nested_spawn_uaf.cr`.
 Follows `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`, which named the
 chain: the freed block is the live execution context's stack-pool
@@ -38,7 +42,40 @@ gcry: the free that wrote it was of the block at 0x…, still FREE, size 3072,
 defects with different owners, and until this bit existed the poison could not
 tell them apart.
 
-## CI qualifies this: the other free path exists
+## Retracted: there was no "other free path" — the flag was being erased
+
+**The section below is wrong, and is kept because the reasoning in it was
+plausible and the correction is the point.** It read a CI catch's `flags 0x1` as
+"freed by an explicit `Heap#free`" and built three further observations on top.
+
+`Flags::SWEPT` was set only in `push_size_class_free`. Four sites in
+`collect_sweep.cr` — the freelist **rebuild** paths, which re-link blocks that
+are *already free* after a chunk is emptied or page-released — reconstructed each
+header with a bare `Flags::FREE` and **erased the bit**. A block the sweep had
+genuinely reclaimed therefore read as an explicit free as soon as a rebuild
+touched its size class.
+
+Measured both ways on a workload that empties whole chunks (20 000 × 256 B, four
+collections):
+
+| | free blocks still findable | carrying `SWEPT` |
+|---|---|---|
+| flag carried through the rebuild | 278 | **278** |
+| bare `FREE` (the bug) | 278 | **0** |
+
+And the discriminator itself, unchanged: an explicit `GC.free` leaves `SWEPT`
+clear, a swept block sets it — 199 of 200 dropped blocks, the 200th retained by
+a conservative stack hit.
+
+Also checked, because the retracted section rested on it: `Heap#free` is called
+**zero** times in a fiber-spawning workload, and so is `realloc(size: 0)`. The
+harness does not free either, and Crystal's stdlib calls `GC.free` only from the
+zlib and GMP allocator hooks. There was never a plausible caller.
+
+Now gated in `process_spec` — both the discrimination and the rebuild
+preservation, the latter broken on purpose and observed red at `Expected: 278`.
+
+### The retracted reading, as it stood
 
 The first tagged catch in CI (run `31963103652`, `make ec-queue-audit`, aarch64)
 says something the local repro never showed:
@@ -74,8 +111,10 @@ and `nested_spawn_uaf` are hitting two different ones. Nothing here settles that
 and the report was truncated before its stacks and owner sections — several
 threads were faulting at once and the output interleaved.
 
-**What it does settle:** the `SWEPT` bit earns its place, and any statement of
-the form "the collector freed it" has to name which path it measured.
+**What it settled, in the end:** not that there are two free paths, but that a
+flag is only as good as every site that rewrites the word it lives in. The bit
+was added, used to draw a conclusion, and the conclusion found the *flag's* bug
+rather than the collector's.
 
 ## Four eliminations, each measured
 
