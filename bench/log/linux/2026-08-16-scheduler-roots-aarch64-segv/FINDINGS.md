@@ -6,6 +6,7 @@
 |---|---|---|---|
 | `31933855152` | `e7de946` | `make scheduler-roots` | `0xff42d3800358` |
 | `31950823605` | `4645bf7` | `make ec-queue-audit` | `0xff00f1800358` |
+| `31961004141` | `c28bea5` | `make ec-queue-audit` | `0xff6dbcc00358` |
 
 Both `test (aarch64 native)`, both the same call chain, and both addresses end
 in the same `800358`. A re-run of the first was green, which is why it was
@@ -58,6 +59,37 @@ held, so Crystal's list is not being mutated under the walk — but the list
 holding a `Thread` whose pthread has already exited is not something the lock
 prevents. That makes it the same family as `fix/stw-libc-under-suspension`:
 gcry asking libc about a thread whose lifetime it does not control.
+
+## The third occurrence, with the counters in
+
+Run `31961004141` faulted the same way on the very first CI run after the
+counters landed, and they answered:
+
+```
+gcry: the collector was inside the pthread stack-bounds query for thread
+      0xff6dbcbfff40 — the fault is in that query, not in the heap.
+      Visited/read so far: 22/21
+gcry: SIGSEGV at 0xff6dbcc00358 — outside gcry's heap span
+      [0xff6e07693000, 0xff6e07824000) — never a gcry allocation
+```
+
+Three facts that were not available for the first two:
+
+- **The fault is inside the query**, stated rather than inferred from a libc
+  frame, and the thread it is about is named.
+- **`0xff6dbcc00358 − 0xff6dbcbfff40 = 0x418`.** The fault is 1048 bytes into
+  the thread descriptor the `pthread_t` points at — libc reading a field of it —
+  and the two addresses are on **different pages** (`…bff000` against
+  `…c00000`). So the descriptor's first page is mapped and the next one is not.
+  That is what a thread whose descriptor has been partially unmapped looks like,
+  which is the exited-thread reading this file has been proposing.
+- **22 visited, 21 read**, i.e. every earlier thread in this snapshot answered
+  and the 22nd is the one in flight. There is no accumulated coverage gap
+  hiding behind the crash; it is this call, on this thread.
+
+Note also what the address line says on its own: *outside gcry's heap span*.
+Without the in-flight id that is all the report could have offered, and it
+would have read as a wild pointer rather than as a libc descriptor read.
 
 ## The counters are built
 
@@ -124,7 +156,7 @@ still points at it.
 
 ## Status
 
-Open, **2 occurrences**, both aarch64, both in CI, in two different gates. Still
+Open, **3 occurrences**, all aarch64, all in CI, across two gates. Still
 not reproduced on demand and never seen outside CI. It is no longer a one-off,
 so the two counters proposed above are worth building rather than merely
 proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be

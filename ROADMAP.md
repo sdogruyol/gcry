@@ -386,9 +386,15 @@ CI asymmetry that hid both.
       in `process_spec` (Linux; Darwin reports zeros by design), broken on
       purpose and observed red at `visited=96, read=0`; and
       `stack_bounds_in_flight` carries the `pthread_t` being queried, which the
-      SIGSEGV report now prints *before* the address line — so a repeat says
-      which thread instead of leaving a libc frame. Not yet a release blocker —
-      never seen outside CI — but no longer dismissible as noise.
+      SIGSEGV report now prints *before* the address line. **A third occurrence
+      arrived on the first CI run after they landed** (`31961004141`), and they
+      answered: the fault is 1048 bytes (`0x418`) into the thread descriptor the
+      `pthread_t` points at, on the *next page* from the id itself, with 22
+      threads visited and 21 read — so no accumulated coverage gap, just this
+      call on this thread. A descriptor whose first page is mapped and whose
+      next is not is what an exited thread looks like, which is the standing
+      hypothesis, now with evidence. Not yet a release blocker — never seen
+      outside CI — but it is the second-most-frequent red on the board.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,

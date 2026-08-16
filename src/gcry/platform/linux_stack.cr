@@ -74,7 +74,10 @@ module Gcry
     @@sb_misses = 0_u64
     @@sb_visited = 0_u64
     @@sb_read = 0_u64
-    @@sb_in_flight = LibC::PthreadT.new(0)
+    # Held as a plain word: `LibC::PthreadT` is `ULong` on glibc and a pointer
+    # on musl, so neither `.new` nor `.address` is portable. It is an opaque id
+    # for a diagnostic line, and 8 bytes either way.
+    @@sb_in_flight = 0_u64
 
     # Drop the previous collection's entries. A pthread_t can be reused by a new
     # thread after the old one exits, so entries are never carried across a
@@ -101,9 +104,9 @@ module Gcry
         i = @@sb_count
         return if i >= MAX_STACK_BOUNDS_SLOTS
         @@sb_visited += 1
-        @@sb_in_flight = thread
+        @@sb_in_flight = thread.unsafe_as(UInt64)
         bounds = pthread_stack_bounds(thread)
-        @@sb_in_flight = LibC::PthreadT.new(0)
+        @@sb_in_flight = 0_u64
         return unless bounds
         @@sb_read += 1
         @@sb_ids[i] = thread
@@ -116,11 +119,7 @@ module Gcry
     # Non-zero only while `pthread_getattr_np` is running for that thread, so a
     # crash handler reading it is reading the thread the fault is about.
     def self.stack_bounds_in_flight : UInt64
-      {% if flag?(:linux) %}
-        @@sb_in_flight.as(UInt64)
-      {% else %}
-        0_u64
-      {% end %}
+      @@sb_in_flight
     end
 
     # Threads the snapshot walked, and the subset it got bounds for. Equal
