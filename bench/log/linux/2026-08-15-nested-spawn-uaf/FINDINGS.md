@@ -201,6 +201,44 @@ Whether the retained pointer is Crystal's (`Deque#resize_to_capacity` sets
 `lazy_size` outside its lock) or something gcry does with it, this file does not
 say — and the difference matters, because only one of those is gcry's to fix.
 
+## Two interventions remove it, and a third that should have does not
+
+`Heap#realloc` roots the old block across its copy and unroots it on return.
+Never unrooting it at all:
+
+| arm | crashes |
+|---|---|
+| `delete_root` removed from `realloc` | **0/20** |
+| unchanged, same batch | **20/20** |
+
+So the read of the abandoned buffer is real, and gcry's release of that root is
+what makes it fatal. That is two independent interventions now — pre-grow the
+pool (no resize, no abandoned buffer) and never unroot (abandoned buffer stays
+alive) — and both go to zero.
+
+**But the obvious fix from that does not work.** Releasing the root one
+collection later instead of at return — a grace list stamped with the collection
+count, drained after sweep — leaves it at 19/20. Nor does a longer grace, and nor
+is it the list overflowing:
+
+| grace | slots | crashes |
+|---|---|---|
+| 1 collection | 512 | 15/15 |
+| 4 | 512 | 13/15 |
+| 16 | 512 | 15/15 |
+| 64 | 512 | 13/15 |
+| 1 | 65 536 | 15/15 |
+| 4 | 65 536 | 14/15 |
+
+Sixty-four collections of grace with 65 536 slots is most of the run, and it
+still crashes. So whatever holds the stale pointer holds it **indefinitely**, not
+for a bounded window after the realloc — which also rules out the reading that
+`delete_root`-removal merely changed timing or root-set size, since these arms
+inflate the root set the same way and do not help.
+
+The grace-list machinery was written, measured, and **reverted**: it does not fix
+the defect, so shipping its cost would buy nothing.
+
 ## Not a CI gate
 
 Deliberately. It fails most runs, which is the finding; a gate that is always red
