@@ -642,6 +642,9 @@ module GC
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
+    # EXPERIMENT: root every block for the collection after its birth
+    # (src/gcry/birth_grace.cr). A measurement, not a fix.
+    heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")
     # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
     # out of, search the root set, the live heap and the fiber stacks for
     # whatever still points into it (src/gcry/poison_holders.cr). It implies the

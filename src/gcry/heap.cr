@@ -488,6 +488,9 @@ module Gcry
       end
 
       user.as(UInt8*).clear(rounded) if needs_clear
+      # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
+      # unreachable to the collector between here and the caller's store.
+      note_birth(user) if @birth_grace
       user
     end
 

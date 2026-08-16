@@ -127,12 +127,29 @@ CI asymmetry that hid both.
       the block, and at that collection the block was live only in a register or
       a stack slot. That moves the hunt off heap edges and onto **ambient roots
       of the allocating thread**.
-      **Next**: a birth grace — root every block `allocate` returns until the end
-      of the next collection — and measure. The earlier grace held the *old*
-      realloc block and failed; this is the other side of the same window. If it
-      goes to zero the defect is ambient-root coverage, and the fix is root-set
-      discipline rather than a scan change.
-      `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`
+      **The birth grace closes it, and names what dies.** `GCRY_BIRTH_GRACE=1`
+      (research only) roots every block `allocate` returns for the next
+      collection and drops it after: **20/48 → 0/48**, in back-to-back batches,
+      with `birth_grace_rooted` 2 774 and **0 overflows** so a null result could
+      not have been a silent cap. It runs *after* the mark, so it reports each
+      newborn block the mark did not reach before saving it — and across six runs
+      **157 of the reported saves are one thing: size 192, first word 0xa8, i.e.
+      `type_id` 168 = `Fiber`**. A `Fiber` in the middle of `Fiber#initialize` is
+      reachable from no root the collector scans, which is the same call the
+      crash dies in, and why the repro's nesting matters: `ec.spawn` is issued
+      from inside another fiber, so the half-built `Fiber` lives only in a
+      register or a frame on that fiber's stack while the world is stopped.
+      The `Deque` buffer the earlier rounds chased is downstream of that.
+      **Next**: narrow, do not widen. Record which *thread* allocated each saved
+      block and whether its address falls inside the scan window that thread's
+      fiber got. The candidates are now few and all on the running-fiber path —
+      `fiber_stack_scan_top`'s cheap parked `stack_top` clamp for a *running*
+      fiber outside multi-mutator STW, `scan_stack_containing_sp` covering only
+      the stack holding the captured SP, and a value spilled into a frame the
+      clamp excludes (registers are already covered since v0.19.0). The fix
+      follows from which one it is.
+      `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`,
+      `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`

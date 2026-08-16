@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the knob off. The first version of that gate did not set `GCRY_SCAN_CAPS`
   and passed vacuously: with the caps off the scan reads the slack too and the
   planted edge is not missed at all.
+- **`GCRY_BIRTH_GRACE=1` — research only, and it found the window.** Roots every
+  block `allocate` returns for the duration of the next collection, then drops
+  it: the one window in which a block is live in a register or a stack slot and
+  nowhere else. It runs **after** the mark, so it reports each newborn block the
+  mark did not reach — address, size, first word, collection — before saving it.
+  On the fiber-creation use-after-free: **20/48 crashes → 0/48**, back-to-back,
+  with 2 774 blocks rooted and **0 ring overflows**, so the null arm cannot be a
+  silent cap. And 157 of the reported saves across six runs are one thing: a
+  192-byte block whose first word is 168 — a **`Fiber`**, mid-`initialize`,
+  reachable from no root the collector scans. Not a fix and never a default: it
+  keeps every allocation alive for a whole collection. Counters on `/gc-stats`.
+  `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
 - **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
   link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV
   report. "The collector decided it was garbage" and "the program asked for it

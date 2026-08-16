@@ -1136,6 +1136,14 @@ module Gcry
 
           t0 = monotonic_ns
           mark_loop
+          # EXPERIMENT (GCRY_BIRTH_GRACE=1): *after* the mark, so a newborn block
+          # that nothing reached is visible as such. Reports what it saved, then
+          # marks it and drains again — the point is to name the block the
+          # collector was about to take, not only to keep the process alive.
+          if @birth_grace
+            mark_birth_grace_roots
+            mark_loop
+          end
           @last_phase_mark_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
@@ -1152,6 +1160,8 @@ module Gcry
             @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
           end
+
+          reset_birth_grace if @birth_grace
 
           # Mark completeness, in the only window where the answer exists: the
           # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,
