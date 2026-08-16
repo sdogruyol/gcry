@@ -367,20 +367,23 @@ CI asymmetry that hid both.
       spec that turns it on fires the documented off-by-one race from an
       arbitrary allocation site and kills the process. `GCRY_DEBUG_INVARIANTS=1`
       and the `make invariants` gate are where that check belongs.
-- [ ] **A one-off aarch64 SEGV in `make scheduler-roots`, inside
-      `pthread_getattr_np`.** Recorded rather than closed: seen **once** in CI
-      (run `31933855152`, commit `e7de946`), green on a re-run of the same job at
-      the same commit, and the first of its shape — every other red run in the
-      last 40 resolved to `ec-queue-audit` dying on the open use-after-free's
-      poison. It is not the known STW-hang either: the stack-bounds snapshot is
+- [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
+      one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
+      green on re-run); it recurred four hours later in run `31950823605`
+      (`make ec-queue-audit`, commit `4645bf7`), same call chain, address ending
+      in the same `800358`. That second landing matters beyond the count: it is
+      in the *same target* as the known poison flake, so **"ec-queue-audit was
+      red" is not a diagnosis** — two different defects fail that step and only
+      the backtrace separates them. It is not the known STW-hang either: the stack-bounds snapshot is
       taken *before* the suspend signals, under `Thread.lock`, and this is a
       SIGSEGV inside libc rather than a wedge. What is left is
       `pthread_getattr_np` on a `pthread_t` whose thread has exited — the same
       family as `fix/stw-libc-under-suspension`, gcry asking libc about a thread
       whose lifetime it does not own. Two cheap counters would make the next
       occurrence say something (threads visited vs bounds read per snapshot; the
-      `pthread_t` the loop is on when it faults). Not a release blocker — never
-      seen outside CI, never twice.
+      `pthread_t` the loop is on when it faults), and they are now worth
+      building rather than proposing. Not yet a release blocker — never seen
+      outside CI — but no longer dismissible as noise.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,

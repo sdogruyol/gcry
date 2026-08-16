@@ -1,9 +1,16 @@
-# `make scheduler-roots` SEGV'd on aarch64, inside `pthread_getattr_np`
+# An aarch64 SEGV in `pthread_getattr_np`, in two different gates
 
-2026-08-16, CI run `31933855152`, job `test (aarch64 native)`, commit `e7de946`.
-**Seen once. A re-run of the same job on the same commit was green.** Recorded
-because it is the first of its shape and a re-run erasing it is how a defect
-gets rediscovered from scratch six weeks later.
+2026-08-16. **Seen twice, in two different targets, within four hours.**
+
+| run | commit | target | address |
+|---|---|---|---|
+| `31933855152` | `e7de946` | `make scheduler-roots` | `0xff42d3800358` |
+| `31950823605` | `4645bf7` | `make ec-queue-audit` | `0xff00f1800358` |
+
+Both `test (aarch64 native)`, both the same call chain, and both addresses end
+in the same `800358`. A re-run of the first was green, which is why it was
+filed as a one-off; the second arrived before that file was a day old. This
+section is the correction.
 
 ## What happened
 
@@ -18,13 +25,18 @@ Invalid memory access (signal 11) at address 0xff42d3800358
 make: *** [Makefile:247: scheduler-roots] Error 11
 ```
 
-## Why it is not the known flake
+## Why it is not the known flake — and why the second occurrence proves it
 
 CI's recurring red is `make ec-queue-audit` dying on gcry's own poison
-(`0xdeadf2eedeadf2d0`) — the open fiber-creation use-after-free. This is a
-different target, a different call, and a different address. Across the last 40
-CI runs every other failure resolved to `ec-queue-audit`; `scheduler-roots` had
-never failed.
+(`0xdeadf2eedeadf2d0` / `…f2fe`) — the open fiber-creation use-after-free. That
+shape crashes *inside the audit's own workload* and the address is the poison.
+
+This shape crashes inside `GC.collect` → `stop_world`, the address is an
+ordinary-looking one, and the top frame is libc. The second occurrence landed in
+`ec-queue-audit` — the same target as the poison flake — which is what makes the
+distinction load-bearing rather than cosmetic: **"ec-queue-audit was red" is not
+a diagnosis.** Two different defects fail that step, and only the backtrace
+separates them.
 
 | recent red runs | failing target |
 |---|---|
@@ -63,9 +75,22 @@ Neither is a gate on its own. `make scheduler-roots` already runs on all three
 platforms with a CI job; if this recurs, the counters make the next occurrence
 say something instead of leaving one hex number.
 
+## One more thing the second run showed
+
+The SIGSEGV report printed, on **aarch64**:
+
+> the kernel reported address 0. On x86_64 that is also what a *non-canonical*
+> dereference looks like …
+
+The reasoning is x86_64-specific and the text says so, but it is being printed
+on a platform where it does not apply. Small, and worth fixing while the file is
+open: a diagnostic that explains the wrong architecture is how a reader gets
+sent down the wrong path.
+
 ## Status
 
-Open, unreproduced, 1 occurrence in 40+ runs. Not on the v0.20.0 board as a
-release blocker — it has never been seen outside CI and never twice — but on the
-board as an observation, because the alternative is that the next one is also
-"the first of its shape".
+Open, **2 occurrences**, both aarch64, both in CI, in two different gates. Still
+not reproduced on demand and never seen outside CI. It is no longer a one-off,
+so the two counters proposed above are worth building rather than merely
+proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be
+read from its backtrace, not from its name.
