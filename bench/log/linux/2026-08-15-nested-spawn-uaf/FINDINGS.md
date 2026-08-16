@@ -80,25 +80,25 @@ is now a question that can be asked of a binary that fails in seconds.
 
 ## Narrowed
 
-Each row is 12 runs at `WORKERS=1 ROUNDS=100` unless stated, on the idle host.
+This workload's baseline moves between batches — see the correction below — so
+only arms that either went to **zero** or carried their own control in the same
+batch are kept here.
 
 | variable | result |
 |---|---|
-| `COLLECTS=0` (no collection) | **0/10** — the defect needs a collection |
+| `COLLECTS=0` (no collection) | **0/10**, control 9/10 — the defect needs a collection |
 | `COLLECTS=0` + `GCRY_DISABLE_AUTO` | 0/10 |
 | plain `spawn` (default context) | **0/12** — needs an *explicitly created* context |
-| `NEST=0` (spawn from the main thread) | 8/10 — nesting is not required |
+| `NEST=0` (spawn from the main thread) | 8/10 vs 9/10 — nesting is not required |
 | no `Channel` (atomic counter instead) | 8/12 — the Channel is not the subject |
 | `WORKERS=1` / `2` / `4` | 7/12, 7/12, 5/12 — parallelism is not required |
-| `GCRY_SOUND=1` | 10/12 — not one of the soundness levers |
-| `GCRY_DISABLE_NURSERY` | 9/12 |
-| `GCRY_DISABLE_TYPE_ID_GATE` | 12/12 |
+| context in a constant, not a local | 7/20 vs 6/20 — not how the context is rooted |
+| collect only after every fiber finished | 7/20 vs 6/20 — not a race with fiber creation |
 | `GCRY_DISABLE_SP_CLAMP` | **hangs**, 3 of 3 — a different failure, not measured here |
-| `GCRY_DISABLE_TIGHT_GROW` | 11/12 |
 
 So the minimal shape is: **an explicitly created `Fiber::ExecutionContext::Parallel`,
 fibers spawned on it, collections underneath.** No parallelism, no nesting, no
-channel, and no known-unsound option involved.
+channel.
 
 ## It is a real use-after-free, not a poison artifact
 
@@ -128,77 +128,34 @@ was the arrival of the instrument, not the arrival of the defect. Since the
 workload is silent without poison, dating this defect needs a different method
 than running the reproducer against old commits.
 
-## Where the hunt stands
+## A correction: the "halving" table was noise
 
-No option removes it. Several halve it, which is itself the shape of the answer:
+An earlier pass here published a table of options that appeared to halve the
+crash rate — `GCRY_STACK_LOW_WATER=0` at 8/20 against 13/20, `GCRY_DISABLE_LAYOUT`
+and `GCRY_DISABLE_BLACKLIST` at 3/12 against 6/12, rooting the deque at 9/25
+against 15/25 — and reasoned from the pattern. **The pattern was an artifact of
+the measurement.** Those rows came from three different binaries and from batches
+run minutes apart, and this workload's baseline is not stable enough for that:
+measured later, four consecutive baseline batches of 20 gave 19, 18, 18, 19,
+while the earlier batches that supplied the "control" numbers were running at
+6/20 to 13/20.
 
-| arm | rate |
+Re-measured properly — one binary, one batch, a control at each end:
+
+| arm | crashes |
 |---|---|
-| baseline | 13/20, 15/25, 6/12 across batches |
-| `GCRY_STACK_LOW_WATER=0` | 8/20 |
-| `GCRY_DISABLE_LAYOUT=1` | 3/12 |
-| `GCRY_DISABLE_BLACKLIST=1` | 3/12 |
-| root `StackPool@deque` explicitly | 9/25 against 15/25 |
-| `GCRY_INTERIOR=1` | 5/12 |
-| `GCRY_UNALIGNED_CANDIDATES=1` | 7/12 |
-| context in a constant (static root) not a local | 7/20 — no change |
-| collect only after every fiber finished (`QUIESCE`) | 7/20 — no change |
+| control | 19/20 |
+| `GCRY_STACK_LOW_WATER=0` | 17/20 |
+| `GCRY_DISABLE_LAYOUT=1` | 20/20 |
+| `GCRY_DISABLE_BLACKLIST=1` | 19/20 |
+| control (closing) | 19/20 |
 
-Two of those rows do real work.
+**No option changes it.** The tagged poison is not the cause of the rate either —
+`GCRY_POISON_FREED` and `GCRY_POISON_TAG` measured 20/20 and 18/20, then 20/20
+and 19/20, in the same batch.
 
-**It is not a race with fiber creation.** Letting every fiber finish before
-collecting, and only then spawning the next round, leaves the rate where it was.
-So the sequence is: fibers run to completion → a collection → the *next* spawn
-crashes. The collection frees something the next `checkout` needs.
-
-**It is not how the context is rooted.** Moving the context from a local into a
-constant — from the stack into static data — changes nothing, so the "explicitly
-created context" requirement is not a rooting question about the context object.
-
-What that leaves is the path a *finished* fiber's stack takes: `Fiber#run`
-releases it into `Fiber::StackPool@deque`, a collection runs, and the next
-`checkout` reads it back. Explicitly rooting that deque halves the rate, which
-points at it without convicting it — halving is what timing changes do too, and
-every other row here halves something.
-
-**The next instrument is not another knob**: it is making the collector say
-*which block* it freed, so the poison the crash reads can be traced to the free
-that wrote it. That instrument now exists — see below.
-
-## `GCRY_POISON_TAG=1`, and the block it names
-
-`POISON_WORD` is one constant, so every poisoned block reads alike and a crash
-that finds it can say "a use-after-free" and nothing more. The tagged poison
-writes `0xDEAD` in bits 63:48 and **the freed block's own address** in the low 48
-— still non-canonical, so it faults identically, and 48 bits is the whole of an
-x86_64 user address, so nothing is lost. `segv_report` then describes that
-address against the heap's tables exactly as it describes a faulting one.
-
-The first crash it caught:
-
-```
-gcry: SIGSEGV at 0x0 — gcry's freed-block poison … a use-after-free
-gcry: the free that wrote it was of the block at 0x735a075dec88, still FREE, size 768, flags 0x1
-```
-
-40 crashes, and the sizes are not scattered:
-
-| size | count |
-|---|---|
-| 3072 | 11 |
-| 1536 | 11 |
-| 768 | 9 |
-| 384 | 4 |
-
-`Fiber::Stack` is 24 bytes (`Void*`, `Void*`, `Int32`, `Bool`, aligned). Those
-four sizes are **24 x 16, 32, 64, 128** — the capacity-doubling sequence of a
-`Deque(Fiber::Stack)`. Every one is `still FREE`, so none was reissued: the pool
-read back its own freed buffer.
-
-**The block is `Fiber::StackPool`'s deque buffer.** `Fiber#run` releases a
-finished fiber's stack into it, a collection frees the buffer, and the next
-`checkout` reads a `Fiber::Stack` whose `pointer` is poison — which is exactly
-where `makecontext` writes.
+What survives from that pass is only what was measured against a control in its
+own batch, and those are the rows below.
 
 ## The trigger: the deque's resize, and only that
 
