@@ -638,6 +638,18 @@ module GC
     # off because it installs a signal handler, and a collector should not do
     # that to a process that did not ask.
     Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
+    # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
+    # out of, search the root set, the live heap and the fiber stacks for
+    # whatever still points into it (src/gcry/poison_holders.cr). It implies the
+    # tag and the report it extends: the search needs a block address to look
+    # for, and the tag is what supplies it, so asking for holders without them
+    # would be a knob that silently does nothing.
+    if env_flag_one?("GCRY_POISON_HOLDERS")
+      heap.poison_freed = true
+      heap.poison_tag_addr = true
+      Gcry::SegvReport.request
+      Gcry::PoisonHolders.request
+    end
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

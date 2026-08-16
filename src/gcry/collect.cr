@@ -409,6 +409,15 @@ module Gcry
       end
     end
 
+    # Walk the explicit root set **without** `@roots_lock`. For the crash
+    # reporter only (`Gcry::PoisonHolders`): a signal handler cannot take that
+    # lock, because the thread it interrupted may be the one holding it, and a
+    # crash report that deadlocks is worse than one that reads a half-linked
+    # node. Best effort by construction, like every other read `SegvReport` does.
+    def unsafe_each_root(& : Void* ->) : Nil
+      @roots.each { |pointer| yield pointer }
+    end
+
     def set_stackbottom(stack_bottom : Void*) : Nil
       @stack_bottom = stack_bottom
     end

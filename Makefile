@@ -316,6 +316,16 @@ poison-freed: $(BIN)
 	GCRY_POISON_FREED=1 $(BIN)/poison_freed
 	$(BIN)/poison_freed --control
 
+# `GCRY_POISON_TAG` names the block a use-after-free read out of; this names
+# whatever still points at it — the root set, the live heap, the fiber stacks.
+# Plants holders it knows the address of, because a search that finds nothing
+# reads exactly like one that ran and found the heap clean. `--control` shows the
+# search adds lines and removes none. ~2 s.
+poison-holders: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/poison_holders.cr -o $(BIN)/poison_holders --error-trace
+	$(BIN)/poison_holders
+	$(BIN)/poison_holders --control
+
 darwin-page-query: $(BIN)
 	$(CRYSTAL) build bench/darwin_page_query.cr -o $(BIN)/darwin_page_query --error-trace
 	$(BIN)/darwin_page_query $${PAGE_QUERY_PRESSURE:+--pressure=$$PAGE_QUERY_PRESSURE}
@@ -334,7 +344,7 @@ perf-baseline:
 # file header for the rates and the Boehm control.
 nested-spawn-uaf: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/nested_spawn_uaf.cr -o $(BIN)/nested_spawn_uaf --error-trace
-	GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 $(BIN)/nested_spawn_uaf
+	GCRY_POISON_HOLDERS=1 $(BIN)/nested_spawn_uaf
 
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace

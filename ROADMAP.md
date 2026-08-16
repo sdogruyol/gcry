@@ -69,13 +69,35 @@ CI asymmetry that hid both.
       pointer is held *indefinitely*, and the root-set inflation of those arms
       also rules out "removing `delete_root` merely changed timing". The grace
       machinery was written, measured and reverted.
-      **Next**: the crash already knows the abandoned block's address, so scan
-      the heap span and the thread stacks for that value at fault time. Whatever
-      holds it is the owner, and the owner decides whether this is gcry's to fix
-      or Crystal's (`Deque#resize_to_capacity` sets `@capacity` before `@buffer`;
-      `Fiber::StackPool` reads `@deque.empty?` and `lazy_size` outside its lock).
+      **The holder is now named, and it is one level above the buffer.**
+      `GCRY_POISON_HOLDERS=1` searches the root set, every live block and every
+      fiber stack for the freed block's address at fault time
+      (`src/gcry/poison_holders.cr`, gated by `make poison-holders`, both
+      directions broken on purpose and observed red). Across **17 crashes in 37
+      runs** it says the same thing every time: **exactly one** heap holder — a
+      **32-byte block, `type_id` 210 = `Deque(Fiber::Stack)`, holding the
+      pointer at +16, which is `Deque`'s `@buffer`** — and **0 of 0** explicit
+      roots. Every stack holder sits on a **running** fiber *above* `stack_top`,
+      i.e. inside the window the collector scans, so a stack-scan hole is
+      eliminated rather than left open.
+      **And the holder object is `flags 0x0` — never marked.** The report
+      carries the heap's current mark generation next to the flags for exactly
+      this reading: `clear_all_marks` bumps the generation per collection, so
+      zero gen bits against a current gen of 17 / 33 / 201 is not a stale
+      generation but a block **no recent mark phase marked**. That reverses the
+      causality the previous cut assumed — the buffer was not freed while
+      something pointed at it; the buffer was freed **because its owner was not
+      marked**, so its `@buffer` was never a root. It is also not the pool's
+      deque, whose live buffer is still 0 dead in 4 800 checks.
+      **Next**: one level up again — walk the heap for words pointing at the
+      *holder*, and settle why a `Deque(Fiber::Stack)` is unmarked. Either it is
+      genuinely unreachable at mark time and published afterwards (Crystal's, and
+      `Fiber::StackPool` reading `@deque.empty?` / `lazy_size` outside its lock
+      is the standing candidate), or it is reachable and the mark missed it
+      (gcry's). That answer decides the owner.
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
-      `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
+      `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
+      `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now

@@ -31,6 +31,7 @@ require "./gcry/observability"
 require "./gcry/stw_watchdog"
 require "./gcry/raw_out"
 require "./gcry/ec_queue_audit"
+require "./gcry/poison_holders"
 require "./gcry/segv_report"
 
 module Gcry

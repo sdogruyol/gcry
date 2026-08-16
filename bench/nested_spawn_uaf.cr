@@ -59,6 +59,19 @@ NEST     = (ENV["NEST"]? || "1") != "0"
 # instead, which is a different failure and would hide this one.
 ec = Fiber::ExecutionContext::Parallel.new("nested-spawn-uaf", WORKERS)
 
+# `GCRY_POISON_HOLDERS=1` reports a holder by `type_id`, because a signal
+# handler cannot look a name up: Crystal's type ids are assigned per program and
+# gcry ships no table of them. This prints the ids of the types the hunt is
+# about, from *this* binary, so the number in the crash report can be read.
+# It adds no type to the program — every one of these is already instantiated by
+# `Fiber::StackPool` — so the ids it prints are the ids a crashing run has.
+if ENV["PRINT_TYPE_IDS"]? == "1"
+  {% for t in [Deque(Fiber::Stack), Fiber::StackPool, Fiber, Fiber::ExecutionContext::Parallel,
+               Fiber::ExecutionContext::Parallel::Scheduler, Array(Fiber::Stack), Thread] %}
+    puts "type_id {{t}} = #{ {{t}}.crystal_instance_type_id } (instance_sizeof #{instance_sizeof({{t}})})"
+  {% end %}
+end
+
 puts "fibers=#{FIBERS} rounds=#{ROUNDS} workers=#{WORKERS} collects=#{COLLECTS} nest=#{NEST}"
 
 ROUNDS.times do

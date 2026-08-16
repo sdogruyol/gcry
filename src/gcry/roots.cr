@@ -270,7 +270,12 @@ module Gcry
     end
 
     # Kernel copies one byte from *page*; EFAULT ⇒ not readable (PROT_NONE / hole).
-    private def self.page_readable?(page : UInt64) : Bool
+    #
+    # Public because the crash reporter needs the same probe: `PoisonHolders`
+    # walks fiber stacks word by word to report the *address* of a slot rather
+    # than only its value, so it cannot go through `scan_range`, and a blind
+    # read over a guard page from a signal handler is a second crash.
+    def self.page_readable?(page : UInt64) : Bool
       return false if @@probe_wr < 0
       n = LibC.write(@@probe_wr, Pointer(Void).new(page), 1)
       if n == 1

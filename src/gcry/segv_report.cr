@@ -155,6 +155,11 @@ module Gcry
       len = RawOut.append_hex(buf.to_unsafe, len, info[:flags].to_u64)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+
+      # Naming the block is where this stopped being able to help. `GCRY_POISON_HOLDERS=1`
+      # goes one step further and asks *who still points at it* — the root set,
+      # the live heap, the fiber stacks. See src/gcry/poison_holders.cr.
+      PoisonHolders.search(heap, src, info[:size].to_u64) if PoisonHolders.requested?
     end
 
     private def self.report(sig : Int32, addr : Void*, ctx : Void*) : Nil

@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_POISON_HOLDERS=1` — a use-after-free now names what still points at
+  the block, not only which block it read.** `GCRY_POISON_TAG` got as far as
+  naming the freed block; the open fiber-creation UAF stopped exactly there, at
+  "a `Deque(Fiber::Stack)` buffer abandoned at a resize, freed correctly, and
+  something still reads it". On a fault the reporter now searches the three
+  places gcry can walk — the explicit root set, every live block in the heap,
+  and every fiber stack — and names each holder: the holding block's address,
+  size, `type_id`, flags, mark state and the offset the pointer sits at, or for
+  a stack the slot address, the fiber's `stack_top` and whether that slot is
+  inside the window the collector actually scans. Implies the tag and the crash
+  report it extends, since a search with no block address to look for would be a
+  knob that silently does nothing. Costs nothing until something faults.
+  Gated by `make poison-holders`: a planted heap holder must be named **by
+  address**, a stack-only holder must be found on the stack, and a block nobody
+  holds must report **0** — the arm that fails if the walk matches the freed
+  block on itself or walks FREE blocks. `--control` shows the search adds lines
+  and removes none. Both directions broken on purpose and observed red. Linux
+  only, alongside `make segv-report` and `make poison-freed`, because
+  `SegvReport`'s register scan for the poison is Linux-only and on Darwin the
+  search would have no address to look for.
+  **What it found on its first runs, and it reverses the reading:** across 17
+  crashes in 37 runs, **exactly one** heap holder every time — a 32-byte block,
+  `type_id` 210 (`Deque(Fiber::Stack)`), holding the pointer at +16, which is
+  `Deque`'s `@buffer` — with **0 of 0** explicit roots and every stack holder on
+  a *running* fiber above `stack_top`, i.e. inside the scanned window. And the
+  holder object is `flags 0x0` against a current mark generation of 17 / 33 /
+  201, so it was not marked by any recent collection. The buffer was not freed
+  while something pointed at it; it was freed **because its owner was not
+  marked**. Not the pool's deque, whose live buffer is still 0 dead in 4 800
+  checks. `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
 - **`ec_root_pins` — the Parallel EC pin block is now readable from outside the
   collector.** `scan_thread_roots` names the execution context's queues, event
   loop, stack pool and schedulers, and the whole block sits behind a macro gate

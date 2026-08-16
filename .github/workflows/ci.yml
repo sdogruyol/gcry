@@ -377,6 +377,16 @@ jobs:
         run: |
           make segv-report
 
+      # And the step after naming the block: naming what still points at it.
+      # The open fiber-creation UAF stopped at "the block is a Deque buffer the
+      # deque abandoned"; this searches the root set, the live heap and the
+      # fiber stacks for that address at fault time. Plants holders on purpose,
+      # because a search that finds nothing looks like one that found the heap
+      # clean.
+      - name: Use-after-free holders
+        run: |
+          make poison-holders
+
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
       # comparator closes that; this gates the comparator itself, which needs
