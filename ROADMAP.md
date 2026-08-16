@@ -80,21 +80,40 @@ CI asymmetry that hid both.
       roots. Every stack holder sits on a **running** fiber *above* `stack_top`,
       i.e. inside the window the collector scans, so a stack-scan hole is
       eliminated rather than left open.
-      **And the holder object is `flags 0x0` — never marked.** The report
-      carries the heap's current mark generation next to the flags for exactly
-      this reading: `clear_all_marks` bumps the generation per collection, so
-      zero gen bits against a current gen of 17 / 33 / 201 is not a stale
-      generation but a block **no recent mark phase marked**. That reverses the
-      causality the previous cut assumed — the buffer was not freed while
-      something pointed at it; the buffer was freed **because its owner was not
-      marked**, so its `@buffer` was never a root. It is also not the pool's
-      deque, whose live buffer is still 0 dead in 4 800 checks.
-      **Next**: one level up again — walk the heap for words pointing at the
-      *holder*, and settle why a `Deque(Fiber::Stack)` is unmarked. Either it is
-      genuinely unreachable at mark time and published afterwards (Crystal's, and
-      `Fiber::StackPool` reading `@deque.empty?` / `lazy_size` outside its lock
-      is the standing candidate), or it is reachable and the mark missed it
-      (gcry's). That answer decides the owner.
+      **And one level up names the owner: it is the context's own stack pool.**
+      The search now runs a second pass against the holder itself, and the
+      harness prints the live pools' addresses before anything can go wrong, so
+      the match is by address and not by inference. Across 7 crashes: the freed
+      block's only holder is `live ec pool deque`, and *its* only holder is
+      `live ec pool` — `type_id` 199 = `Fiber::StackPool`. Not an orphan, not a
+      duplicate, not the default context's: the pool the program is spawning on.
+      **And the deque is not mid-resize.** The holder's payload is dumped, and
+      `@capacity` matches the freed block's entry count exactly — 1536 B ↔ 64,
+      3072 B ↔ 128, with `@size` below it. `Deque#resize_to_capacity` writes
+      `@capacity` before `@buffer`, so that race would show a capacity *larger*
+      than the block `@buffer` points at. It does not, which also retires the
+      "buffer abandoned at a resize" reading: the freed block is sized to the
+      deque's live capacity.
+      **Correction to the first cut of this item.** It read a zero mark
+      generation as "no collection ever marked the holder" and concluded the
+      buffer was freed because its owner was unmarked. That was wrong: `sweep`
+      clears every survivor's mark (`collect_sweep.cr:127/146/347`), so between
+      collections every live object reads zero — measured against an object held
+      in a local across three collections. The verdict is out of the reporter;
+      raw flags stay, and `ATOMIC` is called out by name because *that* bit does
+      mean the payload is never scanned. Neither the pool nor the deque is
+      ATOMIC.
+      **Next, and it is now a single question.** `Parallel` declares
+      `getter stack_pool : Fiber::StackPool = Fiber::StackPool.new`, gcry pins
+      every pointer-bearing EC ivar from `instance_vars`, and `ec` is a local on
+      the main stack — so the mark should reach
+      `ec → @stack_pool → @deque → @buffer` and one of those four edges does not
+      hold. `@buffer` is the one to measure first: it is a raw
+      `Pointer(Fiber::Stack)`, the shape `Heap#realloc`'s own comment says the
+      process-GC `type_id_gate` rejects as an ambient stack root. Whether that
+      gate also drops a heap-to-heap edge out of a scanned `Deque` payload is a
+      small experiment — mark a `Deque(Fiber::Stack)` by hand and ask whether its
+      buffer survives a collection.
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`

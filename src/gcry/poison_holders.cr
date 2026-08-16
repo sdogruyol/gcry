@@ -44,7 +44,19 @@ module Gcry
     # mutation left circular must not turn the crash report into a hang.
     MAX_BLOCKS = 16_000_000_u64
 
+    # Payload words dumped per reported holder. Four covers a `Deque`'s whole
+    # object (`type_id`, three `Int32`, `@buffer`) with a word to spare, and the
+    # line still fits `RawOut`'s 480-byte buffer.
+    DUMP_WORDS = 4_u64
+
     @@requested = false
+
+    # The first heap holder found, so the search can be run once more against
+    # *it*. Class variables and not a return value because the walk is a chain
+    # of yielding methods and a signal handler may not allocate a tuple.
+    @@first_holder_base = 0_u64
+    @@first_holder_size = 0_u64
+    @@record_first = false
 
     def self.request : Nil
       @@requested = true
@@ -62,35 +74,77 @@ module Gcry
     # reporting only exact matches would miss the second case entirely.
     def self.search(heap : Heap, user : UInt64, size : UInt64) : Nil
       return if user == 0 || size == 0
-      finish = user &+ size
 
       buf = uninitialized UInt8[512]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: holders — looking for words pointing into [0x")
       len = RawOut.append_hex(buf.to_unsafe, len, user)
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
-      len = RawOut.append_hex(buf.to_unsafe, len, finish)
+      len = RawOut.append_hex(buf.to_unsafe, len, user &+ size)
       len = RawOut.append(buf.to_unsafe, len, "), the block whose free wrote the poison\n")
       RawOut.flush(buf.to_unsafe, len)
 
-      found = 0_u64
-      found &+= search_roots(heap, user, finish)
-      found &+= search_heap(heap, user, finish)
-      found &+= search_stacks(heap, user, finish)
+      @@first_holder_base = 0_u64
+      @@first_holder_size = 0_u64
+      @@record_first = true
+      found = search_at(heap, user, size, "holders")
+      @@record_first = false
 
-      return unless found == 0
+      if found == 0
+        len = 0
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: holders — none. Nothing in the root set, in a live block or on a fiber stack points " \
+          "into it, so the pointer is in a register, in thread-local storage, or in memory gcry never " \
+          "mapped — and those are three different defects\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+
+      # One level up, and this is the question the first level opened rather than
+      # closed. The holder found for the fiber-creation UAF is itself a heap
+      # block — a `Deque(Fiber::Stack)` that no collection has ever marked — so
+      # "who freed the buffer" became "why is its owner not live". Asking the
+      # same question of the holder answers it: something points at the holder
+      # and the mark missed it, which is gcry's defect; or nothing does, and the
+      # holder is genuinely unreachable while still being read, which is the
+      # mutator publishing an object the collector cannot see — Crystal's.
+      base = @@first_holder_base
+      bsize = @@first_holder_size
+      return if base == 0 || bsize == 0
+
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: owner — and who points at that holder? [0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, base)
+      len = RawOut.append(buf.to_unsafe, len, ", 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, base &+ bsize)
+      len = RawOut.append(buf.to_unsafe, len, ")\n")
+      RawOut.flush(buf.to_unsafe, len)
+
+      owners = search_at(heap, base, bsize, "owner")
+      return unless owners == 0
       len = 0
       len = RawOut.append(buf.to_unsafe, len,
-        "gcry: holders — none. Nothing in the root set, in a live block or on a fiber stack points " \
-        "into it, so the pointer is in a register, in thread-local storage, or in memory gcry never " \
-        "mapped — and those are three different defects\n")
+        "gcry: owner — none. Nothing points at the holder either, so the collector was right to " \
+        "consider it garbage and the mutator is reading an object it never published anywhere the " \
+        "collector can see\n")
       RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # One pass of the three walks over `[lo, lo + size)`, tagged so a second
+    # pass one level up is distinguishable from the first in the output.
+    private def self.search_at(heap : Heap, lo : UInt64, size : UInt64, tag : String) : UInt64
+      finish = lo &+ size
+      found = 0_u64
+      found &+= search_roots(heap, lo, finish, tag)
+      found &+= search_heap(heap, lo, finish, tag)
+      found &+= search_stacks(heap, lo, finish, tag)
+      found
     end
 
     # The collector's own bookkeeping first: it is the cheapest walk, and it is
     # the one that can say `realloc` released its root rather than leaving the
     # question to be inferred from a crash rate.
-    private def self.search_roots(heap : Heap, user : UInt64, finish : UInt64) : UInt64
+    private def self.search_roots(heap : Heap, user : UInt64, finish : UInt64, tag : String) : UInt64
       hits = 0_u64
       total = 0_u64
       heap.unsafe_each_root do |ptr|
@@ -101,7 +155,9 @@ module Gcry
 
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: holders — explicit roots: ")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append(buf.to_unsafe, len, tag)
+      len = RawOut.append(buf.to_unsafe, len, " — explicit roots: ")
       len = RawOut.append_u64(buf.to_unsafe, len, hits)
       len = RawOut.append(buf.to_unsafe, len, " of ")
       len = RawOut.append_u64(buf.to_unsafe, len, total)
@@ -118,7 +174,7 @@ module Gcry
     # FREE blocks are deliberately not searched. A freed block holding the
     # address is a copy nothing reads; reporting it would fill the report with
     # the poison's own neighbours and bury the one line that matters.
-    private def self.search_heap(heap : Heap, user : UInt64, finish : UInt64) : UInt64
+    private def self.search_heap(heap : Heap, user : UInt64, finish : UInt64, tag : String) : UInt64
       hits = 0_u64
       blocks_with_hits = 0_u64
       scanned = 0_u64
@@ -137,7 +193,7 @@ module Gcry
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
           scanned &+= 1
           next if BlockHeader.free?(header)
-          h = scan_block(header, user, finish, reported) { |r| reported = r }
+          h = scan_block(header, user, finish, tag, reported) { |r| reported = r }
           if h > 0
             hits &+= h
             blocks_with_hits &+= 1
@@ -163,7 +219,7 @@ module Gcry
           scanned &+= 1
           header = cursor.as(BlockHeader*)
           unless BlockHeader.free?(header)
-            h = scan_block(header, user, finish, reported) { |r| reported = r }
+            h = scan_block(header, user, finish, tag, reported) { |r| reported = r }
             if h > 0
               hits &+= h
               blocks_with_hits &+= 1
@@ -176,7 +232,9 @@ module Gcry
 
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: holders — heap: ")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append(buf.to_unsafe, len, tag)
+      len = RawOut.append(buf.to_unsafe, len, " — heap: ")
       len = RawOut.append_u64(buf.to_unsafe, len, hits)
       len = RawOut.append(buf.to_unsafe, len, " word(s) in ")
       len = RawOut.append_u64(buf.to_unsafe, len, blocks_with_hits)
@@ -186,13 +244,11 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, chunks)
       len = RawOut.append(buf.to_unsafe, len, " chunk(s)")
       len = RawOut.append(buf.to_unsafe, len, budget_out ? " — walk cut short at the block budget" : "")
-      # The current mark generation is what makes a holder's `flags` readable.
-      # `clear_all_marks` bumps the generation at the *start* of a collection, so
-      # a block whose gen bits equal this one was marked by the last mark phase;
-      # older non-zero bits mean garbage the sweep has not reached; and **zero**
-      # bits mean the block has not been marked since the last full clear — a
-      # block allocated after that mark. Without this number all three read the
-      # same word, "UNMARKED".
+      # Carried for context, not as a liveness test — see the note on `flags` in
+      # `scan_block`. `clear_all_marks` bumps this at the start of a collection
+      # and `sweep` clears each survivor's gen bits at the end, so outside a
+      # collection every live block reads zero and the generation only tells you
+      # how many collections the crash is downstream of.
       len = RawOut.append(buf.to_unsafe, len, ". current mark gen ")
       len = RawOut.append_u64(buf.to_unsafe, len, heap.header_mark_gen.to_u64)
       len = RawOut.append(buf.to_unsafe, len, ", collections ")
@@ -204,7 +260,7 @@ module Gcry
 
     # Scan one live block's payload. Yields the updated report count so the
     # caller's cap survives across blocks without a class variable.
-    private def self.scan_block(header : BlockHeader*, user : UInt64, finish : UInt64,
+    private def self.scan_block(header : BlockHeader*, user : UInt64, finish : UInt64, tag : String,
                                 reported : Int32, &) : UInt64
       size = header.value.size.to_u64
       return 0_u64 if size < sizeof(UInt64)
@@ -232,33 +288,79 @@ module Gcry
             reported += 1
             buf = uninitialized UInt8[512]
             len = 0
-            len = RawOut.append(buf.to_unsafe, len, "gcry: holders — heap: block 0x")
+            len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+            len = RawOut.append(buf.to_unsafe, len, tag)
+            len = RawOut.append(buf.to_unsafe, len, " — heap: block 0x")
             len = RawOut.append_hex(buf.to_unsafe, len, base)
             len = RawOut.append(buf.to_unsafe, len, " size ")
             len = RawOut.append_u64(buf.to_unsafe, len, size)
             len = RawOut.append(buf.to_unsafe, len, " type_id ")
             len = RawOut.append_u64(buf.to_unsafe, len, type_id)
-            # Flags and mark state separate the two readings of a holder that
-            # matter: an ATOMIC block is one the collector never scans, so its
-            # pointer was never a root and the free is gcry's own marking hole;
-            # an *unmarked* holder is garbage the sweep has not reached yet, so
-            # it holds the address without anything reading it.
+            # Raw flags, and deliberately **no verdict about liveness**. The
+            # first version of this printed "UNMARKED" for a zero mark
+            # generation and read it as "no collection ever marked this" — which
+            # was wrong, and wrong in the direction that invents a defect:
+            # `sweep` calls `heap_clear_mark` on **every survivor**, so between
+            # collections every live object in the heap has zero gen bits.
+            # Measured against a `Keeper` held in a local across three
+            # collections: `flags 0x0`, exactly like the holder. The bits that
+            # do mean something here are the rest — ATOMIC (0x2) says the
+            # collector never scans this block's payload, FINALIZER (0x20),
+            # NURSERY (0x10), LARGE (0x8) — so print them and let the reader
+            # decode rather than asserting a liveness the header cannot carry
+            # outside a collection.
             len = RawOut.append(buf.to_unsafe, len, " flags 0x")
             len = RawOut.append_hex(buf.to_unsafe, len, header.value.flags.to_u64)
             len = RawOut.append(buf.to_unsafe, len,
-              BlockHeader.marked?(header) ? " marked" : " UNMARKED")
+              (header.value.flags & BlockHeader::Flags::ATOMIC) != 0 ? " ATOMIC(unscanned)" : "")
             len = RawOut.append(buf.to_unsafe, len, " holds it at +")
             len = RawOut.append_u64(buf.to_unsafe, len, i &* sizeof(UInt64))
             len = RawOut.append(buf.to_unsafe, len, " (block+")
             len = RawOut.append_u64(buf.to_unsafe, len, w &- user)
             len = RawOut.append(buf.to_unsafe, len, ")\n")
             RawOut.flush(buf.to_unsafe, len)
+            dump_payload(base, size)
+            # The first holder is the one the caller runs the search against a
+            # second time. Recorded here rather than returned: the walk is a
+            # chain of yielding methods and a signal handler may not allocate.
+            if @@record_first && @@first_holder_base == 0
+              @@first_holder_base = base
+              @@first_holder_size = size
+            end
           end
         end
         i &+= 1
       end
       yield reported
       hits
+    end
+
+    # The holder's first words, verbatim. `type_id` says *what* the holder is;
+    # this says what state it was in, and for the fiber-creation UAF that is the
+    # whole question — `Deque` is `type_id`, then three `Int32` (`@start`,
+    # `@size`, `@capacity`) packed into two words, then `@buffer`. A `@capacity`
+    # that matches the *freed* block and one that matches a newer, larger one are
+    # different defects: the first is an owner that still believes it owns the
+    # buffer, the second is a resize caught between `@capacity = capacity` and
+    # the `@buffer` store that follows it — and Crystal's `resize_to_capacity`
+    # writes them in exactly that order.
+    private def self.dump_payload(base : UInt64, size : UInt64) : Nil
+      words = size // sizeof(UInt64)
+      words = DUMP_WORDS if words > DUMP_WORDS
+      return if words == 0
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry:   payload")
+      i = 0_u64
+      while i < words
+        len = RawOut.append(buf.to_unsafe, len, " +")
+        len = RawOut.append_u64(buf.to_unsafe, len, i &* sizeof(UInt64))
+        len = RawOut.append(buf.to_unsafe, len, "=0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, Pointer(UInt64).new(base &+ i &* sizeof(UInt64)).value)
+        i &+= 1
+      end
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # Fiber stacks, and the faulting thread's live frames. A hit here means a
@@ -279,7 +381,7 @@ module Gcry
     # same `write(2)`/EFAULT test the collector's stack scan uses, so an unmapped
     # guard page is skipped rather than faulted on; a torn read is possible and
     # is the price of asking at all.
-    private def self.search_stacks(heap : Heap, user : UInt64, finish : UInt64) : UInt64
+    private def self.search_stacks(heap : Heap, user : UInt64, finish : UInt64, tag : String) : UInt64
       sp = Roots.hardware_stack_pointer.address
       hits = 0_u64
       stacks = 0_u64
@@ -305,7 +407,7 @@ module Gcry
 
         stacks &+= 1
         top = fiber.@context.stack_top.address
-        h = scan_stack_range(low, bottom, user, finish, fiber.object_id, top,
+        h = scan_stack_range(low, bottom, user, finish, tag, fiber.object_id, top,
           fiber.running?, reported) { |r| reported = r }
         hits &+= h
       end
@@ -317,13 +419,15 @@ module Gcry
         bottom = heap.stack_bottom.address
         if bottom > sp && (bottom &- sp) <= Roots::MAX_SCAN_BYTES
           stacks &+= 1
-          hits &+= scan_stack_range(sp, bottom, user, finish, 0_u64, sp, true, reported) { |r| reported = r }
+          hits &+= scan_stack_range(sp, bottom, user, finish, tag, 0_u64, sp, true, reported) { |r| reported = r }
         end
       end
 
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: holders — stacks: ")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append(buf.to_unsafe, len, tag)
+      len = RawOut.append(buf.to_unsafe, len, " — stacks: ")
       len = RawOut.append_u64(buf.to_unsafe, len, hits)
       len = RawOut.append(buf.to_unsafe, len, " word(s) across ")
       len = RawOut.append_u64(buf.to_unsafe, len, stacks)
@@ -337,8 +441,8 @@ module Gcry
     # each word and this report is about the *address* of the slot, which is the
     # only thing that can be compared against the collector's scan window.
     private def self.scan_stack_range(low : UInt64, high : UInt64, user : UInt64, finish : UInt64,
-                                      fiber_id : UInt64, stack_top : UInt64, running : Bool,
-                                      reported : Int32, &) : UInt64
+                                      tag : String, fiber_id : UInt64, stack_top : UInt64,
+                                      running : Bool, reported : Int32, &) : UInt64
       hits = 0_u64
       word = sizeof(UInt64).to_u64
       lo = (low &+ word &- 1) & ~(word &- 1)
@@ -362,7 +466,7 @@ module Gcry
             hits &+= 1
             if reported < MAX_REPORTED
               reported += 1
-              report_stack_hit(cursor, a, user, fiber_id, stack_top, running)
+              report_stack_hit(cursor, a, user, tag, fiber_id, stack_top, running)
             end
           end
           cursor &+= word
@@ -373,11 +477,13 @@ module Gcry
       hits
     end
 
-    private def self.report_stack_hit(slot : UInt64, value : UInt64, user : UInt64,
+    private def self.report_stack_hit(slot : UInt64, value : UInt64, user : UInt64, tag : String,
                                       fiber_id : UInt64, stack_top : UInt64, running : Bool) : Nil
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: holders — stack: ")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append(buf.to_unsafe, len, tag)
+      len = RawOut.append(buf.to_unsafe, len, " — stack: ")
       if fiber_id == 0
         len = RawOut.append(buf.to_unsafe, len, "thread stack")
       else

@@ -29,16 +29,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only, alongside `make segv-report` and `make poison-freed`, because
   `SegvReport`'s register scan for the poison is Linux-only and on Darwin the
   search would have no address to look for.
-  **What it found on its first runs, and it reverses the reading:** across 17
-  crashes in 37 runs, **exactly one** heap holder every time — a 32-byte block,
-  `type_id` 210 (`Deque(Fiber::Stack)`), holding the pointer at +16, which is
-  `Deque`'s `@buffer` — with **0 of 0** explicit roots and every stack holder on
-  a *running* fiber above `stack_top`, i.e. inside the scanned window. And the
-  holder object is `flags 0x0` against a current mark generation of 17 / 33 /
-  201, so it was not marked by any recent collection. The buffer was not freed
-  while something pointed at it; it was freed **because its owner was not
-  marked**. Not the pool's deque, whose live buffer is still 0 dead in 4 800
-  checks. `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
+  The search runs a **second pass against the holder itself**, and each reported
+  holder's first payload words are dumped, so an object's state is readable and
+  not only its address.
+  **What it found, and it is the live pool.** Across 7 crashes the chain is the
+  same every time, matched by address against the pools the harness prints
+  before anything goes wrong: the freed block's only holder is the execution
+  context's own `Deque(Fiber::Stack)` (`type_id` 210, `@buffer` at +16), and
+  *its* only holder is the context's own `Fiber::StackPool` (`type_id` 199).
+  Not an orphan and not the default context's. `0 of 0` explicit roots at both
+  levels; every stack holder on a *running* fiber above `stack_top`, i.e. inside
+  the scanned window; neither block `ATOMIC`. And the payload dump retires the
+  "abandoned buffer" reading: `@capacity` matches the freed block's entry count
+  exactly (1536 B ↔ 64, 3072 B ↔ 128) with `@size` below it, so the deque is not
+  caught between `Deque#resize_to_capacity`'s `@capacity` and `@buffer` stores —
+  it holds the buffer it believes is current, and gcry freed that.
+  **Correction.** The first version of this reporter printed `UNMARKED` for a
+  zero mark generation and this changelog read it as "no collection ever marked
+  the holder". That was wrong: `sweep` clears every survivor's mark, so between
+  collections every live object reads zero — measured against an object held in
+  a local across three collections. The verdict is out; raw flags stay, with
+  `ATOMIC` named because that bit does mean the payload is never scanned.
+  `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
 - **`ec_root_pins` — the Parallel EC pin block is now readable from outside the
   collector.** `scan_thread_roots` names the execution context's queues, event
   loop, stack pool and schedulers, and the whole block sits behind a macro gate

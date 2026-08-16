@@ -3,126 +3,117 @@
 2026-08-16, x86_64 WSL2, Crystal 1.21.0, `bench/nested_spawn_uaf.cr`.
 
 `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md` got as far as naming
-the block — a `Deque(Fiber::Stack)` buffer abandoned at a resize, 384 / 768 /
-1536 / 3072 bytes, always `still FREE` — and stopped at "gcry freed it
-correctly; something still reads it". Two interventions took the crash to zero
-and a bounded grace on `Heap#realloc`'s root did not, so the stale pointer is
-held **indefinitely**, by something nothing had named.
+the block — 384 / 768 / 1536 / 3072 bytes, always `still FREE` — and stopped at
+"gcry freed it correctly; something still reads it". Two interventions took the
+crash to zero and a bounded grace on `Heap#realloc`'s root did not, so the stale
+pointer is held **indefinitely**, by something nothing had named.
 
-`GCRY_POISON_HOLDERS=1` names it. At fault time the reporter searches the three
-places gcry can walk for the freed block's address: the explicit root set, every
-live block in the heap, and every fiber stack
+`GCRY_POISON_HOLDERS=1` names it, and then names what points at *that*
 (`src/gcry/poison_holders.cr`, gated by `make poison-holders`).
 
-## What it says
+## The chain, and it is the live pool
 
-Two batches, 37 runs, 17 crashes, and the answer does not vary:
+Two rounds, 18 runs, 7 crashes, and the answer does not vary:
 
 ```
-gcry: the free that wrote it was of the block at 0x7a9c43a2e758, still FREE, size 1536, flags 0x1
-gcry: holders — looking for words pointing into [0x7a9c43a2e758, 0x7a9c43a2ed58), the block whose free wrote the poison
+live ec pool 0x7632398e3df8 deque 0x7632398e3dc8
+gcry: the free that wrote it was of the block at 0x7632394deeb8, still FREE, size 3072, flags 0x1
 gcry: holders — explicit roots: 0 of 0 point into it — gcry is not rooting it
-gcry: holders — heap: block 0x7a9c43e3cdc8 size 32 type_id 210 flags 0x0 UNMARKED holds it at +16 (block+0)
-gcry: holders — heap: 1 word(s) in 1 live block(s), from 15763 block(s) in 15 chunk(s). current mark gen 17, collections 16
-gcry: holders — stack: fiber 0x7a9c43b7fe68 (running) slot 0x7ffecc3cef08 holds block+0, stack_top 0x7ffecc3cee64
-gcry: holders — stacks: 1 word(s) across 12 stack(s)
+gcry: holders — heap: block 0x7632398e3dc8 size 32 type_id 210 flags 0x0 holds it at +16 (block+0)
+gcry:   payload +0=0xd2 +8=0x8000000040 +16=0x7632394deeb8 +24=0x0
+gcry: holders — stack: fiber 0x… (running) slot 0x… holds block+0, stack_top 0x…
+gcry: owner — and who points at that holder? [0x7632398e3dc8, 0x7632398e3de8)
+gcry: owner — explicit roots: 0 of 0 point into it — gcry is not rooting it
+gcry: owner — heap: block 0x7632398e3df8 size 32 type_id 199 flags 0x20 holds it at +16 (block+0)
+gcry:   payload +0=0xc7 +8=0x101 +16=0x7632398e3dc8 +24=0x0
+gcry: owner — stacks: 0 word(s) across 12 stack(s)
 ```
 
-| fact | across 17 crashes |
-|---|---|
-| heap holders | **1 word in 1 block, every time** |
-| that block | **32 bytes, `type_id` 210, pointer at +16, value = block+0**, every time |
-| its flags | **0x0 — UNMARKED**, every time |
-| explicit roots pointing into it | **0 of 0**, every time |
-| stack holders | 1 word (13 crashes) or 4 (1), always on a **running** fiber, never below `stack_top` |
-| freed block size | 1536 (11), 3072 (4), 768 (2) |
+Read against the addresses the harness prints **before anything goes wrong**:
 
-**`type_id` 210 is `Deque(Fiber::Stack)`.** Printed from the same binary
-(`PRINT_TYPE_IDS=1 bin/nested_spawn_uaf`), which is the only way to read a
-Crystal type id — they are assigned per program and a signal handler has no
-table. `instance_sizeof` is 24, so the object lands in the 32-byte class, and
-`Deque`'s ivars are `@size`, `@capacity`, `@start` (three `Int32`) then
-`@buffer` — **at byte 16**, which is the offset the report names.
+| | address | what it is |
+|---|---|---|
+| freed block | `0x7632394deeb8` | 3072 bytes |
+| its only heap holder | `0x7632398e3dc8` | **= `live ec pool deque`** — `type_id` 210 = `Deque(Fiber::Stack)` |
+| that holder's only holder | `0x7632398e3df8` | **= `live ec pool`** — `type_id` 199 = `Fiber::StackPool` |
 
-So the holder is a `Deque(Fiber::Stack)` **object** whose `@buffer` still points
-at the base of the block gcry freed and poisoned.
+Not an abandoned buffer, not an orphaned deque: it is the execution context's
+**own** stack pool and its **own** deque, matched by address, every time.
 
-## The part that is new, and that changes the reading
+**And the deque's state is coherent, so it is not caught mid-resize.** `Deque`'s
+object is `type_id`, three `Int32`, then `@buffer` at +16, and the dump decodes:
 
-**The holder object is UNMARKED, and `flags` is 0x0 — not merely a stale
-generation.** `clear_all_marks` bumps the mark generation at the *start* of each
-collection, so the gen bits distinguish three states that all print as
-"unmarked":
+| run | freed block | entries (÷24) | `@capacity` (+12) | `@size` (+8) |
+|---|---|---|---|---|
+| r2 | 1536 B | 64 | **64** (`0x40`) | 32 |
+| r3 | 3072 B | 128 | **128** (`0x80`) | 64 |
+| r5 | 3072 B | 128 | **128** (`0x80`) | 66 |
 
-- gen bits == the current generation → marked by the last mark phase;
-- gen bits non-zero but older → garbage the sweep has not reached;
-- gen bits **zero** → never marked since the last full clear.
+`@capacity` matches the freed block's entry count exactly, and `@size` is below
+it. `Deque#resize_to_capacity` writes `@capacity` **before** `@buffer`, so a
+resize caught between the two would show a capacity larger than the block
+`@buffer` still points at. It does not. This deque is not mid-resize — it holds
+the buffer it believes is its current one, and gcry freed that buffer.
 
-The report carries the current generation next to the flags precisely so this is
-readable, and it measured **gen 17 / 33 / 201 against flags 0x0**. Generations
-wrap at 255 and these are nowhere near a wrap, so this is the third state: the
-holding `Deque` object **has not been marked by any recent collection**.
+That is a stronger claim than the 2026-08-15 cut's, and it contradicts part of
+it: "the block is a buffer the deque **abandoned** at a resize" does not survive
+this measurement. The freed block is sized to the deque's live `@capacity`.
 
-That is not the pool's deque. The earlier findings checked `Fiber::StackPool`'s
-live `@buffer` after every collect — **0 dead in 4 800 checks** — and that still
-holds. This is a *second* `Deque(Fiber::Stack)` object, one the collector did
-not mark, holding `@buffer` into a block the collector therefore had every right
-to free.
+## A correction to this file's own first cut
 
-And the free follows from it directly: if the collector never marked the Deque
-object, it never scanned the Deque's payload, so `@buffer` was never a root, so
-the buffer was garbage. The buffer was freed **because** its owner was not
-marked — the abandoned-buffer story was one level too low.
+The first version of this instrument printed `UNMARKED` whenever a block's mark
+generation was zero, and this file read that as "no collection ever marked the
+holder", concluding that the buffer was freed *because its owner was not marked*.
+**That was wrong.** `sweep` calls `heap_clear_mark` on every survivor
+(`src/gcry/collect_sweep.cr:127`, `:146`, `:347`), so between collections **every
+live object in the heap has zero mark-generation bits**. Measured rather than
+argued: an object held in a local across three collections reads `flags 0x0`,
+exactly like the holder.
 
-## What this rules out, and what it does not
+The verdict is gone from the reporter. Raw flags are still printed, because the
+other bits do mean something outside a collection — `ATOMIC` (0x2) says the
+collector never scans that block's payload, and it is now called out by name.
+The `Fiber::StackPool` block's `0x20` is `FINALIZER`, which is expected:
+`StackPool#finalize` frees the pooled stacks.
 
-- **Not gcry rooting it wrongly.** `explicit roots: 0 of 0` at fault time, in
-  every crash: `Heap#realloc`'s `add_root`/`delete_root` pair is balanced and the
-  root set is empty. The two interventions that fixed the crash worked by keeping
-  the *buffer* alive, not by fixing this.
+## What is eliminated
+
+- **Not gcry rooting it wrongly.** `explicit roots: 0 of 0` at fault time, at
+  both levels, in every crash. `Heap#realloc`'s `add_root`/`delete_root` pair is
+  balanced.
 - **Not a stack-scan window hole.** Every stack holder sits on a **running**
-  fiber, at an address **above** `stack_top` — inside the window the collector
-  scans, not below it. The report says so per holder, because that was the
-  candidate worth eliminating first.
-- **Not an uncleared reissued block wearing a dead Deque's image.** Poisoning is
-  on in these runs, so any block that has been through a free carries
-  `0xdeadf2ee…`, not a plausible object image.
+  fiber at an address *above* `stack_top` — inside the window the collector
+  scans, not below it.
+- **Not an unscanned holder.** Neither the deque nor the pool is `ATOMIC`; both
+  are ordinary scanned blocks.
+- **Not a mid-resize race in `Deque`.** See the capacity table above.
+- **Not an orphaned or duplicate pool.** Both levels match the live context's
+  pool by address.
 
-**Still open, and this is the next question:** why is a live `Deque(Fiber::Stack)`
-not marked? Either it is genuinely unreachable at mark time and becomes reachable
-afterwards (a publication the collector cannot see — which would make this
-Crystal's, and `Fiber::StackPool` reading `@deque.empty?` and `lazy_size` outside
-its lock is the standing candidate), or it is reachable and the mark missed it,
-which is gcry's. The instrument to tell them apart is the same one: walk the
-heap for words pointing at the *holder* rather than at the buffer, one level up.
+## What it leaves, and it is now a single question
+
+The pool is an ivar of the execution context — Crystal 1.21.0 declares
+`getter stack_pool : Fiber::StackPool = Fiber::StackPool.new` on
+`Fiber::ExecutionContext::Parallel` — and gcry pins every pointer-bearing ivar of
+every EC type by name, derived from `instance_vars` (`pin_ec_ivars`). The context
+itself is also a local in `__crystal_main`, so the main thread's stack holds it.
+So the mark should reach `ec` → `@stack_pool` → `@deque` → `@buffer`, and one of
+those four edges does not hold.
+
+`@buffer` is the edge worth suspecting first: it is a raw
+`Pointer(Fiber::Stack)`, i.e. exactly the "raw Pointer buffer" shape
+`Heap#realloc`'s own comment says the process-GC `type_id_gate` rejects as an
+ambient stack root. Whether that gate also filters a heap-to-heap edge out of a
+scanned `Deque` payload is the next measurement, and it is a small one: mark a
+`Deque(Fiber::Stack)` by hand and ask whether its buffer survives a collection.
 
 ## The gate
 
-`make poison-holders`. Three arms plus a control, each a child process that
-faults on purpose:
+`make poison-holders`, unchanged by this round: a planted heap holder must be
+named by address, a stack-only holder found on the stack, a block nobody holds
+must report **0**, and `--control` must print no holder line at all. Both
+directions were broken on purpose and observed red when it was written.
 
-| arm | asserts |
-|---|---|
-| `heap-holder` | a planted holder is named **by address**, at the offset it was planted at |
-| `stack-holder` | a holder that exists only on the stack is found there |
-| `no-heap-holder` | with nothing planted the heap section reports **0** — the arm that fails if the walk matches the freed block on itself or walks FREE blocks |
-| `--control` | with the knob off, no holder line appears at all |
-
-Both directions broken on purpose and observed red:
-
-| break | result |
-|---|---|
-| `search_heap` returns without walking | `heap-holder` NOT named, `no-heap-holder` red |
-| `search_stacks` returns without walking | `stack-holder` NOT named |
-
-Linux only, alongside `make segv-report` and `make poison-freed`. The Darwin job
-runs none of the three: `SegvReport`'s register scan for the poison is
-`{% if flag?(:linux) %}`, so on Darwin the search has no block address to look
-for. Adding the gate there before that path exists would be a gate measuring
-nothing — the same defect the Darwin RSS reader had.
-
-## Cost
-
-None until something faults. The search runs from the SIGSEGV handler, after the
-process is already dead; the walk of ~16 000 blocks in 15 chunks is not timed
-because nothing downstream of it is waiting.
+Linux only, alongside `make segv-report` and `make poison-freed` —
+`SegvReport`'s register scan for the poison is `{% if flag?(:linux) %}`, so on
+Darwin the search would have no block address to look for.

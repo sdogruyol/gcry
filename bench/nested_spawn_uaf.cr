@@ -72,6 +72,16 @@ if ENV["PRINT_TYPE_IDS"]? == "1"
   {% end %}
 end
 
+# The holder search names the crashing `Fiber::StackPool` and its `Deque` by
+# address. These are the addresses of the *live* pools, printed before anything
+# can go wrong, so a crash can be read as "the context's own pool" or "some
+# other pool" without inferring it. There are two: the context this file
+# creates, and the default one Crystal sets up for plain `spawn`.
+ec_pool = ec.stack_pool
+default_pool = Fiber::ExecutionContext.default.stack_pool
+puts "live ec pool 0x#{ec_pool.object_id.to_s(16)} deque 0x#{ec_pool.@deque.object_id.to_s(16)}"
+puts "live default pool 0x#{default_pool.object_id.to_s(16)} deque 0x#{default_pool.@deque.object_id.to_s(16)}"
+
 puts "fibers=#{FIBERS} rounds=#{ROUNDS} workers=#{WORKERS} collects=#{COLLECTS} nest=#{NEST}"
 
 ROUNDS.times do
