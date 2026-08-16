@@ -140,6 +140,17 @@ CI asymmetry that hid both.
       from inside another fiber, so the half-built `Fiber` lives only in a
       register or a frame on that fiber's stack while the world is stopped.
       The `Deque` buffer the earlier rounds chased is downstream of that.
+      **And CI shows the other free path.** The first tagged catch there
+      (`31963103652`, `make ec-queue-audit`, aarch64) reports `flags 0x1` —
+      `SWEPT` **clear**, i.e. freed by an explicit `Heap#free`, where every
+      locally measured crash was `0x81` (the sweep). Its block is 384 bytes (16
+      entries, the smallest capacity) against 1536/3072 locally, its holder's
+      pointer sits at **block+24** rather than block+0, and it lands 3
+      collections in rather than 16–200. So either the defect is reachable
+      through two free paths or the two harnesses hit two different defects —
+      unsettled, and the report truncated before its stacks section because
+      several threads faulted at once. The `SWEPT` bit paid for itself on its
+      first CI catch.
       **Correction, and it retires the line above.** The grace now carries its
       saves into the next collection and asks whether they are marked there:
       across three runs **0, 0 and 1** were live, against **80–106 garbage**. So

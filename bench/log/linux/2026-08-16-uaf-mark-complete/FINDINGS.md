@@ -38,6 +38,45 @@ gcry: the free that wrote it was of the block at 0x…, still FREE, size 3072,
 defects with different owners, and until this bit existed the poison could not
 tell them apart.
 
+## CI qualifies this: the other free path exists
+
+The first tagged catch in CI (run `31963103652`, `make ec-queue-audit`, aarch64)
+says something the local repro never showed:
+
+```
+gcry: the free that wrote it was of the block at 0xfffce8e62d70, still FREE,
+      size 384, flags 0x1 — freed by an explicit free, not by the sweep
+gcry: holders — explicit roots: 0 of 0 point into it
+gcry: holders — heap: block 0xfffce8fd3d38 size 32 type_id 211 flags 0x0
+      holds it at +16 (block+24)
+gcry: holders — heap: 1 word in 1 live block, from 15512 blocks in 13 chunks.
+      current mark gen 4, collections 3
+```
+
+`flags 0x1` — **`SWEPT` is clear**. Every crash measured locally in this file was
+`0x81`: the sweep decided the block was garbage. This one was handed back by
+`Heap#free`, i.e. the program asked. That is exactly the distinction the flag was
+added for, and it fired on its first CI catch.
+
+Three more differences from the local shape, none of them explained yet:
+
+- **size 384** — 16 `Fiber::Stack` entries, the *smallest* capacity in the
+  original 384 / 768 / 1536 / 3072 sequence, against 1536 and 3072 locally;
+- the holder's pointer is at **block+24**, an *interior* offset one entry in,
+  where every local holder pointed at **block+0**. A `Deque` keeps `@buffer` at
+  the base and tracks `@start` as an index, so an advanced buffer pointer is not
+  `Deque`'s shape — `Array#shift` is;
+- **3 collections in**, i.e. very early, against 16–200 locally.
+
+So "the sweep freed it" is true of the local repro and **not** of this catch.
+Either the same defect is reachable through two free paths, or `ec-queue-audit`
+and `nested_spawn_uaf` are hitting two different ones. Nothing here settles that,
+and the report was truncated before its stacks and owner sections — several
+threads were faulting at once and the output interleaved.
+
+**What it does settle:** the `SWEPT` bit earns its place, and any statement of
+the form "the collector freed it" has to name which path it measured.
+
 ## Four eliminations, each measured
 
 | arm | crashes / 24 |
