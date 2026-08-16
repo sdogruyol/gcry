@@ -128,6 +128,43 @@ was the arrival of the instrument, not the arrival of the defect. Since the
 workload is silent without poison, dating this defect needs a different method
 than running the reproducer against old commits.
 
+## Where the hunt stands
+
+No option removes it. Several halve it, which is itself the shape of the answer:
+
+| arm | rate |
+|---|---|
+| baseline | 13/20, 15/25, 6/12 across batches |
+| `GCRY_STACK_LOW_WATER=0` | 8/20 |
+| `GCRY_DISABLE_LAYOUT=1` | 3/12 |
+| `GCRY_DISABLE_BLACKLIST=1` | 3/12 |
+| root `StackPool@deque` explicitly | 9/25 against 15/25 |
+| `GCRY_INTERIOR=1` | 5/12 |
+| `GCRY_UNALIGNED_CANDIDATES=1` | 7/12 |
+| context in a constant (static root) not a local | 7/20 — no change |
+| collect only after every fiber finished (`QUIESCE`) | 7/20 — no change |
+
+Two of those rows do real work.
+
+**It is not a race with fiber creation.** Letting every fiber finish before
+collecting, and only then spawning the next round, leaves the rate where it was.
+So the sequence is: fibers run to completion → a collection → the *next* spawn
+crashes. The collection frees something the next `checkout` needs.
+
+**It is not how the context is rooted.** Moving the context from a local into a
+constant — from the stack into static data — changes nothing, so the "explicitly
+created context" requirement is not a rooting question about the context object.
+
+What that leaves is the path a *finished* fiber's stack takes: `Fiber#run`
+releases it into `Fiber::StackPool@deque`, a collection runs, and the next
+`checkout` reads it back. Explicitly rooting that deque halves the rate, which
+points at it without convicting it — halving is what timing changes do too, and
+every other row here halves something.
+
+**Not solved.** The next instrument is not another knob: it is making the
+collector say *which block* it freed, so the poison the crash reads can be traced
+to the free that wrote it. Every knob from here is a guess with a wide error bar.
+
 ## Not a CI gate
 
 Deliberately. It fails most runs, which is the finding; a gate that is always red
