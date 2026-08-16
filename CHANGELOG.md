@@ -7,20 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **`make ec-queue-audit` and the 5 h soak arm now run `GCRY_POISON_HOLDERS=1`
-  instead of `GCRY_POISON_FREED=1`.** Same memset, strictly more information: the
-  tag puts the freed block's address in the poison, and the crash report then
-  names the block, its size, whether the **sweep** or an explicit free released
-  it (`Flags::SWEPT`), and what still points at it. Prompted by CI on
-  2026-08-16 — `ec-queue-audit` caught the open fiber-creation use-after-free on
-  aarch64 and the report could only answer "the poison is untagged, so it names
-  no block". The local repro has gone quiet, so CI is currently the only place
-  the defect is observed and a sighting is not something to waste.
-  `GCRY_SEGV_REPORT` stays set explicitly on the soak so turning the poison off
-  does not silently take the crash report with it.
-
 ### Added
 
 - **The pthread stack-bounds snapshot is countable, and a fault in it names the
@@ -33,9 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design) and broken on purpose at `visited=96, read=0`. And
   `stack_bounds_in_flight` holds the `pthread_t` being queried, non-zero only
   during the call, which the SIGSEGV report prints before anything about the
-  faulting address. Prompted by two aarch64 CI crashes inside
-  `pthread_getattr_np` on 2026-08-16, in two different gates, each leaving a
-  libc frame and one hex number.
+  faulting address. Prompted by aarch64 CI crashes inside `pthread_getattr_np`
+  on 2026-08-16 — **three** by the end of the day, across two different gates,
+  each of the first two leaving a libc frame and one hex number. The third
+  arrived on the first run after these landed and answered: the fault is
+  `0x418` into the thread descriptor the `pthread_t` points at, on the *next
+  page* from the id itself, with 22 threads visited and 21 read.
   `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 
 - **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before
@@ -52,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the knob off. The first version of that gate did not set `GCRY_SCAN_CAPS`
   and passed vacuously: with the caps off the scan reads the slack too and the
   planted edge is not missed at all.
+
 - **`GCRY_BIRTH_GRACE=1` — research only, and it found the window.** Roots every
   block `allocate` returns for the duration of the next collection, then drops
   it: the one window in which a block is live in a register or a stack slot and
@@ -60,8 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   On the fiber-creation use-after-free: **20/48 crashes → 0/48**, back-to-back,
   with 2 774 blocks rooted and **0 ring overflows**, so the null arm cannot be a
   silent cap. And 157 of the reported saves across six runs are one thing: a
-  192-byte block whose first word is 168 — a **`Fiber`**, mid-`initialize`,
-  reachable from no root the collector scans. Not a fix and never a default: it
+  192-byte block whose first word is 168, i.e. a **`Fiber`** — which read as a
+  fiber under construction and was not; see the third correction below, which
+  retires that reading. Not a fix and never a default: it
   keeps every allocation alive for a whole collection. Counters on `/gc-stats`.
   It also reports **where the value is not**: not on any fiber stack above the
   collector's entry SP, not in any suspended thread's captured GP registers, and
@@ -83,11 +74,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delaying a block's return to the freelist moves a use-after-free that depends
   on reuse timing.
   `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
+
 - **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
   link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV
   report. "The collector decided it was garbage" and "the program asked for it
   to be freed" are different defects with different owners, and the poison alone
   could not tell them apart. One OR per free.
+  **It needed a second fix, and the first CI catch is what found it.** The flag
+  was set only in `push_size_class_free`; four freelist **rebuild** sites in
+  `collect_sweep.cr` — which re-link blocks that are *already* free after a
+  chunk is emptied or page-released — reconstructed the header with a bare
+  `FREE` and **erased** it. A block the sweep had genuinely reclaimed then read
+  as an explicit free, and a CI catch was written up as "a second free path
+  exists" on exactly that basis. It was retracted: measured on a chunk-emptying
+  workload, the flag survives **278 of 278** with the fix and **0 of 278**
+  without, and `Heap#free` / `realloc(size: 0)` fire zero times in a
+  fiber-spawning workload, so there was never a plausible caller. Both
+  directions — the discrimination and the rebuild preservation — are now gated
+  in `process_spec`, broken on purpose and observed red at `Expected: 278`.
+  A flag is only as good as every site that rewrites the word it lives in.
+
 - **The fiber-creation use-after-free is now bounded from the other side.** The
   block is freed **by the sweep** (`flags 0x81`), **no marked object points at
   it** at sweep time (zero missed edges in 15 runs, 6 of them crashing), and the
@@ -142,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a local across three collections. The verdict is out; raw flags stay, with
   `ATOMIC` named because that bit does mean the payload is never scanned.
   `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
+
 - **`ec_root_pins` — the Parallel EC pin block is now readable from outside the
   collector.** `scan_thread_roots` names the execution context's queues, event
   loop, stack pool and schedulers, and the whole block sits behind a macro gate
@@ -156,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Note what the gate is *not*: with the pins stubbed the parked fibers still
   survived 16/16, because the conservative scan reaches them anyway — the delta
   discriminates, the survival does not.
+
 - Two candidate explanations for the 2026-08-10 soak SEGV are **eliminated**, and
   neither is a fix: (1) the macro gate is **open** on the configuration the soak
   builds — measured on Crystal 1.21.0, open by default and under
@@ -170,8 +178,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conservative and covers the slot. The second is now **verified as a defect** in
   its own right and fixed — see below — though not as an explanation for the
   SEGV, and not on the ivar it was recorded against.
-
-### Added
 
 - **The soak, the STW × TLAB property test and the invariant checker now run on
   Darwin — and the soak's RSS gate stopped passing by measuring nothing.** Three
@@ -188,6 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yet run on a Darwin host. The macOS job gained `stw-mt-property-test-short`,
   `soak-smoke` (as `continue-on-error` until a Darwin RSS ceiling is *measured*
   rather than guessed), `ec-queue-audit` and `perf-baseline`.
+
 - **`bench/perf_compare.py` — perf against a recorded baseline, not just against
   a floor.** `perf_smoke.sh` gates on thr ≥65% of Boehm, RSS ≤1.25×, p50 ≤2.5 ms,
   and quiet tip holds ~85% @ ~0.8× @ ~0.6 ms, so **85% → 70% clears every gate in
@@ -204,6 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which needs neither wrk nor a quiet host. **No baseline is recorded yet**, and
   the perf job's own comment records ~68–88% thr across runs there, so the honest
   next step is N green runs on that runner class before any number is committed.
+
 - **The soak can now keep its run queues occupied, and CI runs three arms at
   once.** The queue audit below can only catch a slot that is corrupt *while* a
   collection sees it, and the baseline workload gave it almost nothing: measured,
@@ -223,6 +231,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
   artifacts. No fault reproduced yet; what changed is the rate at which a run
   could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+
 - **Three readings of the 2026-08-10 soak SEGV closed by audit.** gcry writes
   outside its own chunks in exactly two places and **neither was active in that
   run**: the parked-fiber scrub — the one with a measured-zero margin — was
@@ -236,6 +245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in this release are not it either — the soak sets no `GCRY_AUTO_LAYOUTS`, so
   its `Fiber` / `GlobalQueue` / `Runnables` are scanned word by word.
   `bench/log/linux/2026-08-15-segv-write-path-audit/FINDINGS.md`
+
 - **`GCRY_SEGV_REPORT=1` — the crash says what gcry knows about the address.**
   `Invalid memory access at 0x7f1700000149` is everything the 2026-08-10 soak
   left behind, and at that moment the collector could have said whether the
@@ -255,6 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gcry line at all. Default off: it installs a signal handler, which a collector
   should not do to a process that did not ask. On for the CI soak.
   `bench/log/linux/2026-08-15-segv-report/FINDINGS.md`
+
 - **`GCRY_POISON_FREED=1` — a freed payload becomes `0xdeadf2eedeadf2ee`.** The
   2026-08-10 soak died on `0x7f1700000149`, and three sessions have argued about
   what that value was — a partially overwritten pointer, a reissued object's
@@ -276,6 +287,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible, unlike the queue audit's, which is why the default is off and the soak
   job is where it is turned on.
   `bench/log/linux/2026-08-15-poison-freed/FINDINGS.md`
+
 - **`make darwin-page-query` — the experiment the Darwin low-water skip is
   blocked on.** macOS takes none of the 8.06 → 3.60 ms EC4 pause the parked-fiber
   low-water skip bought on Linux, because the skip rests on a primitive Darwin
@@ -294,6 +306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The eviction arm is expected to be INCONCLUSIVE on a runner that will not
   compress — it exits 0 and says exactly that, because a probe that cannot
   produce the case must not report that it passed.
+
 - **The queue audit also checks the structures, not only the slots in them.** A
   slot walk cannot report a reissued *container*: if the `Runnables` block is
   freed and reused, its head, tail and ring are read out of whatever the block
@@ -310,6 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arm in `make ec-queue-audit` that plants a live object of the wrong type in a
   scheduler's `@runnables` and requires the report to name it; silent across a
   15 s soak at `--fiber-churn=128`.
+
 - **`GCRY_EC_QUEUE_AUDIT=1` — name the corrupt run-queue slot at the next
   collection instead of at the crash.** The 2026-08-10 soak died in
   `Parallel::Scheduler#quick_dequeue?` on `0x7f1700000149`, 1h24m in; the dequeue
@@ -334,8 +348,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Fiber::ExecutionContext::Parallel` on Crystal 1.21.0 with or without
   `-Dexecution_context` / `-Dpreview_mt`, so plain `spawn` is covered by this and
   by the pin block. `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
-
-### Added
 
 - **`GCRY_POISON_TAG=1` — the poison carries the address of the block whose free
   wrote it.** `GCRY_POISON_FREED` proves a crash is a use-after-free and stops
@@ -378,41 +390,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the retained pointer is Crystal's or gcry's is the open half.
   `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
 
-### Fixed
-
-- **The page size was asked for on Darwin and assumed on Linux.** Three
-  constants read `4096_u64`: the pagemap stride in `linux_softdirty.cr`, the
-  `mprotect` alignment in `linux_mprotect.cr`, and a dead one in
-  `darwin_stubs.cr` — in the same file whose `host_page_size` documents Apple
-  Silicon as 16 KiB. `Platform.host_page_size` on Linux returned that constant
-  rather than a reading, and eight call sites in `collect_sweep.cr` plus
-  `heap.cr`'s mmap `align_up` trust it. Nothing was unsound: the pagemap stride
-  is gated by `soft_dirty_tracks_writes?`, which writes a page and requires the
-  bit back, so a wrong stride fails the probe and the backend is never selected —
-  but it fails *silently*, and `mprotect` on a misaligned address fails the same
-  quiet way. All three now call `sysconf(_SC_PAGESIZE)`. Linux x86_64 and Ubuntu
-  arm64 both return 4096, so no supported host changes behaviour; measured
-  identical backend selection before and after. Found by sweeping for the
-  defect that produced three CI reds today — an assumption sitting where a
-  measurement belongs — after the same shape turned up in
-  `bench/darwin_page_query.cr`, whose hardcoded 4096 was a *quarter* of the
-  runner's real 16384.
-
-- **`make scheduler-roots` measured from a baseline that had not settled, and it
-  cut both ways.** The gate went red three times on 2026-08-15 (aarch64 once,
-  Darwin twice) on `the pin count moved by 2 with no Parallel EC in the process`,
-  which read like a platform difference and was not: reproduced on x86_64 at **1
-  run in 25**. Not a thread arriving either — the count jumps with
-  `/proc/self/status` `Threads:` flat at 2 — but the runtime still finishing its
-  asynchronous boot, since a 50 ms sleep before the first collection makes it
-  stable on 10 of 10. Both arms baselined off that first collection, so the same
-  line turned `--control` red *and* inflated the hold arm's `delta` by 2,
-  discounting the threshold it must clear (the failing Darwin run: `before: 23`,
-  delta 49 against 45 expected; settled it was 47). `settled_pins` now collects
-  until two readings agree. No threshold changed; `--control` is 0 in 40 runs and
-  the gate 8/8. `bench/log/linux/2026-08-15-ec-pin-baseline-settles/FINDINGS.md`
-
 ### Changed
+
+- **`make ec-queue-audit` and the 5 h soak arm now run `GCRY_POISON_HOLDERS=1`
+  instead of `GCRY_POISON_FREED=1`.** Same memset, strictly more information: the
+  tag puts the freed block's address in the poison, and the crash report then
+  names the block, its size, whether the **sweep** or an explicit free released
+  it (`Flags::SWEPT`), and what still points at it. Prompted by CI on
+  2026-08-16 — `ec-queue-audit` caught the open fiber-creation use-after-free on
+  aarch64 and the report could only answer "the poison is untagged, so it names
+  no block". The local repro has gone quiet, so CI is currently the only place
+  the defect is observed and a sighting is not something to waste.
+  `GCRY_SEGV_REPORT` stays set explicitly on the soak so turning the poison off
+  does not silently take the crash report with it.
 
 - **`--collect-hz=N` — the soak's collect cadence is a knob, and it was the
   cheaper half of the catch rate.** The queue audit only reports a slot that is
@@ -459,6 +449,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `#spawn_context` are two of the 19 ivars that walk dropped, so under
   `GCRY_AUTO_LAYOUTS=1` that closure was reachable by neither route.
   `bench/log/linux/2026-08-15-isolated-context-unpinned/FINDINGS.md`
+
 - **The Parallel EC pin list is derived from the types, not written beside them.**
   `scan_thread_roots` pinned seven names; the structures carry **ten** pointer
   ivars on the context and **seven** on the scheduler, so `@mutex`, `@condition`,
@@ -484,6 +475,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The page size was asked for on Darwin and assumed on Linux.** Three
+  constants read `4096_u64`: the pagemap stride in `linux_softdirty.cr`, the
+  `mprotect` alignment in `linux_mprotect.cr`, and a dead one in
+  `darwin_stubs.cr` — in the same file whose `host_page_size` documents Apple
+  Silicon as 16 KiB. `Platform.host_page_size` on Linux returned that constant
+  rather than a reading, and eight call sites in `collect_sweep.cr` plus
+  `heap.cr`'s mmap `align_up` trust it. Nothing was unsound: the pagemap stride
+  is gated by `soft_dirty_tracks_writes?`, which writes a page and requires the
+  bit back, so a wrong stride fails the probe and the backend is never selected —
+  but it fails *silently*, and `mprotect` on a misaligned address fails the same
+  quiet way. All three now call `sysconf(_SC_PAGESIZE)`. Linux x86_64 and Ubuntu
+  arm64 both return 4096, so no supported host changes behaviour; measured
+  identical backend selection before and after. Found by sweeping for the
+  defect that produced three CI reds today — an assumption sitting where a
+  measurement belongs — after the same shape turned up in
+  `bench/darwin_page_query.cr`, whose hardcoded 4096 was a *quarter* of the
+  runner's real 16384.
+
+- **`make scheduler-roots` measured from a baseline that had not settled, and it
+  cut both ways.** The gate went red three times on 2026-08-15 (aarch64 once,
+  Darwin twice) on `the pin count moved by 2 with no Parallel EC in the process`,
+  which read like a platform difference and was not: reproduced on x86_64 at **1
+  run in 25**. Not a thread arriving either — the count jumps with
+  `/proc/self/status` `Threads:` flat at 2 — but the runtime still finishing its
+  asynchronous boot, since a 50 ms sleep before the first collection makes it
+  stable on 10 of 10. Both arms baselined off that first collection, so the same
+  line turned `--control` red *and* inflated the hold arm's `delta` by 2,
+  discounting the threshold it must clear (the failing Darwin run: `before: 23`,
+  delta 49 against 45 expected; settled it was 47). `settled_pins` now collects
+  until two readings agree. No threshold changed; `--control` is 0 in 40 runs and
+  the gate 8/8. `bench/log/linux/2026-08-15-ec-pin-baseline-settles/FINDINGS.md`
+
 - **The lint gate linted ameba, and four regression specs had never run.** CI's
   Ameba step `cd lib/ameba`'d to build the binary and never came back, so
   `../../bin/ameba` ran with its working directory inside ameba's own checkout:
@@ -500,6 +523,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux-only jobs. `spec/all_specs.cr` keeps its name and is excluded from the
   rule with the reason written beside it — renaming *it* would make
   `crystal spec` run the whole suite twice.
+
 - **Those four regression specs were testing Boehm.** Making them run showed it:
   each calls `GC.malloc` / `GC.collect`, and gcry only takes over `GC` under
   `-Dgc_none`, which neither `spec/` nor the `all_specs` builds pass. Measured —
@@ -513,6 +537,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the count must rise by at least the 10 000 allocated and come back within 500
   of baseline after they are freed and collected.
   `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
+
 - **`make invariants` passes — and it was never a Darwin problem.** Two failures,
   two causes, neither platform-specific. `count_live_blocks` walked **dormant**
   chunks, whose headers the sweep has advised away: Linux zeroes them
@@ -531,6 +556,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so they gate on every platform, and `GCRY_DEBUG_INVARIANTS=1 crystal spec` is
   now a step in the macOS job for the first time.
   `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
+
 - **A precise layout could skip an ivar and still call itself precise.**
   `Layout.register` sorts every ivar into a scan offset, a noscan offset, or
   `force_scan_cap` (give up on precision for the whole type, scan its body
