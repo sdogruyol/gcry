@@ -153,6 +153,12 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, info[:size].to_u64)
       len = RawOut.append(buf.to_unsafe, len, ", flags 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, info[:flags].to_u64)
+      # Which path gave the block back. "The collector decided it was garbage"
+      # and "the program asked for it to be freed" are different defects with
+      # different owners, and the 2026-08-16 hunt spent a round unable to tell
+      # them apart from the poison alone.
+      len = RawOut.append(buf.to_unsafe, len,
+        (info[:flags] & BlockHeader::Flags::SWEPT) != 0 ? " — freed by the SWEEP, so the collector decided it was garbage" : " — freed by an explicit free, not by the sweep")
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
 

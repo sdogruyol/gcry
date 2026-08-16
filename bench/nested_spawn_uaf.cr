@@ -70,6 +70,15 @@ if ENV["PRINT_TYPE_IDS"]? == "1"
                Fiber::ExecutionContext::Parallel::Scheduler, Array(Fiber::Stack), Thread] %}
     puts "type_id {{t}} = #{ {{t}}.crystal_instance_type_id } (instance_sizeof #{instance_sizeof({{t}})})"
   {% end %}
+  # And the offsets, because the holder report dumps raw payload words and
+  # decoding them by guessing the ivar order is how a coherent deque gets read
+  # as a mid-resize one. `offsetof` is the compiler's answer, not an assumption.
+  {% for iv in %w[start size capacity buffer] %}
+    puts "offsetof Deque(Fiber::Stack).@{{iv.id}} = #{offsetof(Deque(Fiber::Stack), @{{iv.id}})}"
+  {% end %}
+  {% for iv in %w[protect reuse_dead_fiber_stack deque] %}
+    puts "offsetof Fiber::StackPool.@{{iv.id}} = #{offsetof(Fiber::StackPool, @{{iv.id}})}"
+  {% end %}
 end
 
 # The holder search names the crashing `Fiber::StackPool` and its `Deque` by
@@ -84,7 +93,33 @@ puts "live default pool 0x#{default_pool.object_id.to_s(16)} deque 0x#{default_p
 
 puts "fibers=#{FIBERS} rounds=#{ROUNDS} workers=#{WORKERS} collects=#{COLLECTS} nest=#{NEST}"
 
+# Which edge of `ec → @stack_pool → @deque → @buffer` does the mark fail to
+# follow? Rooting one link explicitly and measuring the crash rate answers it,
+# and the arms are nested rather than independent: an explicit root marks the
+# object *and* everything the mark then reaches from it. So if `ROOT=pool` takes
+# the rate to zero the break is at `ec → @stack_pool`; if `pool` does not but
+# `deque` does, it is the pool's own payload scan; if only `buffer` does, it is
+# the deque's. `none` is the control, and the same binary runs all four.
+ROOT = ENV["ROOT"]? || "none"
+
+def root_link(pool : Fiber::StackPool) : Nil
+  heap = Gcry.default_heap
+  case ROOT
+  when "pool"
+    heap.add_root(Pointer(Void).new(pool.object_id))
+  when "deque"
+    heap.add_root(Pointer(Void).new(pool.@deque.object_id))
+  when "buffer"
+    # The buffer moves on every resize, so re-root the current one each round.
+    # Roots are a set of raw addresses with no ownership, so leaving the old
+    # ones in costs a few dozen entries over a run and nothing else.
+    buf = pool.@deque.@buffer
+    heap.add_root(buf.as(Void*)) unless buf.null?
+  end
+end
+
 ROUNDS.times do
+  root_link(ec_pool)
   done = Channel(Nil).new(FIBERS)
   FIBERS.times do
     if NEST
@@ -106,4 +141,6 @@ ROUNDS.times do
   FIBERS.times { done.receive }
 end
 
+heap = Gcry.default_heap
+puts "mark audit: #{heap.mark_audit_edges} base edges checked, #{heap.mark_audit_misses} missed"
 puts "ok — no fault this run (it is intermittent; see the rates in the header)"

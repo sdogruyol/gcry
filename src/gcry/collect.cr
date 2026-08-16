@@ -1153,6 +1153,11 @@ module Gcry
             @nursery_survival_bytes = 0_u64
           end
 
+          # Mark completeness, in the only window where the answer exists: the
+          # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,
+          # src/gcry/mark_audit.cr). Off by default — O(live heap) in the pause.
+          run_mark_audit if @mark_audit
+
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.
           @lazy_sweep_pending = sweep_after_world?

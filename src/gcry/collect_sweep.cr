@@ -946,7 +946,7 @@ module Gcry
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
-      push_size_class_free(class_index, was_nursery, header, user, payload)
+      push_size_class_free(class_index, was_nursery, header, user, payload, swept: true)
     end
 
     # Accounting only — caller unmaps / drops the chunk from @chunks.

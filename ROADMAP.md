@@ -103,17 +103,36 @@ CI asymmetry that hid both.
       raw flags stay, and `ATOMIC` is called out by name because *that* bit does
       mean the payload is never scanned. Neither the pool nor the deque is
       ATOMIC.
-      **Next, and it is now a single question.** `Parallel` declares
-      `getter stack_pool : Fiber::StackPool = Fiber::StackPool.new`, gcry pins
-      every pointer-bearing EC ivar from `instance_vars`, and `ec` is a local on
-      the main stack — so the mark should reach
-      `ec → @stack_pool → @deque → @buffer` and one of those four edges does not
-      hold. `@buffer` is the one to measure first: it is a raw
-      `Pointer(Fiber::Stack)`, the shape `Heap#realloc`'s own comment says the
-      process-GC `type_id_gate` rejects as an ambient stack root. Whether that
-      gate also drops a heap-to-heap edge out of a scanned `Deque` payload is a
-      small experiment — mark a `Deque(Fiber::Stack)` by hand and ask whether its
-      buffer survives a collection.
+      **And the answer is that no heap edge is missed at all.** Three
+      measurements, at `ROUNDS=20 FIBERS=64` (the repro is **20× cheaper** than
+      documented: 4/12 crashes at ~2 s a run against 6/15 at ~40 s):
+      (1) `BlockHeader::Flags::SWEPT` — a new diagnostic bit set by the sweep's
+      freelist link and clear on an explicit `Heap#free` — says the block was
+      freed **by the sweep**, so the collector decided it was garbage;
+      (2) nothing changes the rate — `GCRY_SOUND`, `GCRY_INTERIOR`,
+      `GCRY_AUTO_LAYOUTS`, an explicit root on the pool, on the deque (verified
+      live: the report reads `explicit roots: 0 of 3`), on the buffer, or never
+      releasing a root on `realloc`'s *new* block (written, measured, reverted);
+      (3) `GCRY_MARK_AUDIT=1` walks every marked block between mark and sweep and
+      reports any pointer into a block about to be freed — **zero missed edges**
+      across 15 runs and 6 crashes, ~31 000 base edges per short run. Gated by
+      `make mark-audit`, whose `hold` arm plants an edge the mark provably does
+      not follow (a pointer in a block's `scan_cap` slack under
+      `GCRY_SCAN_CAPS=1`) and requires it to be named: 199 missed of 1579,
+      against 0 of 1977 clean and 0 edges with the knob off. Also broken on
+      purpose at the source: stubbing `mark_candidate` gives 1 missed of 235.
+      **So the window is "nothing points at it yet".** The block was freed by the
+      sweep, no marked object pointed at it then, and the live deque points at it
+      now — so the deque acquired the pointer *after* the collection that freed
+      the block, and at that collection the block was live only in a register or
+      a stack slot. That moves the hunt off heap edges and onto **ambient roots
+      of the allocating thread**.
+      **Next**: a birth grace — root every block `allocate` returns until the end
+      of the next collection — and measure. The earlier grace held the *old*
+      realloc block and failed; this is the other side of the same window. If it
+      goes to zero the defect is ambient-root coverage, and the fix is root-set
+      discipline rather than a scan change.
+      `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`

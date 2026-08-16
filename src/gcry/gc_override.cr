@@ -638,6 +638,10 @@ module GC
     # off because it installs a signal handler, and a collector should not do
     # that to a process that did not ask.
     Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
+    # After mark, before sweep: does any marked object point at a block the
+    # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
+    # O(live heap) inside the pause.
+    heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
     # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
     # out of, search the root set, the live heap and the fiber stacks for
     # whatever still points into it (src/gcry/poison_holders.cr). It implies the

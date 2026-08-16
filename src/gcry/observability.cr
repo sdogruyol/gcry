@@ -165,6 +165,8 @@ module Gcry
         ec_queue_audit_ring_slots:             heap.ec_queue_audit_ring_slots,
         ec_queue_audit_list_slots:             heap.ec_queue_audit_list_slots,
         ec_queue_audit_faults:                 heap.ec_queue_audit_faults,
+        mark_audit_edges:                      heap.mark_audit_edges,
+        mark_audit_misses:                     heap.mark_audit_misses,
         ec_queue_audit_last_fault:             heap.ec_queue_audit_last_fault,
         poisoned_blocks:                       heap.poisoned_blocks,
         low_water_skips:                       heap.low_water_skips,

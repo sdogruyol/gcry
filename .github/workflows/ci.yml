@@ -387,6 +387,14 @@ jobs:
         run: |
           make poison-holders
 
+      # And the question the holder search opened: is the mark complete at all?
+      # Walks every marked block after mark and before sweep and names any
+      # pointer into a block the sweep is about to free. The gate plants one it
+      # knows the shape of, so a silent audit cannot pass.
+      - name: Mark completeness audit
+        run: |
+          make mark-audit
+
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
       # comparator closes that; this gates the comparator itself, which needs

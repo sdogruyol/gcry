@@ -737,20 +737,25 @@ module Gcry
       @poisoned_blocks &+= 1
     end
 
-    private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32) : Nil
+    # *swept* records which path gave the block back — the sweep's freelist link
+    # or an explicit `Heap#free`. It rides in the header (`Flags::SWEPT`) so a
+    # crash report can say it; nothing in the allocator reads it back.
+    private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32, swept : Bool = false) : Nil
       poison_payload(pointer, payload) if @poison_freed
+      flags = BlockHeader::Flags::FREE
+      flags |= BlockHeader::Flags::SWEPT if swept
       if nursery
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
         @nursery_freelist_clean[class_index] = false
         return
       end
       if @tight_grow && tight_addr_in_grow?(class_index, pointer.address)
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @prefer_freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @prefer_freelists[class_index])
         @prefer_freelists[class_index] = pointer
         @freelist_clean[class_index] = false
       else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @freelists[class_index])
         @freelists[class_index] = pointer
         @freelist_clean[class_index] = false
       end

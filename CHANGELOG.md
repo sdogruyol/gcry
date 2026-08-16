@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before
+  `sweep`, with the world stopped, walk every marked block and report any base
+  pointer into a **used but unmarked** block: the sweep is about to free
+  something a live object points at. Names the parent's address, `type_id` and
+  offset, and the child. `mark_audit_edges` / `mark_audit_misses` on
+  `/gc-stats`, so a run that ends without a crash still says whether the mark
+  held. Off by default — O(live heap) inside the pause; it reports, it does not
+  fix. Gated by `make mark-audit`, whose `hold` arm plants an edge the mark
+  provably does not follow — a pointer in a block's `scan_cap` slack under
+  `GCRY_SCAN_CAPS=1` — and requires the audit to name it (199 missed of 1579),
+  against 0 missed of 1977 on the same workload without it and 0 edges walked
+  with the knob off. The first version of that gate did not set `GCRY_SCAN_CAPS`
+  and passed vacuously: with the caps off the scan reads the slack too and the
+  planted edge is not missed at all.
+- **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
+  link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV
+  report. "The collector decided it was garbage" and "the program asked for it
+  to be freed" are different defects with different owners, and the poison alone
+  could not tell them apart. One OR per free.
+- **The fiber-creation use-after-free is now bounded from the other side.** The
+  block is freed **by the sweep** (`flags 0x81`), **no marked object points at
+  it** at sweep time (zero missed edges in 15 runs, 6 of them crashing), and the
+  live deque points at it at fault time — so the deque acquired the pointer
+  *after* the collection that freed the block, and at that collection it was
+  live only in a register or a stack slot. Nothing moves the rate: `GCRY_SOUND`,
+  `GCRY_INTERIOR`, `GCRY_AUTO_LAYOUTS`, an explicit root on the pool, the deque
+  or the buffer, or never releasing a root on `realloc`'s new block. The hunt
+  moves off heap edges and onto ambient roots of the allocating thread. Also:
+  the repro is **20× cheaper** — `ROUNDS=20 FIBERS=64` gives 4/12 crashes at ~2 s
+  a run. `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`
+
 - **`GCRY_POISON_HOLDERS=1` — a use-after-free now names what still points at
   the block, not only which block it read.** `GCRY_POISON_TAG` got as far as
   naming the freed block; the open fiber-creation UAF stopped exactly there, at
