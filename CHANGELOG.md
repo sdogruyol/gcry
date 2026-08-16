@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   went quiet late in the session — the committed binary crashing 10/24 dropped to
   0/8 minutes later with no code change, so the rate is host-state dependent and
   a quiet arm proves nothing.
+  **And a third correction, which retires this entry's own first claim.** The
+  grace now follows its saves into the next collection: **0, 0 and 1** of them
+  were live there, against 80–106 garbage. So ~99% of what it saves is ordinary
+  short-lived garbage and the saved `Fiber`s are *finished* fibers, not fibers
+  under construction — "a `Fiber` mid-`initialize` is reachable from no root we
+  scan" is **not supported**. The arm's effect (20/48 → 0/48, back-to-back,
+  twice) stands; its mechanism does not, and the remaining reading is that
+  delaying a block's return to the freelist moves a use-after-free that depends
+  on reuse timing.
   `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
 - **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
   link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV

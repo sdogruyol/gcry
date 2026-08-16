@@ -144,4 +144,5 @@ end
 heap = Gcry.default_heap
 puts "mark audit: #{heap.mark_audit_edges} base edges checked, #{heap.mark_audit_misses} missed"
 puts "birth grace: #{heap.birth_grace_rooted} rooted, #{heap.birth_grace_saved} saved from the sweep, #{heap.birth_grace_overflows} overflowed"
+puts "birth grace follow-up: #{heap.birth_grace_live_later} were live next collection, #{heap.birth_grace_garbage_later} were garbage"
 puts "ok — no fault this run (it is intermittent; see the rates in the header)"

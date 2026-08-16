@@ -510,6 +510,9 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
+      # Snapshot the mutator's callee-saved registers before any collector frame
+      # can save them into its own (src/gcry/birth_grace.cr). Armed knob only.
+      note_collect_entry_regs if @birth_grace
       abort_incremental
       Trace.collect_start(major: true)
       run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)

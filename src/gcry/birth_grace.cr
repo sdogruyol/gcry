@@ -32,6 +32,28 @@ module Gcry
     BIRTH_GRACE_SLOTS = 1_u32 << 20
 
     @birth_slots : Void** = Pointer(Void*).null
+    # The mutator's callee-saved registers, captured at the *public* collect
+    # entry — before `run_collection` and everything under it has had a chance
+    # to save them into its own frames. `scan_mutator`'s `setjmp` is taken much
+    # later, and whether that is late enough is the open question this buffer
+    # exists to answer.
+    @collect_entry_regs = uninitialized StaticArray(UInt8, 256)
+    @collect_entry_regs_valid = false
+
+    # Blocks this cycle had to save, carried into the next one. The question the
+    # save count alone cannot answer: was the block **live but unreachable** at
+    # the moment it was saved, or simply **garbage** that the grace delayed by a
+    # cycle? A block that is marked by the *following* collection was live and
+    # the collector would have taken it wrongly; one that is still unmarked was
+    # garbage and the save proves nothing. Roughly 2–3% of allocations are saved,
+    # which is an ordinary amount of short-lived garbage, so this distinction is
+    # the whole difference between a defect and a normal collection.
+    BIRTH_FOLLOW_SLOTS = 256
+
+    @birth_follow = uninitialized StaticArray(Void*, 256)
+    @birth_follow_count = 0
+    getter birth_grace_live_later : UInt64 = 0_u64
+    getter birth_grace_garbage_later : UInt64 = 0_u64
     @birth_index = Atomic(UInt32).new(0_u32)
     getter birth_grace_overflows : UInt64 = 0_u64
     getter birth_grace_rooted : UInt64 = 0_u64
@@ -68,6 +90,7 @@ module Gcry
     # them, and nothing in the heap, the root set or a scanned stack said no.
     protected def mark_birth_grace_roots : Nil
       return if @birth_slots.null?
+      follow_up_previous_saves
       n = @birth_index.get
       n = BIRTH_GRACE_SLOTS if n > BIRTH_GRACE_SLOTS
       saved = 0_u64
@@ -81,10 +104,15 @@ module Gcry
         next if BlockHeader.free?(header)
         unless heap_marked?(header)
           saved &+= 1
+          if @birth_follow_count < BIRTH_FOLLOW_SLOTS
+            @birth_follow[@birth_follow_count] = ptr
+            @birth_follow_count += 1
+          end
           if saved <= BIRTH_GRACE_REPORT_LIMIT
             report_birth_save(header, ptr)
             locate_birth_holder(ptr)
             locate_birth_register(ptr)
+            locate_birth_entry_regs(ptr)
             probe_root_acceptance(ptr)
           end
         end
@@ -92,6 +120,43 @@ module Gcry
       end
       @birth_grace_rooted &+= n.to_u64
       @birth_grace_saved &+= saved
+    end
+
+    # The verdict on last cycle's saves, taken after *this* cycle's mark and
+    # before it saves anything of its own.
+    private def follow_up_previous_saves : Nil
+      n = @birth_follow_count
+      return if n == 0
+      live = 0_u64
+      garbage = 0_u64
+      i = 0
+      while i < n
+        ptr = @birth_follow[i]
+        i += 1
+        header = find_block(ptr)
+        next unless header
+        if BlockHeader.free?(header)
+          garbage &+= 1
+        elsif heap_marked?(header)
+          live &+= 1
+        else
+          garbage &+= 1
+        end
+      end
+      @birth_follow_count = 0
+      @birth_grace_live_later &+= live
+      @birth_grace_garbage_later &+= garbage
+      return if live == 0
+
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: birth grace — of ")
+      len = RawOut.append_u64(buf.to_unsafe, len, n.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " block(s) saved last collection, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, live)
+      len = RawOut.append(buf.to_unsafe, len,
+        " are MARKED now — they were live then, and the collector would have taken them\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     BIRTH_GRACE_REPORT_LIMIT = 2
@@ -153,6 +218,49 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len,
         "gcry: birth grace — no live mutator frame holds it, so the value is in a register, spilled " \
         "into the collector's own frames, or in memory gcry does not scan\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # Called at the public `collect` entry when the grace is armed. `setjmp`
+    # spills the callee-saved registers into the buffer; we never `longjmp`, so
+    # it is a register snapshot and nothing else.
+    protected def note_collect_entry_regs : Nil
+      Roots.spill_registers
+      Roots::LibSetjmp.setjmp(@collect_entry_regs.to_unsafe.as(Void*))
+      @collect_entry_regs_valid = true
+    end
+
+    # Is the address in the mutator's registers as the collector was entered?
+    #
+    # This is the region the stack search could not look at without finding
+    # itself: a value the mutator held in a callee-saved register is spilled by
+    # the collector's own prologues, into the collector's own frames. Asking the
+    # registers instead of the stack sidesteps that entirely.
+    #
+    # Caveat, stated because it bounds the answer: glibc's `__sigsetjmp` mangles
+    # SP and PC, so those two words will never match. The callee-saved GPRs
+    # (`rbx`, `r12`–`r15` on x86_64) are stored plainly, and those are where a
+    # live object reference would sit.
+    private def locate_birth_entry_regs(user : Void*) : Nil
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: birth grace —   collect-entry registers: ")
+      unless @collect_entry_regs_valid
+        len = RawOut.append(buf.to_unsafe, len, "not captured\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+      addr = user.address
+      hits = 0_u64
+      words = @collect_entry_regs.size // sizeof(UInt64)
+      base = @collect_entry_regs.to_unsafe.as(UInt64*)
+      i = 0
+      while i < words
+        hits &+= 1 if base[i] == addr
+        i += 1
+      end
+      len = RawOut.append_u64(buf.to_unsafe, len, hits)
+      len = RawOut.append(buf.to_unsafe, len, hits == 0 ? " hit(s) — the mutator was not holding it in a callee-saved register either\n" : " hit(s) — the mutator held it in a callee-saved register at collect entry\n")
       RawOut.flush(buf.to_unsafe, len)
     end
 

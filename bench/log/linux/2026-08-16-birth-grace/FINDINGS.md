@@ -1,4 +1,4 @@
-# The fiber-creation use-after-free: a newborn `Fiber` is not a root
+# The fiber-creation use-after-free: the birth window is real, its mechanism is not settled
 
 2026-08-16, x86_64 WSL2, Crystal 1.21.0, `bench/nested_spawn_uaf.cr`,
 `ROUNDS=20 FIBERS=64`, n=24 per arm.
@@ -27,7 +27,7 @@ was believed — `birth_grace_rooted` is 2 774 with **0 overflows** on a 20-roun
 run, so a null result could not have been the ring silently dropping entries
 (the 2026-08-15 grace-list experiment had to rule that out after the fact).
 
-## What it saves: a `Fiber` being constructed
+## What it saves — read with the correction below
 
 The grace runs **after** `mark_loop`, so a newborn block the mark did not reach
 is distinguishable from one it did, and it reports the ones it had to save. Six
@@ -51,6 +51,42 @@ root gcry scans.** That is the same call the crash dies in
 matters — `ec.spawn` is issued from *inside another fiber* on a worker thread,
 so the only reference to the half-built `Fiber` is a register or a stack slot on
 that fiber's stack while the world is stopped around it.
+
+## The correction that matters: the saves are garbage, not rescued live objects
+
+Everything above about *what* the grace saves needs the following read with it,
+and it retires this file's own headline.
+
+The grace now carries last cycle's saves into the next collection and asks
+whether they are marked there. A block that is marked by the following
+collection was arguably live when it was saved; one that is still unmarked, or
+already free, was garbage and the save proves nothing.
+
+| run | live at the next collection | garbage |
+|---|---|---|
+| 1 | **0** | 106 |
+| 2 | **0** | 80 |
+| 3 | **1** | 84 |
+
+So ~99% of what the grace saves is **ordinary short-lived garbage** — 65–87
+blocks out of 2 775 allocations, which is an unremarkable 2–3%. The `Fiber`
+objects it saves are therefore **finished fibers**, not fibers under
+construction, and the claim this file made — "a `Fiber` object in the middle of
+`Fiber#initialize` is reachable from no root gcry scans" — **is not supported**.
+The negatives in the next section say the same thing from the other side: the
+address is nowhere because nothing holds it, which is what garbage looks like.
+
+The single "live at the next collection" case does not rescue the claim either.
+A block allocated before collection N and stored into a live object after it is
+garbage at N and live at N+1 entirely legitimately; the follow-up cannot tell
+that from a genuine miss.
+
+**What survives:** the arm's effect is real and was properly controlled —
+20/48 → 0/48, back-to-back, twice. What is *not* established is the mechanism.
+"The grace rescues live objects the mark missed" is now the reading with
+evidence against it, so the effect has to be explained some other way: the delay
+shifts when a block returns to the freelist and is reissued, and that alone can
+move a use-after-free that depends on reuse timing.
 
 ## Where the pointer is not
 
@@ -122,13 +158,19 @@ now specific and few, all on the "running fiber on a suspended thread" path:
 - the suspended thread's GP registers are scanned (v0.19.0), but a value spilled
   into a frame the clamp excludes is neither register nor scanned stack.
 
-**Next**: the only region left is the collector's own frames, and the way to
-look at it without the search contaminating it is to stop looking at the stack.
-Capture the mutator's registers with a `setjmp` taken at collect *entry* —
-before any collector frame exists — and search that buffer for the address. If
-the value is there, the gap is that `scan_mutator`'s spill happens after frames
-that can clobber it; if it is not, the value is somewhere gcry has never
-looked, and that is a different and larger finding.
+**Done, and it came back negative too.** A `setjmp` taken at the *public*
+`collect` entry — before `run_collection` and everything under it can save the
+mutator's callee-saved registers into its own frames — holds the address **0
+times in 89 reports**. Together with the stack and suspended-register searches,
+the address is nowhere at all, which is consistent with the correction above:
+the block is garbage.
+
+**Next**, and it needs the repro to be live again: bisect the grace by size
+class. Save only 192-byte blocks, then only the `Deque` buffer sizes (768 / 1536
+/ 3072), and see which subset still takes the crash to zero. If only the buffer
+sizes do, the mechanism is reuse timing on the buffer and the `Fiber` saves are
+a coincidence of volume; if only 192 does, the `Fiber` is back in the frame and
+this file's headline can be re-argued on better evidence than it had.
 
 ## Status of the knob
 

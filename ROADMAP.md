@@ -140,6 +140,19 @@ CI asymmetry that hid both.
       from inside another fiber, so the half-built `Fiber` lives only in a
       register or a frame on that fiber's stack while the world is stopped.
       The `Deque` buffer the earlier rounds chased is downstream of that.
+      **Correction, and it retires the line above.** The grace now carries its
+      saves into the next collection and asks whether they are marked there:
+      across three runs **0, 0 and 1** were live, against **80–106 garbage**. So
+      ~99% of what it saves is ordinary short-lived garbage (65–87 blocks of
+      2 775 allocations, i.e. 2–3%), the saved `Fiber`s are **finished** fibers
+      rather than fibers under construction, and "a `Fiber` mid-`initialize` is
+      reachable from no root we scan" **is not supported**. The single live case
+      does not restore it either — a block stored into a live object *after* a
+      collection is legitimately garbage then and live now. What survives is the
+      arm's effect (20/48 → 0/48, back-to-back, twice) and not its explanation:
+      "the grace rescues live objects the mark missed" now has evidence against
+      it, so the delay must be acting through *when a block returns to the
+      freelist and is reissued*.
       **And it is a coverage gap, not a filter.** The grace now asks, with the
       world still stopped, where the value actually is: **not** on any fiber
       stack above the collector's entry SP (75 of 76), **not** in any suspended
@@ -158,13 +171,17 @@ CI asymmetry that hid both.
       rate is host-state dependent, so the 20/48 → 0/48 comparison stands only
       because both arms ran back-to-back twice, and any new arm must wait for the
       repro to be live.
-      **Next**: one region is left — the collector's own frames, where a value
-      the mutator held in a callee-saved register is spilled. Looking at it from
-      the stack is what contaminated the last measurement, so stop looking at the
-      stack: take a `setjmp` at collect *entry*, before any collector frame
-      exists, and search that buffer. If the address is there the gap is in when
-      `scan_mutator` spills relative to the frames that can clobber it; if it is
-      not, the value is somewhere gcry has never looked.
+      **The collect-entry register snapshot came back negative too**: a `setjmp`
+      taken at the public `collect` entry, before any collector frame can save
+      the mutator's callee-saved registers, holds the address 0 times in 89
+      reports. The address is nowhere — which is what garbage looks like, and is
+      consistent with the correction above.
+      **Next**, and it needs the repro live again (it went quiet mid-session):
+      bisect the grace by size class. Save only 192-byte blocks, then only the
+      `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
+      the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing
+      and the `Fiber` saves were volume; only 192 ⇒ the `Fiber` is back in the
+      frame, on better evidence than it had.
       `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`,
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
@@ -350,6 +367,21 @@ CI asymmetry that hid both.
       spec that turns it on fires the documented off-by-one race from an
       arbitrary allocation site and kills the process. `GCRY_DEBUG_INVARIANTS=1`
       and the `make invariants` gate are where that check belongs.
+- [ ] **A one-off aarch64 SEGV in `make scheduler-roots`, inside
+      `pthread_getattr_np`.** Recorded rather than closed: seen **once** in CI
+      (run `31933855152`, commit `e7de946`), green on a re-run of the same job at
+      the same commit, and the first of its shape — every other red run in the
+      last 40 resolved to `ec-queue-audit` dying on the open use-after-free's
+      poison. It is not the known STW-hang either: the stack-bounds snapshot is
+      taken *before* the suspend signals, under `Thread.lock`, and this is a
+      SIGSEGV inside libc rather than a wedge. What is left is
+      `pthread_getattr_np` on a `pthread_t` whose thread has exited — the same
+      family as `fix/stw-libc-under-suspension`, gcry asking libc about a thread
+      whose lifetime it does not own. Two cheap counters would make the next
+      occurrence say something (threads visited vs bounds read per snapshot; the
+      `pthread_t` the loop is on when it faults). Not a release blocker — never
+      seen outside CI, never twice.
+      `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
