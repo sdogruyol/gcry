@@ -1031,7 +1031,14 @@ module Gcry
       true
     end
 
+    # The mutator's stack pointer as the collector was entered. Everything below
+    # it is the collector's own frames — including, when `GCRY_BIRTH_GRACE` is
+    # searching for who holds a block, that search's own parameters. An
+    # instrument that scans the stack has to be able to exclude itself.
+    getter collect_entry_sp : UInt64 = 0_u64
+
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+      @collect_entry_sp = Roots.hardware_stack_pointer.address
       cols_before = @collections
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).

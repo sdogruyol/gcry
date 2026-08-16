@@ -52,6 +52,60 @@ matters — `ec.spawn` is issued from *inside another fiber* on a worker thread,
 so the only reference to the half-built `Fiber` is a register or a stack slot on
 that fiber's stack while the world is stopped around it.
 
+## Where the pointer is not
+
+The grace's own result opened a narrower question — *what* holds the newborn
+`Fiber`, since something must — and the instrument now asks it while the world
+is still stopped. Three answers, all measured on runs that still produced 65–72
+saves each:
+
+| question | measured |
+|---|---|
+| Is it on a fiber stack, above the collector's entry SP? | **no** — 75 of 76 report no live mutator frame holds it |
+| Is it in a suspended thread's captured GP registers? | **no** — 0 hits across 92 registers of 4 captured threads (of 6), 85 of 85 reports |
+| Would the mark take it if a scan handed it over? | **yes** — `mark_root_candidate` ACCEPTS the address, 88 of 88 |
+
+The third is the one that matters: **no root predicate rejects the value.** It is
+not the type_id gate, not `base_only`, not alignment, not the minor filter. The
+address is acceptable and simply never arrives. That makes this a **scan-coverage
+gap**, not a filter — and it rules out the whole class of fixes that would have
+been about loosening a heuristic.
+
+What is left unexamined is one region: the collector's own frames on the
+collecting thread, where a value the mutator held in a callee-saved register is
+spilled by the collector's prologues. `scan_mutator` covers it by design (it
+starts from its own SP, below the entry frame), which is why it is the last
+place to look and the hardest to look at — see the correction below.
+
+## A correction: the instrument found itself
+
+The first version of the locator walked the current fiber's whole stack and
+reported **87 of 87** hits "inside `scan_mutator`'s window — read and rejected".
+That was an artifact. `locate_birth_holder(user)` takes the address as a
+parameter, so the value is on the stack *because the search is running*, and
+every hit landed at the same offset — 1520 bytes above the window's low bound,
+i.e. inside the collector's own call chain. Excluding frames below the
+collector's entry SP (`Heap#collect_entry_sp`, recorded at the top of
+`run_collection`) removed **every** hit.
+
+It is recorded because it would otherwise have become a finding: "the collector
+read the slot and refused the value" is a completely different defect from the
+one the corrected instrument reports, and nothing about the first reading looked
+wrong.
+
+## And a caution: the repro went quiet
+
+Late in the same session, on the same host, the **committed** binary that had
+been crashing 6/15 and 10/24 stopped reproducing entirely: 0/8 at the documented
+`ROUNDS=200` config and 0/12 at `ROUNDS=20` under four-way parallel load. No code
+change is responsible — the same binary, minutes apart. The rate is host-state
+dependent.
+
+So the numbers in this file that compare arms — 20/48 against 0/48 — were taken
+**back-to-back in the same conditions, twice**, and stand. Any *new* arm has to
+wait for the repro to be live again, and a quiet run proves nothing. This is the
+board's own standing warning about the soak, arriving at a two-second repro.
+
 ## What this closes, and what it does not
 
 It closes the question the last three rounds were stuck on. The chain
@@ -68,10 +122,13 @@ now specific and few, all on the "running fiber on a suspended thread" path:
 - the suspended thread's GP registers are scanned (v0.19.0), but a value spilled
   into a frame the clamp excludes is neither register nor scanned stack.
 
-**Next**: narrow the grace instead of widening the scan — record which *thread*
-allocated each saved block, and whether its address is inside the scan window
-that thread's fiber got. That turns "some root source missed it" into a named
-one, and the fix follows from which.
+**Next**: the only region left is the collector's own frames, and the way to
+look at it without the search contaminating it is to stop looking at the stack.
+Capture the mutator's registers with a `setjmp` taken at collect *entry* —
+before any collector frame exists — and search that buffer for the address. If
+the value is there, the gap is that `scan_mutator`'s spill happens after frames
+that can clobber it; if it is not, the value is somewhere gcry has never
+looked, and that is a different and larger finding.
 
 ## Status of the knob
 

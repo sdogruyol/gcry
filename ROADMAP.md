@@ -140,14 +140,31 @@ CI asymmetry that hid both.
       from inside another fiber, so the half-built `Fiber` lives only in a
       register or a frame on that fiber's stack while the world is stopped.
       The `Deque` buffer the earlier rounds chased is downstream of that.
-      **Next**: narrow, do not widen. Record which *thread* allocated each saved
-      block and whether its address falls inside the scan window that thread's
-      fiber got. The candidates are now few and all on the running-fiber path —
-      `fiber_stack_scan_top`'s cheap parked `stack_top` clamp for a *running*
-      fiber outside multi-mutator STW, `scan_stack_containing_sp` covering only
-      the stack holding the captured SP, and a value spilled into a frame the
-      clamp excludes (registers are already covered since v0.19.0). The fix
-      follows from which one it is.
+      **And it is a coverage gap, not a filter.** The grace now asks, with the
+      world still stopped, where the value actually is: **not** on any fiber
+      stack above the collector's entry SP (75 of 76), **not** in any suspended
+      thread's captured GP registers (0 hits across 92 registers of 4 captured
+      threads, 85 of 85), and `mark_root_candidate` **ACCEPTS** the address when
+      handed it (88 of 88). So no root predicate rejects the value — not the
+      type_id gate, not `base_only`, not alignment — it simply never arrives.
+      That retires the whole class of fixes about loosening a heuristic.
+      **Two corrections, both from this round.** (1) The locator's first version
+      reported 87 of 87 hits "inside `scan_mutator`'s window, read and rejected";
+      that was the search finding **its own parameter** on the stack, every hit
+      at the same offset inside the collector's call chain. Excluding frames
+      below `Heap#collect_entry_sp` removed all of them. (2) Late in the session
+      the **committed** binary stopped reproducing at all — 0/8 at `ROUNDS=200`,
+      0/12 under parallel load, minutes after 10/24, with no code change. The
+      rate is host-state dependent, so the 20/48 → 0/48 comparison stands only
+      because both arms ran back-to-back twice, and any new arm must wait for the
+      repro to be live.
+      **Next**: one region is left — the collector's own frames, where a value
+      the mutator held in a callee-saved register is spilled. Looking at it from
+      the stack is what contaminated the last measurement, so stop looking at the
+      stack: take a `setjmp` at collect *entry*, before any collector frame
+      exists, and search that buffer. If the address is there the gap is in when
+      `scan_mutator` spills relative to the frames that can clobber it; if it is
+      not, the value is somewhere gcry has never looked.
       `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`,
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.

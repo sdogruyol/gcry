@@ -122,6 +122,12 @@ module Gcry
       # (shouldn't) — take the lesser address so we never shrink the window.
       approx = stack_pointer.address
       low = approx if approx < low
+      # Recorded, not re-derived: `GCRY_BIRTH_GRACE` asks whether a stack slot
+      # was inside the window this scan actually used, and computing a second
+      # opinion of "where SP was" from another frame would answer a different
+      # question. Two stores on a once-per-collection path.
+      @@last_mutator_low = low
+      @@last_mutator_high = bottom.address
       scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
         yield candidate
       end
@@ -174,6 +180,10 @@ module Gcry
 
     @@probe_rd = -1
     @@probe_wr = -1
+
+    # The window the last `scan_mutator` word-scanned. See the note there.
+    class_getter last_mutator_low : UInt64 = 0_u64
+    class_getter last_mutator_high : UInt64 = 0_u64
 
     def self.scan_range(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
       return if low.null? || high.null?

@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   192-byte block whose first word is 168 — a **`Fiber`**, mid-`initialize`,
   reachable from no root the collector scans. Not a fix and never a default: it
   keeps every allocation alive for a whole collection. Counters on `/gc-stats`.
+  It also reports **where the value is not**: not on any fiber stack above the
+  collector's entry SP, not in any suspended thread's captured GP registers, and
+  `mark_root_candidate` accepts the address when handed it — so this is a
+  scan-coverage gap and not a root filter. Two corrections came with it: the
+  locator's first version found **its own parameter** on the stack (87 of 87
+  hits, all at one offset inside the collector's call chain; excluding frames
+  below the new `Heap#collect_entry_sp` removed every one), and the repro itself
+  went quiet late in the session — the committed binary crashing 10/24 dropped to
+  0/8 minutes later with no code change, so the rate is host-state dependent and
+  a quiet arm proves nothing.
   `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
 - **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
   link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV
