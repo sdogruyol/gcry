@@ -59,6 +59,25 @@ holding a `Thread` whose pthread has already exited is not something the lock
 prevents. That makes it the same family as `fix/stw-libc-under-suspension`:
 gcry asking libc about a thread whose lifetime it does not control.
 
+## The counters are built
+
+Both are in, and gated:
+
+- `Gcry::Platform.stack_bounds_visited` / `.stack_bounds_read` — threads the
+  snapshot walked against the subset it got bounds for, on `/gc-stats`. A gap is
+  a thread whose pthread mapping the root scan does not have, and it is now
+  countable rather than silent — the same shape as the register stubs v0.19.0
+  closed.
+- `Gcry::Platform.stack_bounds_in_flight` — the `pthread_t` being queried,
+  non-zero only while `pthread_getattr_np` is running. The SIGSEGV report reads
+  it first, before anything about the faulting address, so a repeat of this
+  crash says **which thread** instead of leaving a libc frame.
+
+Gated by `process_spec` (Linux; Darwin queries the descriptor at lookup time and
+reports zeros by design, so the same assertion there would be red on a platform
+that is working). Broken on purpose and observed red: making
+`pthread_stack_bounds` return nil gives `visited=96, read=0` and fails the spec.
+
 ## What would settle it
 
 The snapshot loop is `Thread.unsafe_each { |t| snapshot_pthread_stack_bounds(t.to_unsafe) }`.
@@ -71,9 +90,8 @@ cheap:
 - record the `pthread_t` the loop is on before the call, so a fault names the
   thread rather than the libc frame.
 
-Neither is a gate on its own. `make scheduler-roots` already runs on all three
-platforms with a CI job; if this recurs, the counters make the next occurrence
-say something instead of leaving one hex number.
+Both are now built and gated (above). The next occurrence should print the
+thread id and the visited/read pair before the address line.
 
 ## One more thing the second run showed
 

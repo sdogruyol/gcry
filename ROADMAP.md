@@ -381,9 +381,14 @@ CI asymmetry that hid both.
       family as `fix/stw-libc-under-suspension`, gcry asking libc about a thread
       whose lifetime it does not own. Two cheap counters would make the next
       occurrence say something (threads visited vs bounds read per snapshot; the
-      `pthread_t` the loop is on when it faults), and they are now worth
-      building rather than proposing. Not yet a release blocker — never seen
-      outside CI — but no longer dismissible as noise.
+      `pthread_t` the loop is on when it faults). **Both are now built.**
+      `stack_bounds_visited` / `stack_bounds_read` are on `/gc-stats` and gated
+      in `process_spec` (Linux; Darwin reports zeros by design), broken on
+      purpose and observed red at `visited=96, read=0`; and
+      `stack_bounds_in_flight` carries the `pthread_t` being queried, which the
+      SIGSEGV report now prints *before* the address line — so a repeat says
+      which thread instead of leaving a libc frame. Not yet a release blocker —
+      never seen outside CI — but no longer dismissible as noise.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,

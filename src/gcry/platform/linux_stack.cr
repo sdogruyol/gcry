@@ -72,6 +72,9 @@ module Gcry
     @@sb_high = uninitialized StaticArray(UInt64, MAX_STACK_BOUNDS_SLOTS)
     @@sb_count = 0
     @@sb_misses = 0_u64
+    @@sb_visited = 0_u64
+    @@sb_read = 0_u64
+    @@sb_in_flight = LibC::PthreadT.new(0)
 
     # Drop the previous collection's entries. A pthread_t can be reused by a new
     # thread after the old one exits, so entries are never carried across a
@@ -82,16 +85,53 @@ module Gcry
     end
 
     # Record *thread*'s bounds. Must be called with no thread suspended.
+    #
+    # The two counters and the in-flight id exist because this call has SEGV'd
+    # twice on aarch64 CI — 2026-08-16, in `make scheduler-roots` and then in
+    # `make ec-queue-audit` — inside `pthread_getattr_np`, leaving one hex
+    # address and a libc frame
+    # (`bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`).
+    # A visit that produces no bounds is the same shape as the register gaps
+    # v0.19.0 closed: the caller assumes coverage and the platform returns
+    # nothing. `visited` against `read` makes that countable instead of silent,
+    # and `in_flight` means the next fault names the thread rather than the
+    # frame.
     def self.snapshot_pthread_stack_bounds(thread : LibC::PthreadT) : Nil
       {% if flag?(:linux) %}
         i = @@sb_count
         return if i >= MAX_STACK_BOUNDS_SLOTS
-        return unless bounds = pthread_stack_bounds(thread)
+        @@sb_visited += 1
+        @@sb_in_flight = thread
+        bounds = pthread_stack_bounds(thread)
+        @@sb_in_flight = LibC::PthreadT.new(0)
+        return unless bounds
+        @@sb_read += 1
         @@sb_ids[i] = thread
         @@sb_low[i] = bounds[0].address
         @@sb_high[i] = bounds[1].address
         @@sb_count = i + 1
       {% end %}
+    end
+
+    # Non-zero only while `pthread_getattr_np` is running for that thread, so a
+    # crash handler reading it is reading the thread the fault is about.
+    def self.stack_bounds_in_flight : UInt64
+      {% if flag?(:linux) %}
+        @@sb_in_flight.as(UInt64)
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    # Threads the snapshot walked, and the subset it got bounds for. Equal
+    # counts mean full coverage; a gap is a thread whose pthread mapping the
+    # root scan does not have.
+    def self.stack_bounds_visited : UInt64
+      @@sb_visited
+    end
+
+    def self.stack_bounds_read : UInt64
+      @@sb_read
     end
 
     # STW-safe lookup: no libc, no locks, no allocation.

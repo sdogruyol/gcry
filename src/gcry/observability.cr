@@ -167,6 +167,8 @@ module Gcry
         ec_queue_audit_faults:                 heap.ec_queue_audit_faults,
         mark_audit_edges:                      heap.mark_audit_edges,
         mark_audit_misses:                     heap.mark_audit_misses,
+        stack_bounds_visited:                  Gcry::Platform.stack_bounds_visited,
+        stack_bounds_read:                     Gcry::Platform.stack_bounds_read,
         birth_grace_rooted:                    heap.birth_grace_rooted,
         birth_grace_saved:                     heap.birth_grace_saved,
         birth_grace_overflows:                 heap.birth_grace_overflows,

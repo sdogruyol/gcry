@@ -194,3 +194,35 @@ end
     end
   end
 {% end %}
+
+{% if flag?(:linux) %}
+  describe "process GC pthread stack-bounds snapshot" do
+    # The other half of "the platform answered nothing", on the pthread side.
+    # `snapshot_pthread_stack_bounds` asks libc for each thread's stack range
+    # before the suspend signals go out; a thread it visits but gets no bounds
+    # for loses the pthread-mapping half of that thread's root coverage. The
+    # call has also SEGV'd twice on aarch64 CI
+    # (bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md),
+    # which is why the id being queried is readable at all.
+    #
+    # Linux only: Darwin queries the descriptor at lookup time rather than
+    # snapshotting, and reports zeros by design — the same assertion there
+    # would be red on a platform that is working.
+    it "reads stack bounds for every thread the snapshot visits" do
+      GC.collect
+      visited = Gcry::Platform.stack_bounds_visited
+      read = Gcry::Platform.stack_bounds_read
+
+      # Zero visits is the stub shape: a snapshot that walks nothing also
+      # reports no gap, which is how a missing platform path passes for
+      # releases at a time. Broken on purpose and observed red: making
+      # `pthread_stack_bounds` return nil gives visited=6, read=0.
+      visited.should be > 0
+      read.should eq(visited)
+
+      # Non-zero only while the query is running, so a crash handler reading it
+      # is reading the thread the fault is about. Nothing is in flight here.
+      Gcry::Platform.stack_bounds_in_flight.should eq(0)
+    end
+  end
+{% end %}

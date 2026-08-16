@@ -179,6 +179,26 @@ module Gcry
 
       a = addr.address
 
+      # Before anything else about the address: was the collector inside
+      # `pthread_getattr_np` when it faulted? That call has SEGV'd twice on
+      # aarch64 CI and both times left a libc frame and one hex number. The id
+      # is non-zero only while the snapshot is querying that thread, so a
+      # non-zero read here names the thread the fault is about.
+      if (in_flight = Platform.stack_bounds_in_flight) != 0
+        ilen = 0
+        ibuf = uninitialized UInt8[512]
+        ilen = RawOut.append(ibuf.to_unsafe, ilen,
+          "gcry: the collector was inside the pthread stack-bounds query for thread 0x")
+        ilen = RawOut.append_hex(ibuf.to_unsafe, ilen, in_flight)
+        ilen = RawOut.append(ibuf.to_unsafe, ilen,
+          " — the fault is in that query, not in the heap. Visited/read so far: ")
+        ilen = RawOut.append_u64(ibuf.to_unsafe, ilen, Platform.stack_bounds_visited)
+        ilen = RawOut.append(ibuf.to_unsafe, ilen, "/")
+        ilen = RawOut.append_u64(ibuf.to_unsafe, ilen, Platform.stack_bounds_read)
+        ilen = RawOut.append(ibuf.to_unsafe, ilen, "\n")
+        RawOut.flush(ibuf.to_unsafe, ilen)
+      end
+
       # The poison first: it forecloses every other reading and needs no heap
       # lookup. Two ways to see it, and the second is the one that fires in
       # practice — `0xdeadf2ee…` is **non-canonical** on x86_64, so dereferencing

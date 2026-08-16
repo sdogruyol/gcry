@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The pthread stack-bounds snapshot is countable, and a fault in it names the
+  thread.** `snapshot_pthread_stack_bounds` asks libc for each thread's stack
+  range before the suspend signals go out; a thread it visits but gets no bounds
+  for silently loses the pthread-mapping half of its root coverage — the same
+  shape as the register stubs v0.19.0 closed. `stack_bounds_visited` /
+  `stack_bounds_read` on `/gc-stats` make that a number, gated in `process_spec`
+  on Linux (Darwin queries the descriptor at lookup time and reports zeros by
+  design) and broken on purpose at `visited=96, read=0`. And
+  `stack_bounds_in_flight` holds the `pthread_t` being queried, non-zero only
+  during the call, which the SIGSEGV report prints before anything about the
+  faulting address. Prompted by two aarch64 CI crashes inside
+  `pthread_getattr_np` on 2026-08-16, in two different gates, each leaving a
+  libc frame and one hex number.
+  `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
+
 - **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before
   `sweep`, with the world stopped, walk every marked block and report any base
   pointer into a **used but unmarked** block: the sweep is about to free
