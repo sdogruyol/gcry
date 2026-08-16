@@ -111,10 +111,17 @@ module Gcry
     private def self.report_poison_source(word : UInt64) : Nil
       buf = uninitialized UInt8[512]
       len = 0
-      if word == Heap::POISON_WORD
+      # Only decode a block address when this process was actually writing
+      # tagged poison. `POISON_WORD >> 48` is `0xDEAD` as well, and a fault on a
+      # poisoned pointer *plus an offset* — `0xdeadf2eedeadf2fe`, measured in CI
+      # on 2026-08-16 — is neither equal to `POISON_WORD` nor a tagged word, so
+      # the tag test alone decoded garbage and reported a block that cannot
+      # exist. Ask the heap what it was writing instead of inferring it.
+      tagged = (h = Gcry.default_heap?) ? h.poison_tag_addr : false
+      if !tagged || word == Heap::POISON_WORD
         len = RawOut.append(buf.to_unsafe, len,
-          "gcry: that is the untagged poison, so it names no block. GCRY_POISON_TAG=1 writes the " \
-          "freed block's address into the poison and this line becomes the block that was freed\n")
+          "gcry: the poison is untagged, so it names no block. GCRY_POISON_TAG=1 writes the freed " \
+          "block's address into the poison and this line becomes the block that was freed\n")
         RawOut.flush(buf.to_unsafe, len)
         return
       end
