@@ -351,6 +351,17 @@ perf-baseline:
 # eight commits earlier. A gate that plants corruption on purpose is the last
 # place a crash should be allowed to stay anonymous. Measured: both arms pass
 # with them on, five runs of each, and the poison run says more.
+# `GCRY_POISON_HOLDERS` and not `GCRY_POISON_FREED`, and the difference is the
+# whole point: it implies the poison *and* the address tag *and* the crash
+# report, at the same runtime cost — the tag is written by the same memset that
+# was already happening. The plain poison names no block, and CI proved that
+# expensive on 2026-08-16: this gate caught the open use-after-free and the
+# report could only say "the poison is untagged, so it names no block". With the
+# tag, the same catch names the block, its size, whether the sweep or an explicit
+# free released it, and what still points at it. The local repro is quiet, so CI
+# is currently the only place this defect is observed — it should not waste a
+# sighting.
+#
 # Not a gate: it fails most runs on purpose, and that is the finding. See the
 # file header for the rates and the Boehm control.
 nested-spawn-uaf: $(BIN)
@@ -359,8 +370,8 @@ nested-spawn-uaf: $(BIN)
 
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
-	GCRY_EC_QUEUE_AUDIT=1 GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1 $(BIN)/ec_queue_audit
-	GCRY_SEGV_REPORT=1 GCRY_POISON_FREED=1 $(BIN)/ec_queue_audit --control
+	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit
+	GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \

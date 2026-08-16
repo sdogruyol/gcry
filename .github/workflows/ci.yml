@@ -27,7 +27,7 @@ on:
         required: false
         default: "on"
       poison_freed:
-        description: "GCRY_POISON_FREED — overwrite freed payloads with 0xdeadf2ee… so a use-after-free reads poison instead of plausible data. 'off' to disable."
+        description: "GCRY_POISON_HOLDERS — poison freed payloads with 0xdeadf2ee…, tag each with the freed block's address, and on a fault name what still points at it. 'off' to disable."
         required: false
         default: "on"
       fiber_churn:
@@ -658,12 +658,19 @@ jobs:
           # it did. Costs a bounded walk inside the pause; on by default here
           # because that is what this job is for.
           GCRY_EC_QUEUE_AUDIT: ${{ github.event.inputs.ec_queue_audit == 'off' && '0' || '1' }}
-          # A use-after-free then reads 0xdeadf2eedeadf2ee instead of something
-          # that looks like data. Costs a memset per free; this job is where
-          # that is worth paying.
-          GCRY_POISON_FREED: ${{ github.event.inputs.poison_freed == 'off' && '0' || '1' }}
-          # And explain whatever address the run dies on against the heap's own
+          # A use-after-free then reads 0xdeadf2ee… instead of something that
+          # looks like data. `GCRY_POISON_HOLDERS` rather than the plain poison,
+          # and for the same memset: it implies the address **tag**, the crash
+          # report, and a search of the root set, the heap and the fiber stacks
+          # for whatever still points at the freed block. Untagged poison names
+          # no block — measured on 2026-08-16, when `ec-queue-audit` caught the
+          # open use-after-free in CI and the report could only say so. A 5 h
+          # arm that catches this once must not waste the sighting.
+          GCRY_POISON_HOLDERS: ${{ github.event.inputs.poison_freed == 'off' && '0' || '1' }}
+          # Explain whatever address the run dies on against the heap's own
           # tables, instead of leaving one hex number behind like 2026-08-10 did.
+          # Implied by POISON_HOLDERS; set explicitly so turning that off does
+          # not silently take the crash report with it.
           GCRY_SEGV_REPORT: "1"
           FIBER_CHURN: ${{ github.event.inputs.fiber_churn || '0' }}
           SOAK_RSS_LIMIT_KB: ${{ github.event.inputs.soak_rss_limit_kb || '4096' }}

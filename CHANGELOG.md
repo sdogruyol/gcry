@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`make ec-queue-audit` and the 5 h soak arm now run `GCRY_POISON_HOLDERS=1`
+  instead of `GCRY_POISON_FREED=1`.** Same memset, strictly more information: the
+  tag puts the freed block's address in the poison, and the crash report then
+  names the block, its size, whether the **sweep** or an explicit free released
+  it (`Flags::SWEPT`), and what still points at it. Prompted by CI on
+  2026-08-16 — `ec-queue-audit` caught the open fiber-creation use-after-free on
+  aarch64 and the report could only answer "the poison is untagged, so it names
+  no block". The local repro has gone quiet, so CI is currently the only place
+  the defect is observed and a sighting is not something to waste.
+  `GCRY_SEGV_REPORT` stays set explicitly on the soak so turning the poison off
+  does not silently take the crash report with it.
+
 ### Added
 
 - **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before

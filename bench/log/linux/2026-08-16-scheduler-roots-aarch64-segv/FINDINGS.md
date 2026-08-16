@@ -87,6 +87,23 @@ on a platform where it does not apply. Small, and worth fixing while the file is
 open: a diagnostic that explains the wrong architecture is how a reader gets
 sent down the wrong path.
 
+## And the sighting the same day wasted
+
+Run `31953213205`, the next one, failed the *same step* on the **other** defect —
+the open use-after-free — and the report could only say:
+
+> the poison is untagged, so it names no block. `GCRY_POISON_TAG=1` writes the
+> freed block's address into the poison and this line becomes the block that was
+> freed
+
+`make ec-queue-audit` was running `GCRY_POISON_FREED=1`. The tag costs nothing
+extra — it is written by the same memset — and the local repro has gone quiet, so
+CI is currently the only place this defect is observed. Both the gate and the
+5 h soak arm now run `GCRY_POISON_HOLDERS=1` instead, which implies the poison,
+the tag, the crash report and the holder search. The next CI catch names the
+block, its size, whether the sweep or an explicit free released it, and what
+still points at it.
+
 ## Status
 
 Open, **2 occurrences**, both aarch64, both in CI, in two different gates. Still
