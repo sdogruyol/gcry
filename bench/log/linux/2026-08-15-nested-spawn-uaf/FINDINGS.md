@@ -200,18 +200,49 @@ finished fiber's stack into it, a collection frees the buffer, and the next
 `checkout` reads a `Fiber::Stack` whose `pointer` is poison — which is exactly
 where `makecontext` writes.
 
-## What is still open
+## The trigger: the deque's resize, and only that
 
-Why it is dropped, because it is not simply unreachable. A quiesced probe —
-fill the pool, hide the buffer's address from the scanner behind an XOR, collect
-seven times, ask `HEAP.live?` — reports the buffer **live every time**, 3 of 3.
-So `ec → @stack_pool → @deque → @buffer` is traced under ordinary conditions.
+Everything else moved the rate. This removes it.
 
-The crash sizes say when it is not: every one of them is a capacity step, so the
-window is around the deque's **growth**, where a new buffer is allocated, filled
-and installed while the old one becomes garbage. That is the next thing to
-instrument, and it is a much smaller question than the one this file started
-with.
+Pre-grow the pool so the deque never resizes during the workload — spawn 512
+fibers that all block at once, so 512 stacks are allocated and then released
+together, taking the deque to `capacity=512` — and then run the same 100 rounds
+of 64:
+
+| | crashes |
+|---|---|
+| pool pre-grown to 512 (no resize during the run) | **0 in 20** |
+| not pre-grown | 6 in 15, 6 in 20, 13 in 20 across batches |
+
+A first attempt at this arm was wrong and is worth recording: spawning 1024
+fibers sequentially does *not* grow the pool, because with one worker each fiber
+finishes and hands its stack straight to the next, so the deque never holds more
+than a few. The capacity line said `kapasite=16` while the arm claimed to have
+warmed 1024. The fix is to keep them all alive at once behind a gate.
+
+## What is not the cause
+
+- **Not a reachability failure of the current buffer.** After each collect, read
+  the pool's live `@buffer` and ask `HEAP.live?`: **0 dead in 4 800 checks**, so
+  gcry never frees the buffer the deque is actually using.
+- **Not the window inside `Heap#realloc`.** That method already pins the old
+  block with `add_root` and suppresses collection across the `allocate`. Moving
+  the `copy_from` inside the suppressed region as well: 5/20 against a 6/20
+  baseline — no effect.
+
+## Where that leaves it
+
+The block the crash reads is a buffer the deque **abandoned during a resize** —
+not the one it is using. gcry freed it correctly; something still reads it. Under
+Boehm the same stale read is harmless, because a conservative collector that sees
+the stale pointer keeps the old buffer alive and its contents are still valid
+`Fiber::Stack` entries. Under gcry the block is freed and poisoned, so the same
+read is fatal.
+
+Whether the retained pointer is Crystal's (`Deque#resize_to_capacity` sets
+`@capacity` before `@buffer`, and `Fiber::StackPool` reads `@deque.empty?` and
+`lazy_size` outside its lock) or something gcry does with it, this file does not
+say — and the difference matters, because only one of those is gcry's to fix.
 
 ## Not a CI gate
 

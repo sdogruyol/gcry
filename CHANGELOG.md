@@ -232,11 +232,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crashes the freed block is 384, 768, 1536 or 3072 bytes — `Fiber::Stack` is 24
   bytes, so those are 16, 32, 64 and 128 entries, the capacity-doubling sequence
   of a `Deque(Fiber::Stack)` — always `still FREE`, never reissued. It is
-  `Fiber::StackPool`'s deque buffer, read back by `checkout` after the collector
-  freed it, which is exactly where `makecontext` writes. Not yet explained: a
-  quiesced probe finds that buffer live 3 times in 3, so it is not plainly
-  unreachable; every crash size being a capacity step points at the deque's
-  growth as the window.
+  `Fiber::StackPool`'s deque buffer. The trigger is the deque's **resize**, and
+  that is measured rather than inferred: pre-grow the pool so it never resizes
+  during the run and the crash goes to **0 in 20**, the only condition all day
+  that removed it rather than halving it. Two things it is *not* — gcry never
+  frees the buffer the deque is using (0 dead in 4 800 checks), and the window is
+  not inside `Heap#realloc` (suppressing collection across its copy as well
+  changes nothing). What the crash reads is a buffer the deque **abandoned** at a
+  resize: freed correctly, still read. Boehm survives the same read because a
+  conservative collector that sees the stale pointer keeps the block alive and
+  its contents valid; gcry frees and poisons it, so the read is fatal. Whether
+  the retained pointer is Crystal's or gcry's is the open half.
   `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
 
 ### Fixed
