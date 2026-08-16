@@ -53,21 +53,30 @@ FIBERS   = (ENV["FIBERS"]? || "64").to_i
 ROUNDS   = (ENV["ROUNDS"]? || "200").to_i
 WORKERS  = (ENV["WORKERS"]? || "4").to_i
 COLLECTS = (ENV["COLLECTS"]? || "8").to_i
+NEST     = (ENV["NEST"]? || "1") != "0"
 
 # One context for the whole run. A fresh context per round exhausts threads
 # instead, which is a different failure and would hide this one.
 ec = Fiber::ExecutionContext::Parallel.new("nested-spawn-uaf", WORKERS)
 
-puts "fibers=#{FIBERS} rounds=#{ROUNDS} workers=#{WORKERS} collects=#{COLLECTS}"
+puts "fibers=#{FIBERS} rounds=#{ROUNDS} workers=#{WORKERS} collects=#{COLLECTS} nest=#{NEST}"
 
 ROUNDS.times do
   done = Channel(Nil).new(FIBERS)
   FIBERS.times do
-    # The nesting is the shape: a fiber that spawns a fiber and then yields, so
-    # a new Fiber is being built on one stack while the collection walks another.
-    ec.spawn do
+    if NEST
+      # The nesting is the shape: a fiber that spawns a fiber and then yields, so
+      # a new Fiber is being built on one stack while the collection walks another.
+      ec.spawn do
+        ec.spawn { done.send(nil) }
+        Fiber.yield
+      end
+    else
+      # NEST=0 — the same fiber count and the same collections, but every spawn
+      # is issued from the main thread. If this arm is clean the defect is in the
+      # spawning *fiber's* stack, not in spawning as such.
       ec.spawn { done.send(nil) }
-      Fiber.yield
+      ec.spawn { Fiber.yield }
     end
   end
   COLLECTS.times { GC.collect }

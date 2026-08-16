@@ -78,6 +78,56 @@ still points at it, inside the Parallel scheduler's world — but that crash was
 under construction. Whether one explains the other is the next question, and it
 is now a question that can be asked of a binary that fails in seconds.
 
+## Narrowed
+
+Each row is 12 runs at `WORKERS=1 ROUNDS=100` unless stated, on the idle host.
+
+| variable | result |
+|---|---|
+| `COLLECTS=0` (no collection) | **0/10** — the defect needs a collection |
+| `COLLECTS=0` + `GCRY_DISABLE_AUTO` | 0/10 |
+| plain `spawn` (default context) | **0/12** — needs an *explicitly created* context |
+| `NEST=0` (spawn from the main thread) | 8/10 — nesting is not required |
+| no `Channel` (atomic counter instead) | 8/12 — the Channel is not the subject |
+| `WORKERS=1` / `2` / `4` | 7/12, 7/12, 5/12 — parallelism is not required |
+| `GCRY_SOUND=1` | 10/12 — not one of the soundness levers |
+| `GCRY_DISABLE_NURSERY` | 9/12 |
+| `GCRY_DISABLE_TYPE_ID_GATE` | 12/12 |
+| `GCRY_DISABLE_SP_CLAMP` | **hangs**, 3 of 3 — a different failure, not measured here |
+| `GCRY_DISABLE_TIGHT_GROW` | 11/12 |
+
+So the minimal shape is: **an explicitly created `Fiber::ExecutionContext::Parallel`,
+fibers spawned on it, collections underneath.** No parallelism, no nesting, no
+channel, and no known-unsound option involved.
+
+## It is a real use-after-free, not a poison artifact
+
+`GCRY_POISON_FREED=1` is required to see it: without it, **0 in 12**. That raises
+the obvious suspicion that poisoning is itself the bug — the repo already names
+that hazard, since a freed block that is poisoned but still counted "clean" would
+have `malloc` hand out `0xdeadf2ee…` where a caller asked for zeroes.
+
+Measured, and it is not that. 40 rounds of 3 000 allocate-free-collect cycles
+across twelve size classes, then 3 000 cleared allocations checked word by word:
+
+    cleared allocations checked=120000 holding poison=0
+
+So the poison is not being handed out. It is being *read through a stale
+pointer* — which is what it exists for. The alarming half follows: **without
+poison this workload does not crash.** It reads a freed block's old contents,
+finds something plausible, and carries on. Whatever it corrupts, it corrupts
+quietly.
+
+## A correction: the age of this defect is not known
+
+An earlier pass here reported `v0.19.0` clean and bisected the first bad commit
+to `8e7d10e`. That result is void, and the reason is worth keeping: `8e7d10e` is
+the commit that *introduced* `GCRY_POISON_FREED`. Every older build was measured
+with the knob set and no feature behind it, so what the bisect actually located
+was the arrival of the instrument, not the arrival of the defect. Since the
+workload is silent without poison, dating this defect needs a different method
+than running the reproducer against old commits.
+
 ## Not a CI gate
 
 Deliberately. It fails most runs, which is the finding; a gate that is always red
