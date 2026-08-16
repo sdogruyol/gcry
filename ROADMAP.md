@@ -44,6 +44,38 @@ counter was wired to a gate and the gate was broken on purpose. The largest open
 item fits that shape too, so 0.20.0 spends its budget on root coverage and on the
 CI asymmetry that hid both.
 
+- [ ] **A use-after-free in fiber creation — reproducible in seconds, and the
+      most concrete open defect on this board.** `bench/nested_spawn_uaf.cr`:
+      spawn fibers on an explicitly created `Fiber::ExecutionContext::Parallel`
+      and collect underneath them. With `GCRY_POISON_FREED=1` it crashes in
+      `Fiber#initialize` → `makecontext` on **~19 runs in 20**; under **Boehm,
+      same file, 0 in 25**, so the collector is the subject and not Crystal's
+      execution context. It is a real use-after-free and not a poison artifact —
+      120 000 cleared allocations were checked and none came back poisoned.
+      **The block is named.** `GCRY_POISON_TAG=1` (added for this) writes the
+      freed block's address into the poison, and across 40 crashes the sizes are
+      384 / 768 / 1536 / 3072 — `Fiber::Stack` is 24 bytes, so 16 / 32 / 64 / 128
+      entries, the capacity sequence of a `Deque(Fiber::Stack)` — always
+      `still FREE`. It is `Fiber::StackPool`'s deque buffer, and specifically a
+      buffer the deque **abandoned at a resize**, not the one it is using (gcry
+      never frees the current one: 0 dead in 4 800 checks).
+      **Two independent interventions take it to zero**, which is what pins the
+      mechanism: pre-grow the pool so it never resizes (**0/20**), or never
+      release the root `Heap#realloc` takes on the old block (**0/20** against
+      20/20 in the same batch).
+      **What does not work**, and rules out the easy fix: releasing that root a
+      bounded number of collections later. A grace list at 1, 4, 16 and 64
+      collections, at 512 and 65 536 slots, all still crash — so the stale
+      pointer is held *indefinitely*, and the root-set inflation of those arms
+      also rules out "removing `delete_root` merely changed timing". The grace
+      machinery was written, measured and reverted.
+      **Next**: the crash already knows the abandoned block's address, so scan
+      the heap span and the thread stacks for that value at fault time. Whatever
+      holds it is the owner, and the owner decides whether this is gcry's to fix
+      or Crystal's (`Deque#resize_to_capacity` sets `@capacity` before `@buffer`;
+      `Fiber::StackPool` reads `@deque.empty?` and `lazy_size` outside its lock).
+      Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
+      `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now
@@ -150,7 +182,12 @@ CI asymmetry that hid both.
       −40%, not the −3.9% the short run showed. A `workflow_dispatch` input like
       the others.
       `bench/log/linux/2026-08-15-soak-collect-cadence/FINDINGS.md`
-      **Why the item stays open:** no fault has been reproduced. All of this
+      **And a fault of the same family is now reproducible in seconds** — see the
+      use-after-free item at the top of this section. It did not come from the
+      soak: `make ec-queue-audit` crashed three times in a day and the poison
+      said what it was. That is the answer this item was asking for, arrived by
+      another route.
+      **Why the item stays open:** no soak fault has been reproduced. All of this
       raises the rate at which a run could catch one and shortens the report from
       "an hour later, in the consumer" to "the next collection"; whether that is
       enough is the next scheduled run's answer. And note what the cadence knob
