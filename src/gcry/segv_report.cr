@@ -84,19 +84,70 @@ module Gcry
     # Does any GP register of the faulting context hold the poison? Uses the same
     # ucontext offsets the collector already scans suspended threads with, so
     # there is one description of where registers live rather than two.
-    private def self.context_holds_poison?(ctx : Void*) : Bool
-      return false if ctx.null?
+    # Returns the poison word a GP register of the faulting context holds, or 0.
+    # The word rather than a Bool because the tagged form (`GCRY_POISON_TAG=1`)
+    # carries the freed block's address in its low 48 bits, and that is the whole
+    # reason to look.
+    private def self.context_poison_word(ctx : Void*) : UInt64
+      return 0_u64 if ctx.null?
       {% if flag?(:linux) %}
         n = Platform::UCONTEXT_NGREGS
-        return false if n <= 0
+        return 0_u64 if n <= 0
         base = Pointer(UInt64).new(ctx.address + Platform::UCONTEXT_GREGS_OFFSET)
         i = 0
         while i < n
-          return true if base[i] == Heap::POISON_WORD
+          w = base[i]
+          return w if w == Heap::POISON_WORD || (w & Heap::POISON_TAG_MASK) == Heap::POISON_TAG
           i += 1
         end
       {% end %}
-      false
+      0_u64
+    end
+
+    # Untagged poison says a use-after-free happened. Tagged poison
+    # (`GCRY_POISON_TAG=1`) says which block's free wrote it, and the block is
+    # then described against the heap's own tables exactly as a faulting address
+    # would be — so "of what" is answered in the same terms as "where".
+    private def self.report_poison_source(word : UInt64) : Nil
+      buf = uninitialized UInt8[512]
+      len = 0
+      if word == Heap::POISON_WORD
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: that is the untagged poison, so it names no block. GCRY_POISON_TAG=1 writes the " \
+          "freed block's address into the poison and this line becomes the block that was freed\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+
+      src = word & Heap::POISON_ADDR_MASK
+      len = RawOut.append(buf.to_unsafe, len, "gcry: the free that wrote it was of the block at 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, src)
+      heap = Gcry.default_heap?
+      unless heap
+        len = RawOut.append(buf.to_unsafe, len, " — no gcry heap exists to describe it\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+      ptr = Pointer(Void).new(src)
+      unless heap.in_heap_span?(ptr)
+        len = RawOut.append(buf.to_unsafe, len,
+          " — outside the heap span, which should be impossible for an address gcry poisoned\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+      info = heap.debug_block_info(ptr)
+      unless info[:found]
+        len = RawOut.append(buf.to_unsafe, len, " — in no live chunk now; its chunk was released\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+      len = RawOut.append(buf.to_unsafe, len, info[:free] ? ", still FREE" : ", since REISSUED")
+      len = RawOut.append(buf.to_unsafe, len, ", size ")
+      len = RawOut.append_u64(buf.to_unsafe, len, info[:size].to_u64)
+      len = RawOut.append(buf.to_unsafe, len, ", flags 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, info[:flags].to_u64)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     private def self.report(sig : Int32, addr : Void*, ctx : Void*) : Nil
@@ -117,14 +168,16 @@ module Gcry
       # as 0. Measured, not assumed: the first version of this reporter matched
       # on the address and never fired. So when the address cannot say, the
       # registers of the faulting context are asked instead.
-      poisoned = a == Heap::POISON_WORD
-      poisoned ||= context_holds_poison?(ctx) if !poisoned
-      if poisoned
+      pw = 0_u64
+      pw = a if a == Heap::POISON_WORD || (a & Heap::POISON_TAG_MASK) == Heap::POISON_TAG
+      pw = context_poison_word(ctx) if pw == 0
+      if pw != 0
         len = RawOut.append(buf.to_unsafe, len,
           "gcry's freed-block poison (GCRY_POISON_FREED) is in the faulting context. Something " \
           "followed a pointer read out of a block that had already been freed: a use-after-free, " \
           "not a wild pointer\n")
         RawOut.flush(buf.to_unsafe, len)
+        report_poison_source(pw)
         return
       end
 

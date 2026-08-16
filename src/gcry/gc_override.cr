@@ -627,6 +627,12 @@ module GC
     # something that looks like data (bench/poison_freed.cr). Costs a memset per
     # free; the soak turns it on.
     heap.poison_freed = true if env_flag_one?("GCRY_POISON_FREED")
+    # `GCRY_POISON_TAG=1` implies the poison — asking for the tag and not getting
+    # poisoned blocks would be a knob that silently does nothing.
+    if env_flag_one?("GCRY_POISON_TAG")
+      heap.poison_freed = true
+      heap.poison_tag_addr = true
+    end
     # Explain the address a crash died on against the heap's own tables
     # (src/gcry/segv_report.cr). Costs nothing until something faults; default
     # off because it installs a signal handler, and a collector should not do

@@ -702,12 +702,36 @@ module Gcry
     # the whole safety argument: `bench/poison_freed.cr` gates both halves.
     POISON_WORD = 0xDEADF2EEDEADF2EE_u64
 
+    # Tagged poison (`GCRY_POISON_TAG=1`). Same job as `POISON_WORD` and one more:
+    # the low 48 bits carry the address of the block that was freed, so a crash
+    # that reads it can say *which* free wrote it instead of only that some free
+    # did. `POISON_WORD` answers "use-after-free"; this answers "of what".
+    #
+    # Still non-canonical — bits 63:48 are `0xDEAD` and bit 47 of a user-space
+    # address is 0 — so it faults exactly like the untagged word, with the same
+    # `si_addr == 0` from #GP that made the register scan necessary in the first
+    # place. And 48 bits is the whole of an x86_64 user address, so nothing about
+    # the block is lost. `POISON_WORD >> 48` is `0xDEAD` too, which is why the
+    # reader checks the exact word first and only then reads the tag.
+    POISON_TAG       = 0xDEAD_u64 << 48
+    POISON_TAG_MASK  = 0xFFFF_u64 << 48
+    POISON_ADDR_MASK = (1_u64 << 48) - 1
+
+    # Opt-in on top of `@poison_freed`: it makes every freed block's payload
+    # differ, which a future reader might be tempted to rely on for equality.
+    property poison_tag_addr : Bool = false
+
     private def poison_payload(pointer : Void*, payload : UInt32) : Nil
+      word = if @poison_tag_addr
+               POISON_TAG | (pointer.address & POISON_ADDR_MASK)
+             else
+               POISON_WORD
+             end
       words = pointer.as(UInt64*)
       n = payload // sizeof(UInt64)
       i = 0
       while i < n
-        words[i] = POISON_WORD
+        words[i] = word
         i += 1
       end
       @poisoned_blocks &+= 1

@@ -161,9 +161,57 @@ releases it into `Fiber::StackPool@deque`, a collection runs, and the next
 points at it without convicting it — halving is what timing changes do too, and
 every other row here halves something.
 
-**Not solved.** The next instrument is not another knob: it is making the
-collector say *which block* it freed, so the poison the crash reads can be traced
-to the free that wrote it. Every knob from here is a guess with a wide error bar.
+**The next instrument is not another knob**: it is making the collector say
+*which block* it freed, so the poison the crash reads can be traced to the free
+that wrote it. That instrument now exists — see below.
+
+## `GCRY_POISON_TAG=1`, and the block it names
+
+`POISON_WORD` is one constant, so every poisoned block reads alike and a crash
+that finds it can say "a use-after-free" and nothing more. The tagged poison
+writes `0xDEAD` in bits 63:48 and **the freed block's own address** in the low 48
+— still non-canonical, so it faults identically, and 48 bits is the whole of an
+x86_64 user address, so nothing is lost. `segv_report` then describes that
+address against the heap's tables exactly as it describes a faulting one.
+
+The first crash it caught:
+
+```
+gcry: SIGSEGV at 0x0 — gcry's freed-block poison … a use-after-free
+gcry: the free that wrote it was of the block at 0x735a075dec88, still FREE, size 768, flags 0x1
+```
+
+40 crashes, and the sizes are not scattered:
+
+| size | count |
+|---|---|
+| 3072 | 11 |
+| 1536 | 11 |
+| 768 | 9 |
+| 384 | 4 |
+
+`Fiber::Stack` is 24 bytes (`Void*`, `Void*`, `Int32`, `Bool`, aligned). Those
+four sizes are **24 x 16, 32, 64, 128** — the capacity-doubling sequence of a
+`Deque(Fiber::Stack)`. Every one is `still FREE`, so none was reissued: the pool
+read back its own freed buffer.
+
+**The block is `Fiber::StackPool`'s deque buffer.** `Fiber#run` releases a
+finished fiber's stack into it, a collection frees the buffer, and the next
+`checkout` reads a `Fiber::Stack` whose `pointer` is poison — which is exactly
+where `makecontext` writes.
+
+## What is still open
+
+Why it is dropped, because it is not simply unreachable. A quiesced probe —
+fill the pool, hide the buffer's address from the scanner behind an XOR, collect
+seven times, ask `HEAP.live?` — reports the buffer **live every time**, 3 of 3.
+So `ec → @stack_pool → @deque → @buffer` is traced under ordinary conditions.
+
+The crash sizes say when it is not: every one of them is a capacity step, so the
+window is around the deque's **growth**, where a new buffer is allocated, filled
+and installed while the old one becomes garbage. That is the next thing to
+instrument, and it is a much smaller question than the one this file started
+with.
 
 ## Not a CI gate
 

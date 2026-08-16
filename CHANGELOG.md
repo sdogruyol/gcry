@@ -204,6 +204,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_POISON_TAG=1` — the poison carries the address of the block whose free
+  wrote it.** `GCRY_POISON_FREED` proves a crash is a use-after-free and stops
+  there, because one constant makes every freed block read alike. The tagged form
+  puts `0xDEAD` in bits 63:48 and the freed block's address in the low 48 — still
+  non-canonical, so it faults identically and the `si_addr == 0` register scan
+  still finds it, and 48 bits is the whole of an x86_64 user address. The SIGSEGV
+  report then describes that block against the heap's own tables, the same way it
+  describes a faulting address: `the free that wrote it was of the block at
+  0x…, still FREE, size 768, flags 0x1`. Opt-in, and it implies
+  `GCRY_POISON_FREED`. It found what it was written for on its first run — see
+  the entry below.
+
 - **`bench/nested_spawn_uaf.cr` — a use-after-free in fiber creation, in seconds
   instead of 1h24m.** `make ec-queue-audit` went red three times on 2026-08-15
   (aarch64, Darwin, x86_64) and looked like a flaky gate. It was not: every crash
@@ -216,7 +228,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Crystal's execution context. It does not need parallelism either: one worker
   reproduces it 7 times in 12. Not wired into CI, because it fails most runs on
   purpose; `make nested-spawn-uaf`, and it becomes the regression test when the
-  defect is fixed.
+  defect is fixed. **`GCRY_POISON_TAG=1` then named the block**: across 40
+  crashes the freed block is 384, 768, 1536 or 3072 bytes — `Fiber::Stack` is 24
+  bytes, so those are 16, 32, 64 and 128 entries, the capacity-doubling sequence
+  of a `Deque(Fiber::Stack)` — always `still FREE`, never reissued. It is
+  `Fiber::StackPool`'s deque buffer, read back by `checkout` after the collector
+  freed it, which is exactly where `makecontext` writes. Not yet explained: a
+  quiesced probe finds that buffer live 3 times in 3, so it is not plainly
+  unreachable; every crash size being a capacity step points at the deque's
+  growth as the window.
   `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
 
 ### Fixed
