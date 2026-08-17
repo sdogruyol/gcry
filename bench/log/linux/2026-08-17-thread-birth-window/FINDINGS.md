@@ -139,6 +139,53 @@ start routine, with `stop_world` suspending the union of that record and
 Crystal's list, is the shape that can work; the census is the acceptance test
 and currently reads 3/10.
 
+## The second attempt: the record works, the trampoline does not
+
+The other half — what `GC_pthread_create` gives Boehm. `GC.pthread_create` passes
+a trampoline that records `pthread_self()` in a fixed staging table and only
+then calls the real start routine, so gcry knows the thread exists from its
+first instruction. `stop_world` drops a staged entry once the thread turns up in
+Crystal's list, leaving exactly the not-yet-published set. Nothing about what the
+collector *suspends* was changed: the recording half first, verified before
+anything acts on it.
+
+**The record is right.** Every census gap observed with it on was accounted for
+exactly:
+
+```
+gcry: thread census — the OS reports 14 thread(s) and Crystal's list yielded 13,
+      so 1 thread(s) are outside Crystal's list. gcry has staged 1 of them,
+      so it knows they exist. collection 0
+```
+
+Seven such reports, every one `staged >= gap`, and `staged_overflows` zero. So a
+record made before user code does capture the window the census measures — the
+approach is sound.
+
+**The implementation is not.** A/B on the same workload, 16 workers, ten runs:
+
+| | crashes |
+|---|---|
+| without the trampoline | **0/10** |
+| with the trampoline | **8/10** |
+
+It destabilises thread startup outright. Reverted.
+
+One thing was learned on the way and is worth keeping, because it cost a hang to
+find: **the staging table's class variables must be eager.** With
+`@@staged_count = Atomic(Int32).new(0)`, the first process to start a thread
+hung — a class variable with an initializer is set up lazily behind a guard, and
+the first access happens on a pthread that has not finished starting. The same
+trampoline with the staging call removed ran clean, which is what isolated it.
+Cleared explicitly from `GC.init` instead, the hang went away and the crashes
+above are a separate, later problem.
+
+Candidates for that separate problem, none of them measured: the extra frame
+changes what Crystal's `stack_address` derives for the new thread; the trampoline
+runs before Crystal's per-thread runtime setup; the slot claim is deliberately
+racy and sixteen workers start at once; or gcry's stack-bounds snapshot now
+reaches a thread whose Crystal-side state is half-built.
+
 ## What would settle it
 
 Instrument rather than reproduce. gcry can count what it cannot see:

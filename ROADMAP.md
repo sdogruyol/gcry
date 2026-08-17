@@ -425,10 +425,25 @@ CI asymmetry that hid both.
       inside its own `start`, so when the creator releases there is still a
       thread that exists, is unlisted, and is racing the collector — now parked
       on a lock the suspend path does not expect it on.
-      **Next**: the other half, which is what `GC_pthread_create` gives Boehm — a
-      trampoline that records `pthread_self()` before user code runs, with
-      `stop_world` suspending the union of that record and Crystal's list. The
-      census is the acceptance test and currently reads 3/10.
+      **The other half was built, and it splits into a right idea and a wrong
+      implementation.** A trampoline in `GC.pthread_create` that records
+      `pthread_self()` before user code, with `stop_world` dropping the record
+      once the thread appears in Crystal's list: **the record is exactly right**
+      — every census gap seen with it on reported `staged >= gap` ("gcry has
+      staged 1 of them, so it knows they exist"), seven for seven, no overflows.
+      **But it destabilises thread startup**: 8/10 runs crash against 0/10
+      without it, on the same workload. Reverted, like the lock before it.
+      A hang on the way is worth keeping: the staging table's class variables
+      must be **eager**, because a lazily-initialised one is set up behind a
+      guard and the first access happens on a pthread that has not finished
+      starting — with an `Atomic` initializer the first thread hung, and the
+      same trampoline minus the staging call ran clean.
+      **Next**: the recording approach is validated and the delivery mechanism
+      is not. Either record from the creating side after `pthread_create`
+      returns (a smaller window, no trampoline, no new frame on the new thread),
+      or find which of the four candidates above the crashes are — the extra
+      frame, the pre-runtime call site, the racy slot claim, or the snapshot
+      reaching a half-built thread.
       `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
