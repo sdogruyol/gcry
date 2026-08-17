@@ -186,6 +186,46 @@ runs before Crystal's per-thread runtime setup; the slot claim is deliberately
 racy and sixteen workers start at once; or gcry's stack-bounds snapshot now
 reaches a thread whose Crystal-side state is half-built.
 
+## The third attempt lands: record from the creating side
+
+Same record, different delivery. `GC.pthread_create` stages the handle
+`pthread_create` just wrote, on the **creating** thread, with no trampoline and
+no new frame on the new one; `stop_world` releases the entry when the thread
+turns up in Crystal's list.
+
+| | crashes (20 runs, 16 workers) | census gaps covered |
+|---|---|---|
+| without the record | **0/20** | — |
+| trampoline (attempt 2) | 8/10 | every one |
+| **creating side** | **0/20** | **every one** |
+
+Every gap the census reported with it on read `staged >= gap`:
+
+```
+the OS reports 18 thread(s) and Crystal's list yielded 17, so 1 thread(s) are
+outside Crystal's list; gcry has staged 1 of them, so it knows they exist.
+```
+
+An earlier 2-in-10 reading on this arm did not survive a larger sample; at n=20
+it is 0. That is worth stating plainly because at n=10 it looked like the same
+failure as the trampoline, and it was not.
+
+**What this does and does not buy.** gcry now has a record of every thread from
+the moment its handle exists, and the record demonstrably accounts for the
+window the census measures. It still does **not** change what `stop_world`
+suspends or what the scan walks — deliberately, because two attempts at this
+defect have changed collector behaviour and broken it. Acting on the record is
+the next step, and it now has a foundation that is measured rather than assumed.
+
+The placement leaves the interval *inside* `pthread_create` uncovered, which
+only a trampoline reaches. The census is the instrument that will say whether
+that residue matters: gaps it cannot account for will report
+"fewer than the gap — at least one is unrecorded".
+
+Gated in `process_spec`: the hook must have run (`staged_total` grows) and
+nothing may be left staged once threads are published, both broken on purpose
+and observed red.
+
 ## What would settle it
 
 Instrument rather than reproduce. gcry can count what it cannot see:

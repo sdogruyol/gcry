@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **gcry now records a thread as soon as `pthread_create` hands back its
+  handle.** Crystal publishes a thread onto `Thread.threads` only from inside
+  its own `start`, and until then `stop_world` neither suspends nor scans it —
+  a window the census measures at roughly one collection in a thousand. The new
+  staging table (`src/gcry/platform/thread_staging.cr`) is filled from the
+  creating side and emptied when the thread turns up in Crystal's list, and it
+  **accounts for every gap the census has reported** (`staged >= gap`). It
+  records only: what the collector suspends and scans is unchanged, because two
+  earlier attempts that did change it broke thread startup — holding Crystal's
+  thread-list lock across creation (3/10 crashes, window not closed) and a
+  trampoline staging `pthread_self()` before user code (8/10 crashes, window
+  covered exactly). The creating-side placement is 0/20 against 0/20 without it.
+  Counters on `/gc-stats`; gated in `process_spec` with both halves broken on
+  purpose. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
 - **`GCRY_THREAD_CENSUS=1` — is every thread inside the stopped world?** gcry
   learns about threads from Crystal's list: `stop_world` suspends what
   `Thread.unsafe_each` yields and the stack scans walk the same set, so a thread

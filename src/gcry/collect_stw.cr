@@ -93,6 +93,7 @@ module Gcry
           listed = 0
           Thread.unsafe_each do |thread|
             listed += 1
+            Platform.unstage_thread(thread.to_unsafe.unsafe_as(UInt64))
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
           # Does the set about to be stopped account for every thread the

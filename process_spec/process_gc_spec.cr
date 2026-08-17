@@ -261,6 +261,29 @@ describe "process GC free-path flag" do
 end
 
 {% if flag?(:linux) %}
+  describe "process GC thread staging" do
+    # gcry records a thread as soon as `pthread_create` hands back its handle,
+    # because Crystal only publishes it from inside its own `start` and until
+    # then `stop_world` neither suspends nor scans it. The record is dropped
+    # when the thread turns up in Crystal's list.
+    it "records created threads and releases them once Crystal publishes them" do
+      before = Gcry::Platform.staged_total
+      ec = Fiber::ExecutionContext::Parallel.new("staging-spec", 2)
+      done = Channel(Nil).new(4)
+      4.times { ec.spawn { done.send(nil) } }
+      4.times { done.receive }
+      GC.collect
+
+      # The hook ran: a run that stages nothing at all is indistinguishable
+      # from one where `pthread_create` was never wrapped.
+      (Gcry::Platform.staged_total - before).should be > 0
+      # And nothing is left staged once the threads are published — every entry
+      # is released by the `stop_world` walk that sees them in the list.
+      Gcry::Platform.staged_count.should eq(0)
+      Gcry::Platform.staged_overflows.should eq(0)
+    end
+  end
+
   describe "process GC thread census" do
     # gcry learns about threads from Crystal's list, so a thread that exists but
     # has not pushed itself yet is neither suspended nor scanned. The census

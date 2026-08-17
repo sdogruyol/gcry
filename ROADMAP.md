@@ -438,12 +438,19 @@ CI asymmetry that hid both.
       guard and the first access happens on a pthread that has not finished
       starting — with an `Atomic` initializer the first thread hung, and the
       same trampoline minus the staging call ran clean.
-      **Next**: the recording approach is validated and the delivery mechanism
-      is not. Either record from the creating side after `pthread_create`
-      returns (a smaller window, no trampoline, no new frame on the new thread),
-      or find which of the four candidates above the crashes are — the extra
-      frame, the pre-runtime call site, the racy slot claim, or the snapshot
-      reaching a half-built thread.
+      **The third attempt lands.** Recording from the **creating** side — stage
+      the handle `pthread_create` just wrote, no trampoline, no new frame on the
+      new thread — is **0/20 crashes against 0/20 without it**, and covers every
+      census gap observed (`staged >= gap`, reported as "gcry has staged 1 of
+      them, so it knows they exist"). An earlier 2/10 on this arm did not
+      survive n=20. Gated in `process_spec`, both halves broken on purpose.
+      It records only: what `stop_world` suspends and what the scan walks are
+      unchanged, because two attempts that did change them broke the collector.
+      Counters on `/gc-stats` (`thread_staged_now` / `_total` / `_overflows`,
+      `thread_census_staged_covered`).
+      **Next**: act on the record — suspend and scan the staged set alongside
+      Crystal's list — and watch the census for gaps it cannot account for,
+      which is the residue only a trampoline could reach.
       `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,

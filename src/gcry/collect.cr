@@ -15,6 +15,7 @@
   require "./platform/linux_fork"
 {% end %}
 
+require "./platform/thread_staging"
 require "./mark"
 require "./roots"
 require "./stack_maps"

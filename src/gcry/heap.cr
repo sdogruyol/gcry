@@ -745,6 +745,8 @@ module Gcry
     # Collections where /proc could not answer — counted, so "no gaps" can
     # never be the result of never having looked.
     getter thread_census_unanswered : UInt64 = 0_u64
+    # Gaps gcry's own staging record accounted for.
+    getter thread_census_staged_covered : UInt64 = 0_u64
 
     private def census_threads(listed : Int32) : Nil
       @thread_census_checks &+= 1
@@ -754,6 +756,8 @@ module Gcry
         return
       end
       gap = os - listed
+      staged = Platform.staged_count
+      @thread_census_staged_covered &+= 1 if gap > 0 && staged >= gap
       return if gap <= 0
       @thread_census_gaps &+= 1
       @thread_census_gap_max = gap if gap > @thread_census_gap_max
@@ -768,7 +772,10 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", so ")
       len = RawOut.append_u64(buf.to_unsafe, len, gap.to_u64)
       len = RawOut.append(buf.to_unsafe, len,
-        " thread(s) are running through this stopped world, unscanned. collection ")
+        " thread(s) are outside Crystal's list; gcry has staged ")
+      len = RawOut.append_u64(buf.to_unsafe, len, staged.to_u64)
+      len = RawOut.append(buf.to_unsafe, len,
+        staged >= gap ? " of them, so it knows they exist. collection " : ", fewer than the gap — at least one is unrecorded. collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)

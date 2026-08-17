@@ -20,6 +20,8 @@ module GC
       Gcry::Platform.install_stw_sp_capture
     end
 
+    Gcry::Platform.init_staging
+
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
@@ -946,8 +948,18 @@ module GC
     end
   {% elsif !flag?(:wasm32) %}
     # :nodoc:
+    # Record the thread with gcry as soon as its handle exists. Crystal only
+    # publishes a thread from inside its own `start`, so until then `stop_world`
+    # neither suspends nor scans it (src/gcry/platform/thread_staging.cr).
+    # Recording here does not cover the interval *inside* `pthread_create` —
+    # doing that needs a trampoline on the new thread, which was tried and
+    # crashed 8 runs in 10. The census reports what this placement leaves.
     def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
-      LibC.pthread_create(thread, attr, start, arg)
+      ret = LibC.pthread_create(thread, attr, start, arg)
+      {% if flag?(:gc_none) %}
+        Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64)) if ret == 0
+      {% end %}
+      ret
     end
 
     # :nodoc:
