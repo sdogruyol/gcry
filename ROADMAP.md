@@ -316,10 +316,18 @@ CI asymmetry that hid both.
       (`GCRY_DEAD_STACK_ROOTS=0` disables), gated in `process_spec` in both
       directions, and not retention — same `heap_size`, same 160 collections,
       *fewer* live objects than control.
+      **The pause cost does not show up.** `pause_budget --live-mb=20` over four
+      runs an arm: p50 18.71–19.23 ms off against 18.91–19.92 ms on, p99
+      26.4–35.5 against 22.4–33.9 — fully overlapping — and CI's `perf smoke`
+      passed on the same commit.
       **Next**: the coverage audit still reports **4 mappings per run** it cannot
-      account for, and the pause cost of the 64 KiB window has not been measured
-      against the perf gate. Neither is a reason to hold the fix; both are
-      reasons not to call the item closed.
+      account for. And the push carrying this fix produced a red aarch64 job with
+      the **thread** family's crash — `make ec-queue-audit` in
+      `pthread_getattr_np` on a poisoned `pthread_t`, a 192-byte block freed by
+      an explicit free and reissued — which this fix does not touch and which
+      did not reproduce on the re-run. The 5 h soak was dispatched against this
+      commit; until it reports, "the fiber family is closed" rests on 0/24 in a
+      two-second repro.
       `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`,
       `bench/log/linux/2026-08-17-inflight-stack-roots/FINDINGS.md` (retracted),
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`

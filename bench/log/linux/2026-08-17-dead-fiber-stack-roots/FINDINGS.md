@@ -97,8 +97,34 @@ slot over and clears it: a scan that consumed the thread's recycled stack would
 change what the program does, not just what the collector sees.
 
 64 KiB because every hit the address-space audit reported was 968 to 1408 bytes
-below the stack top, where `makecontext` writes a fiber's first frame. The
-pause cost of the window is not yet measured against the perf gate.
+below the stack top, where `makecontext` writes a fiber's first frame.
+
+## The pause cost is not measurable
+
+Two instruments, both arms interleaved on the same host:
+
+| | p50 | p99 |
+|---|---|---|
+| `pause_budget --live-mb=20`, off (4 runs) | 18.71–19.23 ms | 26.4–35.5 ms |
+| `pause_budget --live-mb=20`, **on** (4 runs) | 18.91–19.92 ms | 22.4–33.9 ms |
+| `nested_spawn_uaf`, 16 workers, off (8 runs) | 23.9 ms | 89.9 ms |
+| `nested_spawn_uaf`, 16 workers, **on** (8 runs) | 19.9 ms | 60.8 ms |
+
+The ranges overlap completely in the first pair and the second pair favours the
+fix, which is not a claim worth making either — a 16-worker fiber workload's
+pause is dominated by other phases and the spread is wide. What can be said is
+that scanning ~1 300 stack windows a run does not show up. CI's `perf smoke`
+gate passed on the same commit.
+
+## And it does not close the other family
+
+The push that carried this fix produced a red `test (aarch64 native)`:
+`make ec-queue-audit` died in `pthread_getattr_np` on a **poisoned `pthread_t`**
+(`0xdeadff7810b3d738`), with the report naming a 192-byte block freed by an
+*explicit* free and since reissued. That is the thread family
+(`bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`), not the
+fiber-creation one this closes, and it reproduced on neither the re-run nor any
+local batch. The fiber repro at 0/24 says nothing about it.
 
 ## Reproducing
 

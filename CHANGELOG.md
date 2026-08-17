@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_ADDRESS_SPACE_AUDIT=1` — at the moment a block dies, search the whole
+  address space for its address and name the region that holds it.** The
+  use-after-free hunt had reached a contradiction it could not settle from
+  inside the collector: the dying `Deque(Fiber::Stack)` buffer was in no used
+  heap block, in no suspended thread's registers, in no explicit root, and the
+  crash report found it on a stack immediately afterwards. So the audit stops
+  asking gcry and asks the kernel — it walks every readable mapping in
+  `/proc/self/maps`, searches it word-aligned, and classifies each hit as a gcry
+  block, a live fiber stack (inside or below the scan window), a pooled stack, a
+  thread stack, or an unowned one. That is what found the window this release
+  fixes. Off by default and expensive: it reads the resident address space
+  inside the pause, once per collection.
+  Two corrections in it are the reason its numbers can be read at all: the first
+  version reported 47 hits that were **its own frames** (it runs on the
+  collecting fiber's stack and carries the target as an argument — it now
+  compares against the window the scan actually used), and it took a **SIGBUS**
+  on a mapping `/proc/self/maps` calls readable, killing the collection it was
+  measuring; reads now go through `pread` on `/proc/self/mem`, where a bad page
+  costs one page.
+  `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`
+
+- **Research arms for unowned fiber stacks**, kept rather than deleted because
+  the next question about this defect will want the same ones and rebuilding
+  them from a log is how a measurement gets quietly redefined:
+  `GCRY_DEAD_STACK_NOROOT`, `GCRY_POOLED_STACK_ROOTS`,
+  `GCRY_POOLED_STACK_NOROOT`, `GCRY_MAPS_INFLIGHT_ROOTS`,
+  `GCRY_MAPS_INFLIGHT_NOROOT`, and `GCRY_UNOWNED_COVERAGE_AUDIT=1`, which walks
+  `/proc/self/maps` beside the shipped fix and counts stack-shaped mappings
+  nothing accounts for (549 accounted for against 4 not, per run). Every arm
+  counts the stacks it walked and the words it offered, so a null result cannot
+  be an arm that never ran — and each rooting arm has a twin that walks the same
+  memory and offers nothing, which is what separated this fix from the birth
+  grace's zero.
+
 - **`GCRY_STAGED_WAIT=1` — the collector waits for a thread that has not
   published itself yet.** gcry records every thread from the moment
   `pthread_create` returns; this is the first change that *acts* on that record.
@@ -456,6 +490,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI pins Crystal instead of asking for `latest`.** On 2026-08-17 GitHub's
+  releases-list endpoint for `crystal-lang/crystal` began returning an empty
+  array — `releases/latest` and the tags stayed correct — so
+  `crystal-lang/install-crystal`, which resolves `latest` off that list, asked
+  for version `null` and took **ten of the twelve jobs** down with it, twice an
+  hour apart. Every `latest` in the workflows is pinned to 1.21.0; the pinned
+  job was green on the same tree throughout, which is what identified it. The
+  matrix's `latest` arm became the same job as the pinned one and was dropped —
+  worth bringing back when the endpoint recovers, since it is the only thing
+  that reports a compiler release breaking the collector.
+
 - **`make scheduler-roots` now runs with the crash diagnostics on**, for the
   reason the STW × TLAB test did: it has caught the open use-after-free twice —
   aarch64 on 2026-08-16 and x86_64 on 2026-08-17, both SIGSEGV inside
@@ -552,6 +597,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depend on it. `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
 
 ### Fixed
+
+- **A fiber's stack was scanned by nothing while the fiber was ending, and a
+  use-after-free lived in that window.** Crystal cannot release a terminating
+  fiber's stack until the thread swaps off it, so `Thread#dying_fiber` parks the
+  stack on the thread. While it sits there the owning `Fiber` is already gone
+  from the fiber list — so no fiber scan reaches it — and the thread may still
+  be **executing on it**, which gcry's other-thread scan cannot see either
+  because that scan works from *pthread* stack bounds a fiber stack is nowhere
+  near. Anything reachable only from those frames was unrooted, and a collection
+  landing in the window freed it. `bench/nested_spawn_uaf.cr` at
+  `ROUNDS=20 FIBERS=64` with poison on: **10/24 crashes against 0/24** with the
+  new root, interleaved, and re-measured from scratch after the code was
+  rewritten. It is not retention — same `heap_size`, same 160 collections, and
+  fewer live objects than control — and it is not the walk: a twin arm that
+  reads the identical memory and offers nothing to the mark stays at 12/24. On
+  by default; `GCRY_DEAD_STACK_ROOTS=0` opts out. Gated in `process_spec` in
+  both directions.
+  **Two neighbouring windows were measured and are not the defect**, which is
+  worth recording because the first version of this fix was built on one of
+  them: a stack sitting in the `Fiber::StackPool` deque (rooting them is *worse*
+  than control, 20/24), and a stack checked out of the pool but not yet attached
+  to a published `Fiber` — a `Fiber::StackPool#checkout` hook covering exactly
+  that moved 13/24 to 8/24, which is nothing, and was deleted rather than
+  shipped on a maybe.
+  `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
+
+- **The live-object invariant was stated of heaps that do not maintain it, and
+  flaked for it.** `spec/invariant_spec.cr` failed 6 runs in 25, on three
+  different examples. Two causes, one of which is a real defect the check was
+  right about: `note_alloc_bytes` uses plain `set(get + 1)` unless
+  `heap_counters_atomic` is set, so a second allocating thread makes the counter
+  lose increments **permanently** — the process heap drifts with no thread in
+  the program but main and the monitor. The checker now states the invariant
+  only where the counter can be kept (`Heap#counters_may_lose_updates?`), and
+  establishes quiescence from the heap's own counter — sample, walk, sample
+  again, re-check a mismatch `CONFIRM_ATTEMPTS` times — rather than from a
+  thread count that called "main plus monitor" quiescent. It also no longer
+  re-enters itself: the failure message interpolates, interpolation allocates,
+  and that landed straight back in `after_malloc`. **0 failures in 100 runs**
+  since. The counter itself is on the board; making it atomic costs the
+  allocation hot path and needs the throughput numbers beside it.
 
 - **The SIGSEGV report claimed x86_64 reasoning on every architecture, and
   implied a diagnosis Darwin cannot make.** Its `si_addr == 0` branch explained
