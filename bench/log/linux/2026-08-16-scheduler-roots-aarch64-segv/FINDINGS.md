@@ -7,6 +7,7 @@
 | `31933855152` | `e7de946` | `make scheduler-roots` | `0xff42d3800358` |
 | `31950823605` | `4645bf7` | `make ec-queue-audit` | `0xff00f1800358` |
 | `31961004141` | `c28bea5` | `make ec-queue-audit` | `0xff6dbcc00358` |
+| `31995517368` | `ea56fb8` | `make ec-queue-audit` | `0xff38b60000d8` |
 
 Both `test (aarch64 native)`, both the same call chain, and both addresses end
 in the same `800358`. A re-run of the first was green, which is why it was
@@ -91,6 +92,57 @@ Note also what the address line says on its own: *outside gcry's heap span*.
 Without the in-flight id that is all the report could have offered, and it
 would have read as a wild pointer rather than as a libc descriptor read.
 
+## The fourth occurrence repeats the third exactly
+
+2026-08-17, run `31995517368`. Same call, and the two instrumented crashes are
+numerically identical where it matters:
+
+| | thread id | fault | delta | visited/read |
+|---|---|---|---|---|
+| 3rd | `0xff6dbcbfff40` | `0xff6dbcc00358` | **0x418** | **22/21** |
+| 4th | `0xff38b5fffcc0` | `0xff38b60000d8` | **0x418** | **22/21** |
+
+The same offset into the descriptor, and the same position in the run — the
+counters are cumulative, so "22 visited, 21 read" means the fault lands on the
+**22nd stack-bounds query of the process**, twice. In both, the id sits near the
+end of a page and `+0x418` crosses into the next one.
+
+That is not a race with a random victim. It is a specific query, at a
+reproducible point, on a descriptor whose following page is not mapped.
+
+## Four mechanisms eliminated, from Crystal's own source
+
+The obvious explanations are all ruled out by ordering in
+`crystal/system/thread.cr` and `crystal/system/unix/pthread.cr` (1.21.0):
+
+1. **"The handle is not published yet."** `thread_proc` assigns
+   `th.system_handle = current_handle` *before* calling `th.start`, and `start`
+   is what pushes onto the list. List membership therefore implies a written
+   handle.
+2. **"The main thread's handle is unset."** Its constructor assigns
+   `Crystal::System::Thread.current_handle` before `Thread.threads.push(self)`.
+3. **"The thread already exited."** `start`'s `ensure` runs
+   `Thread.threads.delete(self)` *before* `detach { system_close }`, so removal
+   precedes the pthread going away.
+4. **"The list mutated under the walk."** `push` and `delete` both take
+   `@mutex.synchronize`, and `Thread.lock` — which the snapshot holds — locks
+   that same `threads.@mutex`.
+
+So the thread gcry queries is in the list, alive, and carrying a handle its own
+code wrote. None of the cheap stories survive.
+
+**What that leaves**, and it needs runtime evidence rather than more reading:
+either the id is valid but its descriptor is genuinely unmapped at that instant
+(which would make it a libc/kernel-level lifetime question), or gcry hands
+`pthread_getattr_np` something that is not the id it thinks it is.
+
+**Next**: the discriminator is one bit of state — has this id been queried
+*successfully* before? Keep a bounded set of ids the snapshot has read bounds
+for, and have the crash report say whether the faulting one is a repeat. A
+repeat means the thread died between two snapshots despite the ordering above;
+a first-time id means it never worked, and the startup path is back in scope
+even though the ordering says it should not be.
+
 ## The counters are built
 
 Both are in, and gated:
@@ -156,7 +208,7 @@ still points at it.
 
 ## Status
 
-Open, **3 occurrences**, all aarch64, all in CI, across two gates. Still
+Open, **4 occurrences**, all aarch64, all in CI, across two gates. Still
 not reproduced on demand and never seen outside CI. It is no longer a one-off,
 so the two counters proposed above are worth building rather than merely
 proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be

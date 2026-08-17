@@ -411,7 +411,17 @@ CI asymmetry that hid both.
       threads visited and 21 read — so no accumulated coverage gap, just this
       call on this thread. A descriptor whose first page is mapped and whose
       next is not is what an exited thread looks like, which is the standing
-      hypothesis, now with evidence. Not yet a release blocker — never seen
+      hypothesis, now with evidence. **A fourth arrived on 2026-08-17
+      (`31995517368`) and repeats the third exactly**: same `0x418` offset into
+      the descriptor, same `22/21` visited/read, i.e. the same query at the same
+      point in the run. And the four cheap explanations are **eliminated from
+      Crystal's source**: the handle is published before the thread joins the
+      list, the main thread's is set before its push, removal precedes
+      `system_close`, and `push`/`delete`/`Thread.lock` all take the same mutex.
+      So the thread is in the list, alive, and carrying a handle its own code
+      wrote. **Next**: record whether the faulting id had ever been queried
+      *successfully* before — a repeat means it died between snapshots, a
+      first-timer means it never worked. Not yet a release blocker — never seen
       outside CI — but it is the second-most-frequent red on the board.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
