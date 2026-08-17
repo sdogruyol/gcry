@@ -435,6 +435,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make scheduler-roots` now runs with the crash diagnostics on**, for the
+  reason the STW × TLAB test did: it has caught the open use-after-free twice —
+  aarch64 on 2026-08-16 and x86_64 on 2026-08-17, both SIGSEGV inside
+  `pthread_getattr_np` under `stop_world` — and both times could report nothing
+  but one hex number, because the knobs were not set there.
 - **The STW × TLAB property test now runs with the crash diagnostics on.** It
   caught the open use-after-free on 2026-08-17 — SIGSEGV inside
   `pthread_getattr_np` under `stop_world`, on **x86_64**, in a harness that uses

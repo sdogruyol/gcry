@@ -242,10 +242,17 @@ greg-roots: $(BIN)
 	$(BIN)/greg_roots
 	$(BIN)/greg_roots --control
 
+# The diagnostics travel with this gate for the same reason they travel with
+# `ec-queue-audit`: it is one that dies. It caught the open use-after-free on
+# 2026-08-16 (aarch64) and again on 2026-08-17 (x86_64) — SIGSEGV inside
+# `pthread_getattr_np` under `stop_world` — and both times could say nothing but
+# one hex number, because the knobs were not on here. They cost a memset per
+# free and nothing until something faults. A gate that catches this defect
+# should not waste the sighting.
 scheduler-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
-	$(BIN)/scheduler_roots
-	$(BIN)/scheduler_roots --control
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots --control
 
 # A precise layout is a claim that every pointer in the object is at one of the
 # offsets it lists. `Layout.register` had a third outcome it never named: an ivar

@@ -24,6 +24,7 @@
 | `31997472378` | `81123d2` | `make ec-queue-audit` | `0xdeadff86af17db50` (poison) |
 | `32006847158` | `2a8a18b` | `stw_mt_property_test`, **x86_64** | `0x7f64e2e00348` |
 | `32007492923` | `32dff1d` | `make scheduler-roots` | — |
+| `32014723127` | `81eb56c` | `make scheduler-roots`, **x86_64** | `0x7fb0aa0005d0` |
 
 Both `test (aarch64 native)`, both the same call chain, and both addresses end
 in the same `800358`. A re-run of the first was green, which is why it was
@@ -306,8 +307,14 @@ still points at it.
 
 ## Status
 
+**Both gates that catch this now carry the diagnostics.** `ec-queue-audit` and
+the STW × TLAB property test got them first; `scheduler-roots` caught it twice —
+aarch64 on 2026-08-16, x86_64 on 2026-08-17 — and said nothing but a hex number
+both times, so it now runs with `GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1`
+too. Three runs green locally with them on.
+
 Mechanism **resolved** at occurrence 5; the underlying use-after-free is still
-open. **7 occurrences**, in CI, across **three** gates (`scheduler-roots`,
+open. **8 occurrences**, in CI, across **three** gates (`scheduler-roots`,
 `ec-queue-audit`, `stw_mt_property_test`) and **both** architectures. The last
 of them, on x86_64, could say nothing — the diagnostics were not enabled on that
 step, which is now fixed. Still
