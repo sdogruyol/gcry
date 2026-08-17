@@ -1042,6 +1042,9 @@ module Gcry
     # instrument that scans the stack has to be able to exclude itself.
     getter collect_entry_sp : UInt64 = 0_u64
 
+    # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
+    property post_mark_spin : UInt64 = 0_u64
+
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       cols_before = @collections
@@ -1174,6 +1177,20 @@ module Gcry
           end
 
           reset_birth_grace if @birth_grace
+
+          # `GCRY_POST_MARK_SPIN=<n>`: pure delay between mark and sweep, no
+          # bookkeeping of any kind. The control the birth-grace arms needed:
+          # every arm that walks a table here takes the crash rate to zero, and
+          # every arm that does not leaves it at the control rate — including
+          # one that roots a null pointer. If a bare spin does the same, the
+          # grace was never keeping anything alive.
+          if (n = @post_mark_spin) > 0
+            i = 0_u64
+            while i < n
+              Intrinsics.pause
+              i &+= 1
+            end
+          end
 
           # Mark completeness, in the only window where the answer exists: the
           # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,

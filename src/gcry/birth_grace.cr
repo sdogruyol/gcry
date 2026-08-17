@@ -73,9 +73,20 @@ module Gcry
 
     # On the allocation hot path when armed. One atomic increment and one store;
     # the ring is never read outside a collection.
+    # Size window for the bisect: only blocks whose payload falls in
+    # `[@birth_size_min, @birth_size_max]` are recorded, so the grace can be
+    # aimed at one shape at a time. 0/0 means every size, which is the arm the
+    # 20/48 → 0/48 result was measured on. `GCRY_BIRTH_GRACE_MIN` / `_MAX`.
+    property birth_size_min : UInt32 = 0_u32
+    property birth_size_max : UInt32 = 0_u32
+
     @[AlwaysInline]
     protected def note_birth(user : Void*) : Nil
       return if user.null? || @birth_slots.null?
+      if @birth_size_max > 0
+        size = BlockHeader.from_user(user).value.size
+        return if size < @birth_size_min || size > @birth_size_max
+      end
       i = @birth_index.add(1_u32)
       if i >= BIRTH_GRACE_SLOTS
         @birth_grace_overflows &+= 1
@@ -88,8 +99,22 @@ module Gcry
     # block the mark did not reach is distinguishable from one it did. Those are
     # the blocks this experiment exists to name: the collector was about to take
     # them, and nothing in the heap, the root set or a scanned stack said no.
+    # Record without rooting. The control the size-class bisect needed and did
+    # not have: an arm that pays the recording cost on the allocation path and
+    # changes nothing about liveness. If the crash rate falls here too, the
+    # grace is winning by perturbing timing rather than by keeping anything
+    # alive, and the bisect measured the wrong thing.
+    property birth_grace_noroot : Bool = false
+
+    # See the dummy branch in `mark_birth_grace_roots`.
+    property birth_grace_dummy : Bool = false
+
     protected def mark_birth_grace_roots : Nil
       return if @birth_slots.null?
+      if @birth_grace_noroot
+        @birth_index.set(0_u32)
+        return
+      end
       follow_up_previous_saves
       n = @birth_index.get
       n = BIRTH_GRACE_SLOTS if n > BIRTH_GRACE_SLOTS
@@ -116,7 +141,16 @@ module Gcry
             probe_root_acceptance(ptr)
           end
         end
-        mark_explicit_root(ptr)
+        # `GCRY_BIRTH_GRACE_DUMMY=1`: walk the ring exactly as usual but root
+        # nothing valid. It separates "the loop runs" from "these particular
+        # pointers are rooted" — the question the size bisect could not answer,
+        # because the arm that took the crash rate to zero reported
+        # `rooted=20, saved=0`, i.e. by its own counters it kept nothing alive.
+        if @birth_grace_dummy
+          mark_explicit_root(Pointer(Void).null)
+        else
+          mark_explicit_root(ptr)
+        end
       end
       @birth_grace_rooted &+= n.to_u64
       @birth_grace_saved &+= saved

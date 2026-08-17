@@ -72,8 +72,21 @@ Also checked, because the retracted section rested on it: `Heap#free` is called
 harness does not free either, and Crystal's stdlib calls `GC.free` only from the
 zlib and GMP allocator hooks. There was never a plausible caller.
 
-Now gated in `process_spec` — both the discrimination and the rebuild
-preservation, the latter broken on purpose and observed red at `Expected: 278`.
+Gated in `process_spec` for the **discrimination** — a swept block sets the flag,
+an explicitly freed one does not — and that half is broken on purpose and
+observed red.
+
+**The rebuild preservation is not gated**, and that is worth saying plainly
+because it was claimed here on 2026-08-16 and the claim did not survive. The
+rebuild only runs when chunks are released, and a released chunk takes its
+blocks out of `find_block` with it: a workload that triggers the rebuild leaves
+nothing to inspect, and one that keeps blocks inspectable does not trigger it.
+Four arrangements were tried on 2026-08-17 — retaining nothing (flaky: 278
+findable free blocks one hour, 0 the next), retaining half, retaining one in
+200, and holding empty chunks — and breaking the flag on purpose passed in every
+one except the flaky arrangement. The evidence for the fix is the standalone
+measurement above (278 of 278 against 0 of 278); the gate is the discrimination
+only.
 
 ### The retracted reading, as it stood
 

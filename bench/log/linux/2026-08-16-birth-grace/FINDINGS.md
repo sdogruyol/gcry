@@ -176,8 +176,87 @@ times in 89 reports**. Together with the stack and suspended-register searches,
 the address is nowhere at all, which is consistent with the correction above:
 the block is garbage.
 
-**Next**, and it needs the repro to be live again: bisect the grace by size
-class. Save only 192-byte blocks, then only the `Deque` buffer sizes (768 / 1536
+## 2026-08-17: the observer was never dead, and the bisect ran
+
+**`GCRY_THREAD_CENSUS=1` brings the defect back.** It reads `/proc` inside the
+pause and shifts the timing: on a 16-worker spawn workload, **0/20 crashes with
+the census off, 16/25 with it on**. Every "the repro is quiet" measurement in
+this file and the next had the census off. The observer had been there all along.
+
+And the crashes it produces are the **`Fiber#makecontext` family** — 15 of 16,
+with **zero** in `pthread_getattr_np`. So the family that could not be measured
+is the one that reproduces fastest.
+
+**The bisect, interleaved to control for drift** (the control rate swings
+8/25 → 17/25 between batches an hour apart, so sequential arms are not
+comparable — an earlier sequential run of this same bisect is not reported here
+for that reason):
+
+| arm | crashes |
+|---|---|
+| control | **10/18** |
+| grace, all sizes | **0/18** |
+| grace, only ≥384 (`Deque` buffer sizes) | **0/18** |
+| grace, only 192 (`Fiber`) | 11/25 (sequential) |
+| grace ≥384, **recording but not rooting** | 15/25 (sequential) |
+
+Two things follow, and the second is the reason this section stops short of a
+conclusion.
+
+1. The effect is real and is **not** perturbation: an arm that pays the same
+   recording cost on the allocation path and roots nothing does not help.
+2. **The counters contradict the obvious explanation.** In the ≥384 arm the
+   grace records ~20 pointers across the whole run and **saves none of them** —
+   `rooted=20, saved=0`, three runs identical — so nothing it roots was ever
+   unmarked, and rooting an already-marked block is a no-op. By its own
+   instrumentation that arm does nothing to liveness, and it still takes the
+   crash rate to zero.
+
+So the bisect does **not** name the mechanism. What it establishes is narrower
+and still worth having: whatever the grace does, it does through the ≥384
+blocks and not through the 192-byte `Fiber` objects, and not by perturbation.
+
+### The discriminating arms, and where they leave it
+
+All interleaved, n=18 per arm, control re-run inside every batch:
+
+| arm | crashes |
+|---|---|
+| control | 7–11/18 across batches |
+| grace ≥384, rooting the recorded pointers | **0/18** |
+| grace ≥384, walking the ring but rooting `null` | **0/18** |
+| grace ≥384, recording but **not** walking the ring | 9/18 |
+| grace all sizes, recording but not walking the ring | 11/18 |
+| no grace, bare post-mark spin of 50 | 11/18 |
+| no grace, bare post-mark spin of 500 | 7/18 |
+
+Read together these eliminate three explanations at once:
+
+- **Not the rooting.** An arm that walks the ring and roots a null pointer —
+  which `mark_impl` rejects on its first bounds check — is as effective as one
+  that roots the real blocks.
+- **Not the recording.** Paying `note_birth` on every allocation and never
+  walking the ring leaves the rate at control.
+- **Not a delay.** A bare spin between mark and sweep, at 50 and at 500 pauses,
+  does nothing.
+
+What is left is the ring walk itself, and specifically the only work it does
+besides the rooting: a `find_block` and a `heap_marked?` per recorded pointer —
+reading the header of each block allocated since the last collection, inside the
+stopped world, between mark and sweep.
+
+That is a strange thing to be load-bearing, and this file does not claim to
+understand it. What it does claim, with the arms above as evidence: **the birth
+grace's effect is not the one it was built to test.** Yesterday's 20/48 → 0/48
+and today's 10/18 → 0/18 are real and reproducible, and they are not evidence
+that keeping newborn blocks alive fixes anything — the null-rooting arm settles
+that.
+
+**Next**: narrow inside the walk. An arm that reads each recorded block's header
+and does nothing else separates "touching the header" from the rest; if that
+alone is enough, the question becomes why reading a header between mark and
+sweep changes a use-after-free, which would point at the sweep rather than at
+the mark. Save only 192-byte blocks, then only the `Deque` buffer sizes (768 / 1536
 / 3072), and see which subset still takes the crash to zero. If only the buffer
 sizes do, the mechanism is reuse timing on the buffer and the `Fiber` saves are
 a coincidence of volume; if only 192 does, the `Fiber` is back in the frame and

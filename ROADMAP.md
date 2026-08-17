@@ -194,11 +194,14 @@ CI asymmetry that hid both.
       the mutator's callee-saved registers, holds the address 0 times in 89
       reports. The address is nowhere — which is what garbage looks like, and is
       consistent with the correction above.
-      **Next**, and it is blocked: the repro has stayed quiet — 0/15 at
-      `ROUNDS=20` and 0/8 at `ROUNDS=200` a day later on the committed binary,
-      after 10/24 the previous afternoon, with no code change tracking the
-      decay. Do not plan an A/B on it; CI is the reliable observer now. When it
-      is live again:
+      **Unblocked, 2026-08-17: the repro was never dead — it needs
+      `GCRY_THREAD_CENSUS=1`.** That knob reads `/proc` inside the pause and
+      shifts the timing enough to bring the defect back: **0/20 crashes with the
+      census off, 16/25 with it on**, on a 16-worker spawn workload. And the
+      crashes are the **`Fiber` family** — 15 of 16 in `Fiber#makecontext`, none
+      in `pthread_getattr_np`. So the family that could not be measured is now
+      the one that reproduces fastest, in about ten minutes a batch.
+      That reopens everything that was blocked on a live repro, starting with:
       bisect the grace by size class. Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

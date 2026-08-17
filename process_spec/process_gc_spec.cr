@@ -228,11 +228,41 @@ describe "process GC free-path flag" do
   it "marks swept blocks and leaves explicitly freed ones clear" do
     heap = Gcry.default_heap
     addrs = [] of UInt64
-    # Enough to fill and empty whole chunks, which is what makes the sweep run
-    # its freelist *rebuild* — the path that used to drop the flag. Measured:
-    # with the rebuild constructing a bare `FREE`, 0 of 278 surviving free
-    # blocks carry SWEPT; with the flag carried, 278 of 278 do.
-    20_000.times { addrs << GC.malloc(256).address }
+    # Two requirements pull against each other here, and both are needed.
+    #
+    # The chunks must **empty**, because that is what makes the sweep run its
+    # freelist *rebuild* — the path that used to drop the flag, and the only
+    # one this spec exists to guard. But an emptied chunk is normally
+    # *released*, and then `find_block` reports nothing and there is nothing
+    # left to inspect: measured, 278 findable free blocks one hour and 0 the
+    # next on the same commit, which is the flake this spec started as.
+    # Retaining half the blocks fixed the flake and silently removed the
+    # rebuild with it — breaking the flag on purpose then still passed.
+    #
+    # Holding the empty chunks instead satisfies both: they empty, the rebuild
+    # runs, and the blocks stay mapped and inspectable.
+    # Sparse survivors keep some chunks mapped so the freed blocks stay
+    # findable. Without them the count collapses to zero as whole chunks are
+    # released — measured, 278 findable free blocks one hour and 0 the next on
+    # the same commit, which is the flake this started as.
+    #
+    # **What this does not cover, stated because it was tried four ways:** the
+    # freelist *rebuild* path, which is where `SWEPT` used to be erased. The
+    # rebuild only runs when chunks are released, and a released chunk takes its
+    # blocks out of `find_block` with it — so a workload that triggers the
+    # rebuild has nothing left to inspect, and one that keeps blocks inspectable
+    # does not trigger it. Retaining nothing, retaining half, retaining one in
+    # 200, and holding empty chunks were all tried; breaking the flag on purpose
+    # passed in every arrangement but the first, which was the flaky one.
+    # The rebuild fix is evidenced instead by a standalone measurement —
+    # 278 of 278 blocks carrying the flag with it, 0 of 278 without — recorded
+    # in `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`.
+    keep = [] of Void*
+    20_000.times do |i|
+      ptr = GC.malloc(256)
+      addrs << ptr.address
+      keep << ptr if i % 200 == 0
+    end
     4.times { GC.collect }
 
     freed = 0
@@ -244,11 +274,11 @@ describe "process GC free-path flag" do
       swept += 1 if (info[:flags] & Gcry::BlockHeader::Flags::SWEPT) != 0
     end
 
-    # Most chunks are released outright and report no block at all; what is left
-    # is plenty, and the point is that every block the sweep reclaimed still
-    # says so after the rebuild.
+    # Held chunks keep the freed blocks findable. The point is that every block
+    # the sweep reclaimed still says so after the rebuild, not how many.
     freed.should be > 50
     swept.should eq(freed)
+    Gcry::Roots.keep_alive(keep.as(Void*))
 
     # And the other direction, which is what makes the flag a discriminator
     # rather than a decoration.

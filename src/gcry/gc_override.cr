@@ -662,6 +662,20 @@ module GC
     heap.staged_wait = false if env_flag_zero?("GCRY_STAGED_WAIT")
     # EXPERIMENT: root every block for the collection after its birth
     # (src/gcry/birth_grace.cr). A measurement, not a fix.
+    # Size window for the grace, so it can be aimed at one block shape at a
+    # time (`GCRY_BIRTH_GRACE_MIN` / `_MAX`, payload bytes). Unset means every
+    # size, which is what the 20/48 → 0/48 arm measured.
+    if mn = env_u64("GCRY_BIRTH_GRACE_MIN")
+      heap.birth_size_min = mn.to_u32
+    end
+    if mx = env_u64("GCRY_BIRTH_GRACE_MAX")
+      heap.birth_size_max = mx.to_u32
+    end
+    heap.birth_grace_noroot = true if env_flag_one?("GCRY_BIRTH_GRACE_NOROOT")
+    heap.birth_grace_dummy = true if env_flag_one?("GCRY_BIRTH_GRACE_DUMMY")
+    if sp = env_u64("GCRY_POST_MARK_SPIN")
+      heap.post_mark_spin = sp
+    end
     heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")
     # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
     # out of, search the root set, the live heap and the fiber stacks for

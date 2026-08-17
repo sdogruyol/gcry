@@ -268,11 +268,31 @@ would pay the full spin and time out again — a permanent cost bought by a thre
 that no longer exists. Dropping loses the record, which is the lesser harm, and
 `stw_staged_wait_timeouts` counts it.
 
-**On by default**, and that is not the cautious choice, so here is the reasoning.
+**On by default.** The reasoning below is kept as written and then corrected,
+because the correction is the more useful half.
 
-The local repro is dead — `nested_spawn_uaf` 0/23 and `ec_queue_audit` 0/25 — so
-CI is the only place this defect is still observed, and **a knob nobody sets is
-never observed at all**. Left off, the question that matters most would stay
+> The local repro is dead — `nested_spawn_uaf` 0/23 and `ec_queue_audit` 0/25 —
+> so CI is the only place this defect is still observed, and a knob nobody sets
+> is never observed at all.
+
+**That was wrong, and measurably so.** The repro is not dead; it needs
+`GCRY_THREAD_CENSUS=1`, which reads `/proc` inside the pause and shifts the
+timing. On the same 16-worker workload: **0/20 crashes with the census off,
+16/25 with it on.** The observer had been there the whole time and this file
+called it dead — the earlier 0/23 and 0/25 runs simply had the census off.
+
+And with it on, the crashes are **not** the family the wait addresses:
+
+| | crashes | `Fiber#makecontext` family | `pthread_getattr_np` family |
+|---|---|---|---|
+| wait off | 16/25 | **15** | **0** |
+| wait on | 11/25 | 11 | 0 |
+
+So on this workload the wait has **no measurable effect** (16/25 against 11/25,
+Fisher p ≈ 0.26) and the thread family it was built for does not appear at all.
+It stays on — the window it closes is real and measured, the harm evidence is
+still nil, and the thread family is real in CI — but this file no longer claims
+it fixes anything the `Fiber` family suffers from. Left off, the question that matters most would stay
 unanswered indefinitely: not whether the wait helps the thread family, which is
 measured, but whether it also closes the **`Fiber` family** — the `makecontext`
 poison crashes on a `Deque(Fiber::Stack)` buffer, which has never been shown to
@@ -284,11 +304,13 @@ and the timeout safeguard bounds the worst case.
 
 So it ships on, `GCRY_STAGED_WAIT=0` turns it back off, and CI is the test.
 
-- **Worked**: `scheduler-roots`, `ec-queue-audit` and the STW × TLAB property
-  test go quiet over ~20 runs, against a base rate of roughly one red in four.
-- **Did not**: `ec-queue-audit` keeps dying on `Fiber#makecontext` poison while
-  the `pthread_getattr_np` shape disappears — which would say there are two
-  windows and only one is closed.
+- **Worked**: the `pthread_getattr_np` shape goes quiet in CI over ~20 runs,
+  against a base rate of roughly one red in four.
+- **Did not**: it keeps appearing.
+
+The `Fiber` family needs no CI to answer any more — it reproduces locally at
+16/25 under the census, which is the fastest observer this defect has had since
+2026-08-16 and reopens every measurement that was blocked on a live repro.
 
 ## What would settle it
 
