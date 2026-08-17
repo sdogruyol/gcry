@@ -14,6 +14,11 @@
 #
 #   poison       dereference gcry's freed-block pattern → must say use-after-free
 #                and name the knob, with no heap lookup at all.
+#   offset-poison  dereference the *tagged* poison plus 760 bytes, which is what
+#                a crash looks like when libc indexes a poisoned pointer before
+#                reading it. The tag survives the arithmetic, so a reader that
+#                trusts it decodes the wrong block — this arm requires the
+#                report to recover the base instead.
 #   free-block   dereference a pointer *into* a block that was freed → must say
 #                the address is in a FREE block.
 #   used-block   a bad offset inside a live block → must say USED, so the two
@@ -45,6 +50,18 @@ def crash_address(arm : String) : UInt64
   case arm
   when "poison"
     POISON
+  when "offset-poison"
+    # The shape a real crash takes when libc indexes a poisoned pointer before
+    # dereferencing it: `pthread_getattr_np` reading `struct pthread` at +0x418,
+    # Darwin at +760. The value still carries `0xDEAD` in its top bits, so a
+    # reader that only checks the tag decodes an address that is not the freed
+    # block — measured, it named a block five slots along and called it an
+    # explicit free. The report must recover the base instead.
+    ptr = GC.malloc(1024)
+    ptr.as(UInt64*).value = 0_u64
+    STDERR.puts "planted block 0x#{ptr.address.to_s(16)}"
+    GC.free(ptr)
+    Pointer(UInt64).new(ptr.address).value + 760
   when "free-block"
     # Freed, then read through a pointer into the middle of it. Poison is off
     # for this arm so the *block state* is what the report has to notice.
@@ -99,18 +116,32 @@ exe = Process.executable_path.not_nil!
 failures = [] of String
 
 ARMS = {
-  "poison"     => {"freed-block poison", true},
-  "free-block" => {"in a FREE block", false},
-  "used-block" => {"in a USED block", false},
-  "outside"    => {"outside gcry's heap span", true},
+  "poison" => {"freed-block poison", true},
+  # The expectation is filled in from what the child planted — see below. A
+  # fixed string here would pass on a report that recovered the *wrong* base,
+  # which is exactly the bug this arm exists for.
+  "offset-poison" => {"", true},
+  "free-block"    => {"in a FREE block", false},
+  "used-block"    => {"in a USED block", false},
+  "outside"       => {"outside gcry's heap span", true},
 }
 
 ARMS.each do |arm, (expect, needs_signal)|
   env = {"GCRY_SEGV_REPORT" => control ? "0" : "1"}
   env["GCRY_POISON_FREED"] = "1" if arm == "poison"
+  # The tag is what makes a block recoverable at all.
+  env["GCRY_POISON_TAG"] = "1" if arm == "offset-poison"
   captured = IO::Memory.new
   Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
+  if arm == "offset-poison"
+    planted = text.lines.find(&.starts_with?("planted block "))
+    unless planted
+      failures << "#{arm}: the child did not report what it planted"
+      next
+    end
+    expect = "bytes into the block at #{planted.split(' ')[2]}"
+  end
   saw = text.includes?(expect)
   gcry_line = text.includes?("gcry: SIGSEGV") || text.includes?("gcry: SIGBUS")
   puts "#{arm}: #{saw ? "named" : "NOT named"} (#{expect.inspect})"

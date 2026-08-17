@@ -144,13 +144,28 @@ module Gcry
       # names a block **base**; anything else is the poison with arithmetic done
       # to it, and names nothing.
       if heap && (info = heap.debug_block_info(Pointer(Void).new(src)))[:found] && info[:offset] != 0
+        # An offset was added to the poison before it faulted. The poison names
+        # a block *base*, so the base is recoverable: the containing block's
+        # user address is `src - offset`, and that is the block the free wrote
+        # — provided the added offset stayed inside it, which is exactly the
+        # case where `debug_block_info` reports a non-zero offset into a block
+        # that begins at the poisoned address. Say so, with the condition
+        # attached, instead of giving up: a Darwin catch on 2026-08-17 landed
+        # 760 bytes in and the report could otherwise name nothing, because the
+        # register reader that would carry the clean word is Linux-only.
+        base = src - info[:offset]
         len = RawOut.append(buf.to_unsafe, len,
-          "gcry: the poison in the fault has had an offset added to it (it lands ")
+          "gcry: the poison in the fault has an offset added to it — it lands ")
         len = RawOut.append_u64(buf.to_unsafe, len, info[:offset])
+        len = RawOut.append(buf.to_unsafe, len, " bytes into the block at 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, base)
         len = RawOut.append(buf.to_unsafe, len,
-          " bytes into a block, and poison always names a base), so it names no block. " \
-          "The value the *registers* hold is the one to decode\n")
+          ", so the free that wrote it was of that block, unless the offset was larger than the " \
+          "block and landed in a later one\n")
         RawOut.flush(buf.to_unsafe, len)
+        # Describe the recovered base in the same terms as any other block,
+        # rather than stopping at "it names no block".
+        report_poison_block(heap, base)
         return
       end
       len = RawOut.append(buf.to_unsafe, len, "gcry: the free that wrote it was of the block at 0x")
@@ -160,6 +175,18 @@ module Gcry
         RawOut.flush(buf.to_unsafe, len)
         return
       end
+      RawOut.flush(buf.to_unsafe, len)
+      report_poison_block(heap, src)
+    end
+
+    # Describes the block a poison names, in the same terms wherever the address
+    # came from — decoded directly, or recovered from a poison that had an
+    # offset added to it.
+    private def self.report_poison_block(heap : Heap, src : UInt64) : Nil
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: that block, 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, src)
       ptr = Pointer(Void).new(src)
       unless heap.in_heap_span?(ptr)
         len = RawOut.append(buf.to_unsafe, len,
