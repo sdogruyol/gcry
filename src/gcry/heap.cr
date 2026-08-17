@@ -733,6 +733,47 @@ module Gcry
     POISON_TAG_MASK  = 0xFFFF_u64 << 48
     POISON_ADDR_MASK = (1_u64 << 48) - 1
 
+    # `GCRY_THREAD_CENSUS=1`. See src/gcry/platform/linux_thread_census.cr.
+    property thread_census : Bool = false
+
+    # Collections where the OS reported more threads than Crystal's list
+    # yielded, and the largest such difference. A gap is a thread running
+    # through the stopped world.
+    getter thread_census_checks : UInt64 = 0_u64
+    getter thread_census_gaps : UInt64 = 0_u64
+    getter thread_census_gap_max : Int32 = 0
+    # Collections where /proc could not answer — counted, so "no gaps" can
+    # never be the result of never having looked.
+    getter thread_census_unanswered : UInt64 = 0_u64
+
+    private def census_threads(listed : Int32) : Nil
+      @thread_census_checks &+= 1
+      os = Platform.os_thread_count
+      unless os
+        @thread_census_unanswered &+= 1
+        return
+      end
+      gap = os - listed
+      return if gap <= 0
+      @thread_census_gaps &+= 1
+      @thread_census_gap_max = gap if gap > @thread_census_gap_max
+      return if @thread_census_gaps > 4
+
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: thread census — the OS reports ")
+      len = RawOut.append_u64(buf.to_unsafe, len, os.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " thread(s) and Crystal's list yielded ")
+      len = RawOut.append_u64(buf.to_unsafe, len, listed.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, ", so ")
+      len = RawOut.append_u64(buf.to_unsafe, len, gap.to_u64)
+      len = RawOut.append(buf.to_unsafe, len,
+        " thread(s) are running through this stopped world, unscanned. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     # Opt-in on top of `@poison_freed`: it makes every freed block's payload
     # differ, which a future reader might be tempted to rely on for equality.
     property poison_tag_addr : Bool = false

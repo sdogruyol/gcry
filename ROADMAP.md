@@ -404,11 +404,22 @@ CI asymmetry that hid both.
       **Not reproduced**: 0 of 200 threads caught themselves freed, and the
       aggressive arms hang in a shape that resembles the known STW-startup hang,
       so they say nothing. Written down as a hypothesis with a measured symptom.
-      **Next, and it needs no repro**: at `stop_world`, compare the threads
-      Crystal's list yields against `/proc/self/status:Threads`. A difference is
-      a thread outside the stopped world, and it turns the argument into a
-      counter — the move that worked for the register stubs and the stack-bounds
-      snapshot. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+      **Measured, and the window is real.** `GCRY_THREAD_CENSUS=1` compares
+      Crystal's list against `/proc/self/status:Threads` at every `stop_world`
+      and has caught it: *"the OS reports 10 thread(s) and Crystal's list
+      yielded 9, so 1 thread(s) are running through this stopped world,
+      unscanned"*. Rate on a churn workload at 160 collections a run, six runs
+      an arm: 0/6 at 4 workers, 1 sighting at 8, **2/6 at 16** — about one
+      collection in a thousand, one thread, during worker startup. Counters on
+      `/gc-stats` (`_checks` / `_gaps` / `_gap_max` / `_unanswered`, the last so
+      "no gaps" cannot be "never looked"), gated in `process_spec`, broken on
+      purpose and observed red.
+      It does **not** yet show the window causes the crash: an unscanned thread
+      only matters if something is reachable solely from it. **Next**: make the
+      census say *what* the invisible thread was holding, or close the window
+      outright by registering the thread from `GC.pthread_create` — wrapping the
+      start routine as Boehm does — and see whether the aarch64 crashes stop.
+      `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
       green on re-run); it recurred four hours later in run `31950823605`

@@ -261,6 +261,28 @@ describe "process GC free-path flag" do
 end
 
 {% if flag?(:linux) %}
+  describe "process GC thread census" do
+    # gcry learns about threads from Crystal's list, so a thread that exists but
+    # has not pushed itself yet is neither suspended nor scanned. The census
+    # asks the kernel instead, and it is only worth having if it answers: a
+    # reader that returns nothing looks exactly like a process with no extra
+    # threads. Measured at `stop_world`, it has seen a real gap — the OS
+    # reporting 10 threads against Crystal's 9
+    # (bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md).
+    it "reads the kernel's thread count and never reports fewer than the list" do
+      os = Gcry::Platform.os_thread_count
+      os.should_not be_nil
+      os.not_nil!.should be > 0
+
+      listed = 0
+      Thread.unsafe_each { listed += 1 }
+      # Crystal removes a thread from the list *before* its pthread exits, so
+      # the kernel can never know about fewer threads than the list yields.
+      # The other direction is the window this exists to measure.
+      os.not_nil!.should be >= listed
+    end
+  end
+
   describe "process GC pthread stack-bounds snapshot" do
     # The other half of "the platform answered nothing", on the pthread side.
     # `snapshot_pthread_stack_bounds` asks libc for each thread's stack range

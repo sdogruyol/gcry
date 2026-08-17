@@ -71,6 +71,42 @@ So: **the mechanism above is a hypothesis with a measured symptom and a
 source-derived path, not a reproduction.** It is written down at that strength
 deliberately.
 
+## Measured: the window is real, and rare
+
+`GCRY_THREAD_CENSUS=1` counts, at every `stop_world`, what Crystal's list yields
+against what `/proc/self/status` says the process has. It has seen the
+difference:
+
+```
+gcry: thread census — the OS reports 10 thread(s) and Crystal's list yielded 9,
+      so 1 thread(s) are running through this stopped world, unscanned.
+      collection 4
+```
+
+Rate, on a fiber-churn workload with 160 collections per run, six runs per arm:
+
+| workers | runs with a gap | gap collections |
+|---|---|---|
+| 4 | 0/6 | 0 |
+| 8 | 0/6 (1 in an earlier run) | 1 |
+| 16 | **2/6** | 2 |
+
+So roughly **one collection in a thousand** has a thread the collector neither
+stopped nor scanned, the gap is **one thread**, and it scales with how much
+thread creation the workload does — collection 4 in the observed case, i.e.
+during worker startup, which is where the argument said it would be.
+
+That is the argument turned into a number. It does **not** show that the window
+causes the crash — a thread being unscanned for one collection only matters if
+something is reachable solely from it, which is the next question — but it
+removes "this is theoretical" as an answer.
+
+`thread_census_checks` / `_gaps` / `_gap_max` / `_unanswered` are on
+`/gc-stats`. The last one exists so "no gaps" can never be the result of never
+having looked, and the reader returns `nil` rather than 0 when `/proc` cannot
+answer, for the same reason. Gated in `process_spec` (Linux; Darwin answers
+`nil` by design), broken on purpose and observed red.
+
 ## What would settle it
 
 Instrument rather than reproduce. gcry can count what it cannot see:

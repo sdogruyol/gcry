@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_THREAD_CENSUS=1` — is every thread inside the stopped world?** gcry
+  learns about threads from Crystal's list: `stop_world` suspends what
+  `Thread.unsafe_each` yields and the stack scans walk the same set, so a thread
+  that exists at the OS level but has not yet pushed itself onto
+  `Thread.threads` is neither stopped nor scanned. The census counts the list
+  against `/proc/self/status:Threads` at every `stop_world` and **has caught the
+  difference** — the OS reporting 10 threads against Crystal's 9, during worker
+  startup. About one collection in a thousand on a churn workload, one thread,
+  scaling with thread creation (0/6 runs at 4 workers, 2/6 at 16). Off by
+  default: it reads `/proc` inside the pause. The reader returns `nil` rather
+  than 0 when `/proc` cannot answer, and `thread_census_unanswered` counts those,
+  so "no gaps" can never be the result of never having looked. Linux only;
+  Darwin answers `nil` by design. Gated in `process_spec`, broken on purpose and
+  observed red. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
 - **The pthread stack-bounds snapshot is countable, and a fault in it names the
   thread.** `snapshot_pthread_stack_bounds` asks libc for each thread's stack
   range before the suspend signals go out; a thread it visits but gets no bounds

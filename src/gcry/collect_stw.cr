@@ -90,9 +90,17 @@ module Gcry
           # moved out of the suspension window; `Thread.lock` is already held, so
           # the set snapshotted here is exactly the set scanned below.
           Platform.begin_stack_bounds_snapshot
+          listed = 0
           Thread.unsafe_each do |thread|
+            listed += 1
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
+          # Does the set about to be stopped account for every thread the
+          # process has? gcry learns about threads from Crystal's list, so a
+          # thread that exists but has not pushed itself yet is neither
+          # suspended nor scanned (src/gcry/platform/linux_thread_census.cr).
+          # Off by default: it reads /proc inside the pause.
+          census_threads(listed) if @thread_census
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)

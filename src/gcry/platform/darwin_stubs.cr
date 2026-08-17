@@ -102,3 +102,14 @@ module Gcry
     {% end %}
   end
 end
+
+module Gcry
+  module Platform
+    # No portable `/proc/self/status` here, and a number nobody measured is
+    # worse than none — see `linux_thread_census.cr`. `nil` means "cannot
+    # answer", which a caller must handle rather than compare against zero.
+    def self.os_thread_count : Int32?
+      nil
+    end
+  end
+end
