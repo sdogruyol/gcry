@@ -104,8 +104,14 @@ module Gcry
     @mutator_seen_count = 0
     getter mutator_seen_overflows : UInt64 = 0_u64
 
+    # Addresses dropped for want of a slot in *this* collection. The cumulative
+    # counter answers "has this ever happened"; only the per-collection one can
+    # qualify a single "never offered" claim.
+    @mutator_seen_dropped = 0_u64
+
     protected def reset_mutator_seen : Nil
       @mutator_seen_count = 0
+      @mutator_seen_dropped = 0_u64
     end
 
     protected def note_mutator_candidate(addr : UInt64) : Nil
@@ -121,6 +127,7 @@ module Gcry
       end
       if @mutator_seen_count >= MUTATOR_SEEN_SLOTS
         @mutator_seen_overflows &+= 1
+        @mutator_seen_dropped &+= 1
         return
       end
       @mutator_seen[@mutator_seen_count] = addr
@@ -181,9 +188,22 @@ module Gcry
                 " dies unreferenced: not in the heap, not in a suspended thread's registers, and " \
                 "never offered by the mutator-stack scan. collection ")
               l2 = RawOut.append_u64(b2.to_unsafe, l2, @collections)
+              # The offered/not-offered claim is only as good as the table it is
+              # read from. A full table drops later addresses silently, and the
+              # answer would then be "not recorded", not "not offered".
+              l2 = RawOut.append(b2.to_unsafe, l2, " [mutator table ")
+              l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_count.to_u64)
+              l2 = RawOut.append(b2.to_unsafe, l2, "/")
+              l2 = RawOut.append_u64(b2.to_unsafe, l2, MUTATOR_SEEN_SLOTS.to_u64)
+              l2 = RawOut.append(b2.to_unsafe, l2, ", dropped ")
+              l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_dropped)
+              l2 = RawOut.append(b2.to_unsafe, l2, "]")
               l2 = RawOut.append(b2.to_unsafe, l2, "\n")
               RawOut.flush(b2.to_unsafe, l2)
             end
+            # Every place gcry looks has now said no. Ask the kernel where the
+            # value actually is (src/gcry/address_space_audit.cr).
+            audit_address_space_once(addr, header.value.size.to_u64)
           end
           @dying_offered_by_mutator &+= 1 if offered
           next unless found

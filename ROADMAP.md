@@ -253,11 +253,35 @@ CI asymmetry that hid both.
       gcry consults**: heap edges, suspended registers, the mutator scan, and
       the explicit root set (0 of 0 in every crash report). Immediately
       afterwards the address is in `@buffer` and on a running fiber's stack.
-      **Next**: name the region instead of guessing. Extend the dying audit to
-      search the whole reachable address space for that value at the moment of
-      death — `/proc/self/maps` regions, TLS blocks, and fiber stacks below
-      their scan windows — and report which one holds it. Every earlier step in
-      this hunt moved only once "somewhere" became a name.
+      **The region is named, and it is a stack that belongs to nobody.**
+      `GCRY_ADDRESS_SPACE_AUDIT=1` (`src/gcry/address_space_audit.cr`) walks
+      every readable mapping in `/proc/self/maps` at the moment of death and
+      searches it for the dying block's address. Across fourteen runs the
+      address is found on **in-flight fiber stacks** — mapped
+      `STACK_SIZE - PAGE_SIZE` with a guard page below, owned by no `Fiber` and
+      held in no pool — **61 times**, and on **pooled** stacks sitting in a
+      `Fiber::StackPool` deque **24 times**. Both land 968–1408 bytes below the
+      stack top, which is where `makecontext` writes a new fiber's first frame.
+      gcry scans the stack of every fiber `Fiber.unsafe_each` yields; between
+      `stack_pool.checkout` and the `Fiber` being published, and again after the
+      fiber finishes, the stack is yielded by nothing and scanned by nothing.
+      That is a **root source gcry has never had**, and it is the one the value
+      crosses the collection in.
+      Two instrument corrections make those numbers readable rather than
+      flattering: the first version reported 47 hits that were the audit's *own
+      frames* (it runs on the collecting fiber's stack and carries the target as
+      an argument — now compared against `Roots.last_mutator_low/high`, the
+      window the scan actually used), and it took a **SIGBUS** on a mapping
+      `/proc/self/maps` calls readable, which killed the collection it was
+      measuring — reads now go through `pread` on `/proc/self/mem`.
+      **Next**: separate live from stale. On an in-flight stack, at
+      `makecontext`'s offset, the word is live; on a pooled stack the fiber that
+      wrote it is finished and the same word may be a dead copy. Scanning
+      pooled stacks would be conservative and cheap; covering the in-flight
+      window needs gcry to know a stack is checked out, which nothing tells it
+      today. Measure which of the two the crash actually needs before building
+      either.
+      `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

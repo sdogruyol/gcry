@@ -68,6 +68,20 @@ module Gcry
       len
     end
 
+    # A byte range that is not a `String`. `/proc/self/maps` pathnames arrive as
+    # a pointer into a read buffer, and naming the region that holds a value is
+    # the whole point of the address-space audit; wrapping one in a `String`
+    # would allocate.
+    def self.append_bytes(buf : UInt8*, len : Int32, src : UInt8*, count : Int32) : Int32
+      i = 0
+      while i < count && len < LIMIT
+        buf[len] = src[i]
+        len += 1
+        i += 1
+      end
+      len
+    end
+
     def self.flush(buf : UInt8*, len : Int32) : Nil
       LibC.write(2, buf, LibC::SizeT.new(len))
     end

@@ -33,6 +33,7 @@ require "./gcry/raw_out"
 require "./gcry/ec_queue_audit"
 require "./gcry/birth_grace"
 require "./gcry/mark_audit"
+require "./gcry/address_space_audit"
 require "./gcry/poison_holders"
 require "./gcry/segv_report"
 

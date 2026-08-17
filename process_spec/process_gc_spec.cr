@@ -429,4 +429,52 @@ end
       Gcry::Platform.stack_bounds_seen_full?.should be_false
     end
   end
+
+  describe "process GC address-space walk" do
+    # The address-space audit's answer is "the value is in this region" or "the
+    # value is nowhere", and the second one is only worth anything if the walk
+    # actually walked. A maps parser that yields nothing produces exactly the
+    # same output as a clean process
+    # (bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md), so the walk
+    # is asked about regions whose addresses this test already knows.
+    it "yields the region that contains a mapping it was just handed" do
+      len = LibC::SizeT.new(64 * 1024)
+      # MAP_PRIVATE | MAP_ANONYMOUS, PROT_READ | PROT_WRITE.
+      mapped = LibC.mmap(Pointer(Void).null, len, 3, 0x22, -1, LibC::OffT.new(0))
+      mapped.address.should_not eq(0)
+      mapped.address.should_not eq(UInt64::MAX)
+
+      begin
+        target = mapped.address
+        stack_addr = pointerof(len).address
+
+        regions = 0
+        found_mapping = false
+        found_stack = false
+        walked = Gcry::Platform.each_map_region do |lo, hi, perms, _name, _name_len|
+          regions += 1
+          # Every region the walk yields must be a range, and its permission
+          # field must be one of the two things that column can start with. A
+          # parser that mixes up columns still produces plausible-looking
+          # numbers, and the search would then read the wrong bytes. The walker
+          # deliberately yields unreadable regions too — filtering is the
+          # caller's job — so `-` is as correct here as `r`.
+          hi.should be > lo
+          (perms[0] == 'r'.ord.to_u8 || perms[0] == '-'.ord.to_u8).should be_true
+          found_mapping = true if target >= lo && target < hi
+          found_stack = true if stack_addr >= lo && stack_addr < hi
+        end
+
+        walked.should be_true
+        # Broken on purpose and observed red: raising `yield_map_line`'s minimum
+        # line length to 20 000 makes the walk parse nothing while still
+        # reporting success, and this is the assertion that catches it.
+        regions.should be > 1
+        found_mapping.should be_true
+        found_stack.should be_true
+      ensure
+        LibC.munmap(mapped, len)
+      end
+    end
+  end
 {% end %}

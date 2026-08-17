@@ -648,6 +648,15 @@ module GC
       heap.mark_audit = true
       heap.dying_register_audit = true
     end
+    # Where in the address space does a dying block's value actually live?
+    # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
+    # audit's unreferenced branch that asks the question. Off by default and
+    # very expensive — it reads the resident address space inside the pause.
+    if env_flag_one?("GCRY_ADDRESS_SPACE_AUDIT")
+      heap.mark_audit = true
+      heap.dying_register_audit = true
+      heap.address_space_audit = true
+    end
     if env_flag_one?("GCRY_MARK_AUDIT_ALL")
       heap.mark_audit = true
       heap.mark_audit_all_parents = true

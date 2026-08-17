@@ -6,6 +6,7 @@
   require "./platform/linux_pagemap"
   require "./platform/linux_proc_sp"
   require "./platform/linux_thread_census"
+  require "./platform/linux_address_space"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"

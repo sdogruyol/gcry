@@ -111,5 +111,13 @@ module Gcry
     def self.os_thread_count : Int32?
       nil
     end
+
+    # Same contract as `linux_address_space.cr`: false means "could not look",
+    # which is not the same answer as "walked everything and found nothing".
+    # `mach_vm_region` could enumerate this, but nothing has needed it yet and
+    # an unmeasured walk is worse than an honest refusal.
+    def self.each_map_region(& : UInt64, UInt64, UInt8*, UInt8*, Int32 ->) : Bool
+      false
+    end
   end
 end
