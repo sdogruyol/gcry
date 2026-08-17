@@ -673,6 +673,7 @@ module GC
     end
     heap.birth_grace_noroot = true if env_flag_one?("GCRY_BIRTH_GRACE_NOROOT")
     heap.birth_grace_dummy = true if env_flag_one?("GCRY_BIRTH_GRACE_DUMMY")
+    heap.birth_grace_touch = true if env_flag_one?("GCRY_BIRTH_GRACE_TOUCH")
     if sp = env_u64("GCRY_POST_MARK_SPIN")
       heap.post_mark_spin = sp
     end

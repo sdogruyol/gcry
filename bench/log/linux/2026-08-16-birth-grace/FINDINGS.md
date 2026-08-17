@@ -252,11 +252,40 @@ and today's 10/18 → 0/18 are real and reproducible, and they are not evidence
 that keeping newborn blocks alive fixes anything — the null-rooting arm settles
 that.
 
-**Next**: narrow inside the walk. An arm that reads each recorded block's header
-and does nothing else separates "touching the header" from the rest; if that
-alone is enough, the question becomes why reading a header between mark and
-sweep changes a use-after-free, which would point at the sweep rather than at
-the mark. Save only 192-byte blocks, then only the `Deque` buffer sizes (768 / 1536
+### Narrowed to one read
+
+Two more interleaved arms, n=18 each with the control re-run inside the batch:
+
+| arm | crashes |
+|---|---|
+| control | 9–11/18 |
+| grace ≥384, full walk | **0/18** |
+| grace ≥384, **empty ring** (size filter matches nothing) | 14/18 |
+| grace ≥384, **`find_block` then stop** | 8/18 |
+
+So the ring's **contents** matter — an empty ring is no better than control — and
+resolving each block is not enough either. What is left between the
+`find_block`-only arm and the full walk is `BlockHeader.free?` and
+`heap_marked?`, and both of those read the same word: **`header.value.flags`**.
+
+**The finding, stated exactly: reading each newborn ≥384-byte block's flags
+word, between mark and sweep, takes the crash rate from ~10/18 to 0/18.** Not
+rooting it (null-rooting is as effective), not recording it (recording without
+the walk does nothing), not delay (a bare spin does nothing), and not merely
+locating it (`find_block` alone does nothing).
+
+That is not a liveness effect and this file does not claim to explain it. What
+it does is point somewhere specific for the first time: the **header flags
+word** — which is where `FREE`, `SWEPT` and the mark generation live, and where
+the sweep and the allocator's fast paths both write. A defect that a targeted
+read of that word suppresses, while an untargeted delay does not, looks like a
+race on it rather than a mistake about reachability.
+
+**Next**, and it is a different kind of question from everything above: look for
+a data race on `BlockHeader` flags between the sweep and a mutator — the TLAB
+fast paths write `Flags::FREE` directly (`tlab.cr:410/413/457/503/757`), the
+sweep writes them under STW, and `free?`/`marked?` are plain reads with no
+ordering anywhere. Save only 192-byte blocks, then only the `Deque` buffer sizes (768 / 1536
 / 3072), and see which subset still takes the crash to zero. If only the buffer
 sizes do, the mechanism is reuse timing on the buffer and the `Fiber` saves are
 a coincidence of volume; if only 192 does, the `Fiber` is back in the frame and

@@ -201,8 +201,20 @@ CI asymmetry that hid both.
       crashes are the **`Fiber` family** — 15 of 16 in `Fiber#makecontext`, none
       in `pthread_getattr_np`. So the family that could not be measured is now
       the one that reproduces fastest, in about ten minutes a batch.
-      That reopens everything that was blocked on a live repro, starting with:
-      bisect the grace by size class. Save only 192-byte blocks, then only the
+      That reopened everything blocked on a live repro, and the size-class
+      bisect ran. It eliminated more than it confirmed: the grace's effect is
+      **not** the rooting (null-rooting is as effective), not the recording
+      (recording without the walk does nothing), not a delay (a bare post-mark
+      spin does nothing), not the `Fiber`-sized blocks (192-only is no better
+      than control), and not merely locating the blocks (`find_block` alone does
+      nothing). What remains is a single read: **`header.value.flags`** on each
+      newborn ≥384-byte block, between mark and sweep, which takes ~10/18 to
+      **0/18**.
+      **Next**: that points at the flags word rather than at reachability — look
+      for a data race on `BlockHeader` flags between the sweep and the TLAB fast
+      paths, which write `Flags::FREE` directly with no ordering, while
+      `free?` / `marked?` are plain reads.
+      `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing
       and the `Fiber` saves were volume; only 192 ⇒ the `Fiber` is back in the

@@ -109,6 +109,9 @@ module Gcry
     # See the dummy branch in `mark_birth_grace_roots`.
     property birth_grace_dummy : Bool = false
 
+    # See the touch branch in `mark_birth_grace_roots`.
+    property birth_grace_touch : Bool = false
+
     protected def mark_birth_grace_roots : Nil
       return if @birth_slots.null?
       if @birth_grace_noroot
@@ -125,6 +128,12 @@ module Gcry
         i &+= 1
         next if ptr.null?
         header = find_block(ptr)
+        # `GCRY_BIRTH_GRACE_TOUCH=1`: resolve the block and stop. Splits "the
+        # walk resolves each newborn block" from everything after it — the
+        # `marked?` read and the root call — now that an empty ring has been
+        # shown not to help (14/18 against a control of 11/18) while the same
+        # walk over real entries gives 0/18.
+        next if @birth_grace_touch
         next unless header
         next if BlockHeader.free?(header)
         unless heap_marked?(header)
