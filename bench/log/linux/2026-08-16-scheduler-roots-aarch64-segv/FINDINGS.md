@@ -1,4 +1,10 @@
-# An aarch64 SEGV in `pthread_getattr_np` — which turned out to be the use-after-free
+# A SEGV in `pthread_getattr_np` — which turned out to be the use-after-free
+
+> **Not aarch64-specific, 2026-08-17.** Run `32006847158` hit the same call, the
+> same way, on **x86_64** — in `stw_mt_property_test`, a harness that uses plain
+> `Thread.new` rather than execution-context workers. Every earlier sighting
+> being on aarch64 was sampling, not a property of the platform. The title is
+> kept for continuity; the "aarch64" in it is wrong.
 
 > **Resolved as to mechanism, 2026-08-17 (occurrence 5).** This is not a
 > separate defect and not a libc lifetime question. gcry was handed a
@@ -15,6 +21,9 @@
 | `31950823605` | `4645bf7` | `make ec-queue-audit` | `0xff00f1800358` |
 | `31961004141` | `c28bea5` | `make ec-queue-audit` | `0xff6dbcc00358` |
 | `31995517368` | `ea56fb8` | `make ec-queue-audit` | `0xff38b60000d8` |
+| `31997472378` | `81123d2` | `make ec-queue-audit` | `0xdeadff86af17db50` (poison) |
+| `32006847158` | `2a8a18b` | `stw_mt_property_test`, **x86_64** | `0x7f64e2e00348` |
+| `32007492923` | `32dff1d` | `make scheduler-roots` | — |
 
 Both `test (aarch64 native)`, both the same call chain, and both addresses end
 in the same `800358`. A re-run of the first was green, which is why it was
@@ -297,8 +306,11 @@ still points at it.
 
 ## Status
 
-Mechanism **resolved** at occurrence 5; the underlying use-after-free is
-still open. 5 occurrences, all aarch64, all in CI, across two gates. Still
+Mechanism **resolved** at occurrence 5; the underlying use-after-free is still
+open. **7 occurrences**, in CI, across **three** gates (`scheduler-roots`,
+`ec-queue-audit`, `stw_mt_property_test`) and **both** architectures. The last
+of them, on x86_64, could say nothing — the diagnostics were not enabled on that
+step, which is now fixed. Still
 not reproduced on demand and never seen outside CI. It is no longer a one-off,
 so the two counters proposed above are worth building rather than merely
 proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be

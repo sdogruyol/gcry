@@ -420,6 +420,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The STW × TLAB property test now runs with the crash diagnostics on.** It
+  caught the open use-after-free on 2026-08-17 — SIGSEGV inside
+  `pthread_getattr_np` under `stop_world`, on **x86_64**, in a harness that uses
+  plain `Thread.new` — and could say nothing about it, because
+  `GCRY_POISON_HOLDERS` and `GCRY_THREAD_CENSUS` were not set on that step. That
+  sighting also settled something: the crash is **not aarch64-specific**, and
+  not specific to execution-context workers. Every earlier sighting being on
+  aarch64 was sampling.
+
 - **`make ec-queue-audit` and the 5 h soak arm now run `GCRY_POISON_HOLDERS=1`
   instead of `GCRY_POISON_FREED=1`.** Same memset, strictly more information: the
   tag puts the freed block's address in the poison, and the crash report then

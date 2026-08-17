@@ -186,6 +186,14 @@ jobs:
           # that `bench/stw_watchdog.cr` already established as CI-proof against
           # a runner simply descheduling the collector.
           GCRY_STW_WATCHDOG_MS: "10000"
+          # This gate caught the open use-after-free on 2026-08-17 — SIGSEGV in
+          # `pthread_getattr_np` under `stop_world`, on **x86_64**, in a harness
+          # that uses plain `Thread.new` — and could say nothing about it,
+          # because the diagnostics were not on here. They cost a memset per
+          # free and nothing until something faults; a gate that catches this
+          # defect should not waste the sighting.
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
