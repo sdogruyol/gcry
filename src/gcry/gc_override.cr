@@ -644,6 +644,10 @@ module GC
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
+    if env_flag_one?("GCRY_MARK_AUDIT_ALL")
+      heap.mark_audit = true
+      heap.mark_audit_all_parents = true
+    end
     # Count the threads the OS has against the ones Crystal's list yields, at
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.

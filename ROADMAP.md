@@ -210,10 +210,36 @@ CI asymmetry that hid both.
       nothing). What remains is a single read: **`header.value.flags`** on each
       newborn ≥384-byte block, between mark and sweep, which takes ~10/18 to
       **0/18**.
-      **Next**: that points at the flags word rather than at reachability — look
-      for a data race on `BlockHeader` flags between the sweep and the TLAB fast
-      paths, which write `Flags::FREE` directly with no ordering, while
-      `free?` / `marked?` are plain reads.
+      That pointed at the flags word rather than at reachability, and the first
+      guess there is **out**: TLAB is off in this configuration
+      (`tlab_enabled=false`), so its unordered `Flags::FREE` writes cannot be
+      the writer.
+      **And running both instruments together sharpens the real contradiction.**
+      Ten crash reports: freed by the **sweep** 10/10, block 1536/768 bytes, and
+      exactly one holder every time — the live `Deque`'s `@buffer`. Six audited
+      crashes: **zero missed edges**. Both cannot be complete, and the gap is
+      what the audit walks — **only marked parents**. If the `Deque` was itself
+      unmarked at that collection its edge is never examined, so "the mark is
+      complete" means *surviving objects have no dangling edges*, not *nothing
+      dangling survives*.
+      **Audited from the other side, and the answer is neither.**
+      `GCRY_MARK_AUDIT_ALL=1` walks every used block as a parent, marked or not,
+      and across five crashing runs reports **nothing**: when the buffer is
+      freed, no pointer to it exists anywhere in the used heap. At fault time
+      the holder search finds it on a **running fiber's stack** (17 hits, all
+      `running`) under the `Deque` → `Fiber::StackPool` chain. So the buffer is
+      allocated, held only in a register or stack slot, freed by a collection
+      that cannot see it, and *then* stored into `@buffer` — the birth window,
+      for the buffer.
+      **But the suppressor is still not the rooting**: at n=24 interleaved,
+      control 15/24, grace 0/24, and grace **rooting `null`** also 0/24. Two
+      solid measurements that do not reconcile.
+      **Next**: the one place not measured for this family — the registers of
+      the threads suspended at that collection. `locate_birth_register` asks
+      exactly that and found nothing for the `Fiber` case on the old repro;
+      re-run it under the fast observer with the ≥384 filter. In the registers
+      ⇒ the register scan drops it and this is root coverage after all. Not
+      there ⇒ the value lives somewhere gcry has never looked.
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

@@ -40,6 +40,25 @@ module Gcry
     # `GCRY_MARK_AUDIT=1`. See src/gcry/mark_audit.cr.
     property mark_audit : Bool = false
 
+    # `GCRY_MARK_AUDIT_ALL=1`: walk **every** used block as a parent, not only
+    # the marked ones, and report the parent's mark state with each edge into a
+    # dying block.
+    #
+    # The default walk asks "does anything that survives point at something
+    # about to be freed?" and answered *no* in six crashing runs — while the
+    # crash report showed a live `Deque` pointing at exactly such a block. Both
+    # cannot be complete, and the gap is this filter: an unmarked parent's edges
+    # are never examined, so the audit cannot see the very edge in question if
+    # the `Deque` was itself unmarked
+    # (`bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`).
+    property mark_audit_all_parents : Bool = false
+
+    # Edges from an **unmarked** parent into a dying block. Garbage pointing at
+    # garbage is ordinary and expected; what makes it worth counting is that the
+    # `Deque` in the crash reports is alive afterwards, so finding it here would
+    # say it was dying at the collection that freed its buffer.
+    getter mark_audit_dying_edges : UInt64 = 0_u64
+
     # Missed edges seen across the process, cumulative. On `/gc-stats` so a run
     # that ends without a crash still says whether the mark was complete.
     getter mark_audit_misses : UInt64 = 0_u64
@@ -62,7 +81,7 @@ module Gcry
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
           next if BlockHeader.free?(header)
-          next unless heap_marked?(header)
+          next unless heap_marked?(header) || @mark_audit_all_parents
           reported = audit_block(header, pointerof(edges), pointerof(misses), reported)
           next
         end
@@ -75,7 +94,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          if !BlockHeader.free?(header) && heap_marked?(header)
+          if !BlockHeader.free?(header) && (heap_marked?(header) || @mark_audit_all_parents)
             reported = audit_block(header, pointerof(edges), pointerof(misses), reported)
           end
           cursor += block_bytes
@@ -123,19 +142,29 @@ module Gcry
         next if BlockHeader.free?(child)
         edges.value &+= 1
         next if heap_marked?(child)
-        misses.value &+= 1
+        parent_marked = heap_marked?(header)
+        if parent_marked
+          misses.value &+= 1
+        else
+          # Garbage pointing at garbage. Counted separately so it cannot inflate
+          # the miss count, and reported because *which* garbage matters: the
+          # crash's holder is a `Deque` that is alive afterwards.
+          @mark_audit_dying_edges &+= 1
+        end
         next unless reported < MARK_AUDIT_REPORT_LIMIT
         reported += 1
-        report_missed_edge(header, base, (i &- 1) &* sizeof(UInt64), child, w)
+        report_missed_edge(header, base, (i &- 1) &* sizeof(UInt64), child, w, parent_marked)
       end
       reported
     end
 
     private def report_missed_edge(parent : BlockHeader*, parent_base : UInt64, offset : UInt64,
-                                   child : BlockHeader*, child_addr : UInt64) : Nil
+                                   child : BlockHeader*, child_addr : UInt64,
+                                   parent_marked : Bool = true) : Nil
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: mark audit — marked block 0x")
+      len = RawOut.append(buf.to_unsafe, len,
+        parent_marked ? "gcry: mark audit — marked block 0x" : "gcry: mark audit — UNMARKED (dying) block 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, parent_base)
       len = RawOut.append(buf.to_unsafe, len, " type_id ")
       len = RawOut.append_u64(buf.to_unsafe, len, Pointer(UInt32).new(parent_base).value.to_u64)

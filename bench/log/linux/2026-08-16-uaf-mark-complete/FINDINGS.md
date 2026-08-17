@@ -129,6 +129,82 @@ flag is only as good as every site that rewrites the word it lives in. The bit
 was added, used to draw a conclusion, and the conclusion found the *flag's* bug
 rather than the collector's.
 
+## 2026-08-17: both instruments run together, and they contradict each other
+
+With the fast observer (`GCRY_THREAD_CENSUS=1`, which brings the defect back —
+16/25 against 0/20 with it off) the crash report and the mark audit can be run
+in the same process. Ten crash reports and six audited crashes:
+
+| | |
+|---|---|
+| freed by | **SWEEP, 10 of 10** (the flag now survives freelist rebuilds) |
+| block size | 1536 (×8), 768 (×2) — `Deque(Fiber::Stack)` capacities |
+| holders | **one**, every time: a 32-byte block, `type_id` 209, pointer at +16, value `block+0` — the deque's `@buffer` |
+| mark audit | **zero missed edges, 6 of 6 crashing runs** |
+
+Read together they cannot both be complete:
+
+- at fault time a **live** `Deque` points at a block the sweep freed;
+- at sweep time **no surviving block** pointed at any block about to be freed.
+
+The resolution is in what the audit walks: **only marked parents**. If the
+`Deque` object itself was unmarked at that collection, its edge to the buffer is
+never examined, and the audit reports a clean bill while the very edge that
+matters goes unchecked. A "the mark is complete" result is therefore weaker than
+it reads — it says *surviving* objects have no dangling edges, not that nothing
+dangling survives.
+
+### The other side, audited: nothing in the heap points at the dying block
+
+`GCRY_MARK_AUDIT_ALL=1` drops the "parent must be marked" filter and walks
+**every** used block, reporting the parent's mark state with each edge into a
+block about to be freed. Across five crashing runs it reports **nothing at all**
+— not from marked parents, not from unmarked ones.
+
+So at the moment the buffer is freed, **no pointer to it exists anywhere in the
+used heap**. The `Deque` does not point at it yet. And at fault time the
+poison-holder search finds it on a **running fiber's stack** (17 hits across the
+crash reports, all `(running)`), with the `Deque` → `Fiber::StackPool` chain
+above it.
+
+That fixes the sequence beyond argument:
+
+1. the buffer is allocated and held **only** in a register or a stack slot of a
+   running thread;
+2. a collection runs and frees it, because nothing it scans holds it;
+3. the mutator then stores it into `@buffer`, and the next read of the deque
+   walks into poison.
+
+Which is the birth window, for the buffer rather than for a `Fiber` or a
+`Thread`.
+
+### And the suppressor is still not the rooting
+
+The obvious reading of that sequence — the birth grace works because it roots
+the newborn buffer — is **wrong**, and this is the third arm to say so. Rooting
+`null` instead of the recorded pointer is as effective, now at n=24:
+
+| arm (interleaved, n=24) | crashes |
+|---|---|
+| control | **15/24** |
+| grace ≥384, rooting the real blocks | **0/24** |
+| grace ≥384, rooting `null` | **0/24** |
+
+So two solid measurements stand side by side and do not reconcile: the block is
+genuinely unreferenced in the heap when it dies, *and* what prevents the crash
+is reading each newborn block's flags word rather than keeping anything alive.
+The most economical reading left is that the crash is a narrow race and touching
+those cache lines shifts it — but a bare spin does not, so "narrow race" is a
+description, not yet an explanation.
+
+**Next**: the one place not yet measured for this family — the **registers of
+the threads suspended at that collection**. `locate_birth_register` already asks
+exactly that question and found nothing, but it was written for the `Fiber` case
+on the old, now-quiet repro. Re-run it under the fast observer with the ≥384
+filter: if the address is in a suspended thread's captured registers, the
+register scan is dropping it and the defect is a root-coverage bug after all; if
+it is not, the value lives somewhere gcry has never looked.
+
 ## Four eliminations, each measured
 
 | arm | crashes / 24 |
