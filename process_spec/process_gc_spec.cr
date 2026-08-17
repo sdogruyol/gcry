@@ -266,21 +266,48 @@ end
     # because Crystal only publishes it from inside its own `start` and until
     # then `stop_world` neither suspends nor scans it. The record is dropped
     # when the thread turns up in Crystal's list.
-    it "records created threads and releases them once Crystal publishes them" do
+    it "records every thread it creates" do
       before = Gcry::Platform.staged_total
       ec = Fiber::ExecutionContext::Parallel.new("staging-spec", 2)
       done = Channel(Nil).new(4)
       4.times { ec.spawn { done.send(nil) } }
       4.times { done.receive }
-      GC.collect
 
-      # The hook ran: a run that stages nothing at all is indistinguishable
-      # from one where `pthread_create` was never wrapped.
+      # The hook ran. A run that stages nothing at all is indistinguishable
+      # from one where `pthread_create` was never wrapped, which is the failure
+      # this asserts against.
       (Gcry::Platform.staged_total - before).should be > 0
-      # And nothing is left staged once the threads are published — every entry
-      # is released by the `stop_world` walk that sees them in the list.
-      Gcry::Platform.staged_count.should eq(0)
       Gcry::Platform.staged_overflows.should eq(0)
+    end
+
+    # Deliberately not asserted against live threads: whether a real thread is
+    # still staged at any instant depends on whether it has reached its own
+    # `start` yet, and asserting on that is asserting on a race — it failed on
+    # aarch64 CI at `Expected 0, got 1`, which was the spec being wrong and not
+    # the record. The release path is tested directly instead, with an id no
+    # thread can own.
+    it "releases a staged id when it is unstaged" do
+      fake = 0xdead_beef_u64
+      is_staged = ->(id : UInt64) do
+        found = false
+        Gcry::Platform.each_staged { |s| found = true if s == id }
+        found
+      end
+
+      is_staged.call(fake).should be_false
+      Gcry::Platform.stage_thread(fake)
+      is_staged.call(fake).should be_true
+
+      # A collection does not release it: it is not in Crystal's list, which is
+      # exactly the state the staging table exists to represent. Asserted about
+      # *this* id and not about the count, because a collection legitimately
+      # releases whatever real threads have published in the meantime — the
+      # first version of this asserted on the total and failed for that reason.
+      GC.collect
+      is_staged.call(fake).should be_true
+
+      Gcry::Platform.unstage_thread(fake)
+      is_staged.call(fake).should be_false
     end
   end
 
