@@ -226,6 +226,70 @@ Gated in `process_spec`: the hook must have run (`staged_total` grows) and
 nothing may be left staged once threads are published, both broken on purpose
 and observed red.
 
+## Acting on the record: `GCRY_STAGED_WAIT=1`
+
+The record's whole point is to make the window actionable. The least invasive
+way to act on it is to **wait**: before stopping anything, give a thread that
+exists but has not published itself a moment to do so. It changes nothing about
+what is suspended or scanned — the two attempts that did change those broke the
+collector — it only declines to start stopping while a thread is known to be
+invisible.
+
+Two things about the placement are load-bearing:
+
+- **Before `Thread.lock`.** A starting thread publishes from `Thread#start`,
+  which takes that very mutex. Waiting while holding it would deadlock by
+  construction: the thread cannot do the thing being waited for.
+- **The wait must drain published entries itself.** The first version did not,
+  and could not have worked: staging entries were released only by
+  `stop_world`'s own walk, which runs *after* the wait, so the count could not
+  fall while the wait watched it. Measured: **68 waits, 68 timeouts, every
+  one** — and the census gap closed anyway, which made it look like the wait
+  worked when what worked was the 2000-pause delay. Draining inside the loop
+  fixed it: **~140 waits since, zero timeouts.**
+
+Measured, 16 workers, 160 collections a run, census on:
+
+| | crashes | runs with a census gap |
+|---|---|---|
+| without the wait | **6/60** | 3/30 in the batch where any appeared |
+| with the wait | **0/60** | **0/30** |
+
+Fisher exact on the crash counts gives p ≈ 0.03. That is a real signal and it is
+not proof of a fix: 0 of 60 is consistent with a large reduction as well as with
+elimination, and this is one workload on one host.
+
+Cost is near zero — 69 waits over ~4 800 collections, i.e. it fires on about
+1.4% of them, and only while a thread is starting.
+
+**A timeout drops the staged entries.** A thread that dies before publishing
+would otherwise leave a record nothing releases, and every later collection
+would pay the full spin and time out again — a permanent cost bought by a thread
+that no longer exists. Dropping loses the record, which is the lesser harm, and
+`stw_staged_wait_timeouts` counts it.
+
+**On by default**, and that is not the cautious choice, so here is the reasoning.
+
+The local repro is dead — `nested_spawn_uaf` 0/23 and `ec_queue_audit` 0/25 — so
+CI is the only place this defect is still observed, and **a knob nobody sets is
+never observed at all**. Left off, the question that matters most would stay
+unanswered indefinitely: not whether the wait helps the thread family, which is
+measured, but whether it also closes the **`Fiber` family** — the `makecontext`
+poison crashes on a `Deque(Fiber::Stack)` buffer, which has never been shown to
+share this window.
+
+Against that, the evidence for harm is nil: crashes 6/60 → 0/60, census gaps
+3/30 → 0/30, ~1.4% of collections wait, every gate and all twelve CI jobs green,
+and the timeout safeguard bounds the worst case.
+
+So it ships on, `GCRY_STAGED_WAIT=0` turns it back off, and CI is the test.
+
+- **Worked**: `scheduler-roots`, `ec-queue-audit` and the STW × TLAB property
+  test go quiet over ~20 runs, against a base rate of roughly one red in four.
+- **Did not**: `ec-queue-audit` keeps dying on `Fiber#makecontext` poison while
+  the `pthread_getattr_np` shape disappears — which would say there are two
+  windows and only one is closed.
+
 ## What would settle it
 
 Instrument rather than reproduce. gcry can count what it cannot see:

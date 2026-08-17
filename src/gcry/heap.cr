@@ -733,6 +733,61 @@ module Gcry
     POISON_TAG_MASK  = 0xFFFF_u64 << 48
     POISON_ADDR_MASK = (1_u64 << 48) - 1
 
+    # Default **on**; `GCRY_STAGED_WAIT=0` opts out. See
+    # `wait_for_staged_threads` and
+    # `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`.
+    property staged_wait : Bool = true
+
+    # Collections that waited for a staged thread, and those that gave up.
+    getter stw_staged_waits : UInt64 = 0_u64
+    getter stw_staged_wait_timeouts : UInt64 = 0_u64
+
+    # Spin, briefly, while a thread is known to exist and not be published.
+    # Called from `stop_world` **before** `Thread.lock` — see the note there.
+    STAGED_WAIT_SPINS = 2000
+
+    private def wait_for_staged_threads : Nil
+      return if Platform.staged_count == 0
+      @stw_staged_waits &+= 1
+      spins = 0
+      while Platform.staged_count > 0
+        # Release whatever has published itself since the last look. Without
+        # this the loop cannot ever succeed: staging entries were only dropped
+        # by `stop_world`'s own walk, which runs *after* this wait, so the count
+        # could not fall while the wait watched it. Measured before the fix —
+        # 68 waits, 68 timeouts, every one — and the census gap closing anyway,
+        # which made it look like the wait worked when what worked was the delay.
+        drain_published_staged
+        break if Platform.staged_count == 0
+        if spins >= STAGED_WAIT_SPINS
+          @stw_staged_wait_timeouts &+= 1
+          # Drop what did not answer. A thread that dies before publishing
+          # leaves an entry nothing will ever release, and without this every
+          # later collection would pay the full spin and time out again — a
+          # permanent cost bought by a thread that no longer exists. Dropping
+          # loses the record, which is the lesser harm and is counted.
+          Platform.each_staged { |id| Platform.unstage_thread(id) }
+          return
+        end
+        spins += 1
+        Intrinsics.pause
+      end
+    end
+
+    # A staged id that now appears in Crystal's list has published itself; the
+    # ordinary path covers it from here. `Thread.unsafe_each` without the list
+    # mutex on purpose — this runs *before* `Thread.lock`, and taking it here
+    # would deadlock against the very push being waited for.
+    private def drain_published_staged : Nil
+      Platform.each_staged do |id|
+        published = false
+        Thread.unsafe_each do |thread|
+          published = true if thread.to_unsafe.unsafe_as(UInt64) == id
+        end
+        Platform.unstage_thread(id) if published
+      end
+    end
+
     # `GCRY_THREAD_CENSUS=1`. See src/gcry/platform/linux_thread_census.cr.
     property thread_census : Bool = false
 

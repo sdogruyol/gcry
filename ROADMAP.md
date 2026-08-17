@@ -448,9 +448,30 @@ CI asymmetry that hid both.
       unchanged, because two attempts that did change them broke the collector.
       Counters on `/gc-stats` (`thread_staged_now` / `_total` / `_overflows`,
       `thread_census_staged_covered`).
-      **Next**: act on the record — suspend and scan the staged set alongside
-      Crystal's list — and watch the census for gaps it cannot account for,
-      which is the residue only a trampoline could reach.
+      **And the record is now acted on, behind `GCRY_STAGED_WAIT=1`.** Before
+      stopping anything — and before `Thread.lock`, since a starting thread
+      publishes by taking that very mutex — the collector waits, briefly and
+      bounded, for a staged thread to appear in Crystal's list. Measured at 16
+      workers: **crashes 6/60 → 0/60** (Fisher p ≈ 0.03) and **census gaps
+      3/30 → 0/30**, at a cost of ~1.4% of collections waiting at all.
+      The first version could not have worked and looked like it did: staging
+      entries were released only by `stop_world`'s own walk, which runs after
+      the wait, so **68 of 68 waits timed out** while the gap closed anyway on
+      the delay alone. Draining published entries inside the loop fixed it —
+      ~140 waits since, zero timeouts. A timeout now also drops the staged
+      entries, so a thread that dies before publishing cannot buy a permanent
+      per-collection spin.
+      **Now on by default** (`GCRY_STAGED_WAIT=0` opts out) — the uncautious
+      choice, made deliberately: the local repro is dead (`nested_spawn_uaf`
+      0/23, `ec_queue_audit` 0/25), so CI is the only observer left and a knob
+      nobody sets is never observed. Evidence for harm is nil, and the open
+      question can only be answered where the defect appears — whether this also
+      closes the **`Fiber` family** (`makecontext` poison on a
+      `Deque(Fiber::Stack)` buffer), which has never been shown to share this
+      window. **Worked** = the three gates go quiet over ~20 runs against a base
+      rate of about one red in four. **Did not** = `ec-queue-audit` still dying
+      on `Fiber#makecontext` while the `pthread_getattr_np` shape disappears,
+      which would mean two windows and one closed.
       `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,

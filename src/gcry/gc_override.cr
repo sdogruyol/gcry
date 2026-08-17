@@ -648,6 +648,18 @@ module GC
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.
     heap.thread_census = true if env_flag_one?("GCRY_THREAD_CENSUS")
+    # Wait, briefly and before stopping anything, for a thread that exists but
+    # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
+    #
+    # It went on rather than staying a knob for one reason: the local repro is
+    # dead — `nested_spawn_uaf` is 0/23 and `ec_queue_audit` 0/25 — so CI is the
+    # only place this defect is still observed, and a knob nobody sets is never
+    # observed at all. The evidence for harm is nil (crashes 6/60 → 0/60, census
+    # gaps 3/30 → 0/30, ~1.4% of collections wait, every gate green), and the
+    # remaining question — whether it also closes the `Fiber` family, which has
+    # never been shown to share this window — can only be answered where the
+    # defect appears. `GCRY_STAGED_WAIT=0` turns it back off.
+    heap.staged_wait = false if env_flag_zero?("GCRY_STAGED_WAIT")
     # EXPERIMENT: root every block for the collection after its birth
     # (src/gcry/birth_grace.cr). A measurement, not a fix.
     heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")

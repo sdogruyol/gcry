@@ -298,16 +298,44 @@ end
       Gcry::Platform.stage_thread(fake)
       is_staged.call(fake).should be_true
 
-      # A collection does not release it: it is not in Crystal's list, which is
-      # exactly the state the staging table exists to represent. Asserted about
-      # *this* id and not about the count, because a collection legitimately
-      # releases whatever real threads have published in the meantime — the
-      # first version of this asserted on the total and failed for that reason.
-      GC.collect
-      is_staged.call(fake).should be_true
+      # With the pre-stop wait off, a collection does not release it: it is not
+      # in Crystal's list, which is exactly the state the staging table exists
+      # to represent. Asserted about *this* id and not about the count, because
+      # a collection legitimately releases whatever real threads have published
+      # in the meantime — an earlier version asserted on the total and failed
+      # for that reason.
+      heap = Gcry.default_heap
+      was = heap.staged_wait
+      heap.staged_wait = false
+      begin
+        GC.collect
+        is_staged.call(fake).should be_true
+      ensure
+        heap.staged_wait = was
+      end
 
       Gcry::Platform.unstage_thread(fake)
       is_staged.call(fake).should be_false
+    end
+
+    # And the other half of the same behaviour, which the spec above had to be
+    # taught about: with the wait **on** — the default — an id that never
+    # publishes is dropped when the wait gives up. Without that, a thread that
+    # died before publishing would leave a record nothing releases and every
+    # later collection would pay the full spin.
+    it "drops a staged id that never publishes, when the wait times out" do
+      fake = 0xfeed_face_u64
+      heap = Gcry.default_heap
+      heap.staged_wait.should be_true
+
+      Gcry::Platform.stage_thread(fake)
+      before = heap.stw_staged_wait_timeouts
+      GC.collect
+
+      heap.stw_staged_wait_timeouts.should be > before
+      found = false
+      Gcry::Platform.each_staged { |s| found = true if s == fake }
+      found.should be_false
     end
   end
 

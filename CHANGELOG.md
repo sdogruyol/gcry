@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GCRY_STAGED_WAIT=1` — the collector waits for a thread that has not
+  published itself yet.** gcry records every thread from the moment
+  `pthread_create` returns; this is the first change that *acts* on that record.
+  Before stopping anything — and before `Thread.lock`, because a starting thread
+  publishes by taking that very mutex, so waiting under it would deadlock by
+  construction — the collector spins briefly while a staged thread has not
+  appeared in Crystal's list. Measured at 16 workers, 160 collections a run:
+  crashes **6/60 → 0/60** (Fisher p ≈ 0.03), census gaps **3/30 → 0/30**, with
+  about 1.4% of collections waiting at all. A timeout drops the staged entries,
+  so a thread that dies before publishing cannot buy a permanent spin.
+  The first implementation could not have worked and looked like it did — entries
+  were released only by `stop_world`'s later walk, so 68 of 68 waits timed out
+  while the gap closed on the delay alone; the loop now drains published entries
+  itself, ~140 waits since with zero timeouts. **On by default**
+  (`GCRY_STAGED_WAIT=0` opts out) — the uncautious choice, made because the
+  local repro is dead (`nested_spawn_uaf` 0/23, `ec_queue_audit` 0/25) and CI is
+  the only observer left: a knob nobody sets is never observed, and the open
+  question is whether this also closes the `Fiber` family, which has never been
+  shown to share the window. Evidence for harm is nil.
+  `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
 - **gcry now records a thread as soon as `pthread_create` hands back its
   handle.** Crystal publishes a thread onto `Thread.threads` only from inside
   its own `start`, and until then `stop_world` neither suspends nor scans it —
