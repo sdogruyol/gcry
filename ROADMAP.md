@@ -294,15 +294,35 @@ CI asymmetry that hid both.
       `Fiber.unsafe_each` does not yield it, and the pointers in that frame are
       unrooted — which is why the crash dies in `Fiber#initialize` →
       `makecontext`.
-      **Next**: the arm is an instrument, not a fix. It finds in-flight stacks by
-      parsing `/proc/self/maps` every collection, which is Linux-only and costs a
-      parse per collection. The shippable version learns the same fact at the
-      source: reopen `Fiber::StackPool` and record the stack between `checkout`
-      and `release` — O(1), exact, portable, with `src/gcry/monitor_gate.cr` as
-      the precedent for reopening a Crystal class. Then re-measure the same arms
-      against it, and put a gate on the window so it cannot silently reopen.
+      **Correction, and the window has a different name: it is the stack of a
+      fiber that is *ending*.** The arm above rooted every stack-shaped mapping
+      no fiber and no pool claimed, and a coverage audit run beside it showed
+      what that set actually was: **330 per run** were the stack Crystal parks on
+      a `Thread` when a fiber terminates, against a handful genuinely in flight.
+      The fix written from the in-flight reading — a hook on
+      `Fiber::StackPool#checkout` recording exactly those — measured **13/24
+      against 8/24**, which is nothing (p≈0.24), and was deleted rather than
+      shipped on a maybe. Rooting the dying-fiber stack alone: control 11/24,
+      **rooted 0/24**, walked-not-rooted 12/24; and the shipped code, rewritten
+      and re-measured from scratch, **10/24 off against 0/24 on**.
+      Crystal states the window itself: *"When a fiber terminates we can't
+      release its stack until we swap context to another fiber."*
+      `Thread#dying_fiber` parks it, so the owning `Fiber` is already out of the
+      fiber list while the thread may still be **running on that stack** — and
+      gcry's other-thread scan works from *pthread* bounds, which a thread on a
+      fiber stack is nowhere near. Neither root source covers it.
+      **Shipped**: read `Thread#@dead_fiber_stack` at root time and scan its top
+      64 KiB. O(threads), no `/proc`, no size matching, portable; on by default
+      (`GCRY_DEAD_STACK_ROOTS=0` disables), gated in `process_spec` in both
+      directions, and not retention — same `heap_size`, same 160 collections,
+      *fewer* live objects than control.
+      **Next**: the coverage audit still reports **4 mappings per run** it cannot
+      account for, and the pause cost of the 64 KiB window has not been measured
+      against the perf gate. Neither is a reason to hold the fix; both are
+      reasons not to call the item closed.
       `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`,
-      `bench/log/linux/2026-08-17-inflight-stack-roots/FINDINGS.md`
+      `bench/log/linux/2026-08-17-inflight-stack-roots/FINDINGS.md` (retracted),
+      `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

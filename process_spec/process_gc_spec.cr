@@ -195,6 +195,49 @@ end
   end
 {% end %}
 
+describe "process GC dying-fiber stack roots" do
+  # Crystal cannot release a terminating fiber's stack until the thread swaps
+  # off it, so it parks the stack on the `Thread` (`dying_fiber`). In that
+  # window the fiber is gone from the fiber list and the thread may still be
+  # running on the stack, while gcry's other-thread scan looks at *pthread*
+  # bounds a fiber stack is nowhere near — so nothing scanned it. Rooting it
+  # took the fiber-creation use-after-free from 10/24 crashes to 0/24
+  # (bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md).
+  #
+  # This gates the root source itself. A collection that walks no dying-fiber
+  # stack has the same output as one where the window closed on its own, and
+  # that is exactly how a root source ships broken.
+  it "walks the stack a thread is holding for a fiber that ended" do
+    heap = Gcry.default_heap
+    heap.dead_stack_roots.should be_true # the shipped default
+
+    before = heap.dead_stacks_walked
+    words = heap.dead_stack_words
+
+    # Fibers that finish, so a thread has a stack parked when the world stops.
+    8.times do
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
+    end
+    GC.collect
+
+    heap.dead_stacks_walked.should be > before
+    heap.dead_stack_words.should be > words
+
+    # Broken on purpose and observed red: with the property off the counters do
+    # not move, which is what says the numbers above come from this arm.
+    heap.dead_stack_roots = false
+    begin
+      stalled = heap.dead_stacks_walked
+      GC.collect
+      heap.dead_stacks_walked.should eq(stalled)
+    ensure
+      heap.dead_stack_roots = true
+    end
+  end
+end
+
 describe "process GC realloc" do
   # `Heap#realloc`'s grow path documents, at length, why it must not free the
   # old block: Crystal stores the result *after* realloc returns, so until that

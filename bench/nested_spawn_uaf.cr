@@ -145,8 +145,10 @@ heap = Gcry.default_heap
 puts "mark audit: #{heap.mark_audit_edges} base edges checked, #{heap.mark_audit_misses} missed"
 puts "birth grace: #{heap.birth_grace_rooted} rooted, #{heap.birth_grace_saved} saved from the sweep, #{heap.birth_grace_overflows} overflowed"
 puts "birth grace follow-up: #{heap.birth_grace_live_later} were live next collection, #{heap.birth_grace_garbage_later} were garbage"
+puts "dead-fiber stacks: #{heap.dead_stacks_walked} walked / #{heap.dead_stack_words} words"
 puts "unowned stacks: pooled #{heap.pooled_stacks_walked} walked / #{heap.pooled_stack_words} words, " \
-     "in-flight #{heap.inflight_stacks_walked} walked / #{heap.inflight_stack_words} words"
+     "maps-in-flight #{heap.maps_inflight_walked} walked / #{heap.maps_inflight_words} words"
+puts "unowned coverage: #{heap.unowned_covered} accounted for, #{heap.unowned_uncovered} not"
 # Retention, because an arm that takes a crash rate to zero by keeping
 # everything alive is not a fix, and the two look identical from the outside.
 puts "retention: heap_size #{GC.stats.heap_size} live_objects #{heap.live_objects} collections #{heap.collections}"

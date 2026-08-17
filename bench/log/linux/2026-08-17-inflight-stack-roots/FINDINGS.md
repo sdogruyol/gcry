@@ -1,5 +1,15 @@
 # The missing root is the stack in flight
 
+> **RETRACTED, same day.** The arm measured here is real and its zero is real,
+> but the name on it is wrong. The arm rooted *every* stack-shaped mapping no
+> fiber and no pool claimed, and a later coverage audit showed 330 of those per
+> run were the stack Crystal parks on a `Thread` when a fiber **terminates**,
+> against a handful genuinely in flight. A fix built on the in-flight reading —
+> a hook on `Fiber::StackPool#checkout` — measured 13/24 against 8/24, which is
+> nothing, and was deleted. Rooting the dying-fiber stack alone is 0/24. See
+> `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`; what follows
+> stands only as the measurement that got the hunt to the right neighbourhood.
+
 2026-08-17, the same day as
 `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`, which found the
 dying `Deque(Fiber::Stack)` buffer's address on two kinds of stack nothing

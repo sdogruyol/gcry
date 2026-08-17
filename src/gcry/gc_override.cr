@@ -654,8 +654,15 @@ module GC
     # a crash rate to zero without being the mechanism.
     heap.pooled_stack_roots = true if env_flag_one?("GCRY_POOLED_STACK_ROOTS")
     heap.pooled_stack_noroot = true if env_flag_one?("GCRY_POOLED_STACK_NOROOT")
-    heap.inflight_stack_roots = true if env_flag_one?("GCRY_INFLIGHT_STACK_ROOTS")
-    heap.inflight_stack_noroot = true if env_flag_one?("GCRY_INFLIGHT_STACK_NOROOT")
+    # The fix: root the stack a thread is holding for a fiber that is
+    # terminating (src/gcry/unowned_stack_roots.cr). **On** by default — it
+    # closes a use-after-free, and a root source that ships off is the shape of
+    # both defects v0.19.0 had to go back for.
+    heap.dead_stack_roots = false if env_flag_zero?("GCRY_DEAD_STACK_ROOTS")
+    heap.dead_stack_noroot = true if env_flag_one?("GCRY_DEAD_STACK_NOROOT")
+    heap.maps_inflight_roots = true if env_flag_one?("GCRY_MAPS_INFLIGHT_ROOTS")
+    heap.maps_inflight_noroot = true if env_flag_one?("GCRY_MAPS_INFLIGHT_NOROOT")
+    heap.unowned_coverage_audit = true if env_flag_one?("GCRY_UNOWNED_COVERAGE_AUDIT")
     # Where in the address space does a dying block's value actually live?
     # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
     # audit's unreferenced branch that asks the question. Off by default and
