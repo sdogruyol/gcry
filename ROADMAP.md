@@ -244,11 +244,20 @@ CI asymmetry that hid both.
       thread's own frames** — which `scan_mutator` covers by design (it scans
       from below every collector frame up to the stack bottom) and which the
       holder search must exclude to avoid finding its own parameters.
-      **Next**: make `scan_mutator` prove it — count the candidates it hands to
-      `mark_root_candidate` and record those resolving to a used-and-unmarked
-      block, i.e. ask the mark audit's question of the mutator stack. Never
-      among them ⇒ the scan misses a slot it should see; among them ⇒ the
-      rejection is downstream, in `mark_impl`.
+      **And the mutator scan never offered it.** `scan_mutator_stack` now
+      records the ≥384 block bases it hands to `mark_root_candidate`, and the
+      dying audit fires in every crashing run: blocks of 384 / 768 / 1536 bytes
+      — the `Deque` capacities — die *"not in the heap, not in a suspended
+      thread's registers, and never offered by the mutator-stack scan"*.
+      So at the moment it dies the buffer is invisible to **every root source
+      gcry consults**: heap edges, suspended registers, the mutator scan, and
+      the explicit root set (0 of 0 in every crash report). Immediately
+      afterwards the address is in `@buffer` and on a running fiber's stack.
+      **Next**: name the region instead of guessing. Extend the dying audit to
+      search the whole reachable address space for that value at the moment of
+      death — `/proc/self/maps` regions, TLS blocks, and fiber stacks below
+      their scan windows — and report which one holds it. Every earlier step in
+      this hunt moved only once "somewhere" became a name.
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

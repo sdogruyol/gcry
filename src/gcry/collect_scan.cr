@@ -339,6 +339,7 @@ module Gcry
         scan_exclusive_mutator_spill_window(bottom)
       else
         Roots.scan_mutator(bottom) do |candidate|
+          note_mutator_candidate(candidate.address)
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end

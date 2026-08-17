@@ -86,10 +86,55 @@ module Gcry
 
     getter dying_register_hits : UInt64 = 0_u64
     getter dying_blocks_checked : UInt64 = 0_u64
+    # Dying blocks the mutator-stack scan *did* offer to the mark.
+    getter dying_offered_by_mutator : UInt64 = 0_u64
 
     # Only the size band the crashes come from (`Deque(Fiber::Stack)`
     # capacities), so the walk stays bounded inside the pause.
     DYING_AUDIT_MIN_SIZE = 384_u32
+
+    # Addresses the mutator-stack scan handed to `mark_root_candidate` that
+    # resolve to a block base of at least `DYING_AUDIT_MIN_SIZE`. Recorded only
+    # under `GCRY_DYING_REGISTER_AUDIT=1`, and only for that size band, so the
+    # table stays small: the question is narrow — was the dying buffer ever
+    # offered to the mark by the scan that is supposed to see it?
+    MUTATOR_SEEN_SLOTS = 512
+
+    @mutator_seen = uninitialized StaticArray(UInt64, MUTATOR_SEEN_SLOTS)
+    @mutator_seen_count = 0
+    getter mutator_seen_overflows : UInt64 = 0_u64
+
+    protected def reset_mutator_seen : Nil
+      @mutator_seen_count = 0
+    end
+
+    protected def note_mutator_candidate(addr : UInt64) : Nil
+      return unless @dying_register_audit
+      header = find_block(Pointer(Void).new(addr))
+      return unless header
+      return unless BlockHeader.user_from(header).address == addr
+      return if header.value.size < DYING_AUDIT_MIN_SIZE
+      i = 0
+      while i < @mutator_seen_count
+        return if @mutator_seen[i] == addr
+        i += 1
+      end
+      if @mutator_seen_count >= MUTATOR_SEEN_SLOTS
+        @mutator_seen_overflows &+= 1
+        return
+      end
+      @mutator_seen[@mutator_seen_count] = addr
+      @mutator_seen_count += 1
+    end
+
+    private def mutator_offered?(addr : UInt64) : Bool
+      i = 0
+      while i < @mutator_seen_count
+        return true if @mutator_seen[i] == addr
+        i += 1
+      end
+      false
+    end
 
     private def audit_dying_registers : Nil
       checked = 0_u64
@@ -119,6 +164,28 @@ module Gcry
               found = true if value.address == addr
             end
           end
+          offered = mutator_offered?(addr)
+          unless found || offered
+            # The interesting case: about to be freed, in no suspended thread's
+            # registers, and never handed to the mark by the mutator-stack scan
+            # either. Reported once per collection so the volume stays readable.
+            if reported < MARK_AUDIT_REPORT_LIMIT
+              reported += 1
+              b2 = uninitialized UInt8[512]
+              l2 = 0
+              l2 = RawOut.append(b2.to_unsafe, l2, "gcry: dying audit — block 0x")
+              l2 = RawOut.append_hex(b2.to_unsafe, l2, addr)
+              l2 = RawOut.append(b2.to_unsafe, l2, " size ")
+              l2 = RawOut.append_u64(b2.to_unsafe, l2, header.value.size.to_u64)
+              l2 = RawOut.append(b2.to_unsafe, l2,
+                " dies unreferenced: not in the heap, not in a suspended thread's registers, and " \
+                "never offered by the mutator-stack scan. collection ")
+              l2 = RawOut.append_u64(b2.to_unsafe, l2, @collections)
+              l2 = RawOut.append(b2.to_unsafe, l2, "\n")
+              RawOut.flush(b2.to_unsafe, l2)
+            end
+          end
+          @dying_offered_by_mutator &+= 1 if offered
           next unless found
           hits &+= 1
           next unless reported < MARK_AUDIT_REPORT_LIMIT

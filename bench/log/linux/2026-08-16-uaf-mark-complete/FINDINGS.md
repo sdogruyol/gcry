@@ -225,12 +225,49 @@ immediately afterwards — while the one region that could hold it across the
 collection is the one gcry claims to scan and the one the instrument cannot
 inspect without contaminating itself.
 
-**Next**: make `scan_mutator` prove it. Have it count the candidates it hands to
-`mark_root_candidate` and, under a knob, record the ones that resolve to a
-used-and-unmarked block — the same question the mark audit asks of the heap,
-asked of the mutator stack instead. If the dying buffer is never among them, the
-scan is not seeing a slot it should; if it is, the rejection is downstream and
-`mark_impl` is the place to look.
+### The mutator scan, asked the same question
+
+`scan_mutator_stack` now records every candidate it hands to
+`mark_root_candidate` that resolves to a block **base** of ≥384 bytes, and the
+dying audit checks the about-to-die blocks against that record. Five crashing
+runs, and the audit fires every time:
+
+```
+gcry: dying audit — block 0x… size 1536 dies unreferenced: not in the heap,
+      not in a suspended thread's registers, and never offered by the
+      mutator-stack scan. collection N
+```
+
+Sizes 384, 768 and 1536 — the `Deque(Fiber::Stack)` capacities exactly.
+
+### Where that leaves the defect
+
+At the collection that frees it, the buffer is invisible to **every root source
+gcry consults**:
+
+| source | result |
+|---|---|
+| used heap, all parents marked or not | no edge (`GCRY_MARK_AUDIT_ALL`) |
+| suspended threads' captured GP registers | no hit (`GCRY_DYING_REGISTER_AUDIT`) |
+| the mutator-stack scan's own candidates | never offered |
+| explicit root set | 0 of 0, in every crash report |
+
+And immediately afterwards the address is in `@buffer` and on a running fiber's
+stack. So the value crosses the collection somewhere gcry does not consult at
+all — and the list of such places is now short enough to enumerate: memory it
+never scans (thread-local storage, libc internals, mappings outside the static
+root ranges), or a thread it does not know about.
+
+This is the sharpest statement of the defect the hunt has produced, and it is
+reproducible in about ten minutes a batch under `GCRY_THREAD_CENSUS=1`.
+
+**Next**: take the enumeration seriously rather than guessing within it. The
+crash report already names the block; extend the dying audit to search the
+*whole* address space it can reach for that value at the moment of death —
+`/proc/self/maps` regions, TLS blocks, and the fiber stacks below their scan
+windows — and report which region holds it. That converts "somewhere gcry does
+not consult" into a named region, which is what every other step in this hunt
+had to do before it could move.
 
 ## Four eliminations, each measured
 

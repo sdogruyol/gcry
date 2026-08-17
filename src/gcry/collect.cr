@@ -1105,6 +1105,7 @@ module Gcry
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
+          reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
