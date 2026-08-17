@@ -107,6 +107,38 @@ having looked, and the reader returns `nil` rather than 0 when `/proc` cannot
 answer, for the same reason. Gated in `process_spec` (Linux; Darwin answers
 `nil` by design), broken on purpose and observed red.
 
+## An attempted fix, measured and reverted
+
+The cheap half of what Boehm does: hold Crystal's thread-list lock across
+`pthread_create`. `stop_world` takes the same lock before it suspends anything,
+so a collection cannot *begin* while a thread is being created — the hope being
+that this shrinks the window to nothing worth measuring.
+
+It does neither. A/B on the census workload, 16 workers, ten runs each:
+
+| | crashes | runs showing a census gap |
+|---|---|---|
+| without the lock | **0/10** | 3/10 |
+| with the lock | **3/10** | 3/10 |
+
+The gap rate does not move — a run still reports *"the OS reports 18 thread(s)
+and Crystal's list yielded 16"* — and the arm **introduces crashes**, in
+`stop_world` itself. That is consistent with what the lock actually does: the
+new thread blocks on the same mutex inside its own `start`, so at the moment the
+creator releases it there is still a thread that exists, is not in the list, and
+is now racing the collector for the lock. The window moved; it did not close.
+And parking a starting thread on a mutex the collector also takes puts it in a
+state the suspend path does not expect.
+
+Written, measured, reverted — the same disposition as the 2026-08-15 grace list.
+What it rules out is worth keeping: **the window cannot be closed from the
+creating side alone.** gcry needs the other half too — its own record of the
+thread, made before user code runs, which is what `GC_pthread_create` gives
+Boehm. A trampoline that registers `pthread_self()` and only then calls the real
+start routine, with `stop_world` suspending the union of that record and
+Crystal's list, is the shape that can work; the census is the acceptance test
+and currently reads 3/10.
+
 ## What would settle it
 
 Instrument rather than reproduce. gcry can count what it cannot see:

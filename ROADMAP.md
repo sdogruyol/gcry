@@ -415,10 +415,20 @@ CI asymmetry that hid both.
       "no gaps" cannot be "never looked"), gated in `process_spec`, broken on
       purpose and observed red.
       It does **not** yet show the window causes the crash: an unscanned thread
-      only matters if something is reachable solely from it. **Next**: make the
-      census say *what* the invisible thread was holding, or close the window
-      outright by registering the thread from `GC.pthread_create` — wrapping the
-      start routine as Boehm does — and see whether the aarch64 crashes stop.
+      only matters if something is reachable solely from it.
+      **And the cheap fix does not work.** Holding Crystal's thread-list lock
+      across `pthread_create` — `stop_world` takes the same lock, so a collection
+      cannot begin during creation — was written and A/B'd at 16 workers, ten
+      runs each: the gap rate did not move (3/10 either way) and it **introduced
+      crashes in `stop_world`** (0/10 → 3/10). Reverted. It relocates the window
+      rather than closing it: the new thread then blocks on that same mutex
+      inside its own `start`, so when the creator releases there is still a
+      thread that exists, is unlisted, and is racing the collector — now parked
+      on a lock the suspend path does not expect it on.
+      **Next**: the other half, which is what `GC_pthread_create` gives Boehm — a
+      trampoline that records `pthread_self()` before user code runs, with
+      `stop_world` suspending the union of that record and Crystal's list. The
+      census is the acceptance test and currently reads 3/10.
       `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
