@@ -69,9 +69,82 @@ module Gcry
     # stopped world.
     MARK_AUDIT_REPORT_LIMIT = 4
 
+    # `GCRY_DYING_REGISTER_AUDIT=1`: for each block the sweep is about to free,
+    # ask whether its address sits in a **suspended thread's captured GP
+    # registers**.
+    #
+    # This is the last place not yet looked. The all-parents audit showed that
+    # when the buffer dies, nothing in the used heap points at it; the crash
+    # report shows a running fiber's stack holding it afterwards. So the value
+    # crosses the collection somewhere the mark does not consult — and the
+    # registers of suspended threads are consulted (v0.19.0 closed the two
+    # platforms that returned nothing), which makes "is it there?" a question
+    # with two informative answers. In the registers ⇒ the register scan is
+    # dropping it and this is root coverage. Not there ⇒ the value lives
+    # somewhere gcry has never looked.
+    property dying_register_audit : Bool = false
+
+    getter dying_register_hits : UInt64 = 0_u64
+    getter dying_blocks_checked : UInt64 = 0_u64
+
+    # Only the size band the crashes come from (`Deque(Fiber::Stack)`
+    # capacities), so the walk stays bounded inside the pause.
+    DYING_AUDIT_MIN_SIZE = 384_u32
+
+    private def audit_dying_registers : Nil
+      checked = 0_u64
+      hits = 0_u64
+      reported = 0
+      each_chunk do |chunk|
+        next if ChunkHeader.dormant?(chunk)
+        next if ChunkHeader.large?(chunk)
+        class_index = chunk.value.size_class.to_i32!
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        payload = SizeClasses.payload(class_index)
+        next if payload < DYING_AUDIT_MIN_SIZE
+        block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          cursor += block_bytes
+          next if BlockHeader.free?(header)
+          next if heap_marked?(header)
+          # About to be freed.
+          checked &+= 1
+          addr = BlockHeader.user_from(header).address
+          found = false
+          Thread.unsafe_each do |thread|
+            Platform.each_thread_greg(thread.to_unsafe) do |value|
+              found = true if value.address == addr
+            end
+          end
+          next unless found
+          hits &+= 1
+          next unless reported < MARK_AUDIT_REPORT_LIMIT
+          reported += 1
+          buf = uninitialized UInt8[512]
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len,
+            "gcry: dying-register audit — block 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, addr)
+          len = RawOut.append(buf.to_unsafe, len, " size ")
+          len = RawOut.append_u64(buf.to_unsafe, len, header.value.size.to_u64)
+          len = RawOut.append(buf.to_unsafe, len,
+            " is about to be swept and its address is in a suspended thread's registers. collection ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+          len = RawOut.append(buf.to_unsafe, len, "\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+      end
+      @dying_blocks_checked &+= checked
+      @dying_register_hits &+= hits
+    end
+
     # Runs after `mark_loop` and before `sweep`, with the world stopped, so the
     # heap is quiescent and "marked" is final.
     protected def run_mark_audit : Nil
+      audit_dying_registers if @dying_register_audit
       reported = 0
       edges = 0_u64
       misses = 0_u64

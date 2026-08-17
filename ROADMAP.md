@@ -234,12 +234,21 @@ CI asymmetry that hid both.
       **But the suppressor is still not the rooting**: at n=24 interleaved,
       control 15/24, grace 0/24, and grace **rooting `null`** also 0/24. Two
       solid measurements that do not reconcile.
-      **Next**: the one place not measured for this family — the registers of
-      the threads suspended at that collection. `locate_birth_register` asks
-      exactly that and found nothing for the `Fiber` case on the old repro;
-      re-run it under the fast observer with the ≥384 filter. In the registers
-      ⇒ the register scan drops it and this is root coverage after all. Not
-      there ⇒ the value lives somewhere gcry has never looked.
+      **Registers eliminated too.** `GCRY_DYING_REGISTER_AUDIT=1` looks, before
+      the sweep, for each about-to-die ≥384 block's address in every suspended
+      thread's captured registers: **zero hits in five crashing runs**, with
+      `dying_blocks_checked` 2–3 per run — small, but that is the entire
+      population, and in a crashing run the fatal block is among them.
+      So: not in the heap, not in suspended registers, and on a running fiber's
+      stack immediately afterwards. The only region left is the **collecting
+      thread's own frames** — which `scan_mutator` covers by design (it scans
+      from below every collector frame up to the stack bottom) and which the
+      holder search must exclude to avoid finding its own parameters.
+      **Next**: make `scan_mutator` prove it — count the candidates it hands to
+      `mark_root_candidate` and record those resolving to a used-and-unmarked
+      block, i.e. ask the mark audit's question of the mutator stack. Never
+      among them ⇒ the scan misses a slot it should see; among them ⇒ the
+      rejection is downstream, in `mark_impl`.
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

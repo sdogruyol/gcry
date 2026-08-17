@@ -197,13 +197,40 @@ The most economical reading left is that the crash is a narrow race and touching
 those cache lines shifts it — but a bare spin does not, so "narrow race" is a
 description, not yet an explanation.
 
-**Next**: the one place not yet measured for this family — the **registers of
-the threads suspended at that collection**. `locate_birth_register` already asks
-exactly that question and found nothing, but it was written for the `Fiber` case
-on the old, now-quiet repro. Re-run it under the fast observer with the ≥384
-filter: if the address is in a suspended thread's captured registers, the
-register scan is dropping it and the defect is a root-coverage bug after all; if
-it is not, the value lives somewhere gcry has never looked.
+### The registers, asked at the moment of death
+
+`GCRY_DYING_REGISTER_AUDIT=1` walks, before the sweep, every used-and-unmarked
+block of ≥384 bytes — precisely the set about to be freed — and looks for its
+address in the **captured GP registers of every suspended thread**.
+
+Five crashing runs: **zero hits**. And the audit did look — `dying_blocks_checked`
+is 2–3 per run, which is small but is the whole population: only a handful of
+`Deque` buffers die in a run, and in a crashing run the block that kills it is
+among them.
+
+So the value is not in a suspended thread's registers either. With the heap
+already excluded by the all-parents audit, the places it can be are down to one:
+**the collecting thread's own frames** — the region the holder search has to
+exclude to avoid finding its own parameters (`Heap#collect_entry_sp`, and the
+87-of-87 artefact that exclusion was written for).
+
+That is uncomfortable, because `scan_mutator` covers exactly that region by
+design: it scans from its own stack pointer, below every collector frame, up to
+the fiber's stack bottom. A value spilled there by the mutator is inside the
+window it walks.
+
+So the state of the hunt is: the dying block is unreferenced in the heap, absent
+from suspended registers, and its value reappears on a running fiber's stack
+immediately afterwards — while the one region that could hold it across the
+collection is the one gcry claims to scan and the one the instrument cannot
+inspect without contaminating itself.
+
+**Next**: make `scan_mutator` prove it. Have it count the candidates it hands to
+`mark_root_candidate` and, under a knob, record the ones that resolve to a
+used-and-unmarked block — the same question the mark audit asks of the heap,
+asked of the mutator stack instead. If the dying buffer is never among them, the
+scan is not seeing a slot it should; if it is, the rejection is downstream and
+`mark_impl` is the place to look.
 
 ## Four eliminations, each measured
 

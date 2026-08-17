@@ -644,6 +644,10 @@ module GC
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
+    if env_flag_one?("GCRY_DYING_REGISTER_AUDIT")
+      heap.mark_audit = true
+      heap.dying_register_audit = true
+    end
     if env_flag_one?("GCRY_MARK_AUDIT_ALL")
       heap.mark_audit = true
       heap.mark_audit_all_parents = true
