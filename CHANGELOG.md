@@ -475,6 +475,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Heap#realloc(ptr, 0)` freed the caller's block immediately.** Twenty lines
+  below it, the grow path spells out why that must not happen: Crystal stores
+  the result *after* `realloc` returns, so until that store the caller's ivar
+  still holds the old pointer, and freeing it lets a peer Parallel collect reuse
+  the block underneath a live owner — the defect that comment was written for,
+  reachable through a second door. The size-zero path now leaves the block to
+  the sweep, exactly as the grow path does.
+  Stated honestly: this path fires **zero** times in a fiber-spawning workload
+  and Crystal's stdlib has no caller that reaches it (`GC.free` appears only in
+  the zlib and GMP allocator hooks), so it is a trap closed rather than a live
+  defect fixed. Found while chasing what a use-after-free report called "an
+  explicit free", which turned out to be something else entirely. Gated in
+  `process_spec`, broken on purpose and observed red.
+
 - **The page size was asked for on Darwin and assumed on Linux.** Three
   constants read `4096_u64`: the pagemap stride in `linux_softdirty.cr`, the
   `mprotect` alignment in `linux_mprotect.cr`, and a dead one in

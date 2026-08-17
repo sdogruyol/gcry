@@ -333,7 +333,20 @@ module Gcry
       atomic = BlockHeader.atomic?(header)
 
       if new_size == 0
-        free(pointer)
+        # Do **not** free `pointer` here, for the same reason the grow path
+        # below spells out: Crystal stores the result after `realloc` returns,
+        # so until that store the caller's ivar still holds `pointer`. Freeing
+        # it immediately lets a peer Parallel collect reuse the block while an
+        # owner still points at it — the defect that comment was written for,
+        # reachable through a second door.
+        #
+        # Measured before changing it: this path fires **zero** times in a
+        # fiber-spawning workload, and Crystal's stdlib has no caller that
+        # reaches it (`GC.free` appears only in the zlib and GMP allocator
+        # hooks). So this is a trap being closed, not a live defect being
+        # fixed — and closing it costs nothing but the old block's retention
+        # until the next sweep, which is exactly what the grow path already
+        # accepts.
         return malloc(0)
       end
 

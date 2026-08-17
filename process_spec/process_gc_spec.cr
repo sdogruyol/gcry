@@ -195,6 +195,28 @@ end
   end
 {% end %}
 
+describe "process GC realloc" do
+  # `Heap#realloc`'s grow path documents, at length, why it must not free the
+  # old block: Crystal stores the result *after* realloc returns, so until that
+  # store the caller's ivar still holds the old pointer, and freeing it lets a
+  # peer collect reuse the block underneath a live owner. The `size == 0` path
+  # used to free immediately — the same defect through a second door. It fires
+  # zero times in practice, which is why this is a gate on a trap rather than on
+  # a live bug.
+  it "does not free the old block when reallocating to zero" do
+    heap = Gcry.default_heap
+    ptr = GC.malloc(256)
+    fresh = GC.realloc(ptr, 0)
+
+    info = heap.debug_block_info(ptr)
+    info[:found].should be_true
+    info[:free].should be_false
+
+    # And it still hands back something usable, so the caller's store is safe.
+    fresh.should_not be_nil
+  end
+end
+
 describe "process GC free-path flag" do
   # `Flags::SWEPT` is what lets a use-after-free report say whether the
   # collector decided the block was garbage or the program asked. It is only
