@@ -459,6 +459,20 @@ CI asymmetry that hid both.
       first-timer means it never worked. Not yet a release blocker — never seen
       outside CI — but it is the second-most-frequent red on the board.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
+- [ ] **A crash on Darwin cannot be told from a null dereference.** The poison
+      check that identifies a use-after-free reads the *faulting context's*
+      registers, and that reader is `{% if flag?(:linux) %}` — Darwin's
+      `ucontext_t` keeps them in a different layout (`__mcontext`) and gcry has
+      none. Shown on 2026-08-17: `make ec-queue-audit` died on Darwin CI and the
+      report could only say "the kernel reported address 0 … a null dereference
+      or a pointer with garbage in its top bits", while the same crash on Linux
+      names the block, its size, its free path and its holders. The message also
+      said "On x86_64" while running on arm64.
+      Both halves of the wording are fixed — the branch is now
+      architecture-accurate and states the Linux-only limitation out loud rather
+      than implying a diagnosis it cannot make — but **the capability is still
+      missing**, and it is the reason a Darwin sighting is worth less than a
+      Linux one. A `__mcontext` reader would close it.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,

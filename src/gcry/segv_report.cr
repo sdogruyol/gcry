@@ -88,6 +88,12 @@ module Gcry
     # The word rather than a Bool because the tagged form (`GCRY_POISON_TAG=1`)
     # carries the freed block's address in its low 48 bits, and that is the whole
     # reason to look.
+    # Linux only. Darwin's `ucontext_t` keeps its registers in a different
+    # layout (`__mcontext`) and gcry has no reader for it, so on Darwin a crash
+    # on a poisoned pointer arrives with `si_addr == 0` and nothing to identify
+    # it — observed on Darwin CI, 2026-08-17, where the report could only offer
+    # "a null dereference". The `si_addr == 0` branch now says that limitation
+    # out loud instead of implying a diagnosis it cannot make.
     private def self.context_poison_word(ctx : Void*) : UInt64
       return 0_u64 if ctx.null?
       {% if flag?(:linux) %}
@@ -261,10 +267,22 @@ module Gcry
       end
 
       if a == 0
-        len = RawOut.append(buf.to_unsafe, len,
-          "the kernel reported address 0. On x86_64 that is also what a *non-canonical* " \
-          "dereference looks like (#GP carries no address), so this is a null dereference or a " \
-          "pointer with garbage in its top bits\n")
+        len = RawOut.append(buf.to_unsafe, len, "the kernel reported address 0. ")
+        {% if flag?(:x86_64) %}
+          len = RawOut.append(buf.to_unsafe, len,
+            "On x86_64 that is also what a *non-canonical* dereference looks like (#GP carries no " \
+            "address), so this is a null dereference or a pointer with garbage in its top bits")
+        {% else %}
+          len = RawOut.append(buf.to_unsafe, len,
+            "A poisoned pointer can read as 0 here too, so this is a null dereference or a pointer " \
+            "with garbage in its top bits")
+        {% end %}
+        {% unless flag?(:linux) %}
+          len = RawOut.append(buf.to_unsafe, len,
+            " — and gcry cannot tell which on this platform: the check that looks for the poison " \
+            "in the faulting context's registers is implemented for Linux only")
+        {% end %}
+        len = RawOut.append(buf.to_unsafe, len, "\n")
         RawOut.flush(buf.to_unsafe, len)
         return
       end

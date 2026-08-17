@@ -503,6 +503,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The SIGSEGV report claimed x86_64 reasoning on every architecture, and
+  implied a diagnosis Darwin cannot make.** Its `si_addr == 0` branch explained
+  the address with "On x86_64 that is also what a *non-canonical* dereference
+  looks like" — printed verbatim on arm64. Worse, the check that would settle
+  it, looking for the poison in the faulting context's registers, is Linux-only:
+  Darwin keeps them in a different `ucontext_t` layout and gcry has no reader.
+  So a Darwin crash on a poisoned pointer read as "a null dereference" with no
+  hint that gcry simply could not look — observed on Darwin CI 2026-08-17, where
+  `make ec-queue-audit` died and the report had nothing, while the same crash on
+  Linux names the block, its size, its free path and its holders. The branch is
+  now architecture-accurate and says the limitation out loud. The missing
+  `__mcontext` reader is on the board.
+
 - **`Heap#realloc(ptr, 0)` freed the caller's block immediately.** Twenty lines
   below it, the grow path spells out why that must not happen: Crystal stores
   the result *after* `realloc` returns, so until that store the caller's ivar
