@@ -648,6 +648,14 @@ module GC
       heap.mark_audit = true
       heap.dying_register_audit = true
     end
+    # Which unowned stack does the crash need — the pooled one or the one in
+    # flight? (src/gcry/unowned_stack_roots.cr). Each window has a rooting arm
+    # and a walk-but-offer-nothing arm, because an arm that roots more can take
+    # a crash rate to zero without being the mechanism.
+    heap.pooled_stack_roots = true if env_flag_one?("GCRY_POOLED_STACK_ROOTS")
+    heap.pooled_stack_noroot = true if env_flag_one?("GCRY_POOLED_STACK_NOROOT")
+    heap.inflight_stack_roots = true if env_flag_one?("GCRY_INFLIGHT_STACK_ROOTS")
+    heap.inflight_stack_noroot = true if env_flag_one?("GCRY_INFLIGHT_STACK_NOROOT")
     # Where in the address space does a dying block's value actually live?
     # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
     # audit's unreferenced branch that asks the question. Off by default and

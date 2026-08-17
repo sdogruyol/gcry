@@ -1117,6 +1117,9 @@ module Gcry
           @last_phase_scrub_ns = scrub_ns
           # Fiber objects + suspended stacks (once; not also via push_gc_roots).
           scan_all_fiber_roots if scan_stack
+          # Research arms: stacks `Fiber.unsafe_each` does not yield
+          # (src/gcry/unowned_stack_roots.cr). Off by default.
+          scan_unowned_stacks if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
           StwWatchdog.enter(StwWatchdog::PHASE_STATIC)

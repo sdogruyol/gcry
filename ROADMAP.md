@@ -274,14 +274,35 @@ CI asymmetry that hid both.
       window the scan actually used), and it took a **SIGBUS** on a mapping
       `/proc/self/maps` calls readable, which killed the collection it was
       measuring — reads now go through `pread` on `/proc/self/mem`.
-      **Next**: separate live from stale. On an in-flight stack, at
-      `makecontext`'s offset, the word is live; on a pooled stack the fiber that
-      wrote it is finished and the same word may be a dead copy. Scanning
-      pooled stacks would be conservative and cheap; covering the in-flight
-      window needs gcry to know a stack is checked out, which nothing tells it
-      today. Measure which of the two the crash actually needs before building
-      either.
-      `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`
+      **And rooting the in-flight stack closes it: 20/44 → 0/44.** Four arms,
+      interleaved round-robin at n=24 with `GCRY_POISON_FREED=1` (what turns the
+      defect into a fault) and `GCRY_THREAD_CENSUS=1` (what keeps the repro
+      live): control **10/24**, pooled rooted **20/24**, pooled walked-not-rooted
+      **13/24**, **in-flight rooted 0/24**, in-flight walked-not-rooted
+      **14/24** — and a confirmation batch against control alone, **10/20 to
+      0/20**. Each window got a twin arm that walks exactly the same memory and
+      offers nothing, because the birth grace's zero turned out to be timing
+      rather than rooting; here the twins separate cleanly, so the effect **is**
+      the rooting, and only for the stack in flight. The pooled hits were stale
+      copies.
+      It is also not retention: same `heap_size`, same 160 collections, and
+      *fewer* live objects than control (893 against 982). The arm adds roots
+      that are live, not roots that are many.
+      So the mechanism is named: `Fiber.new` checks a stack out of the pool,
+      `makecontext` writes the new fiber's first frame onto it, and the `Fiber`
+      is published only afterwards. In that window the stack belongs to no fiber,
+      `Fiber.unsafe_each` does not yield it, and the pointers in that frame are
+      unrooted — which is why the crash dies in `Fiber#initialize` →
+      `makecontext`.
+      **Next**: the arm is an instrument, not a fix. It finds in-flight stacks by
+      parsing `/proc/self/maps` every collection, which is Linux-only and costs a
+      parse per collection. The shippable version learns the same fact at the
+      source: reopen `Fiber::StackPool` and record the stack between `checkout`
+      and `release` — O(1), exact, portable, with `src/gcry/monitor_gate.cr` as
+      the precedent for reopening a Crystal class. Then re-measure the same arms
+      against it, and put a gate on the window so it cannot silently reopen.
+      `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`,
+      `bench/log/linux/2026-08-17-inflight-stack-roots/FINDINGS.md`
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md` Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing

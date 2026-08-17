@@ -69,6 +69,13 @@ mmaps, and mmap promises page alignment, not stack-size alignment. Size alone.
 
 ## What this does not yet say
 
+- **None of these runs crashed.** The repro needs `GCRY_POISON_FREED=1` to
+  fault, and the audit runs were made without it, so every report above is of a
+  block the sweep freed in a run that then finished cleanly. The blocks are the
+  right sizes and the holders are where the crash reports have always pointed,
+  but "this is the block the crash dies on" is inference from shape, not an
+  observation at a fault. Turning both on at once is the next measurement's job.
+
 - **Whether the words are live.** On an in-flight stack, at the offset
   `makecontext` writes, they are; on a pooled stack the fiber that wrote them is
   finished, so those may be stale copies of the same pointer. The counts do not
