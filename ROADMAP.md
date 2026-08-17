@@ -389,6 +389,26 @@ CI asymmetry that hid both.
       spec that turns it on fires the documented off-by-one race from an
       arbitrary allocation site and kills the process. `GCRY_DEBUG_INVARIANTS=1`
       and the `make invariants` gate are where that check belongs.
+- [ ] **A thread gcry has not heard of yet is neither stopped nor scanned.**
+      Reached from the fifth aarch64 crash, which showed a `Thread`'s
+      `@system_handle` read out of a **freed, poisoned block**. Two facts are
+      measured: that poison, and that `GC.pthread_create` is a bare passthrough
+      — no registration, no wrapper, no suppression. The rest is derived from
+      Crystal 1.21.0: `start_thread` **discards** `checkout`'s return, so between
+      `pthread_create` returning and `attach` running *on the new thread* the
+      `Thread` object's only references are that thread's own frame and libc's
+      argument slot. gcry learns about threads from `Thread.unsafe_each`, so
+      until the thread pushes itself it is **not suspended** (it runs through the
+      stopped world) and **not scanned**. Boehm does not have this window because
+      `GC_pthread_create` registers the thread before user code runs.
+      **Not reproduced**: 0 of 200 threads caught themselves freed, and the
+      aggressive arms hang in a shape that resembles the known STW-startup hang,
+      so they say nothing. Written down as a hypothesis with a measured symptom.
+      **Next, and it needs no repro**: at `stop_world`, compare the threads
+      Crystal's list yields against `/proc/self/status:Threads`. A difference is
+      a thread outside the stopped world, and it turns the argument into a
+      counter — the move that worked for the register stubs and the stack-bounds
+      snapshot. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
       green on re-run); it recurred four hours later in run `31950823605`
