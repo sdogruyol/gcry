@@ -53,9 +53,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            crystal: latest
-            arch_label: x86_64
+          # There were two arms here, `latest` and this pinned one. On 2026-08-16
+          # GitHub's releases-list endpoint for crystal-lang/crystal began
+          # returning an empty array — `releases/latest` and the tags stayed
+          # correct — so install-crystal, which resolves `latest` off that list,
+          # asked for version `null` and took ten of the twelve jobs down. Every
+          # `latest` in this file is pinned for that reason. 1.21.0 was `latest`
+          # on the day of the pin, so the two arms became the same job and one
+          # was dropped. When the endpoint recovers, a `latest` arm is worth
+          # bringing back: it is the only thing that tells us a compiler release
+          # broke the collector.
           - os: ubuntu-latest
             crystal: "1.21.0"
             arch_label: x86_64
@@ -476,7 +483,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Create output dirs
         run: mkdir -p bin coverage
@@ -530,7 +537,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Build ASan spec binary
         run: |
@@ -550,7 +557,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y valgrind
@@ -585,7 +592,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
@@ -647,7 +654,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Build soak test
         run: |
@@ -714,7 +721,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Cross-compile samples for aarch64-linux-gnu
         run: |
@@ -743,7 +750,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Cross-compile samples for ${{ matrix.target }}
         run: |
@@ -766,7 +773,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Unit + process specs + STW SP + fork on aarch64
         run: |
@@ -794,7 +801,7 @@ jobs:
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Unit + process specs + samples on Darwin
         run: |
