@@ -194,7 +194,11 @@ CI asymmetry that hid both.
       the mutator's callee-saved registers, holds the address 0 times in 89
       reports. The address is nowhere — which is what garbage looks like, and is
       consistent with the correction above.
-      **Next**, and it needs the repro live again (it went quiet mid-session):
+      **Next**, and it is blocked: the repro has stayed quiet — 0/15 at
+      `ROUNDS=20` and 0/8 at `ROUNDS=200` a day later on the committed binary,
+      after 10/24 the previous afternoon, with no code change tracking the
+      decay. Do not plan an A/B on it; CI is the reliable observer now. When it
+      is live again:
       bisect the grace by size class. Save only 192-byte blocks, then only the
       `Deque` buffer sizes (768 / 1536 / 3072), and see which subset still takes
       the crash to zero. Only the buffer sizes ⇒ the mechanism is reuse timing
@@ -480,7 +484,17 @@ CI asymmetry that hid both.
       So the throughput half of this item did not land: the runner's own spread
       (70.6–81.9 across the five) makes an honest `pct_json` tolerance so wide
       that the baseline gate sits **1.6 pp** below the fixed floor it was meant
-      to tighten. The file's own note predicted exactly this before it was
+      to tighten.
+      **And the first real firing confirms it was worse than that.** On
+      2026-08-17 (`31997472378`) `perf-smoke` failed at `pct_json` **63.90** —
+      under the fixed floor *and* outside the tolerance — on a commit whose only
+      runtime change was a ≤64-entry array scan on the snapshot path, with RSS
+      and pause both *better* than baseline. A re-run of the same job on the same
+      commit passed. So the runner's real spread is wider than the five-run
+      baseline captured, and `pct_json` currently produces false alarms at the
+      rate the tolerance implies. Before `PERF_GATE_BASELINE=1` is worth turning
+      on, `pct_json` needs either many more baseline runs or exclusion from the
+      gate; RSS and pause are the two that hold. The file's own note predicted exactly this before it was
       measured. The RSS and pause halves did land — **1.3×** and **2.6×** tighter
       than their floors — and those are the two a collector change is most likely
       to move quietly. Next: set `PERF_GATE_BASELINE=1` if that trade is worth

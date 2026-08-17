@@ -1,4 +1,11 @@
-# An aarch64 SEGV in `pthread_getattr_np`, in two different gates
+# An aarch64 SEGV in `pthread_getattr_np` — which turned out to be the use-after-free
+
+> **Resolved as to mechanism, 2026-08-17 (occurrence 5).** This is not a
+> separate defect and not a libc lifetime question. gcry was handed a
+> `pthread_t` that was **gcry's own freed-block poison**, i.e. it read a
+> `Thread`'s `@system_handle` out of a block that had already been freed. The
+> sections below are the road to that, kept in order; the one that names it is
+> "The fifth occurrence answers it".
 
 2026-08-16. **Seen twice, in two different targets, within four hours.**
 
@@ -155,6 +162,76 @@ on `Expected: true`, an always-true predicate fails on `Expected: false`.
 
 **Next**: the fifth occurrence answers it. No new instrument until then.
 
+## The fifth occurrence answers it
+
+2026-08-17, run `31997472378`, the first run after the "has this id ever been
+read successfully?" line landed. It fired, and the id it printed settles the
+whole thread:
+
+```
+gcry: the collector was inside the pthread stack-bounds query for thread
+      0xdeadff86af17d738 — Visited/read so far: 25/24
+gcry: that thread had never been read successfully — the first query for it is
+      the one that faulted
+gcry: SIGSEGV at 0xdeadff86af17db50 — gcry's freed-block poison … a
+      use-after-free, not a wild pointer
+```
+
+**`0xdeadff86af17d738` is the poison.** `POISON_TAG` is `0xDEAD` in the top 16
+bits and the freed block's address in the low 48, so this value is not a thread
+id at all — it is what `GCRY_POISON_FREED` writes into a block at
+`0xff86af17d738` when that block is released.
+
+So `thread.to_unsafe` — the `Thread`'s `@system_handle` — was read out of a
+**freed, poisoned block**. Everything else follows:
+
+- The fault address is `0xdeadff86af17db50`, exactly `poison + 0x418`. That is
+  glibc's fixed offset into `struct pthread`, applied to a poisoned value —
+  which is why occurrences 3 and 4 both showed **`0x418`** and why the number
+  never varied. It was never a descriptor offset that meant anything; it was
+  arithmetic on garbage.
+- "Never been read successfully" is right, and now for the obvious reason: that
+  value was never a thread id, so no earlier snapshot could have read bounds
+  for it.
+- Occurrences 3 and 4 showed non-poison ids (`0xff6dbcbfff40`). Consistent: a
+  freed block that has since been **reissued** no longer holds poison, so the
+  handle read out of it is stale data rather than `0xdead…`. Same defect, one
+  step further along in the block's life.
+
+**And the four eliminations above stay true and stop mattering.** Crystal's
+ordering is correct — the handle is published before the thread joins the list,
+removal precedes `system_close`, and the list mutex is held. None of that
+protects a `Thread` object whose *memory* gcry has already reclaimed.
+
+So this is the fiber-creation use-after-free wearing a different hat, with one
+new and useful fact: the object involved is a **`Thread`**, and `Thread` objects
+are created by `Thread.new` and only pushed onto `Thread.threads` from inside
+`start`, on the new thread. Between allocation and that push, the object is
+reachable only from the creating thread's frame and the new thread's argument —
+**the same birth window** `GCRY_BIRTH_GRACE` closes
+(`bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`).
+
+## A reporter bug the same catch exposed
+
+The report also said, of the same fault:
+
+> the free that wrote it was of the block at `0xff86af17db50`, since REISSUED,
+> size 192, flags 0x0 — freed by an explicit free, not by the sweep
+
+**All of that is wrong**, and none of it should have been printed. `si_addr` was
+the poison *plus* `0x418`; a poison with arithmetic done to it still carries
+`0xDEAD` in its top bits, so the tag test accepted it and decoded an address
+five blocks along. Its cleared flags then produced a false "explicit free" —
+the second time in two days that a cleared `SWEPT` has been read as a verdict it
+could not support.
+
+Fixed two ways: the reporter now prefers the **registers'** copy of the poison
+over `si_addr`, and refuses to decode any tagged word whose address does not
+land on a block **base** — poison fills a payload with one repeated word, so a
+genuine one always names a base. The offset case now prints "it lands N bytes
+into a block, and poison always names a base, so it names no block", verified by
+faulting on `poison + 0x418` on purpose.
+
 ## The counters are built
 
 Both are in, and gated:
@@ -220,7 +297,8 @@ still points at it.
 
 ## Status
 
-Open, **4 occurrences**, all aarch64, all in CI, across two gates. Still
+Mechanism **resolved** at occurrence 5; the underlying use-after-free is
+still open. 5 occurrences, all aarch64, all in CI, across two gates. Still
 not reproduced on demand and never seen outside CI. It is no longer a one-off,
 so the two counters proposed above are worth building rather than merely
 proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be

@@ -127,9 +127,28 @@ module Gcry
       end
 
       src = word & Heap::POISON_ADDR_MASK
+      heap = Gcry.default_heap?
+      # A poison word *plus an offset* still carries `0xDEAD` in its top bits,
+      # so the tag test alone accepts it and decodes an address that is not the
+      # freed block. Measured on 2026-08-17: a fault at `poison + 0x418` — glibc
+      # reading `struct pthread` through a poisoned `pthread_t` — decoded a
+      # block five slots along, reported it as `REISSUED, size 192`, and its
+      # cleared flags then produced a false "freed by an explicit free". The
+      # poison fills a payload with one repeated word, so a genuine one always
+      # names a block **base**; anything else is the poison with arithmetic done
+      # to it, and names nothing.
+      if heap && (info = heap.debug_block_info(Pointer(Void).new(src)))[:found] && info[:offset] != 0
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: the poison in the fault has had an offset added to it (it lands ")
+        len = RawOut.append_u64(buf.to_unsafe, len, info[:offset])
+        len = RawOut.append(buf.to_unsafe, len,
+          " bytes into a block, and poison always names a base), so it names no block. " \
+          "The value the *registers* hold is the one to decode\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
       len = RawOut.append(buf.to_unsafe, len, "gcry: the free that wrote it was of the block at 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, src)
-      heap = Gcry.default_heap?
       unless heap
         len = RawOut.append(buf.to_unsafe, len, " — no gcry heap exists to describe it\n")
         RawOut.flush(buf.to_unsafe, len)
@@ -223,9 +242,14 @@ module Gcry
       # as 0. Measured, not assumed: the first version of this reporter matched
       # on the address and never fired. So when the address cannot say, the
       # registers of the faulting context are asked instead.
-      pw = 0_u64
-      pw = a if a == Heap::POISON_WORD || (a & Heap::POISON_TAG_MASK) == Heap::POISON_TAG
-      pw = context_poison_word(ctx) if pw == 0
+      # Registers first, address second. `si_addr` can be the poison *plus an
+      # offset* — a poisoned pointer that libc indexed before dereferencing —
+      # while a register usually still holds the word as it was read. Taking the
+      # address first decoded the offset value and named the wrong block.
+      pw = context_poison_word(ctx)
+      if pw == 0 && (a == Heap::POISON_WORD || (a & Heap::POISON_TAG_MASK) == Heap::POISON_TAG)
+        pw = a
+      end
       if pw != 0
         len = RawOut.append(buf.to_unsafe, len,
           "gcry's freed-block poison (GCRY_POISON_FREED) is in the faulting context. Something " \

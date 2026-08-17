@@ -142,6 +142,17 @@ So the numbers in this file that compare arms — 20/48 against 0/48 — were ta
 wait for the repro to be live again, and a quiet run proves nothing. This is the
 board's own standing warning about the soak, arriving at a two-second repro.
 
+**It stayed quiet.** Re-measured on the same host a day later, on the committed
+binary: **0/15** at `ROUNDS=20` and **0/8** at `ROUNDS=200`. The decay is
+monotonic across the observations — 10/24 and 6/15 on the afternoon of
+2026-08-16, 1/6 that evening, 0 of 23 on 2026-08-17 — and no code change
+tracks it.
+
+The practical consequence for whoever picks this up: **do not plan an A/B on
+this repro.** CI is currently the only reliable observer of the defect; it
+caught it in run `31963103652` while the local harness was already silent, and
+the tagged poison now makes each of those catches say something.
+
 ## What this closes, and what it does not
 
 It closes the question the last three rounds were stuck on. The chain
