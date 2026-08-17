@@ -20,6 +20,12 @@ describe Gcry::Invariant do
     begin
       heap = Gcry::Heap.new
       begin
+        # The invariant is stated only of a heap that keeps its counter — with
+        # plain get/set a second allocating thread loses increments, and the
+        # checker skips rather than report a counter the heap never promised
+        # (src/gcry/invariant.cr). Opting in is what keeps this from passing by
+        # being skipped.
+        heap.heap_counters_atomic = true
         Gcry::Invariant.check_live_objects(heap)
       ensure
         heap.destroy
@@ -91,6 +97,7 @@ describe Gcry::Invariant do
     begin
       heap = Gcry::Heap.new
       begin
+        heap.heap_counters_atomic = true
         heap.gc_threshold = UInt64::MAX
         heap.release_empty_chunks = true
         heap.empty_chunk_retain = UInt64::MAX
@@ -103,7 +110,11 @@ describe Gcry::Invariant do
 
         heap.dormant_chunk_bytes.should be > 0
         heap.live_objects.should eq(1)
+        checks = Gcry::Invariant.live_object_checks
         Gcry::Invariant.check_live_objects(heap)
+        # And it walked rather than skipped: this example exists to catch a walk
+        # that counts dormant chunks, which a skipped walk also never does.
+        Gcry::Invariant.live_object_checks.should be > checks
       ensure
         heap.destroy
       end
@@ -140,6 +151,38 @@ describe Gcry::Invariant do
 
         stop.set(1)
         workers.each(&.join)
+      ensure
+        heap.destroy
+      end
+    ensure
+      Gcry::Invariant.disable
+    end
+  end
+
+  # The other direction, and the reason the skip logic above can be trusted: a
+  # checker that skips too eagerly passes everything. The walk was made
+  # race-tolerant on 2026-08-17 (sample the counter, walk, sample again, and
+  # re-check a mismatch `CONFIRM_ATTEMPTS` times) after it failed 6 runs in 25;
+  # this is what says the tolerance did not swallow the check itself.
+  it "catches a live_objects drift, and says how many walks ran" do
+    Gcry::Invariant.enable
+    begin
+      heap = Gcry::Heap.new
+      begin
+        heap.heap_counters_atomic = true
+        before = Gcry::Invariant.live_object_checks
+        heap.malloc(64)
+        # A private heap has no other mutator, so the walk must have run to
+        # agreement rather than skipped.
+        Gcry::Invariant.live_object_checks.should be > before
+
+        # A drift no allocation explains: stable across every re-check, so it
+        # must be reported rather than tolerated.
+        heap.debug_drift_live_objects(1_i64)
+        expect_raises(Exception, /live_objects mismatch/) do
+          Gcry::Invariant.check_live_objects(heap)
+        end
+        heap.debug_drift_live_objects(-1_i64)
       ensure
         heap.destroy
       end

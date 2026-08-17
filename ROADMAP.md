@@ -681,6 +681,28 @@ CI asymmetry that hid both.
       to move quietly. Next: set `PERF_GATE_BASELINE=1` if that trade is worth
       blocking a PR on, and re-record when the runner class changes.
 
+- [ ] **The process heap's counters lose updates, and the assumption that they
+      do not is written in the source.** `note_alloc_bytes` uses plain
+      `set(get + 1)` unless `heap_counters_atomic` is set, and `heap.cr` calls
+      that safe on the grounds of "single mutator + rare SYSMON". Measured
+      against: with the invariant checker on, `spec/invariant_spec.cr` reports
+      the process heap's `live_objects` **permanently one below** the walk in
+      **3 runs of 40**, in a program whose only threads are main and the
+      monitor. A lost increment is not a sampling race — it never comes back.
+      `total_bytes` and `bytes_since_gc` are incremented the same way, and a
+      `bytes_since_gc` that drifts low delays collections by exactly the bytes
+      it forgot.
+      This surfaced as a flaky test and was fixed as a *scope* correction: the
+      invariant is now stated only of a heap that keeps its counter
+      (`Heap#counters_may_lose_updates?`), which took the flake from 6/25 to
+      **0/60**. That makes the checker honest; it does not make the counter
+      right.
+      **Next**: decide the trade deliberately rather than by default. Turning
+      the atomic path on unconditionally costs a LOCK RMW on the allocation hot
+      path — the reason it is off — so it needs the Kemal throughput numbers
+      beside it. The cheaper alternative is to make SYSMON's allocations not
+      count, if they can be identified.
+
 ## Then (v0.21.0) — Darwin performance parity
 
 Linux took an 8.06 → 3.60 ms EC4 pause from the low-water skip and macOS takes none

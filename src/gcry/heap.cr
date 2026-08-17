@@ -59,6 +59,15 @@ module Gcry
       @live_objects.get
     end
 
+    # Move the counter without touching a block, so a test can show that
+    # `Invariant.check_live_objects` catches a drift rather than only that it
+    # passes. There is no other way to produce one on purpose: every real path
+    # keeps the counter and the headers together, which is the point.
+    def debug_drift_live_objects(delta : Int64) : Nil
+      current = @live_objects.get
+      @live_objects.set(delta < 0 ? current &- (-delta).to_u64 : current &+ delta.to_u64)
+    end
+
     # Sum of large-chunk mapped_bytes (live + free on freelist).
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).

@@ -45,6 +45,15 @@ module Gcry
       @@concurrent_skips
     end
 
+    # Walks that ran to agreement. The skip counter says how often the checker
+    # declined; this says how often it actually checked, which is the number a
+    # test needs to know the check is not passing vacuously.
+    @@live_object_checks = 0_u64
+
+    def self.live_object_checks : UInt64
+      @@live_object_checks
+    end
+
     # Verify that `live_objects` matches the actual number of live (non-free)
     # blocks in the heap. This is the most important invariant: if the counter
     # drifts, every GC decision based on it is suspect.
@@ -56,16 +65,68 @@ module Gcry
     # measured as `actual=40 reported=41` in `spec/mt_spec.cr:118`, off by
     # exactly the one allocation in flight. Skip rather than report a drift that
     # is really a race.
+    #
+    # Asking "is another thread running?" was not enough, and this check was
+    # flaky for it — 6 failures in 25 runs of `spec/invariant_spec.cr`, on three
+    # different examples. Two distinct causes came out of it, and only the
+    # second one is about timing.
+    #
+    #   - **The counter is not always kept.** `note_alloc_bytes` uses plain
+    #     get/set unless `heap_counters_atomic` is set, so a second allocating
+    #     thread makes `set(get + 1)` lose increments outright. The residual
+    #     failures after the timing fix were this, and they had `actual` *above*
+    #     `reported` — a counter that had permanently fallen behind, which the
+    #     walk was right to report. The invariant is therefore stated only of a
+    #     heap that can keep it: see `Heap#counters_may_lose_updates?`.
+    #   - **The walk and the counter are two instants.** `after_malloc` runs
+    #     outside the allocation lock, so an allocation in flight is counted in
+    #     one and not the other. Quiescence is established from what the heap
+    #     itself says rather than from thread bookkeeping: sample the counter,
+    #     walk, sample again. A change across the walk *is* a concurrent
+    #     mutation, whoever made it. And because an allocation whose counter has
+    #     been bumped but whose header is not yet written straddles both
+    #     samples, a mismatch is re-checked `CONFIRM_ATTEMPTS` times: the
+    #     in-flight store lands and the next attempt agrees, while a real drift
+    #     is stable and still fails.
+    CONFIRM_ATTEMPTS = 3
+
+    # The failure path interpolates, and interpolation allocates, which lands
+    # straight back in `after_malloc` → `check_live_objects`. That recursion is
+    # what the flaky runs printed: a stack of nested checkers under one real
+    # mismatch. A checker must not be its own mutator.
+    @@checking = false
+
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
-      if heap.concurrent_mutators?
+      return if @@checking
+      if heap.concurrent_mutators? || heap.counters_may_lose_updates?
         @@concurrent_skips += 1
         return
       end
-      actual = count_live_blocks(heap)
-      reported = heap.live_objects
-      return if actual == reported
-      fail("live_objects mismatch: actual=#{actual} reported=#{reported}")
+
+      @@checking = true
+      begin
+        actual = 0_u64
+        reported = 0_u64
+        attempts = 0
+        while attempts < CONFIRM_ATTEMPTS
+          reported = heap.live_objects
+          actual = count_live_blocks(heap)
+          after = heap.live_objects
+          if actual == reported && reported == after
+            @@live_object_checks += 1
+            return
+          end
+          if reported != after
+            @@concurrent_skips += 1
+            return
+          end
+          attempts += 1
+        end
+        fail("live_objects mismatch: actual=#{actual} reported=#{reported}")
+      ensure
+        @@checking = false
+      end
     end
 
     # Verify that the freelist for a given size class is internally consistent:

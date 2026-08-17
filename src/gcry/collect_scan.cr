@@ -450,7 +450,34 @@ module Gcry
     # running the two are sampled at different instants and disagree by the
     # allocations in flight — a race, not a drift.
     def concurrent_mutators? : Bool
+      # Deliberately *not* consulting the staging record. A staged id says a
+      # thread was created; it is cleared only when a collection drains it, and
+      # nothing clears it when the thread dies — so "staged and not in the list"
+      # covers the birth window and every dead thread since, and a check that
+      # skips forever is worse than one that races.
       multi_mutator_threads?
+    end
+
+    # Can this heap's counters lose an update outright? `note_alloc_bytes` uses
+    # plain get/set unless `heap_counters_atomic` is set, so two threads doing
+    # `set(get + 1)` at once drop one increment **permanently** — not a sampling
+    # race, a counter that is now wrong and stays wrong.
+    #
+    # `heap.cr` calls that trade-off safe on the grounds of "single mutator +
+    # rare SYSMON", and this is the measurement against it: with the invariant
+    # checker on, the process heap drifts in 3 runs of 40, `actual` one above
+    # `reported`, with no thread in the program but main and the monitor
+    # (`spec/invariant_spec.cr`). So the counter equals the walk only on a heap
+    # that either has one thread near it or counts atomically, and stating the
+    # invariant anywhere else is stating it of a heap that does not maintain it.
+    def counters_may_lose_updates? : Bool
+      return false if @heap_counters_atomic
+      n = 0
+      Thread.unsafe_each do
+        n += 1
+        return true if n > 1
+      end
+      false
     end
 
     # Empty-chunk reclaim after major.
