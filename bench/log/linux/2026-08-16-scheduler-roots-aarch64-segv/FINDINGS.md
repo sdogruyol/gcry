@@ -136,12 +136,24 @@ either the id is valid but its descriptor is genuinely unmapped at that instant
 (which would make it a libc/kernel-level lifetime question), or gcry hands
 `pthread_getattr_np` something that is not the id it thinks it is.
 
-**Next**: the discriminator is one bit of state — has this id been queried
-*successfully* before? Keep a bounded set of ids the snapshot has read bounds
-for, and have the crash report say whether the faulting one is a repeat. A
-repeat means the thread died between two snapshots despite the ordering above;
-a first-time id means it never worked, and the startup path is back in scope
-even though the ordering says it should not be.
+**The discriminator is now built.** The snapshot remembers every id it has
+successfully read bounds for (bounded at 64, and `stack_bounds_seen_full?` says
+when it stopped recording so "first time" is never reported when the real answer
+is "we stopped looking"). The crash report prints one of three lines:
+
+- *had been read successfully before* → the thread stopped being queryable
+  between two snapshots, despite the ordering above;
+- *never been read successfully* → the first query for it is the one that
+  faulted, and the startup path is back in scope even though the ordering says
+  it should not be;
+- *table is full, so this is not evidence*.
+
+Gated in `process_spec` against a **live** thread id rather than a constant — an
+always-false predicate would otherwise pass a test that only asked about an
+unknown id — and broken on purpose in both directions: recording nothing fails
+on `Expected: true`, an always-true predicate fails on `Expected: false`.
+
+**Next**: the fifth occurrence answers it. No new instrument until then.
 
 ## The counters are built
 

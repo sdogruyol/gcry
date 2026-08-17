@@ -74,6 +74,18 @@ module Gcry
     @@sb_misses = 0_u64
     @@sb_visited = 0_u64
     @@sb_read = 0_u64
+    # Ids the snapshot has ever read bounds for, so a fault can say whether the
+    # thread it died on had worked before. That one bit separates the two
+    # readings left after Crystal's own ordering rules the cheap ones out
+    # (bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md):
+    # a **repeat** means the thread stopped being queryable between two
+    # snapshots, a **first-timer** means it never was. Bounded and never
+    # cleared; a process with more distinct threads than this simply stops
+    # recording, which `sb_seen_full` says out loud rather than silently.
+    SEEN_IDS = 64
+    @@sb_seen = uninitialized StaticArray(UInt64, SEEN_IDS)
+    @@sb_seen_count = 0
+    @@sb_seen_full = false
     # Held as a plain word: `LibC::PthreadT` is `ULong` on glibc and a pointer
     # on musl, so neither `.new` nor `.address` is portable. It is an opaque id
     # for a diagnostic line, and 8 bytes either way.
@@ -109,11 +121,43 @@ module Gcry
         @@sb_in_flight = 0_u64
         return unless bounds
         @@sb_read += 1
+        note_seen_id(thread.unsafe_as(UInt64))
         @@sb_ids[i] = thread
         @@sb_low[i] = bounds[0].address
         @@sb_high[i] = bounds[1].address
         @@sb_count = i + 1
       {% end %}
+    end
+
+    private def self.note_seen_id(id : UInt64) : Nil
+      i = 0
+      while i < @@sb_seen_count
+        return if @@sb_seen[i] == id
+        i += 1
+      end
+      if @@sb_seen_count >= SEEN_IDS
+        @@sb_seen_full = true
+        return
+      end
+      @@sb_seen[@@sb_seen_count] = id
+      @@sb_seen_count += 1
+    end
+
+    # Has the snapshot ever read bounds for this thread? Signal-safe: an array
+    # scan and nothing else.
+    def self.stack_bounds_seen_before?(id : UInt64) : Bool
+      i = 0
+      while i < @@sb_seen_count
+        return true if @@sb_seen[i] == id
+        i += 1
+      end
+      false
+    end
+
+    # True once the table stopped recording, so "first time" cannot be read as
+    # fact when it might be "we stopped looking".
+    def self.stack_bounds_seen_full? : Bool
+      @@sb_seen_full
     end
 
     # Non-zero only while `pthread_getattr_np` is running for that thread, so a

@@ -197,6 +197,23 @@ module Gcry
         ilen = RawOut.append_u64(ibuf.to_unsafe, ilen, Platform.stack_bounds_read)
         ilen = RawOut.append(ibuf.to_unsafe, ilen, "\n")
         RawOut.flush(ibuf.to_unsafe, ilen)
+
+        # The one bit that separates the two readings left standing: had this
+        # thread ever been queried successfully? A repeat means it stopped being
+        # queryable between two snapshots; a first-timer means it never was.
+        ilen = 0
+        ilen = RawOut.append(ibuf.to_unsafe, ilen, "gcry: that thread had ")
+        if Platform.stack_bounds_seen_before?(in_flight)
+          ilen = RawOut.append(ibuf.to_unsafe, ilen,
+            "been read successfully before — it stopped being queryable between two snapshots\n")
+        elsif Platform.stack_bounds_seen_full?
+          ilen = RawOut.append(ibuf.to_unsafe, ilen,
+            "no recorded earlier read, but the id table is full, so this is not evidence\n")
+        else
+          ilen = RawOut.append(ibuf.to_unsafe, ilen,
+            "never been read successfully — the first query for it is the one that faulted\n")
+        end
+        RawOut.flush(ibuf.to_unsafe, ilen)
       end
 
       # The poison first: it forecloses every other reading and needs no heap

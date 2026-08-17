@@ -63,5 +63,13 @@ module Gcry
     def self.stack_bounds_in_flight : UInt64
       0_u64
     end
+
+    def self.stack_bounds_seen_before?(id : UInt64) : Bool
+      false
+    end
+
+    def self.stack_bounds_seen_full? : Bool
+      false
+    end
   end
 end

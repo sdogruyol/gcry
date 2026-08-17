@@ -288,6 +288,15 @@ end
       # Non-zero only while the query is running, so a crash handler reading it
       # is reading the thread the fault is about. Nothing is in flight here.
       Gcry::Platform.stack_bounds_in_flight.should eq(0)
+
+      # Every thread whose bounds were read is remembered, so a fault can say
+      # whether the thread it died on had ever worked. Checked against a live
+      # thread rather than a constant: an always-false predicate would pass a
+      # test that only asked about an unknown id.
+      id = Thread.current.to_unsafe.unsafe_as(UInt64)
+      Gcry::Platform.stack_bounds_seen_before?(id).should be_true
+      Gcry::Platform.stack_bounds_seen_before?(0xdead_beef_u64).should be_false
+      Gcry::Platform.stack_bounds_seen_full?.should be_false
     end
   end
 {% end %}

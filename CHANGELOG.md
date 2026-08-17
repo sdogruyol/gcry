@@ -24,7 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each of the first two leaving a libc frame and one hex number. The third
   arrived on the first run after these landed and answered: the fault is
   `0x418` into the thread descriptor the `pthread_t` points at, on the *next
-  page* from the id itself, with 22 threads visited and 21 read.
+  page* from the id itself, with 22 threads visited and 21 read. A **fourth**
+  on 2026-08-17 repeated those numbers exactly — same `0x418`, same `22/21` —
+  so it is one query at a reproducible point, not a race with a random victim.
+  The snapshot now also remembers every id it has **successfully** read bounds
+  for, and the report says whether the faulting thread is among them: a repeat
+  means it stopped being queryable between two snapshots, a first-timer means
+  it never was. That is the bit that decides between the two readings left
+  after Crystal's own ordering rules out the cheap ones — the handle is
+  published before the thread joins the list, the main thread's is set before
+  its push, removal precedes `system_close`, and `push` / `delete` /
+  `Thread.lock` all take the same mutex. The id table is bounded and says so
+  (`stack_bounds_seen_full?`), so "first time" is never reported when the real
+  answer is "we stopped recording". Gated in `process_spec` against a live
+  thread id, broken on purpose in both directions.
   `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
 
 - **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before
