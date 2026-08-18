@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-18
+
 ### Added
 
 - **`GCRY_ADDRESS_SPACE_AUDIT=1` — at the moment a block dies, search the whole
