@@ -1,4 +1,4 @@
-# Announcing gcry v0.19.0 (draft)
+# Announcing gcry v0.20.0 (draft)
 
 Crystal-native conservative mark–sweep GC as a **shard** — `require "gcry"` + `-Dgc_none`, no compiler fork. Stock Crystal ≥ 1.21 is enough.
 
@@ -6,44 +6,51 @@ Crystal-native conservative mark–sweep GC as a **shard** — `require "gcry"` 
 
 Boehm-class collector you can read and change in Crystal; **Linux + macOS**; fibers OK; default parallelism 1. Stack maps ship **dormant** (research only).
 
-## v0.19.0 highlight
+## v0.20.0 highlight
 
-**A dropped-root class, closed on the two platforms that had it — and the second one was found by the test written for the first.**
+**A fiber's stack was scanned by nothing while the fiber was ending — and that is where a use-after-free lived.**
 
-`collect_scan` asks the platform for a suspended thread's GP registers, because a reference can live only in a register: the compiler is free to keep an object pointer in a callee-saved register and never spill it, and a conservative scan of that thread's stack then sees nothing. Two platforms were not answering.
+Crystal cannot release a terminating fiber's stack until the thread swaps off it, so `Thread#dying_fiber` parks the stack on the thread. In that window two things are true at once: the owning `Fiber` is already gone from the fiber list, so no fiber scan reaches the stack; and the thread may still be **executing on it**, which gcry's other-thread scan also cannot see, because that scan works from *pthread* stack bounds a fiber stack is nowhere near. Anything reachable only from those frames had no root, and a collection landing in the window freed it. The program then ran on freed memory — `Fiber#initialize` → `makecontext`, where the crash had been dying all along.
 
-- **Darwin:** `each_thread_greg` was an **empty stub**, next to a `thread_get_state` that already read SP and discarded the rest. Observed on a real app as a live `String`'s tail overwritten in place — same 25 bytes, same allocation, four sessions. It needed a collection to appear (`GCRY_DISABLE_AUTO=1` is 0/5 against 8/10), which is what makes it a dropped root and not a write bug. A/B at one commit: **4/10 corrupt → 0/10**; control re-established later on a newer compiler at **7/10 → 0/10**.
-- **Linux aarch64:** `UCONTEXT_NGREGS = 0`, under the comment *"skip full mcontext register dump on aarch64 for now (SP clamp only)"*. Same defect, different route. x86_64 (`NGREGS = 23`) was never affected.
+`bench/nested_spawn_uaf.cr` reproduces it in about two seconds. Interleaved against control, poison on: **10/24 crashes → 0/24**.
 
-**Who was actually hitting it — say this plainly, it is not "everyone".** The corruption above never reproduced under **stock Crystal 1.21.0**: 0/5 on the system-compiler arm and 0/18 across the `run_all.sh` runs, 0/23 combined. Every observation came from a **1.22.0-dev probe compiler** (2/5 without execution contexts, 5/6 with). That is not a coincidence to wave away — whether a pointer lives in a register or gets spilled is a codegen choice, which is exactly why Linux x86_64 never saw it and why the base rate moved between two builds of the same compiler.
+**Why that number is worth something.** Every rooting arm in this hunt was measured against a twin that walks the *identical* memory and offers nothing to the mark. The twin stays at **12/24** — so the effect is the rooting, not the walking and not the timing. It is also not retention: same `heap_size`, same 160 collections, and *fewer* live objects than control. That discipline exists because an earlier candidate fix in this same hunt went to zero for reasons that had nothing to do with the pointer.
 
-So the honest shape of the claim is: **the defect is real by construction on any compiler** — the mark phase asked for a root source the platform did not provide, and a reference held only in a register had no root — but whether a given toolchain *produces* that shape is unmeasured outside the compiler that produced it here. Stock 1.21 users have no reproduction, and no evidence of safety either. Upgrade because the hole is closed, not because your app was demonstrably losing objects.
+**Four readings were wrong before this one was right, and they are in the log.** The buffer being freed was blamed on a missed heap edge (the mark was complete: 0 missed edges in 15 runs), on a `Fiber` under construction (the saved objects were finished fibers), on a pooled stack (rooting those is *worse* than control), and on a stack in flight between `checkout` and publication (a `Fiber::StackPool#checkout` hook covering exactly that moved 13/24 to 8/24 — nothing — and was deleted rather than shipped). Each correction is written up in `bench/log/linux/`, including the two times the instrument was reporting **itself**.
 
-The fix is now **gated** — `thread_greg_candidates` on `/gc-stats`, asserted in `process_spec` and `make greg-roots`, running on Darwin + Linux x86_64 + Linux aarch64. The gate is verified red: stubbing the method out fails the spec and drops the count to 0. **The aarch64 bug was found by that gate on its first CI run**, which is the part worth telling: it had been open as "does Linux have the same gap?" and answered itself within minutes of being wired up.
+**Also in this release:**
 
-**Also:** the Darwin fat-app RSS headline is re-cut and the old ~**0.63×** does not reproduce — it is ~**98%** thr @ ~**0.97×** at n=9. gcry is not what moved: its post-GC RSS is within **0.6%** of the old cut, while Boehm's fell **35%**. The v0.17-era ~18× gate stays closed; gcry is at parity here rather than a third below.
+- **The thread-birth window.** gcry now records a thread from the moment `pthread_create` returns, and `GCRY_STAGED_WAIT` (on by default) makes the collector wait briefly for a thread that exists but has not published itself. Thread-family crashes **6/60 → 0/60**, census gaps **3/30 → 0/30**, ~1.4% of collections waiting.
+- **`Heap#realloc(ptr, 0)` freed the caller's block** — the same defect the grow path documents at length, reachable through a second door.
+- **The live-object invariant was stated of heaps that cannot keep it**, and flaked for it: 6 runs in 25 → 0 in 100. Underneath it sits a real one that is *not* fixed: with non-atomic counters, a second allocating thread makes `live_objects` lose increments permanently.
+- **New diagnostics**, all off by default: `GCRY_ADDRESS_SPACE_AUDIT` (at the moment a block dies, search every mapping in `/proc/self/maps` and name the region holding its address — this is what found the window above), `GCRY_POISON_HOLDERS`, `GCRY_POISON_TAG`, `GCRY_SEGV_REPORT`, `GCRY_MARK_AUDIT`, `GCRY_THREAD_CENSUS`, `GCRY_EC_QUEUE_AUDIT`, and `BlockHeader::Flags::SWEPT`.
+
+**Validation:** 5 h soak × 3 arms, all clean — ~52 000 collections, ~526 000 fibers, 0 errors, RSS well inside its ceiling. Plus spec 164/0, process_spec 26/0, and green x86_64, aarch64, Darwin, two musl cross-compiles, asan, valgrind, coverage and perf smoke.
 
 ## Discord / forum blurb *(copy-paste)*
 
 ```
-gcry v0.19.0 is out — Crystal-native GC as a shard (require "gcry" + -Dgc_none).
+gcry v0.20.0 is out — Crystal-native GC as a shard (require "gcry" + -Dgc_none).
 No compiler fork; stock Crystal >= 1.21.
 
-Correctness release. A suspended thread's registers were never scanned on Darwin
-(empty stub) or Linux aarch64 (NGREGS = 0, "for now"), so a reference the compiler
-kept in a register and never spilled had no root and its object was swept.
-Both fixed and gated. The aarch64 one was found by the test written for the
-Darwin one, on its first CI run.
+Correctness release. A fiber's stack was scanned by nothing while the fiber was
+ending: Crystal parks a terminating fiber's stack on the thread until it can
+swap off it, and in that window the Fiber is already out of the fiber list while
+the thread may still be running on that stack. Pointers held only in those
+frames had no root and their objects were swept -> use-after-free in fiber
+creation. Repro: 10/24 crashes -> 0/24, with a control arm that walks the same
+memory and roots nothing staying at 12/24. 5h soak x3 clean.
 
-Scope, honestly: every observed corruption came from a 1.22.0-dev compiler
-(0/23 under stock 1.21). Register-vs-spill is a codegen choice, so the hole is
-real on any compiler but stock-1.21 users have no reproduction - and no
-evidence of safety either.
+Also: the thread-birth window (gcry now waits for a thread that exists but has
+not published itself, 6/60 -> 0/60), realloc(ptr, 0) no longer frees the
+caller's block, and a pile of new diagnostics including an address-space audit
+that names the region holding a dying block's address.
 
-Also: Darwin fat-app re-cut, ~98% thr @ ~0.97x RSS (n=9). The old ~0.63x does not
-reproduce - gcry's RSS is within 0.6% of that cut, Boehm's arm is what fell 35%.
+Still open, said plainly: a second use-after-free where gcry reads a Thread's
+handle out of a freed block and faults in pthread_getattr_np. Seen on CI with
+this fix in place; not reproducible locally. This release does not close it.
 
-https://github.com/sdogruyol/gcry/releases/tag/v0.19.0
+https://github.com/sdogruyol/gcry/releases/tag/v0.20.0
 PERF: https://github.com/sdogruyol/gcry/blob/master/docs/PERF.md
 ```
 
@@ -63,6 +70,8 @@ Cite [PERF-macos.md](PERF-macos.md). **Kemal:** `/` ~**89%**, `/json` ~**88%**, 
 
 ## What this release does not claim
 
+- **A second use-after-free is still open.** gcry reads a `Thread`'s `@system_handle` out of a freed block and faults inside `pthread_getattr_np`. It was seen on aarch64 CI **with this release's fix in place**, and it does not reproduce locally (`ec_queue_audit` 0/20, 0/25; the 5 h soak did not fire it). This release does not close it, and nobody should read "use-after-free fixed" as "use-after-free class eliminated".
+- **The fiber fix is proven on one repro and one soak.** 0/24 on `nested_spawn_uaf` and 15 h of clean soak is the strongest evidence this project has produced for a fix — and it is still one workload on one architecture family.
 - **No link to any production crash.** The 2026-08-08 SIGSEGV remains an unproven bet; nothing here connects them.
 - **No claim that stock-Crystal users were losing objects.** 0/23 under 1.21.0; every reproduction needed the 1.22.0-dev probe compiler. The hole was real; the exposure is unmeasured.
 - **The 15-minute Darwin soak is worth less than it looks.** 900 s, 887 collections, 72,437/72,437 finalized, `errors=0`, no crash — real coverage of the changed path. But `bench/soak.cr` reads `/proc/self/status` unguarded, so its **RSS-leak gate is inert on Darwin** (`rss=0kB` throughout) and checked nothing. Linux aarch64 was not soaked at all.
@@ -86,18 +95,18 @@ Cite [PERF-macos.md](PERF-macos.md). **Kemal:** `/` ~**89%**, `/json` ~**88%**, 
 ## Channels
 
 - GitHub: https://github.com/sdogruyol/gcry
-- Release: https://github.com/sdogruyol/gcry/releases/tag/v0.19.0
+- Release: https://github.com/sdogruyol/gcry/releases/tag/v0.20.0
 - Crystal forum / Discord: link PERF methodology + honest limits
 - awesome-crystal / shards.info: after posting
 
 ## Checklist before posting
 
-- [x] CI green on x86_64 + aarch64 + macOS — PR #25, 22 checks pass, incl. `greg-roots` on all three
-- [ ] Tag `v0.19.0`; CHANGELOG + README + PERF/ACIKTURKIYE reflect tip
-- [ ] Link COMPARISON.md + POLICY.md + TEST_PLAN.md in the post
-- [ ] Lead with **the dropped root on two platforms, and the gate that found the second**
-- [ ] State the compiler scope: **0/23 under stock 1.21**, every reproduction on 1.22.0-dev. Do not let a reader conclude their app was losing objects
-- [ ] Say the fat-app re-cut moved because *Boehm* moved, not gcry — do not sell 0.63× → 0.97× as a regression or a win
+- [x] CI green on x86_64 + aarch64 + macOS, and a 5 h × 3 soak clean on the release commit
+- [ ] Tag `v0.20.0`
+- [ ] CHANGELOG + README + PERF/ACIKTURKIYE reflect tip
+- [ ] Lead with **the stack nothing scanned while the fiber was ending**, not with the instrument list
+- [ ] Say the twin-arm control out loud — 0/24 against a 12/24 arm that walks the same memory — or the number reads as a guess that worked
+- [ ] State the **still-open thread-family use-after-free** in the post itself, not only in the docs
+- [ ] Do **not** claim the perf numbers moved; nothing was re-measured this release
 - [ ] Do **not** claim stack maps as the product win
 - [ ] Do **not** imply any production crash is explained
-- [ ] Do **not** cite the Darwin soak as leak evidence — its RSS gate is inert there

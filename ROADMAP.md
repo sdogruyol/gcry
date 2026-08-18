@@ -4,7 +4,7 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-## Current (v0.19.0) — "Suspended-thread register roots, on both platforms that lacked them"
+## Shipped (v0.19.0) — "Suspended-thread register roots, on both platforms that lacked them"
 
 - [x] **Suspended threads' GP registers are scanned everywhere the collector
       claims to support.** They were not: Darwin's `each_thread_greg` was an
@@ -35,7 +35,7 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 
 ---
 
-## Next (v0.20.0) — "Prove root coverage, and put Darwin under the gates"
+## Current (v0.20.0) — "Prove root coverage, and put Darwin under the gates"
 
 Both defects v0.19.0 closed were the same shape: a root the caller assumed was
 scanned and the platform returned nothing for — Darwin's empty `each_thread_greg`
@@ -44,8 +44,15 @@ counter was wired to a gate and the gate was broken on purpose. The largest open
 item fits that shape too, so 0.20.0 spends its budget on root coverage and on the
 CI asymmetry that hid both.
 
-- [ ] **A use-after-free in fiber creation — reproducible in seconds, and the
-      most concrete open defect on this board.** `bench/nested_spawn_uaf.cr`:
+- [x] **A use-after-free in fiber creation — closed in v0.20.0.** The root it
+      needed is the stack of a fiber that is *ending*: `Thread#dying_fiber`
+      parks it, the owning `Fiber` is already out of the fiber list, and the
+      thread may still be running on it. Interleaved, poison on: **10/24
+      crashes → 0/24**, with a twin arm that walks the same memory and offers
+      nothing at 12/24; 5 h soak × 3 arms clean (~52 000 collections, ~526 000
+      fibers, 0 errors). What follows is the hunt that got there, kept because
+      four of its readings were wrong and the corrections are the useful part.
+      **The thread family below is a different defect and is still open.** `bench/nested_spawn_uaf.cr`:
       spawn fibers on an explicitly created `Fiber::ExecutionContext::Parallel`
       and collect underneath them. With `GCRY_POISON_FREED=1` it crashes in
       `Fiber#initialize` → `makecontext` on **~19 runs in 20**; under **Boehm,
@@ -752,7 +759,47 @@ CI asymmetry that hid both.
       beside it. The cheaper alternative is to make SYSMON's allocations not
       count, if they can be identified.
 
-## Then (v0.21.0) — Darwin performance parity
+## Next (v0.21.0) — the thread family, then Darwin performance parity
+
+- [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
+      of a freed block.** It faults inside `pthread_getattr_np` under
+      `stop_world`, on a `pthread_t` that is gcry's own tagged poison
+      (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
+      STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
+      the v0.20.0 fix in place** — so the dying-fiber stack root does not touch
+      it. The last report named the block: 192 bytes, freed by an **explicit**
+      free rather than the sweep, and since **reissued**.
+      **The obstacle is the observer, not the analysis.** It does not reproduce
+      locally: `ec_queue_audit` 0/20 and 0/25 in two batches, `nested_spawn_uaf`
+      never produces this shape, and the 5 h × 3 soak on 2026-08-17 did not fire
+      it either. Every sighting so far is CI, mostly aarch64.
+      **Next**: point the instrument that cracked the fiber family at this one.
+      `GCRY_ADDRESS_SPACE_AUDIT` can answer "where does this `Thread`'s address
+      live when its block is freed" the same way it answered it for the deque
+      buffer — but it has to run where the defect appears, which means wiring it
+      into the aarch64 job rather than waiting for a local repro that has not
+      come in three days.
+      `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
+      `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
+
+- [ ] **The coverage audit cannot account for 4 mappings a run.**
+      `GCRY_UNOWNED_COVERAGE_AUDIT=1` walks `/proc/self/maps` beside the
+      dying-fiber root and matches what it finds against fibers, pools and
+      thread slots: 549 accounted for, **4 not**. Too few to move a crash rate,
+      and exactly the kind of residue that was ignored one round earlier and
+      turned out to be the whole defect. Label them with the address-space
+      audit.
+
+- [ ] **`live_objects`, `total_bytes` and `bytes_since_gc` lose updates.**
+      `note_alloc_bytes` uses plain `set(get + 1)` unless
+      `heap_counters_atomic` is set, and `heap.cr` calls that safe on the
+      grounds of "single mutator + rare SYSMON". Measured against: the process
+      heap's counter falls permanently behind in **3 runs of 40** with only main
+      and the monitor in the program. v0.20.0 fixed the *checker* (it now states
+      the invariant only where the counter can be kept); the counter itself is
+      untouched. Turning the atomic path on unconditionally costs a LOCK RMW on
+      the allocation hot path, so it needs the Kemal throughput numbers beside
+      it.
 
 Linux took an 8.06 → 3.60 ms EC4 pause from the low-water skip and macOS takes none
 of it. The gap is measured rather than assumed — `low_water_skips = 0` in every
