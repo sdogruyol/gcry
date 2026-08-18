@@ -5,6 +5,8 @@
   require "./platform/linux_stw"
   require "./platform/linux_pagemap"
   require "./platform/linux_proc_sp"
+  require "./platform/linux_thread_census"
+  require "./platform/linux_address_space"
   require "./platform/linux_fork"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"
@@ -14,6 +16,7 @@
   require "./platform/linux_fork"
 {% end %}
 
+require "./platform/thread_staging"
 require "./mark"
 require "./roots"
 require "./stack_maps"
@@ -259,6 +262,52 @@ module Gcry
     # empty stub while this scan called it). The two readings are worth
     # separating from the outside, so `bench/greg_roots.cr` gates on it.
     getter thread_greg_candidates : UInt64 = 0_u64
+    # Execution-context structures pinned explicitly by `scan_thread_roots`
+    # (schedulers, run queues, event loop, stack pool), last collect. Same
+    # reading problem as the counter above, and a sharper one: the whole pin
+    # block sits behind a macro gate on `Thread.@execution_context`, so on a
+    # compiler that does not declare that ivar it compiles out entirely and the
+    # only coverage left is the conservative Thread body scan — which the
+    # comment on that block already records as insufficient (Kemal EC4 SEGV
+    # @ …0008). Zero and "compiled out" are indistinguishable without this.
+    getter ec_root_pins : UInt64 = 0_u64
+    # Pointer-bearing ivars of the Parallel EC structures that the pin block
+    # could *not* cover. Wide ones it can — a Proc, a Tuple,
+    # `(Fiber::ExecutionContext | Nil)` get every word of the slot marked — so
+    # this is the shape with no sound answer left: pointer-bearing and narrower
+    # than a pointer. Zero on Crystal 1.21.0, and `make scheduler-roots` asserts
+    # it stays zero, because an upstream ivar of that shape is a root the block
+    # would otherwise drop without a word about it.
+    getter ec_root_unpinned_ivars : UInt64 = 0_u64
+    # Execution-context queue audit (`GCRY_EC_QUEUE_AUDIT=1`, default off).
+    # `slots` is per-collect — it says the walk engaged, and a walk that silently
+    # covered nothing is the failure mode every gate in this milestone is about.
+    # `faults` is **cumulative on purpose**: it is evidence of a corruption that
+    # already happened, and a per-collect reset would erase it by the next
+    # collection, which is exactly what makes the soak SEGV unbisectable today.
+    # Split by structure so "the walk engaged" can be told apart from "the walk
+    # engaged on the half that happened to be busy": the ring and the global list
+    # are populated by different traffic, and a harness that only ever fills one
+    # would report coverage it does not have.
+    getter ec_queue_audit_ring_slots : UInt64 = 0_u64
+    getter ec_queue_audit_list_slots : UInt64 = 0_u64
+    getter ec_queue_audit_faults : UInt64 = 0_u64
+    # The word the most recent fault was reported for. Cumulative like the count:
+    # it is the evidence, and it is also what makes a gate able to say *which*
+    # slot was rejected rather than only that something was.
+    getter ec_queue_audit_last_fault : UInt64 = 0_u64
+    # Walk the Parallel EC run queues inside STW and check every slot is a live
+    # Fiber. Off by default: bounded, but it is inside the pause.
+    property ec_queue_audit : Bool = false
+
+    # Overwrite a block's payload when it is freed (`GCRY_POISON_FREED=1`).
+    # Default off — it is a memset per freed block. What it buys is the
+    # difference between a crash on `0x7f1700000149`, which three sessions have
+    # argued about, and a crash on `0xdeadf2eedeadf2ee`, which says
+    # use-after-free and nothing else. Every small free funnels through
+    # `push_size_class_free`; large blocks are poisoned at their own site.
+    property poison_freed : Bool = false
+    getter poisoned_blocks : UInt64 = 0_u64
     # Parked-fiber scan starts raised to the stack's low-water mark. Whether the
     # skip engages at all is not obvious from the outside: it needs multi-mutator
     # STW, which is `Thread` count > 2, and a fat app can sit right on that
@@ -315,8 +364,10 @@ module Gcry
     # Monotonic span of every address ever mapped — never shrinks on munmap.
     # Used by GC.realloc/free to refuse LibC fallback after empty-chunk release
     # tightened @heap_min/@heap_max around a dangling pointer.
-    @heap_span_lo : UInt64 = UInt64::MAX
-    @heap_span_hi : UInt64 = 0_u64
+    # Public for `SegvReport`: a crash handler has to be able to say whether the
+    # faulting address was ever in this heap's span at all.
+    getter heap_span_lo : UInt64 = UInt64::MAX
+    getter heap_span_hi : UInt64 = 0_u64
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
@@ -359,6 +410,15 @@ module Gcry
       else
         @roots_lock.sync { @roots.delete(pointer) }
       end
+    end
+
+    # Walk the explicit root set **without** `@roots_lock`. For the crash
+    # reporter only (`Gcry::PoisonHolders`): a signal handler cannot take that
+    # lock, because the thread it interrupted may be the one holding it, and a
+    # crash report that deadlocks is worse than one that reads a half-linked
+    # node. Best effort by construction, like every other read `SegvReport` does.
+    def unsafe_each_root(& : Void* ->) : Nil
+      @roots.each { |pointer| yield pointer }
     end
 
     def set_stackbottom(stack_bottom : Void*) : Nil
@@ -453,6 +513,9 @@ module Gcry
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
+      # Snapshot the mutator's callee-saved registers before any collector frame
+      # can save them into its own (src/gcry/birth_grace.cr). Armed knob only.
+      note_collect_entry_regs if @birth_grace
       abort_incremental
       Trace.collect_start(major: true)
       run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
@@ -608,6 +671,27 @@ module Gcry
 
     # Block header for an address in a managed chunk, including FREE blocks.
     # Prefer find_object for mutator-facing queries (rejects FREE).
+    # What this heap knows about an arbitrary address, for a crash handler. Reads
+    # a handful of words and reports what they said — the heap may be
+    # mid-mutation, which is usually why anyone is asking.
+    def debug_block_info(pointer : Void*)
+      header = find_block(pointer)
+      unless header
+        return {found: false, free: false, size: 0_u32, flags: 0_u32,
+                first_word: 0_u64, offset: 0_u64}
+      end
+      user = BlockHeader.user_from(header)
+      addr = pointer.address
+      offset = addr >= user.address ? addr - user.address : 0_u64
+      first = header.value.size >= 8 ? user.as(UInt64*).value : 0_u64
+      {found:      true,
+       free:       BlockHeader.free?(header),
+       size:       header.value.size,
+       flags:      header.value.flags,
+       first_word: first,
+       offset:     offset}
+    end
+
     def find_block(pointer : Void*) : BlockHeader*?
       return nil if pointer.null?
       addr = pointer.address
@@ -953,7 +1037,17 @@ module Gcry
       true
     end
 
+    # The mutator's stack pointer as the collector was entered. Everything below
+    # it is the collector's own frames — including, when `GCRY_BIRTH_GRACE` is
+    # searching for who holds a block, that search's own parameters. An
+    # instrument that scans the stack has to be able to exclude itself.
+    getter collect_entry_sp : UInt64 = 0_u64
+
+    # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
+    property post_mark_spin : UInt64 = 0_u64
+
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+      @collect_entry_sp = Roots.hardware_stack_pointer.address
       cols_before = @collections
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
@@ -1012,6 +1106,7 @@ module Gcry
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
+          reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
@@ -1022,6 +1117,9 @@ module Gcry
           @last_phase_scrub_ns = scrub_ns
           # Fiber objects + suspended stacks (once; not also via push_gc_roots).
           scan_all_fiber_roots if scan_stack
+          # Research arms: stacks `Fiber.unsafe_each` does not yield
+          # (src/gcry/unowned_stack_roots.cr). Off by default.
+          scan_unowned_stacks if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
           StwWatchdog.enter(StwWatchdog::PHASE_STATIC)
@@ -1058,6 +1156,14 @@ module Gcry
 
           t0 = monotonic_ns
           mark_loop
+          # EXPERIMENT (GCRY_BIRTH_GRACE=1): *after* the mark, so a newborn block
+          # that nothing reached is visible as such. Reports what it saved, then
+          # marks it and drains again — the point is to name the block the
+          # collector was about to take, not only to keep the process alive.
+          if @birth_grace
+            mark_birth_grace_roots
+            mark_loop
+          end
           @last_phase_mark_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_FINALIZERS)
 
@@ -1074,6 +1180,27 @@ module Gcry
             @nursery_alloc_before_minor = @nursery_alloc_bytes.get
             @nursery_survival_bytes = 0_u64
           end
+
+          reset_birth_grace if @birth_grace
+
+          # `GCRY_POST_MARK_SPIN=<n>`: pure delay between mark and sweep, no
+          # bookkeeping of any kind. The control the birth-grace arms needed:
+          # every arm that walks a table here takes the crash rate to zero, and
+          # every arm that does not leaves it at the control rate — including
+          # one that roots a null pointer. If a bare spin does the same, the
+          # grace was never keeping anything alive.
+          if (n = @post_mark_spin) > 0
+            i = 0_u64
+            while i < n
+              Intrinsics.pause
+              i &+= 1
+            end
+          end
+
+          # Mark completeness, in the only window where the answer exists: the
+          # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,
+          # src/gcry/mark_audit.cr). Off by default — O(live heap) in the pause.
+          run_mark_audit if @mark_audit
 
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.
@@ -1210,9 +1337,7 @@ module Gcry
     end
 
     private def monotonic_ns : UInt64
-      ts = uninitialized LibC::Timespec
-      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      Clock.monotonic_ns
     end
 
     private def record_pause(started_ns : UInt64) : Nil
@@ -1334,6 +1459,10 @@ module Gcry
       @sp_clamp_hits = 0_u64
       @sp_clamp_fallbacks = 0_u64
       @thread_greg_candidates = 0_u64
+      @ec_root_pins = 0_u64
+      @ec_root_unpinned_ivars = 0_u64
+      @ec_queue_audit_ring_slots = 0_u64
+      @ec_queue_audit_list_slots = 0_u64
       @low_water_skips = 0_u64
       @low_water_skipped_bytes = 0_u64
     end

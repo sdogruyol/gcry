@@ -20,6 +20,8 @@ module GC
       Gcry::Platform.install_stw_sp_capture
     end
 
+    Gcry::Platform.init_staging
+
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
     heap.scan_static_roots = true
@@ -141,6 +143,10 @@ module GC
     # refresh the running fiber bottom each collect.
     heap.before_collect do
       heap.set_stackbottom(Fiber.current.@stack.bottom)
+      # Arm the crash reporter here rather than above: Crystal installs its own
+      # SIGSEGV handler after GC.init and does not chain, so anything installed
+      # earlier is discarded. See Gcry::SegvReport.install_if_requested.
+      Gcry::SegvReport.install_if_requested
     end
 
     # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
@@ -614,6 +620,108 @@ module GC
     if wd = env_u64("GCRY_STW_WATCHDOG_MS")
       Gcry::StwWatchdog.threshold_ms = wd if wd > 0
     end
+    # Walk the Parallel EC run queues inside STW and check every slot is still a
+    # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
+    # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from
+    # "an hour after the write" into "the first collection after it".
+    heap.ec_queue_audit = true if env_flag_one?("GCRY_EC_QUEUE_AUDIT")
+    # Overwrite freed payloads so a use-after-free reads 0xdeadf2ee… instead of
+    # something that looks like data (bench/poison_freed.cr). Costs a memset per
+    # free; the soak turns it on.
+    heap.poison_freed = true if env_flag_one?("GCRY_POISON_FREED")
+    # `GCRY_POISON_TAG=1` implies the poison — asking for the tag and not getting
+    # poisoned blocks would be a knob that silently does nothing.
+    if env_flag_one?("GCRY_POISON_TAG")
+      heap.poison_freed = true
+      heap.poison_tag_addr = true
+    end
+    # Explain the address a crash died on against the heap's own tables
+    # (src/gcry/segv_report.cr). Costs nothing until something faults; default
+    # off because it installs a signal handler, and a collector should not do
+    # that to a process that did not ask.
+    Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
+    # After mark, before sweep: does any marked object point at a block the
+    # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
+    # O(live heap) inside the pause.
+    heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
+    if env_flag_one?("GCRY_DYING_REGISTER_AUDIT")
+      heap.mark_audit = true
+      heap.dying_register_audit = true
+    end
+    # Which unowned stack does the crash need — the pooled one or the one in
+    # flight? (src/gcry/unowned_stack_roots.cr). Each window has a rooting arm
+    # and a walk-but-offer-nothing arm, because an arm that roots more can take
+    # a crash rate to zero without being the mechanism.
+    heap.pooled_stack_roots = true if env_flag_one?("GCRY_POOLED_STACK_ROOTS")
+    heap.pooled_stack_noroot = true if env_flag_one?("GCRY_POOLED_STACK_NOROOT")
+    # The fix: root the stack a thread is holding for a fiber that is
+    # terminating (src/gcry/unowned_stack_roots.cr). **On** by default — it
+    # closes a use-after-free, and a root source that ships off is the shape of
+    # both defects v0.19.0 had to go back for.
+    heap.dead_stack_roots = false if env_flag_zero?("GCRY_DEAD_STACK_ROOTS")
+    heap.dead_stack_noroot = true if env_flag_one?("GCRY_DEAD_STACK_NOROOT")
+    heap.maps_inflight_roots = true if env_flag_one?("GCRY_MAPS_INFLIGHT_ROOTS")
+    heap.maps_inflight_noroot = true if env_flag_one?("GCRY_MAPS_INFLIGHT_NOROOT")
+    heap.unowned_coverage_audit = true if env_flag_one?("GCRY_UNOWNED_COVERAGE_AUDIT")
+    # Where in the address space does a dying block's value actually live?
+    # (src/gcry/address_space_audit.cr). Implies the dying audit: it is that
+    # audit's unreferenced branch that asks the question. Off by default and
+    # very expensive — it reads the resident address space inside the pause.
+    if env_flag_one?("GCRY_ADDRESS_SPACE_AUDIT")
+      heap.mark_audit = true
+      heap.dying_register_audit = true
+      heap.address_space_audit = true
+    end
+    if env_flag_one?("GCRY_MARK_AUDIT_ALL")
+      heap.mark_audit = true
+      heap.mark_audit_all_parents = true
+    end
+    # Count the threads the OS has against the ones Crystal's list yields, at
+    # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
+    # default: it reads /proc inside the pause.
+    heap.thread_census = true if env_flag_one?("GCRY_THREAD_CENSUS")
+    # Wait, briefly and before stopping anything, for a thread that exists but
+    # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
+    #
+    # It went on rather than staying a knob for one reason: the local repro is
+    # dead — `nested_spawn_uaf` is 0/23 and `ec_queue_audit` 0/25 — so CI is the
+    # only place this defect is still observed, and a knob nobody sets is never
+    # observed at all. The evidence for harm is nil (crashes 6/60 → 0/60, census
+    # gaps 3/30 → 0/30, ~1.4% of collections wait, every gate green), and the
+    # remaining question — whether it also closes the `Fiber` family, which has
+    # never been shown to share this window — can only be answered where the
+    # defect appears. `GCRY_STAGED_WAIT=0` turns it back off.
+    heap.staged_wait = false if env_flag_zero?("GCRY_STAGED_WAIT")
+    # EXPERIMENT: root every block for the collection after its birth
+    # (src/gcry/birth_grace.cr). A measurement, not a fix.
+    # Size window for the grace, so it can be aimed at one block shape at a
+    # time (`GCRY_BIRTH_GRACE_MIN` / `_MAX`, payload bytes). Unset means every
+    # size, which is what the 20/48 → 0/48 arm measured.
+    if mn = env_u64("GCRY_BIRTH_GRACE_MIN")
+      heap.birth_size_min = mn.to_u32
+    end
+    if mx = env_u64("GCRY_BIRTH_GRACE_MAX")
+      heap.birth_size_max = mx.to_u32
+    end
+    heap.birth_grace_noroot = true if env_flag_one?("GCRY_BIRTH_GRACE_NOROOT")
+    heap.birth_grace_dummy = true if env_flag_one?("GCRY_BIRTH_GRACE_DUMMY")
+    heap.birth_grace_touch = true if env_flag_one?("GCRY_BIRTH_GRACE_TOUCH")
+    if sp = env_u64("GCRY_POST_MARK_SPIN")
+      heap.post_mark_spin = sp
+    end
+    heap.birth_grace = true if env_flag_one?("GCRY_BIRTH_GRACE")
+    # `GCRY_POISON_HOLDERS=1` — after a use-after-free names the block it read
+    # out of, search the root set, the live heap and the fiber stacks for
+    # whatever still points into it (src/gcry/poison_holders.cr). It implies the
+    # tag and the report it extends: the search needs a block address to look
+    # for, and the tag is what supplies it, so asking for holders without them
+    # would be a knob that silently does nothing.
+    if env_flag_one?("GCRY_POISON_HOLDERS")
+      heap.poison_freed = true
+      heap.poison_tag_addr = true
+      Gcry::SegvReport.request
+      Gcry::PoisonHolders.request
+    end
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.
@@ -899,8 +1007,18 @@ module GC
     end
   {% elsif !flag?(:wasm32) %}
     # :nodoc:
+    # Record the thread with gcry as soon as its handle exists. Crystal only
+    # publishes a thread from inside its own `start`, so until then `stop_world`
+    # neither suspends nor scans it (src/gcry/platform/thread_staging.cr).
+    # Recording here does not cover the interval *inside* `pthread_create` —
+    # doing that needs a trampoline on the new thread, which was tried and
+    # crashed 8 runs in 10. The census reports what this placement leaves.
     def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
-      LibC.pthread_create(thread, attr, start, arg)
+      ret = LibC.pthread_create(thread, attr, start, arg)
+      {% if flag?(:gc_none) %}
+        Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64)) if ret == 0
+      {% end %}
+      ret
     end
 
     # :nodoc:

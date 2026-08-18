@@ -46,5 +46,30 @@ module Gcry
     def self.stack_bounds_snapshot_misses : UInt64
       0_u64
     end
+
+    # Darwin queries the descriptor directly at lookup time rather than
+    # snapshotting (see the note above), so there is no visit/read pair to
+    # count and nothing is ever in flight during the snapshot. Zeros rather
+    # than a missing method: a caller that gates on these must not have to ask
+    # which platform it is on.
+    def self.stack_bounds_visited : UInt64
+      0_u64
+    end
+
+    def self.stack_bounds_read : UInt64
+      0_u64
+    end
+
+    def self.stack_bounds_in_flight : UInt64
+      0_u64
+    end
+
+    def self.stack_bounds_seen_before?(id : UInt64) : Bool
+      false
+    end
+
+    def self.stack_bounds_seen_full? : Bool
+      false
+    end
   end
 end

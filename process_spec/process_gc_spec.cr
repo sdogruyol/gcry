@@ -194,3 +194,330 @@ end
     end
   end
 {% end %}
+
+describe "process GC dying-fiber stack roots" do
+  # Crystal cannot release a terminating fiber's stack until the thread swaps
+  # off it, so it parks the stack on the `Thread` (`dying_fiber`). In that
+  # window the fiber is gone from the fiber list and the thread may still be
+  # running on the stack, while gcry's other-thread scan looks at *pthread*
+  # bounds a fiber stack is nowhere near — so nothing scanned it. Rooting it
+  # took the fiber-creation use-after-free from 10/24 crashes to 0/24
+  # (bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md).
+  #
+  # This gates the root source itself. A collection that walks no dying-fiber
+  # stack has the same output as one where the window closed on its own, and
+  # that is exactly how a root source ships broken.
+  it "walks the stack a thread is holding for a fiber that ended" do
+    heap = Gcry.default_heap
+    heap.dead_stack_roots.should be_true # the shipped default
+
+    before = heap.dead_stacks_walked
+    words = heap.dead_stack_words
+
+    # Fibers that finish, so a thread has a stack parked when the world stops.
+    8.times do
+      ch = Channel(Nil).new
+      spawn { ch.send(nil) }
+      ch.receive
+    end
+    GC.collect
+
+    heap.dead_stacks_walked.should be > before
+    heap.dead_stack_words.should be > words
+
+    # Broken on purpose and observed red: with the property off the counters do
+    # not move, which is what says the numbers above come from this arm.
+    heap.dead_stack_roots = false
+    begin
+      stalled = heap.dead_stacks_walked
+      GC.collect
+      heap.dead_stacks_walked.should eq(stalled)
+    ensure
+      heap.dead_stack_roots = true
+    end
+  end
+end
+
+describe "process GC realloc" do
+  # `Heap#realloc`'s grow path documents, at length, why it must not free the
+  # old block: Crystal stores the result *after* realloc returns, so until that
+  # store the caller's ivar still holds the old pointer, and freeing it lets a
+  # peer collect reuse the block underneath a live owner. The `size == 0` path
+  # used to free immediately — the same defect through a second door. It fires
+  # zero times in practice, which is why this is a gate on a trap rather than on
+  # a live bug.
+  it "does not free the old block when reallocating to zero" do
+    heap = Gcry.default_heap
+    ptr = GC.malloc(256)
+    fresh = GC.realloc(ptr, 0)
+
+    info = heap.debug_block_info(ptr)
+    info[:found].should be_true
+    info[:free].should be_false
+
+    # And it still hands back something usable, so the caller's store is safe.
+    fresh.should_not be_nil
+  end
+end
+
+describe "process GC free-path flag" do
+  # `Flags::SWEPT` is what lets a use-after-free report say whether the
+  # collector decided the block was garbage or the program asked. It is only
+  # worth having if it survives everything that rewrites a free block's header
+  # — the freelist *rebuild* paths re-link blocks that are already free, and
+  # constructing the header with a bare `FREE` erased the bit. A CI catch on
+  # 2026-08-16 was then written up as "an explicit free" and was in fact a
+  # swept block whose flag a rebuild had dropped.
+  it "marks swept blocks and leaves explicitly freed ones clear" do
+    heap = Gcry.default_heap
+    addrs = [] of UInt64
+    # Two requirements pull against each other here, and both are needed.
+    #
+    # The chunks must **empty**, because that is what makes the sweep run its
+    # freelist *rebuild* — the path that used to drop the flag, and the only
+    # one this spec exists to guard. But an emptied chunk is normally
+    # *released*, and then `find_block` reports nothing and there is nothing
+    # left to inspect: measured, 278 findable free blocks one hour and 0 the
+    # next on the same commit, which is the flake this spec started as.
+    # Retaining half the blocks fixed the flake and silently removed the
+    # rebuild with it — breaking the flag on purpose then still passed.
+    #
+    # Holding the empty chunks instead satisfies both: they empty, the rebuild
+    # runs, and the blocks stay mapped and inspectable.
+    # Sparse survivors keep some chunks mapped so the freed blocks stay
+    # findable. Without them the count collapses to zero as whole chunks are
+    # released — measured, 278 findable free blocks one hour and 0 the next on
+    # the same commit, which is the flake this started as.
+    #
+    # **What this does not cover, stated because it was tried four ways:** the
+    # freelist *rebuild* path, which is where `SWEPT` used to be erased. The
+    # rebuild only runs when chunks are released, and a released chunk takes its
+    # blocks out of `find_block` with it — so a workload that triggers the
+    # rebuild has nothing left to inspect, and one that keeps blocks inspectable
+    # does not trigger it. Retaining nothing, retaining half, retaining one in
+    # 200, and holding empty chunks were all tried; breaking the flag on purpose
+    # passed in every arrangement but the first, which was the flaky one.
+    # The rebuild fix is evidenced instead by a standalone measurement —
+    # 278 of 278 blocks carrying the flag with it, 0 of 278 without — recorded
+    # in `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`.
+    keep = [] of Void*
+    20_000.times do |i|
+      ptr = GC.malloc(256)
+      addrs << ptr.address
+      keep << ptr if i % 200 == 0
+    end
+    4.times { GC.collect }
+
+    freed = 0
+    swept = 0
+    addrs.each do |a|
+      info = heap.debug_block_info(Pointer(Void).new(a))
+      next unless info[:free]
+      freed += 1
+      swept += 1 if (info[:flags] & Gcry::BlockHeader::Flags::SWEPT) != 0
+    end
+
+    # Held chunks keep the freed blocks findable. The point is that every block
+    # the sweep reclaimed still says so after the rebuild, not how many.
+    freed.should be > 50
+    swept.should eq(freed)
+    Gcry::Roots.keep_alive(keep.as(Void*))
+
+    # And the other direction, which is what makes the flag a discriminator
+    # rather than a decoration.
+    ptr = GC.malloc(256)
+    GC.free(ptr)
+    info = heap.debug_block_info(ptr)
+    info[:free].should be_true
+    (info[:flags] & Gcry::BlockHeader::Flags::SWEPT).should eq(0)
+  end
+end
+
+{% if flag?(:linux) %}
+  describe "process GC thread staging" do
+    # gcry records a thread as soon as `pthread_create` hands back its handle,
+    # because Crystal only publishes it from inside its own `start` and until
+    # then `stop_world` neither suspends nor scans it. The record is dropped
+    # when the thread turns up in Crystal's list.
+    it "records every thread it creates" do
+      before = Gcry::Platform.staged_total
+      ec = Fiber::ExecutionContext::Parallel.new("staging-spec", 2)
+      done = Channel(Nil).new(4)
+      4.times { ec.spawn { done.send(nil) } }
+      4.times { done.receive }
+
+      # The hook ran. A run that stages nothing at all is indistinguishable
+      # from one where `pthread_create` was never wrapped, which is the failure
+      # this asserts against.
+      (Gcry::Platform.staged_total - before).should be > 0
+      Gcry::Platform.staged_overflows.should eq(0)
+    end
+
+    # Deliberately not asserted against live threads: whether a real thread is
+    # still staged at any instant depends on whether it has reached its own
+    # `start` yet, and asserting on that is asserting on a race — it failed on
+    # aarch64 CI at `Expected 0, got 1`, which was the spec being wrong and not
+    # the record. The release path is tested directly instead, with an id no
+    # thread can own.
+    it "releases a staged id when it is unstaged" do
+      fake = 0xdead_beef_u64
+      is_staged = ->(id : UInt64) do
+        found = false
+        Gcry::Platform.each_staged { |s| found = true if s == id }
+        found
+      end
+
+      is_staged.call(fake).should be_false
+      Gcry::Platform.stage_thread(fake)
+      is_staged.call(fake).should be_true
+
+      # With the pre-stop wait off, a collection does not release it: it is not
+      # in Crystal's list, which is exactly the state the staging table exists
+      # to represent. Asserted about *this* id and not about the count, because
+      # a collection legitimately releases whatever real threads have published
+      # in the meantime — an earlier version asserted on the total and failed
+      # for that reason.
+      heap = Gcry.default_heap
+      was = heap.staged_wait
+      heap.staged_wait = false
+      begin
+        GC.collect
+        is_staged.call(fake).should be_true
+      ensure
+        heap.staged_wait = was
+      end
+
+      Gcry::Platform.unstage_thread(fake)
+      is_staged.call(fake).should be_false
+    end
+
+    # And the other half of the same behaviour, which the spec above had to be
+    # taught about: with the wait **on** — the default — an id that never
+    # publishes is dropped when the wait gives up. Without that, a thread that
+    # died before publishing would leave a record nothing releases and every
+    # later collection would pay the full spin.
+    it "drops a staged id that never publishes, when the wait times out" do
+      fake = 0xfeed_face_u64
+      heap = Gcry.default_heap
+      heap.staged_wait.should be_true
+
+      Gcry::Platform.stage_thread(fake)
+      before = heap.stw_staged_wait_timeouts
+      GC.collect
+
+      heap.stw_staged_wait_timeouts.should be > before
+      found = false
+      Gcry::Platform.each_staged { |s| found = true if s == fake }
+      found.should be_false
+    end
+  end
+
+  describe "process GC thread census" do
+    # gcry learns about threads from Crystal's list, so a thread that exists but
+    # has not pushed itself yet is neither suspended nor scanned. The census
+    # asks the kernel instead, and it is only worth having if it answers: a
+    # reader that returns nothing looks exactly like a process with no extra
+    # threads. Measured at `stop_world`, it has seen a real gap — the OS
+    # reporting 10 threads against Crystal's 9
+    # (bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md).
+    it "reads the kernel's thread count and never reports fewer than the list" do
+      os = Gcry::Platform.os_thread_count
+      os.should_not be_nil
+      os.not_nil!.should be > 0
+
+      listed = 0
+      Thread.unsafe_each { listed += 1 }
+      # Crystal removes a thread from the list *before* its pthread exits, so
+      # the kernel can never know about fewer threads than the list yields.
+      # The other direction is the window this exists to measure.
+      os.not_nil!.should be >= listed
+    end
+  end
+
+  describe "process GC pthread stack-bounds snapshot" do
+    # The other half of "the platform answered nothing", on the pthread side.
+    # `snapshot_pthread_stack_bounds` asks libc for each thread's stack range
+    # before the suspend signals go out; a thread it visits but gets no bounds
+    # for loses the pthread-mapping half of that thread's root coverage. The
+    # call has also SEGV'd twice on aarch64 CI
+    # (bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md),
+    # which is why the id being queried is readable at all.
+    #
+    # Linux only: Darwin queries the descriptor at lookup time rather than
+    # snapshotting, and reports zeros by design — the same assertion there
+    # would be red on a platform that is working.
+    it "reads stack bounds for every thread the snapshot visits" do
+      GC.collect
+      visited = Gcry::Platform.stack_bounds_visited
+      read = Gcry::Platform.stack_bounds_read
+
+      # Zero visits is the stub shape: a snapshot that walks nothing also
+      # reports no gap, which is how a missing platform path passes for
+      # releases at a time. Broken on purpose and observed red: making
+      # `pthread_stack_bounds` return nil gives visited=6, read=0.
+      visited.should be > 0
+      read.should eq(visited)
+
+      # Non-zero only while the query is running, so a crash handler reading it
+      # is reading the thread the fault is about. Nothing is in flight here.
+      Gcry::Platform.stack_bounds_in_flight.should eq(0)
+
+      # Every thread whose bounds were read is remembered, so a fault can say
+      # whether the thread it died on had ever worked. Checked against a live
+      # thread rather than a constant: an always-false predicate would pass a
+      # test that only asked about an unknown id.
+      id = Thread.current.to_unsafe.unsafe_as(UInt64)
+      Gcry::Platform.stack_bounds_seen_before?(id).should be_true
+      Gcry::Platform.stack_bounds_seen_before?(0xdead_beef_u64).should be_false
+      Gcry::Platform.stack_bounds_seen_full?.should be_false
+    end
+  end
+
+  describe "process GC address-space walk" do
+    # The address-space audit's answer is "the value is in this region" or "the
+    # value is nowhere", and the second one is only worth anything if the walk
+    # actually walked. A maps parser that yields nothing produces exactly the
+    # same output as a clean process
+    # (bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md), so the walk
+    # is asked about regions whose addresses this test already knows.
+    it "yields the region that contains a mapping it was just handed" do
+      len = LibC::SizeT.new(64 * 1024)
+      # MAP_PRIVATE | MAP_ANONYMOUS, PROT_READ | PROT_WRITE.
+      mapped = LibC.mmap(Pointer(Void).null, len, 3, 0x22, -1, LibC::OffT.new(0))
+      mapped.address.should_not eq(0)
+      mapped.address.should_not eq(UInt64::MAX)
+
+      begin
+        target = mapped.address
+        stack_addr = pointerof(len).address
+
+        regions = 0
+        found_mapping = false
+        found_stack = false
+        walked = Gcry::Platform.each_map_region do |lo, hi, perms, _name, _name_len|
+          regions += 1
+          # Every region the walk yields must be a range, and its permission
+          # field must be one of the two things that column can start with. A
+          # parser that mixes up columns still produces plausible-looking
+          # numbers, and the search would then read the wrong bytes. The walker
+          # deliberately yields unreadable regions too — filtering is the
+          # caller's job — so `-` is as correct here as `r`.
+          hi.should be > lo
+          (perms[0] == 'r'.ord.to_u8 || perms[0] == '-'.ord.to_u8).should be_true
+          found_mapping = true if target >= lo && target < hi
+          found_stack = true if stack_addr >= lo && stack_addr < hi
+        end
+
+        walked.should be_true
+        # Broken on purpose and observed red: raising `yield_map_line`'s minimum
+        # line length to 20 000 makes the walk parse nothing while still
+        # reporting success, and this is the assertion that catches it.
+        regions.should be > 1
+        found_mapping.should be_true
+        found_stack.should be_true
+      ensure
+        LibC.munmap(mapped, len)
+      end
+    end
+  end
+{% end %}

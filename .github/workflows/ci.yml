@@ -22,6 +22,30 @@ on:
       stall_ms:
         description: "GCRY_STW_TEST_STALL_MS — widens the stopped window so a rare overlap becomes frequent. Research only; 0 for a normal soak."
         default: "0"
+      ec_queue_audit:
+        description: "GCRY_EC_QUEUE_AUDIT — walk the Parallel run queues each collection and report the first slot that stops being a live Fiber. 'off' to disable."
+        required: false
+        default: "on"
+      poison_freed:
+        description: "GCRY_POISON_HOLDERS — poison freed payloads with 0xdeadf2ee…, tag each with the freed block's address, and on a fault name what still points at it. 'off' to disable."
+        required: false
+        default: "on"
+      fiber_churn:
+        description: "Soak --fiber-churn=N: fibers per 1 ms burst, to keep the run queues occupied so the queue audit has something to look at. 0 = the baseline workload every earlier soak ran."
+        required: false
+        default: "0"
+      soak_rss_limit_kb:
+        description: "Soak --rss-limit-kb. Churn holds thousands of fiber stacks (+44.7 MB measured over 25 s at 512), so a churn arm needs this raised."
+        required: false
+        default: "4096"
+      collect_hz:
+        description: "Soak --collect-hz=N: collections per second. The audit only sees a slot that is corrupt while a collection looks at it, so chances = collections x occupancy; churn raised occupancy, this raises the other factor. 20 measured 19x the collections at a *lower* pause. 1 = the baseline every earlier soak ran."
+        required: false
+        default: "1"
+      page_query_pressure:
+        description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm; too much can take the job down with it."
+        required: false
+        default: "0"
 
 jobs:
   test:
@@ -29,9 +53,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            crystal: latest
-            arch_label: x86_64
+          # There were two arms here, `latest` and this pinned one. On 2026-08-16
+          # GitHub's releases-list endpoint for crystal-lang/crystal began
+          # returning an empty array — `releases/latest` and the tags stayed
+          # correct — so install-crystal, which resolves `latest` off that list,
+          # asked for version `null` and took ten of the twelve jobs down. Every
+          # `latest` in this file is pinned for that reason. 1.21.0 was `latest`
+          # on the day of the pin, so the two arms became the same job and one
+          # was dropped. When the endpoint recovers, a `latest` arm is worth
+          # bringing back: it is the only thing that tells us a compiler release
+          # broke the collector.
           - os: ubuntu-latest
             crystal: "1.21.0"
             arch_label: x86_64
@@ -43,7 +74,7 @@ jobs:
     timeout-minutes: 30
     name: test (${{ matrix.arch_label }}, crystal ${{ matrix.crystal }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -55,12 +86,15 @@ jobs:
       - name: Check formatting
         run: crystal tool format --check
 
+      # `make lint`, not an inline script: the inline one `cd lib/ameba`'d to build
+      # the binary and never came back, so `../../bin/ameba` ran with the working
+      # directory still inside ameba's own checkout. It linted **ameba** — 346
+      # files, gcry's config not even loaded — and had done so for every green run
+      # on record. The Makefile target runs each line in its own shell, so the
+      # binary runs from the repo root. gcry is 82 files, and the first honest run
+      # found 10 issues.
       - name: Ameba
-        run: |
-          shards install --development
-          cd lib/ameba && shards build
-          cp -f bin/ameba ../../bin/ameba
-          ../../bin/ameba
+        run: make lint
 
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
@@ -159,6 +193,14 @@ jobs:
           # that `bench/stw_watchdog.cr` already established as CI-proof against
           # a runner simply descheduling the collector.
           GCRY_STW_WATCHDOG_MS: "10000"
+          # This gate caught the open use-after-free on 2026-08-17 — SIGSEGV in
+          # `pthread_getattr_np` under `stop_world`, on **x86_64**, in a harness
+          # that uses plain `Thread.new` — and could say nothing about it,
+          # because the diagnostics were not on here. They cost a memset per
+          # free and nothing until something faults; a gate that catches this
+          # defect should not waste the sighting.
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
@@ -307,6 +349,75 @@ jobs:
         run: |
           make greg-roots
 
+      # The same question one level up: scan_thread_roots pins the Parallel EC's
+      # queues, event loop and schedulers by name, and the whole block sits behind
+      # a macro gate on Thread.@execution_context. A gate that compiles a root
+      # scan out looks, from outside, exactly like one that ran and found
+      # nothing — which is how the two register gaps above went unnoticed.
+      - name: Parallel EC scheduler root pins
+        run: |
+          make scheduler-roots
+
+      # And one level down: a precise layout is a claim about *every* pointer in
+      # the object, and `Layout.register` had a bucket it never named — an ivar it
+      # could not classify (module-typed, Proc, Tuple) got no offset and did not
+      # force the conservative fallback, so the word was never scanned. 19 such
+      # ivars in 186 stdlib types, `Fiber#proc` among them. Same shape as the two
+      # register gaps above: a root the caller assumed was covered.
+      - name: Unclassified ivar layout roots
+        run: |
+          make ivar-layout-roots
+
+      # And the consumer side: the run queues the scheduler dequeues from. The
+      # 2026-08-10 soak SEGV'd on a slot whose pointer had been partly
+      # overwritten, an hour after whatever wrote it. `GCRY_EC_QUEUE_AUDIT=1`
+      # names the first collection that sees such a slot; this gate proves it
+      # names the planted value rather than something downstream of it.
+      - name: EC run-queue audit
+        run: |
+          make ec-queue-audit
+
+      # And the other half of "make the next crash legible": a freed payload
+      # becomes 0xdeadf2eedeadf2ee. The gate's second arm is the one that
+      # matters — poisoning must not break the freelist-clean fast path, or a
+      # cleared malloc hands out poison.
+      - name: Poison on free
+        run: |
+          make poison-freed
+
+      # And the reporter that reads the poison back: a crash now says whether
+      # the address was in the heap, in a free block, in a used one, or nowhere
+      # gcry mapped. Tested by crashing, one child process per shape.
+      - name: SIGSEGV report
+        run: |
+          make segv-report
+
+      # And the step after naming the block: naming what still points at it.
+      # The open fiber-creation UAF stopped at "the block is a Deque buffer the
+      # deque abandoned"; this searches the root set, the live heap and the
+      # fiber stacks for that address at fault time. Plants holders on purpose,
+      # because a search that finds nothing looks like one that found the heap
+      # clean.
+      - name: Use-after-free holders
+        run: |
+          make poison-holders
+
+      # And the question the holder search opened: is the mark complete at all?
+      # Walks every marked block after mark and before sweep and names any
+      # pointer into a block the sweep is about to free. The gate plants one it
+      # knows the shape of, so a silent audit cannot pass.
+      - name: Mark completeness audit
+        run: |
+          make mark-audit
+
+      # The perf gates are floors far below tip, so a regression that lands
+      # inside one is invisible (85% -> 70% clears all of them). The baseline
+      # comparator closes that; this gates the comparator itself, which needs
+      # neither wrk nor a quiet host.
+      - name: Perf baseline comparator
+        run: |
+          make perf-baseline
+
       - name: RSS leak detection
         run: |
           crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
@@ -368,11 +479,11 @@ jobs:
     timeout-minutes: 20
     name: coverage
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Create output dirs
         run: mkdir -p bin coverage
@@ -411,7 +522,7 @@ jobs:
           fi
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -422,11 +533,11 @@ jobs:
     timeout-minutes: 20
     name: asan
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Build ASan spec binary
         run: |
@@ -442,11 +553,11 @@ jobs:
     timeout-minutes: 20
     name: valgrind
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y valgrind
@@ -477,11 +588,11 @@ jobs:
     timeout-minutes: 30
     name: perf smoke (kemal /json vs Boehm)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
@@ -492,8 +603,13 @@ jobs:
           # Thr floor 65%: GHA often lands ~68–88% and has flaked at 68.1/68.4
           # under a 70% gate. RSS×/pause catch pause-campaign regressions;
           # quiet tip ~85% @ ~0.8× @ ~0.6ms.
+          # The floors below are the catastrophe net. The baseline comparison
+          # perf_smoke.sh runs at the end is the sensitive half — report-only
+          # until a baseline with a tolerance measured on this runner class is
+          # recorded and committed (bench/baseline/perf_smoke.json).
           PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
             MIN_PCT=65 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
+            RUNNER_LABEL=ubuntu-latest \
             ./bench/perf_smoke.sh
 
       - name: Kemal E2E (endpoints + 60s load)
@@ -507,7 +623,7 @@ jobs:
           make soft-soak-ec4-smoke
 
       - name: Upload perf report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: perf-smoke-report
           path: bench/log/
@@ -523,13 +639,22 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 330
-    name: soak (5h)
+    # Three arms, concurrently. One 5 h arm a week cannot chase a crash that took
+    # 1h24m to arrive — at that cadence a candidate fix and a quiet run are the
+    # same observation. Three tripled the sample rate for the same wall clock,
+    # and `fail-fast: false` is the point: an arm that crashes must not cancel
+    # the two that might have crashed differently.
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [1, 2, 3]
+    name: soak (5h, arm ${{ matrix.arm }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Build soak test
         run: |
@@ -541,17 +666,48 @@ jobs:
           SOAK_DURATION: ${{ github.event.inputs.soak_duration || '18000' }}
           GCRY_MONITOR_GATE: ${{ github.event.inputs.monitor_gate == 'off' && '0' || '1' }}
           GCRY_STW_TEST_STALL_MS: ${{ github.event.inputs.stall_ms || '0' }}
+          # The 2026-08-10 SEGV surfaced in the dequeue, an unknown time after the
+          # write that caused it. This walks the run queues at every collection
+          # and prints the first one that holds something other than a live Fiber,
+          # so a crashing run says *when* the slot went bad instead of only that
+          # it did. Costs a bounded walk inside the pause; on by default here
+          # because that is what this job is for.
+          GCRY_EC_QUEUE_AUDIT: ${{ github.event.inputs.ec_queue_audit == 'off' && '0' || '1' }}
+          # A use-after-free then reads 0xdeadf2ee… instead of something that
+          # looks like data. `GCRY_POISON_HOLDERS` rather than the plain poison,
+          # and for the same memset: it implies the address **tag**, the crash
+          # report, and a search of the root set, the heap and the fiber stacks
+          # for whatever still points at the freed block. Untagged poison names
+          # no block — measured on 2026-08-16, when `ec-queue-audit` caught the
+          # open use-after-free in CI and the report could only say so. A 5 h
+          # arm that catches this once must not waste the sighting.
+          GCRY_POISON_HOLDERS: ${{ github.event.inputs.poison_freed == 'off' && '0' || '1' }}
+          # Explain whatever address the run dies on against the heap's own
+          # tables, instead of leaving one hex number behind like 2026-08-10 did.
+          # Implied by POISON_HOLDERS; set explicitly so turning that off does
+          # not silently take the crash report with it.
+          GCRY_SEGV_REPORT: "1"
+          FIBER_CHURN: ${{ github.event.inputs.fiber_churn || '0' }}
+          SOAK_RSS_LIMIT_KB: ${{ github.event.inputs.soak_rss_limit_kb || '4096' }}
+          COLLECT_HZ: ${{ github.event.inputs.collect_hz || '1' }}
         run: |
-          ./bin/soak --duration="$SOAK_DURATION" --telemetry=/tmp/gcry-soak.log
+          # --fiber-churn=0 is the baseline every earlier soak ran on, and the
+          # one the open 2026-08-10 SEGV is measured against; raise it (with the
+          # RSS ceiling) only for a hunting run.
+          ./bin/soak --duration="$SOAK_DURATION" \
+            --fiber-churn="$FIBER_CHURN" \
+            --collect-hz="$COLLECT_HZ" \
+            --rss-limit-kb="$SOAK_RSS_LIMIT_KB" \
+            --telemetry=/tmp/gcry-soak.log
 
       # The run that fails is the one whose telemetry is worth having, and it was
       # the one run that discarded it: 2026-08-10 crashed, so this step was
       # skipped and the hours before the SEGV went with it.
       - name: Upload telemetry
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: soak-telemetry
+          name: soak-telemetry-arm-${{ matrix.arm }}
           path: /tmp/gcry-soak.log
           retention-days: 30
 
@@ -561,11 +717,11 @@ jobs:
     timeout-minutes: 20
     name: test (aarch64 cross-compile)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Cross-compile samples for aarch64-linux-gnu
         run: |
@@ -590,11 +746,11 @@ jobs:
           - x86_64-linux-musl
           - aarch64-linux-musl
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Cross-compile samples for ${{ matrix.target }}
         run: |
@@ -613,11 +769,11 @@ jobs:
     timeout-minutes: 20
     name: test (aarch64 native)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Unit + process specs + STW SP + fork on aarch64
         run: |
@@ -631,6 +787,9 @@ jobs:
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
           make greg-roots
+          make scheduler-roots
+          make ivar-layout-roots
+          make ec-queue-audit
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
@@ -638,11 +797,11 @@ jobs:
     timeout-minutes: 20
     name: test (darwin native)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: latest
+          crystal: "1.21.0"
 
       - name: Unit + process specs + samples on Darwin
         run: |
@@ -664,3 +823,63 @@ jobs:
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
           make greg-roots
+          make scheduler-roots
+          make ivar-layout-roots
+          make ec-queue-audit
+          make perf-baseline
+
+      # Two more of the ~40 gates the Linux job runs and this one did not. The
+      # STW × TLAB property test is a correctness gate for a UAF class that was
+      # real (process-STW × TLAB freelist), and it is platform code on both
+      # sides of the suspend. The soak smoke needed a Darwin RSS reader first —
+      # its `/proc/self/status` reader returned 0 here, which passed the RSS
+      # ceiling by measuring nothing (bench/bench_rss.cr).
+      - name: STW × TLAB property test
+        run: |
+          make stw-mt-property-test-short
+
+      # The v0.21.0 Darwin low-water skip is blocked on one question, and it is
+      # not a code question: does `mach_vm_page_query`'s disposition separate
+      # "never faulted" from "written then evicted"? Only a Darwin host can
+      # answer it. It has now answered four fifths of it (2026-08-15): untouched
+      # pages read skippable, written ones do not, every skippable page read
+      # zero, and an `MADV_FREE_REUSABLE` page read zero whatever its bits said.
+      # The fifth arm — a page that leaves residency with its contents intact —
+      # needs the host to compress, and a runner will not do that on its own, so
+      # it returns INCONCLUSIVE and exits 0. `page_query_pressure` is how a
+      # dispatch attempts it; a non-zero exit means the bits are demonstrably
+      # wrong, which is itself the answer.
+      - name: mach_vm_page_query disposition bits
+        env:
+          # Empty rather than '0' on the push path: the Makefile expands this
+          # with `${VAR:+…}`, so empty means the flag is not passed at all and a
+          # push runs the exact command line it ran before this input existed.
+          # A dispatch that leaves the field at its 0 default passes
+          # `--pressure=0`, which the probe already treats as no pressure.
+          PAGE_QUERY_PRESSURE: ${{ github.event.inputs.page_query_pressure || '' }}
+        run: make darwin-page-query
+
+      # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
+      # measured on Linux and Darwin reclaims differently (MADV_FREE_REUSABLE
+      # keeps pages mapped where MADV_DONTNEED drops them), so nobody knew what
+      # Darwin does. Four green runs now say, and they say the Linux number
+      # holds — no Darwin ceiling had to be invented after all:
+      #
+      #   +2880 kB  +3136 kB  +2384 kB  +2640 kB   (max RSS 10.6–11.4 MB)
+      #
+      # Worst is +3136 against a +4096 ceiling: 960 kB of headroom, 1.28x the
+      # 752 kB spread across the four. Darwin does run ~2.9x Linux's ~1 MB
+      # re-fault, which is why this needed measuring rather than assuming.
+      # Raise the ceiling only against more runs, never to quiet one red.
+      - name: Soak smoke
+        run: |
+          make soak-smoke
+
+      # First run of the debug invariant checker on Darwin. It failed on Linux
+      # and Darwin alike until 2026-08-15 (the walk counted every block of a
+      # dormant chunk), and nothing ran it here — which is why it shipped in
+      # three releases. `spec/invariant_spec.cr` pins the two cases without the
+      # env var; this step is the whole suite under the checker.
+      - name: Debug invariants on Darwin
+        run: |
+          GCRY_DEBUG_INVARIANTS=1 crystal spec --error-trace

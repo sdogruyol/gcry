@@ -14,6 +14,7 @@
 # Writes bench/trend.json (gitignored) for local/CI artifact trending.
 
 require "../src/gcry"
+require "./bench_rss"
 require "json"
 
 HEAP = Gcry.default_heap.not_nil!
@@ -37,17 +38,16 @@ ARGV.each do |arg|
   end
 end
 
+# RSS is the secondary gate here (heap_size is the primary), so a platform that
+# cannot answer must say so rather than compare zeros — see bench/bench_rss.cr.
+unless BenchRss.available?
+  STDERR.puts "cannot read this process's RSS on this platform; the RSS half of " \
+              "this gate would compare zeros and pass."
+  exit 64
+end
+
 def read_rss_kb : UInt64
-  {% if flag?(:linux) %}
-    File.open("/proc/self/status") do |f|
-      f.each_line do |line|
-        if line.starts_with?("VmRSS:")
-          return line.split[1].to_u64
-        end
-      end
-    end
-  {% end %}
-  0_u64
+  BenchRss.read_kb
 end
 
 # One alloc/free/collect cycle. Returns {rss_kb, heap_size}.

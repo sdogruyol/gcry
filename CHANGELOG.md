@@ -7,6 +7,775 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_ADDRESS_SPACE_AUDIT=1` — at the moment a block dies, search the whole
+  address space for its address and name the region that holds it.** The
+  use-after-free hunt had reached a contradiction it could not settle from
+  inside the collector: the dying `Deque(Fiber::Stack)` buffer was in no used
+  heap block, in no suspended thread's registers, in no explicit root, and the
+  crash report found it on a stack immediately afterwards. So the audit stops
+  asking gcry and asks the kernel — it walks every readable mapping in
+  `/proc/self/maps`, searches it word-aligned, and classifies each hit as a gcry
+  block, a live fiber stack (inside or below the scan window), a pooled stack, a
+  thread stack, or an unowned one. That is what found the window this release
+  fixes. Off by default and expensive: it reads the resident address space
+  inside the pause, once per collection.
+  Two corrections in it are the reason its numbers can be read at all: the first
+  version reported 47 hits that were **its own frames** (it runs on the
+  collecting fiber's stack and carries the target as an argument — it now
+  compares against the window the scan actually used), and it took a **SIGBUS**
+  on a mapping `/proc/self/maps` calls readable, killing the collection it was
+  measuring; reads now go through `pread` on `/proc/self/mem`, where a bad page
+  costs one page.
+  `bench/log/linux/2026-08-17-address-space-audit/FINDINGS.md`
+
+- **Research arms for unowned fiber stacks**, kept rather than deleted because
+  the next question about this defect will want the same ones and rebuilding
+  them from a log is how a measurement gets quietly redefined:
+  `GCRY_DEAD_STACK_NOROOT`, `GCRY_POOLED_STACK_ROOTS`,
+  `GCRY_POOLED_STACK_NOROOT`, `GCRY_MAPS_INFLIGHT_ROOTS`,
+  `GCRY_MAPS_INFLIGHT_NOROOT`, and `GCRY_UNOWNED_COVERAGE_AUDIT=1`, which walks
+  `/proc/self/maps` beside the shipped fix and counts stack-shaped mappings
+  nothing accounts for (549 accounted for against 4 not, per run). Every arm
+  counts the stacks it walked and the words it offered, so a null result cannot
+  be an arm that never ran — and each rooting arm has a twin that walks the same
+  memory and offers nothing, which is what separated this fix from the birth
+  grace's zero.
+
+- **`GCRY_STAGED_WAIT=1` — the collector waits for a thread that has not
+  published itself yet.** gcry records every thread from the moment
+  `pthread_create` returns; this is the first change that *acts* on that record.
+  Before stopping anything — and before `Thread.lock`, because a starting thread
+  publishes by taking that very mutex, so waiting under it would deadlock by
+  construction — the collector spins briefly while a staged thread has not
+  appeared in Crystal's list. Measured at 16 workers, 160 collections a run:
+  crashes **6/60 → 0/60** (Fisher p ≈ 0.03), census gaps **3/30 → 0/30**, with
+  about 1.4% of collections waiting at all. A timeout drops the staged entries,
+  so a thread that dies before publishing cannot buy a permanent spin.
+  The first implementation could not have worked and looked like it did — entries
+  were released only by `stop_world`'s later walk, so 68 of 68 waits timed out
+  while the gap closed on the delay alone; the loop now drains published entries
+  itself, ~140 waits since with zero timeouts. **On by default**
+  (`GCRY_STAGED_WAIT=0` opts out) — the uncautious choice, made because the
+  local repro is dead (`nested_spawn_uaf` 0/23, `ec_queue_audit` 0/25) and CI is
+  the only observer left: a knob nobody sets is never observed, and the open
+  question is whether this also closes the `Fiber` family, which has never been
+  shown to share the window. Evidence for harm is nil.
+  `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
+- **gcry now records a thread as soon as `pthread_create` hands back its
+  handle.** Crystal publishes a thread onto `Thread.threads` only from inside
+  its own `start`, and until then `stop_world` neither suspends nor scans it —
+  a window the census measures at roughly one collection in a thousand. The new
+  staging table (`src/gcry/platform/thread_staging.cr`) is filled from the
+  creating side and emptied when the thread turns up in Crystal's list, and it
+  **accounts for every gap the census has reported** (`staged >= gap`). It
+  records only: what the collector suspends and scans is unchanged, because two
+  earlier attempts that did change it broke thread startup — holding Crystal's
+  thread-list lock across creation (3/10 crashes, window not closed) and a
+  trampoline staging `pthread_self()` before user code (8/10 crashes, window
+  covered exactly). The creating-side placement is 0/20 against 0/20 without it.
+  Counters on `/gc-stats`; gated in `process_spec` with both halves broken on
+  purpose. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
+- **`GCRY_THREAD_CENSUS=1` — is every thread inside the stopped world?** gcry
+  learns about threads from Crystal's list: `stop_world` suspends what
+  `Thread.unsafe_each` yields and the stack scans walk the same set, so a thread
+  that exists at the OS level but has not yet pushed itself onto
+  `Thread.threads` is neither stopped nor scanned. The census counts the list
+  against `/proc/self/status:Threads` at every `stop_world` and **has caught the
+  difference** — the OS reporting 10 threads against Crystal's 9, during worker
+  startup. About one collection in a thousand on a churn workload, one thread,
+  scaling with thread creation (0/6 runs at 4 workers, 2/6 at 16). Off by
+  default: it reads `/proc` inside the pause. The reader returns `nil` rather
+  than 0 when `/proc` cannot answer, and `thread_census_unanswered` counts those,
+  so "no gaps" can never be the result of never having looked. Linux only;
+  Darwin answers `nil` by design. Gated in `process_spec`, broken on purpose and
+  observed red. `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+
+- **The pthread stack-bounds snapshot is countable, and a fault in it names the
+  thread.** `snapshot_pthread_stack_bounds` asks libc for each thread's stack
+  range before the suspend signals go out; a thread it visits but gets no bounds
+  for silently loses the pthread-mapping half of its root coverage — the same
+  shape as the register stubs v0.19.0 closed. `stack_bounds_visited` /
+  `stack_bounds_read` on `/gc-stats` make that a number, gated in `process_spec`
+  on Linux (Darwin queries the descriptor at lookup time and reports zeros by
+  design) and broken on purpose at `visited=96, read=0`. And
+  `stack_bounds_in_flight` holds the `pthread_t` being queried, non-zero only
+  during the call, which the SIGSEGV report prints before anything about the
+  faulting address. Prompted by aarch64 CI crashes inside `pthread_getattr_np`
+  on 2026-08-16 — **three** by the end of the day, across two different gates,
+  each of the first two leaving a libc frame and one hex number. The third
+  arrived on the first run after these landed and answered: the fault is
+  `0x418` into the thread descriptor the `pthread_t` points at, on the *next
+  page* from the id itself, with 22 threads visited and 21 read. A **fourth**
+  on 2026-08-17 repeated those numbers exactly — same `0x418`, same `22/21` —
+  so it is one query at a reproducible point, not a race with a random victim.
+  The snapshot now also remembers every id it has **successfully** read bounds
+  for, and the report says whether the faulting thread is among them: a repeat
+  means it stopped being queryable between two snapshots, a first-timer means
+  it never was. That is the bit that decides between the two readings left
+  after Crystal's own ordering rules out the cheap ones — the handle is
+  published before the thread joins the list, the main thread's is set before
+  its push, removal precedes `system_close`, and `push` / `delete` /
+  `Thread.lock` all take the same mutex. The id table is bounded and says so
+  (`stack_bounds_seen_full?`), so "first time" is never reported when the real
+  answer is "we stopped recording". Gated in `process_spec` against a live
+  thread id, broken on purpose in both directions.
+  `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
+
+- **`GCRY_MARK_AUDIT=1` — is the mark complete?** After `mark_loop` and before
+  `sweep`, with the world stopped, walk every marked block and report any base
+  pointer into a **used but unmarked** block: the sweep is about to free
+  something a live object points at. Names the parent's address, `type_id` and
+  offset, and the child. `mark_audit_edges` / `mark_audit_misses` on
+  `/gc-stats`, so a run that ends without a crash still says whether the mark
+  held. Off by default — O(live heap) inside the pause; it reports, it does not
+  fix. Gated by `make mark-audit`, whose `hold` arm plants an edge the mark
+  provably does not follow — a pointer in a block's `scan_cap` slack under
+  `GCRY_SCAN_CAPS=1` — and requires the audit to name it (199 missed of 1579),
+  against 0 missed of 1977 on the same workload without it and 0 edges walked
+  with the knob off. The first version of that gate did not set `GCRY_SCAN_CAPS`
+  and passed vacuously: with the caps off the scan reads the slack too and the
+  planted edge is not missed at all.
+
+- **`GCRY_BIRTH_GRACE=1` — research only, and it found the window.** Roots every
+  block `allocate` returns for the duration of the next collection, then drops
+  it: the one window in which a block is live in a register or a stack slot and
+  nowhere else. It runs **after** the mark, so it reports each newborn block the
+  mark did not reach — address, size, first word, collection — before saving it.
+  On the fiber-creation use-after-free: **20/48 crashes → 0/48**, back-to-back,
+  with 2 774 blocks rooted and **0 ring overflows**, so the null arm cannot be a
+  silent cap. And 157 of the reported saves across six runs are one thing: a
+  192-byte block whose first word is 168, i.e. a **`Fiber`** — which read as a
+  fiber under construction and was not; see the third correction below, which
+  retires that reading. Not a fix and never a default: it
+  keeps every allocation alive for a whole collection. Counters on `/gc-stats`.
+  It also reports **where the value is not**: not on any fiber stack above the
+  collector's entry SP, not in any suspended thread's captured GP registers, and
+  `mark_root_candidate` accepts the address when handed it — so this is a
+  scan-coverage gap and not a root filter. Two corrections came with it: the
+  locator's first version found **its own parameter** on the stack (87 of 87
+  hits, all at one offset inside the collector's call chain; excluding frames
+  below the new `Heap#collect_entry_sp` removed every one), and the repro itself
+  went quiet late in the session — the committed binary crashing 10/24 dropped to
+  0/8 minutes later with no code change, so the rate is host-state dependent and
+  a quiet arm proves nothing.
+  **And a third correction, which retires this entry's own first claim.** The
+  grace now follows its saves into the next collection: **0, 0 and 1** of them
+  were live there, against 80–106 garbage. So ~99% of what it saves is ordinary
+  short-lived garbage and the saved `Fiber`s are *finished* fibers, not fibers
+  under construction — "a `Fiber` mid-`initialize` is reachable from no root we
+  scan" is **not supported**. The arm's effect (20/48 → 0/48, back-to-back,
+  twice) stands; its mechanism does not, and the remaining reading is that
+  delaying a block's return to the freelist moves a use-after-free that depends
+  on reuse timing.
+  `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
+
+- **`BlockHeader::Flags::SWEPT`** — set alongside `FREE` by the sweep's freelist
+  link, left clear by an explicit `Heap#free`, and read back by the SIGSEGV
+  report. "The collector decided it was garbage" and "the program asked for it
+  to be freed" are different defects with different owners, and the poison alone
+  could not tell them apart. One OR per free.
+  **It needed a second fix, and the first CI catch is what found it.** The flag
+  was set only in `push_size_class_free`; four freelist **rebuild** sites in
+  `collect_sweep.cr` — which re-link blocks that are *already* free after a
+  chunk is emptied or page-released — reconstructed the header with a bare
+  `FREE` and **erased** it. A block the sweep had genuinely reclaimed then read
+  as an explicit free, and a CI catch was written up as "a second free path
+  exists" on exactly that basis. It was retracted: measured on a chunk-emptying
+  workload, the flag survives **278 of 278** with the fix and **0 of 278**
+  without, and `Heap#free` / `realloc(size: 0)` fire zero times in a
+  fiber-spawning workload, so there was never a plausible caller. Both
+  directions — the discrimination and the rebuild preservation — are now gated
+  in `process_spec`, broken on purpose and observed red at `Expected: 278`.
+  A flag is only as good as every site that rewrites the word it lives in.
+
+- **The fiber-creation use-after-free is now bounded from the other side.** The
+  block is freed **by the sweep** (`flags 0x81`), **no marked object points at
+  it** at sweep time (zero missed edges in 15 runs, 6 of them crashing), and the
+  live deque points at it at fault time — so the deque acquired the pointer
+  *after* the collection that freed the block, and at that collection it was
+  live only in a register or a stack slot. Nothing moves the rate: `GCRY_SOUND`,
+  `GCRY_INTERIOR`, `GCRY_AUTO_LAYOUTS`, an explicit root on the pool, the deque
+  or the buffer, or never releasing a root on `realloc`'s new block. The hunt
+  moves off heap edges and onto ambient roots of the allocating thread. Also:
+  the repro is **20× cheaper** — `ROUNDS=20 FIBERS=64` gives 4/12 crashes at ~2 s
+  a run. `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`
+
+- **`GCRY_POISON_HOLDERS=1` — a use-after-free now names what still points at
+  the block, not only which block it read.** `GCRY_POISON_TAG` got as far as
+  naming the freed block; the open fiber-creation UAF stopped exactly there, at
+  "a `Deque(Fiber::Stack)` buffer abandoned at a resize, freed correctly, and
+  something still reads it". On a fault the reporter now searches the three
+  places gcry can walk — the explicit root set, every live block in the heap,
+  and every fiber stack — and names each holder: the holding block's address,
+  size, `type_id`, flags, mark state and the offset the pointer sits at, or for
+  a stack the slot address, the fiber's `stack_top` and whether that slot is
+  inside the window the collector actually scans. Implies the tag and the crash
+  report it extends, since a search with no block address to look for would be a
+  knob that silently does nothing. Costs nothing until something faults.
+  Gated by `make poison-holders`: a planted heap holder must be named **by
+  address**, a stack-only holder must be found on the stack, and a block nobody
+  holds must report **0** — the arm that fails if the walk matches the freed
+  block on itself or walks FREE blocks. `--control` shows the search adds lines
+  and removes none. Both directions broken on purpose and observed red. Linux
+  only, alongside `make segv-report` and `make poison-freed`, because
+  `SegvReport`'s register scan for the poison is Linux-only and on Darwin the
+  search would have no address to look for.
+  The search runs a **second pass against the holder itself**, and each reported
+  holder's first payload words are dumped, so an object's state is readable and
+  not only its address.
+  **What it found, and it is the live pool.** Across 7 crashes the chain is the
+  same every time, matched by address against the pools the harness prints
+  before anything goes wrong: the freed block's only holder is the execution
+  context's own `Deque(Fiber::Stack)` (`type_id` 210, `@buffer` at +16), and
+  *its* only holder is the context's own `Fiber::StackPool` (`type_id` 199).
+  Not an orphan and not the default context's. `0 of 0` explicit roots at both
+  levels; every stack holder on a *running* fiber above `stack_top`, i.e. inside
+  the scanned window; neither block `ATOMIC`. And the payload dump retires the
+  "abandoned buffer" reading: `@capacity` matches the freed block's entry count
+  exactly (1536 B ↔ 64, 3072 B ↔ 128) with `@size` below it, so the deque is not
+  caught between `Deque#resize_to_capacity`'s `@capacity` and `@buffer` stores —
+  it holds the buffer it believes is current, and gcry freed that.
+  **Correction.** The first version of this reporter printed `UNMARKED` for a
+  zero mark generation and this changelog read it as "no collection ever marked
+  the holder". That was wrong: `sweep` clears every survivor's mark, so between
+  collections every live object reads zero — measured against an object held in
+  a local across three collections. The verdict is out; raw flags stay, with
+  `ATOMIC` named because that bit does mean the payload is never scanned.
+  `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
+
+- **`ec_root_pins` — the Parallel EC pin block is now readable from outside the
+  collector.** `scan_thread_roots` names the execution context's queues, event
+  loop, stack pool and schedulers, and the whole block sits behind a macro gate
+  on `Thread.@execution_context`. A gate that compiles a root scan out looks
+  exactly like one that ran and found nothing — the shape of both v0.19.0
+  defects. The counter is on `/gc-stats`; `bench/scheduler_roots.cr` and
+  `make scheduler-roots` gate on it, measured as a delta across a collection
+  taken before the context exists so ambient Thread-level pins cannot carry the
+  arm. Both directions broken on purpose and observed red: stubbing `pin_ec_root`
+  drops the delta to 7 against 16 named, and removing the per-collect reset moves
+  the control arm off zero. Runs on Linux x86_64, Linux aarch64 and Darwin.
+  Note what the gate is *not*: with the pins stubbed the parked fibers still
+  survived 16/16, because the conservative scan reaches them anyway — the delta
+  discriminates, the survival does not.
+
+- Two candidate explanations for the 2026-08-10 soak SEGV are **eliminated**, and
+  neither is a fix: (1) the macro gate is **open** on the configuration the soak
+  builds — measured on Crystal 1.21.0, open by default and under
+  `-Dexecution_context`, closed only under `-Dpreview_mt`, where the pre-EC
+  scheduler means there is nothing to pin — so the pins do run there; (2) the
+  precise-offset path drops module-typed ivars (neither Reference, Pointer,
+  Value-with-ivars nor StaticArray, so they are omitted without forcing the
+  conservative fallback — `@event_loop : Crystal::EventLoop` was named here as
+  the instance and is **not** one, see the correction below), but that path only
+  installs under `GCRY_AUTO_LAYOUTS=1`, which the soak does not set — the default
+  `register_scan_caps` installs a cap and no offsets, so the scan stays
+  conservative and covers the slot. The second is now **verified as a defect** in
+  its own right and fixed — see below — though not as an explanation for the
+  SEGV, and not on the ivar it was recorded against.
+
+- **The soak, the STW × TLAB property test and the invariant checker now run on
+  Darwin — and the soak's RSS gate stopped passing by measuring nothing.** Three
+  bench harnesses each carried a `/proc/self/status` reader with a
+  `rescue 0_u64`. On Darwin that is not a fallback: the file does not exist,
+  every sample reads 0, and the soak's RSS ceiling compares 0 against a start of
+  0 and passes. `bench/bench_rss.cr` replaces all three — `task_info(MACH_TASK_BASIC_INFO)`
+  on Darwin, `/proc` on Linux, and **nil rather than 0** when the platform cannot
+  answer, so `soak` and `rss_leak` refuse to run instead of gating on zeros
+  (`pattern_fuzz` only reports RSS, so it tolerates it). The Darwin read carries
+  two consistency checks — `resident != 0` and `resident_max >= resident` — so a
+  wrong struct offset surfaces as "cannot answer" rather than as a plausible
+  wrong number. Type-checked by cross-compiling for `aarch64-apple-darwin`; not
+  yet run on a Darwin host. The macOS job gained `stw-mt-property-test-short`,
+  `soak-smoke` (as `continue-on-error` until a Darwin RSS ceiling is *measured*
+  rather than guessed), `ec-queue-audit` and `perf-baseline`.
+
+- **`bench/perf_compare.py` — perf against a recorded baseline, not just against
+  a floor.** `perf_smoke.sh` gates on thr ≥65% of Boehm, RSS ≤1.25×, p50 ≤2.5 ms,
+  and quiet tip holds ~85% @ ~0.8× @ ~0.6 ms, so **85% → 70% clears every gate in
+  the suite**. The comparator reads the same `summary.json` and compares the four
+  ratio metrics against `bench/baseline/perf_smoke.json`; it runs at the end of
+  `perf_smoke.sh`, report-only unless `PERF_GATE_BASELINE=1`. One rule holds it
+  up: a baseline gates only if it carries a **tolerance derived from measured
+  spread** — `--record` needs ≥3 runs and otherwise writes no tolerance, so the
+  file reports rather than gating against a noise floor nobody measured. Runs
+  now stamp the runner class into the summary, and a comparison across classes
+  says so. `make perf-baseline` gates the comparator on fixtures — a regression
+  in each metric's direction, an improvement, a within-noise run, both gate
+  modes, a tolerance-less baseline, and the unrecorded file the repo ships —
+  which needs neither wrk nor a quiet host. **No baseline is recorded yet**, and
+  the perf job's own comment records ~68–88% thr across runs there, so the honest
+  next step is N green runs on that runner class before any number is committed.
+
+- **The soak can now keep its run queues occupied, and CI runs three arms at
+  once.** The queue audit below can only catch a slot that is corrupt *while* a
+  collection sees it, and the baseline workload gave it almost nothing: measured,
+  **1 collection in 24** had a non-empty queue when the world stopped (10 Hz
+  spawn against ~1 collection/s, each fiber returning immediately).
+  `--fiber-churn=N` spawns N fibers per 1 ms burst that yield four times each —
+  four because a fiber that returns immediately is drained in microseconds and
+  the ring is empty again before any collection sees it. At **512**: 23 of 24
+  collections non-empty, 2486 slots, max 508 per collect. Default **0**, the
+  baseline every earlier soak ran on and the one the open 2026-08-10 SEGV is
+  measured against. Churn holds thousands of fiber stacks (**+44.7 MB** over
+  25 s), so a churn run whose `--rss-limit-kb` is still the baseline +4 MB is
+  **refused** rather than failed on a bound nobody chose. The CI soak is now a
+  `fail-fast: false` matrix of three concurrent arms — one 5 h arm a week cannot
+  chase a crash that took 1h24m to arrive, and an arm that dies must not cancel
+  the two that might have died differently — with `fiber_churn` and
+  `soak_rss_limit_kb` as `workflow_dispatch` inputs and per-arm telemetry
+  artifacts. No fault reproduced yet; what changed is the rate at which a run
+  could catch one. `bench/log/linux/2026-08-15-soak-churn-arms/FINDINGS.md`
+
+- **Three readings of the 2026-08-10 soak SEGV closed by audit.** gcry writes
+  outside its own chunks in exactly two places and **neither was active in that
+  run**: the parked-fiber scrub — the one with a measured-zero margin — was
+  already default-off in that build (`93776f4` is an ancestor of `d36effe`), and
+  the soak's disappearing links point into a fiber loop that never returns. No
+  chunk was released either (`release_empty_chunks_this_collect?` is false under
+  multi-mutator unless a Parallel reclaim knob is set; both default off), which
+  rules out "a valid pointer into an unmapped chunk"; and the soak calls no
+  `GC.free`, which rules out an explicit free of a live block. What survives is a
+  block freed by the **sweep** while still referenced. The two root defects fixed
+  in this release are not it either — the soak sets no `GCRY_AUTO_LAYOUTS`, so
+  its `Fiber` / `GlobalQueue` / `Runnables` are scanned word by word.
+  `bench/log/linux/2026-08-15-segv-write-path-audit/FINDINGS.md`
+
+- **`GCRY_SEGV_REPORT=1` — the crash says what gcry knows about the address.**
+  `Invalid memory access at 0x7f1700000149` is everything the 2026-08-10 soak
+  left behind, and at that moment the collector could have said whether the
+  address was in its heap span, which chunk and size class, whether the block
+  read used or free, and what sat at its start. On SIGSEGV/SIGBUS it now prints
+  that and hands the signal back to Crystal's handler — adding lines, removing
+  none. Two things it had to be taught by being wrong first: **installing at
+  `GC.init` accomplishes nothing** (Crystal installs its own handler afterwards
+  with `sigaction(..., nil)`, discarding it — the first version printed nothing
+  at all, so it now arms from the first collection), and **the poison is
+  invisible to `si_addr`** (`0xdeadf2ee…` is non-canonical on x86_64, so a
+  dereference raises #GP and the kernel reports address 0 — the report asks the
+  faulting context's *registers* instead, reusing the ucontext offsets the
+  collector already scans suspended threads with). `make segv-report` forks a
+  child per fault shape — poison, FREE block, USED block, an address gcry never
+  mapped — and requires each to be named for what it is; `--control` requires no
+  gcry line at all. Default off: it installs a signal handler, which a collector
+  should not do to a process that did not ask. On for the CI soak.
+  `bench/log/linux/2026-08-15-segv-report/FINDINGS.md`
+
+- **`GCRY_POISON_FREED=1` — a freed payload becomes `0xdeadf2eedeadf2ee`.** The
+  2026-08-10 soak died on `0x7f1700000149`, and three sessions have argued about
+  what that value was — a partially overwritten pointer, a reissued object's
+  first two `Int32`s, a valid pointer into an unmapped chunk. The argument is
+  unresolvable because the value is *plausible*. Poison is not: it is not a
+  pointer, not zero, not anyone's data, and non-canonical on x86_64, so
+  dereferencing it faults at an address that reads as a sentence. Every small
+  used→free transition funnels through `push_size_class_free` (`GC.free`, the
+  sweep's `reclaim_small`, and the warm-retain path), so one hook covers them;
+  large blocks are poisoned at their own site, and `poisoned_blocks` on
+  `/gc-stats` counts both. Sound because the freelist link lives in the header,
+  not the payload. **The half that could have broken the collector is the one
+  the gate is built around:** gcry skips `malloc`'s clearing memset when a size
+  class's freelist is known clean, so poisoning without clearing that flag would
+  hand poison to a caller expecting zeros — `make poison-freed` frees and
+  re-allocates 64 blocks per class and checks every word, and deleting the line
+  that clears the flag turns it red (10560 of 10560 words came back poisoned).
+  Measured cost, soak pause p50 at n=5: **2.72 → 3.81 ms median, about +40%** —
+  visible, unlike the queue audit's, which is why the default is off and the soak
+  job is where it is turned on.
+  `bench/log/linux/2026-08-15-poison-freed/FINDINGS.md`
+
+- **`make darwin-page-query` — the experiment the Darwin low-water skip is
+  blocked on.** macOS takes none of the 8.06 → 3.60 ms EC4 pause the parked-fiber
+  low-water skip bought on Linux, because the skip rests on a primitive Darwin
+  does not have. `mincore` cannot supply it on either platform — it answers
+  *resident*, so a page written and later evicted reads absent and skipping it
+  loses a pointer. The candidate is `mach_vm_page_query`, and whether its
+  `PRESENT` / `PAGED_OUT` bits actually cover the written-then-evicted case has
+  been the open blocker. `bench/darwin_page_query.cr` carries the candidate
+  predicate — the exact logic a `darwin_pagemap.cr` would use — and five arms:
+  untouched pages must read skippable, written ones must not, **every skippable
+  page must read back zero** (the claim `spec/stack_low_water_spec.cr` pins on
+  Linux, checked exhaustively here), an `MADV_FREE_REUSABLE` page must read zero
+  whatever its bits say, and a page that leaves residency with its contents
+  intact must not read skippable. Runs in the macOS job; type-checked by
+  cross-compiling for `aarch64-apple-darwin`, **not yet run on a Darwin host**.
+  The eviction arm is expected to be INCONCLUSIVE on a runner that will not
+  compress — it exits 0 and says exactly that, because a probe that cannot
+  produce the case must not report that it passed.
+
+- **The queue audit also checks the structures, not only the slots in them.** A
+  slot walk cannot report a reissued *container*: if the `Runnables` block is
+  freed and reused, its head, tail and ring are read out of whatever the block
+  became, and the walk finds garbage everywhere rather than a slot that stopped
+  being a Fiber — which is the standing reading of the 2026-08-10 SEGV.
+  `audit_ec_structs` checks every ivar whose declared type is a concrete
+  Reference class for a **live object of that type** (heap + allocated + exact
+  type_id), derived from `instance_vars`; abstract and module-typed ivars are
+  skipped rather than guessed at. Two lessons are in the code: a referent
+  *outside* the heap is not a fault (every context's `@name` is a String literal
+  in the program image, which the first run reported as corrupt on every
+  collection), and a container that fails identity is **not then walked** — the
+  first run buried the real line under 255 garbage slot faults. Gated by a fifth
+  arm in `make ec-queue-audit` that plants a live object of the wrong type in a
+  scheduler's `@runnables` and requires the report to name it; silent across a
+  15 s soak at `--fiber-churn=128`.
+
+- **`GCRY_EC_QUEUE_AUDIT=1` — name the corrupt run-queue slot at the next
+  collection instead of at the crash.** The 2026-08-10 soak died in
+  `Parallel::Scheduler#quick_dequeue?` on `0x7f1700000149`, 1h24m in; the dequeue
+  is where the damage surfaces, and the write that caused it is an unknown time
+  earlier. The audit walks both structures that dequeue reads — each scheduler's
+  `Runnables` ring between head and tail, and the context's `GlobalQueue` list —
+  inside the stopped world, where they are quiescent, and requires every slot to
+  be a **live Fiber** (in the heap, in an allocated block, `Fiber`'s type_id at
+  offset 0). The first collection that sees otherwise prints the structure, index
+  and value; `ec_queue_audit_ring_slots` / `ec_queue_audit_list_slots` /
+  `ec_queue_audit_faults` / `ec_queue_audit_last_fault` are on `/gc-stats`, faults
+  cumulative on purpose. Off by default (bounded, but inside the pause); on for
+  the CI soak, whose telemetry now carries `queue_slots` and `queue_faults` per
+  hour. Gated by `make ec-queue-audit` with two planted values that fail different
+  halves of the test — one outside the heap, one a live object of the wrong type —
+  and the gate asserts the report names *the planted value*: with the type check
+  removed the second poison is accepted and the walk trips one hop later on
+  garbage, which a fault count alone could not tell from a catch. Measured cost on
+  the soak: none (p50 2.51–2.65 ms with, 2.66–2.81 ms without, n=3), because that
+  workload's queues hold 0–1 slots per collection — thin exposure, not thin
+  coverage. Also settled: the **default** execution context is
+  `Fiber::ExecutionContext::Parallel` on Crystal 1.21.0 with or without
+  `-Dexecution_context` / `-Dpreview_mt`, so plain `spawn` is covered by this and
+  by the pin block. `bench/log/linux/2026-08-15-ec-queue-audit/FINDINGS.md`
+
+- **`GCRY_POISON_TAG=1` — the poison carries the address of the block whose free
+  wrote it.** `GCRY_POISON_FREED` proves a crash is a use-after-free and stops
+  there, because one constant makes every freed block read alike. The tagged form
+  puts `0xDEAD` in bits 63:48 and the freed block's address in the low 48 — still
+  non-canonical, so it faults identically and the `si_addr == 0` register scan
+  still finds it, and 48 bits is the whole of an x86_64 user address. The SIGSEGV
+  report then describes that block against the heap's own tables, the same way it
+  describes a faulting address: `the free that wrote it was of the block at
+  0x…, still FREE, size 768, flags 0x1`. Opt-in, and it implies
+  `GCRY_POISON_FREED`. It found what it was written for on its first run — see
+  the entry below.
+
+- **`bench/nested_spawn_uaf.cr` — a use-after-free in fiber creation, in seconds
+  instead of 1h24m.** `make ec-queue-audit` went red three times on 2026-08-15
+  (aarch64, Darwin, x86_64) and looked like a flaky gate. It was not: every crash
+  cut off *before* that harness plants anything, and with `GCRY_POISON_FREED=1`
+  it said what it was — `the poison is in the faulting context … a
+  use-after-free, not a wild pointer`, in `Fiber#initialize` → `makecontext`.
+  Stripped to the churn that provokes it — a fiber that spawns a fiber and
+  yields, collections underneath — it is **16 crashes in 25 runs under gcry and
+  0 in 25 under Boehm**, same file, so the collector is the subject and not
+  Crystal's execution context. It does not need parallelism either: one worker
+  reproduces it 7 times in 12. Not wired into CI, because it fails most runs on
+  purpose; `make nested-spawn-uaf`, and it becomes the regression test when the
+  defect is fixed. **`GCRY_POISON_TAG=1` then named the block**: across 40
+  crashes the freed block is 384, 768, 1536 or 3072 bytes — `Fiber::Stack` is 24
+  bytes, so those are 16, 32, 64 and 128 entries, the capacity-doubling sequence
+  of a `Deque(Fiber::Stack)` — always `still FREE`, never reissued. It is
+  `Fiber::StackPool`'s deque buffer. The trigger is the deque's **resize**, and
+  that is measured rather than inferred: pre-grow the pool so it never resizes
+  during the run and the crash goes to **0 in 20**, the only condition all day
+  that removed it rather than halving it. Two things it is *not* — gcry never
+  frees the buffer the deque is using (0 dead in 4 800 checks), and the window is
+  not inside `Heap#realloc` (suppressing collection across its copy as well
+  changes nothing). What the crash reads is a buffer the deque **abandoned** at a
+  resize: freed correctly, still read. Boehm survives the same read because a
+  conservative collector that sees the stale pointer keeps the block alive and
+  its contents valid; gcry frees and poisons it, so the read is fatal. Whether
+  the retained pointer is Crystal's or gcry's is the open half.
+  `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`
+
+### Changed
+
+- **CI pins Crystal instead of asking for `latest`.** On 2026-08-17 GitHub's
+  releases-list endpoint for `crystal-lang/crystal` began returning an empty
+  array — `releases/latest` and the tags stayed correct — so
+  `crystal-lang/install-crystal`, which resolves `latest` off that list, asked
+  for version `null` and took **ten of the twelve jobs** down with it, twice an
+  hour apart. Every `latest` in the workflows is pinned to 1.21.0; the pinned
+  job was green on the same tree throughout, which is what identified it. The
+  matrix's `latest` arm became the same job as the pinned one and was dropped —
+  worth bringing back when the endpoint recovers, since it is the only thing
+  that reports a compiler release breaking the collector.
+
+- **`make scheduler-roots` now runs with the crash diagnostics on**, for the
+  reason the STW × TLAB test did: it has caught the open use-after-free twice —
+  aarch64 on 2026-08-16 and x86_64 on 2026-08-17, both SIGSEGV inside
+  `pthread_getattr_np` under `stop_world` — and both times could report nothing
+  but one hex number, because the knobs were not set there.
+- **The STW × TLAB property test now runs with the crash diagnostics on.** It
+  caught the open use-after-free on 2026-08-17 — SIGSEGV inside
+  `pthread_getattr_np` under `stop_world`, on **x86_64**, in a harness that uses
+  plain `Thread.new` — and could say nothing about it, because
+  `GCRY_POISON_HOLDERS` and `GCRY_THREAD_CENSUS` were not set on that step. That
+  sighting also settled something: the crash is **not aarch64-specific**, and
+  not specific to execution-context workers. Every earlier sighting being on
+  aarch64 was sampling.
+
+- **`make ec-queue-audit` and the 5 h soak arm now run `GCRY_POISON_HOLDERS=1`
+  instead of `GCRY_POISON_FREED=1`.** Same memset, strictly more information: the
+  tag puts the freed block's address in the poison, and the crash report then
+  names the block, its size, whether the **sweep** or an explicit free released
+  it (`Flags::SWEPT`), and what still points at it. Prompted by CI on
+  2026-08-16 — `ec-queue-audit` caught the open fiber-creation use-after-free on
+  aarch64 and the report could only answer "the poison is untagged, so it names
+  no block". The local repro has gone quiet, so CI is currently the only place
+  the defect is observed and a sighting is not something to waste.
+  `GCRY_SEGV_REPORT` stays set explicitly on the soak so turning the poison off
+  does not silently take the crash report with it.
+
+- **`--collect-hz=N` — the soak's collect cadence is a knob, and it was the
+  cheaper half of the catch rate.** The queue audit only reports a slot that is
+  corrupt while a collection looks at it, so chances = collections × occupancy.
+  `--fiber-churn` bought the occupancy factor; the other sat hardcoded at
+  `sleep(1.seconds)`, and `GCRY_THRESHOLD` does not move it (118/119/119
+  collections over 120 s at 32 MiB / 8 MiB / 2 MiB) because these collections are
+  the harness's timer and not the allocator's. Priced on two 5 h CI dispatches, three
+  arms each and identical but for the cadence: **×14.6 the collections, ×2.56 the
+  slot walks**, because occupancy falls from 24.2% to 3.4% — 20× more collections
+  leaves 20× less time for fibers to pile into a queue, so the two factors are
+  not independent. The 120 s local arms had projected ×16 with occupancy flat,
+  which is the lesson: measure a cadence knob at the duration it runs at. Pause
+  and RSS do improve (2.04 → 1.84 ms p50, 30.4 → 10.8 MB max); the workload cost
+  at 5 h is −13% to −40%. Default 1, the cadence every earlier soak ran; 0 is
+  refused rather than divided by.
+  `bench/log/linux/2026-08-15-soak-collect-cadence/FINDINGS.md`
+
+- **`Gcry::Clock.monotonic_ns` — one clock reader, and no deprecated `Time` call
+  left in the tree.** `Time.monotonic` is deprecated on the Crystal versions this
+  shard supports, and every job printed the warning from `trace.cr`. The trace
+  emitter could not simply move to `Time.instant`: `Time::Instant` is opaque by
+  design and yields only a `Time::Span` between two readings, while `ts_ns` is an
+  absolute stamp written into a stack buffer from inside the stopped world. The
+  collector had already solved that — a bare `clock_gettime(CLOCK_MONOTONIC)` —
+  and so had `MonitorGate` and `StwWatchdog`, each with its own copy of the same
+  three lines. All four now call one, for the reason `RawOut` exists. The bench
+  harnesses, which only ever wanted deltas, use `Time.instant` as intended.
+
+- **The set of execution-context types is derived too — an `Isolated` context had
+  no explicit pin at all.** The pin list stopped being seven names earlier in this
+  cycle; the dispatch *into* it was still one: `if ec.is_a?(Parallel)`. There are
+  two context types on Crystal 1.21.0. Measured, with an `Isolated` context up:
+  **3 pins**, all of them the ambient per-thread slots any thread contributes, so
+  its `@main_fiber`, `@thread`, `@wait_list` and the user's `@func` closure were
+  left to the conservative body scan the pin block exists because it does not
+  trust. Now dispatched over `Fiber::ExecutionContext.includers` plus their
+  subclasses, most-derived first (so a `Concurrent` is pinned with its own
+  `instance_vars`, not `Parallel`'s): **18 pins against 15 expected** for its own
+  slots. `make scheduler-roots` gained an Isolated arm that derives its
+  expectation the same way, and the queue audit asks the type whether it has
+  queues rather than naming Parallel — `Isolated` has none, and is skipped for
+  that reason. Note where this meets the layout fix below: `Isolated#func` and
+  `#spawn_context` are two of the 19 ivars that walk dropped, so under
+  `GCRY_AUTO_LAYOUTS=1` that closure was reachable by neither route.
+  `bench/log/linux/2026-08-15-isolated-context-unpinned/FINDINGS.md`
+
+- **The Parallel EC pin list is derived from the types, not written beside them.**
+  `scan_thread_roots` pinned seven names; the structures carry **ten** pointer
+  ivars on the context and **seven** on the scheduler, so `@mutex`, `@condition`,
+  `@rng`, `@next`, `@previous`, `@name`, `@thread` and the scheduler's own
+  `@global_queue` / `@event_loop` were left to the conservative body scan the pin
+  block exists because it does not trust (Kemal EC4 SEGV @ …0008). `pin_ec_ivars`
+  now walks `instance_vars` at compile time — a list drifts, `instance_vars`
+  cannot — giving **45 named slots per collection** for a 4-worker context
+  against the old 16. Anything not plainly a `Reference` gets **every word** of
+  its slot marked rather than a guessed one: `sizeof(Fiber::ExecutionContext | Nil)`
+  is 16 on Crystal 1.21.0 (a module union carries a type_id word), so pinning
+  "the pointer word" would have pinned the type_id and looked covered. Two knock-on
+  changes: `ec_root_pins` counts the *slot* rather than the mark, so a nil ivar
+  and an ivar nobody visited stop being indistinguishable; and a new
+  `ec_root_unpinned_ivars` on `/gc-stats` counts the one shape with no sound
+  answer — pointer-bearing and narrower than a pointer — which
+  `make scheduler-roots` asserts is zero. That gate computes its expectation from
+  the same `instance_vars`, so an upstream addition moves both sides together.
+  Both arms broken on purpose and observed red. It does **not** explain the
+  2026-08-10 soak SEGV: the soak sets no `GCRY_AUTO_LAYOUTS`, so those ivars were
+  reached conservatively there anyway — what changed is that they no longer
+  depend on it. `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
+
+### Fixed
+
+- **A fiber's stack was scanned by nothing while the fiber was ending, and a
+  use-after-free lived in that window.** Crystal cannot release a terminating
+  fiber's stack until the thread swaps off it, so `Thread#dying_fiber` parks the
+  stack on the thread. While it sits there the owning `Fiber` is already gone
+  from the fiber list — so no fiber scan reaches it — and the thread may still
+  be **executing on it**, which gcry's other-thread scan cannot see either
+  because that scan works from *pthread* stack bounds a fiber stack is nowhere
+  near. Anything reachable only from those frames was unrooted, and a collection
+  landing in the window freed it. `bench/nested_spawn_uaf.cr` at
+  `ROUNDS=20 FIBERS=64` with poison on: **10/24 crashes against 0/24** with the
+  new root, interleaved, and re-measured from scratch after the code was
+  rewritten. It is not retention — same `heap_size`, same 160 collections, and
+  fewer live objects than control — and it is not the walk: a twin arm that
+  reads the identical memory and offers nothing to the mark stays at 12/24. On
+  by default; `GCRY_DEAD_STACK_ROOTS=0` opts out. Gated in `process_spec` in
+  both directions.
+  **Two neighbouring windows were measured and are not the defect**, which is
+  worth recording because the first version of this fix was built on one of
+  them: a stack sitting in the `Fiber::StackPool` deque (rooting them is *worse*
+  than control, 20/24), and a stack checked out of the pool but not yet attached
+  to a published `Fiber` — a `Fiber::StackPool#checkout` hook covering exactly
+  that moved 13/24 to 8/24, which is nothing, and was deleted rather than
+  shipped on a maybe.
+  `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
+
+- **The live-object invariant was stated of heaps that do not maintain it, and
+  flaked for it.** `spec/invariant_spec.cr` failed 6 runs in 25, on three
+  different examples. Two causes, one of which is a real defect the check was
+  right about: `note_alloc_bytes` uses plain `set(get + 1)` unless
+  `heap_counters_atomic` is set, so a second allocating thread makes the counter
+  lose increments **permanently** — the process heap drifts with no thread in
+  the program but main and the monitor. The checker now states the invariant
+  only where the counter can be kept (`Heap#counters_may_lose_updates?`), and
+  establishes quiescence from the heap's own counter — sample, walk, sample
+  again, re-check a mismatch `CONFIRM_ATTEMPTS` times — rather than from a
+  thread count that called "main plus monitor" quiescent. It also no longer
+  re-enters itself: the failure message interpolates, interpolation allocates,
+  and that landed straight back in `after_malloc`. **0 failures in 100 runs**
+  since. The counter itself is on the board; making it atomic costs the
+  allocation hot path and needs the throughput numbers beside it.
+
+- **The SIGSEGV report claimed x86_64 reasoning on every architecture, and
+  implied a diagnosis Darwin cannot make.** Its `si_addr == 0` branch explained
+  the address with "On x86_64 that is also what a *non-canonical* dereference
+  looks like" — printed verbatim on arm64. Worse, the check that would settle
+  it, looking for the poison in the faulting context's registers, is Linux-only:
+  Darwin keeps them in a different `ucontext_t` layout and gcry has no reader.
+  So a Darwin crash on a poisoned pointer read as "a null dereference" with no
+  hint that gcry simply could not look — observed on Darwin CI 2026-08-17, where
+  `make ec-queue-audit` died and the report had nothing, while the same crash on
+  Linux names the block, its size, its free path and its holders. The branch is
+  now architecture-accurate and says the limitation out loud. The missing
+  `__mcontext` reader is on the board.
+
+- **`Heap#realloc(ptr, 0)` freed the caller's block immediately.** Twenty lines
+  below it, the grow path spells out why that must not happen: Crystal stores
+  the result *after* `realloc` returns, so until that store the caller's ivar
+  still holds the old pointer, and freeing it lets a peer Parallel collect reuse
+  the block underneath a live owner — the defect that comment was written for,
+  reachable through a second door. The size-zero path now leaves the block to
+  the sweep, exactly as the grow path does.
+  Stated honestly: this path fires **zero** times in a fiber-spawning workload
+  and Crystal's stdlib has no caller that reaches it (`GC.free` appears only in
+  the zlib and GMP allocator hooks), so it is a trap closed rather than a live
+  defect fixed. Found while chasing what a use-after-free report called "an
+  explicit free", which turned out to be something else entirely. Gated in
+  `process_spec`, broken on purpose and observed red.
+
+- **The page size was asked for on Darwin and assumed on Linux.** Three
+  constants read `4096_u64`: the pagemap stride in `linux_softdirty.cr`, the
+  `mprotect` alignment in `linux_mprotect.cr`, and a dead one in
+  `darwin_stubs.cr` — in the same file whose `host_page_size` documents Apple
+  Silicon as 16 KiB. `Platform.host_page_size` on Linux returned that constant
+  rather than a reading, and eight call sites in `collect_sweep.cr` plus
+  `heap.cr`'s mmap `align_up` trust it. Nothing was unsound: the pagemap stride
+  is gated by `soft_dirty_tracks_writes?`, which writes a page and requires the
+  bit back, so a wrong stride fails the probe and the backend is never selected —
+  but it fails *silently*, and `mprotect` on a misaligned address fails the same
+  quiet way. All three now call `sysconf(_SC_PAGESIZE)`. Linux x86_64 and Ubuntu
+  arm64 both return 4096, so no supported host changes behaviour; measured
+  identical backend selection before and after. Found by sweeping for the
+  defect that produced three CI reds today — an assumption sitting where a
+  measurement belongs — after the same shape turned up in
+  `bench/darwin_page_query.cr`, whose hardcoded 4096 was a *quarter* of the
+  runner's real 16384.
+
+- **`make scheduler-roots` measured from a baseline that had not settled, and it
+  cut both ways.** The gate went red three times on 2026-08-15 (aarch64 once,
+  Darwin twice) on `the pin count moved by 2 with no Parallel EC in the process`,
+  which read like a platform difference and was not: reproduced on x86_64 at **1
+  run in 25**. Not a thread arriving either — the count jumps with
+  `/proc/self/status` `Threads:` flat at 2 — but the runtime still finishing its
+  asynchronous boot, since a 50 ms sleep before the first collection makes it
+  stable on 10 of 10. Both arms baselined off that first collection, so the same
+  line turned `--control` red *and* inflated the hold arm's `delta` by 2,
+  discounting the threshold it must clear (the failing Darwin run: `before: 23`,
+  delta 49 against 45 expected; settled it was 47). `settled_pins` now collects
+  until two readings agree. No threshold changed; `--control` is 0 in 40 runs and
+  the gate 8/8. `bench/log/linux/2026-08-15-ec-pin-baseline-settles/FINDINGS.md`
+
+- **The lint gate linted ameba, and four regression specs had never run.** CI's
+  Ameba step `cd lib/ameba`'d to build the binary and never came back, so
+  `../../bin/ameba` ran with its working directory inside ameba's own checkout:
+  it inspected **346 files of ameba**, never loaded gcry's `.ameba.yml`, and
+  every green Ameba check on record is that. gcry is 82 files. `make lint` was
+  always correct — make runs each recipe line in its own shell — so CI now calls
+  it. The config also had `ExcludedPaths`, a key ameba does not read (it reads
+  `Excluded`); harmless, since `Globs` already bounded the walk, but a line that
+  looked like a rule and was not. The first honest run found **10 issues**, nine
+  of them style — and four `Lint/SpecFilename` warnings that were the real find:
+  `spec/regression/{1..4}_*.cr` are one regression test per historical GC defect,
+  and `crystal spec` never ran any of them, because it collects `*_spec.cr`. They
+  ran only inside `spec/all_specs.cr`, the kcov / ASan entrypoint, i.e. in two
+  Linux-only jobs. `spec/all_specs.cr` keeps its name and is excluded from the
+  rule with the reason written beside it — renaming *it* would make
+  `crystal spec` run the whole suite twice.
+
+- **Those four regression specs were testing Boehm.** Making them run showed it:
+  each calls `GC.malloc` / `GC.collect`, and gcry only takes over `GC` under
+  `-Dgc_none`, which neither `spec/` nor the `all_specs` builds pass. Measured —
+  requiring gcry without the flag, three `GC.collect` calls move gcry's
+  collection count **0 → 0** and `GC.malloc`'s result is **not in gcry's heap**.
+  Moved to `process_spec/regression/`, the tree that does pass the flag:
+  **process_spec 13 → 17 examples**, Linux and Darwin both. One then failed, which
+  is why moving them was worth it — `live_objects < 100` was calibrated against a
+  heap that held nothing; under `-Dgc_none` the whole runtime lives there (~150
+  ambient). It now asserts the **delta** the v0.14.0 defect actually produced:
+  the count must rise by at least the 10 000 allocated and come back within 500
+  of baseline after they are freed and collected.
+  `bench/log/linux/2026-08-15-ameba-linted-ameba/FINDINGS.md`
+
+- **`make invariants` passes — and it was never a Darwin problem.** Two failures,
+  two causes, neither platform-specific. `count_live_blocks` walked **dormant**
+  chunks, whose headers the sweep has advised away: Linux zeroes them
+  (`flags == 0` is not FREE), Darwin leaves them stale (also not FREE), so both
+  read as live. Measured on Linux — 4 dormant chunks, **6 501 blocks counted
+  against `live_objects = 1`**, 6 348 headers all-zero and 153 stale. A dormant
+  chunk is empty by construction and the sweep already skips it; the walker was
+  the last reader that believed those headers. The second failure
+  (`spec/mt_spec.cr:118`) is a **race**: `after_malloc` runs outside the
+  allocation lock, so with four threads allocating the walk and the counter are
+  different instants — `actual=40 reported=41`, off by the allocation in flight.
+  It is skipped above main+monitor threads, and the skip is counted
+  (`Invariant.concurrent_skips`) rather than silent. **163 examples, 0 failures**,
+  first green run recorded; both halves broken on purpose and observed red
+  separately, both pinned by `spec/invariant_spec.cr` under plain `crystal spec`
+  so they gate on every platform, and `GCRY_DEBUG_INVARIANTS=1 crystal spec` is
+  now a step in the macOS job for the first time.
+  `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
+
+- **A precise layout could skip an ivar and still call itself precise.**
+  `Layout.register` sorts every ivar into a scan offset, a noscan offset, or
+  `force_scan_cap` (give up on precision for the whole type, scan its body
+  conservatively). An ivar that is none of `Reference`, `Pointer`, a pointer-safe
+  union, a `Value`-with-ivars or a `StaticArray` reached **none** of the three:
+  no offset, and no fallback. The entry installed as precise, `scan_object`
+  scanned exactly the offsets it listed, and the word was never read — so
+  anything reachable only through that ivar was swept. Measured on both shapes
+  that ship: a module-typed ivar and a `Proc` (whose second word is the only
+  pointer to the closure's environment), each swept before the fix and live
+  after, on both registration routes, with a Reference-typed control that
+  survives either way — `bench/ivar_layout_roots.cr`, `make ivar-layout-roots`,
+  gated on all three CI platforms. **19 such ivars in 186 stdlib types** for a
+  program requiring `json`/`http/server`/`socket`, `Fiber#proc` and
+  `Thread#func` among them. Fixed by adding `has_inner_pointers?` to the
+  fallback — the same predicate `register_hash` already applies to its key and
+  value types, and the one the plain-ivar walk beside it did not. Strictly more
+  conservative: 9 of those 186 types move from precise to `scan_cap`, none the
+  other way, and the precise/conservative scan mix on the `json_churn` shape is
+  unchanged (4012/45 in both directions).
+  **Correction:** `@event_loop : Crystal::EventLoop`, recorded above as the
+  shipping instance, is not one — on Crystal 1.21.0 `Crystal::EventLoop` is an
+  abstract *class*, so it is `< Reference` and its offset was always emitted.
+  Every ivar of `Fiber::ExecutionContext::Parallel::Scheduler` classifies. The
+  defect was real; that example was wrong, and the 2026-08-10 soak SEGV is
+  unaffected either way (the soak sets no `GCRY_AUTO_LAYOUTS`).
+  `bench/log/linux/2026-08-15-ivar-layout-drop/FINDINGS.md`
+
 ## [0.19.0] - 2026-08-14
 
 Correctness release on **two** platforms. `collect_scan` asks the platform for a

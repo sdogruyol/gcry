@@ -153,7 +153,7 @@ end
 # mismatch even if it does not manage to segfault the process — the same reason
 # `scrub_margin` checks values instead of trusting a crash.
 @[NoInline]
-def spin_deep(depth : Int32, state : SpinState, deadline : Time::Span) : UInt64
+def spin_deep(depth : Int32, state : SpinState, deadline : Time::Instant) : UInt64
   canary = uninitialized UInt64[CANARY_WORDS]
   tag = 0xC0FFEE0000_u64 &+ depth.to_u64
   i = 0
@@ -170,7 +170,7 @@ def spin_deep(depth : Int32, state : SpinState, deadline : Time::Span) : UInt64
     # `Platform.thread_sp` records an SP far below the fiber's `stack_top`.
     # The deadline is a hang guard — the parent must always get a verdict.
     state.ready!(Thread.current.object_id.to_u64)
-    while !state.stop? && Time.monotonic < deadline
+    while !state.stop? && Time.instant < deadline
     end
   end
 
@@ -197,7 +197,7 @@ def run_child(mode : String) : Int32
   Fiber::ExecutionContext.default.resize(PARALLELISM)
 
   state = SpinState.new
-  deadline = Time.monotonic + SPIN_SECONDS.seconds
+  deadline = Time.instant + SPIN_SECONDS.seconds
   spinner = nil.as(Fiber?)
 
   spawn do
@@ -379,7 +379,7 @@ MODES.each do |mode|
       else        "CORRUPT (exit #{status.exit_code})"
       end
     else
-      "CORRUPT (#{status.exit_signal})"
+      "CORRUPT (#{status.exit_signal? || status.exit_reason})"
     end
 
   note = (r = retries[mode]?) ? "  [#{r} startup-hang retry(ies)]" : ""

@@ -143,7 +143,7 @@ module Gcry
         len = append_raw(buf.to_unsafe, len, "{\"event\":\"")
         len = append_raw(buf.to_unsafe, len, event)
         len = append_raw(buf.to_unsafe, len, "\",\"ts_ns\":")
-        len = append_i64_value(buf.to_unsafe, len, Time.monotonic.total_nanoseconds.to_i64)
+        len = append_i64_value(buf.to_unsafe, len, Clock.monotonic_ns.to_i64!)
         len = yield buf.to_unsafe, len
         len = append_raw(buf.to_unsafe, len, "}\n")
         LibC.write(@@fd, buf.to_unsafe, LibC::SizeT.new(len)) if len > 0

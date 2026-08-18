@@ -330,8 +330,18 @@ module Gcry
             {% end %}
           {% end %}
           # Embedded struct / StaticArray may contain References at non-ivar offsets.
+          # `has_inner_pointers?` is the third case, and it is the one that bites:
+          # a type that is neither Reference, Pointer, union, Value-with-ivars nor
+          # StaticArray fell through *both* the fallback above and the `is_ptr`
+          # test below, so no offset was emitted and the type stayed precise —
+          # the slot was simply never scanned. Module-typed ivars are the shipping
+          # instance (`@event_loop : Crystal::EventLoop`), and `Proc` and `Tuple`
+          # ivars have the same shape (pointers, zero `instance_vars`). Measured:
+          # an object reachable only through such an ivar is swept
+          # (bench/module_ivar_roots.cr). `register_hash` already asks this
+          # question of its key and value types; this walk did not.
           {% if !(t < Reference) && !(t <= Pointer) && !t.union? %}
-            {% if (t < Value && t.instance_vars.size > 0) || t <= StaticArray %}
+            {% if (t < Value && t.instance_vars.size > 0) || t <= StaticArray || t.has_inner_pointers? %}
               {% force_scan_cap = true %}
             {% end %}
           {% end %}

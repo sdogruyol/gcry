@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -241,6 +241,144 @@ greg-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/greg_roots.cr -o $(BIN)/greg_roots --error-trace
 	$(BIN)/greg_roots
 	$(BIN)/greg_roots --control
+
+# The diagnostics travel with this gate for the same reason they travel with
+# `ec-queue-audit`: it is one that dies. It caught the open use-after-free on
+# 2026-08-16 (aarch64) and again on 2026-08-17 (x86_64) — SIGSEGV inside
+# `pthread_getattr_np` under `stop_world` — and both times could say nothing but
+# one hex number, because the knobs were not on here. They cost a memset per
+# free and nothing until something faults. A gate that catches this defect
+# should not waste the sighting.
+scheduler-roots: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots --control
+
+# A precise layout is a claim that every pointer in the object is at one of the
+# offsets it lists. `Layout.register` had a third outcome it never named: an ivar
+# it could not classify — module-typed (`Log::Dispatcher`), `Proc`, `Tuple` — got
+# no offset *and* did not force the conservative fallback, so the type stayed
+# precise and the word was never scanned. 19 such ivars in 186 stdlib types.
+# The gate is the installed entry, which is static; the sweep arm is the
+# consequence (both shapes were swept before the fix, on both registration
+# routes). `--control` types the same ivar as the class and must survive, or the
+# other two arms prove nothing. Run under GCRY_AUTO_LAYOUTS=1 as well: that is
+# the shipping route into the same macro. ~1 s.
+ivar-layout-roots: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/ivar_layout_roots.cr -o $(BIN)/ivar_layout_roots --error-trace
+	$(BIN)/ivar_layout_roots
+	$(BIN)/ivar_layout_roots --proc
+	$(BIN)/ivar_layout_roots --control
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --proc
+	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --control
+
+# The 2026-08-10 soak died in `quick_dequeue?` on a run-queue slot whose pointer
+# had been partly overwritten — an unknown time after the write that did it, and
+# at one crash per five hours that gap cannot be bisected. `GCRY_EC_QUEUE_AUDIT=1`
+# walks the ring and the global list inside STW and names the first *collection*
+# that sees a slot which is not a live Fiber. The gate plants two values that
+# fail different halves of the test — one outside the heap, one a live object of
+# the wrong type — and requires the report to name the planted value, not
+# whatever the walk trips over afterwards. `--control` (audit off) shows the knob
+# is what does the work. ~5 s.
+# `perf-smoke` gates on fixed floors — thr >= 65%, RSS <= 1.25x, p50 <= 2.5 ms —
+# which sit far below tip (~85% @ ~0.8x @ ~0.6 ms), so 85% -> 70% clears every
+# gate in the suite. `bench/perf_compare.py` compares the same summary against a
+# recorded baseline instead. This target runs its selftest: the comparator is
+# what is new, and it can be gated here without wrk or a quiet host. Fixtures
+# cover a regression in each direction, an improvement, a within-noise run, both
+# gate modes, a baseline with no measured tolerance, and the unrecorded file this
+# repo actually ships. ~0.1 s.
+# The Darwin low-water skip (v0.21.0) is blocked on one question, and it is not a
+# code question: does `mach_vm_page_query`'s disposition separate "never
+# faulted" from "written then evicted"? `mincore` cannot — it answers resident,
+# so an evicted page reads absent and skipping it drops a root. This probe
+# answers it on a Darwin host and carries the candidate predicate it tests, so a
+# green run validates the exact logic a `darwin_pagemap.cr` would use. On Linux
+# it prints SKIP. Exits non-zero only if the bits are demonstrably wrong; the
+# "could not force an eviction" outcome is INCONCLUSIVE and says so. ~1 s.
+# A freed block's payload becomes 0xdeadf2eedeadf2ee, so the next use-after-free
+# reads something nobody can argue about. The 2026-08-10 soak died on
+# `0x7f1700000149`, a value plausible enough that three sessions disagreed about
+# what it was. Two arms and the second is the gate: freed payloads must read the
+# pattern, and a `malloc` that asks to be cleared must **still** get zeros — gcry
+# skips the clearing memset on a "clean" freelist, so poisoning without clearing
+# that flag would hand poison to a caller expecting zeros (broken on purpose:
+# 10560 of 10560 words came back poisoned). `--control` runs with the knob off.
+# A crash reporter can only be tested by crashing, so this forks a child per
+# fault shape and checks the diagnosis names the right one: gcry's poison in the
+# faulting context, an address in a FREE block, one in a USED block, one gcry
+# never mapped. The 2026-08-10 soak left a single hex number and three sessions
+# of argument; every fact that would have narrowed it was in the collector's
+# tables at the time and nothing asked. `--control` shows the reporter adds
+# lines and removes none. ~2 s.
+segv-report: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/segv_report.cr -o $(BIN)/segv_report --error-trace
+	$(BIN)/segv_report
+	$(BIN)/segv_report --control
+
+poison-freed: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/poison_freed.cr -o $(BIN)/poison_freed --error-trace
+	GCRY_POISON_FREED=1 $(BIN)/poison_freed
+	$(BIN)/poison_freed --control
+
+# After mark, before sweep: does any marked object point at a block the sweep is
+# about to free? The `hold` arm plants an edge the mark provably does not follow
+# (a pointer in a block's scan_cap slack, under GCRY_SCAN_CAPS=1) and requires
+# the audit to name it — an audit that only ever reports zero is worth nothing.
+# `clean` requires a non-trivial edge count with zero misses on the same
+# workload; `--control` shows nothing is walked with the knob off. ~3 s.
+mark-audit: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/mark_audit.cr -o $(BIN)/mark_audit --error-trace
+	$(BIN)/mark_audit
+	$(BIN)/mark_audit --control
+
+# `GCRY_POISON_TAG` names the block a use-after-free read out of; this names
+# whatever still points at it — the root set, the live heap, the fiber stacks.
+# Plants holders it knows the address of, because a search that finds nothing
+# reads exactly like one that ran and found the heap clean. `--control` shows the
+# search adds lines and removes none. ~2 s.
+poison-holders: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/poison_holders.cr -o $(BIN)/poison_holders --error-trace
+	$(BIN)/poison_holders
+	$(BIN)/poison_holders --control
+
+darwin-page-query: $(BIN)
+	$(CRYSTAL) build bench/darwin_page_query.cr -o $(BIN)/darwin_page_query --error-trace
+	$(BIN)/darwin_page_query $${PAGE_QUERY_PRESSURE:+--pressure=$$PAGE_QUERY_PRESSURE}
+
+perf-baseline:
+	python3 bench/perf_compare.py --selftest
+
+# The two diagnostics travel with this gate because it is one that dies: on
+# 2026-08-15 it took SIGSEGV twice on aarch64 inside `Parallel::Scheduler` →
+# `swapcontext`, and left `Invalid memory access at 0xff851bc00008` and nothing
+# else — one hex number, the exact problem `GCRY_SEGV_REPORT` was written to fix
+# eight commits earlier. A gate that plants corruption on purpose is the last
+# place a crash should be allowed to stay anonymous. Measured: both arms pass
+# with them on, five runs of each, and the poison run says more.
+# `GCRY_POISON_HOLDERS` and not `GCRY_POISON_FREED`, and the difference is the
+# whole point: it implies the poison *and* the address tag *and* the crash
+# report, at the same runtime cost — the tag is written by the same memset that
+# was already happening. The plain poison names no block, and CI proved that
+# expensive on 2026-08-16: this gate caught the open use-after-free and the
+# report could only say "the poison is untagged, so it names no block". With the
+# tag, the same catch names the block, its size, whether the sweep or an explicit
+# free released it, and what still points at it. The local repro is quiet, so CI
+# is currently the only place this defect is observed — it should not waste a
+# sighting.
+#
+# Not a gate: it fails most runs on purpose, and that is the finding. See the
+# file header for the rates and the Boehm control.
+nested-spawn-uaf: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/nested_spawn_uaf.cr -o $(BIN)/nested_spawn_uaf --error-trace
+	GCRY_POISON_HOLDERS=1 $(BIN)/nested_spawn_uaf
+
+ec-queue-audit: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
+	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit
+	GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \

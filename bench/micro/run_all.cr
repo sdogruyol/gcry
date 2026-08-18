@@ -60,10 +60,10 @@ def phase_alloc_latency : Array(NamedTuple(size: Int32, p50: UInt64, p99: UInt64
 
     # Measure
     SAMPLES.times do
-      t0 = Time.monotonic.total_nanoseconds
+      t0 = Time.instant
       p = h_malloc(size.to_u64)
-      t1 = Time.monotonic.total_nanoseconds
-      timings << (t1 - t0).to_u64
+      t1 = Time.instant
+      timings << (t1 - t0).total_nanoseconds.to_u64
       ptrs << p
     end
     ptrs.each { |p| h_free(p) }
@@ -84,10 +84,10 @@ def phase_free_latency : NamedTuple(p50: UInt64, p99: UInt64, max: UInt64)
 
   SAMPLES.times do
     p = h_malloc(64_u64)
-    t0 = Time.monotonic.total_nanoseconds
+    t0 = Time.instant
     h_free(p)
-    t1 = Time.monotonic.total_nanoseconds
-    timings << (t1 - t0).to_u64
+    t1 = Time.instant
+    timings << (t1 - t0).total_nanoseconds.to_u64
   end
   ptrs.each { |p| h_free(p) }
 
@@ -108,11 +108,11 @@ def phase_collect_latency : NamedTuple(p50: UInt64, p99: UInt64, max: UInt64)
     GC.collect
     GC.collect
 
-    t0 = Time.monotonic.total_nanoseconds
+    t0 = Time.instant
     GC.collect
-    t1 = Time.monotonic.total_nanoseconds
+    t1 = Time.instant
 
-    timings << (t1 - t0).to_u64
+    timings << (t1 - t0).total_nanoseconds.to_u64
 
     ptrs.each { |p| h_free(p) }
   end
@@ -131,10 +131,10 @@ def phase_tlab_cost : NamedTuple(p50: UInt64, p99: UInt64, max: UInt64)
 
   SAMPLES.times do
     _exhaust = h_malloc(65536_u64)
-    t0 = Time.monotonic.total_nanoseconds
+    t0 = Time.instant
     p = h_malloc(64_u64)
-    t1 = Time.monotonic.total_nanoseconds
-    timings << (t1 - t0).to_u64
+    t1 = Time.instant
+    timings << (t1 - t0).total_nanoseconds.to_u64
     h_free(p)
     h_free(_exhaust)
   end
@@ -149,14 +149,14 @@ def phase_stw_latency : NamedTuple(p50: UInt64, p99: UInt64, max: UInt64)
   timings = Array(UInt64).new(COLLECT_SAMPLES)
 
   COLLECT_SAMPLES.times do
-    t0 = Time.monotonic.total_nanoseconds
+    t0 = Time.instant
     HEAP.stop_world
     _x = 0
-    t1 = Time.monotonic.total_nanoseconds
+    t1 = Time.instant
     HEAP.start_world
-    t2 = Time.monotonic.total_nanoseconds
+    t2 = Time.instant
 
-    timings << (t2 - t0).to_u64
+    timings << (t2 - t0).total_nanoseconds.to_u64
   end
 
   {p50: p50(timings), p99: p99(timings), max: max(timings)}
@@ -167,19 +167,19 @@ end
 def phase_lock_cost : NamedTuple(empty_ns: UInt64, lock_ns: UInt64)
   iters = 1_000_000
 
-  t0 = Time.monotonic.total_nanoseconds
+  t0 = Time.instant
   iters.times { }
-  t1 = Time.monotonic.total_nanoseconds
+  t1 = Time.instant
 
-  t2 = Time.monotonic.total_nanoseconds
+  t2 = Time.instant
   iters.times {
     HEAP.lock_read
     HEAP.unlock_read
   }
-  t3 = Time.monotonic.total_nanoseconds
+  t3 = Time.instant
 
-  empty_per = ((t1 - t0) // iters).to_u64
-  lock_per = ((t3 - t2) // iters).to_u64
+  empty_per = ((t1 - t0).total_nanoseconds // iters).to_u64
+  lock_per = ((t3 - t2).total_nanoseconds // iters).to_u64
 
   {empty_ns: empty_per, lock_ns: lock_per}
 end

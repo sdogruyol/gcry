@@ -122,6 +122,12 @@ module Gcry
       # (shouldn't) — take the lesser address so we never shrink the window.
       approx = stack_pointer.address
       low = approx if approx < low
+      # Recorded, not re-derived: `GCRY_BIRTH_GRACE` asks whether a stack slot
+      # was inside the window this scan actually used, and computing a second
+      # opinion of "where SP was" from another frame would answer a different
+      # question. Two stores on a once-per-collection path.
+      @@last_mutator_low = low
+      @@last_mutator_high = bottom.address
       scan_range(Pointer(Void).new(low), bottom, safe: true) do |candidate|
         yield candidate
       end
@@ -174,6 +180,10 @@ module Gcry
 
     @@probe_rd = -1
     @@probe_wr = -1
+
+    # The window the last `scan_mutator` word-scanned. See the note there.
+    class_getter last_mutator_low : UInt64 = 0_u64
+    class_getter last_mutator_high : UInt64 = 0_u64
 
     def self.scan_range(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
       return if low.null? || high.null?
@@ -270,7 +280,12 @@ module Gcry
     end
 
     # Kernel copies one byte from *page*; EFAULT ⇒ not readable (PROT_NONE / hole).
-    private def self.page_readable?(page : UInt64) : Bool
+    #
+    # Public because the crash reporter needs the same probe: `PoisonHolders`
+    # walks fiber stacks word by word to report the *address* of a slot rather
+    # than only its value, so it cannot go through `scan_range`, and a blind
+    # read over a guard page from a signal handler is a second crash.
+    def self.page_readable?(page : UInt64) : Bool
       return false if @@probe_wr < 0
       n = LibC.write(@@probe_wr, Pointer(Void).new(page), 1)
       if n == 1

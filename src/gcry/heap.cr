@@ -59,6 +59,15 @@ module Gcry
       @live_objects.get
     end
 
+    # Move the counter without touching a block, so a test can show that
+    # `Invariant.check_live_objects` catches a drift rather than only that it
+    # passes. There is no other way to produce one on purpose: every real path
+    # keeps the counter and the headers together, which is the point.
+    def debug_drift_live_objects(delta : Int64) : Nil
+      current = @live_objects.get
+      @live_objects.set(delta < 0 ? current &- (-delta).to_u64 : current &+ delta.to_u64)
+    end
+
     # Sum of large-chunk mapped_bytes (live + free on freelist).
     getter large_mapped_bytes : UInt64 = 0_u64
     # Retain this many free large bytes after trim_large_cache (outside STW).
@@ -333,7 +342,20 @@ module Gcry
       atomic = BlockHeader.atomic?(header)
 
       if new_size == 0
-        free(pointer)
+        # Do **not** free `pointer` here, for the same reason the grow path
+        # below spells out: Crystal stores the result after `realloc` returns,
+        # so until that store the caller's ivar still holds `pointer`. Freeing
+        # it immediately lets a peer Parallel collect reuse the block while an
+        # owner still points at it — the defect that comment was written for,
+        # reachable through a second door.
+        #
+        # Measured before changing it: this path fires **zero** times in a
+        # fiber-spawning workload, and Crystal's stdlib has no caller that
+        # reaches it (`GC.free` appears only in the zlib and GMP allocator
+        # hooks). So this is a trap being closed, not a live defect being
+        # fixed — and closing it costs nothing but the old block's retention
+        # until the next sweep, which is exactly what the grow path already
+        # accepts.
         return malloc(0)
       end
 
@@ -488,6 +510,9 @@ module Gcry
       end
 
       user.as(UInt8*).clear(rounded) if needs_clear
+      # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
+      # unreachable to the collector between here and the caller's store.
+      note_birth(user) if @birth_grace
       user
     end
 
@@ -689,19 +714,176 @@ module Gcry
       u
     end
 
-    private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32) : Nil
+    # Fill a block's payload with a pattern that is neither zero nor a pointer,
+    # so that a use-after-free reads something no one can mistake for data and
+    # dereferences to an address no one can mistake for a heap address. The
+    # 2026-08-10 soak died on `0x7f1700000149` — a value plausible enough that
+    # three sessions have argued about what it was. `0xdeadf2ee…` is not.
+    #
+    # Sound because the freelist link lives in the *header* (`next_free`), not in
+    # the payload, so nothing the collector reads afterwards is in this range —
+    # and because every path that gets here sets `@freelist_clean` false, so a
+    # later `malloc(clear: true)` still zeroes what it hands out. That pairing is
+    # the whole safety argument: `bench/poison_freed.cr` gates both halves.
+    POISON_WORD = 0xDEADF2EEDEADF2EE_u64
+
+    # Tagged poison (`GCRY_POISON_TAG=1`). Same job as `POISON_WORD` and one more:
+    # the low 48 bits carry the address of the block that was freed, so a crash
+    # that reads it can say *which* free wrote it instead of only that some free
+    # did. `POISON_WORD` answers "use-after-free"; this answers "of what".
+    #
+    # Still non-canonical — bits 63:48 are `0xDEAD` and bit 47 of a user-space
+    # address is 0 — so it faults exactly like the untagged word, with the same
+    # `si_addr == 0` from #GP that made the register scan necessary in the first
+    # place. And 48 bits is the whole of an x86_64 user address, so nothing about
+    # the block is lost. `POISON_WORD >> 48` is `0xDEAD` too, which is why the
+    # reader checks the exact word first and only then reads the tag.
+    POISON_TAG       = 0xDEAD_u64 << 48
+    POISON_TAG_MASK  = 0xFFFF_u64 << 48
+    POISON_ADDR_MASK = (1_u64 << 48) - 1
+
+    # Default **on**; `GCRY_STAGED_WAIT=0` opts out. See
+    # `wait_for_staged_threads` and
+    # `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`.
+    property staged_wait : Bool = true
+
+    # Collections that waited for a staged thread, and those that gave up.
+    getter stw_staged_waits : UInt64 = 0_u64
+    getter stw_staged_wait_timeouts : UInt64 = 0_u64
+
+    # Spin, briefly, while a thread is known to exist and not be published.
+    # Called from `stop_world` **before** `Thread.lock` — see the note there.
+    STAGED_WAIT_SPINS = 2000
+
+    private def wait_for_staged_threads : Nil
+      return if Platform.staged_count == 0
+      @stw_staged_waits &+= 1
+      spins = 0
+      while Platform.staged_count > 0
+        # Release whatever has published itself since the last look. Without
+        # this the loop cannot ever succeed: staging entries were only dropped
+        # by `stop_world`'s own walk, which runs *after* this wait, so the count
+        # could not fall while the wait watched it. Measured before the fix —
+        # 68 waits, 68 timeouts, every one — and the census gap closing anyway,
+        # which made it look like the wait worked when what worked was the delay.
+        drain_published_staged
+        break if Platform.staged_count == 0
+        if spins >= STAGED_WAIT_SPINS
+          @stw_staged_wait_timeouts &+= 1
+          # Drop what did not answer. A thread that dies before publishing
+          # leaves an entry nothing will ever release, and without this every
+          # later collection would pay the full spin and time out again — a
+          # permanent cost bought by a thread that no longer exists. Dropping
+          # loses the record, which is the lesser harm and is counted.
+          Platform.each_staged { |id| Platform.unstage_thread(id) }
+          return
+        end
+        spins += 1
+        Intrinsics.pause
+      end
+    end
+
+    # A staged id that now appears in Crystal's list has published itself; the
+    # ordinary path covers it from here. `Thread.unsafe_each` without the list
+    # mutex on purpose — this runs *before* `Thread.lock`, and taking it here
+    # would deadlock against the very push being waited for.
+    private def drain_published_staged : Nil
+      Platform.each_staged do |id|
+        published = false
+        Thread.unsafe_each do |thread|
+          published = true if thread.to_unsafe.unsafe_as(UInt64) == id
+        end
+        Platform.unstage_thread(id) if published
+      end
+    end
+
+    # `GCRY_THREAD_CENSUS=1`. See src/gcry/platform/linux_thread_census.cr.
+    property thread_census : Bool = false
+
+    # Collections where the OS reported more threads than Crystal's list
+    # yielded, and the largest such difference. A gap is a thread running
+    # through the stopped world.
+    getter thread_census_checks : UInt64 = 0_u64
+    getter thread_census_gaps : UInt64 = 0_u64
+    getter thread_census_gap_max : Int32 = 0
+    # Collections where /proc could not answer — counted, so "no gaps" can
+    # never be the result of never having looked.
+    getter thread_census_unanswered : UInt64 = 0_u64
+    # Gaps gcry's own staging record accounted for.
+    getter thread_census_staged_covered : UInt64 = 0_u64
+
+    private def census_threads(listed : Int32) : Nil
+      @thread_census_checks &+= 1
+      os = Platform.os_thread_count
+      unless os
+        @thread_census_unanswered &+= 1
+        return
+      end
+      gap = os - listed
+      staged = Platform.staged_count
+      @thread_census_staged_covered &+= 1 if gap > 0 && staged >= gap
+      return if gap <= 0
+      @thread_census_gaps &+= 1
+      @thread_census_gap_max = gap if gap > @thread_census_gap_max
+      return if @thread_census_gaps > 4
+
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: thread census — the OS reports ")
+      len = RawOut.append_u64(buf.to_unsafe, len, os.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " thread(s) and Crystal's list yielded ")
+      len = RawOut.append_u64(buf.to_unsafe, len, listed.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, ", so ")
+      len = RawOut.append_u64(buf.to_unsafe, len, gap.to_u64)
+      len = RawOut.append(buf.to_unsafe, len,
+        " thread(s) are outside Crystal's list; gcry has staged ")
+      len = RawOut.append_u64(buf.to_unsafe, len, staged.to_u64)
+      len = RawOut.append(buf.to_unsafe, len,
+        staged >= gap ? " of them, so it knows they exist. collection " : ", fewer than the gap — at least one is unrecorded. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # Opt-in on top of `@poison_freed`: it makes every freed block's payload
+    # differ, which a future reader might be tempted to rely on for equality.
+    property poison_tag_addr : Bool = false
+
+    private def poison_payload(pointer : Void*, payload : UInt32) : Nil
+      word = if @poison_tag_addr
+               POISON_TAG | (pointer.address & POISON_ADDR_MASK)
+             else
+               POISON_WORD
+             end
+      words = pointer.as(UInt64*)
+      n = payload // sizeof(UInt64)
+      i = 0
+      while i < n
+        words[i] = word
+        i += 1
+      end
+      @poisoned_blocks &+= 1
+    end
+
+    # *swept* records which path gave the block back — the sweep's freelist link
+    # or an explicit `Heap#free`. It rides in the header (`Flags::SWEPT`) so a
+    # crash report can say it; nothing in the allocator reads it back.
+    private def push_size_class_free(class_index : Int32, nursery : Bool, header : BlockHeader*, pointer : Void*, payload : UInt32, swept : Bool = false) : Nil
+      poison_payload(pointer, payload) if @poison_freed
+      flags = BlockHeader::Flags::FREE
+      flags |= BlockHeader::Flags::SWEPT if swept
       if nursery
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @nursery_freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @nursery_freelists[class_index])
         @nursery_freelists[class_index] = pointer
         @nursery_freelist_clean[class_index] = false
         return
       end
       if @tight_grow && tight_addr_in_grow?(class_index, pointer.address)
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @prefer_freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @prefer_freelists[class_index])
         @prefer_freelists[class_index] = pointer
         @freelist_clean[class_index] = false
       else
-        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, @freelists[class_index])
+        header.value = BlockHeader.new(payload, flags, @freelists[class_index])
         @freelists[class_index] = pointer
         @freelist_clean[class_index] = false
       end
@@ -717,7 +899,7 @@ module Gcry
       splice = @prefer_freelists[index]
       return if splice.null?
       tail = splice
-      while true
+      loop do
         th = BlockHeader.from_user(tail)
         nxt = th.value.next_free
         break if nxt.null?
@@ -761,7 +943,7 @@ module Gcry
         unless splice.null?
           # append global onto end of prefer chain, then move all to global
           tail = splice
-          while true
+          loop do
             th = BlockHeader.from_user(tail)
             nxt = th.value.next_free
             break if nxt.null?
@@ -882,6 +1064,7 @@ module Gcry
         break if tnxt.null?
         tail = tnxt
       end
+      poison_payload(user, payload) if @poison_freed
       header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
       if tail.null?
         @large_freelists[bucket] = user

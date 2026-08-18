@@ -20,7 +20,13 @@ module Gcry
       Mprotect
     end
 
-    PAGE = 4096_u64
+    # Asked, not assumed: `mprotect` requires a page-aligned address, so a
+    # hardcoded 4 KiB on a larger-page host fails the call rather than the
+    # alignment. See the note in `linux_softdirty.cr`.
+    PAGE = begin
+      sz = LibC.sysconf(LibC::SC_PAGESIZE)
+      sz > 0 ? sz.to_u64 : 4096_u64
+    end
 
     # Bitmap of dirty pages for mprotect barrier (LibC-backed, not GC heap).
     @@mp_base : UInt64 = 0

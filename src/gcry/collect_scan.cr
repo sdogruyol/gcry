@@ -13,10 +13,68 @@ module Gcry
 
     # Module-typed Reference ivars (Scheduler, ExecutionContext) cannot
     # `.as(Reference)` / `unsafe_as(Reference)` yet — load the pointer bits.
+    #
+    # The counter counts the slot, not the mark: a nil ivar is a slot the block
+    # visited and found empty, and a gate that could not tell that from a slot
+    # the block never looked at would be the same blind spot this counter exists
+    # to remove.
     private def mark_ref_slot(slot_addr : UInt64) : Nil
+      @ec_root_pins += 1
       bits = Pointer(UInt64).new(slot_addr).value
       return if bits == 0
       mark_root_candidate(Pointer(Void).new(bits), source: RootSource::Thread)
+    end
+
+    # An EC structure pinned by name rather than reached by scanning something
+    # else. Counted so the pin block's engagement is readable from outside the
+    # collector — see `ec_root_pins`.
+    private def pin_ec_root(obj) : Nil
+      @ec_root_pins += 1
+      mark_root_candidate(Pointer(Void).new(obj.object_id), source: RootSource::Thread)
+    end
+
+    # Mark every word of one ivar slot. For anything that is not plainly a
+    # `Reference`, guessing which word holds the pointer is worse than not
+    # guessing: `@next : (Fiber::ExecutionContext | Nil)` is **16 bytes** on
+    # Crystal 1.21.0 — a module union carries a type_id word — so pinning "the
+    # pointer word" would pin the type_id and look covered. A `Proc` is 16 bytes
+    # for the same practical reason (function, then closure environment).
+    private def pin_ec_slot(slot_addr : UInt64, bytes : Int32) : Nil
+      word = sizeof(Void*)
+      if bytes < word
+        # Pointer-bearing and narrower than a pointer: nothing sound to mark.
+        # Cannot happen on 1.21.0; counted so it cannot happen quietly.
+        @ec_root_unpinned_ivars += 1
+        return
+      end
+      offset = 0
+      while offset + word <= bytes
+        mark_ref_slot(slot_addr + offset)
+        offset += word
+      end
+    end
+
+    # Pin every pointer-bearing ivar of an EC structure, derived from the type
+    # itself rather than from a list of names written beside it. A list drifts:
+    # upstream adds a queue, the block keeps pinning the four it was written
+    # with, and nothing says otherwise — the shape of both v0.19.0 register gaps,
+    # and the reason this item stayed open after `ec_root_pins` proved the block
+    # *ran*. `instance_vars` cannot drift.
+    #
+    # Two outcomes per ivar, and no third one to forget about: a `Reference` is
+    # one word, and anything else that can hold a pointer gets every word of its
+    # slot marked. Values (`Int32`, `Bool`, `Atomic(Int32)`, an enum) are skipped
+    # because `has_inner_pointers?` says there is nothing in them — the same
+    # predicate `Layout.register` was fixed to ask on 2026-08-15.
+    private macro pin_ec_ivars(obj, type)
+      {% for ivar in type.resolve.instance_vars %}
+        {% ty = ivar.type %}
+        {% if ty < Reference %}
+          mark_ref_slot(pointerof({{obj}}.@{{ivar.name}}).address)
+        {% elsif ty.has_inner_pointers? %}
+          pin_ec_slot(pointerof({{obj}}.@{{ivar.name}}).address, sizeof({{ty}}))
+        {% end %}
+      {% end %}
     end
 
     # Mark Thread objects and Parallel EC roots (TLS alone is not scanned).
@@ -48,21 +106,223 @@ module Gcry
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|
           mark_ref_slot(pointerof(ec).address)
-          # Parallel: also pin queues / event loop / schedulers explicitly. Body
+          # Pin each context's queues / event loop / schedulers explicitly. Body
           # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
-          if ec.is_a?(Fiber::ExecutionContext::Parallel)
-            mark_root_candidate(Pointer(Void).new(ec.@global_queue.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@event_loop.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@stack_pool.object_id), source: RootSource::Thread)
-            mark_root_candidate(Pointer(Void).new(ec.@schedulers.object_id), source: RootSource::Thread)
-            ec.@schedulers.each do |sched|
-              mark_root_candidate(Pointer(Void).new(sched.object_id), source: RootSource::Thread)
-              mark_root_candidate(Pointer(Void).new(sched.@runnables.object_id), source: RootSource::Thread)
-              mark_root_candidate(Pointer(Void).new(sched.@main_fiber.object_id), source: RootSource::Thread)
-            end
+          #
+          # The *set of context types* is derived too, not just each type's
+          # ivars: this named `Parallel` and nothing else, so an
+          # `Fiber::ExecutionContext::Isolated` — which holds `@main_fiber`,
+          # `@thread`, `@wait_list` and the user's `@func` closure — got no
+          # explicit pin at all, and the block looked like it had run. Same
+          # shape as the seven-name list it replaced, one level up.
+          # Subclasses are listed before their parents so a `Concurrent` is
+          # pinned with `Concurrent.instance_vars` rather than `Parallel`'s; it
+          # adds none today, and a future one would be covered without an edit.
+          {% ec_types = [] of Nil %}
+          {% for includer in Fiber::ExecutionContext.includers %}
+            {% for sub in includer.all_subclasses %}
+              {% ec_types << sub %}
+            {% end %}
+            {% ec_types << includer %}
+          {% end %}
+          case ec
+          {% for t in ec_types %}
+          when {{t}}
+            pin_ec_ivars(ec, {{t}})
+            # Derived rather than named: a context that owns schedulers has an
+            # `@schedulers` ivar, and each scheduler is a root in its own right.
+            {% if t.instance_vars.any? { |v| v.name == "schedulers" } %}
+              ec.@schedulers.each do |sched|
+                pin_ec_root(sched)
+                pin_ec_ivars(sched, Fiber::ExecutionContext::Parallel::Scheduler)
+              end
+            {% end %}
+          {% end %}
           end
         end
       {% end %}
+
+      audit_ec_queues
+    end
+
+    # ── Execution-context queue audit ─────────────────────────────────────────
+    #
+    # The 2026-08-10 soak died in `Parallel::Scheduler#quick_dequeue?` on
+    # `0x7f1700000149` — a heap pointer with its low bytes overwritten — 1h24m
+    # in. The dequeue is where the damage *surfaces*; the write that did it
+    # happened an unknown time earlier, and at one crash per five hours the gap
+    # cannot be bisected. This walks the two structures that dequeue reads —
+    # each scheduler's `Runnables` ring between head and tail, and the context's
+    # `GlobalQueue` list — and names the first *collection* at which a slot
+    # stops being a live Fiber.
+    #
+    # It runs inside the stopped world, which is what makes it readable at all:
+    # the queues are quiescent there, so a slot that fails the test failed it
+    # before the world stopped rather than under the walk.
+    #
+    # Off by default (`GCRY_EC_QUEUE_AUDIT=1`) — it is a bounded walk (≤ ring
+    # capacity per scheduler, plus the global list) but it is inside the pause.
+    private def ec_queue_slot_live_fiber?(bits : UInt64) : Bool
+      return false if bits == 0
+      ptr = Pointer(Void).new(bits)
+      return false unless is_heap_ptr(ptr)
+      return false unless live?(ptr)
+      # A queue slot holds a Fiber and nothing else, so the type_id is an exact
+      # test rather than a plausibility one — which is the difference between
+      # this and the conservative marking path.
+      ptr.as(Int32*).value == Fiber.crystal_instance_type_id
+    end
+
+    private def audit_ec_queues : Nil
+      return unless @ec_queue_audit
+      {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
+        Fiber::ExecutionContext.unsafe_each do |ec|
+          # Which contexts have queues is asked of the types, not written down:
+          # `Isolated` has neither a global queue nor schedulers and is skipped
+          # for that reason rather than by name. A context type added upstream
+          # with a queue is audited without an edit here.
+          {% ec_types = [] of Nil %}
+          {% for includer in Fiber::ExecutionContext.includers %}
+            {% for sub in includer.all_subclasses %}
+              {% ec_types << sub %}
+            {% end %}
+            {% ec_types << includer %}
+          {% end %}
+          case ec
+          {% for t in ec_types %}
+            {% has_queue = t.instance_vars.any? { |v| v.name == "global_queue" } %}
+            {% has_scheds = t.instance_vars.any? { |v| v.name == "schedulers" } %}
+            {% if has_queue || has_scheds %}
+          when {{t}}
+              # Before the slots, the structures that hold them. The standing
+              # reading of the 2026-08-10 SEGV is that a slot was freed and
+              # reused while the scheduler still pointed at it — and the object
+              # that holds the slots can be reissued the same way, in which case
+              # a slot walk reads a head, a tail and a ring out of whatever the
+              # block became and reports nothing, because everything it finds is
+              # garbage rather than a bad Fiber.
+              audit_ec_structs(ec, {{t}})
+              {% if has_queue %}
+                # Only walk a container that is still that container. The report
+                # from `audit_ec_structs` already named it; walking it anyway
+                # would bury that line under a ring's worth of garbage slots,
+                # which is what the first run of this gate did.
+                if ec_struct_ok?(pointerof(ec.@global_queue).as(UInt64*).value,
+                     typeof(ec.@global_queue).crystal_instance_type_id)
+                  audit_ec_global_queue(ec.@global_queue)
+                end
+              {% end %}
+              {% if has_scheds %}
+                ec.@schedulers.each_with_index do |sched, i|
+                  audit_ec_structs(sched, Fiber::ExecutionContext::Parallel::Scheduler)
+                  if ec_struct_ok?(pointerof(sched.@runnables).as(UInt64*).value,
+                       typeof(sched.@runnables).crystal_instance_type_id)
+                    audit_ec_runnables(sched.@runnables, i)
+                  end
+                end
+              {% end %}
+            {% end %}
+          {% end %}
+          end
+        end
+      {% end %}
+    end
+
+    # Is `bits` a live object of exactly type `type_id`? Same three questions as
+    # a queue slot, with the type it must be passed in rather than fixed to
+    # Fiber.
+    private def ec_struct_ok?(bits : UInt64, type_id : Int32) : Bool
+      return false if bits == 0
+      ptr = Pointer(Void).new(bits)
+      # Outside the heap is not a fault: a `String` literal — every context's
+      # `@name` — lives in the program image, and gcry never sweeps what it did
+      # not allocate. It is also the limit of this check, and worth stating: a
+      # wild pointer that happens to land outside the heap passes here. Only
+      # objects the collector manages can be swept, so only those are the
+      # question. (Measured the hard way: without this, every collection
+      # reported `Parallel@name` as corrupt.)
+      return true unless is_heap_ptr(ptr)
+      return false unless live?(ptr)
+      ptr.as(Int32*).value == type_id
+    end
+
+    # Check every ivar of an EC structure whose declared type is a **concrete**
+    # Reference class, i.e. every one whose runtime type_id is known at compile
+    # time. Abstract and module-typed ivars (`@event_loop : Crystal::EventLoop`)
+    # are skipped rather than guessed at: their runtime type is a subclass and
+    # there is no single id to compare against. Derived from `instance_vars` for
+    # the same reason the pins are — a structure added upstream is checked
+    # without an edit here.
+    #
+    # This is the check that would name a *reissued* structure. The slot walks
+    # cannot: if a `Runnables` block is freed and reused, its head, tail and ring
+    # are whatever the new owner wrote, and a walk over them finds garbage
+    # everywhere rather than a slot that stopped being a Fiber.
+    private macro audit_ec_structs(obj, type)
+      {% for ivar in type.resolve.instance_vars %}
+        {% ty = ivar.type %}
+        {% if ty < Reference && !ty.abstract? %}
+          unless ec_struct_ok?(pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value,
+                   {{ty}}.crystal_instance_type_id)
+            @ec_queue_audit_faults += 1
+            @ec_queue_audit_last_fault = pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value
+            EcQueueAudit.report_struct({{type.resolve.name.stringify}}, {{ivar.name.stringify}},
+              pointerof({{obj}}.@{{ivar.name}}).as(UInt64*).value)
+          end
+        {% end %}
+      {% end %}
+    end
+
+    # No macro gate on these two: `instance_vars` cannot be called at class-body
+    # scope, and none is needed. They take untyped parameters, so a compiler
+    # without execution contexts never instantiates them — the only call site is
+    # inside the gate above.
+    private def audit_ec_runnables(runnables, scheduler_index : Int32) : Nil
+      capacity = runnables.capacity.to_u32
+      head = runnables.@head.get(:relaxed)
+      tail = runnables.@tail.get(:relaxed)
+      # head and tail are a wrapping pair, so the size is their difference. A
+      # difference past capacity is itself corruption; clamp so the walk cannot
+      # run away, and let the slots it does read report what they are.
+      size = tail &- head
+      count = size > capacity ? capacity : size
+      # `pointerof`, not `.to_unsafe`: reading the ivar would copy the whole
+      # ring (N Fiber-sized words) into a temporary first.
+      base = pointerof(runnables.@buffer).as(UInt64*)
+      i = 0_u32
+      while i < count
+        slot = (head &+ i) % capacity
+        bits = base[slot]
+        @ec_queue_audit_ring_slots += 1
+        unless ec_queue_slot_live_fiber?(bits)
+          @ec_queue_audit_faults += 1
+          @ec_queue_audit_last_fault = bits
+          EcQueueAudit.report(EcQueueAudit::KIND_RUNNABLES, scheduler_index, slot, bits)
+        end
+        i += 1
+      end
+    end
+
+    private def audit_ec_global_queue(queue) : Nil
+      size = queue.@list.size
+      return if size <= 0
+      bits = pointerof(queue.@list.@head).as(UInt64*).value
+      walked = 0_u32
+      # Bounded twice: by the list's own size (plus slack, since the size
+      # itself could be the corrupt word) and by a hard cap against a cycle.
+      limit = size > 65_536 ? 65_536_u32 : (size.to_u32 &+ 8_u32)
+      while bits != 0 && walked < limit
+        @ec_queue_audit_list_slots += 1
+        unless ec_queue_slot_live_fiber?(bits)
+          @ec_queue_audit_faults += 1
+          @ec_queue_audit_last_fault = bits
+          EcQueueAudit.report(EcQueueAudit::KIND_GLOBAL_LIST, -1, walked, bits)
+          # The chain cannot be followed past a node that is not a Fiber.
+          return
+        end
+        bits = Pointer(UInt64).new(bits &+ offsetof(Fiber, @list_next).to_u64).value
+        walked &+= 1
+      end
     end
 
     # Spill GP registers, then scan approx SP→bottom for the running fiber.
@@ -79,6 +339,7 @@ module Gcry
         scan_exclusive_mutator_spill_window(bottom)
       else
         Roots.scan_mutator(bottom) do |candidate|
+          note_mutator_candidate(candidate.address)
           mark_root_candidate(candidate, source: RootSource::Stack)
         end
       end
@@ -180,6 +441,41 @@ module Gcry
       Thread.unsafe_each do
         n += 1
         return true if n > 2
+      end
+      false
+    end
+
+    # For `Invariant`: its walks are snapshots, and the counters they compare
+    # against are bumped by whichever thread allocates. With another mutator
+    # running the two are sampled at different instants and disagree by the
+    # allocations in flight — a race, not a drift.
+    def concurrent_mutators? : Bool
+      # Deliberately *not* consulting the staging record. A staged id says a
+      # thread was created; it is cleared only when a collection drains it, and
+      # nothing clears it when the thread dies — so "staged and not in the list"
+      # covers the birth window and every dead thread since, and a check that
+      # skips forever is worse than one that races.
+      multi_mutator_threads?
+    end
+
+    # Can this heap's counters lose an update outright? `note_alloc_bytes` uses
+    # plain get/set unless `heap_counters_atomic` is set, so two threads doing
+    # `set(get + 1)` at once drop one increment **permanently** — not a sampling
+    # race, a counter that is now wrong and stays wrong.
+    #
+    # `heap.cr` calls that trade-off safe on the grounds of "single mutator +
+    # rare SYSMON", and this is the measurement against it: with the invariant
+    # checker on, the process heap drifts in 3 runs of 40, `actual` one above
+    # `reported`, with no thread in the program but main and the monitor
+    # (`spec/invariant_spec.cr`). So the counter equals the walk only on a heap
+    # that either has one thread near it or counts atomically, and stating the
+    # invariant anywhere else is stating it of a heap that does not maintain it.
+    def counters_may_lose_updates? : Bool
+      return false if @heap_counters_atomic
+      n = 0
+      Thread.unsafe_each do
+        n += 1
+        return true if n > 1
       end
       false
     end

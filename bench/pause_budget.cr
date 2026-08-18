@@ -140,10 +140,10 @@ if phases.includes?(3)
   5.times { finished = HEAP.collect_a_little(64); break if finished }
 
   50.times do
-    t0 = Time.monotonic.total_nanoseconds
+    t0 = Time.instant
     done = HEAP.collect_a_little(64)
-    t1 = Time.monotonic.total_nanoseconds
-    slice_times << (t1 - t0).to_u64
+    t1 = Time.instant
+    slice_times << (t1 - t0).total_nanoseconds.to_u64
     break if done
   end
 

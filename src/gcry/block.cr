@@ -33,6 +33,14 @@ module Gcry
       NURSERY      = 16_u32 # young generation (Phase 6)
       FINALIZER    = 32_u32 # has at least one finalizer entry
       DISAPPEARING = 64_u32 # has at least one disappearing link (WeakRef)
+      # Diagnostic, set alongside FREE by the sweep's freelist link and left
+      # clear by an explicit `Heap#free`. A use-after-free report can then say
+      # *which* path gave the block back — "the collector decided it was
+      # garbage" and "the program asked" are different defects with different
+      # owners, and the 2026-08-16 hunt spent a round unable to tell them apart.
+      # Costs one OR at free time; the bit is otherwise unused (8–15 are the
+      # mark generation).
+      SWEPT = 128_u32
       # Bits 8–15: mark generation (in-header path). Matches Heap#header_mark_gen /
       # BlockHeader.mark_gen. clear_all_marks bumps gen (O(1)) instead of walking.
       MARK_GEN_SHIFT =          8

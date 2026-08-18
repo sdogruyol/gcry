@@ -1,0 +1,47 @@
+{
+  "provenance": {
+    "runner": "ubuntu-latest",
+    "commit": "7709898",
+    "runs": 5,
+    "recorded": "2026-08-15",
+    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm."
+  },
+  "metrics": {
+    "pct_json": {
+      "value": 76.0,
+      "runs": 5,
+      "observed_range": [
+        70.6,
+        81.9
+      ],
+      "tolerance": 9.375
+    },
+    "pct_root": {
+      "value": 83.0,
+      "runs": 5,
+      "observed_range": [
+        78.1,
+        91.7
+      ],
+      "tolerance": 12.525
+    },
+    "rss_x": {
+      "value": 0.884,
+      "runs": 5,
+      "observed_range": [
+        0.869,
+        0.926
+      ],
+      "tolerance": 0.0795
+    },
+    "pause_p50_ms": {
+      "value": 0.7606,
+      "runs": 5,
+      "observed_range": [
+        0.6773,
+        0.8512
+      ],
+      "tolerance": 0.2
+    }
+  }
+}

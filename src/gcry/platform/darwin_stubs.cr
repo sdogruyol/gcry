@@ -14,7 +14,11 @@ module Gcry
         Mprotect
       end
 
-      PAGE_SIZE = 4096_u64
+      # Dead on this platform — the soft-dirty paths that read it are guarded on
+      # the linux flag — but it was 4096 in a file whose own `host_page_size`
+      # documents Apple Silicon as 16 KiB. A constant that is both wrong and
+      # unused is one refactor away from being wrong and used.
+      PAGE_SIZE = host_page_size
 
       def self.darwin_process_gc_supported? : Bool
         true
@@ -96,5 +100,24 @@ module Gcry
         LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), 5) == 0
       end
     {% end %}
+  end
+end
+
+module Gcry
+  module Platform
+    # No portable `/proc/self/status` here, and a number nobody measured is
+    # worse than none — see `linux_thread_census.cr`. `nil` means "cannot
+    # answer", which a caller must handle rather than compare against zero.
+    def self.os_thread_count : Int32?
+      nil
+    end
+
+    # Same contract as `linux_address_space.cr`: false means "could not look",
+    # which is not the same answer as "walked everything and found nothing".
+    # `mach_vm_region` could enumerate this, but nothing has needed it yet and
+    # an unmeasured walk is worse than an honest refusal.
+    def self.each_map_region(& : UInt64, UInt64, UInt8*, UInt8*, Int32 ->) : Bool
+      false
+    end
   end
 end

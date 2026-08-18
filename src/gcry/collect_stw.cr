@@ -79,6 +79,26 @@ module Gcry
         Platform.stop_world_threads(current_thread)
         @world_stopped = true
       {% else %}
+        # `GCRY_STAGED_WAIT=1`: give a thread that exists but has not published
+        # itself a moment to do so, before the world is stopped around it.
+        #
+        # gcry records such threads (`Platform.stage_thread`), so it can *see*
+        # the window the census measures — but seeing it changes nothing on its
+        # own. Waiting is the least invasive way to act on the record: it does
+        # not touch what is suspended or scanned, it only declines to start
+        # stopping while a thread is known to be invisible.
+        #
+        # **Before `Thread.lock`, and that is not a detail.** A starting thread
+        # publishes itself from `Thread#start`, which takes the very mutex
+        # `Thread.lock` holds. Waiting while holding it would deadlock by
+        # construction — the thread cannot do the thing being waited for.
+        #
+        # Hard-bounded. A staged entry that never clears — a thread that died
+        # before publishing, or a record lost to table overflow — must cost a
+        # bounded delay and not a hung collector, so the wait gives up and says
+        # so in `stw_staged_wait_timeouts`.
+        wait_for_staged_threads if @staged_wait
+
         Thread.lock
         begin
           # Take every thread's stack bounds while they are all still running.
@@ -90,9 +110,18 @@ module Gcry
           # moved out of the suspension window; `Thread.lock` is already held, so
           # the set snapshotted here is exactly the set scanned below.
           Platform.begin_stack_bounds_snapshot
+          listed = 0
           Thread.unsafe_each do |thread|
+            listed += 1
+            Platform.unstage_thread(thread.to_unsafe.unsafe_as(UInt64))
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
+          # Does the set about to be stopped account for every thread the
+          # process has? gcry learns about threads from Crystal's list, so a
+          # thread that exists but has not pushed itself yet is neither
+          # suspended nor scanned (src/gcry/platform/linux_thread_census.cr).
+          # Off by default: it reads /proc inside the pause.
+          census_threads(listed) if @thread_census
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)

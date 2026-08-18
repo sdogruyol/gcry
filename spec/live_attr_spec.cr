@@ -27,7 +27,7 @@ describe "Gcry.live_attr_json" do
 
       classes = obj["size_classes"].as_a
       classes.size.should be > 0
-      bytes_sum = classes.sum { |c| c["bytes"].as_i64 }
+      bytes_sum = classes.sum(&.["bytes"].as_i64)
       bytes_sum.should be > 0
     ensure
       heap.destroy
