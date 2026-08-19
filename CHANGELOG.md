@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_THREAD_BLOCK_AUDIT=1` — name the dying `Thread`, in the collection
+  that frees it.** The second use-after-free is only ever seen on CI: gcry calls
+  `pthread_getattr_np` under `stop_world` on a `pthread_t` that is its own freed
+  block poison, i.e. it read a `Thread`'s `@system_handle` out of memory it had
+  already reclaimed. Eight sightings, three gates, both architectures, and no
+  local repro in three days. The instrument that cracked the fiber family —
+  walk `/proc/self/maps` at the moment of death and name the region that holds
+  the address — could not see this one, and the reason was size in both halves:
+  the dying-register audit that triggers it only walks size classes at or above
+  384 bytes (the `Deque(Fiber::Stack)` band) and a `Thread` is 192, and it fires
+  for whichever block died first in a collection, which in a fiber-churning
+  program is never the one wanted. So the arm aims the same question at one
+  type: after the mark and before the sweep, read Crystal's `type_id` out of
+  every used block, report each one of the watched type the mark did not reach,
+  and hand its address to the address-space walk. Wired into the gates that have
+  caught this defect — `scheduler-roots` and `ec-queue-audit` (both
+  architectures, and six of the eight sightings are on the aarch64 runner) and
+  the x86_64 `stw_mt_property_test` step. Measured: +3% on the property test,
+  nothing on the root gates.
+
+- **`GCRY_DYING_TYPE_ID=<n>` and `make thread-block-audit`**, which are what let
+  the arm's silence on CI be read as evidence. The knob points the same walk at
+  a type whose life and death the harness controls, and the gate has three arms:
+  200 dropped objects of that type must be named as dying **and** must trigger
+  the address-space walk; the same 200 held alive must produce zero deaths and a
+  non-zero *live* count; and the shipped default must find live `Thread` blocks
+  with four threads running — a default aimed at a `type_id` that matches
+  nothing in the heap would be quiet on CI for a reason that has nothing to do
+  with the defect. Broken on purpose in three directions and observed red:
+  treating every block as marked fails the first arm, dropping the type
+  comparison fails the second (8 phantom deaths among rooted objects), and a
+  bogus default id fails the third.
+
+### Fixed
+
+- **The address-space audit reported its own call chain as a hole in the stack
+  scan.** Its first version reported 47 hits that were its own frames and was
+  fixed by comparing against the window the scan actually used — but the audit
+  runs at roughly the depth the scan ran at, so its frames land *inside* that
+  window, and the verdict they earned was "the scan walked these bytes and did
+  not offer the value": a filter bug that does not exist. It now excludes
+  everything below `collect_entry_sp`, the same boundary `GCRY_BIRTH_GRACE`'s
+  holder search already uses, and says so — the collector's own call chain, this
+  audit's included, is not evidence. Measured on the new gate: 6 of 7 base hits
+  on a dropped object were the audit's own chain and one was its caller's local;
+  before the fix, one of them was classified as inside the scanned window.
+
+- **The dying audit's "never offered by the mutator-stack scan" line could not
+  be true for a 192-byte block.** The table it reads records only candidates at
+  or above the 384-byte band, so any smaller block was "not recorded" rather
+  than "not offered". It now also records blocks of the watched type, whatever
+  their size.
+
 ## [0.20.0] - 2026-08-18
 
 ### Added

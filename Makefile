@@ -1,12 +1,12 @@
 CRYSTAL ?= crystal
 BIN := bin
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -249,10 +249,17 @@ greg-roots: $(BIN)
 # one hex number, because the knobs were not on here. They cost a memset per
 # free and nothing until something faults. A gate that catches this defect
 # should not waste the sighting.
+# `GCRY_THREAD_BLOCK_AUDIT` for the same reason, one object along: this gate is
+# one of the three that has caught the `Thread` use-after-free, and what those
+# catches could never say is what held the `Thread`'s address at the moment its
+# block was swept. The arm answers that from inside the collection that frees it
+# rather than from the crash that follows (src/gcry/thread_block_audit.cr).
+# Measured on this gate: no cost — it reports nothing here, which is the point,
+# because this defect has never reproduced locally.
 scheduler-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
-	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots
-	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots --control
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --control
 
 # A precise layout is a claim that every pointer in the object is at one of the
 # offsets it lists. `Layout.register` had a third outcome it never named: an ivar
@@ -339,6 +346,18 @@ mark-audit: $(BIN)
 # Plants holders it knows the address of, because a search that finds nothing
 # reads exactly like one that ran and found the heap clean. `--control` shows the
 # search adds lines and removes none. ~2 s.
+# The `Thread` use-after-free is only ever seen on CI, so the instrument aimed
+# at it (src/gcry/thread_block_audit.cr) has to be trusted before its silence
+# there can be read as anything. Three arms: a dropped object of the watched
+# type must be named as dying and must trigger the address-space walk, the same
+# objects held alive must produce no deaths and a non-zero live count, and the
+# shipped default must find live `Thread` blocks — a default aimed at nothing
+# would be silent on CI for a reason that has nothing to do with the defect.
+thread-block-audit: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_block_audit.cr -o $(BIN)/thread_block_audit --error-trace
+	$(BIN)/thread_block_audit
+	$(BIN)/thread_block_audit --control
+
 poison-holders: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_holders.cr -o $(BIN)/poison_holders --error-trace
 	$(BIN)/poison_holders
@@ -377,8 +396,8 @@ nested-spawn-uaf: $(BIN)
 
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
-	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit
-	GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit --control
+	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \

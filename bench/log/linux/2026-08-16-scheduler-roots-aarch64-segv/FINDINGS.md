@@ -305,6 +305,95 @@ the tag, the crash report and the holder search. The next CI catch names the
 block, its size, whether the sweep or an explicit free released it, and what
 still points at it.
 
+## The instrument, 2026-08-19: ask the question about one type
+
+The crash reports have taken this as far as they can. They say *what* was read
+out of the freed block (`@system_handle`), and they say the block was a
+`Thread`. What they cannot say is what still held that `Thread`'s address when
+the collection freed it, because by the time the fault happens the collection is
+over.
+
+The fiber family answered exactly that question with
+`GCRY_ADDRESS_SPACE_AUDIT` — at the moment of death, walk every readable mapping
+in `/proc/self/maps` and name the region that holds the address. Pointed at this
+defect, it never fires, and the reason is size in both halves of its trigger:
+
+- the dying-register audit that calls it walks only size classes at or above
+  `DYING_AUDIT_MIN_SIZE` (384 B, the `Deque(Fiber::Stack)` capacity band). A
+  `Thread` is 192 B and is never looked at;
+- and it fires once per collection, for whichever unreferenced block died first.
+  In a program churning fibers that is never the `Thread`.
+
+`GCRY_THREAD_BLOCK_AUDIT=1` (`src/gcry/thread_block_audit.cr`) aims the same
+question at one type instead. After the mark and before the sweep — the only
+window where "about to be freed" exists and nothing has been reclaimed — it
+reads Crystal's `type_id` out of every used block, and for each block of the
+watched type the mark did not reach it prints the block, whether its address is
+in a suspended thread's registers, whether the collecting thread's own stack
+scan offered it, and then hands the address to the address-space walk.
+
+**It counts what it walked, and it counts the live blocks of the watched type.**
+The second one is the qualifier that matters: a run reporting no dying `Thread`
+is worth nothing if the arm is aimed at a `type_id` that matches nothing in the
+heap, and those two cases are indistinguishable without it.
+
+### Why it can be believed when it is silent
+
+`GCRY_DYING_TYPE_ID=<n>` points the same walk at any other type, which is what
+makes a gate possible at all — the harness cannot make a `Thread` die on
+command, but it can make its own objects die. `make thread-block-audit`, three
+arms:
+
+| arm | what it requires |
+|---|---|
+| `dies` | 200 dropped objects of the watched type: at least one named as dying, **and** the address-space walk triggered |
+| `lives` | the same 200 held in a rooted array: a non-zero *live* count and **zero** deaths |
+| `thread` | the shipped default, four threads running: live `Thread` blocks found |
+
+Broken on purpose in three directions and observed red: treating every block as
+marked takes `dies` to 0 deaths and 0 audits; dropping the `type_id` comparison
+gives `lives` **8 deaths among 200 rooted objects**; a bogus default id leaves
+`thread` at 0 live with 245 blocks walked. The `--control` run has the knob off
+and walks nothing, so the other runs' counts belong to the knob and not to the
+`dying_type_id` property, which every arm sets.
+
+### A correction the gate produced immediately
+
+The first clean run of the `dies` arm reported six holders on the collecting
+fiber's stack, and one of them was classified **"INSIDE the window the scan
+used"** — which reads as "the scan walked those bytes and did not offer the
+value", i.e. a filter bug in the root scan.
+
+It was the instrument. The audit carries the target as an argument through a
+call chain that runs *below* where the collector was entered, and the scan
+window's low bound is deeper still, so the audit's own frames are inside the
+window it compares against. The header of `address_space_audit.cr` already
+records a first version that reported 47 hits that were its own frames; the fix
+then — compare against the window the scan actually used — is not enough on its
+own, and this is the second time the same instrument has found itself.
+
+It now excludes everything below `collect_entry_sp`, which is the boundary
+`GCRY_BIRTH_GRACE`'s holder search already uses for the same reason, and says
+so instead of classifying it. After the fix all six are named as the collector's
+own call chain (80 to 18 408 bytes below the entry SP) and none is offered as
+evidence about the scan.
+
+A second, smaller one: the dying audit's "never offered by the mutator-stack
+scan" line reads a table that only records candidates in the ≥384 B band, so for
+a 192-byte block the honest answer was "not recorded", not "not offered". The
+table now also records blocks of the watched type whatever their size.
+
+### Where it runs
+
+On all three gates that have caught this defect — `scheduler-roots` and
+`ec-queue-audit` (both architectures; six of the eight sightings are on the
+aarch64 runner) and the x86_64 `stw_mt_property_test` step — plus its own gate
+on the aarch64 job. Cost measured locally: **+3%** wall clock on
+`stw_mt_property_test` (6.72 → 6.94 s), and nothing distinguishable on
+`scheduler_roots` (0.054 → 0.048 s) or `ec_queue_audit` (0.228 → 0.225 s).
+None of them reports a dying `Thread` locally, which is the expected result and
+the whole reason the instrument had to be sent to CI.
+
 ## Status
 
 **Both gates that catch this now carry the diagnostics.** `ec-queue-audit` and
@@ -322,3 +411,9 @@ not reproduced on demand and never seen outside CI. It is no longer a one-off,
 so the two counters proposed above are worth building rather than merely
 proposing — and until they exist, a red `ec-queue-audit` on aarch64 has to be
 read from its backtrace, not from its name.
+
+**2026-08-19:** the counters exist, and so does the instrument that asks the
+question they leave open — what held the `Thread`'s address when its block was
+freed (`GCRY_THREAD_BLOCK_AUDIT`, above). It is gated, it is on all three gates
+that have caught this, and it is silent locally. The next occurrence should
+print the holder rather than only the fault.

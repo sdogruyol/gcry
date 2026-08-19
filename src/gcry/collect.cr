@@ -1202,6 +1202,14 @@ module Gcry
           # src/gcry/mark_audit.cr). Off by default — O(live heap) in the pause.
           run_mark_audit if @mark_audit
 
+          # The same window, one question narrower: is a block of the watched
+          # type about to be swept, and if so what still holds its address?
+          # (GCRY_THREAD_BLOCK_AUDIT=1, src/gcry/thread_block_audit.cr). Gated
+          # separately from `mark_audit` on purpose — the arm has to run on CI
+          # steps whose budget will not carry an O(live heap) walk per
+          # collection as well.
+          audit_dying_type_blocks if @thread_block_audit
+
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.
           @lazy_sweep_pending = sweep_after_world?

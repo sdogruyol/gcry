@@ -672,6 +672,29 @@ module GC
       heap.dying_register_audit = true
       heap.address_space_audit = true
     end
+    # Is a `Thread` — or any type asked for by id — about to be swept, and what
+    # holds its address when it is? (src/gcry/thread_block_audit.cr). Implies
+    # the address-space audit, because "a Thread died" without the region that
+    # held it is the fact the last eight CI sightings already established.
+    # `GCRY_ADDRESS_SPACE_AUDIT=0` below drops the expensive half and leaves the
+    # report.
+    if env_flag_one?("GCRY_THREAD_BLOCK_AUDIT")
+      heap.thread_block_audit = true
+      heap.address_space_audit = true
+    end
+    # Aim the same arm at another type. The gate uses it to point the audit at a
+    # type whose death it controls, which is the only way its silence can be
+    # read as evidence.
+    if tid = env_u64("GCRY_DYING_TYPE_ID")
+      if tid > 0 && tid <= UInt32::MAX
+        heap.dying_type_id = tid.to_u32
+        heap.thread_block_audit = true
+        heap.address_space_audit = true
+      end
+    end
+    # The off switch for the walk of the resident address space, so the cheap
+    # half of either audit can run on its own.
+    heap.address_space_audit = false if env_flag_zero?("GCRY_ADDRESS_SPACE_AUDIT")
     if env_flag_one?("GCRY_MARK_AUDIT_ALL")
       heap.mark_audit = true
       heap.mark_audit_all_parents = true

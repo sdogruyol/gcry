@@ -201,6 +201,13 @@ jobs:
           # defect should not waste the sighting.
           GCRY_POISON_HOLDERS: "1"
           GCRY_THREAD_CENSUS: "1"
+          # What those diagnostics still could not say: what held the `Thread`'s
+          # address at the moment its block was swept. This arm answers it from
+          # inside the collection that frees it, instead of from the crash one
+          # collection later (src/gcry/thread_block_audit.cr). Measured on this
+          # step: +3% wall clock, and it reports nothing locally — which is the
+          # point, because this defect has never reproduced off CI.
+          GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
@@ -409,6 +416,17 @@ jobs:
       - name: Mark completeness audit
         run: |
           make mark-audit
+
+      # And the same window aimed at one type. The `Thread` use-after-free is
+      # only ever observed on CI, so the arm that asks where a dying `Thread`'s
+      # address lives has to be trusted before its silence there means anything.
+      # Three arms: a dropped object of the watched type must be named, the same
+      # objects held alive must produce no deaths, and the shipped default must
+      # find live `Thread` blocks — a default aimed at nothing would be quiet on
+      # CI for a reason that has nothing to do with the defect.
+      - name: Dying-type audit
+        run: |
+          make thread-block-audit
 
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
@@ -775,6 +793,14 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      # `scheduler-roots` and `ec-queue-audit` carry `GCRY_THREAD_BLOCK_AUDIT=1`
+      # from the Makefile: six of the eight sightings of the `Thread`
+      # use-after-free are on this runner, and the question they leave open —
+      # what held the `Thread`'s address when its block was swept — can only be
+      # answered where the defect happens. It has not reproduced locally in
+      # three days, so the instrument goes to it rather than the other way
+      # round. `thread-block-audit` is that instrument's own gate, run here so a
+      # silent arm on this arch is distinguishable from a broken one.
       - name: Unit + process specs + STW SP + fork on aarch64
         run: |
           mkdir -p bin
@@ -790,6 +816,7 @@ jobs:
           make scheduler-roots
           make ivar-layout-roots
           make ec-queue-audit
+          make thread-block-audit
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:

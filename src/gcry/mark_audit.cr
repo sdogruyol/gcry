@@ -115,11 +115,17 @@ module Gcry
     end
 
     protected def note_mutator_candidate(addr : UInt64) : Nil
-      return unless @dying_register_audit
+      return unless @dying_register_audit || @thread_block_audit
       header = find_block(Pointer(Void).new(addr))
       return unless header
       return unless BlockHeader.user_from(header).address == addr
-      return if header.value.size < DYING_AUDIT_MIN_SIZE
+      # The size band is the fiber family's (`Deque(Fiber::Stack)` capacities).
+      # The dying-type audit's block is 192 bytes and would fall through it, and
+      # then its "never offered" line would be reporting the band rather than
+      # the scan (src/gcry/thread_block_audit.cr).
+      unless header.value.size >= DYING_AUDIT_MIN_SIZE || watched_type_block?(header)
+        return
+      end
       i = 0
       while i < @mutator_seen_count
         return if @mutator_seen[i] == addr
@@ -132,6 +138,12 @@ module Gcry
       end
       @mutator_seen[@mutator_seen_count] = addr
       @mutator_seen_count += 1
+    end
+
+    private def watched_type_block?(header : BlockHeader*) : Bool
+      return false unless @thread_block_audit
+      return false if header.value.size < 4
+      BlockHeader.user_from(header).as(UInt32*).value == dying_type_id
     end
 
     private def mutator_offered?(addr : UInt64) : Bool

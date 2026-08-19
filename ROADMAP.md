@@ -767,18 +767,36 @@ CI asymmetry that hid both.
       (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
       STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
       the v0.20.0 fix in place** — so the dying-fiber stack root does not touch
-      it. The last report named the block: 192 bytes, freed by an **explicit**
-      free rather than the sweep, and since **reissued**.
+      it. The block is 192 bytes. **What the last report said about *how* it was
+      freed does not stand**: "an explicit free rather than the sweep, since
+      reissued" was decoded from `si_addr`, which was the poison **plus
+      `0x418`** and named a block five along — the same reporter bug that
+      produced a false "explicit free" from cleared flags, retracted in the
+      FINDINGS the day it was printed. Who freed it is still open.
       **The obstacle is the observer, not the analysis.** It does not reproduce
       locally: `ec_queue_audit` 0/20 and 0/25 in two batches, `nested_spawn_uaf`
       never produces this shape, and the 5 h × 3 soak on 2026-08-17 did not fire
       it either. Every sighting so far is CI, mostly aarch64.
-      **Next**: point the instrument that cracked the fiber family at this one.
-      `GCRY_ADDRESS_SPACE_AUDIT` can answer "where does this `Thread`'s address
-      live when its block is freed" the same way it answered it for the deque
-      buffer — but it has to run where the defect appears, which means wiring it
-      into the aarch64 job rather than waiting for a local repro that has not
-      come in three days.
+      **The instrument is built and wired.** `GCRY_THREAD_BLOCK_AUDIT=1`
+      (`src/gcry/thread_block_audit.cr`) asks the fiber family's question about
+      one type: after the mark and before the sweep it reads Crystal's `type_id`
+      out of every used block, names each block of the watched type the mark did
+      not reach, and hands its address to the address-space walk, which names the
+      region that holds it. The general audit could not see this defect and the
+      reason was size twice over — its trigger walks only the ≥384 B band and a
+      `Thread` is 192 B, and it fires for whichever block died first, never this
+      one. It rides on `scheduler-roots`, `ec-queue-audit` and the x86_64
+      `stw_mt_property_test` step, i.e. on all three gates that have caught the
+      defect, at +3% on the property test and no measurable cost on the others.
+      `GCRY_DYING_TYPE_ID=<n>` retargets it, which is what `make
+      thread-block-audit` uses to require it to name a death it plants and to
+      stay silent when the same objects are held — without that, a quiet CI arm
+      would say nothing.
+      **Next**: read what it prints. Three answers, three different defects — on
+      a thread stack or a fiber stack below the scan window is root coverage, in
+      a live heap block is a missed edge the mark audit would have to explain,
+      and nowhere is the birth window, where the `Thread` is live only in the
+      starting thread's registers or frame.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
