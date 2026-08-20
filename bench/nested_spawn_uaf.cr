@@ -148,7 +148,7 @@ puts "birth grace follow-up: #{heap.birth_grace_live_later} were live next colle
 puts "dead-fiber stacks: #{heap.dead_stacks_walked} walked / #{heap.dead_stack_words} words"
 puts "unowned stacks: pooled #{heap.pooled_stacks_walked} walked / #{heap.pooled_stack_words} words, " \
      "maps-in-flight #{heap.maps_inflight_walked} walked / #{heap.maps_inflight_words} words"
-puts "unowned coverage: #{heap.unowned_covered} accounted for, #{heap.unowned_uncovered} not"
+puts "unowned coverage: #{heap.unowned_covered} accounted for, #{heap.unowned_thread_stacks} thread stacks, #{heap.unowned_uncovered} not (compared against #{heap.unowned_bounds_compared} thread bounds); in-flight walk saw #{heap.maps_inflight_walked}"
 # Retention, because an arm that takes a crash rate to zero by keeping
 # everything alive is not a fix, and the two look identical from the outside.
 puts "pause: p50 #{heap.pause_percentile_ns(50.0)} ns  p99 #{heap.pause_percentile_ns(99.0)} ns  n #{heap.collections}"

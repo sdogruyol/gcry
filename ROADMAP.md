@@ -858,13 +858,26 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
-- [ ] **The coverage audit cannot account for 4 mappings a run.**
-      `GCRY_UNOWNED_COVERAGE_AUDIT=1` walks `/proc/self/maps` beside the
-      dying-fiber root and matches what it finds against fibers, pools and
-      thread slots: 549 accounted for, **4 not**. Too few to move a crash rate,
-      and exactly the kind of residue that was ignored one round earlier and
-      turned out to be the whole defect. Label them with the address-space
-      audit.
+- [x] **The coverage audit's residue is labelled — it is the in-flight
+      population, and "4 a run" was a sample.** `GCRY_UNOWNED_COVERAGE_AUDIT=1`
+      matches fiber-stack-shaped mappings against fibers, pools and dying-fiber
+      slots, and what it could not account for turns out to be exactly the
+      regions the in-flight arm walks: measured on `nested_spawn_uaf`,
+      `accounted + not` equals `maps_inflight_walked` in every run
+      (5411 + 6 = 5417, 5328 + 6 = 5334, 5310 + 36 = 5346). So the split is not
+      "known versus unknown" but "parked in a `Thread#dying_fiber` slot versus
+      not", and the unparked half is the population `GCRY_MAPS_INFLIGHT_ROOTS`
+      exists for.
+      Three corrections to the original reading. It is **not 4 a run** — 1 to 36
+      on the same harness across runs, so the number was one draw and not a
+      constant. It is **not thread stacks**, which was the obvious candidate
+      because a glibc thread stack is its size minus a guard page and therefore
+      passes the same geometry test: the audit now checks them by name and finds
+      **0**, against 6 thread bounds compared, so the null is a measurement
+      rather than a walk with nothing to compare against. And it needs a
+      **Parallel** execution context under concurrent spawning: a quiesced
+      single-context program reports 0 uncovered before and after a spawn
+      storm.
 
 - [ ] **`live_objects`, `total_bytes` and `bytes_since_gc` lose updates.**
       `note_alloc_bytes` uses plain `set(get + 1)` unless

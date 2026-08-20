@@ -62,6 +62,11 @@ module Gcry
     property unowned_coverage_audit : Bool = false
     getter unowned_covered : UInt64 = 0_u64
     getter unowned_uncovered : UInt64 = 0_u64
+    # Uncovered mappings that turned out to be thread stacks — scanned, just not
+    # by the route this audit checks.
+    getter unowned_thread_stacks : UInt64 = 0_u64
+    # Thread stack bounds the last comparison had available.
+    getter unowned_bounds_compared : UInt64 = 0_u64
 
     # Stacks walked and words offered, per arm. Counted so a null result cannot
     # be "the arm never ran" — the failure mode every step of this hunt has hit
@@ -130,6 +135,15 @@ module Gcry
         if @unowned_coverage_audit
           if dying_fiber_stack?(lo, hi)
             @unowned_covered &+= 1
+          elsif thread_stack_region?(lo, hi)
+            # A glibc thread stack is its size minus a guard page, and
+            # `Fiber::StackPool::STACK_SIZE` is the same size — so a thread
+            # stack passes the geometry test above and is owned by no fiber and
+            # in no pool. It is not a coverage hole: `stop_world` snapshots its
+            # bounds and the root scan walks it by that route. Counted apart,
+            # because "accounted for" and "accounted for somewhere else" are
+            # different claims.
+            @unowned_thread_stacks &+= 1
           else
             @unowned_uncovered &+= 1
           end
@@ -155,6 +169,28 @@ module Gcry
       page = Roots::PAGE_SIZE.to_u64
       return false unless (lo & (page - 1)) == 0
       (hi & (page - 1)) == 0
+    end
+
+    # Does any thread's snapshotted stack overlap this mapping? Bounds come from
+    # the pre-stop snapshot, which is taken before this scan runs.
+    private def thread_stack_region?(lo : UInt64, hi : UInt64) : Bool
+      found = false
+      bounds_seen = 0_u64
+      Thread.unsafe_each do |thread|
+        bounds = Platform.snapshotted_stack_bounds(thread.to_unsafe)
+        next unless bounds
+        bounds_seen &+= 1
+        blo = bounds[0].address
+        bhi = bounds[1].address
+        found = true if blo < hi && bhi > lo
+      end
+      # A "no thread stack" answer from a walk that had no bounds to compare
+      # against is not an answer. Recorded rather than assumed: the check is
+      # called inside the roots phase, and whether the pre-stop snapshot has
+      # been taken by then is exactly the sort of thing this file has been wrong
+      # about before.
+      @unowned_bounds_compared = bounds_seen
+      found
     end
 
     private def dying_fiber_stack?(lo : UInt64, hi : UInt64) : Bool
