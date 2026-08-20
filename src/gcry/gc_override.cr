@@ -21,6 +21,7 @@ module GC
     end
 
     Gcry::Platform.init_staging
+    Gcry::ThreadBirthRoot.init
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -672,6 +673,29 @@ module GC
       heap.dying_register_audit = true
       heap.address_space_audit = true
     end
+    # Is a `Thread` — or any type asked for by id — about to be swept, and what
+    # holds its address when it is? (src/gcry/thread_block_audit.cr). Implies
+    # the address-space audit, because "a Thread died" without the region that
+    # held it is the fact the last eight CI sightings already established.
+    # `GCRY_ADDRESS_SPACE_AUDIT=0` below drops the expensive half and leaves the
+    # report.
+    if env_flag_one?("GCRY_THREAD_BLOCK_AUDIT")
+      heap.thread_block_audit = true
+      heap.address_space_audit = true
+    end
+    # Aim the same arm at another type. The gate uses it to point the audit at a
+    # type whose death it controls, which is the only way its silence can be
+    # read as evidence.
+    if tid = env_u64("GCRY_DYING_TYPE_ID")
+      if tid > 0 && tid <= UInt32::MAX
+        heap.dying_type_id = tid.to_u32
+        heap.thread_block_audit = true
+        heap.address_space_audit = true
+      end
+    end
+    # The off switch for the walk of the resident address space, so the cheap
+    # half of either audit can run on its own.
+    heap.address_space_audit = false if env_flag_zero?("GCRY_ADDRESS_SPACE_AUDIT")
     if env_flag_one?("GCRY_MARK_AUDIT_ALL")
       heap.mark_audit = true
       heap.mark_audit_all_parents = true
@@ -680,6 +704,13 @@ module GC
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.
     heap.thread_census = true if env_flag_one?("GCRY_THREAD_CENSUS")
+    # Root the `Thread` object from `pthread_create` until the thread publishes
+    # itself (src/gcry/thread_birth_root.cr). **On** by default: it closes a
+    # use-after-free, and it is one `add_root` per thread created.
+    Gcry::ThreadBirthRoot.enabled = false if env_flag_zero?("GCRY_THREAD_BIRTH_ROOT")
+    # The twin: record every birth and root nothing, so a run that survives is
+    # not credited to the bookkeeping.
+    Gcry::ThreadBirthRoot.noroot = true if env_flag_one?("GCRY_THREAD_BIRTH_NOROOT")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #
@@ -1016,7 +1047,15 @@ module GC
     def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
       ret = LibC.pthread_create(thread, attr, start, arg)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64)) if ret == 0
+        if ret == 0
+          Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64))
+          # Crystal passes the `Thread` object itself as `arg`
+          # (`crystal/system/unix/pthread.cr`: `arg: self.as(Void*)`), so the
+          # object whose only other holder is the new thread's unscanned stack
+          # is right here. Root it until the thread publishes itself
+          # (src/gcry/thread_birth_root.cr).
+          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
+        end
       {% end %}
       ret
     end

@@ -755,7 +755,44 @@ module Gcry
     # Called from `stop_world` **before** `Thread.lock` — see the note there.
     STAGED_WAIT_SPINS = 2000
 
+    # What the wait saw, for the collection that is about to run. Read after the
+    # fact by the dying-type audit's precondition report
+    # (src/gcry/thread_block_audit.cr), and recorded here because it cannot be
+    # recovered later: this wait either drains a staged entry or drops it, so
+    # `Platform.staged_count` is **zero by construction** by the time anything
+    # downstream looks. The first version of that report asked it anyway and got
+    # a zero it could not have got anything else from.
+    getter staged_seen_at_stop : UInt64 = 0_u64
+    getter staged_timed_out_at_stop : Bool = false
+
+    # The ids themselves, not just how many. A dying `Thread` whose
+    # `@system_handle` is one of these *is* the thread that was being born —
+    # which is the difference between a coincidence in the same collection and
+    # an identification. Recorded at wait entry because the timeout path drops
+    # every entry before anything downstream could read them.
+    STAGED_SNAPSHOT_SLOTS = 8
+
+    @staged_ids_at_stop = uninitialized StaticArray(UInt64, STAGED_SNAPSHOT_SLOTS)
+    getter staged_ids_at_stop_count : Int32 = 0
+
+    def staged_id_at_stop?(id : UInt64) : Bool
+      i = 0
+      while i < @staged_ids_at_stop_count
+        return true if @staged_ids_at_stop[i] == id
+        i += 1
+      end
+      false
+    end
+
     private def wait_for_staged_threads : Nil
+      @staged_seen_at_stop = Platform.staged_count.to_u64
+      @staged_timed_out_at_stop = false
+      @staged_ids_at_stop_count = 0
+      Platform.each_staged do |id|
+        next if @staged_ids_at_stop_count >= STAGED_SNAPSHOT_SLOTS
+        @staged_ids_at_stop[@staged_ids_at_stop_count] = id
+        @staged_ids_at_stop_count += 1
+      end
       return if Platform.staged_count == 0
       @stw_staged_waits &+= 1
       spins = 0
@@ -770,6 +807,7 @@ module Gcry
         break if Platform.staged_count == 0
         if spins >= STAGED_WAIT_SPINS
           @stw_staged_wait_timeouts &+= 1
+          @staged_timed_out_at_stop = true
           # Drop what did not answer. A thread that dies before publishing
           # leaves an entry nothing will ever release, and without this every
           # later collection would pay the full spin and time out again — a

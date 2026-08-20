@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_THREAD_BLOCK_AUDIT=1` — name the dying `Thread`, in the collection
+  that frees it.** The second use-after-free is only ever seen on CI: gcry calls
+  `pthread_getattr_np` under `stop_world` on a `pthread_t` that is its own freed
+  block poison, i.e. it read a `Thread`'s `@system_handle` out of memory it had
+  already reclaimed. Eight sightings, three gates, both architectures, and no
+  local repro in three days. The instrument that cracked the fiber family —
+  walk `/proc/self/maps` at the moment of death and name the region that holds
+  the address — could not see this one, and the reason was size in both halves:
+  the dying-register audit that triggers it only walks size classes at or above
+  384 bytes (the `Deque(Fiber::Stack)` band) and a `Thread` is 192, and it fires
+  for whichever block died first in a collection, which in a fiber-churning
+  program is never the one wanted. So the arm aims the same question at one
+  type: after the mark and before the sweep, read Crystal's `type_id` out of
+  every used block, report each one of the watched type the mark did not reach,
+  and hand its address to the address-space walk. Wired into the gates that have
+  caught this defect — `scheduler-roots` and `ec-queue-audit` (both
+  architectures, and six of the eight sightings are on the aarch64 runner) and
+  the x86_64 `stw_mt_property_test` step. Measured: +3% on the property test,
+  nothing on the root gates.
+
+- **`GCRY_DYING_TYPE_ID=<n>` and `make thread-block-audit`**, which are what let
+  the arm's silence on CI be read as evidence. The knob points the same walk at
+  a type whose life and death the harness controls, and the gate has three arms:
+  200 dropped objects of that type must be named as dying **and** must trigger
+  the address-space walk; the same 200 held alive must produce zero deaths and a
+  non-zero *live* count; and the shipped default must find live `Thread` blocks
+  with four threads running — a default aimed at a `type_id` that matches
+  nothing in the heap would be quiet on CI for a reason that has nothing to do
+  with the defect. Broken on purpose in three directions and observed red:
+  treating every block as marked fails the first arm, dropping the type
+  comparison fails the second (8 phantom deaths among rooted objects), and a
+  bogus default id fails the third.
+
+- **The dying-type arm now counts the defect's precondition every collection,
+  not just its consequence** — and the first version of that count was zero by
+  construction, which is why it now reports three separate things: what the
+  pre-stop wait saw, whether it **gave up** (the world then stopped with a
+  thread unpublished), and whether a thread was staged *after* the wait ran, so
+  nothing waited for it at all. Asking `Platform.staged_count` after the mark,
+  as the first version did, can only ever return zero: the wait drains what has
+  published and drops the rest.
+  Measured in the failing harness locally: **24 sightings in 12 runs** of a
+  thread staged when the world was about to stop, every one caught by the wait.
+  Both branches that would say otherwise are shown to fire by staging an id that
+  can never publish — `make thread-block-audit` gained `staged` and
+  `staged-nowait` arms for exactly that, since a real thread publishes too fast
+  to be held in the state the defect needs.
+  The two kinds are the two candidate mechanisms and they need different fixes:
+  staged (created, not yet on Crystal's list) and a gap (on the list, no bounds
+  from the snapshot). Both are countable in **green** runs, which is what makes
+  them worth having — the consequence arrives in bursts (4 of 20 in one batch, 0
+  of 60 across the three after it). The gap half is silent locally too, and that
+  silence is evidence: stubbing `snapshotted_stack_bounds` to `nil` makes the
+  same run report `6 listed, 0 bounded` at every collection.
+
+- **The report is three lines now, and the reason is the one this file keeps
+  recording:** it grew past `RawOut::LIMIT` (480 bytes) and was silently
+  truncated, losing the end of its own verdict — the same failure mode the crash
+  reporter has been corrected for three times, committed by the instrument
+  written to correct it. In the same pass, "not on Crystal's list" stopped
+  asserting "the thread has exited": off-list has two causes and the first catch
+  to reach that line was the other one, a thread that had not published yet. The
+  line now states both and quotes the pre-stop wait's own record beside it,
+  including the dying object's `@system_handle` against the staged ids — as
+  *consistent with*, never as an identification, because glibc recycles thread
+  ids (measured: one value across eight collections while the staged total went
+  4 → 11).
+
+- **The dying-type report now says whether the dying `Thread` is still on
+  Crystal's list, and whether any live thread's list node still links to it.**
+  Those are different defects — a listed `Thread` dying means the static root
+  that is `Thread.threads` did not cover it, while an unlisted one is legitimate
+  garbage and the defect is whatever still walks to it, `Thread::LinkedList`
+  being intrusive. Both are answerable on any catch, without waiting for the
+  address-space walk to find a holder, and the line carries a self-check: a "not
+  on the list" from a walk that cannot find the collecting thread either is a
+  broken comparison, not a finding.
+
+- **`make thread-uaf-sample` — buy samples of a defect that only happens on
+  CI.** The `Thread` use-after-free fires in about one aarch64 job in three and
+  in none of 40 local runs of the same harness, and the arm that names its
+  holder only speaks when it fires. The target runs the failing harness ten
+  times with the arm on and keeps the logs of the runs that said something. It
+  is deliberately **not** a gate — it exits 0 either way, because a step
+  expected to fail while the defect is open would block every pull request or
+  train everyone to ignore it — and it ships as a `continue-on-error` aarch64
+  job that uploads what it caught. `THREAD_UAF_BIN` points it at another
+  harness, which is how its own reporting path is shown to work: against
+  `thread_storm`, where a dying `Thread` is routine, it must keep and print.
+
+### Fixed
+
+- **The `Thread` use-after-free is closed: the object is rooted from
+  `pthread_create` until the thread publishes itself.** Between the two, the
+  `Thread` is covered by no root — it is not on `Thread.threads` yet, so the
+  static root that is the list cannot reach it, and its only other holder is the
+  new thread's own stack, which gcry has no bounds for and never scans. The
+  pre-stop wait was supposed to cover the window and does, in 40 sightings
+  across 20 green CI runs; the two catches that crashed are the ones where it
+  **gave up** and stopped the world anyway, with the kernel reporting one more
+  thread than Crystal's list held.
+  The fix needs none of that machinery, because the object was already in
+  gcry's hands: Crystal calls `GC.pthread_create(…, arg: self.as(Void*))`, so
+  the `Thread` *is* the argument the hook is handed. It is rooted there and
+  released in `stop_world`'s walk once the thread is on the list — one
+  `add_root` per thread created, and no change to what the stopped world does,
+  which matters because two earlier attempts at this defect changed collector
+  behaviour and broke it. `GCRY_THREAD_BIRTH_ROOT=0` turns it off;
+  `GCRY_THREAD_BIRTH_NOROOT=1` records the same births and roots nothing.
+  Gated by `make thread-birth-root`, which holds the window open the only way it
+  can be held open — a **raw** pthread created through the same hook, which
+  never joins Crystal's list — and requires the block to survive rooted, and to
+  **die** in both the twin and the knob-off arms. The first version of the
+  release path deadlocked the collector: `stop_world` runs under `@roots_lock`
+  and it is not reentrant, so the release hands the pointer back and the caller
+  mutates the set directly.
+  The twin earned its place on the first CI run: it failed on aarch64 because
+  the record table is a class variable, i.e. static memory the conservative root
+  scan reads — so storing the address there rooted it, and neither arm could
+  have told `add_root` from the bookkeeping. Addresses are masked in the table
+  now, and the harness materialises the victim's pointer only inside a
+  `@[NoInline]` frame it then wipes.
+  Known and counted: a thread that never publishes keeps its root for the life
+  of the process (`ThreadBirthRoot.outstanding`), and the interval *inside*
+  `pthread_create` is still uncovered — closing that needs a trampoline on the
+  new thread, tried before and crashed 8 runs in 10.
+
+- **The crash reporter excluded the defect it was reporting.** A fault outside
+  the heap span printed "never a gcry allocation, so a swept object is not the
+  explanation" — in three control runs, two lines after naming the `pthread_t`
+  the collector was querying, and at exactly that id **+ `0x418`**. The address
+  is a field of the descriptor that id points at, the id came out of a
+  `Thread`'s `@system_handle`, and a reissued `Thread` block carries no poison,
+  so a swept object is the *leading* reading there rather than an excluded one.
+  The decision is now a pure function (`SegvReport.out_of_span_reading`) with
+  five cases in `spec/segv_report_spec.cr`, because the branch that matters can
+  only fire while libc is inside the query and no harness can enter it.
+
+- **The crash reporter named a free path from a reissued block's flags.**
+  `SWEPT` is set beside `FREE` by the sweep and cleared when the block is handed
+  out again, so on a reissued block those flags describe the reissue — and the
+  line was read as "freed by an explicit free" three times, the last against a
+  block the dying-type audit had watched the **sweep** condemn one collection
+  earlier. It now declines the verdict unless the block is still free, and says
+  why. `make segv-report` grew a `reissued-poison` arm that requires exactly
+  that, broken on purpose in both directions.
+
+- **The address-space audit reported its own call chain as a hole in the stack
+  scan.** Its first version reported 47 hits that were its own frames and was
+  fixed by comparing against the window the scan actually used — but the audit
+  runs at roughly the depth the scan ran at, so its frames land *inside* that
+  window, and the verdict they earned was "the scan walked these bytes and did
+  not offer the value": a filter bug that does not exist. It now excludes
+  everything below `collect_entry_sp`, the same boundary `GCRY_BIRTH_GRACE`'s
+  holder search already uses, and says so — the collector's own call chain, this
+  audit's included, is not evidence. Measured on the new gate: 6 of 7 base hits
+  on a dropped object were the audit's own chain and one was its caller's local;
+  before the fix, one of them was classified as inside the scanned window.
+
+- **The dying audit's "never offered by the mutator-stack scan" line could not
+  be true for a 192-byte block.** The table it reads records only candidates at
+  or above the 384-byte band, so any smaller block was "not recorded" rather
+  than "not offered". It now also records blocks of the watched type, whatever
+  their size.
+
 ## [0.20.0] - 2026-08-18
 
 ### Added

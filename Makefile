@@ -1,12 +1,14 @@
 CRYSTAL ?= crystal
 BIN := bin
+# Where `thread-uaf-sample` leaves the runs that said something.
+SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -249,10 +251,17 @@ greg-roots: $(BIN)
 # one hex number, because the knobs were not on here. They cost a memset per
 # free and nothing until something faults. A gate that catches this defect
 # should not waste the sighting.
+# `GCRY_THREAD_BLOCK_AUDIT` for the same reason, one object along: this gate is
+# one of the three that has caught the `Thread` use-after-free, and what those
+# catches could never say is what held the `Thread`'s address at the moment its
+# block was swept. The arm answers that from inside the collection that frees it
+# rather than from the crash that follows (src/gcry/thread_block_audit.cr).
+# Measured on this gate: no cost — it reports nothing here, which is the point,
+# because this defect has never reproduced locally.
 scheduler-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
-	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots
-	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 $(BIN)/scheduler_roots --control
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --control
 
 # A precise layout is a claim that every pointer in the object is at one of the
 # offsets it lists. `Layout.register` had a third outcome it never named: an ivar
@@ -339,6 +348,89 @@ mark-audit: $(BIN)
 # Plants holders it knows the address of, because a search that finds nothing
 # reads exactly like one that ran and found the heap clean. `--control` shows the
 # search adds lines and removes none. ~2 s.
+# The `Thread` use-after-free is only ever seen on CI, so the instrument aimed
+# at it (src/gcry/thread_block_audit.cr) has to be trusted before its silence
+# there can be read as anything. Three arms: a dropped object of the watched
+# type must be named as dying and must trigger the address-space walk, the same
+# objects held alive must produce no deaths and a non-zero live count, and the
+# shipped default must find live `Thread` blocks — a default aimed at nothing
+# would be silent on CI for a reason that has nothing to do with the defect.
+# The fix for the `Thread` use-after-free, and the window it closes.
+#
+# Between `pthread_create` and the new thread's own push onto `Thread.threads`,
+# the `Thread` object is covered by no root: not the list (it is not on it yet),
+# not any stack gcry scans (the only other holder is the new thread's, which has
+# no snapshotted bounds). `src/gcry/thread_birth_root.cr` roots the `arg`
+# Crystal passes to `pthread_create` and releases it when the thread appears on
+# the list.
+#
+# A real `Thread` publishes itself in microseconds, so the window cannot be held
+# open with one. The gate creates a **raw** pthread through the same hook with a
+# plain heap block as `arg`: that thread never joins Crystal's list, so the block
+# stays in exactly the state the defect needs for as long as the harness wants.
+# Three arms — rooted (must survive), `--noroot` (same births recorded, nothing
+# rooted: must die), and the knob off (nothing armed: must die).
+thread-birth-root: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_birth_root.cr -o $(BIN)/thread_birth_root --error-trace
+	$(BIN)/thread_birth_root
+	GCRY_THREAD_BIRTH_NOROOT=1 $(BIN)/thread_birth_root --noroot
+	GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_birth_root --control
+
+# Buy samples of a defect that only happens on CI.
+#
+# The `Thread` use-after-free fires in roughly one aarch64 job in three and
+# never locally (40 runs of this harness on x86_64: 0 crashes, 0 reports, while
+# the same arm reports 72 dying `Thread`s in `thread-storm` on the same
+# machine). The arm that names its holder only speaks when the defect happens,
+# so the way to read it more often is to run the failing harness more often.
+#
+# Both arms, per iteration, exactly as `ec-queue-audit` runs them — and the
+# second one is the one that matters: all four catches on 2026-08-20 were in
+# **`--control`**, with `GCRY_EC_QUEUE_AUDIT` off. The first version of this
+# target sampled the audit-on arm only and found nothing in ten runs, which is
+# what a sampler pointed at the wrong arm looks like.
+#
+# `THREAD_UAF_BIN` / `THREAD_UAF_ARGS` point it at another harness, which is how
+# the sampler's own reporting path is shown to work at all: against
+# `bin/thread_storm`, where a dying `Thread` is routine, it must keep the logs
+# and print them. A sampler that has never been seen to report something says
+# nothing when it reports nothing.
+#
+# The two are counted apart on purpose. The first version of this target added
+# them together under the label "dying-Thread report(s)", and once the arm began
+# reporting the *precondition* in green runs that number would have said the
+# defect had fired when nothing had died.
+#
+# **Not a gate.** It exits 0 whether or not the defect fires, because an open
+# defect must not turn every pull request red — and a step that is expected to
+# fail teaches everyone to ignore it. What it produces is evidence: the logs of
+# the runs that said something, and nothing from the ones that did not.
+thread-uaf-sample: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
+	@mkdir -p $(SAMPLE_DIR)
+	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; pre=0; crashes=0; \
+	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
+	: $${THREAD_UAF_CONTROL_ARGS:=--control}; \
+	for i in $$(seq 1 $$runs); do \
+	  GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    $$harness $$THREAD_UAF_ARGS > $(SAMPLE_DIR)/run-$$i-hold.log 2>&1 || crashes=$$((crashes+1)); \
+	  GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    $$harness $$THREAD_UAF_ARGS $$THREAD_UAF_CONTROL_ARGS > $(SAMPLE_DIR)/run-$$i-control.log 2>&1 || crashes=$$((crashes+1)); \
+	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log; do \
+	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
+	    p=$$(grep -c "precondition:" $$f || true); \
+	    hits=$$((hits+d)); pre=$$((pre+p)); \
+	    if [ "$$d" = "0" ] && [ "$$p" = "0" ]; then rm -f $$f; fi; \
+	  done; \
+	done; \
+	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s), $$pre precondition sighting(s) in $(SAMPLE_DIR)"; \
+	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
+
+thread-block-audit: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_block_audit.cr -o $(BIN)/thread_block_audit --error-trace
+	$(BIN)/thread_block_audit
+	$(BIN)/thread_block_audit --control
+
 poison-holders: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_holders.cr -o $(BIN)/poison_holders --error-trace
 	$(BIN)/poison_holders
@@ -377,8 +469,8 @@ nested-spawn-uaf: $(BIN)
 
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
-	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit
-	GCRY_POISON_HOLDERS=1 $(BIN)/ec_queue_audit --control
+	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit --control
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \

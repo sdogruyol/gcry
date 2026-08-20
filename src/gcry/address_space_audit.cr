@@ -69,18 +69,37 @@ module Gcry
     # audited.
     @address_space_audited_at = UInt64::MAX
 
+    # A second slot, so the two questions do not compete for one. The dying
+    # audit's block is whatever died first in a collection; the dying-type
+    # audit's is the one that was asked for by name
+    # (src/gcry/thread_block_audit.cr), and one arm must not be able to spend
+    # the other's budget.
+    @address_space_type_audited_at = UInt64::MAX
+
     protected def audit_address_space_once(target : UInt64, size : UInt64) : Nil
       return unless @address_space_audit
       return if @address_space_audited_at == @collections
       @address_space_audited_at = @collections
-      audit_address_space(target, size)
+      audit_address_space(target, size, "dying block")
     end
 
-    private def audit_address_space(target : UInt64, size : UInt64) : Nil
+    protected def audit_address_space_for_type(target : UInt64, size : UInt64) : Nil
+      return unless @address_space_audit
+      return if @address_space_type_audited_at == @collections
+      @address_space_type_audited_at = @collections
+      audit_address_space(target, size, "dying watched-type block")
+    end
+
+    private def audit_address_space(target : UInt64, size : UInt64, why : String) : Nil
       @address_space_audits &+= 1
       regions = 0_u64
       scanned = 0_u64
       skipped = 0_u64
+      # A walk that stopped early has to say how much it never looked at, or
+      # "not found anywhere else" is a claim about the limit and not about the
+      # address space.
+      unscanned_regions = 0_u64
+      unscanned_bytes = 0_u64
       base_hits = 0_u64
       interior_hits = 0_u64
       reported = 0
@@ -103,6 +122,8 @@ module Gcry
           walked = Platform.each_map_region do |lo, hi, perms, name, name_len|
             if scanned >= ADDRESS_SPACE_SCAN_LIMIT
               truncated = true
+              unscanned_regions &+= 1
+              unscanned_bytes &+= (hi - lo)
             elsif skip_region?(perms, name, name_len)
               skipped &+= 1
             else
@@ -123,7 +144,9 @@ module Gcry
 
       buf = uninitialized UInt8[512]
       len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: address-space audit — 0x")
+      len = RawOut.append(buf.to_unsafe, len, "gcry: address-space audit (")
+      len = RawOut.append(buf.to_unsafe, len, why)
+      len = RawOut.append(buf.to_unsafe, len, ") — 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, target)
       if !walked
         len = RawOut.append(buf.to_unsafe, len, " not searched: /proc/self/maps could not be read")
@@ -147,7 +170,13 @@ module Gcry
         len = RawOut.append(buf.to_unsafe, len, " pooled stacks / ")
         len = RawOut.append_u64(buf.to_unsafe, len, @classifier_thread_bounds)
         len = RawOut.append(buf.to_unsafe, len, " thread bounds")
-        len = RawOut.append(buf.to_unsafe, len, truncated ? ", TRUNCATED at the scan limit" : "")
+        if truncated
+          len = RawOut.append(buf.to_unsafe, len, ", TRUNCATED at the scan limit: ")
+          len = RawOut.append_u64(buf.to_unsafe, len, unscanned_regions)
+          len = RawOut.append(buf.to_unsafe, len, " regions / ")
+          len = RawOut.append_u64(buf.to_unsafe, len, unscanned_bytes >> 20)
+          len = RawOut.append(buf.to_unsafe, len, " MiB never searched")
+        end
       end
       len = RawOut.append(buf.to_unsafe, len, ". collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
@@ -265,6 +294,7 @@ module Gcry
       @classifier_fibers = 0_u64
       @classifier_pooled_stacks = 0_u64
       @classifier_thread_bounds = 0_u64
+
       if holder = find_block(Pointer(Void).new(at))
         len = RawOut.append(buf, len, "gcry heap block 0x")
         len = RawOut.append_hex(buf, len, BlockHeader.user_from(holder).address)
@@ -317,7 +347,24 @@ module Gcry
         return l
       end
 
-      RawOut.append(buf, len, "no gcry block, no fiber stack, no pooled stack, no thread stack")
+      # Nothing owns it and it is not a pool stack's exact geometry. The shape
+      # is still evidence: a large anonymous mapping whose hit sits just below
+      # its top is what a *thread* stack looks like — mapped whole, used from
+      # the high end down — and the first four catches of the dying-`Thread`
+      # arm all landed in one, at byte-identical offsets below the top. Stated
+      # with its criteria so it reads as a shape and not as a verdict; the
+      # thread-population line beside the report says whose it can be.
+      below_top = region_hi > at ? region_hi - at : 0_u64
+      span = region_hi > region_lo ? region_hi - region_lo : 0_u64
+      l = RawOut.append(buf, len, "no gcry block, no fiber stack, no pooled stack, no thread stack — ")
+      l = RawOut.append_u64(buf, l, span >> 10)
+      l = RawOut.append(buf, l, " KiB anonymous mapping, hit ")
+      l = RawOut.append_u64(buf, l, below_top)
+      l = RawOut.append(buf, l, " bytes below its top")
+      if span >= (1_u64 << 20) && below_top <= (64_u64 << 10)
+        l = RawOut.append(buf, l, " — mapped whole and used from the high end: the shape of a thread stack")
+      end
+      l
     end
 
     private def fiber_stack_geometry?(lo : UInt64, hi : UInt64) : Bool
@@ -339,6 +386,25 @@ module Gcry
       lo = stack.pointer.address
       hi = stack.bottom.address
       return nil unless lo < hi && at >= lo && at < hi
+
+      # The collector's own frames first, and for the same reason
+      # `GCRY_BIRTH_GRACE`'s holder search excludes them (src/gcry/birth_grace.cr):
+      # this audit carries the target as an argument through a call chain that
+      # sits *below* where the collector was entered — and the scan window's low
+      # bound is deeper still, so those frames are **inside** the window the scan
+      # used. Without this branch the instrument reports itself as "the scan
+      # walked these bytes and did not offer the value", which is a filter bug
+      # that does not exist. Measured on the gate: 5 of 6 base hits in the `dies`
+      # arm are the audit's own chain, and the 6th is its caller's `addr` local.
+      entry = @collect_entry_sp
+      if entry > 0 && at < entry
+        l = RawOut.append(buf, len, "the collecting fiber's own stack, ")
+        l = RawOut.append_u64(buf, l, entry - at)
+        l = RawOut.append(buf, l, " bytes below where the collector was entered (0x")
+        l = RawOut.append_hex(buf, l, entry)
+        l = RawOut.append(buf, l, ") — the collector's own call chain, this audit's included. Not evidence")
+        return l
+      end
 
       scan_lo = Roots.last_mutator_low
       scan_hi = Roots.last_mutator_high

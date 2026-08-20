@@ -201,6 +201,13 @@ jobs:
           # defect should not waste the sighting.
           GCRY_POISON_HOLDERS: "1"
           GCRY_THREAD_CENSUS: "1"
+          # What those diagnostics still could not say: what held the `Thread`'s
+          # address at the moment its block was swept. This arm answers it from
+          # inside the collection that frees it, instead of from the crash one
+          # collection later (src/gcry/thread_block_audit.cr). Measured on this
+          # step: +3% wall clock, and it reports nothing locally — which is the
+          # point, because this defect has never reproduced off CI.
+          GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
@@ -409,6 +416,26 @@ jobs:
       - name: Mark completeness audit
         run: |
           make mark-audit
+
+      # And the same window aimed at one type. The `Thread` use-after-free is
+      # only ever observed on CI, so the arm that asks where a dying `Thread`'s
+      # address lives has to be trusted before its silence there means anything.
+      # Three arms: a dropped object of the watched type must be named, the same
+      # objects held alive must produce no deaths, and the shipped default must
+      # find live `Thread` blocks — a default aimed at nothing would be quiet on
+      # CI for a reason that has nothing to do with the defect.
+      - name: Dying-type audit
+        run: |
+          make thread-block-audit
+
+      # And the fix that window's report named: the `Thread` object is rooted
+      # from `pthread_create` until the thread publishes itself. The gate holds
+      # the window open with a raw pthread that never joins Crystal's list, and
+      # requires the block to die with the root off — so the survival is the
+      # root's doing and not the harness's.
+      - name: Thread-birth root
+        run: |
+          make thread-birth-root
 
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
@@ -775,6 +802,14 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      # `scheduler-roots` and `ec-queue-audit` carry `GCRY_THREAD_BLOCK_AUDIT=1`
+      # from the Makefile: six of the eight sightings of the `Thread`
+      # use-after-free are on this runner, and the question they leave open —
+      # what held the `Thread`'s address when its block was swept — can only be
+      # answered where the defect happens. It has not reproduced locally in
+      # three days, so the instrument goes to it rather than the other way
+      # round. `thread-block-audit` is that instrument's own gate, run here so a
+      # silent arm on this arch is distinguishable from a broken one.
       - name: Unit + process specs + STW SP + fork on aarch64
         run: |
           mkdir -p bin
@@ -790,6 +825,44 @@ jobs:
           make scheduler-roots
           make ivar-layout-roots
           make ec-queue-audit
+          make thread-block-audit
+          make thread-birth-root
+
+  # Sampling, not gating. The `Thread` use-after-free fires in roughly one
+  # aarch64 job in three and has never been seen off CI — 40 runs of the same
+  # harness locally produced 0 crashes and 0 reports, while the same arm
+  # reported 72 dying `Thread`s in `thread-storm` on that machine. The arm that
+  # names the holder only speaks when the defect happens, so this job runs the
+  # failing harness ten times to be told ten times as often, and uploads
+  # whatever it caught.
+  #
+  # `continue-on-error` because the defect is **open**: a step expected to fail
+  # would either block every pull request or teach everyone to ignore a red
+  # mark. The gates that must stay green are elsewhere; this one collects
+  # evidence.
+  thread-uaf-sample:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    continue-on-error: true
+    name: thread UAF sampler (aarch64)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Run the failing harness ten times with the arm on
+        run: make thread-uaf-sample
+
+      - name: Upload what it caught
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-uaf-samples
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:

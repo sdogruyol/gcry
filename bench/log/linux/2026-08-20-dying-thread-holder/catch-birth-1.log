@@ -1,0 +1,50 @@
+ gcry: dying-type audit — precondition: the wait for a staged thread GAVE UP — the world stopped with it unpublished. 5 listed, 5 bounded, 2 staged. collection 2
+ gcry: dying-type audit — block 0xffd0fe28ad28 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 93 words). Offered by the collecting thread's own stack scan: no. On Crystal's thread list: no — the thread has exited and the object is garbage (walk self-check: the collecting thread was found). Still linked from a live thread's list node: no (8 links read). collection 2
+ gcry:   threads at that moment: 5 on Crystal's list, 5 of them with snapshotted stack bounds, 0 staged and unpublished (5 ever staged, 0 overflowed), the kernel says 6
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7fe7b0 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 6224 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7fe800 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 6144 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7fe898 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 5992 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7fe8a0 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 5984 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7fe8a8 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 5976 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry:   0xffd0fe28ad28 held at 0xffd0be7ff5c0 in [0xffd0bd800000,0xffd0be800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack — 16384 KiB anonymous mapping, hit 2624 bytes below its top — mapped whole and used from the high end: the shape of a thread stack
+ gcry: address-space audit (dying watched-type block) — 0xffd0fe28ad28 base hits 6, interior hits 0, across 68 regions / 515 MiB (63 skipped, 0 unreadable pages), compared against 104 fibers / 0 pooled stacks / 5 thread bounds, TRUNCATED at the scan limit: 109 regions / 556 MiB never searched. collection 2
+ gcry: SIGSEGV at 0xdeadffd0fe28ad28 — gcry's freed-block poison (GCRY_POISON_FREED) is in the faulting context. Something followed a pointer read out of a block that had already been freed: a use-after-free, not a wild pointer
+ gcry: the free that wrote it was of the block at 0xffd0fe28ad28gcry: that block, 0xffd0fe28ad28, since REISSUED, size 192, flags 0x400 — which path freed it cannot be read from these flags: they describe the reissue, not the free
+ gcry: holders — looking for words pointing into [0xffd0fe28ad28, 0xffd0fe28ade8), the block whose free wrote the poison
+ gcry: holders — explicit roots: 0 of 0 point into it — gcry is not rooting it
+ gcry: holders — heap: block 0xffd0fe1bc918 size 2560 type_id 201 flags 0x0 holds it at +328 (block+0)
+ gcry:   payload +0=0xc9 +8=0xffd0fe26fc68 +16=0x2d0000000f +24=0xffd0fe28dc48
+ gcry: holders — heap: block 0xffd0fe1deca8 size 80 type_id 204 flags 0x0 holds it at +24 (block+0)
+ gcry:   payload +0=0xcc +8=0xffd0fe26fae8 +16=0xffd0fe1feee8 +24=0xffd0fe28ad28
+ gcry: holders — heap: block 0xffd0fe28a0f8 size 192 type_id 169 flags 0x400 holds it at +104 (block+0)
+ gcry:   payload +0=0xa9 +8=0xffd0d47fff40 +16=0x1 +24=0xffd0d4000000
+ gcry: holders — heap: block 0xffd0fe28a1c8 size 192 type_id 169 flags 0x0 holds it at +96 (block+0)
+ gcry:   payload +0=0xa9 +8=0xffd0dd7fff40 +16=0x1 +24=0xffd0dd000000
+ gcry: holders — heap: block 0xffd0fe28a778 size 192 type_id 173 flags 0x0 holds it at +40 (block+0)
+ gcry:   payload +0=0xad +8=0xffd0badff180 +16=0x0 +24=0xffd0fe28a6a8
+ Invalid memory access (signal 11) at address 0xffd0d4000358
+ gcry: holders — heap: block 0xffd0fe2cffd8 size 32 type_id 175 flags 0x0 holds it at +16 (block+0)
+ gcry:   payload +0=0xaf +8=0xffd0fe28ff38 +16=0xffd0fe28ad28 +24=0xffd0fe2affb8
+ gcry: holders — heap: 6 word(s) in 6 live block(s), from 15512 block(s) in 13 chunk(s). current mark gen 4, collections 3
+ [0xab9d01c7e048] *Exception::CallStack::print_backtrace:Nil +108 in bin/ec_queue_audit
+ [0xab9d01c63a24] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +272 in bin/ec_queue_audit
+ [0xffd0fe54d938] ?? +281273085253944 in linux-vdso.so.1
+ [0xffd0fe4505b0] ?? +281273084216752 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xffd0fe396914] pthread_getattr_np +84 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xab9d01d417f8] *Gcry::Platform::pthread_stack_bounds<UInt64>:(Tuple(Pointer(Void), Pointer(Void)) | Nil) +24 in bin/ec_queue_audit
+ [0xab9d01d41ee8] *Gcry::Platform::snapshot_pthread_stack_bounds<UInt64>:Nil +152 in bin/ec_queue_audit
+ [0xab9d01c937cc] *Gcry::Heap#stop_world:Nil +348 in bin/ec_queue_audit
+ [0xab9d01c935f4] *Gcry::Heap#stop_world_quiescing_roots:Nil +56 in bin/ec_queue_audit
+ [0xab9d01c8cd44] *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool>:Nil +588 in bin/ec_queue_audit
+ [0xab9d01cc9cd8] *Gcry::Heap#collect:Nil +260 in bin/ec_queue_audit
+ [0xab9d01c800ec] *GC::collect:Nil +48 in bin/ec_queue_audit
+ [0xab9d01c648d8] *run<Bool>:Int32 +332 in bin/ec_queue_audit
+ [0xab9d01c5ace4] __crystal_main +1676 in bin/ec_queue_audit
+ [0xab9d01d8d46c] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +8 in bin/ec_queue_audit
+ [0xab9d01d8d3c0] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +60 in bin/ec_queue_audit
+ [0xab9d01c634dc] main +28 in bin/ec_queue_audit
+ [0xffd0fe3384c4] ?? +281273083069636 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xffd0fe338598] __libc_start_main +152 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xab9d01c5a570] _start +48 in bin/ec_queue_audit
+ [0x0] ???
+ make: *** [Makefile:451: ec-queue-audit] Error 11

@@ -767,18 +767,94 @@ CI asymmetry that hid both.
       (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
       STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
       the v0.20.0 fix in place** — so the dying-fiber stack root does not touch
-      it. The last report named the block: 192 bytes, freed by an **explicit**
-      free rather than the sweep, and since **reissued**.
+      it. The block is 192 bytes. **What the last report said about *how* it was
+      freed does not stand**: "an explicit free rather than the sweep, since
+      reissued" was decoded from `si_addr`, which was the poison **plus
+      `0x418`** and named a block five along — the same reporter bug that
+      produced a false "explicit free" from cleared flags, retracted in the
+      FINDINGS the day it was printed. Who freed it is still open.
       **The obstacle is the observer, not the analysis.** It does not reproduce
       locally: `ec_queue_audit` 0/20 and 0/25 in two batches, `nested_spawn_uaf`
       never produces this shape, and the 5 h × 3 soak on 2026-08-17 did not fire
       it either. Every sighting so far is CI, mostly aarch64.
-      **Next**: point the instrument that cracked the fiber family at this one.
-      `GCRY_ADDRESS_SPACE_AUDIT` can answer "where does this `Thread`'s address
-      live when its block is freed" the same way it answered it for the deque
-      buffer — but it has to run where the defect appears, which means wiring it
-      into the aarch64 job rather than waiting for a local repro that has not
-      come in three days.
+      **The instrument is built and wired.** `GCRY_THREAD_BLOCK_AUDIT=1`
+      (`src/gcry/thread_block_audit.cr`) asks the fiber family's question about
+      one type: after the mark and before the sweep it reads Crystal's `type_id`
+      out of every used block, names each block of the watched type the mark did
+      not reach, and hands its address to the address-space walk, which names the
+      region that holds it. The general audit could not see this defect and the
+      reason was size twice over — its trigger walks only the ≥384 B band and a
+      `Thread` is 192 B, and it fires for whichever block died first, never this
+      one. It rides on `scheduler-roots`, `ec-queue-audit` and the x86_64
+      `stw_mt_property_test` step, i.e. on all three gates that have caught the
+      defect, at +3% on the property test and no measurable cost on the others.
+      `GCRY_DYING_TYPE_ID=<n>` retargets it, which is what `make
+      thread-block-audit` uses to require it to name a death it plants and to
+      stay silent when the same objects are held — without that, a quiet CI arm
+      would say nothing.
+      **And it caught it, on the first batch: 4 of 10 aarch64 reruns.** All four
+      in `ec-queue-audit`, all at collection 2, all saying the same thing — the
+      dying 192-byte `Thread`'s address sits **six times in one 16 MiB anonymous
+      mapping that gcry can name as nothing**: no heap block, no fiber stack, no
+      pooled stack, no thread stack, at **byte-identical offsets below that
+      mapping's top in all four runs** (`0x1850 0x1800 0x1768 0x1760 0x1758
+      0x0A40`). A region mapped whole and used from the high end, with a frame
+      layout that repeats exactly, is a stack; the classifier had **4–5** thread
+      bounds against ~100 live fibers, and one of the four crashes lands in
+      `ThreadPool#attach` ← `Thread#start` ← `thread_proc`, on the new thread's
+      own start path. In one of them the poison the crash faults on is the
+      tagged form of **the same block the audit named one collection earlier**,
+      which is the first time this defect's death and its crash have been the
+      same block in the same run.
+      **And the next catch decided it — it is the birth window, and the
+      pre-stop wait giving up is what opens it.** Two more catches the same day,
+      on two runs of the same commit, both with the precondition and the death
+      in the **same collection**: `the wait for a staged thread GAVE UP — the
+      world stopped with it unpublished. 5 listed, 5 bounded, 2 staged`, then a
+      192-byte `type_id 173` block dying, off Crystal's list, held only in the
+      16 MiB stack-shaped mapping — and, in the same report, `5 on Crystal's
+      list … the kernel says 6`. One thread outside the stopped world, its
+      `Thread` object covered by no root, swept; the thread then publishes and
+      the next `stop_world` reads `@system_handle` out of the freed block. Both
+      crashes fault on the poison of exactly the block the audit named.
+      Baseline for contrast: 40 precondition sightings across 20 green runs,
+      **every one caught by the wait**, never a timeout.
+      **Still an inference**: that the dying object is that thread's. The
+      handle comparison is only consistent with it — glibc recycles `pthread_t`
+      values, measured in this repo's own runs (one id across eight collections
+      while the staged total went 4 → 11).
+      **And the fix needs none of the three options that were on the table** —
+      not an unbounded wait, not scanning a staged thread's stack, not deferring
+      the collection. The object is already in gcry's hands: Crystal calls
+      `GC.pthread_create(…, arg: self.as(Void*))`, so the `Thread` *is* the
+      argument the hook is handed. `src/gcry/thread_birth_root.cr` roots it
+      there and releases it in `stop_world`'s existing walk once the thread is
+      on the list. One `add_root` per thread created, and nothing about the
+      stopped world changes — which is the point, because two earlier attempts
+      at this defect changed collector behaviour and broke it.
+      **Gated, and the window is now reproducible on demand.** A real `Thread`
+      publishes in microseconds, so `make thread-birth-root` holds the window
+      open with a **raw** pthread created through the same hook, which never
+      joins Crystal's list: rooted the block survives, and with the twin
+      (`GCRY_THREAD_BIRTH_NOROOT=1`, same records, roots nothing) or the knob off
+      it **dies** — the defect, local and deterministic for the first time.
+      **Left open and counted**: a thread that never publishes keeps its root for
+      the life of the process, and the interval *inside* `pthread_create` is
+      still uncovered (a trampoline on the new thread was tried for the staging
+      record and crashed 8 runs in 10).
+      **The crash-rate measurement**: 9 completed reruns of the aarch64 job with
+      the fix in, all green, 0 dying-`Thread` reports (a tenth was cancelled and
+      is not counted). Stated with its weight and not more: a batch *before* the
+      fix was also 0/10, the rate is bursty on this fleet, and Fisher against
+      the 3/10 control is p ≈ 0.2. The evidence that does not depend on the rate
+      is the local gate, where the window is held open on purpose and the block
+      dies without the root and survives with it, 20 of 20.
+      **Next**: leave the sampler running and revisit the rate once more pushes
+      have accumulated; the item stays open until CI has enough runs to say so.
+      **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
+      catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
+      quote.
+      `bench/log/linux/2026-08-20-dying-thread-holder/FINDINGS.md`
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
