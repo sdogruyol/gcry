@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The allocation counters stop losing updates, and the cost that was traded
+  for those losses does not exist on x86_64.** `live_objects`, `total_bytes`
+  and `bytes_since_gc` were updated with plain `set(get + n)` unless
+  `heap_counters_atomic` was set — measured, four threads lose **5 723 of
+  1 200 000** increments. They now flip to atomic the moment a second thread is
+  created (`GC.pthread_create`, before that thread can allocate), so a
+  single-threaded program keeps the cheap path.
+  The comment that justified the losses said an atomic RMW would cost Kemal
+  throughput. On x86_64 `Atomic#set` compiles to `mov; inc; xchg`, and `xchg` to
+  memory is locked whether you ask or not — so the "cheap" path was already
+  paying for a locked instruction per counter and losing updates for it, against
+  a single `lock incq` for the atomic. Interleaved and pinned: 55.69 / 55.47 /
+  56.13 ns per allocation for plain / atomic / relaxed, within a ~3 ns
+  within-arm spread. On **aarch64** the cost is real (`ldar; add; stlr` against
+  an `ldaxr/stlxr` retry loop), which is why this flips on a second thread
+  rather than shipping on.
+  `GCRY_HEAP_COUNTERS_ATOMIC=0/1` pins an arm and survives the flip, which is
+  what makes `make heap-counters` two-directional: the old path must be shown to
+  lose or the new one's exactness proves nothing.
+  `bench/log/linux/2026-08-20-heap-counter-cost/FINDINGS.md`
+
 ### Changed
 
 - **The unowned-coverage audit now names thread stacks, and its residue is

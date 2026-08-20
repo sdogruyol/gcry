@@ -883,16 +883,21 @@ CI asymmetry that hid both.
       spawning: a quiesced single-context program reports 0 uncovered before and
       after a spawn storm.
 
-- [ ] **`live_objects`, `total_bytes` and `bytes_since_gc` lose updates.**
-      `note_alloc_bytes` uses plain `set(get + 1)` unless
-      `heap_counters_atomic` is set, and `heap.cr` calls that safe on the
-      grounds of "single mutator + rare SYSMON". Measured against: the process
-      heap's counter falls permanently behind in **3 runs of 40** with only main
-      and the monitor in the program. v0.20.0 fixed the *checker* (it now states
-      the invariant only where the counter can be kept); the counter itself is
-      untouched. Turning the atomic path on unconditionally costs a LOCK RMW on
-      the allocation hot path, so it needs the Kemal throughput numbers beside
-      it.
+- [x] **`live_objects`, `total_bytes` and `bytes_since_gc` lose updates — closed
+      2026-08-20.** The counters flip to atomic the moment a second thread is
+      created (`GC.pthread_create`, before that thread can allocate), so a
+      program that cannot race keeps the cheap path. Gated both ways by
+      `make heap-counters`: four threads, 300 000 allocations each, GC disabled
+      — the old path loses **5 723 of 1 200 000** and the new one loses **0**.
+      The cost the old comment was defending does not exist on x86_64, where
+      `set(get + n)` compiles to `mov; inc; xchg` and `xchg` to memory is locked
+      whether you ask or not, against a single `lock incq` for the atomic:
+      interleaved and pinned, 55.69 / 55.47 / 56.13 ns per allocation for plain
+      / atomic / relaxed, indistinguishable. On **aarch64** it does exist —
+      `ldar; add; stlr` against an `ldaxr/stlxr` retry loop — which is why this
+      flips on a second thread rather than shipping on.
+      `bench/log/linux/2026-08-20-heap-counter-cost/FINDINGS.md`
+
 
 Linux took an 8.06 → 3.60 ms EC4 pause from the low-water skip and macOS takes none
 of it. The gap is measured rather than assumed — `low_water_skips = 0` in every

@@ -326,6 +326,19 @@ module GC
       end
     end
 
+    # A/B for the allocation counters. They are plain get/set by default, which
+    # loses increments outright once a second thread allocates
+    # (src/gcry/invariant.cr), and atomic costs a LOCK RMW on the hot path — so
+    # the two arms have to be runnable side by side before either can be
+    # defended.
+    if env_flag_one?("GCRY_HEAP_COUNTERS_ATOMIC")
+      heap.heap_counters_atomic = true
+      heap.heap_counters_atomic_pinned = true
+    elsif env_flag_zero?("GCRY_HEAP_COUNTERS_ATOMIC")
+      heap.heap_counters_atomic = false
+      heap.heap_counters_atomic_pinned = true
+    end
+
     if env_flag_one?("GCRY_DISABLE_NURSERY")
       heap.nursery_enabled = false
       heap.nursery_threshold = UInt64::MAX
@@ -1055,6 +1068,29 @@ module GC
           # is right here. Root it until the thread publishes itself
           # (src/gcry/thread_birth_root.cr).
           Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
+          # A second thread exists from here on, and the allocation counters are
+          # plain get/set until told otherwise — `set(get + 1)` loses increments
+          # outright once two threads run it (src/gcry/invariant.cr measured the
+          # process heap's counter permanently behind in 3 runs of 40). Flip
+          # them at the moment the second thread is created, which is before it
+          # can allocate: single-threaded programs never pay, and anything that
+          # can race keeps its counters.
+          #
+          # What it costs, measured rather than assumed, because the comment on
+          # `heap_counters_atomic` said the opposite:
+          #   x86_64  `set(get + n)` is `mov; inc; xchg` — and `xchg` to memory
+          #           is locked whether you ask or not — against a single
+          #           `lock incq` for the atomic. The "cheap" path was never
+          #           cheaper: 3 arms interleaved and pinned, mins 55.69 /
+          #           55.47 / 56.13 ns per allocation for plain / atomic /
+          #           relaxed, i.e. indistinguishable.
+          #   aarch64 the other way: `ldar; add; stlr` against an `ldaxr/stlxr`
+          #           retry loop (baseline codegen, no LSE). There the atomic
+          #           path is genuinely more work, which is why this flips on a
+          #           second thread rather than shipping on.
+          if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
+            h.heap_counters_atomic = true
+          end
         end
       {% end %}
       ret

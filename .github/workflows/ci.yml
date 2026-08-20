@@ -437,6 +437,13 @@ jobs:
         run: |
           make thread-birth-root
 
+      # And the counters those threads share: four of them allocate a known
+      # number of objects and every one must be accounted for, while the old
+      # plain-store path must be shown to lose some.
+      - name: Heap counters
+        run: |
+          make heap-counters
+
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
       # comparator closes that; this gates the comparator itself, which needs

@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -355,6 +355,19 @@ mark-audit: $(BIN)
 # objects held alive must produce no deaths and a non-zero live count, and the
 # shipped default must find live `Thread` blocks — a default aimed at nothing
 # would be silent on CI for a reason that has nothing to do with the defect.
+# Do the allocation counters keep what they are given?
+#
+# `note_alloc_bytes` used plain `set(get + n)` unless told otherwise, and two
+# threads running that lose increments outright. They now flip to atomic the
+# moment a second thread is created, so a program that cannot race keeps the
+# cheap path. Both directions, because the first arm alone is just a run that
+# happened not to race: four threads must lose some on the old path and none on
+# the new one. Measured: 5 723 of 1 200 000 lost, and 0.
+heap-counters: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/heap_counters.cr -o $(BIN)/heap_counters --error-trace
+	$(BIN)/heap_counters
+	GCRY_HEAP_COUNTERS_ATOMIC=0 $(BIN)/heap_counters --plain
+
 # The fix for the `Thread` use-after-free, and the window it closes.
 #
 # Between `pthread_create` and the new thread's own push onto `Thread.threads`,

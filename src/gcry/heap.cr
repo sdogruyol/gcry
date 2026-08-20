@@ -131,10 +131,25 @@ module Gcry
     @alloc_lock = Crystal::SpinLock.new
     @freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
     @nursery_freelist_locks = uninitialized StaticArray(Crystal::SpinLock, SIZE_CLASS_COUNT)
-    # Parallel: Atomic RMW on every alloc/free. EC1 default off — LOCK XADD /
-    # CAS on the hot path costs Kemal thr; single mutator + rare SYSMON is
-    # fine with plain get/set. Set true when EC_PARALLELISM>1 (gc_override).
+    # Atomic RMW on every alloc/free counter update. Off until a **second
+    # thread is created**, which `GC.pthread_create` flips (gc_override), and
+    # `EC_PARALLELISM>1` still sets up front.
+    #
+    # It used to say that single mutator plus a rare SYSMON was "fine with plain
+    # get/set". It is not: `set(get + 1)` loses increments outright once two
+    # threads run it, measured as the process heap's counter permanently behind
+    # in 3 runs of 40 (src/gcry/invariant.cr). And the cost that bought is not
+    # what the comment claimed either — on x86_64 `set` compiles to `xchg`,
+    # which is locked whether you ask or not, so the plain path was already
+    # paying for a locked instruction per counter and losing updates for it.
+    # `GCRY_HEAP_COUNTERS_ATOMIC=0/1` runs the arms side by side.
     property heap_counters_atomic : Bool = false
+
+    # Set when `GCRY_HEAP_COUNTERS_ATOMIC` names a value: an explicit arm must
+    # survive the flip that `GC.pthread_create` would otherwise do, or the two
+    # arms cannot be run side by side and the "plain path loses updates" half of
+    # the gate can never be shown.
+    property heap_counters_atomic_pinned : Bool = false
     @index_lock = Crystal::SpinLock.new
     @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
