@@ -115,7 +115,9 @@ def run_child(arm : String) : NoReturn
   3.times { GC.collect }
 
   STDERR.puts "walked=#{heap.dying_type_walked} live=#{heap.dying_type_live} " \
-              "deaths=#{heap.dying_type_deaths} audits=#{heap.address_space_audits}"
+              "deaths=#{heap.dying_type_deaths} audits=#{heap.address_space_audits} " \
+              "pop=#{heap.thread_pop_collections} gaps=#{heap.thread_pop_gap_collections} " \
+              "staged=#{heap.thread_pop_staged_collections}"
 
   go.set
   workers.each(&.join)
@@ -152,14 +154,25 @@ failures = [] of String
   live = fields["live"]
   deaths = fields["deaths"]
   audits = fields["audits"]
-  puts "#{arm}: #{walked} blocks walked, #{live} live, #{deaths} dying, #{audits} address-space audits"
+  pop = fields["pop"]
+  gaps = fields["gaps"]
+  staged = fields["staged"]
+  puts "#{arm}: #{walked} blocks walked, #{live} live, #{deaths} dying, #{audits} address-space audits, " \
+       "#{pop} collections walked for the precondition (#{gaps} with an unbounded thread, #{staged} with a staged one)"
 
   if control
-    if walked > 0 || live > 0 || deaths > 0 || audits > 0
+    if walked > 0 || live > 0 || deaths > 0 || audits > 0 || pop > 0
       failures << "#{arm}: the knob is off and the arm still ran (walked #{walked}, live #{live}, " \
-                  "deaths #{deaths}, audits #{audits})"
+                  "deaths #{deaths}, audits #{audits}, precondition walks #{pop})"
     end
     next
+  end
+
+  # The precondition walk runs every collection, crash or not — it is what makes
+  # a green CI run say something. A zero here means its counts are not evidence.
+  if pop == 0
+    failures << "#{arm}: the precondition was never walked, so a zero gap and a zero staged count " \
+                "say nothing about this run"
   end
 
   if walked == 0

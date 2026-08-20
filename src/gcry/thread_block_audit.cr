@@ -82,9 +82,21 @@ module Gcry
       @dying_type_id = id
     end
 
+    # Collections the arm walked, and the two preconditions worth counting.
+    getter thread_pop_collections : UInt64 = 0_u64
+    getter thread_pop_gap_collections : UInt64 = 0_u64
+    getter thread_pop_staged_collections : UInt64 = 0_u64
+
+    # Sightings reported per run, per kind. The counters carry the rest.
+    THREAD_POP_REPORT_LIMIT = 3
+
+    @thread_pop_gaps_reported = 0
+    @thread_pop_staged_reported = 0
+
     # Called with the world stopped, after `mark_loop` and before `sweep`.
     protected def audit_dying_type_blocks : Nil
       return unless @thread_block_audit
+      note_thread_preconditions
       watched = dying_type_id
       reported = 0
       each_chunk do |chunk|
@@ -156,6 +168,70 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
       report_thread_population
+    end
+
+    # The consequence — a `Thread` dying with its address on a stack gcry owns
+    # nothing of — fires in about one CI job in three, in bursts, and in none of
+    # 60 local runs. Waiting for it is not the only way to learn something.
+    #
+    # Its **precondition** is countable in every collection, crash or not: a
+    # thread that gcry has no stack bounds for. There are two kinds and they are
+    # the two candidate mechanisms —
+    #
+    #   - `staged` — created, recorded by `Platform` at `pthread_create`, not yet
+    #     on Crystal's list, so `stop_world` neither suspends nor scans it;
+    #   - a **gap** — on the list, and the pre-stop snapshot got no bounds for
+    #     it, which is the visited/read shortfall v0.20.0 made countable.
+    #
+    # A green run that never shows either says the unowned stack in the catches
+    # is neither of them and the hunt has to widen. A green run full of one of
+    # them names the fix without waiting for another crash. Counted every
+    # collection under the arm, reported the first few times each is seen.
+    private def note_thread_preconditions : Nil
+      @thread_pop_collections &+= 1
+      listed = 0_u64
+      bounded = 0_u64
+      Thread.unsafe_each do |thread|
+        listed &+= 1
+        bounded &+= 1 if Platform.snapshotted_stack_bounds(thread.to_unsafe)
+      end
+      staged = Platform.staged_count.to_u64
+
+      if bounded < listed
+        @thread_pop_gap_collections &+= 1
+        if @thread_pop_gaps_reported < THREAD_POP_REPORT_LIMIT
+          @thread_pop_gaps_reported += 1
+          report_thread_precondition("a thread on Crystal's list has no snapshotted stack bounds",
+            listed, bounded, staged)
+        end
+      end
+
+      if staged > 0
+        @thread_pop_staged_collections &+= 1
+        if @thread_pop_staged_reported < THREAD_POP_REPORT_LIMIT
+          @thread_pop_staged_reported += 1
+          report_thread_precondition("a thread is staged and has not published itself",
+            listed, bounded, staged)
+        end
+      end
+    end
+
+    private def report_thread_precondition(what : String, listed : UInt64, bounded : UInt64,
+                                           staged : UInt64) : Nil
+      buf = uninitialized UInt8[384]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: dying-type audit — precondition: ")
+      len = RawOut.append(buf.to_unsafe, len, what)
+      len = RawOut.append(buf.to_unsafe, len, ". ")
+      len = RawOut.append_u64(buf.to_unsafe, len, listed)
+      len = RawOut.append(buf.to_unsafe, len, " listed, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, bounded)
+      len = RawOut.append(buf.to_unsafe, len, " bounded, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, staged)
+      len = RawOut.append(buf.to_unsafe, len, " staged. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # The line that separates the two mechanisms a "held in a region gcry owns

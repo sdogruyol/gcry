@@ -140,6 +140,36 @@ the stopped world, and a race whose window is the birth of a thread can be
 masked by a longer pause as easily as by anything else. Timing, not mechanism —
 but it is the difference between the two arms.
 
+## Measuring the precondition, because the consequence comes in bursts
+
+Two more batches after the first: 10 native jobs (**0/20** harness runs) and two
+sampler jobs (**0/20** and **0/20**). The rate is not stable — batch 1 fired 4
+times in 20 and everything since has been silent, on the same fleet and the same
+commit family. Waiting is not a plan.
+
+The consequence is rare; its **precondition is countable in every collection**.
+A `Thread` can only die on an unscanned stack if a thread exists whose stack
+gcry has no bounds for, and there are exactly two kinds — the two candidate
+mechanisms:
+
+- **staged**: created, recorded by `Platform` at `pthread_create`, not yet on
+  Crystal's list, so `stop_world` neither suspends nor scans it;
+- **a gap**: on the list, and the pre-stop snapshot got no bounds for it.
+
+The arm now counts both at every collection and reports the first few sightings
+of each (`thread_pop_collections` / `_gap_collections` / `_staged_collections`).
+A green CI run now says something either way: preconditions present names the
+window without another crash; none at all says the unowned stack in the catches
+is neither of these and the hunt widens.
+
+**Locally: zero.** `thread_storm` (200 × 12) and `ec_queue_audit --control` walk
+the check every collection and never see a staged thread or an unbounded one —
+consistent with a defect that does not happen here. **The silence is evidence
+rather than an unarmed counter**: with `snapshotted_stack_bounds` stubbed to
+return `nil`, the same run reports `6 listed, 0 bounded, 0 staged` at every
+collection. The gate requires the walk to have run at all, and the control run
+requires it not to have.
+
 ## A reporter bug this catch exposed, and fixed
 
 The same report said:
