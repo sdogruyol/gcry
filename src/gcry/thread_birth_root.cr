@@ -46,6 +46,15 @@ module Gcry
     # are different facts.
     SLOTS = 64
 
+    # The recorded address is stored **masked**. This table is a class variable,
+    # i.e. static memory that the conservative root scan reads, so a plain
+    # address in it is a root — which would make the twin arm
+    # (`GCRY_THREAD_BIRTH_NOROOT=1`) keep alive exactly what it claims to leave
+    # alone, and would leave the shipped arm unable to say whether the survival
+    # came from `add_root` or from the bookkeeping. Caught by the twin on
+    # aarch64 CI, where it survived; it had passed locally on x86_64.
+    TABLE_MASK = 0x5A5A_A5A5_5A5A_A5A5_u64
+
     @@ids = uninitialized StaticArray(UInt64, SLOTS)
     @@objects = uninitialized StaticArray(UInt64, SLOTS)
     @@used = uninitialized StaticArray(Bool, SLOTS)
@@ -116,7 +125,7 @@ module Gcry
       while i < SLOTS
         unless @@used[i]
           @@ids[i] = id
-          @@objects[i] = object.address
+          @@objects[i] = object.address ^ TABLE_MASK
           @@used[i] = true
           @@armed &+= 1
           @@outstanding += 1
@@ -143,13 +152,13 @@ module Gcry
       i = 0
       while i < SLOTS
         if @@used[i] && @@ids[i] == id
-          object = @@objects[i]
+          object = @@objects[i] ^ TABLE_MASK
           @@used[i] = false
           @@ids[i] = 0_u64
           @@objects[i] = 0_u64
           @@released &+= 1
           @@outstanding -= 1
-          return nil if @@noroot || object == 0
+          return nil if @@noroot || object == TABLE_MASK || object == 0
           return Pointer(Void).new(object)
         end
         i += 1

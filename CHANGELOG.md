@@ -125,6 +125,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release path deadlocked the collector: `stop_world` runs under `@roots_lock`
   and it is not reentrant, so the release hands the pointer back and the caller
   mutates the set directly.
+  The twin earned its place on the first CI run: it failed on aarch64 because
+  the record table is a class variable, i.e. static memory the conservative root
+  scan reads — so storing the address there rooted it, and neither arm could
+  have told `add_root` from the bookkeeping. Addresses are masked in the table
+  now, and the harness materialises the victim's pointer only inside a
+  `@[NoInline]` frame it then wipes.
   Known and counted: a thread that never publishes keeps its root for the life
   of the process (`ThreadBirthRoot.outstanding`), and the interval *inside*
   `pthread_create` is still uncovered — closing that needs a trampoline on the

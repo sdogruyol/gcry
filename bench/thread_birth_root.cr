@@ -63,6 +63,21 @@ def raw_thread_body(arg : Void*) : Void*
   arg
 end
 
+# The raw pointer exists only inside this frame: the caller passes and keeps the
+# masked form, so no long-lived frame of the harness holds the victim's address.
+@[NoInline]
+def spawn_holder(hidden : UInt64) : LibC::PthreadT
+  handle = uninitialized LibC::PthreadT
+  rc = GC.pthread_create(
+    thread: pointerof(handle),
+    attr: Pointer(LibC::PthreadAttrT).null,
+    start: ->raw_thread_body(Void*),
+    arg: Pointer(Void).new(hidden ^ KEY),
+  )
+  raise "pthread_create failed: #{rc}" unless rc == 0
+  handle
+end
+
 @[NoInline]
 def make_victim_hidden : UInt64
   victim = GC.malloc(VICTIM_SIZE)
@@ -98,14 +113,13 @@ puts "mode: #{mode}"
 hidden = make_victim_hidden
 wipe_stack
 
-handle = uninitialized LibC::PthreadT
-rc = GC.pthread_create(
-  thread: pointerof(handle),
-  attr: Pointer(LibC::PthreadAttrT).null,
-  start: ->raw_thread_body(Void*),
-  arg: Pointer(Void).new(hidden ^ KEY),
-)
-raise "pthread_create failed: #{rc}" unless rc == 0
+handle = spawn_holder(hidden)
+# Again, because the pointer was materialised inside `spawn_holder` and its
+# frame is where the collector's frames now go. Without this the arm that must
+# see the block *die* can be kept alive by a dead slot in the harness's own
+# stack — which is what a conservative collector is entitled to do, and is not
+# a property of the fix under test.
+wipe_stack
 
 # Two, so a single collection's timing cannot be the explanation.
 GC.collect

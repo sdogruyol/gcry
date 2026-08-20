@@ -445,3 +445,23 @@ release now hands the pointer back and the caller, already inside the lock,
 mutates the set directly. Worth recording because the deadlock looked exactly
 like the hang this collector had in `pthread_getattr_np` two weeks ago and is a
 completely different thing.
+
+### The twin caught the fix's gate rooting through its own bookkeeping
+
+First CI run of `make thread-birth-root` on aarch64: the `--noroot` arm failed —
+*the twin roots nothing and the block survived anyway*. Two causes, both real,
+both fixed:
+
+- **The table is static memory.** `ThreadBirthRoot`'s slots are class variables,
+  which the conservative static-root scan reads, so an address stored there is a
+  root. The twin was keeping alive exactly what it claimed to leave alone, and
+  the shipped arm could not have told `add_root` from the bookkeeping. Addresses
+  are stored **masked** now.
+- **The harness's own frame.** `Pointer(Void).new(hidden ^ KEY)` was
+  materialised in the frame that stays live across `GC.collect`. The spawn moved
+  into a `@[NoInline]` helper, with the stack wiped after it returns, so the raw
+  pointer exists only in a dead frame.
+
+It passed locally on x86_64 before either fix, twenty arm runs of the corrected
+version pass locally, and the twin is the reason any of this is known — a gate
+whose control arm cannot fail is a gate that proves nothing.
