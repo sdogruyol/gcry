@@ -842,8 +842,15 @@ CI asymmetry that hid both.
       the life of the process, and the interval *inside* `pthread_create` is
       still uncovered (a trampoline on the new thread was tried for the staging
       record and crashed 8 runs in 10).
-      **Next**: the crash-rate measurement on the runner where the defect
-      lives — the batches to beat are 4 of 20 with the arm and 3 of 10 without.
+      **The crash-rate measurement**: 9 completed reruns of the aarch64 job with
+      the fix in, all green, 0 dying-`Thread` reports (a tenth was cancelled and
+      is not counted). Stated with its weight and not more: a batch *before* the
+      fix was also 0/10, the rate is bursty on this fleet, and Fisher against
+      the 3/10 control is p ≈ 0.2. The evidence that does not depend on the rate
+      is the local gate, where the window is held open on purpose and the block
+      dies without the root and survives with it, 20 of 20.
+      **Next**: leave the sampler running and revisit the rate once more pushes
+      have accumulated; the item stays open until CI has enough runs to say so.
       **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
       catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
       quote.

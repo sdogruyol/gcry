@@ -465,3 +465,35 @@ both fixed:
 It passed locally on x86_64 before either fix, twenty arm runs of the corrected
 version pass locally, and the twin is the reason any of this is known — a gate
 whose control arm cannot fail is a gate that proves nothing.
+
+## The crash-rate measurement, and what it is worth
+
+Ten reruns of `test (aarch64 native)` on the branch with the fix in: **9
+completed, all green, 0 dying-`Thread` reports, 0 waits that gave up**; the
+tenth was cancelled by the harness and is not counted.
+
+| batch | arm | red |
+|---|---|---|
+| before, PR `f3b9055` | audit only | 4/10 |
+| before, master `7a7dd05` | none | 3/10 |
+| before, PR `13292ed` | audit only | 0/10 |
+| **after, PR `864ab10`** | **birth root** | **0/9** |
+
+**0 of 9 is consistent with the fix and does not on its own establish it.**
+Fisher against the 3/10 control gives p ≈ 0.2, and the row that matters most is
+the third: a batch *before* the fix was also 0/10. The rate is bursty on this
+fleet, so a green batch is weak evidence by construction, and quoting it as a
+result would be the same mistake as reading a cleared flag as a free path.
+
+What does carry weight is the local gate, because it does not depend on the rate
+at all: the window is held open deliberately with a raw pthread, and the block
+dies without the root and survives with it, twenty arm runs out of twenty. The
+defect is closed by construction there; CI's silence since is corroboration, not
+the proof.
+
+The first attempt at this measurement was discarded and is recorded here because
+the numbers looked fine: it polled the *run* rather than the job, fetched logs
+from jobs that were still running — one log says so in as many words — and
+started reruns that cancelled the attempt in flight. Three of its ten rows never
+ran at all. A batch that cannot tell "clean" from "never started" produces
+exactly the kind of table this file exists to distrust.
