@@ -95,6 +95,11 @@ module Gcry
       regions = 0_u64
       scanned = 0_u64
       skipped = 0_u64
+      # A walk that stopped early has to say how much it never looked at, or
+      # "not found anywhere else" is a claim about the limit and not about the
+      # address space.
+      unscanned_regions = 0_u64
+      unscanned_bytes = 0_u64
       base_hits = 0_u64
       interior_hits = 0_u64
       reported = 0
@@ -117,6 +122,8 @@ module Gcry
           walked = Platform.each_map_region do |lo, hi, perms, name, name_len|
             if scanned >= ADDRESS_SPACE_SCAN_LIMIT
               truncated = true
+              unscanned_regions &+= 1
+              unscanned_bytes &+= (hi - lo)
             elsif skip_region?(perms, name, name_len)
               skipped &+= 1
             else
@@ -163,7 +170,13 @@ module Gcry
         len = RawOut.append(buf.to_unsafe, len, " pooled stacks / ")
         len = RawOut.append_u64(buf.to_unsafe, len, @classifier_thread_bounds)
         len = RawOut.append(buf.to_unsafe, len, " thread bounds")
-        len = RawOut.append(buf.to_unsafe, len, truncated ? ", TRUNCATED at the scan limit" : "")
+        if truncated
+          len = RawOut.append(buf.to_unsafe, len, ", TRUNCATED at the scan limit: ")
+          len = RawOut.append_u64(buf.to_unsafe, len, unscanned_regions)
+          len = RawOut.append(buf.to_unsafe, len, " regions / ")
+          len = RawOut.append_u64(buf.to_unsafe, len, unscanned_bytes >> 20)
+          len = RawOut.append(buf.to_unsafe, len, " MiB never searched")
+        end
       end
       len = RawOut.append(buf.to_unsafe, len, ". collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
@@ -334,7 +347,24 @@ module Gcry
         return l
       end
 
-      RawOut.append(buf, len, "no gcry block, no fiber stack, no pooled stack, no thread stack")
+      # Nothing owns it and it is not a pool stack's exact geometry. The shape
+      # is still evidence: a large anonymous mapping whose hit sits just below
+      # its top is what a *thread* stack looks like — mapped whole, used from
+      # the high end down — and the first four catches of the dying-`Thread`
+      # arm all landed in one, at byte-identical offsets below the top. Stated
+      # with its criteria so it reads as a shape and not as a verdict; the
+      # thread-population line beside the report says whose it can be.
+      below_top = region_hi > at ? region_hi - at : 0_u64
+      span = region_hi > region_lo ? region_hi - region_lo : 0_u64
+      l = RawOut.append(buf, len, "no gcry block, no fiber stack, no pooled stack, no thread stack — ")
+      l = RawOut.append_u64(buf, l, span >> 10)
+      l = RawOut.append(buf, l, " KiB anonymous mapping, hit ")
+      l = RawOut.append_u64(buf, l, below_top)
+      l = RawOut.append(buf, l, " bytes below its top")
+      if span >= (1_u64 << 20) && below_top <= (64_u64 << 10)
+        l = RawOut.append(buf, l, " — mapped whole and used from the high end: the shape of a thread stack")
+      end
+      l
     end
 
     private def fiber_stack_geometry?(lo : UInt64, hi : UInt64) : Bool

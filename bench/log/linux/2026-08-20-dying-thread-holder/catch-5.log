@@ -1,0 +1,16 @@
+ gcry: dying-type audit — block 0xff1572c1f2d8 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 62 words). Offered by the collecting thread's own stack scan: no. collection 2
+ gcry:   0xff1572c1f2d8 held at 0xff1535ffe7b0 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff1572c1f2d8 held at 0xff1535ffe800 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff1572c1f2d8 held at 0xff1535ffe898 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff1572c1f2d8 held at 0xff1535ffe8a0 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff1572c1f2d8 held at 0xff1535ffe8a8 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff1572c1f2d8 held at 0xff1535fff5c0 in [0xff1535000000,0xff1536000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry: address-space audit (dying watched-type block) — 0xff1572c1f2d8 base hits 6, interior hits 0, across 67 regions / 514 MiB (62 skipped, 0 unreadable pages), compared against 98 fibers / 0 pooled stacks / 4 thread bounds, TRUNCATED at the scan limit. collection 2
+ gcry: SIGSEGV at 0x1000008 — outside gcry's heap span [0xff1572af3000, 0xff1572c64000) — never a gcry allocation, so a swept object is not the explanation
+ Invalid memory access (signal 11) at address 0x1000008
+ [0xab2cea26ec80] Invalid memory access (signal 11) at address 0x0
+ [0xab2cea26ec80] *Exception::CallStack::print_backtrace:Nil +108 in bin/ec_queue_audit
+ [0xab2cea253658] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +272 in bin/ec_queue_audit
+ [0xff1572ee0938] ?? +280467587598648 in linux-vdso.so.1
+ [0x0] ???
+ make: *** [Makefile:400: ec-queue-audit] Error 11

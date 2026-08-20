@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The crash reporter named a free path from a reissued block's flags.**
+  `SWEPT` is set beside `FREE` by the sweep and cleared when the block is handed
+  out again, so on a reissued block those flags describe the reissue — and the
+  line was read as "freed by an explicit free" three times, the last against a
+  block the dying-type audit had watched the **sweep** condemn one collection
+  earlier. It now declines the verdict unless the block is still free, and says
+  why. `make segv-report` grew a `reissued-poison` arm that requires exactly
+  that, broken on purpose in both directions.
+
 - **The address-space audit reported its own call chain as a hole in the stack
   scan.** Its first version reported 47 hits that were its own frames and was
   fixed by comparing against the window the scan actually used — but the audit

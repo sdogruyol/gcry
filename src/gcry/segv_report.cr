@@ -209,8 +209,24 @@ module Gcry
       # and "the program asked for it to be freed" are different defects with
       # different owners, and the 2026-08-16 hunt spent a round unable to tell
       # them apart from the poison alone.
-      len = RawOut.append(buf.to_unsafe, len,
-        (info[:flags] & BlockHeader::Flags::SWEPT) != 0 ? " — freed by the SWEEP, so the collector decided it was garbage" : " — freed by an explicit free, not by the sweep")
+      #
+      # Only while the block is **still free**. `SWEPT` is set beside `FREE` by
+      # the sweep's freelist link and cleared when the block is handed out
+      # again, so on a reissued block the bit describes the reissue and not the
+      # free that wrote the poison — and reading it anyway has now produced a
+      # false "explicit free" three times: twice from a misdecoded address in
+      # the 2026-08-16 hunt, and once on 2026-08-20 against a block the
+      # dying-type audit had watched the **sweep** condemn one collection
+      # earlier (`bench/log/linux/2026-08-20-dying-thread-holder/`). A verdict
+      # that contradicts a direct observation of the death is worse than no
+      # verdict.
+      len = if info[:free]
+              RawOut.append(buf.to_unsafe, len,
+                (info[:flags] & BlockHeader::Flags::SWEPT) != 0 ? " — freed by the SWEEP, so the collector decided it was garbage" : " — freed by an explicit free, not by the sweep")
+            else
+              RawOut.append(buf.to_unsafe, len,
+                " — which path freed it cannot be read from these flags: they describe the reissue, not the free")
+            end
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
 

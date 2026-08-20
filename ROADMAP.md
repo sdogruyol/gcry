@@ -792,11 +792,31 @@ CI asymmetry that hid both.
       thread-block-audit` uses to require it to name a death it plants and to
       stay silent when the same objects are held — without that, a quiet CI arm
       would say nothing.
-      **Next**: read what it prints. Three answers, three different defects — on
-      a thread stack or a fiber stack below the scan window is root coverage, in
-      a live heap block is a missed edge the mark audit would have to explain,
-      and nowhere is the birth window, where the `Thread` is live only in the
-      starting thread's registers or frame.
+      **And it caught it, on the first batch: 4 of 10 aarch64 reruns.** All four
+      in `ec-queue-audit`, all at collection 2, all saying the same thing — the
+      dying 192-byte `Thread`'s address sits **six times in one 16 MiB anonymous
+      mapping that gcry can name as nothing**: no heap block, no fiber stack, no
+      pooled stack, no thread stack, at **byte-identical offsets below that
+      mapping's top in all four runs** (`0x1850 0x1800 0x1768 0x1760 0x1758
+      0x0A40`). A region mapped whole and used from the high end, with a frame
+      layout that repeats exactly, is a stack; the classifier had **4–5** thread
+      bounds against ~100 live fibers, and one of the four crashes lands in
+      `ThreadPool#attach` ← `Thread#start` ← `thread_proc`, on the new thread's
+      own start path. In one of them the poison the crash faults on is the
+      tagged form of **the same block the audit named one collection earlier**,
+      which is the first time this defect's death and its crash have been the
+      same block in the same run.
+      **What is left to separate**: a stack with no bounds is either a thread
+      that has not published itself on Crystal's list (the birth window
+      `Platform` records from `pthread_create`) or one that is on the list and
+      whose bounds the snapshot failed to read (the visited/read gap). Different
+      fixes, so the report now prints the thread population beside it — list
+      count, how many have snapshotted bounds, how many are staged and
+      unpublished, and the kernel's count. The next catch decides it.
+      **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
+      catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
+      quote.
+      `bench/log/linux/2026-08-20-dying-thread-holder/FINDINGS.md`
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 

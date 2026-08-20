@@ -1,0 +1,15 @@
+ gcry: dying-type audit — block 0xff15e39ff208 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 62 words). Offered by the collecting thread's own stack scan: no. collection 2
+ gcry:   0xff15e39ff208 held at 0xff15a67fe7b0 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff15e39ff208 held at 0xff15a67fe800 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff15e39ff208 held at 0xff15a67fe898 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff15e39ff208 held at 0xff15a67fe8a0 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff15e39ff208 held at 0xff15a67fe8a8 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff15e39ff208 held at 0xff15a67ff5c0 in [0xff15a5800000,0xff15a6800000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry: address-space audit (dying watched-type block) — 0xff15e39ff208 base hits 6, interior hits 0, across 67 regions / 514 MiB (62 skipped, 0 unreadable pages), compared against 100 fibers / 0 pooled stacks / 4 thread bounds, TRUNCATED at the scan limit. collection 2
+ gcry: SIGSEGV at 0x0 — the kernel reported address 0. A poisoned pointer can read as 0 here too, so this is a null dereference or a pointer with garbage in its top bits
+ Invalid memory access (signal 11) at address 0x0
+ [0xaaf15bfeec80] *Exception::CallStack::print_backtrace:Nil +108 in bin/ec_queue_audit
+ [0xaaf15bfd3658] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +272 in bin/ec_queue_audit
+ [0xff15e3cc4938] ?? +280469481212216 in linux-vdso.so.1
+ [0x0] ???
+ make: *** [Makefile:400: ec-queue-audit] Error 11

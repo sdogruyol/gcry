@@ -62,6 +62,34 @@ def crash_address(arm : String) : UInt64
     STDERR.puts "planted block 0x#{ptr.address.to_s(16)}"
     GC.free(ptr)
     Pointer(UInt64).new(ptr.address).value + 760
+  when "reissued-poison"
+    # The same poison, read after the block has been **handed out again**.
+    # `SWEPT` is set beside `FREE` by the sweep and cleared when the block is
+    # reissued, so on a reissued block the flags describe the reissue and not
+    # the free that wrote the poison. Reading them anyway produced a false
+    # "explicit free" three times, the last against a block the dying-type
+    # audit had watched the sweep condemn one collection earlier. The report
+    # must decline the verdict here, not guess it.
+    ptr = GC.malloc(1024)
+    ptr.as(UInt64*).value = 0_u64
+    STDERR.puts "planted block 0x#{ptr.address.to_s(16)}"
+    GC.free(ptr)
+    # Read the tagged poison out before anything can overwrite the payload.
+    poison = Pointer(UInt64).new(ptr.address).value
+    heap = Gcry.default_heap
+    tries = 0
+    while heap.debug_block_info(Pointer(Void).new(ptr.address))[:free] && tries < 64
+      GC.malloc(1024)
+      tries += 1
+    end
+    if heap.debug_block_info(Pointer(Void).new(ptr.address))[:free]
+      # Say so rather than fault: an arm that could not build its own condition
+      # must fail loudly, not pass on a report about a still-free block.
+      STDERR.puts "could not get the block reissued in #{tries} allocations"
+      exit 0
+    end
+    STDERR.puts "reissued after #{tries} allocation(s)"
+    poison
   when "free-block"
     # Freed, then read through a pointer into the middle of it. Poison is off
     # for this arm so the *block state* is what the report has to notice.
@@ -121,16 +149,19 @@ ARMS = {
   # fixed string here would pass on a report that recovered the *wrong* base,
   # which is exactly the bug this arm exists for.
   "offset-poison" => {"", true},
-  "free-block"    => {"in a FREE block", false},
-  "used-block"    => {"in a USED block", false},
-  "outside"       => {"outside gcry's heap span", true},
+  # No fixed expectation: the arm asserts on what must *not* be there as well,
+  # below.
+  "reissued-poison" => {"they describe the reissue, not the free", true},
+  "free-block"      => {"in a FREE block", false},
+  "used-block"      => {"in a USED block", false},
+  "outside"         => {"outside gcry's heap span", true},
 }
 
 ARMS.each do |arm, (expect, needs_signal)|
   env = {"GCRY_SEGV_REPORT" => control ? "0" : "1"}
   env["GCRY_POISON_FREED"] = "1" if arm == "poison"
   # The tag is what makes a block recoverable at all.
-  env["GCRY_POISON_TAG"] = "1" if arm == "offset-poison"
+  env["GCRY_POISON_TAG"] = "1" if arm == "offset-poison" || arm == "reissued-poison"
   captured = IO::Memory.new
   Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
@@ -145,6 +176,16 @@ ARMS.each do |arm, (expect, needs_signal)|
   saw = text.includes?(expect)
   gcry_line = text.includes?("gcry: SIGSEGV") || text.includes?("gcry: SIGBUS")
   puts "#{arm}: #{saw ? "named" : "NOT named"} (#{expect.inspect})"
+
+  if arm == "reissued-poison" && !control
+    if text.includes?("could not get the block reissued")
+      failures << "reissued-poison: the arm could not reissue the block, so it tested nothing"
+    end
+    if text.includes?("freed by an explicit free") || text.includes?("freed by the SWEEP")
+      failures << "reissued-poison: the report named a free path from a reissued block's flags, " \
+                  "which describe the reissue and not the free"
+    end
+  end
 
   if control && needs_signal
     # The two signal arms are the ones the knob gates; the other two report on

@@ -155,6 +155,59 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+      report_thread_population
+    end
+
+    # The line that separates the two mechanisms a "held in a region gcry owns
+    # nothing of" answer leaves open.
+    #
+    # The first four catches (2026-08-20, aarch64 CI) put the dying `Thread`'s
+    # address six times in one 16 MiB anonymous mapping, at byte-identical
+    # offsets below its top, that the classifier could name as neither a fiber
+    # stack, a pooled stack, nor a thread stack. A used region at the top of a
+    # large anonymous mapping is a **stack**; the question is whose. Either
+    #
+    #   - it belongs to a thread that has not published itself on Crystal's list
+    #     yet, so gcry has no bounds for it and scans nothing of it — the birth
+    #     window `Platform` already records from `pthread_create`; or
+    #   - it belongs to a thread that *is* on the list and whose bounds the
+    #     snapshot failed to read, which is the visited/read gap that has been
+    #     countable since v0.20.0.
+    #
+    # The fix is different in each case, so the counts go next to the report
+    # rather than into a later reading of it: what Crystal's list holds, what
+    # gcry staged and has not seen published, how many of those threads the
+    # snapshot actually got bounds for, and what the kernel says the process
+    # has. `nil` from the kernel prints as `unknown` — a count nobody could read
+    # must not arrive as a zero.
+    private def report_thread_population : Nil
+      listed = 0_u64
+      bounded = 0_u64
+      Thread.unsafe_each do |thread|
+        listed &+= 1
+        bounded &+= 1 if Platform.snapshotted_stack_bounds(thread.to_unsafe)
+      end
+
+      buf = uninitialized UInt8[320]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry:   threads at that moment: ")
+      len = RawOut.append_u64(buf.to_unsafe, len, listed)
+      len = RawOut.append(buf.to_unsafe, len, " on Crystal's list, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, bounded)
+      len = RawOut.append(buf.to_unsafe, len, " of them with snapshotted stack bounds, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, Platform.staged_count.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " staged and unpublished (")
+      len = RawOut.append_u64(buf.to_unsafe, len, Platform.staged_total)
+      len = RawOut.append(buf.to_unsafe, len, " ever staged, ")
+      len = RawOut.append_u64(buf.to_unsafe, len, Platform.staged_overflows)
+      len = RawOut.append(buf.to_unsafe, len, " overflowed), the kernel says ")
+      if os = Platform.os_thread_count
+        len = RawOut.append_u64(buf.to_unsafe, len, os.to_u64)
+      else
+        len = RawOut.append(buf.to_unsafe, len, "unknown")
+      end
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
   end
 end

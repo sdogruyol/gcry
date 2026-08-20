@@ -1,0 +1,48 @@
+ gcry: dying-type audit — block 0xff50053daec8 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 93 words). Offered by the collecting thread's own stack scan: no. collection 2
+ gcry:   0xff50053daec8 held at 0xff4fc5ffe7b0 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff50053daec8 held at 0xff4fc5ffe800 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff50053daec8 held at 0xff4fc5ffe898 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff50053daec8 held at 0xff4fc5ffe8a0 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff50053daec8 held at 0xff4fc5ffe8a8 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry:   0xff50053daec8 held at 0xff4fc5fff5c0 in [0xff4fc5000000,0xff4fc6000000) rw-p anon — no gcry block, no fiber stack, no pooled stack, no thread stack
+ gcry: address-space audit (dying watched-type block) — 0xff50053daec8 base hits 6, interior hits 0, across 68 regions / 515 MiB (63 skipped, 0 unreadable pages), compared against 100 fibers / 0 pooled stacks / 5 thread bounds, TRUNCATED at the scan limit. collection 2
+ gcry: SIGSEGV at 0xdeadff50053daec8 — gcry's freed-block poison (GCRY_POISON_FREED) is in the faulting context. Something followed a pointer read out of a block that had already been freed: a use-after-free, not a wild pointer
+ gcry: the free that wrote it was of the block at 0xff50053daec8gcry: that block, 0xff50053daec8, since REISSUED, size 192, flags 0x400 — freed by an explicit free, not by the sweep
+ gcry: holders — looking for words pointing into [0xff50053daec8, 0xff50053daf88), the block whose free wrote the poison
+ gcry: holders — explicit roots: 0 of 0 point into it — gcry is not rooting it
+ gcry: holders — heap: block 0xff500530c918 size 2560 type_id 201 flags 0x0 holds it at +416 (block+0)
+ gcry:   payload +0=0xc9 +8=0xff50053bfca8 +16=0x3b0000001d +24=0xff50053ddc48
+ gcry: holders — heap: block 0xff500532eca8 size 80 type_id 204 flags 0x0 holds it at +24 (block+0)
+ gcry:   payload +0=0xcc +8=0xff50053bfb28 +16=0xff500534eee8 +24=0xff50053daec8
+ gcry: holders — heap: block 0xff50053da368 size 192 type_id 169 flags 0x400 holds it at +104 (block+0)
+ gcry:   payload +0=0xa9 +8=0xff4fe67fff40 +16=0x1 +24=0xff4fe6000000
+ gcry: holders — heap: block 0xff50053da438 size 192 type_id 169 flags 0x0 holds it at +96 (block+0)
+ Invalid memory access (signal gcry:   payload +0=0xa9 +8=0xff4fe6ffff40 +16=0x1 +24=0xff4fe6800000
+ 11) at address gcry: holders — heap: block 0xff50053daab8 size 192 type_id 173 flags 0x0 holds it at +40 (block+0)
+ 0xff4fe6000358
+ gcry:   payload +0=0xad +8=0xff4fc3dff180 +16=0x0 +24=0xff50053da9e8
+ [0xab8e3c5cec80] gcry: holders — heap: block 0xff500541ffd8 size 32 type_id 175 flags 0x0 holds it at +16 (block+0)
+ gcry:   payload +0=0xaf +8=0xff50053dff38 +16=0xff50053daec8 +24=0xff50053fffb8
+ gcry: holders — heap: 6 word(s) in 6 live block(s), from 15512 block(s) in 13 chunk(s). current mark gen 4, collections 3
+ *Exception::CallStack::print_backtrace:Nil +108 in bin/ec_queue_audit
+ [0xab8e3c5b3658] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +272 in bin/ec_queue_audit
+ [0xff500569b938] ?? +280719153281336 in linux-vdso.so.1
+ [0xff50055a05b0] ?? +280719152252336 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xff50054e6914] pthread_getattr_np +84 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xab8e3c69041c] *Gcry::Platform::pthread_stack_bounds<UInt64>:(Tuple(Pointer(Void), Pointer(Void)) | Nil) +24 in bin/ec_queue_audit
+ [0xab8e3c690b0c] *Gcry::Platform::snapshot_pthread_stack_bounds<UInt64>:Nil +152 in bin/ec_queue_audit
+ [0xab8e3c5e437c] *Gcry::Heap#stop_world:Nil +348 in bin/ec_queue_audit
+ [0xab8e3c5e41a4] *Gcry::Heap#stop_world_quiescing_roots:Nil +56 in bin/ec_queue_audit
+ [0xab8e3c5dd8f4] *Gcry::Heap#run_collection<Bool, Bool, Nil, Bool>:Nil +588 in bin/ec_queue_audit
+ [0xab8e3c619900] *Gcry::Heap#collect:Nil +260 in bin/ec_queue_audit
+ [0xab8e3c5d0d24] *GC::collect:Nil +48 in bin/ec_queue_audit
+ [0xab8e3c5b450c] *run<Bool>:Int32 +332 in bin/ec_queue_audit
+ [0xab8e3c5aa924] __crystal_main +1676 in bin/ec_queue_audit
+ [0xab8e3c6dd06c] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +8 in bin/ec_queue_audit
+ [0xab8e3c6dcfc0] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +60 in bin/ec_queue_audit
+ [0xab8e3c5b3110] main +28 in bin/ec_queue_audit
+ [0xff50054884c4] ?? +280719151105220 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xff5005488598] __libc_start_main +152 in /lib/aarch64-linux-gnu/libc.so.6
+ [0xab8e3c5aa1b0] _start +48 in bin/ec_queue_audit
+ [0x0] ???
+ make: *** [Makefile:400: ec-queue-audit] Error 11
