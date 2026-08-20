@@ -375,6 +375,11 @@ mark-audit: $(BIN)
 # and print them. A sampler that has never been seen to report something says
 # nothing when it reports nothing.
 #
+# The two are counted apart on purpose. The first version of this target added
+# them together under the label "dying-Thread report(s)", and once the arm began
+# reporting the *precondition* in green runs that number would have said the
+# defect had fired when nothing had died.
+#
 # **Not a gate.** It exits 0 whether or not the defect fires, because an open
 # defect must not turn every pull request red — and a step that is expected to
 # fail teaches everyone to ignore it. What it produces is evidence: the logs of
@@ -382,7 +387,7 @@ mark-audit: $(BIN)
 thread-uaf-sample: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
 	@mkdir -p $(SAMPLE_DIR)
-	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; crashes=0; \
+	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; pre=0; crashes=0; \
 	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
 	: $${THREAD_UAF_CONTROL_ARGS:=--control}; \
 	for i in $$(seq 1 $$runs); do \
@@ -391,12 +396,13 @@ thread-uaf-sample: $(BIN)
 	  GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	    $$harness $$THREAD_UAF_ARGS $$THREAD_UAF_CONTROL_ARGS > $(SAMPLE_DIR)/run-$$i-control.log 2>&1 || crashes=$$((crashes+1)); \
 	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log; do \
-	    r=$$(grep -c "dying-type audit" $$f || true); \
-	    hits=$$((hits+r)); \
-	    if [ "$$r" = "0" ]; then rm -f $$f; fi; \
+	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
+	    p=$$(grep -c "precondition:" $$f || true); \
+	    hits=$$((hits+d)); pre=$$((pre+p)); \
+	    if [ "$$d" = "0" ] && [ "$$p" = "0" ]; then rm -f $$f; fi; \
 	  done; \
 	done; \
-	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s) in $(SAMPLE_DIR)"; \
+	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s), $$pre precondition sighting(s) in $(SAMPLE_DIR)"; \
 	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
 
 thread-block-audit: $(BIN)
