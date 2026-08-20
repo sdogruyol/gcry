@@ -203,6 +203,55 @@ being born, did the wait give up, and was one staged after the wait. The
 way, and its silence is evidence too: stubbing `snapshotted_stack_bounds` to
 `nil` makes the same run report `6 listed, 0 bounded` at every collection.
 
+## What green CI runs say, and what it leaves
+
+Twenty green harness runs on the aarch64 runner, with the precondition walked in
+every collection:
+
+| | sightings |
+|---|---|
+| a thread staged when the world stopped, **caught by the wait** | 40 |
+| the wait **gave up** | 0 |
+| a thread staged **after** the wait ran | 0 |
+| a listed thread with **no snapshotted bounds** | 0 |
+
+Identical numbers in every run — 5 staged at collection 0 (the execution
+context's workers), 1 at collection 8 — and identical to the local runs. So the
+birth window is real, present in every run of this harness, and closed by
+`GCRY_STAGED_WAIT` every time a green run looks.
+
+That does not explain the catches, and saying so is the point: the staged
+mechanism is measured and covered in every run where it can be measured. Either
+the crashing runs differ in a way only a catch will show, or the unowned stack
+in them is not a thread being born at all.
+
+## The question that splits it, answerable on every catch
+
+A dying `Thread` is either still on Crystal's list or not, and the two are
+different defects:
+
+- **on the list** — `Thread.threads` is a class variable, so the list is a
+  static root and everything on it should be reachable. A listed `Thread` dying
+  means that root is not covering it: root coverage, the family v0.19.0 closed
+  twice.
+- **not on the list** — the thread exited, `start`'s `ensure` removed it, the
+  object *is* garbage and the sweep is right. The defect is then downstream:
+  something still walks to it. `Thread::LinkedList` is **intrusive** — `@next`
+  and `@previous` live on the `Thread` objects themselves — so a freed and
+  reissued node puts garbage in the chain that `Thread.unsafe_each` follows, and
+  that walk is exactly where `snapshot_pthread_stack_bounds` faults.
+
+The report now answers both, on any catch, without needing the address-space
+walk to find a holder: whether the block is on the list, whether any **live**
+thread's `@next`/`@previous` still points at it, and how many links were read —
+plus a self-check that the walk can find the collecting thread at all, because a
+"not on the list" from a comparison that matches nothing is not a finding.
+
+Locally, `thread_storm`'s dying `Thread`s answer *not on the list, not linked,
+self-check found, 4 links read* every time: a thread that exited, removed
+cleanly, correctly collected. That is the baseline the next catch is read
+against.
+
 ## A reporter bug this catch exposed, and fixed
 
 The same report said:

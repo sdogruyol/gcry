@@ -153,6 +153,50 @@ module Gcry
       end
       offered = mutator_offered?(addr)
 
+      # The question that splits the mechanism, and it can be answered on every
+      # catch rather than only on one where the address-space walk finds a
+      # holder.
+      #
+      #   **on the list** — `Thread.threads` is a class variable, so the list is
+      #   a static root and every `Thread` on it should be reachable. One dying
+      #   while listed means that root is not covering it, which is a
+      #   root-coverage defect in the same family as v0.19.0's two.
+      #
+      #   **not on the list** — the thread has exited and `start`'s `ensure`
+      #   removed it, so the object *is* garbage and the sweep is right. The
+      #   defect is then downstream: something still walks to it. `LinkedList`
+      #   is intrusive — `@previous` / `@next` live on the `Thread` objects
+      #   themselves — so a freed-and-reissued node puts garbage in the chain
+      #   that `Thread.unsafe_each` follows, which is the walk
+      #   `snapshot_pthread_stack_bounds` faults in.
+      #
+      # The self-check is part of the answer: a "not on the list" from a walk
+      # that cannot find the *collecting* thread either is a broken comparison,
+      # not a finding.
+      listed_hit = false
+      self_seen = false
+      chain_hit = false
+      links = 0_u64
+      current = Thread.current.as(Void*).address
+      Thread.unsafe_each do |thread|
+        object = thread.as(Void*).address
+        listed_hit = true if object == addr
+        self_seen = true if object == current
+        # And the chain itself. `LinkedList#delete` fixes up both neighbours, so
+        # a *live* node whose `@next` or `@previous` still points at a block the
+        # sweep is about to free means the removal did not happen or did not
+        # hold — and the walk that follows those links is
+        # `snapshot_pthread_stack_bounds`'s, which is where this defect faults.
+        if n = thread.@next
+          links &+= 1
+          chain_hit = true if n.as(Void*).address == addr
+        end
+        if pv = thread.@previous
+          links &+= 1
+          chain_hit = true if pv.as(Void*).address == addr
+        end
+      end
+
       buf = uninitialized UInt8[512]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: dying-type audit — block 0x")
@@ -168,7 +212,15 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, greg_words)
       len = RawOut.append(buf.to_unsafe, len, " words). Offered by the collecting thread's own stack scan: ")
       len = RawOut.append(buf.to_unsafe, len, offered ? "yes" : "no")
-      len = RawOut.append(buf.to_unsafe, len, ". collection ")
+      len = RawOut.append(buf.to_unsafe, len, ". On Crystal's thread list: ")
+      len = RawOut.append(buf.to_unsafe, len, listed_hit ? "YES — the list is a static root and did not keep it alive" : "no — the thread has exited and the object is garbage")
+      len = RawOut.append(buf.to_unsafe, len, " (walk self-check: the collecting thread was ")
+      len = RawOut.append(buf.to_unsafe, len, self_seen ? "found" : "NOT FOUND, so this comparison proves nothing")
+      len = RawOut.append(buf.to_unsafe, len, "). Still linked from a live thread's list node: ")
+      len = RawOut.append(buf.to_unsafe, len, chain_hit ? "YES" : "no")
+      len = RawOut.append(buf.to_unsafe, len, " (")
+      len = RawOut.append_u64(buf.to_unsafe, len, links)
+      len = RawOut.append(buf.to_unsafe, len, " links read). collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)

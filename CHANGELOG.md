@@ -64,6 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silence is evidence: stubbing `snapshotted_stack_bounds` to `nil` makes the
   same run report `6 listed, 0 bounded` at every collection.
 
+- **The dying-type report now says whether the dying `Thread` is still on
+  Crystal's list, and whether any live thread's list node still links to it.**
+  Those are different defects — a listed `Thread` dying means the static root
+  that is `Thread.threads` did not cover it, while an unlisted one is legitimate
+  garbage and the defect is whatever still walks to it, `Thread::LinkedList`
+  being intrusive. Both are answerable on any catch, without waiting for the
+  address-space walk to find a holder, and the line carries a self-check: a "not
+  on the list" from a walk that cannot find the collecting thread either is a
+  broken comparison, not a finding.
+
 - **`make thread-uaf-sample` — buy samples of a defect that only happens on
   CI.** The `Thread` use-after-free fires in about one aarch64 job in three and
   in none of 40 local runs of the same harness, and the arm that names its
