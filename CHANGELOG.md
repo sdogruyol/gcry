@@ -43,7 +43,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bogus default id fails the third.
 
 - **The dying-type arm now counts the defect's precondition every collection,
-  not just its consequence.** A `Thread` can only die on an unscanned stack if a
+  not just its consequence** — and the first version of that count was zero by
+  construction, which is why it now reports three separate things: what the
+  pre-stop wait saw, whether it **gave up** (the world then stopped with a
+  thread unpublished), and whether a thread was staged *after* the wait ran, so
+  nothing waited for it at all. Asking `Platform.staged_count` after the mark,
+  as the first version did, can only ever return zero: the wait drains what has
+  published and drops the rest.
+  Measured in the failing harness locally: **24 sightings in 12 runs** of a
+  thread staged when the world was about to stop, every one caught by the wait.
+  Both branches that would say otherwise are shown to fire by staging an id that
+  can never publish — `make thread-block-audit` gained `staged` and
+  `staged-nowait` arms for exactly that, since a real thread publishes too fast
+  to be held in the state the defect needs.
+
+- **Superseded:**  A `Thread` can only die on an unscanned stack if a
   thread exists whose stack gcry has no bounds for, and there are two kinds:
   staged (created, not yet on Crystal's list) and a gap (on the list, no bounds
   from the snapshot). Those are the two candidate mechanisms, they need

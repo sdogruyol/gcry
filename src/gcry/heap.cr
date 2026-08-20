@@ -755,7 +755,19 @@ module Gcry
     # Called from `stop_world` **before** `Thread.lock` — see the note there.
     STAGED_WAIT_SPINS = 2000
 
+    # What the wait saw, for the collection that is about to run. Read after the
+    # fact by the dying-type audit's precondition report
+    # (src/gcry/thread_block_audit.cr), and recorded here because it cannot be
+    # recovered later: this wait either drains a staged entry or drops it, so
+    # `Platform.staged_count` is **zero by construction** by the time anything
+    # downstream looks. The first version of that report asked it anyway and got
+    # a zero it could not have got anything else from.
+    getter staged_seen_at_stop : UInt64 = 0_u64
+    getter staged_timed_out_at_stop : Bool = false
+
     private def wait_for_staged_threads : Nil
+      @staged_seen_at_stop = Platform.staged_count.to_u64
+      @staged_timed_out_at_stop = false
       return if Platform.staged_count == 0
       @stw_staged_waits &+= 1
       spins = 0
@@ -770,6 +782,7 @@ module Gcry
         break if Platform.staged_count == 0
         if spins >= STAGED_WAIT_SPINS
           @stw_staged_wait_timeouts &+= 1
+          @staged_timed_out_at_stop = true
           # Drop what did not answer. A thread that dies before publishing
           # leaves an entry nothing will ever release, and without this every
           # later collection would pay the full spin and time out again — a

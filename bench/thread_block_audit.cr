@@ -107,6 +107,15 @@ def run_child(arm : String) : NoReturn
     PROBES.times { keeper << Probe.new }
   when "thread"
     4.times { workers << Thread.new { spin_until(go) } }
+  when "staged"
+    # A thread id that will never appear on Crystal's list. That is exactly the
+    # state the defect needs — a thread gcry knows exists, has no bounds for,
+    # and does not scan — and it is the one state a harness cannot produce by
+    # creating a real thread, because a real one publishes itself in
+    # microseconds. Staged by hand so the two branches that report it can be
+    # shown to report at all: with the wait on it must give up, with the wait
+    # off nothing waits and the world stops with the entry outstanding.
+    Gcry::Platform.stage_thread(0xdead_beef_u64)
   else
     drop_probes
     bury_stack
@@ -117,7 +126,9 @@ def run_child(arm : String) : NoReturn
   STDERR.puts "walked=#{heap.dying_type_walked} live=#{heap.dying_type_live} " \
               "deaths=#{heap.dying_type_deaths} audits=#{heap.address_space_audits} " \
               "pop=#{heap.thread_pop_collections} gaps=#{heap.thread_pop_gap_collections} " \
-              "staged=#{heap.thread_pop_staged_collections}"
+              "staged=#{heap.thread_pop_staged_collections} " \
+              "timeouts=#{heap.thread_pop_staged_timeouts} " \
+              "stagednow=#{heap.thread_pop_staged_now_collections}"
 
   go.set
   workers.each(&.join)
@@ -139,10 +150,15 @@ puts "mode: #{control ? "control (GCRY_THREAD_BLOCK_AUDIT unset; nothing may be 
 exe = Process.executable_path.not_nil!
 failures = [] of String
 
-["dies", "lives", "thread"].each do |arm|
+["dies", "lives", "thread", "staged", "staged-nowait"].each do |arm|
   env = {"GCRY_THREAD_BLOCK_AUDIT" => control ? "0" : "1"}
+  # The same planted entry, with the pre-stop wait on and off. On: the wait
+  # cannot drain an id that will never publish, so it must give up and say so.
+  # Off: nothing waits, and the world stops with the entry outstanding.
+  env["GCRY_STAGED_WAIT"] = "0" if arm == "staged-nowait"
   captured = IO::Memory.new
-  Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
+  child_arm = arm == "staged-nowait" ? "staged" : arm
+  Process.run(exe, ["--child=#{child_arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
   line = text.lines.find(&.starts_with?("walked="))
   unless line
@@ -157,8 +173,11 @@ failures = [] of String
   pop = fields["pop"]
   gaps = fields["gaps"]
   staged = fields["staged"]
+  timeouts = fields["timeouts"]
+  staged_now = fields["stagednow"]
   puts "#{arm}: #{walked} blocks walked, #{live} live, #{deaths} dying, #{audits} address-space audits, " \
-       "#{pop} collections walked for the precondition (#{gaps} with an unbounded thread, #{staged} with a staged one)"
+       "#{pop} collections walked for the precondition (#{gaps} with an unbounded thread, " \
+       "#{staged} with a staged one, #{timeouts} where the wait gave up, #{staged_now} staged after it)"
 
   if control
     if walked > 0 || live > 0 || deaths > 0 || audits > 0 || pop > 0
@@ -181,6 +200,26 @@ failures = [] of String
   end
 
   case arm
+  when "staged"
+    # The wait cannot drain an id that never publishes, so it must give up —
+    # and that is the state the world then stops in.
+    unless text.includes?("GAVE UP")
+      failures << "staged: an id that can never publish was staged and the pre-stop wait did not " \
+                  "report giving up, so the branch that names a world stopped with an unpublished " \
+                  "thread has never been seen to fire"
+    end
+    if timeouts == 0
+      failures << "staged: the wait reported giving up and the timeout counter stayed at zero"
+    end
+  when "staged-nowait"
+    unless text.includes?("AFTER the wait ran")
+      failures << "staged-nowait: with GCRY_STAGED_WAIT=0 nothing waits, the entry is still " \
+                  "outstanding when the world stops, and the arm did not name it"
+    end
+    if staged_now == 0
+      failures << "staged-nowait: nothing was reported as staged after the wait, so that counter " \
+                  "cannot distinguish a covered birth window from an uncovered one"
+    end
   when "dies"
     if deaths == 0
       failures << "dies: #{PROBES} objects of the watched type were dropped and the audit named none " \

@@ -86,12 +86,17 @@ module Gcry
     getter thread_pop_collections : UInt64 = 0_u64
     getter thread_pop_gap_collections : UInt64 = 0_u64
     getter thread_pop_staged_collections : UInt64 = 0_u64
+    # The subset that gave up: those stopped the world with a thread unscanned.
+    getter thread_pop_staged_timeouts : UInt64 = 0_u64
+    # Collections that stopped the world with a thread staged after the wait.
+    getter thread_pop_staged_now_collections : UInt64 = 0_u64
 
     # Sightings reported per run, per kind. The counters carry the rest.
     THREAD_POP_REPORT_LIMIT = 3
 
     @thread_pop_gaps_reported = 0
     @thread_pop_staged_reported = 0
+    @thread_pop_staged_now_reported = 0
 
     # Called with the world stopped, after `mark_loop` and before `sweep`.
     protected def audit_dying_type_blocks : Nil
@@ -195,7 +200,24 @@ module Gcry
         listed &+= 1
         bounded &+= 1 if Platform.snapshotted_stack_bounds(thread.to_unsafe)
       end
-      staged = Platform.staged_count.to_u64
+      # Not `Platform.staged_count`: `wait_for_staged_threads` runs before the
+      # world stops and either drains every published entry or drops the rest on
+      # timeout, so that number is zero by construction here. What matters is
+      # what the wait *saw*, and whether it gave up — a wait that timed out
+      # stopped the world with a thread still unpublished, which is the
+      # precondition itself and not a proxy for it.
+      staged = staged_seen_at_stop
+      timed_out = staged_timed_out_at_stop
+
+      # And the reading the wait cannot account for at all: a thread staged
+      # *after* the wait ran. `pthread_create` returns, the entry appears, and
+      # the collector is already past the point where it looks — the world then
+      # stops without it. Entries are otherwise only released when the thread
+      # publishes itself, so a non-zero count here is not the wait's leftovers:
+      # it is a thread that exists, is not on Crystal's list, and was never
+      # waited for. Zero by construction only on the timeout path, which is
+      # reported separately above.
+      staged_now = Platform.staged_count.to_u64
 
       if bounded < listed
         @thread_pop_gap_collections &+= 1
@@ -206,11 +228,23 @@ module Gcry
         end
       end
 
+      if staged_now > 0 && !timed_out
+        @thread_pop_staged_now_collections &+= 1
+        if @thread_pop_staged_now_reported < THREAD_POP_REPORT_LIMIT
+          @thread_pop_staged_now_reported += 1
+          report_thread_precondition(
+            "a thread was staged AFTER the wait ran — the world stopped without it and nothing waited",
+            listed, bounded, staged_now)
+        end
+      end
+
       if staged > 0
         @thread_pop_staged_collections &+= 1
+        @thread_pop_staged_timeouts &+= 1 if timed_out
         if @thread_pop_staged_reported < THREAD_POP_REPORT_LIMIT
           @thread_pop_staged_reported += 1
-          report_thread_precondition("a thread is staged and has not published itself",
+          report_thread_precondition(
+            timed_out ? "the wait for a staged thread GAVE UP — the world stopped with it unpublished" : "a thread was staged when the world stopped, and the wait caught it",
             listed, bounded, staged)
         end
       end

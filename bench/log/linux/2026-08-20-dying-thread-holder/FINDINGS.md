@@ -162,13 +162,46 @@ A green CI run now says something either way: preconditions present names the
 window without another crash; none at all says the unowned stack in the catches
 is neither of these and the hunt widens.
 
-**Locally: zero.** `thread_storm` (200 × 12) and `ec_queue_audit --control` walk
-the check every collection and never see a staged thread or an unbounded one —
-consistent with a defect that does not happen here. **The silence is evidence
-rather than an unarmed counter**: with `snapshotted_stack_bounds` stubbed to
-return `nil`, the same run reports `6 listed, 0 bounded, 0 staged` at every
-collection. The gate requires the walk to have run at all, and the control run
-requires it not to have.
+### The first version of the staged count was zero by construction
+
+It asked `Platform.staged_count` after the mark and got zero everywhere, which
+was not a measurement: `wait_for_staged_threads` runs *before* the world stops
+and either drains every entry that has published or, on timeout, **drops the
+rest** — so nothing downstream can ever see one. That is the same failure the
+Darwin RSS reader had for three releases, and it took ten CI runs to notice.
+
+What the arm reports now is three distinct things:
+
+- **what the wait saw at entry** — the birth window existing at all;
+- **whether the wait gave up** — the world then stopped with a thread
+  unpublished, which is the defect's precondition exactly;
+- **a thread staged *after* the wait ran** — created once the collector was
+  already past the point where it looks, so nothing waited for it at all. This
+  one is not zero by construction: entries are otherwise released only when the
+  thread publishes.
+
+### And with that, the window is measurable — and locally the wait covers it
+
+`ec_queue_audit --control`, 12 local runs: **24 sightings of a thread staged
+when the world was about to stop** (5 of them at once at collection 0, which is
+the execution context's workers being created), and **every one caught by the
+wait** — 0 timeouts, 0 staged after it. So the birth window is not hypothetical
+in this harness; it is there in every run, and here `GCRY_STAGED_WAIT` closes it
+every time. `thread_storm` says the same.
+
+**Both branches that would say otherwise are shown to fire**, by staging an id
+that can never publish (`make thread-block-audit`, arms `staged` and
+`staged-nowait`): with the wait on it gives up and says so; with
+`GCRY_STAGED_WAIT=0` nothing waits and the entry is still outstanding when the
+world stops, reported in 3 of 3 collections. A real thread cannot be held in
+that state by a harness — it publishes in microseconds — which is why the id is
+planted. Broken on purpose and observed red in both assertions.
+
+So a CI catch now has three questions answered by the same report: was a thread
+being born, did the wait give up, and was one staged after the wait. The
+`gap` half — a listed thread with no snapshotted bounds — is measured the same
+way, and its silence is evidence too: stubbing `snapshotted_stack_bounds` to
+`nil` makes the same run report `6 listed, 0 bounded` at every collection.
 
 ## A reporter bug this catch exposed, and fixed
 
