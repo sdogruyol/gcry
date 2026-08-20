@@ -125,6 +125,21 @@ x86_64. The defect is not being missed locally by an instrument that cannot see
 it — the instrument fires 72 times in `thread_storm` on the same machine. It is
 not happening here.
 
+## All four catches are in the arm with the queue audit **off**
+
+`ec-queue-audit` runs the harness twice: once with `GCRY_EC_QUEUE_AUDIT=1`, and
+once as `--control` with it off. **All four catches are the control run.** 4 of 4
+is not proof of a preference, but it is enough to sample by: the first version of
+`make thread-uaf-sample` ran only the audit-on arm and found nothing in ten CI
+runs, which is what a sampler aimed at the wrong arm looks like. It now runs both
+arms per iteration, as the gate does.
+
+Worth stating and not explaining away: with the queue audit on, every collection
+does an extra bounded walk of the run queues *inside the pause*. That lengthens
+the stopped world, and a race whose window is the birth of a thread can be
+masked by a longer pause as easily as by anything else. Timing, not mechanism —
+but it is the difference between the two arms.
+
 ## A reporter bug this catch exposed, and fixed
 
 The same report said:

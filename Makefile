@@ -363,6 +363,12 @@ mark-audit: $(BIN)
 # machine). The arm that names its holder only speaks when the defect happens,
 # so the way to read it more often is to run the failing harness more often.
 #
+# Both arms, per iteration, exactly as `ec-queue-audit` runs them — and the
+# second one is the one that matters: all four catches on 2026-08-20 were in
+# **`--control`**, with `GCRY_EC_QUEUE_AUDIT` off. The first version of this
+# target sampled the audit-on arm only and found nothing in ten runs, which is
+# what a sampler pointed at the wrong arm looks like.
+#
 # `THREAD_UAF_BIN` / `THREAD_UAF_ARGS` point it at another harness, which is how
 # the sampler's own reporting path is shown to work at all: against
 # `bin/thread_storm`, where a dying `Thread` is routine, it must keep the logs
@@ -378,12 +384,17 @@ thread-uaf-sample: $(BIN)
 	@mkdir -p $(SAMPLE_DIR)
 	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; crashes=0; \
 	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
+	: $${THREAD_UAF_CONTROL_ARGS:=--control}; \
 	for i in $$(seq 1 $$runs); do \
 	  GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
-	    $$harness $$THREAD_UAF_ARGS > $(SAMPLE_DIR)/run-$$i.log 2>&1 || crashes=$$((crashes+1)); \
-	  r=$$(grep -c "dying-type audit" $(SAMPLE_DIR)/run-$$i.log || true); \
-	  hits=$$((hits+r)); \
-	  if [ "$$r" = "0" ]; then rm -f $(SAMPLE_DIR)/run-$$i.log; fi; \
+	    $$harness $$THREAD_UAF_ARGS > $(SAMPLE_DIR)/run-$$i-hold.log 2>&1 || crashes=$$((crashes+1)); \
+	  GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    $$harness $$THREAD_UAF_ARGS $$THREAD_UAF_CONTROL_ARGS > $(SAMPLE_DIR)/run-$$i-control.log 2>&1 || crashes=$$((crashes+1)); \
+	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log; do \
+	    r=$$(grep -c "dying-type audit" $$f || true); \
+	    hits=$$((hits+r)); \
+	    if [ "$$r" = "0" ]; then rm -f $$f; fi; \
+	  done; \
 	done; \
 	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s) in $(SAMPLE_DIR)"; \
 	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
