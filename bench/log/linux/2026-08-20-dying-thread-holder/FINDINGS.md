@@ -252,6 +252,69 @@ self-check found, 4 links read* every time: a thread that exited, removed
 cleanly, correctly collected. That is the baseline the next catch is read
 against.
 
+## The catch that names it: the wait gave up, and the `Thread` died in that collection
+
+2026-08-20, later the same day. Two more catches, one on the push run and one on
+the pull-request run of `51d817d`, both on aarch64 CI, and this time the
+precondition and the death are in the **same collection**:
+
+```
+gcry: dying-type audit — precondition: the wait for a staged thread GAVE UP —
+      the world stopped with it unpublished. 5 listed, 5 bounded, 2 staged. collection 2
+gcry: dying-type audit — block 0xffd0fe28ad28 size 192 type_id 173 is unmarked
+      and about to be swept … On Crystal's thread list: no … collection 2
+gcry:   threads at that moment: 5 on Crystal's list, 5 of them with snapshotted
+        stack bounds, 0 staged and unpublished (5 ever staged), the kernel says 6
+gcry:   0xffd0fe28ad28 held at 0xffd0be7fe7b0 … 16384 KiB anonymous mapping, hit
+        6224 bytes below its top — mapped whole and used from the high end: the
+        shape of a thread stack
+gcry: SIGSEGV at 0xdeadffd0fe28ad28 — gcry's freed-block poison … a use-after-free
+```
+
+The second catch says the same at collection 5. In both, the poison the crash
+faults on is the tagged form of the block the audit named — the second and third
+exact matches, after the first on 2026-08-20 morning.
+
+Read together with the green-run baseline (40 sightings, all caught by the wait,
+never a timeout), the chain is:
+
+1. `pthread_create` returns. gcry stages the id; the new thread has not yet
+   pushed itself onto `Thread.threads`.
+2. A collection begins. The pre-stop wait spins, the thread does not publish in
+   time, and the wait **gives up** — it drops the staged entries and stops the
+   world anyway. `5 listed, the kernel says 6`: one thread is outside the
+   stopped world, in the same report.
+3. That thread's `Thread` object is off the list, so the static root that is
+   `Thread.threads` does not cover it, and its only holder is the new thread's
+   own 16 MiB stack, which gcry has no bounds for and never scans. The mark
+   cannot reach it. The sweep frees it.
+4. The thread then publishes itself. The **next** `stop_world` walks the list,
+   reads `@system_handle` out of the freed — by then reissued — block, and hands
+   it to `pthread_getattr_np`. That is the fault seen since 2026-08-16, and the
+   `+0x418` that never varied.
+
+`catch-birth-1.log` and `catch-birth-2.log`.
+
+**What is still an inference, and stated as one.** The report cannot yet prove
+the dying object *is* the staged thread's. Its `@system_handle` can be compared
+against the ids the wait recorded, and that comparison is only *consistent with*
+the identification: this file's own local runs show the same `pthread_t` value in
+eight different collections while the staged total climbed 4 → 11, i.e. glibc
+recycles ids. What is not an inference: the wait gave up, a thread was outside
+the stopped world, an off-list `Thread` died in that collection, and its only
+holders were on a stack nothing scans.
+
+## Two corrections the same catch forced, both in this instrument
+
+- **"not on the list" was reported as "the thread has exited and the object is
+  garbage".** Off-list has two causes and the first catch to reach that line was
+  the other one — a thread that had not published *yet*. The line now states
+  both and quotes the wait's own record beside it.
+- **The report grew past `RawOut::LIMIT` (480 bytes) and was silently
+  truncated**, losing the end of its own verdict. It is three lines now. That is
+  the same failure this file has recorded three times in the crash reporter,
+  committed by the instrument written to fix it.
+
 ## A reporter bug this catch exposed, and fixed
 
 The same report said:

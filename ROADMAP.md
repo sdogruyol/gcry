@@ -806,13 +806,29 @@ CI asymmetry that hid both.
       tagged form of **the same block the audit named one collection earlier**,
       which is the first time this defect's death and its crash have been the
       same block in the same run.
-      **What is left to separate**: a stack with no bounds is either a thread
-      that has not published itself on Crystal's list (the birth window
-      `Platform` records from `pthread_create`) or one that is on the list and
-      whose bounds the snapshot failed to read (the visited/read gap). Different
-      fixes, so the report now prints the thread population beside it — list
-      count, how many have snapshotted bounds, how many are staged and
-      unpublished, and the kernel's count. The next catch decides it.
+      **And the next catch decided it — it is the birth window, and the
+      pre-stop wait giving up is what opens it.** Two more catches the same day,
+      on two runs of the same commit, both with the precondition and the death
+      in the **same collection**: `the wait for a staged thread GAVE UP — the
+      world stopped with it unpublished. 5 listed, 5 bounded, 2 staged`, then a
+      192-byte `type_id 173` block dying, off Crystal's list, held only in the
+      16 MiB stack-shaped mapping — and, in the same report, `5 on Crystal's
+      list … the kernel says 6`. One thread outside the stopped world, its
+      `Thread` object covered by no root, swept; the thread then publishes and
+      the next `stop_world` reads `@system_handle` out of the freed block. Both
+      crashes fault on the poison of exactly the block the audit named.
+      Baseline for contrast: 40 precondition sightings across 20 green runs,
+      **every one caught by the wait**, never a timeout.
+      **Still an inference**: that the dying object is that thread's. The
+      handle comparison is only consistent with it — glibc recycles `pthread_t`
+      values, measured in this repo's own runs (one id across eight collections
+      while the staged total went 4 → 11).
+      **Next is the fix, and it is a choice**: never give up (a thread that dies
+      before publishing must then not wedge the collector), snapshot and scan a
+      staged thread's stack so the window needs no wait at all, or defer the
+      collection when the wait times out. Two earlier attempts at this defect
+      changed collector behaviour and broke it, so whichever lands ships with an
+      A/B arm and a crash-rate measurement beside it.
       **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
       catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
       quote.

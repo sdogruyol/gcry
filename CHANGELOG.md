@@ -64,6 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silence is evidence: stubbing `snapshotted_stack_bounds` to `nil` makes the
   same run report `6 listed, 0 bounded` at every collection.
 
+- **The report is three lines now, and the reason is the one this file keeps
+  recording:** it grew past `RawOut::LIMIT` (480 bytes) and was silently
+  truncated, losing the end of its own verdict — the same failure mode the crash
+  reporter has been corrected for three times, committed by the instrument
+  written to correct it. In the same pass, "not on Crystal's list" stopped
+  asserting "the thread has exited": off-list has two causes and the first catch
+  to reach that line was the other one, a thread that had not published yet. The
+  line now states both and quotes the pre-stop wait's own record beside it,
+  including the dying object's `@system_handle` against the staged ids — as
+  *consistent with*, never as an identification, because glibc recycles thread
+  ids (measured: one value across eight collections while the staged total went
+  4 → 11).
+
 - **The dying-type report now says whether the dying `Thread` is still on
   Crystal's list, and whether any live thread's list node still links to it.**
   Those are different defects — a listed `Thread` dying means the static root

@@ -197,6 +197,10 @@ module Gcry
         end
       end
 
+      # Three lines, not one. `RawOut::LIMIT` is 480 bytes and truncates in
+      # silence — the first version of this report grew past it and lost the
+      # end of its own verdict, which is the failure mode of every instrument
+      # in this file written down one more time.
       buf = uninitialized UInt8[512]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: dying-type audit — block 0x")
@@ -212,19 +216,68 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, greg_words)
       len = RawOut.append(buf.to_unsafe, len, " words). Offered by the collecting thread's own stack scan: ")
       len = RawOut.append(buf.to_unsafe, len, offered ? "yes" : "no")
-      len = RawOut.append(buf.to_unsafe, len, ". On Crystal's thread list: ")
-      len = RawOut.append(buf.to_unsafe, len, listed_hit ? "YES — the list is a static root and did not keep it alive" : "no — the thread has exited and the object is garbage")
-      len = RawOut.append(buf.to_unsafe, len, " (walk self-check: the collecting thread was ")
-      len = RawOut.append(buf.to_unsafe, len, self_seen ? "found" : "NOT FOUND, so this comparison proves nothing")
-      len = RawOut.append(buf.to_unsafe, len, "). Still linked from a live thread's list node: ")
-      len = RawOut.append(buf.to_unsafe, len, chain_hit ? "YES" : "no")
-      len = RawOut.append(buf.to_unsafe, len, " (")
-      len = RawOut.append_u64(buf.to_unsafe, len, links)
-      len = RawOut.append(buf.to_unsafe, len, " links read). collection ")
+      len = RawOut.append(buf.to_unsafe, len, ". collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry:   on Crystal's thread list: ")
+      if listed_hit
+        len = RawOut.append(buf.to_unsafe, len, "YES — the list is a static root and did not keep it alive")
+      else
+        # Off the list has **two** causes and this line asserted one of them
+        # until 2026-08-20, when the first catch to reach it was the other: a
+        # thread that had not published *yet*, not one that had exited.
+        len = RawOut.append(buf.to_unsafe, len, "no — it has either not published yet or exited")
+      end
+      len = RawOut.append(buf.to_unsafe, len, ". Still linked from a live thread's list node: ")
+      len = RawOut.append(buf.to_unsafe, len, chain_hit ? "YES" : "no")
+      len = RawOut.append(buf.to_unsafe, len, " (")
+      len = RawOut.append_u64(buf.to_unsafe, len, links)
+      len = RawOut.append(buf.to_unsafe, len, " links read; self-check: the collecting thread was ")
+      len = RawOut.append(buf.to_unsafe, len, self_seen ? "found)" : "NOT FOUND, so this proves nothing)")
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+
+      report_birth_evidence(addr) unless listed_hit
       report_thread_population
+    end
+
+    # What the pre-stop wait recorded, next to this block's own handle.
+    #
+    # The handle comparison is **consistent with** the object being the thread
+    # that was being born; it is not proof, and the reason is in this file's own
+    # local runs: the same `pthread_t` value appeared in eight different
+    # collections while the staged total climbed from 4 to 11. glibc recycles
+    # thread ids, so a match can also be an old object holding an id that has
+    # since been handed to somebody else. Said here rather than left for a
+    # reader to discover, because the line above it is the one that would
+    # otherwise read as an identification.
+    private def report_birth_evidence(addr : UInt64) : Nil
+      handle = Pointer(UInt64).new(addr &+ offsetof(Thread, @system_handle)).value
+      matched = staged_ids_at_stop_count > 0 && staged_id_at_stop?(handle)
+
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry:   its @system_handle 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, handle)
+      if staged_timed_out_at_stop
+        len = RawOut.append(buf.to_unsafe, len, "; the wait GAVE UP on ")
+        len = RawOut.append_u64(buf.to_unsafe, len, staged_seen_at_stop)
+        len = RawOut.append(buf.to_unsafe, len, " staged thread(s), so the world stopped with one unpublished and unscanned")
+      elsif staged_seen_at_stop > 0
+        len = RawOut.append(buf.to_unsafe, len, "; ")
+        len = RawOut.append_u64(buf.to_unsafe, len, staged_seen_at_stop)
+        len = RawOut.append(buf.to_unsafe, len, " were staged at the stop and the wait caught them all")
+      else
+        len = RawOut.append(buf.to_unsafe, len, "; nothing was staged at the stop, so an exit is the reading left")
+      end
+      if matched
+        len = RawOut.append(buf.to_unsafe, len, ". That handle is one of the staged ids — consistent with the thread being born, though ids are recycled")
+      end
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # The consequence — a `Thread` dying with its address on a stack gcry owns
