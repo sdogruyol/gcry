@@ -56,14 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can never publish — `make thread-block-audit` gained `staged` and
   `staged-nowait` arms for exactly that, since a real thread publishes too fast
   to be held in the state the defect needs.
-
-- **Superseded:**  A `Thread` can only die on an unscanned stack if a
-  thread exists whose stack gcry has no bounds for, and there are two kinds:
+  The two kinds are the two candidate mechanisms and they need different fixes:
   staged (created, not yet on Crystal's list) and a gap (on the list, no bounds
-  from the snapshot). Those are the two candidate mechanisms, they need
-  different fixes, and they are countable in green runs — which matters because
-  the consequence arrives in bursts (4 of 20 in one batch, 0 of 60 across the
-  three after it). Locally both counts are zero in every harness tried, and that
+  from the snapshot). Both are countable in **green** runs, which is what makes
+  them worth having — the consequence arrives in bursts (4 of 20 in one batch, 0
+  of 60 across the three after it). The gap half is silent locally too, and that
   silence is evidence: stubbing `snapshotted_stack_bounds` to `nil` makes the
   same run report `6 listed, 0 bounded` at every collection.
 
