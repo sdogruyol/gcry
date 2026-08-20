@@ -870,14 +870,18 @@ CI asymmetry that hid both.
       exists for.
       Three corrections to the original reading. It is **not 4 a run** — 1 to 36
       on the same harness across runs, so the number was one draw and not a
-      constant. It is **not thread stacks**, which was the obvious candidate
-      because a glibc thread stack is its size minus a guard page and therefore
-      passes the same geometry test: the audit now checks them by name and finds
-      **0**, against 6 thread bounds compared, so the null is a measurement
-      rather than a walk with nothing to compare against. And it needs a
-      **Parallel** execution context under concurrent spawning: a quiesced
-      single-context program reports 0 uncovered before and after a spawn
-      storm.
+      constant. It **cannot be thread stacks**, and the reason is structural
+      rather than measured: the geometry test looks for
+      `STACK_SIZE - PAGE_SIZE` = 8 384 512 bytes, and a Crystal thread's stack
+      maps exactly `STACK_SIZE` = 8 388 608 — one page apart, so a thread stack
+      never reaches the audit at all. (The check for them is kept as a tripwire,
+      because that page is an accident of where glibc puts the guard and not a
+      guarantee; a non-zero count would say a libc has made the two shapes
+      identical. Its zero is by construction and is documented as such — an
+      earlier version of this item offered that zero as a measurement, which it
+      never was.) And it needs a **Parallel** execution context under concurrent
+      spawning: a quiesced single-context program reports 0 uncovered before and
+      after a spawn storm.
 
 - [ ] **`live_objects`, `total_bytes` and `bytes_since_gc` lose updates.**
       `note_alloc_bytes` uses plain `set(get + 1)` unless

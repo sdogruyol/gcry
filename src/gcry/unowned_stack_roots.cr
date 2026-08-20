@@ -136,13 +136,24 @@ module Gcry
           if dying_fiber_stack?(lo, hi)
             @unowned_covered &+= 1
           elsif thread_stack_region?(lo, hi)
-            # A glibc thread stack is its size minus a guard page, and
-            # `Fiber::StackPool::STACK_SIZE` is the same size — so a thread
-            # stack passes the geometry test above and is owned by no fiber and
-            # in no pool. It is not a coverage hole: `stop_world` snapshots its
-            # bounds and the root scan walks it by that route. Counted apart,
-            # because "accounted for" and "accounted for somewhere else" are
-            # different claims.
+            # A **tripwire**, and it is expected to read zero: measured on
+            # x86_64/glibc, the geometry test above looks for
+            # `STACK_SIZE - PAGE_SIZE` = 8 384 512 bytes and a Crystal thread's
+            # stack maps exactly `STACK_SIZE` = 8 388 608 — one page apart, so a
+            # thread stack cannot reach this branch at all.
+            #
+            # It is kept rather than deleted because that page is an accident of
+            # how glibc places the guard, not a guarantee: a libc that maps the
+            # guard inside the stack, or a different guard size, makes the two
+            # shapes identical and every thread stack starts landing in this
+            # audit's residue. A **non-zero** count here says that has happened
+            # — it does not say a root is missing, because `stop_world`
+            # snapshots those bounds and the scan walks them by that route.
+            #
+            # Its zero is therefore structural, and saying so is the point: an
+            # earlier version of this comment claimed the two sizes were the
+            # same and offered the zero as a measurement that ruled thread
+            # stacks out. It ruled nothing out; it could not have.
             @unowned_thread_stacks &+= 1
           else
             @unowned_uncovered &+= 1

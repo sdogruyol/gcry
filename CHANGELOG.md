@@ -15,13 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   equals `maps_inflight_walked` in every run — so the split is "parked in a
   `Thread#dying_fiber` slot or not", not "known or unknown". Three corrections
   to the reading it shipped with: it is **not 4 a run** (1 to 36 on the same
-  harness), it is **not thread stacks** (0, against 6 thread bounds compared —
-  the obvious candidate, since a glibc thread stack is its size minus a guard
-  page and passes the same geometry test), and it needs a Parallel execution
-  context under concurrent spawning, a quiesced single-context program
-  reporting 0 either side of a spawn storm. The comparison carries the count of
-  bounds it had available, so a "no thread stack" answer cannot come from a walk
-  with nothing to compare against.
+  harness), it **cannot be thread stacks** — measured, the geometry test looks
+  for `STACK_SIZE - PAGE_SIZE` = 8 384 512 bytes while a Crystal thread's stack
+  maps exactly 8 388 608, one page apart, so they never reach the audit — and it
+  needs a Parallel execution context under concurrent spawning, a quiesced
+  single-context program reporting 0 either side of a spawn storm.
+  The thread-stack check ships as a **tripwire** whose zero is structural and
+  documented as such: that page is where glibc happens to put the guard, not a
+  guarantee, and a non-zero count would mean a libc has made the two shapes
+  identical. It carries the number of bounds it compared against, so it can also
+  say when it had nothing to compare. The first version of this entry offered
+  the zero as a measurement ruling thread stacks out; it ruled nothing out.
 
 ### Added
 
