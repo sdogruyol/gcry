@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison fails the second (8 phantom deaths among rooted objects), and a
   bogus default id fails the third.
 
+- **`make thread-uaf-sample` — buy samples of a defect that only happens on
+  CI.** The `Thread` use-after-free fires in about one aarch64 job in three and
+  in none of 40 local runs of the same harness, and the arm that names its
+  holder only speaks when it fires. The target runs the failing harness ten
+  times with the arm on and keeps the logs of the runs that said something. It
+  is deliberately **not** a gate — it exits 0 either way, because a step
+  expected to fail while the defect is open would block every pull request or
+  train everyone to ignore it — and it ships as a `continue-on-error` aarch64
+  job that uploads what it caught. `THREAD_UAF_BIN` points it at another
+  harness, which is how its own reporting path is shown to work: against
+  `thread_storm`, where a dying `Thread` is routine, it must keep and print.
+
 ### Fixed
 
 - **The crash reporter excluded the defect it was reporting.** A fault outside

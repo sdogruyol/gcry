@@ -818,6 +818,42 @@ jobs:
           make ec-queue-audit
           make thread-block-audit
 
+  # Sampling, not gating. The `Thread` use-after-free fires in roughly one
+  # aarch64 job in three and has never been seen off CI — 40 runs of the same
+  # harness locally produced 0 crashes and 0 reports, while the same arm
+  # reported 72 dying `Thread`s in `thread-storm` on that machine. The arm that
+  # names the holder only speaks when the defect happens, so this job runs the
+  # failing harness ten times to be told ten times as often, and uploads
+  # whatever it caught.
+  #
+  # `continue-on-error` because the defect is **open**: a step expected to fail
+  # would either block every pull request or teach everyone to ignore a red
+  # mark. The gates that must stay green are elsewhere; this one collects
+  # evidence.
+  thread-uaf-sample:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    continue-on-error: true
+    name: thread UAF sampler (aarch64)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Run the failing harness ten times with the arm on
+        run: make thread-uaf-sample
+
+      - name: Upload what it caught
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: thread-uaf-samples
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30
+
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
     runs-on: macos-latest

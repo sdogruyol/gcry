@@ -1,12 +1,14 @@
 CRYSTAL ?= crystal
 BIN := bin
+# Where `thread-uaf-sample` leaves the runs that said something.
+SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -353,6 +355,39 @@ mark-audit: $(BIN)
 # objects held alive must produce no deaths and a non-zero live count, and the
 # shipped default must find live `Thread` blocks — a default aimed at nothing
 # would be silent on CI for a reason that has nothing to do with the defect.
+# Buy samples of a defect that only happens on CI.
+#
+# The `Thread` use-after-free fires in roughly one aarch64 job in three and
+# never locally (40 runs of this harness on x86_64: 0 crashes, 0 reports, while
+# the same arm reports 72 dying `Thread`s in `thread-storm` on the same
+# machine). The arm that names its holder only speaks when the defect happens,
+# so the way to read it more often is to run the failing harness more often.
+#
+# `THREAD_UAF_BIN` / `THREAD_UAF_ARGS` point it at another harness, which is how
+# the sampler's own reporting path is shown to work at all: against
+# `bin/thread_storm`, where a dying `Thread` is routine, it must keep the logs
+# and print them. A sampler that has never been seen to report something says
+# nothing when it reports nothing.
+#
+# **Not a gate.** It exits 0 whether or not the defect fires, because an open
+# defect must not turn every pull request red — and a step that is expected to
+# fail teaches everyone to ignore it. What it produces is evidence: the logs of
+# the runs that said something, and nothing from the ones that did not.
+thread-uaf-sample: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
+	@mkdir -p $(SAMPLE_DIR)
+	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; crashes=0; \
+	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
+	for i in $$(seq 1 $$runs); do \
+	  GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	    $$harness $$THREAD_UAF_ARGS > $(SAMPLE_DIR)/run-$$i.log 2>&1 || crashes=$$((crashes+1)); \
+	  r=$$(grep -c "dying-type audit" $(SAMPLE_DIR)/run-$$i.log || true); \
+	  hits=$$((hits+r)); \
+	  if [ "$$r" = "0" ]; then rm -f $(SAMPLE_DIR)/run-$$i.log; fi; \
+	done; \
+	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s) in $(SAMPLE_DIR)"; \
+	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
+
 thread-block-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_block_audit.cr -o $(BIN)/thread_block_audit --error-trace
 	$(BIN)/thread_block_audit

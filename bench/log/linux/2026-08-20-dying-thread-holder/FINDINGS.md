@@ -88,6 +88,43 @@ block has **since been REISSUED**, so what points at it now points at whatever
 occupies it now. The address-space audit, which ran inside the collection that
 freed it, found **zero** hits in any gcry block.
 
+## What a correctly collected `Thread` looks like, and it is not this
+
+A dying `Thread` is not by itself a defect: a thread that has exited and left
+Crystal's list *should* have its object reclaimed. So the report needs a
+baseline, and `thread_storm` — whose whole job is creating and joining threads —
+supplies one. Eight local runs, 200 iterations × 12 workers, arm on:
+
+- **0 crashes**, and **72** dying `Thread` blocks reported;
+- **432 reported holders, and every single one is "the collector's own call
+  chain, this audit's included. Not evidence"**.
+
+That is what a correctly collected `Thread` looks like: at the moment it dies,
+nothing in the address space points at it except the instrument's own frames.
+None of the 432 is in a heap block, a fiber stack, a pooled stack, a thread
+stack, or an unowned mapping.
+
+Against that baseline the four CI catches are a different object entirely: six
+holders, none in the collector's chain, all six in one unowned stack-shaped
+mapping.
+
+## And in the harness that fails, a dying `Thread` *is* the crash
+
+`ec_queue_audit` keeps its threads for the length of the run, so a `Thread`
+object dying in it is never routine. Across the two aarch64 batches — 20 reruns
+of the same job — the correlation is exact:
+
+| | dying-`Thread` report | no report |
+|---|---|---|
+| **crashed** | 4 | 0 |
+| **green** | 0 | 16 |
+
+Locally the same harness says nothing at all: **40 runs, 0 crashes, 0 reports**,
+with `GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1` on
+x86_64. The defect is not being missed locally by an instrument that cannot see
+it — the instrument fires 72 times in `thread_storm` on the same machine. It is
+not happening here.
+
 ## A reporter bug this catch exposed, and fixed
 
 The same report said:
