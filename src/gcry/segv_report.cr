@@ -37,6 +37,28 @@ module Gcry
       @@installed
     end
 
+    # How to read a fault outside the heap span. Pure and public so the choice
+    # can be gated without faking a signal: the branch that matters fires only
+    # while `pthread_getattr_np` is in flight, which a harness cannot enter.
+    #
+    # `descriptor_field` is the shape the `Thread` use-after-free takes — the
+    # fault lands a small fixed offset past the `pthread_t` being queried
+    # (glibc's `struct pthread` at +0x418 in every sighting), so the address is
+    # a field of a descriptor and not a wild pointer.
+    enum OutOfSpan
+      NoQuery
+      DescriptorField
+      QueryFar
+    end
+
+    OUT_OF_SPAN_FIELD_MAX = 64_u64 << 10
+
+    def self.out_of_span_reading(fault : UInt64, in_flight : UInt64) : OutOfSpan
+      return OutOfSpan::NoQuery if in_flight == 0
+      return OutOfSpan::QueryFar unless fault > in_flight
+      (fault - in_flight) < OUT_OF_SPAN_FIELD_MAX ? OutOfSpan::DescriptorField : OutOfSpan::QueryFar
+    end
+
     def self.request : Nil
       @@requested = true
     end
@@ -342,8 +364,35 @@ module Gcry
         len = RawOut.append_hex(buf.to_unsafe, len, heap.heap_span_lo)
         len = RawOut.append(buf.to_unsafe, len, ", 0x")
         len = RawOut.append_hex(buf.to_unsafe, len, heap.heap_span_hi)
-        len = RawOut.append(buf.to_unsafe, len,
-          ") — never a gcry allocation, so a swept object is not the explanation\n")
+        # "Never a gcry allocation" is true of the *address*; "so a swept object
+        # is not the explanation" does not follow when the collector is inside
+        # the pthread stack-bounds query. There the address is a field of the
+        # descriptor some `pthread_t` points at, and that id was read out of a
+        # `Thread` object — one gcry may have reclaimed and reissued, in which
+        # case it no longer holds poison and reads as an ordinary value. Three
+        # control runs on 2026-08-20 printed exactly this line while faulting at
+        # the in-flight id + 0x418, i.e. the known use-after-free, and the line
+        # excluded the mechanism by name
+        # (`bench/log/linux/2026-08-20-dying-thread-holder/FINDINGS.md`).
+        inf = Platform.stack_bounds_in_flight
+        case out_of_span_reading(addr.address, inf)
+        in .descriptor_field?
+          len = RawOut.append(buf.to_unsafe, len, ") — never a gcry allocation itself, but it is ")
+          len = RawOut.append_u64(buf.to_unsafe, len, addr.address - inf)
+          len = RawOut.append(buf.to_unsafe, len,
+            " bytes past the in-flight thread id above: libc reading a field of the descriptor that " \
+            "id points at. The id came from a `Thread`'s @system_handle, and a `Thread` whose block " \
+            "was reclaimed and then reissued carries no poison — so a swept object is NOT excluded " \
+            "here, it is the leading reading\n")
+        in .query_far?
+          len = RawOut.append(buf.to_unsafe, len,
+            ") — never a gcry allocation. The collector is inside the stack-bounds query, so this is " \
+            "a read through a `pthread_t` that came out of a `Thread` object; a swept object is not " \
+            "excluded\n")
+        in .no_query?
+          len = RawOut.append(buf.to_unsafe, len,
+            ") — never a gcry allocation, so a swept object is not the explanation\n")
+        end
         RawOut.flush(buf.to_unsafe, len)
         return
       end

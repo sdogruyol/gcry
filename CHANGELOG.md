@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The crash reporter excluded the defect it was reporting.** A fault outside
+  the heap span printed "never a gcry allocation, so a swept object is not the
+  explanation" — in three control runs, two lines after naming the `pthread_t`
+  the collector was querying, and at exactly that id **+ `0x418`**. The address
+  is a field of the descriptor that id points at, the id came out of a
+  `Thread`'s `@system_handle`, and a reissued `Thread` block carries no poison,
+  so a swept object is the *leading* reading there rather than an excluded one.
+  The decision is now a pure function (`SegvReport.out_of_span_reading`) with
+  five cases in `spec/segv_report_spec.cr`, because the branch that matters can
+  only fire while libc is inside the query and no harness can enter it.
+
 - **The crash reporter named a free path from a reissued block's flags.**
   `SWEPT` is set beside `FREE` by the sweep and cleared when the block is handed
   out again, so on a reissued block those flags describe the reissue — and the

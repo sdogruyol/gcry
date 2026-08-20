@@ -116,9 +116,55 @@ rather than passing on a still-free one.
   say `TRUNCATED`. There may be holders it never reached, so "the only holders
   are on that stack" is a statement about 514 MiB and not about the address
   space. The message now quantifies what it never searched.
-- **No control batch.** 4/10 is higher than this gate's usual red rate. The arm
-  cannot have caused the missed mark — it runs *after* the mark and mutates
-  nothing — but the rate itself should not be quoted until ten reruns of the
-  same job without the arm are on the board.
 - The audit fires at most once per collection per arm, so a collection that
   killed more than one `Thread` reports one of them.
+
+## The control batch: the arm does not move the rate
+
+Ten reruns of the same job on **master** (`7a7dd05`, no arm), same runner, same
+afternoon: **3 of 10 failed**, all three the same defect — `pthread_stack_bounds`
+← `snapshot_pthread_stack_bounds` ← `stop_world`, faulting at
+`0xffe767000358`, `0xff10144000d8` and (with poison) `0xdeadff47f45ded28`.
+
+| batch | arm | red |
+|---|---|---|
+| PR `f3b9055` | `GCRY_THREAD_BLOCK_AUDIT=1` | 4/10 |
+| master `7a7dd05` | none | 3/10 |
+
+So this gate's red rate on this runner is ~30% either way and 4/10 is not the
+arm's doing — which was the only reading the first batch could not exclude by
+argument alone. What the arm changes is not the rate but what a red run *says*:
+the three control failures name a fault address and nothing about who held the
+object.
+
+## A third over-claim, from the control batch
+
+All three control failures printed:
+
+> `gcry: SIGSEGV at 0xffe767000358 — outside gcry's heap span […] — never a gcry
+> allocation, so a swept object is not the explanation`
+
+two lines after:
+
+> `gcry: the collector was inside the pthread stack-bounds query for thread
+> 0xffe766ffff40`
+
+`0xffe766ffff40 + 0x418 = 0xffe767000358`. The fault *is* a field of the
+descriptor that the in-flight `pthread_t` points at, that id came out of a
+`Thread`'s `@system_handle`, and a `Thread` whose block was reclaimed and then
+reissued carries no poison — so it reads as an ordinary value. The report was
+excluding, by name, the exact mechanism this file is about.
+
+Fixed: while a stack-bounds query is in flight, a fault a small fixed distance
+past the id being queried is named as a descriptor field and a swept object is
+called the *leading* reading rather than an excluded one. The decision is a pure
+function (`SegvReport.out_of_span_reading`) with five cases in
+`spec/segv_report_spec.cr` — including the two that must **not** be read as an
+offset into the descriptor, an address below the id and the id itself — because
+the branch that matters can only fire while libc is inside the query, which no
+harness can enter.
+
+That is three corrections to this reporter from one defect. The pattern in all
+three is the same: a state read *after* the event being explained (flags after a
+reissue, an address after libc's indexing, an exclusion made without asking what
+the collector was doing), presented as a fact about the event.
