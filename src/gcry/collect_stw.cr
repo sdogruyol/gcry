@@ -114,6 +114,13 @@ module Gcry
           Thread.unsafe_each do |thread|
             listed += 1
             Platform.unstage_thread(thread.to_unsafe.unsafe_as(UInt64))
+            # On the list, so the list is its root from here on: drop the one
+            # taken at `pthread_create` (src/gcry/thread_birth_root.cr).
+            # `@roots` directly — `@roots_lock` is already held by
+            # `stop_world_quiescing_roots` and it is not reentrant.
+            if rooted = ThreadBirthRoot.release(thread.to_unsafe.unsafe_as(UInt64))
+              @roots.delete(rooted)
+            end
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
           # Does the set about to be stopped account for every thread the

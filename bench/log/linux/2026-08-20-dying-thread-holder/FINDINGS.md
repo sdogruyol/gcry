@@ -395,3 +395,53 @@ That is three corrections to this reporter from one defect. The pattern in all
 three is the same: a state read *after* the event being explained (flags after a
 reissue, an address after libc's indexing, an exclusion made without asking what
 the collector was doing), presented as a fact about the event.
+
+## The fix, and why it touches nothing the collector does
+
+The window is between `pthread_create` returning and the new thread's own push
+onto `Thread.threads`. Three ways to close it were on the table: never give up
+in the pre-stop wait (a thread that dies before publishing then wedges the
+collector), snapshot and scan the staged thread's stack (`pthread_getattr_np` on
+an id whose thread may already be gone — the very call this defect faults in),
+or defer the collection on timeout.
+
+None of them is needed, because **the object is already in gcry's hands**.
+Crystal's `init_handle` calls
+
+```crystal
+GC.pthread_create(thread: pointerof(@system_handle), attr: …,
+                  start: ->Thread.thread_proc(Void*), arg: self.as(Void*))
+```
+
+— the `Thread` *is* the `arg` the hook is handed. `src/gcry/thread_birth_root.cr`
+roots it there and releases it in `stop_world`'s existing walk of Crystal's list,
+which is exactly the moment the list becomes its root. One `add_root` per thread
+created; nothing about the stopped world changes.
+
+### Gating a window that cannot be held open
+
+A real `Thread` publishes itself in microseconds, so no harness can hold it in
+the state the defect needs. The gate creates a **raw** pthread through the same
+hook with a plain heap block as `arg`: that thread never joins Crystal's list,
+so the block stays unrooted-except-by-the-fix for as long as the harness likes.
+
+| arm | victim | births armed |
+|---|---|---|
+| rooted | **survives**, contents intact | 2 |
+| `--noroot` (same records, roots nothing) | **dies** | 2 |
+| `GCRY_THREAD_BIRTH_ROOT=0` | **dies** | 0 |
+
+The twin is what makes the first row mean anything: identical bookkeeping,
+nothing rooted, and the block is collected. With the knob off the harness
+reports *the window is open* — the defect, reproduced deterministically and
+locally for the first time, in a harness rather than in one CI job in three.
+
+### And the fix's own first version deadlocked
+
+`release` called `heap.delete_root`, which takes `@roots_lock` — and
+`stop_world_quiescing_roots` takes that lock and holds it across the whole stop.
+It is a non-reentrant spinlock, so the first `GC.collect` never returned. The
+release now hands the pointer back and the caller, already inside the lock,
+mutates the set directly. Worth recording because the deadlock looked exactly
+like the hang this collector had in `pthread_getattr_np` two weeks ago and is a
+completely different thing.

@@ -428,6 +428,15 @@ jobs:
         run: |
           make thread-block-audit
 
+      # And the fix that window's report named: the `Thread` object is rooted
+      # from `pthread_create` until the thread publishes itself. The gate holds
+      # the window open with a raw pthread that never joins Crystal's list, and
+      # requires the block to die with the root off — so the survival is the
+      # root's doing and not the harness's.
+      - name: Thread-birth root
+        run: |
+          make thread-birth-root
+
       # The perf gates are floors far below tip, so a regression that lands
       # inside one is invisible (85% -> 70% clears all of them). The baseline
       # comparator closes that; this gates the comparator itself, which needs
@@ -817,6 +826,7 @@ jobs:
           make ivar-layout-roots
           make ec-queue-audit
           make thread-block-audit
+          make thread-birth-root
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same

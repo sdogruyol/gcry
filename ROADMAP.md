@@ -823,12 +823,27 @@ CI asymmetry that hid both.
       handle comparison is only consistent with it — glibc recycles `pthread_t`
       values, measured in this repo's own runs (one id across eight collections
       while the staged total went 4 → 11).
-      **Next is the fix, and it is a choice**: never give up (a thread that dies
-      before publishing must then not wedge the collector), snapshot and scan a
-      staged thread's stack so the window needs no wait at all, or defer the
-      collection when the wait times out. Two earlier attempts at this defect
-      changed collector behaviour and broke it, so whichever lands ships with an
-      A/B arm and a crash-rate measurement beside it.
+      **And the fix needs none of the three options that were on the table** —
+      not an unbounded wait, not scanning a staged thread's stack, not deferring
+      the collection. The object is already in gcry's hands: Crystal calls
+      `GC.pthread_create(…, arg: self.as(Void*))`, so the `Thread` *is* the
+      argument the hook is handed. `src/gcry/thread_birth_root.cr` roots it
+      there and releases it in `stop_world`'s existing walk once the thread is
+      on the list. One `add_root` per thread created, and nothing about the
+      stopped world changes — which is the point, because two earlier attempts
+      at this defect changed collector behaviour and broke it.
+      **Gated, and the window is now reproducible on demand.** A real `Thread`
+      publishes in microseconds, so `make thread-birth-root` holds the window
+      open with a **raw** pthread created through the same hook, which never
+      joins Crystal's list: rooted the block survives, and with the twin
+      (`GCRY_THREAD_BIRTH_NOROOT=1`, same records, roots nothing) or the knob off
+      it **dies** — the defect, local and deterministic for the first time.
+      **Left open and counted**: a thread that never publishes keeps its root for
+      the life of the process, and the interval *inside* `pthread_create` is
+      still uncovered (a trampoline on the new thread was tried for the staging
+      record and crashed 8 runs in 10).
+      **Next**: the crash-rate measurement on the runner where the defect
+      lives — the batches to beat are 4 of 20 with the arm and 3 of 10 without.
       **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
       catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
       quote.

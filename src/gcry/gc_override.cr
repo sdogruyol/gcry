@@ -21,6 +21,7 @@ module GC
     end
 
     Gcry::Platform.init_staging
+    Gcry::ThreadBirthRoot.init
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
     heap = Gcry.default_heap
@@ -703,6 +704,13 @@ module GC
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.
     heap.thread_census = true if env_flag_one?("GCRY_THREAD_CENSUS")
+    # Root the `Thread` object from `pthread_create` until the thread publishes
+    # itself (src/gcry/thread_birth_root.cr). **On** by default: it closes a
+    # use-after-free, and it is one `add_root` per thread created.
+    Gcry::ThreadBirthRoot.enabled = false if env_flag_zero?("GCRY_THREAD_BIRTH_ROOT")
+    # The twin: record every birth and root nothing, so a run that survives is
+    # not credited to the bookkeeping.
+    Gcry::ThreadBirthRoot.noroot = true if env_flag_one?("GCRY_THREAD_BIRTH_NOROOT")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #
@@ -1039,7 +1047,15 @@ module GC
     def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
       ret = LibC.pthread_create(thread, attr, start, arg)
       {% if flag?(:gc_none) %}
-        Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64)) if ret == 0
+        if ret == 0
+          Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64))
+          # Crystal passes the `Thread` object itself as `arg`
+          # (`crystal/system/unix/pthread.cr`: `arg: self.as(Void*)`), so the
+          # object whose only other holder is the new thread's unscanned stack
+          # is right here. Root it until the thread publishes itself
+          # (src/gcry/thread_birth_root.cr).
+          Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
+        end
       {% end %}
       ret
     end

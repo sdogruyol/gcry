@@ -101,6 +101,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `Thread` use-after-free is closed: the object is rooted from
+  `pthread_create` until the thread publishes itself.** Between the two, the
+  `Thread` is covered by no root — it is not on `Thread.threads` yet, so the
+  static root that is the list cannot reach it, and its only other holder is the
+  new thread's own stack, which gcry has no bounds for and never scans. The
+  pre-stop wait was supposed to cover the window and does, in 40 sightings
+  across 20 green CI runs; the two catches that crashed are the ones where it
+  **gave up** and stopped the world anyway, with the kernel reporting one more
+  thread than Crystal's list held.
+  The fix needs none of that machinery, because the object was already in
+  gcry's hands: Crystal calls `GC.pthread_create(…, arg: self.as(Void*))`, so
+  the `Thread` *is* the argument the hook is handed. It is rooted there and
+  released in `stop_world`'s walk once the thread is on the list — one
+  `add_root` per thread created, and no change to what the stopped world does,
+  which matters because two earlier attempts at this defect changed collector
+  behaviour and broke it. `GCRY_THREAD_BIRTH_ROOT=0` turns it off;
+  `GCRY_THREAD_BIRTH_NOROOT=1` records the same births and roots nothing.
+  Gated by `make thread-birth-root`, which holds the window open the only way it
+  can be held open — a **raw** pthread created through the same hook, which
+  never joins Crystal's list — and requires the block to survive rooted, and to
+  **die** in both the twin and the knob-off arms. The first version of the
+  release path deadlocked the collector: `stop_world` runs under `@roots_lock`
+  and it is not reentrant, so the release hands the pointer back and the caller
+  mutates the set directly.
+  Known and counted: a thread that never publishes keeps its root for the life
+  of the process (`ThreadBirthRoot.outstanding`), and the interval *inside*
+  `pthread_create` is still uncovered — closing that needs a trampoline on the
+  new thread, tried before and crashed 8 runs in 10.
+
 - **The crash reporter excluded the defect it was reporting.** A fault outside
   the heap span printed "never a gcry allocation, so a swept object is not the
   explanation" — in three control runs, two lines after naming the `pthread_t`
