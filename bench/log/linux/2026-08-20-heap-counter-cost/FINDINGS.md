@@ -66,9 +66,11 @@ paid for on ARM.
 
 ## What shipped
 
-The counters flip to atomic **when a second thread is created** —
-`GC.pthread_create` already runs there for the staging record and the birth
-root — which is before that thread can allocate. A single-threaded program keeps
+The counters flip to atomic **before `pthread_create` is called** — the hook is
+already there for the staging record and the birth root. Before, not after: the
+first version flipped on the way back out, which leaves a window in which the
+new thread is already allocating, and leaves the flag's visibility to that
+thread unordered. Setting it first is published by the thread creation itself. A single-threaded program keeps
 the plain path and pays nothing on either architecture; anything that can race
 keeps its counters. `GCRY_HEAP_COUNTERS_ATOMIC=0/1` pins an arm and survives the
 flip, which is what makes the two-directional gate possible at all.

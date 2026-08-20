@@ -13,9 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for those losses does not exist on x86_64.** `live_objects`, `total_bytes`
   and `bytes_since_gc` were updated with plain `set(get + n)` unless
   `heap_counters_atomic` was set — measured, four threads lose **5 723 of
-  1 200 000** increments. They now flip to atomic the moment a second thread is
-  created (`GC.pthread_create`, before that thread can allocate), so a
-  single-threaded program keeps the cheap path.
+  1 200 000** increments. They now flip to atomic in `GC.pthread_create`,
+  **before** the call rather than after it — flipping on the way out leaves a
+  window in which the new thread is already allocating, and leaves the flag's
+  visibility to it unordered, while setting it first is published by the thread
+  creation itself. A single-threaded program never reaches the hook and keeps
+  the cheap path.
   The comment that justified the losses said an atomic RMW would cost Kemal
   throughput. On x86_64 `Atomic#set` compiles to `mov; inc; xchg`, and `xchg` to
   memory is locked whether you ask or not — so the "cheap" path was already

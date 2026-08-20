@@ -1058,6 +1058,32 @@ module GC
     # doing that needs a trampoline on the new thread, which was tried and
     # crashed 8 runs in 10. The census reports what this placement leaves.
     def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
+      {% if flag?(:gc_none) %}
+        # **Before** the call, not after. A second thread is about to exist, and
+        # the allocation counters are plain get/set until told otherwise —
+        # `set(get + 1)` loses increments outright once two threads run it
+        # (src/gcry/invariant.cr measured the process heap's counter permanently
+        # behind in 3 runs of 40). Flipping after `pthread_create` returns
+        # leaves a window in which the new thread is already allocating, and
+        # leaves the flag's visibility to it unordered; setting it first is
+        # published by the thread creation itself. Single-threaded programs
+        # never reach here and pay nothing.
+        #
+        # What it costs, measured rather than assumed, because the comment on
+        # `heap_counters_atomic` said the opposite:
+        #   x86_64  `set(get + n)` is `mov; inc; xchg` — and `xchg` to memory is
+        #           locked whether you ask or not — against a single `lock incq`
+        #           for the atomic. The "cheap" path was never cheaper: three
+        #           arms interleaved and pinned, mins 55.69 / 55.47 / 56.13 ns
+        #           per allocation for plain / atomic / relaxed.
+        #   aarch64 the other way: `ldar; add; stlr` against an `ldaxr/stlxr`
+        #           retry loop (baseline codegen, no LSE). There the atomic path
+        #           is genuinely more work, which is why this flips on a second
+        #           thread rather than shipping on.
+        if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
+          h.heap_counters_atomic = true
+        end
+      {% end %}
       ret = LibC.pthread_create(thread, attr, start, arg)
       {% if flag?(:gc_none) %}
         if ret == 0
@@ -1068,29 +1094,6 @@ module GC
           # is right here. Root it until the thread publishes itself
           # (src/gcry/thread_birth_root.cr).
           Gcry::ThreadBirthRoot.arm(thread.value.unsafe_as(UInt64), arg)
-          # A second thread exists from here on, and the allocation counters are
-          # plain get/set until told otherwise — `set(get + 1)` loses increments
-          # outright once two threads run it (src/gcry/invariant.cr measured the
-          # process heap's counter permanently behind in 3 runs of 40). Flip
-          # them at the moment the second thread is created, which is before it
-          # can allocate: single-threaded programs never pay, and anything that
-          # can race keeps its counters.
-          #
-          # What it costs, measured rather than assumed, because the comment on
-          # `heap_counters_atomic` said the opposite:
-          #   x86_64  `set(get + n)` is `mov; inc; xchg` — and `xchg` to memory
-          #           is locked whether you ask or not — against a single
-          #           `lock incq` for the atomic. The "cheap" path was never
-          #           cheaper: 3 arms interleaved and pinned, mins 55.69 /
-          #           55.47 / 56.13 ns per allocation for plain / atomic /
-          #           relaxed, i.e. indistinguishable.
-          #   aarch64 the other way: `ldar; add; stlr` against an `ldaxr/stlxr`
-          #           retry loop (baseline codegen, no LSE). There the atomic
-          #           path is genuinely more work, which is why this flips on a
-          #           second thread rather than shipping on.
-          if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
-            h.heap_counters_atomic = true
-          end
         end
       {% end %}
       ret
