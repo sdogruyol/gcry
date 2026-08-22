@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`-Dgc_none` did not compile on x86_64 macOS, and had not for as long as the
+  shim existed.** `src/gcry/block.cr` defined `LibC::MAP_ANONYMOUS = MAP_ANON`
+  for every Darwin target, on the grounds that "Darwin only defines MAP_ANON" —
+  but Crystal's `x86_64-macosx-darwin` bindings define `MAP_ANONYMOUS`
+  themselves, and defining it again is a hard error: `already initialized
+  constant LibC::MAP_ANONYMOUS`. CI runs `macos-latest`, which is Apple Silicon,
+  so a platform the README and `shard.yml` both claim was never once compiled
+  for. The shim is now conditional on the constant actually being absent
+  (`LibC.has_constant?`), which is a test rather than a guess about which target
+  has it.
+
+- **The Darwin build broke on a method that only existed on Linux.**
+  `GCRY_STATIC_BSS_CAP`'s setter was added to `linux_roots.cr` and called
+  unconditionally from `GC.init`, so every Linux job passed and the macOS one
+  failed to compile — `undefined method 'bss_size_cap=' for
+  Gcry::Platform:Module`. `Gcry::Platform` is two files that have to present the
+  same surface, and nothing checked that until the last job in the matrix.
+  `make darwin-typecheck` now does, from Linux: `--cross-compile` runs the full
+  semantic analysis for both Darwin targets and stops before linking. It runs
+  early in the Linux job, and it is what found the `MAP_ANONYMOUS` collision
+  above. Broken on purpose and observed red: removing the Darwin stub reproduces
+  the runner's own line.
+
 - **A full staging table threw away the birth it had just been handed — the
   newest one, which is the thread actually inside the window the table exists
   to see.** `Platform.stage_thread` records a thread from the moment
