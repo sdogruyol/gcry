@@ -87,13 +87,23 @@ armed_suspend = run_child(self_path, {
   "GCRY_STW_TEST_SUSPEND_STALL_MS" => STALL_MS.to_s,
 })
 
+# And the report that runs *inside* the suspend wait rather than outside it: it
+# is the only one that can ask whether the thread being waited for is still
+# there. Fired by lowering its spin threshold, since arranging a thread that
+# genuinely never answers is the defect itself.
+armed_inspin = run_child(self_path, {
+  "GCRY_STW_WATCHDOG_MS"     => THRESHOLD_MS.to_s,
+  "GCRY_SUSPEND_STALL_SPINS" => "1",
+})
+
 record["armed+stalled"] = armed_stalled
 record["armed+suspend"] = armed_suspend
+record["armed+in-spin"] = armed_inspin
 record["armed+quiet"] = armed_quiet
 record["unarmed+stalled"] = unarmed_stalled
 
 record.each do |name, stderr_text|
-  first = stderr_text.lines.find(&.includes?("STOP-THE-WORLD"))
+  first = stderr_text.lines.find { |l| l.includes?("STOP-THE-WORLD") || l.includes?("SUSPEND STALLED") }
   puts "  %-16s %s" % [name, first ? first.strip : "(silent)"]
 end
 puts ""
@@ -141,6 +151,17 @@ if m = armed_suspend.match(/(\d+) of (\d+) already have/)
   end
 else
   failures << "the suspend report carried no acknowledged/expected count"
+end
+
+unless armed_inspin.includes?("SUSPEND STALLED on thread 0x")
+  failures << "the in-spin report never fired with its threshold at one spin — the line that " \
+              "names the thread a stop is waiting for is unproven"
+end
+# With every thread healthy the handle must read live; the other branch is the
+# defect and cannot be arranged here.
+if armed_inspin.includes?("SUSPEND STALLED") && !armed_inspin.includes?("the handle is live")
+  failures << "the in-spin report fired but could not say whether the handle was live: " \
+              "#{armed_inspin.lines.find(&.includes?("SUSPEND STALLED"))}"
 end
 
 if armed_quiet.includes?("STOP-THE-WORLD")

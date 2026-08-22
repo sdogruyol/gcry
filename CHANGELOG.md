@@ -40,6 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The suspend wait now asks whether the thread it is waiting for still
+  exists.** The watchdog says `phase=suspend` and names the thread from outside;
+  what it cannot ask is the question that would settle this — is that
+  `pthread_t` still a live thread? The wait now asks it from the inside, once
+  per stop, after about a second of spinning:
+  `SUSPEND STALLED on thread 0x… — n of m acknowledged. the handle is live
+  (pthread_kill 0 → 0)`, or `pthread_kill(0) → 3 ESRCH: the handle names no live
+  thread`. ESRCH is what a `Thread` object that was swept and whose handle was
+  reissued would look like from here — the open use-after-free lives on the same
+  runner as this hang, and nothing has been able to connect or separate them.
+  Armed only when the STW watchdog is (`GCRY_STW_WATCHDOG_MS`), because asking
+  libc about a handle that may have come out of a freed object can itself fault:
+  a fault there names the defect, while a hang names nothing, and a hang is what
+  six aarch64 jobs have produced. `GCRY_SUSPEND_STALL_SPINS` lowers the
+  threshold, and `make stw-watchdog` gained an `armed+in-spin` arm that fires it
+  at one spin and requires both the line and its verdict — arranging a thread
+  that genuinely never answers is the defect itself, so the report is proven on
+  a healthy one.
+
 - **`make find-block-race` — a rate for the open `find_block` crash, and the
   arm that says it is not the harness.** Four threads and 200 collections, with
   one difference between the arms: whether the threads are inside `find_block`.

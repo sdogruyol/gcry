@@ -890,7 +890,18 @@ CI asymmetry that hid both.
       What is still open: why that thread does not acknowledge. Candidates worth
       separating are a lost signal, a thread caught mid-start or mid-exit, and a
       handler that cannot run — the id and the `n of m` count are what will tell
-      them apart.
+      them apart. The wait now also asks `pthread_kill(id, 0)` after about a
+      second and prints whether the handle names a live thread, which is the one
+      question that separates "the signal was lost" from "the handle came out of
+      a freed `Thread`" — the open use-after-free is on this same runner.
+      **Not fixed and deliberately so**: the obvious symmetry is to retry the
+      suspend signal the way `start_world` retries the resume, and it is not
+      safe. A redundant `SIG_RESUME` runs an empty handler; a redundant
+      `SIG_SUSPEND` stays pending while the thread is inside its own handler and
+      is delivered *after* it resumes, suspending it again with nobody waiting.
+      Doing it properly needs a per-thread stop epoch so the handler can ignore a
+      signal it has already served, and that is a change to the stopped world's
+      protocol — which is what the last two attempts at this family got wrong.
       Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
       print how many fibers arrived, how many are still parked on the context's
       global queue and what the audit had counted (`--stall` is the positive
