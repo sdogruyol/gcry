@@ -1343,8 +1343,13 @@ module Gcry
           @index_cache_oob &+= 1
           @index_bad_last = idx.to_u64
         end
-        cached = (@chunk_index + idx).value
+        arr = @chunk_index
+        cached = (arr + idx).value
         if @index_audit && !plausible_chunk?(cached)
+          now = @chunk_index
+          @index_bad_array = arr.address
+          @index_bad_array_now = now.address
+          @index_bad_array_moved &+= 1 if now != arr
           # Counted **and refused**. Returning it is what crashes the caller at
           # `ChunkHeader.large?`, and a process that dies there never gets to
           # say which path produced the pointer. Under the audit knob the

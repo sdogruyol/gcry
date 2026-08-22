@@ -408,6 +408,13 @@ module Gcry
     # The cache path returns `@chunk_index[@last_chunk_idx]` without checking
     # that the index is still inside the array.
     getter index_cache_oob : UInt64 = 0_u64
+    # The array the bad read came out of, and the array `@chunk_index` names
+    # immediately afterwards. Different values would mean the index was
+    # reallocated between the load and its use — which `@index_lock` does not
+    # prevent, because a suspend does not care that it is held.
+    getter index_bad_array : UInt64 = 0_u64
+    getter index_bad_array_now : UInt64 = 0_u64
+    getter index_bad_array_moved : UInt64 = 0_u64
     # EC1 post-STW sweep/flush: block SYSMON map_chunk while `@chunks` is rebuilt
     # and empties are queued for munmap (same cooperative spin as STW).
     @block_other_heap = false

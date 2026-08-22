@@ -108,14 +108,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock, with no unlocked mutator reads anywhere — and the value is the same
   small constant every time, which is what a freed libc allocation reads like,
   not what any writer here puts in that array.
-  The reading that fits, stated as the inference it is: `(@chunk_index +
-  idx).value` loads the array pointer, and a thread suspended by STW between
-  that load and its use resumes against an array that `index_ensure_cap` has
-  since reallocated — holding `@index_lock` does not help, because the suspend
-  does not care that it is held. The same fact has a second consequence worth
-  separating: a mutator frozen while holding `@index_lock` leaves the sweep's
-  own `index_insert` / `index_remove` waiting on it, which is a deadlock and not
-  a crash.
+  The reading that fitted — a thread suspended between loading `@chunk_index`
+  and using it, resuming against an array `index_ensure_cap` had reallocated —
+  **is wrong, and was tested rather than argued away**: the audit records the
+  array the bad read came out of and the array `@chunk_index` names immediately
+  afterwards, and it is `moved=0`, `arr == now`, in every catch. What is left is
+  narrower: a stable array, an index inside it, and the same constant in the
+  slot. Either something writes into the live index, or a slot below
+  `@chunk_index_count` was never written — `index_ensure_cap` reallocates
+  without zeroing.
+  One observation survives independently: a mutator frozen while holding
+  `@index_lock` leaves the sweep's own `index_insert` / `index_remove` waiting
+  on it, which is a deadlock rather than a crash, and is worth testing against
+  the aarch64 hang.
   **Ruled out, each by measurement**: the `@world_stopped` window closed above
   (same rate with the fix and with `GCRY_STW_LATE_CLEAR=1` restoring the old
   ordering — 22 of 25 against 13 of 25 — and zero foreign unlocked reads with

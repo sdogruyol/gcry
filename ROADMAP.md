@@ -945,14 +945,21 @@ CI asymmetry that hid both.
       cached index inside the array, under the lock, and the value is the same
       small constant every time — the shape of freed libc memory, not of
       anything a writer here stores.
-      **The inference, not yet a measurement**: `(@chunk_index + idx).value`
-      loads the array pointer, and a thread suspended by STW between that load
-      and its use resumes against an array `index_ensure_cap` has reallocated.
-      `@index_lock` does not protect against this, because a suspend does not
-      care that it is held — and the same fact predicts a second symptom that is
-      a deadlock rather than a crash: a mutator frozen holding `@index_lock`
-      leaves the sweep's own `index_insert` / `index_remove` spinning on it.
-      That is worth testing against the aarch64 hang above.
+      **The stale-array reading was tested and is wrong.** It said
+      `(@chunk_index + idx).value` loads the array pointer, the thread is
+      suspended, `index_ensure_cap` reallocates, and it resumes against a freed
+      array. The audit now records the array the bad read came out of and the
+      array `@chunk_index` names immediately afterwards: **`moved=0`** in every
+      catch, `arr == now`. The array does not move.
+      So what is left is narrower and stranger: a stable array, an index inside
+      it, and the same small constant in the slot. Either something writes into
+      the live index, or a slot inside `@chunk_index_count` was never written.
+      The second is worth checking first — `index_ensure_cap` reallocates without
+      zeroing, and only `index_insert` fills what it added.
+      The suspend-while-holding-`@index_lock` observation stands on its own and
+      predicts a *deadlock* rather than a crash: a mutator frozen holding it
+      leaves the sweep's `index_insert` / `index_remove` spinning. Worth testing
+      against the aarch64 hang above.
       **And CI split the two arms, which says they are not one defect.** With
       the guard in, on both architectures: `live` **0 of 3** crashed while
       reporting `cache_bad=6` (x86_64) and `cache_bad=1` (aarch64) — so the
