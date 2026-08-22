@@ -953,10 +953,19 @@ CI asymmetry that hid both.
       a deadlock rather than a crash: a mutator frozen holding `@index_lock`
       leaves the sweep's own `index_insert` / `index_remove` spinning on it.
       That is worth testing against the aarch64 hang above.
+      **And CI split the two arms, which says they are not one defect.** With
+      the guard in, on both architectures: `live` **0 of 3** crashed while
+      reporting `cache_bad=6` (x86_64) and `cache_bad=1` (aarch64) — so the
+      cache path fires on both and the refusal catches it — but `realloc`
+      **3 of 3** crashed anyway. Whatever kills `GC.realloc` is therefore *not*
+      the returned chunk, and the next thing to look at is its own bookkeeping:
+      `Heap#realloc` takes and releases a root around the old block, and
+      `Roots::Set` is a `LibC.malloc` linked list with no lock of its own.
       **Next**: confirm the stale-array reading directly (record the array
-      pointer alongside the index and compare after resume), then decide the
-      fix — the candidates are making the index immortal-and-append-only so it
-      is never freed, or making `@index_lock` STW-aware.
+      pointer alongside the index and compare after resume); separately, find
+      what `realloc` corrupts. Fix candidates for the first are an
+      immortal, append-only index that is never freed, or an STW-aware
+      `@index_lock`.
       `make find-block-race` samples the rate per arm and per architecture and
       does not gate.
 

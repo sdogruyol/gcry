@@ -111,7 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero violations in every run that survives); and anything landed today, since
   it reproduces at `daa994b` in 6 runs of 8.
   Not a gate. The defect is open, so it reports and exits 0, on x86_64 and
-  aarch64, for the same reason `thread-uaf-sample` does.
+  aarch64, for the same reason `thread-uaf-sample` does — and its first CI run
+  already earned its place: with the audit refusing impossible chunks, `live`
+  went **0 of 3** on both architectures while still reporting `cache_bad` 6 and
+  1, and `realloc` still crashed **3 of 3**. So the two arms are not one defect:
+  whatever kills `GC.realloc` is not the chunk the cache returns.
 
 - **The dying-type audit called live objects dying on every minor collection.**
   It walked every used block after the mark and reported each one of the watched
