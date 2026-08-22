@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A Crystal program with more than 1 MiB of static data had every global root
+  dropped.** gcry finds a program's BSS in `/proc/self/maps` by adjacency — the
+  anonymous RW mapping that begins exactly where the executable's file-backed RW
+  `.data` ended — and then required it to be **smaller than 1 MiB**. Above that
+  the whole BSS was refused as a root range, so every class variable and every
+  constant slot holding a heap reference was invisible to the mark and was
+  swept. It reproduces in twenty lines: an 8 MiB static class variable, one
+  `GC.malloc` stored into it, two collections, and the process dies inside
+  `IO#encoder` — because `STDERR`, a constant living in that BSS, had been
+  collected and **finalized**, which closes fd 2. The block does not merely get
+  freed: its chunk goes back to the OS, so reading the payload afterwards faults
+  with `Cannot access memory`. That the failure is loud is luck; what the
+  collector did was free reachable objects.
+  The condition was also inverted with respect to the reason written above it.
+  That comment says gcry's own large objects are anonymous and **under** 1 MiB
+  and that caching one and scanning it after `munmap` is a SIGSEGV — but
+  `< 1 MiB` *accepts* exactly that band and rejects the sizes a gcry large
+  object cannot have. What keeps gcry's mappings out is the adjacency test,
+  which an unhinted `mmap` cannot satisfy, backed by
+  `each_static_range_excluding_heap`, which subtracts gcry's chunks from every
+  range the parser yields and exists for precisely this case.
+  **Removing the cap alone would only have moved the hole**, because
+  `Roots.scan_range` refuses any range longer than `MAX_SCAN_BYTES` (64 MiB) —
+  silently, until now. Static ranges go through a new `scan_range_chunked`, and
+  the refusal is counted (`Gcry::Roots.oversize_skips`) so nothing can skip a
+  root range without saying so again.
+  `make static-bss-roots` gates it with two binaries and four arms: 8 MiB of
+  BSS clears the parser cap, 96 MiB clears `MAX_SCAN_BYTES` and can only pass
+  through the chunked scan, and each is run again under the new
+  `GCRY_STATIC_BSS_CAP=1`, which restores the old refusal and requires the same
+  block to **die**. It does, both sizes, `live=false` with the static slot still
+  holding the address. Each arm measures its own BSS from `/proc/self/maps`
+  first, so an arm that never crossed its threshold fails instead of passing
+  quietly, and the verdict goes out through a duplicated fd because the arm
+  under test closes fd 2.
+  **Unmeasured and worth stating**: any program this affected was collecting
+  objects it should have retained, so its RSS and pause numbers were not
+  measuring the same collector as a correct run. The published fat-app figures
+  may move if that app's BSS is over 1 MiB; nothing here re-cuts them.
+
 - **The pthread stack-bounds snapshot stopped at 64 threads, and the counters
   built to notice that reported full coverage.** `snapshot_pthread_stack_bounds`
   records each thread's stack range before the suspend signals go out, and the

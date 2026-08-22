@@ -870,6 +870,25 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
+- [x] **The BSS stopped being a root range above 1 MiB — closed 2026-08-22.**
+      The maps parser accepted the executable's BSS only if the mapping was
+      under 1 MiB, so a program with more static data than that had every class
+      variable and constant slot dropped from the root set. Twenty lines
+      reproduce it: an 8 MiB static array, a block stored in it, two
+      collections, and the process dies in `IO#encoder` because `STDERR` was
+      collected and finalized — fd 2 closed by the collector. The size test was
+      also inverted with respect to its own rationale; adjacency to the
+      executable's `.data` is what excludes gcry's own anonymous mappings, and
+      `each_static_range_excluding_heap` is the second line of defence.
+      Removing the cap alone would have moved the hole to `MAX_SCAN_BYTES`,
+      where a >64 MiB range was skipped with nothing counted, so static ranges
+      are chunked now and the refusal is counted. Gated by
+      `make static-bss-roots` at both thresholds, with `GCRY_STATIC_BSS_CAP=1`
+      as the red arm. **Open**: what this did to the numbers. Any affected
+      program was freeing objects it should have kept, so its RSS and pause
+      figures were not the collector's; the fat-app cuts want re-running if that
+      binary's BSS is over 1 MiB.
+
 - [x] **The pthread stack-bounds snapshot stopped at 64 threads — closed
       2026-08-22.** The table the STW scan looks thread stack ranges up in was a
       fixed 64 entries, so a process with a longer thread list bounded the first
