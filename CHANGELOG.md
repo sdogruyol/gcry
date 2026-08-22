@@ -38,17 +38,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **not** a reproduction: the CI crash has never been reproduced locally, and
   whether this was its cause will show as the crash not coming back.
 
-### Changed
+### Added
 
-- **Open, and separated on purpose**: hammering `Heap#live?` from four threads
-  while collections run faults in `find_block` on a garbage chunk pointer
-  (`0x91`, `0xa1`) — and it does so at the **same rate with the fix and
-  without it** (22 of 25 runs against 13 of 25), so it is not the ordering above
-  and must not be folded into it. It also needs a rate no real program has: at
-  16 lookups per iteration with a 50 µs nap, 15 runs of each arm are clean. It
-  may be a harness asking `find_block` about an address whose chunk the sweep is
-  releasing, which is a question a mutator does not otherwise ask; it may be a
-  defect. It is written down rather than resolved.
+- **The env reference had drifted by 33 knobs, and now cannot.**
+  `docs/HARDENING.md` is the only place a user can find out what a `GCRY_*`
+  knob does, and it was missing everything added in v0.20.0 —
+  `GCRY_HEAP_COUNTERS_ATOMIC`, `GCRY_THREAD_BIRTH_ROOT` and its twin, the
+  birth-grace controls, the dead- and pooled-stack root arms, the scrub audit
+  and its overshoot, `GCRY_POST_MARK_SPIN`, the mostly-empty family — and
+  everything added on 2026-08-22. All 33 are documented now, each with the
+  measurement that put it there.
+  `make knob-doc-check` keeps it that way: every `GCRY_*` the source reads must
+  have a row, and CI runs it. Broken on purpose and observed red. That is the
+  failure mode a reference has — going stale breaks nothing, so nothing says so,
+  which is the same shape as every silent degradation this release found.
+
+- **The suspend wait now asks whether the thread it is waiting for still
+  exists.** The watchdog says `phase=suspend` and names the thread from outside;
+  what it cannot ask is the question that would settle this — is that
+  `pthread_t` still a live thread? The wait now asks it from the inside, once
+  per stop, after about a second of spinning:
+  `SUSPEND STALLED on thread 0x… — n of m acknowledged. the handle is live
+  (pthread_kill 0 → 0)`, or `pthread_kill(0) → 3 ESRCH: the handle names no live
+  thread`. ESRCH is what a `Thread` object that was swept and whose handle was
+  reissued would look like from here — the open use-after-free lives on the same
+  runner as this hang, and nothing has been able to connect or separate them.
+  Armed only when the STW watchdog is (`GCRY_STW_WATCHDOG_MS`), because asking
+  libc about a handle that may have come out of a freed object can itself fault:
+  a fault there names the defect, while a hang names nothing, and a hang is what
+  six aarch64 jobs have produced. `GCRY_SUSPEND_STALL_SPINS` lowers the
+  threshold — read at init like every other knob, and **not** as a constant with
+  an `ENV` lookup in it, which is how the first version of this shipped: Crystal
+  evaluates a constant with a runtime initializer lazily at first use, that
+  first use is inside `stop_world`, and `ENV[]?` allocates. `make rss-leak`
+  caught it in one CI run at **120.75% heap growth against a 15% limit**, which
+  is exactly what that gate is for. `make stw-watchdog` gained an
+  `armed+in-spin` arm that fires the report at one spin and requires both the
+  line and its verdict — arranging a thread
+  that genuinely never answers is the defect itself, so the report is proven on
+  a healthy one.
+
+- **`make find-block-race` — a rate for the open `find_block` crash, and the
+  arm that says it is not the harness.** Four threads and 200 collections, with
+  one difference between the arms: whether the threads are inside `find_block`.
+
+  | arm | what the threads do | crashed |
+  |-----|---------------------|--------:|
+  | `alloc` | 256 `GC.malloc` per iteration | **0 of 8** |
+  | `idle` | `Intrinsics.pause` | **0 of 8** |
+  | `live` | 256 `Heap#live?` per iteration | **5 of 8** |
+  | `realloc` | 256 `GC.realloc` per iteration | **5 of 8** |
+
+  So it is not allocation rate and not thread count: it needs a mutator inside
+  `find_block`. The first version of this note guessed the harness was misusing
+  `Heap#live?` by asking about an address whose chunk the sweep was releasing —
+  the `realloc` arm retires that. `GC.realloc` is a supported public API, it
+  reaches `find_block` by a different route, and it crashes alike; the probe is
+  rooted in both.
+  The crash is always the same shape — `ChunkHeader.large?` on a pointer that
+  cannot be a chunk (`0x91`, `0xa1`) — which is the same function the
+  unattributed TLAB+nursery crash faults in, and TLAB is precisely what puts
+  `find_block` on a real program's allocation fast path.
+  **And the path is now named.** `GCRY_INDEX_AUDIT=1` no longer just counts an
+  impossible chunk — it **refuses** it and returns nil, so the run survives its
+  own answer instead of dying at `ChunkHeader.large?` before it can report. Six
+  runs, every one of which used to crash: `cache_bad=1..5`, `search_bad=0`,
+  `index_cache_oob=0`, `last=0x91`, `index_unlocked_foreign=0`. So it is the
+  **last-chunk cache** path, with the cached index inside the array, under the
+  lock, with no unlocked mutator reads anywhere — and the value is the same
+  small constant every time, which is what a freed libc allocation reads like,
+  not what any writer here puts in that array.
+  The reading that fitted — a thread suspended between loading `@chunk_index`
+  and using it, resuming against an array `index_ensure_cap` had reallocated —
+  **is wrong, and was tested rather than argued away**: the audit records the
+  array the bad read came out of and the array `@chunk_index` names immediately
+  afterwards, and it is `moved=0`, `arr == now`, in every catch. What is left is
+  narrower: a stable array, an index inside it, and the same constant in the
+  slot. Either something writes into the live index, or a slot below
+  `@chunk_index_count` was never written — `index_ensure_cap` reallocates
+  without zeroing.
+  One observation survives independently: a mutator frozen while holding
+  `@index_lock` leaves the sweep's own `index_insert` / `index_remove` waiting
+  on it, which is a deadlock rather than a crash, and is worth testing against
+  the aarch64 hang.
+  **Ruled out, each by measurement**: the `@world_stopped` window closed above
+  (same rate with the fix and with `GCRY_STW_LATE_CLEAR=1` restoring the old
+  ordering — 22 of 25 against 13 of 25 — and zero foreign unlocked reads with
+  it in); the chunk index's own invariants (`GCRY_INDEX_AUDIT=1` now validates
+  every chunk both paths return and checks the cached slot is inside the array —
+  zero violations in every run that survives); and anything landed today, since
+  it reproduces at `daa994b` in 6 runs of 8.
+  Not a gate. The defect is open, so it reports and exits 0, on x86_64 and
+  aarch64, for the same reason `thread-uaf-sample` does — and its first CI run
+  already earned its place: with the audit refusing impossible chunks, `live`
+  went **0 of 3** on both architectures while still reporting `cache_bad` 6 and
+  1, and `realloc` still crashed **3 of 3**. So the two arms are not one defect:
+  whatever kills `GC.realloc` is not the chunk the cache returns.
 
 - **The dying-type audit called live objects dying on every minor collection.**
   It walked every used block after the mark and reported each one of the watched

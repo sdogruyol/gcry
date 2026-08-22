@@ -890,7 +890,18 @@ CI asymmetry that hid both.
       What is still open: why that thread does not acknowledge. Candidates worth
       separating are a lost signal, a thread caught mid-start or mid-exit, and a
       handler that cannot run — the id and the `n of m` count are what will tell
-      them apart.
+      them apart. The wait now also asks `pthread_kill(id, 0)` after about a
+      second and prints whether the handle names a live thread, which is the one
+      question that separates "the signal was lost" from "the handle came out of
+      a freed `Thread`" — the open use-after-free is on this same runner.
+      **Not fixed and deliberately so**: the obvious symmetry is to retry the
+      suspend signal the way `start_world` retries the resume, and it is not
+      safe. A redundant `SIG_RESUME` runs an empty handler; a redundant
+      `SIG_SUSPEND` stays pending while the thread is inside its own handler and
+      is delivered *after* it resumes, suspending it again with nobody waiting.
+      Doing it properly needs a per-thread stop epoch so the handler can ignore a
+      signal it has already served, and that is a change to the stopped world's
+      protocol — which is what the last two attempts at this family got wrong.
       Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
       print how many fibers arrived, how many are still parked on the context's
       global queue and what the audit had counted (`--stall` is the positive
@@ -914,14 +925,56 @@ CI asymmetry that hid both.
       mechanism fits and is closed, but nothing here reproduces that crash and
       only its absence from CI will say whether this was it.
 
-- [ ] **Hammering `Heap#live?` from mutator threads faults in `find_block`.**
-      Four threads at 256 lookups per iteration against 200 collections: 22 of
-      25 runs die on a garbage `ChunkHeader*`, and **22 of 25 with the ordering
-      fix above and 13 of 25 without it**, so it is a different thing and not
-      that. At a realistic rate (16 lookups and a 50 µs nap) 15 runs of each arm
-      are clean. Unresolved which it is: a harness asking `find_block` about an
-      address whose chunk the sweep is releasing — a question a mutator does not
-      otherwise ask — or a real concurrency hole on the lazy-sweep path.
+- [ ] **`find_block` from a mutator thread, while collections run, crashes —
+      and it is very likely the same defect as the item below.** Four threads,
+      200 collections: `alloc` 0 of 8, `idle` 0 of 8, `live` **5 of 8**,
+      `realloc` **5 of 8**. It needs a mutator inside `find_block`, and
+      `GC.realloc` — a supported public API reaching it by a different route —
+      crashes alike, which retires the "the harness is misusing `live?`"
+      reading the first version of this item carried. Always the same shape:
+      `ChunkHeader.large?` on a pointer that cannot be a chunk.
+      **Ruled out by measurement**: the `@world_stopped` window (same rate with
+      and without the fix, zero foreign unlocked reads with it in), the chunk
+      index's own invariants (`GCRY_INDEX_AUDIT=1` validates both return paths
+      and the cached slot — zero violations in surviving runs), and anything
+      landed on 2026-08-22 (6 of 8 at `daa994b`).
+      **The path is named.** With `GCRY_INDEX_AUDIT=1` now *refusing* an
+      impossible chunk instead of returning it, the runs that used to crash
+      survive and report: `cache_bad=1..5`, `search_bad=0`, `cache_oob=0`,
+      `last=0x91`, `foreign=0`. The **last-chunk cache** produces it, with the
+      cached index inside the array, under the lock, and the value is the same
+      small constant every time — the shape of freed libc memory, not of
+      anything a writer here stores.
+      **The stale-array reading was tested and is wrong.** It said
+      `(@chunk_index + idx).value` loads the array pointer, the thread is
+      suspended, `index_ensure_cap` reallocates, and it resumes against a freed
+      array. The audit now records the array the bad read came out of and the
+      array `@chunk_index` names immediately afterwards: **`moved=0`** in every
+      catch, `arr == now`. The array does not move.
+      So what is left is narrower and stranger: a stable array, an index inside
+      it, and the same small constant in the slot. Either something writes into
+      the live index, or a slot inside `@chunk_index_count` was never written.
+      The second is worth checking first — `index_ensure_cap` reallocates without
+      zeroing, and only `index_insert` fills what it added.
+      The suspend-while-holding-`@index_lock` observation stands on its own and
+      predicts a *deadlock* rather than a crash: a mutator frozen holding it
+      leaves the sweep's `index_insert` / `index_remove` spinning. Worth testing
+      against the aarch64 hang above.
+      **And CI split the two arms, which says they are not one defect.** With
+      the guard in, on both architectures: `live` **0 of 3** crashed while
+      reporting `cache_bad=6` (x86_64) and `cache_bad=1` (aarch64) — so the
+      cache path fires on both and the refusal catches it — but `realloc`
+      **3 of 3** crashed anyway. Whatever kills `GC.realloc` is therefore *not*
+      the returned chunk, and the next thing to look at is its own bookkeeping:
+      `Heap#realloc` takes and releases a root around the old block, and
+      `Roots::Set` is a `LibC.malloc` linked list with no lock of its own.
+      **Next**: confirm the stale-array reading directly (record the array
+      pointer alongside the index and compare after resume); separately, find
+      what `realloc` corrupts. Fix candidates for the first are an
+      immortal, append-only index that is never freed, or an STW-aware
+      `@index_lock`.
+      `make find-block-race` samples the rate per arm and per architecture and
+      does not gate.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be

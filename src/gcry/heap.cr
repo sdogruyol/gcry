@@ -1323,6 +1323,14 @@ module Gcry
       end
     end
 
+    # Cheap sanity, not a proof: a real chunk header lives inside the heap's own
+    # address range and is page-aligned by construction.
+    private def plausible_chunk?(chunk : ChunkHeader*) : Bool
+      a = chunk.address
+      return false if a == 0 || (a & 0x7) != 0
+      a >= @heap_min && a < @heap_max
+    end
+
     private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
@@ -1330,7 +1338,27 @@ module Gcry
       # that produced the previous result. Range check first (cheaper than
       # even a L1 index hit) before touching the sorted index.
       if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
-        return (@chunk_index + @last_chunk_idx).value
+        idx = @last_chunk_idx
+        if @index_audit && idx >= @chunk_index_count
+          @index_cache_oob &+= 1
+          @index_bad_last = idx.to_u64
+        end
+        arr = @chunk_index
+        cached = (arr + idx).value
+        if @index_audit && !plausible_chunk?(cached)
+          now = @chunk_index
+          @index_bad_array = arr.address
+          @index_bad_array_now = now.address
+          @index_bad_array_moved &+= 1 if now != arr
+          # Counted **and refused**. Returning it is what crashes the caller at
+          # `ChunkHeader.large?`, and a process that dies there never gets to
+          # say which path produced the pointer. Under the audit knob the
+          # question survives its own answer; the default path is unchanged.
+          @index_cache_bad &+= 1
+          @index_bad_last = cached.address
+          return nil
+        end
+        return cached
       end
 
       lo = 0
@@ -1345,6 +1373,11 @@ module Gcry
         elsif addr >= finish
           lo = mid + 1
         else
+          if @index_audit && !plausible_chunk?(chunk)
+            @index_search_bad &+= 1
+            @index_bad_last = chunk.address
+            return nil
+          end
           @last_chunk_idx = mid
           @last_chunk_lo = base
           @last_chunk_hi = finish

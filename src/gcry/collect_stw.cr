@@ -11,6 +11,12 @@
 #   **all** other threads before touching the heap, so there is no concurrent
 #   mutation during GC.  The RWLock is thus redundant on Darwin — make it a no-op.
 
+# `pthread_kill(id, 0)` asks whether a handle still names a live thread without
+# sending anything. Crystal does not bind it.
+lib LibStwProbe
+  fun pthread_kill(thread : LibC::PthreadT, sig : LibC::Int) : LibC::Int
+end
+
 module Gcry
   class Heap
     def lock_read : Nil
@@ -156,12 +162,19 @@ module Gcry
             end
           end
           acked = 0
+          @suspend_stall_reported = false
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
-            StwWatchdog.note_suspend(expected, acked, thread.to_unsafe.unsafe_as(UInt64))
+            id = thread.to_unsafe.unsafe_as(UInt64)
+            StwWatchdog.note_suspend(expected, acked, id)
+            spins = 0_u64
             until thread.@suspended.get
               Intrinsics.pause
+              spins &+= 1
+              if spins == @suspend_stall_spins
+                report_stuck_suspend(thread, id, expected, acked)
+              end
             end
             acked += 1
           end
@@ -175,6 +188,51 @@ module Gcry
           raise ex
         end
       {% end %}
+    end
+
+    # Roughly a second of `pause` on either arch. The watchdog reports the stall
+    # from outside at 10 s; this one runs *inside* the spin, which is the only
+    # place that can ask the question the watchdog cannot: is the thread we are
+    # waiting for still there?
+    # Roughly a second of `pause` on either arch, and a **property** rather than
+    # a constant with an `ENV` lookup in it. That first version cost a 120%
+    # heap-growth regression on `make rss-leak`: a Crystal constant with a
+    # runtime initializer is evaluated lazily at first use, and the first use of
+    # this one is inside `stop_world` — so `ENV[]?` allocated a `String` with
+    # the world stopped, which is the one thing this collector must never do.
+    # `GCRY_SUSPEND_STALL_SPINS` is read at init like every other knob.
+    property suspend_stall_spins : UInt64 = 200_000_000_u64
+
+    @suspend_stall_reported = false
+
+    # Called once per stop, from inside the suspend wait, and only when the
+    # watchdog is armed — this asks libc about a `pthread_t` the collector has
+    # been unable to get an answer from, and if that handle came out of a freed
+    # `Thread` (the open use-after-free on this same runner) the question can
+    # fault. A fault here names the defect; a hang names nothing, and a hang is
+    # what six aarch64 jobs have produced.
+    private def report_stuck_suspend(thread : Thread, id : UInt64, expected : Int32, acked : Int32) : Nil
+      return unless StwWatchdog.armed?
+      return if @suspend_stall_reported
+      @suspend_stall_reported = true
+
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: SUSPEND STALLED on thread 0x")
+      len = RawOut.append_hex(p, len, id)
+      len = RawOut.append(p, len, " — ")
+      len = RawOut.append_u64(p, len, acked.to_u64)
+      len = RawOut.append(p, len, " of ")
+      len = RawOut.append_u64(p, len, expected.to_u64)
+      len = RawOut.append(p, len, " acknowledged. ")
+      # ESRCH means the handle names no live thread, which is what a `Thread`
+      # object that was swept and reissued would look like from here.
+      rc = LibStwProbe.pthread_kill(id.unsafe_as(LibC::PthreadT), 0)
+      len = RawOut.append(p, len, rc == 0 ? "the handle is live (pthread_kill 0 → 0)" : "pthread_kill(0) → ")
+      len = RawOut.append_u64(p, len, rc.to_u64) unless rc == 0
+      len = RawOut.append(p, len, rc == 3 ? " ESRCH: the handle names no live thread" : "")
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
     end
 
     # ExecutionContext Monitor — signal-exempt; cooperates via @world_stopped.

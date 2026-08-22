@@ -394,6 +394,27 @@ module Gcry
     # The last foreign reader's pthread id, so the two candidate threads can be
     # told apart by name after the world restarts instead of by inference.
     getter index_unlocked_foreign_id : UInt64 = 0_u64
+
+    # `chunk_containing`'s last-chunk cache returns `(@chunk_index +
+    # @last_chunk_idx).value` without dereferencing it, so a stale index or a
+    # reallocated array hands the caller a pointer that only faults later — at
+    # `ChunkHeader.large?`, which is where the unattributed crash lands. These
+    # count a returned chunk that cannot be one: outside the heap's own address
+    # range, or not 8-byte aligned. Split by which path produced it, because the
+    # two have different writers.
+    getter index_cache_bad : UInt64 = 0_u64
+    getter index_search_bad : UInt64 = 0_u64
+    getter index_bad_last : UInt64 = 0_u64
+    # The cache path returns `@chunk_index[@last_chunk_idx]` without checking
+    # that the index is still inside the array.
+    getter index_cache_oob : UInt64 = 0_u64
+    # The array the bad read came out of, and the array `@chunk_index` names
+    # immediately afterwards. Different values would mean the index was
+    # reallocated between the load and its use — which `@index_lock` does not
+    # prevent, because a suspend does not care that it is held.
+    getter index_bad_array : UInt64 = 0_u64
+    getter index_bad_array_now : UInt64 = 0_u64
+    getter index_bad_array_moved : UInt64 = 0_u64
     # EC1 post-STW sweep/flush: block SYSMON map_chunk while `@chunks` is rebuilt
     # and empties are queued for munmap (same cooperative spin as STW).
     @block_other_heap = false
