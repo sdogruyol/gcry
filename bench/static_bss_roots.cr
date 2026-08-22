@@ -18,6 +18,12 @@
 # cap alone would only have moved the hole. Static ranges now go through
 # `scan_range_chunked`.
 #
+# The arms run as **child processes**, because the one that restores the cap is
+# running with its own statics collected and may not survive to say so: it has
+# reached its verdict and died before printing it, and whether it gets that far
+# changes with codegen. So the parent judges, and "died without ever claiming
+# the block was live" counts as the block dying — which is what it is.
+#
 #   default        the block stored in the BSS must survive two collections.
 #   --huge         the same, with a BSS larger than `MAX_SCAN_BYTES`, which can
 #                  only pass if the chunked scan works.
@@ -131,6 +137,57 @@ end
 
 REPORT_FD = LibDup.dup(2)
 
+# The parent judges; see the note at the top.
+unless ARGV.includes?("--child")
+  exe = Process.executable_path.not_nil!
+  failures = [] of String
+  huge_arm = {{ flag?(:static_bss_huge) ? true : false }}
+
+  puts "=== static BSS roots ==="
+  puts "mode: parent (#{huge_arm ? "huge" : "default"} binary, two child arms)"
+
+  [{"default", {} of String => String}, {"cap", {"GCRY_STATIC_BSS_CAP" => "1"}}].each do |(arm, env)|
+    args = arm == "cap" ? ["--child", "--cap"] : ["--child"]
+    captured = IO::Memory.new
+    status = Process.run(exe, args, env: env, output: captured, error: captured)
+    text = captured.to_s
+    said_live = text.includes?("live=true")
+    said_dead = text.includes?("live=false")
+    puts "#{arm}: exit=#{status.exit_code?.inspect} #{text.lines.find(&.starts_with?("block ")) || "(no verdict line)"}"
+
+    if arm == "default"
+      failures << "default: the child did not exit cleanly (#{status.exit_code?.inspect})" unless status.success?
+      failures << "default: a block held only by the BSS did not survive — the BSS is not a root range" unless said_live
+      failures << "default: a range was skipped for being oversize; the static scan is meant to chunk" if text.includes?("oversize_skips=0") == false
+    else
+      # Either it said the block died, or it died before it could say. Both are
+      # the cap collecting a reachable object; what must never happen is the
+      # block surviving.
+      failures << "cap: the 1 MiB cap is restored and the block survived anyway — the other arm's " \
+                  "survival cannot be credited to the BSS being scanned" if said_live
+      unless said_dead || !status.success?
+        failures << "cap: the child neither reported the block dying nor failed, so this arm " \
+                    "observed nothing"
+      end
+    end
+
+    unless text.includes?("BSS mapping")
+      failures << "#{arm}: the child never reported its BSS size, so its threshold was never checked"
+    end
+    failures << "#{arm}: the BSS never crossed the threshold this arm is about" if text.includes?("BSS TOO SMALL")
+  end
+
+  if failures.empty?
+    puts
+    puts "ok — the BSS is a root range at this size, and refusing it collects a reachable block"
+    exit 0
+  else
+    puts
+    failures.each { |f| STDERR.puts "FAIL: #{f}" }
+    exit 1
+  end
+end
+
 cap = ARGV.includes?("--cap")
 huge = {{ flag?(:static_bss_huge) ? true : false }}
 mode = cap ? "cap (GCRY_STATIC_BSS_CAP=1, the old 1 MiB refusal)" : "default (BSS is a root range)"
@@ -140,6 +197,12 @@ puts "mode: #{mode}"
 
 bss = measure_bss_bytes
 puts "static array #{WORDS * 8} bytes; BSS mapping #{bss} bytes#{huge ? " (huge arm)" : ""}"
+# Printed before anything can be collected, so the parent sees it even if this
+# process does not survive its own collection.
+if bss <= 1_u64 * 1024 * 1024 || (huge && bss <= Gcry::Roots::MAX_SCAN_BYTES)
+  puts "BSS TOO SMALL for this arm"
+end
+STDOUT.flush
 
 hidden = stash_in_bss
 wipe_stack
@@ -199,20 +262,9 @@ LibC.write(REPORT_FD, p, LibC::SizeT.new(len))
 # The BSS has to be over the threshold or neither result is about the defect,
 # and the huge arm has to be over `MAX_SCAN_BYTES` or it never reached the
 # chunked path.
-ok = bss > 1_u64 * 1024 * 1024
-ok &&= bss > Gcry::Roots::MAX_SCAN_BYTES if huge
-ok &&= slot_holds_it
+ok = slot_holds_it
+ok &&= alive && intact unless cap
 
-if cap
-  # The block must die, or the other arm's survival is not the BSS scan.
-  ok &&= !alive
-  verdict = "ok — with the 1 MiB cap restored the block dies, so the other arm's survival is the BSS scan\n"
-else
-  ok &&= alive && intact
-  ok &&= Gcry::Roots.oversize_skips == 0
-  verdict = "ok — a block held only by the BSS survives two collections\n"
-end
-
-len = Gcry::RawOut.append(p, 0, ok ? verdict : "FAIL — see the line above\n")
+len = Gcry::RawOut.append(p, 0, ok ? "child ok\n" : "child FAIL — see the line above\n")
 LibC.write(REPORT_FD, p, LibC::SizeT.new(len))
 LibC._exit(ok ? 0 : 1)

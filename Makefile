@@ -422,9 +422,7 @@ static-bss-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/static_bss_roots.cr -o $(BIN)/static_bss_roots --error-trace
 	$(CRYSTAL) build -Dgc_none -Dstatic_bss_huge bench/static_bss_roots.cr -o $(BIN)/static_bss_roots_huge --error-trace
 	$(BIN)/static_bss_roots
-	GCRY_STATIC_BSS_CAP=1 $(BIN)/static_bss_roots --cap
 	$(BIN)/static_bss_roots_huge
-	GCRY_STATIC_BSS_CAP=1 $(BIN)/static_bss_roots_huge --cap
 
 thread-birth-root: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_birth_root.cr -o $(BIN)/thread_birth_root --error-trace
