@@ -878,8 +878,20 @@ CI asymmetry that hid both.
       rather than failed, so this has never been read as a defect, on the runner
       where the `Thread` use-after-free lives and in one of the two gates that
       has caught it.
-      **Nothing is diagnosed yet.** What changed is that the next one will say
-      something, at three levels: the harness's own waits give up after 30 s and
+      **The phase is now known.** The first run with the instrumentation in
+      (2026-08-22, run `32575506486`) failed at 7m46s instead of being cancelled
+      at 20 minutes and said `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`
+      — so it is `stop_world` spinning in `until thread.@suspended.get` for a
+      mutator that never acknowledged its signal, not the harness's fiber waits
+      and not a slow runner. The spin now records which thread it is waiting on
+      and how many have acknowledged, so the next sighting names the victim;
+      `GCRY_STW_TEST_SUSPEND_STALL_MS` and `make stw-watchdog`'s `armed+suspend`
+      arm are what make that report provable rather than hoped for.
+      What is still open: why that thread does not acknowledge. Candidates worth
+      separating are a lost signal, a thread caught mid-start or mid-exit, and a
+      handler that cannot run — the id and the `n of m` count are what will tell
+      them apart.
+      Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
       print how many fibers arrived, how many are still parked on the context's
       global queue and what the audit had counted (`--stall` is the positive
       control for that); every gate in that step is bounded with `timeout 300`

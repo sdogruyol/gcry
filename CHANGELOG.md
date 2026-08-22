@@ -35,6 +35,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The aarch64 hang is in `stop_world`'s suspend phase, and the report now
+  names the thread it is waiting for.** The instrumentation answered on its
+  first sighting (2026-08-22, run `32575506486`): the job failed at 7m46s
+  instead of being cancelled at 20 minutes, and it said
+  `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`. So it is not the
+  harness's fiber waits — those never fired — and not a slow runner: the
+  collector had signalled every mutator and was spinning in
+  `until thread.@suspended.get` for one that never acknowledged.
+  What that report could not say is **which** thread, so the spin now records
+  it: the id being waited on, how many have acknowledged, and how many were
+  expected. The stall line for that phase reads `waiting for thread 0x… to
+  acknowledge its suspend signal; n of m already have`. Two plain stores per
+  thread on a path that runs once per collection, and the same device as
+  `stack_bounds_in_flight` — a report that names a thread is worth more than one
+  that names a frame.
+  `GCRY_STW_TEST_SUSPEND_STALL_MS` is the positive control, because
+  `GCRY_STW_TEST_STALL_MS` holds *thread-stacks* and cannot reach this branch.
+  `make stw-watchdog` gained an `armed+suspend` arm that requires the phase to
+  be named, the thread to be named, and the expected count to be non-zero —
+  broken on purpose by removing the child's mutator threads and observed red at
+  `counted 0 threads to wait for`.
+
 - **`ec_queue_audit`'s own waits are bounded, so the hang says what it was
   stuck on.** The harness waits on three channels — the churn fibers, the
   blocker starting, and the 24 fibers queued behind it running once it is
