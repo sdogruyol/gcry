@@ -731,6 +731,10 @@ module GC
     # instead of growing it, which is what a thread list longer than 64 used to
     # run into (src/gcry/platform/linux_stack.cr).
     Gcry::Platform.stack_bounds_nogrow = true if env_flag_one?("GCRY_STACK_BOUNDS_NOGROW")
+    # Research only: refuse a BSS larger than 1 MiB as a root range, which is
+    # what the maps parser did before 2026-08-22 and what
+    # `make static-bss-roots` uses to show the block dying.
+    Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

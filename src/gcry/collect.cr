@@ -1128,7 +1128,7 @@ module Gcry
           if @scan_static_roots
             Platform.scan_static_roots do |low, high|
               each_static_range_excluding_heap(low, high) do |a, b|
-                Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
+                Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
               end
             end
           end
@@ -1512,7 +1512,7 @@ module Gcry
         if @scan_static_roots
           Platform.scan_static_roots do |low, high|
             each_static_range_excluding_heap(low, high) do |a, b|
-              Roots.scan_range(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
+              Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
             end
           end
         end

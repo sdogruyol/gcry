@@ -352,6 +352,16 @@ jobs:
       # this is a different implementation of the same contract — running the
       # gate here is what turns "does Linux have the same gap?" from an open
       # question into an answered one.
+      # And the widest root range of all, which had a size cap on it: gcry finds
+      # a program's BSS by adjacency to the executable's .data, and used to
+      # refuse it if it was larger than 1 MiB — dropping every class variable
+      # and constant slot in it. An 8 MiB static array was enough to get STDERR
+      # collected. Two binaries, because the second threshold is a scan limit
+      # rather than a parser one.
+      - name: Static BSS roots
+        run: |
+          make static-bss-roots
+
       - name: Suspended-thread register roots
         run: |
           make greg-roots

@@ -181,6 +181,21 @@ module Gcry
     @@probe_rd = -1
     @@probe_wr = -1
 
+    # Ranges `scan_range` refused for being longer than `MAX_SCAN_BYTES`.
+    #
+    # The refusal is a sanity valve against nonsense bounds, and for a stack
+    # that is the right answer. For anything that is really a root range it is a
+    # dropped root, and until 2026-08-22 it was also invisible: a BSS larger
+    # than 64 MiB was skipped whole with nothing said, which is the same defect
+    # the adjacency cap in `linux_roots.cr` carried at 1 MiB. Callers that can
+    # have a legitimately large range use `scan_range_chunked`; this counter
+    # exists so that anything still hitting the valve says so.
+    @@oversize_skips = 0_u64
+
+    def self.oversize_skips : UInt64
+      @@oversize_skips
+    end
+
     # The window the last `scan_mutator` word-scanned. See the note there.
     class_getter last_mutator_low : UInt64 = 0_u64
     class_getter last_mutator_high : UInt64 = 0_u64
@@ -193,7 +208,10 @@ module Gcry
         lo, hi = hi, lo
       end
 
-      return if (hi - lo) > MAX_SCAN_BYTES
+      if (hi - lo) > MAX_SCAN_BYTES
+        @@oversize_skips &+= 1
+        return
+      end
 
       word = sizeof(Void*).to_u64
       lo = (lo + word - 1) & ~(word - 1)
@@ -209,6 +227,31 @@ module Gcry
           yield Pointer(Void).new(cursor.value)
           cursor += 1
         end
+      end
+    end
+
+    # `scan_range` for a range that is allowed to be arbitrarily long.
+    #
+    # Static ranges are the case: a program's BSS is as big as the program says
+    # it is, and refusing it drops every global root in it. Split on word-
+    # aligned `MAX_SCAN_BYTES` boundaries so the valve in `scan_range` is never
+    # reached and no word is lost at a seam.
+    def self.scan_range_chunked(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
+      return if low.null? || high.null?
+      lo = low.address
+      hi = high.address
+      if lo > hi
+        lo, hi = hi, lo
+      end
+      word = sizeof(Void*).to_u64
+      lo = (lo + word - 1) & ~(word - 1)
+      hi &= ~(word - 1)
+      return if lo >= hi
+
+      while lo < hi
+        stop = hi - lo > MAX_SCAN_BYTES ? lo + MAX_SCAN_BYTES : hi
+        scan_range(Pointer(Void).new(lo), Pointer(Void).new(stop), safe: safe) { |c| yield c }
+        lo = stop
       end
     end
 
@@ -301,7 +344,10 @@ module Gcry
     # are thinly mapped; a blind Pointer.clear below SP can SEGV on a hole.
     def self.clear_range_safe(low : UInt64, high : UInt64) : UInt64
       return 0_u64 if low >= high
-      return 0_u64 if (high - low) > MAX_SCAN_BYTES
+      if (high - low) > MAX_SCAN_BYTES
+        @@oversize_skips &+= 1
+        return 0_u64
+      end
 
       ensure_probe_pipe
       return 0_u64 if @@probe_wr < 0

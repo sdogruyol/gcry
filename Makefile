@@ -383,6 +383,21 @@ heap-counters: $(BIN)
 # stays in exactly the state the defect needs for as long as the harness wants.
 # Three arms — rooted (must survive), `--noroot` (same births recorded, nothing
 # rooted: must die), and the knob off (nothing armed: must die).
+# Is the BSS a root range at any size? Two binaries, because the second
+# threshold is a scan limit rather than a maps-parser one: 8 MiB clears the
+# 1 MiB adjacency cap this closed, 96 MiB clears `Roots::MAX_SCAN_BYTES` and so
+# can only pass through the chunked scan. Both arms run against
+# `GCRY_STATIC_BSS_CAP=1`, which restores the old refusal and requires the same
+# block to die — the harness reports that through a duplicated fd, because the
+# collection that frees the block also finalizes `STDERR` and closes fd 2.
+static-bss-roots: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/static_bss_roots.cr -o $(BIN)/static_bss_roots --error-trace
+	$(CRYSTAL) build -Dgc_none -Dstatic_bss_huge bench/static_bss_roots.cr -o $(BIN)/static_bss_roots_huge --error-trace
+	$(BIN)/static_bss_roots
+	GCRY_STATIC_BSS_CAP=1 $(BIN)/static_bss_roots --cap
+	$(BIN)/static_bss_roots_huge
+	GCRY_STATIC_BSS_CAP=1 $(BIN)/static_bss_roots_huge --cap
+
 thread-birth-root: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_birth_root.cr -o $(BIN)/thread_birth_root --error-trace
 	$(BIN)/thread_birth_root

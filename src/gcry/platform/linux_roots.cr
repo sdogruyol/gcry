@@ -56,6 +56,8 @@ module Gcry
       @@cached_generation = @@maps_generation
     end
 
+    @@bss_size_cap = false
+
     private def self.push_range(lo : UInt64, hi : UInt64) : Nil
       return if hi <= lo
       if @@range_count >= @@range_cap
@@ -137,8 +139,10 @@ module Gcry
       if path < 0
         # ELF BSS zero-fill: anonymous RW pages contiguous with the previous
         # file-backed RW mapping (typically after .data). Do NOT treat every
-        # small anonymous VMA as a root — gcry large objects are also anon
-        # <1 MiB; caching those and scanning after munmap is SIGSEGV.
+        # anonymous VMA as a root — gcry's own large objects are anonymous too,
+        # and caching one and scanning it after `munmap` is a SIGSEGV. What
+        # separates them is adjacency to the executable's `.data`, not size;
+        # see `try_yield_adjacent_bss`.
         try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
         return
       end
@@ -191,15 +195,48 @@ module Gcry
       @@parse_prev_file_rw = writable
     end
 
-    # Contiguous small RW anon after a file-backed RW .data (ELF BSS).
+    # Contiguous RW anon after a file-backed RW .data (ELF BSS).
+    #
+    # There used to be a `size < 1 MiB` condition here and it was a silent
+    # correctness hole: a Crystal program whose BSS is larger than that had its
+    # **whole** BSS refused as a root range, so every class variable and every
+    # constant slot holding a heap reference became invisible to the mark and
+    # was swept. Reproduced in 20 lines on 2026-08-22 — an 8 MiB static class
+    # variable, one `GC.malloc`, two collections, and the process dies in
+    # `IO#encoder` because `STDERR` itself was collected. The threshold sat
+    # between a 400 KiB and an 800 KiB array, which is the BSS crossing 1 MiB
+    # with Crystal's own statics in it.
+    #
+    # The condition was also inverted with respect to its own stated reason.
+    # The comment it was written under says gcry's large objects are anonymous
+    # and **under** 1 MiB, and that caching one and scanning it after `munmap`
+    # is a SIGSEGV — but `< 1 MiB` *accepts* exactly that size band and rejects
+    # the sizes a gcry large object cannot have.
+    #
+    # What actually keeps gcry's own mappings out is the adjacency test, and it
+    # is strict: the region must begin exactly where a file-backed RW mapping of
+    # the main executable ended (shared libraries are filtered out before this
+    # point). An `mmap` with no hint does not land there. The second line of
+    # defence is `each_static_range_excluding_heap`, which subtracts gcry's
+    # chunks from every range this yields, and which exists for precisely the
+    # case the size cap was aimed at.
+    #
+    # `GCRY_STATIC_BSS_CAP=1` restores the cap, which is how the gate shows the
+    # collected object.
     private def self.try_yield_adjacent_bss(lo : UInt64, hi : UInt64, perms : UInt8*, size : UInt64, & : Void*, Void* ->) : Nil
       if @@parse_prev_file_rw &&
          lo == @@parse_prev_hi &&
          perms[1] == 'w'.ord.to_u8 &&
-         size < 1_u64 * 1024 * 1024
+         (!@@bss_size_cap || size < 1_u64 * 1024 * 1024)
         yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       end
       @@parse_prev_file_rw = false
+    end
+
+    # Research only: refuse a BSS larger than 1 MiB, as this parser did before
+    # 2026-08-22.
+    def self.bss_size_cap=(value : Bool) : Bool
+      @@bss_size_cap = value
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32
