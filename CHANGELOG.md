@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`start_world` resumed every thread before clearing `@world_stopped`, so
+  every mutator briefly read the chunk index with no lock.**
+  `Heap#chunk_containing` skips `@index_lock` while that flag is set, and its
+  comment says why: only the collector can be reading the index while the world
+  is stopped. `start_world` cleared the flag *after* the resume loop, so between
+  the first `thread.resume` and that store every thread was running with the
+  flag still saying stopped — taking the unlocked path against an
+  `index_insert` / `index_remove` from any peer that maps or unmaps a chunk. A
+  binary search over an array that is being shifted under it returns a garbage
+  `ChunkHeader*`, and the first thing done with one is
+  `ChunkHeader.large?(chunk)`.
+  Measured with the new `GCRY_INDEX_AUDIT=1`, which counts unlocked index reads
+  during a stop and splits them by whether the reader is the thread that stopped
+  the world: **173 326 foreign reads across 15 runs** with the old ordering,
+  **0** with the flag cleared before the resume loop. The readers are ordinary
+  named worker threads — not the signal-exempt Monitor and not an unpublished
+  one, both of which were the obvious suspects and neither of which it is.
+  The flag is cleared first now. `make stw-index-race` gates it in both
+  directions, with `GCRY_STW_LATE_CLEAR=1` restoring the old order, and it
+  checks that the collector's own unlocked count is non-zero so a zero on the
+  other side cannot come from an arm that never ran.
+  **What this is and is not evidence for.** The unattributed crash in the
+  TLAB+nursery arm faults in `Heap#find_block` under `tlab_alloc_small` — a
+  mutator index lookup — and that arm is the one where mutators do 11.5 million
+  such lookups a run against 193 thousand without TLAB, which is why it and not
+  the plain arm. So the mechanism fits the sighting and is now closed. It is
+  **not** a reproduction: the CI crash has never been reproduced locally, and
+  whether this was its cause will show as the crash not coming back.
+
+### Changed
+
+- **Open, and separated on purpose**: hammering `Heap#live?` from four threads
+  while collections run faults in `find_block` on a garbage chunk pointer
+  (`0x91`, `0xa1`) — and it does so at the **same rate with the fix and
+  without it** (22 of 25 runs against 13 of 25), so it is not the ordering above
+  and must not be folded into it. It also needs a rate no real program has: at
+  16 lookups per iteration with a 50 µs nap, 15 runs of each arm are clean. It
+  may be a harness asking `find_block` about an address whose chunk the sweep is
+  releasing, which is a question a mutator does not otherwise ask; it may be a
+  defect. It is written down rather than resolved.
+
 - **The dying-type audit called live objects dying on every minor collection.**
   It walked every used block after the mark and reported each one of the watched
   type the mark had not reached — a question that only means "about to be swept"

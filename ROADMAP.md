@@ -901,6 +901,28 @@ CI asymmetry that hid both.
       sighting will settle. Not reproduced locally: 60 runs of the audit-on arm
       on x86_64 Linux, 0 hangs.
 
+- [x] **A mutator could read the chunk index with no lock, and now cannot —
+      closed 2026-08-22.** `chunk_containing` skips `@index_lock` while
+      `@world_stopped` is set, on the documented grounds that only the collector
+      can be there; `start_world` cleared that flag after resuming every thread,
+      so between the two every mutator took the unlocked path against a peer's
+      `index_insert` / `index_remove`. `GCRY_INDEX_AUDIT=1` counts it: 173 326
+      foreign unlocked reads across 15 runs before, 0 after, gated both ways by
+      `make stw-index-race`. **Bearing on the item below**: the sighting there
+      faults in `find_block` under `tlab_alloc_small`, a mutator index lookup,
+      on the one arm where mutators make 11.5 M such lookups a run — so the
+      mechanism fits and is closed, but nothing here reproduces that crash and
+      only its absence from CI will say whether this was it.
+
+- [ ] **Hammering `Heap#live?` from mutator threads faults in `find_block`.**
+      Four threads at 256 lookups per iteration against 200 collections: 22 of
+      25 runs die on a garbage `ChunkHeader*`, and **22 of 25 with the ordering
+      fix above and 13 of 25 without it**, so it is a different thing and not
+      that. At a realistic rate (16 lookups and a 50 µs nap) 15 runs of each arm
+      are clean. Unresolved which it is: a harness asking `find_block` about an
+      address whose chunk the sweep is releasing — a question a mutator does not
+      otherwise ask — or a real concurrency hole on the lazy-sweep path.
+
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be
       related to it. `stw_mt_property_test --tlab --nursery` died on **x86_64**
