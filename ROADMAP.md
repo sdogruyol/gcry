@@ -941,6 +941,20 @@ CI asymmetry that hid both.
       (`moved=0`, and an immortal index changed nothing) and an unwritten slot
       (zero-filling changed nothing).
 
+- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep.**
+      `chunk_containing` holds that spinlock for the length of a lookup, and a
+      suspend signal arrives wherever it likes; the sweep's own `index_insert` /
+      `index_remove` take the same lock unconditionally, so a thread frozen
+      holding it leaves the collector spinning with the world stopped. Observed
+      only as far as "a thread suspended inside `SpinLock#lock`" under gdb,
+      which is the harmless half — frozen *acquiring* it costs nothing.
+      **Not the aarch64 hang**, and that is settled rather than assumed: that
+      hang names `phase=suspend`, which is before `@world_stopped` is set and
+      before any sweep runs. Left open because the fix is not small — the
+      collector cannot simply take the unlocked path, since a mutator frozen
+      mid-`index_insert` leaves the array itself half-updated — and because
+      nothing has yet been seen to hit it.
+
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**
       The mechanism now fits without any gap: the crash faults in `find_block`
