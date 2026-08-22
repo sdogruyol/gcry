@@ -202,5 +202,14 @@ module Gcry
         i == want.bytesize && (i == 16 || sectname[i] == 0)
       end
     {% end %}
+
+    # Linux finds the BSS in `/proc/self/maps` by adjacency and used to refuse
+    # it above 1 MiB (src/gcry/platform/linux_roots.cr). Darwin reads the
+    # Mach-O `__DATA` sections directly, so there is no adjacency guess and
+    # nothing to cap — but the knob is wired unconditionally in `GC.init`, and a
+    # caller that gates on a platform must not have to ask which one it is on.
+    def self.bss_size_cap=(value : Bool) : Bool
+      value
+    end
   end
 end
