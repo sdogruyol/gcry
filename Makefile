@@ -410,6 +410,7 @@ thread-staging: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_staging.cr -o $(BIN)/thread_staging --error-trace
 	$(BIN)/thread_staging
 	GCRY_STAGED_NO_EVICT=1 $(BIN)/thread_staging --no-evict
+	$(BIN)/thread_staging --race
 
 # Is the BSS a root range at any size? Two binaries, because the second
 # threshold is a scan limit rather than a maps-parser one: 8 MiB clears the

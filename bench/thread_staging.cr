@@ -24,6 +24,13 @@
 # neither the drain nor anything else can release them: the full table is a
 # fact of the harness rather than a race it hopes for.
 #
+#   --race     the full path drains Crystal's thread list from the **creating**
+#              side, without the list mutex — the same choice
+#              `Heap#drain_published_staged` makes, but on the thread-creation
+#              path, which is the hottest window for concurrent pushes. Six
+#              threads creating forty each, so the drain runs while the list is
+#              being mutated.
+#
 #   crystal build -Dgc_none bench/thread_staging.cr -o bin/thread_staging
 #   bin/thread_staging
 #   GCRY_STAGED_NO_EVICT=1 bin/thread_staging --no-evict
@@ -58,6 +65,45 @@ def staged?(id : UInt64) : Bool
   found = false
   Gcry::Platform.each_staged { |staged| found = true if staged == id }
   found
+end
+
+# ── the race arm ───────────────────────────────────────────────────────────
+if ARGV.includes?("--race")
+  made = Atomic(Int32).new(0)
+  creators = 6
+  each = 40
+  before = Gcry::Platform.staged_overflows
+
+  puts "=== thread staging table ==="
+  puts "mode: race (#{creators} threads creating #{each} each, drain under concurrent pushes)"
+
+  threads = [] of Thread
+  creators.times do
+    threads << Thread.new do
+      each.times do
+        Thread.new { made.add(1) }
+        req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 50_000)
+        LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+      end
+    end
+  end
+  while made.get < creators * each
+    req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 200_000)
+    LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+  end
+  GC.collect
+
+  overflowed = Gcry::Platform.staged_overflows - before
+  puts "created=#{made.get} total=#{Gcry::Platform.staged_total} " \
+       "overflows=#{overflowed} evictions=#{Gcry::Platform.staged_evictions}"
+
+  if overflowed == 0
+    STDERR.puts "FAIL: race: the table never filled, so the drain never ran and nothing was raced"
+    exit 1
+  end
+  puts
+  puts "ok — the drain walked Crystal's list #{overflowed} times while it was being pushed onto"
+  exit 0
 end
 
 no_evict = ARGV.includes?("--no-evict")

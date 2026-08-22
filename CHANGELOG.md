@@ -134,6 +134,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Still lossy, and counted**: an eviction is a thread that will not be waited
   for, and a table full of entries for threads that have exited still costs one
   timed-out spin at the next collection before the wait drops them.
+  **And the risk the drain adds is measured rather than argued.** It walks
+  Crystal's thread list without the list mutex — the same choice
+  `Heap#drain_published_staged` makes, and for the same reason, but on the
+  thread-creation path, which is where concurrent pushes actually happen. The
+  gate's `--race` arm puts six threads on creating forty each and requires the
+  table to have filled, so the drain provably ran while the list was being
+  mutated: 42 overflows and 20 evictions in one run, 25 runs of the same shape
+  clean, and 12 runs of the gate clean.
 
 - **A Crystal program with more than 1 MiB of static data had every global root
   dropped.** gcry finds a program's BSS in `/proc/self/maps` by adjacency — the
