@@ -1,7 +1,14 @@
 require "c/sys/mman"
 
-{% if flag?(:darwin) %}
-  # Linux name; Darwin only defines MAP_ANON.
+# The Linux name, on the Darwin targets whose bindings lack it.
+#
+# Not every Darwin target: Crystal's `x86_64-macosx-darwin` bindings already
+# define `MAP_ANONYMOUS`, and defining it again is a hard error — `already
+# initialized constant LibC::MAP_ANONYMOUS`, which is what `-Dgc_none` did on
+# x86_64 macOS for as long as this shim was unconditional. CI runs
+# `macos-latest`, which is Apple Silicon, so the platform this repo claims to
+# support was never compiled for it. Found by `make darwin-typecheck`.
+{% if flag?(:darwin) && !LibC.has_constant?("MAP_ANONYMOUS") %}
   lib LibC
     MAP_ANONYMOUS = MAP_ANON
   end
