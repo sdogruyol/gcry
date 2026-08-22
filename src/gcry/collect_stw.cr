@@ -75,6 +75,7 @@ module Gcry
       # instead — before anything it could be mutating is touched.
       MonitorGate.close
       @stw_owner = current_thread
+      @stw_owner_pthread = LibC.pthread_self.unsafe_as(UInt64)
       {% if flag?(:darwin) %}
         Platform.stop_world_threads(current_thread)
         @world_stopped = true
@@ -169,6 +170,7 @@ module Gcry
         rescue ex
           @world_stopped = false
           @stw_owner = nil
+          @stw_owner_pthread = 0_u64
           Thread.unlock
           raise ex
         end
@@ -208,10 +210,31 @@ module Gcry
         Platform.clear_thread_sps
         @world_stopped = false
         @stw_owner = nil
+        @stw_owner_pthread = 0_u64
         MonitorGate.open
         StwWatchdog.leave
       {% else %}
         begin
+          # **Before** the first `resume`, not after them.
+          #
+          # `chunk_containing` skips `@index_lock` while this flag is set, on
+          # the grounds that only the collector can be reading the chunk index
+          # then. Clearing it after the resume loop breaks that: every thread is
+          # running again while the flag still says stopped, so each of them
+          # takes the unlocked path — against an `index_insert` / `index_remove`
+          # from any peer that maps or unmaps a chunk, and a binary search over
+          # a shifting array yields a garbage `ChunkHeader*`.
+          #
+          # Measured with `GCRY_INDEX_AUDIT=1` on `stw_mt_property_test`: 5–6
+          # unlocked index reads per run by a thread that is not the collector,
+          # and the readers are named worker threads — `stw-mt-4-1` and
+          # friends — not the signal-exempt Monitor and not an unpublished one.
+          # Zero on the arm without TLAB, because `tlab_alloc_small` is what
+          # puts `find_block` on the allocation fast path.
+          #
+          # `GCRY_STW_LATE_CLEAR=1` restores the old order, which is how the
+          # gate shows the reads coming back.
+          @world_stopped = false unless @stw_late_clear
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
@@ -229,6 +252,7 @@ module Gcry
           Platform.clear_thread_sps
           @world_stopped = false
           @stw_owner = nil
+          @stw_owner_pthread = 0_u64
           MonitorGate.open
           StwWatchdog.leave
         ensure
@@ -242,6 +266,7 @@ module Gcry
     def after_fork_child_reinit : Nil
       @world_stopped = false
       @stw_owner = nil
+      @stw_owner_pthread = 0_u64
       @block_other_heap = false
       @collecting = false
       @running_finalizers = false

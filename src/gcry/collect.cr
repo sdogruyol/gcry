@@ -360,6 +360,40 @@ module Gcry
     # Thread that called stop_world — may allocate / take GC locks during STW.
     # Other threads (notably SYSMON, which we do not signal-suspend) must wait.
     @stw_owner : Thread? = nil
+    # The same identity as `@stw_owner`, as a plain word.
+    #
+    # `chunk_containing` skips `@index_lock` while the world is stopped, on the
+    # grounds that only the collector can be touching the chunk index then. Two
+    # threads are documented exceptions to that in this same codebase: the EC
+    # Monitor is signal-exempt and keeps running, and a thread that has not
+    # published itself is neither suspended nor stopped. If either allocates
+    # during a stop it reads the index unlocked while the sweep is calling
+    # `index_remove` / `index_insert`, and a binary search over a shifting array
+    # yields a garbage `ChunkHeader*`.
+    #
+    # `GCRY_INDEX_AUDIT=1` counts exactly that: an unlocked index read, during a
+    # stop, by someone who is not the thread that stopped it. Comparing pthread
+    # ids rather than `Thread.current` keeps the audit off the object graph.
+    @stw_owner_pthread = 0_u64
+
+    # `GCRY_INDEX_AUDIT=1`. Off by default: it costs a `pthread_self` on the
+    # unlocked lookup path.
+    property index_audit : Bool = false
+
+    # Research only: clear `@world_stopped` after the resume loop rather than
+    # before it, which is what `start_world` did until 2026-08-22.
+    property stw_late_clear : Bool = false
+
+    # Unlocked chunk-index reads during a stop, by a thread that is not the one
+    # that stopped the world. Non-zero means the assumption `chunk_containing`
+    # documents does not hold.
+    getter index_unlocked_foreign : UInt64 = 0_u64
+    # The same, counted for the collector itself, so a zero above is
+    # distinguishable from an audit that never ran.
+    getter index_unlocked_owner : UInt64 = 0_u64
+    # The last foreign reader's pthread id, so the two candidate threads can be
+    # told apart by name after the world restarts instead of by inference.
+    getter index_unlocked_foreign_id : UInt64 = 0_u64
     # EC1 post-STW sweep/flush: block SYSMON map_chunk while `@chunks` is rebuilt
     # and empties are queued for munmap (same cooperative spin as STW).
     @block_other_heap = false

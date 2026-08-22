@@ -401,6 +401,18 @@ darwin-typecheck: $(BIN)
 	@rm -f $(BIN)/darwin_typecheck_arm64.o $(BIN)/darwin_typecheck_x86.o
 	@echo "ok — the Darwin build type-checks on both targets"
 
+# Does a mutator ever read the chunk index without the lock?
+#
+# `chunk_containing` skips `@index_lock` while `@world_stopped` is set, on the
+# grounds that only the collector can be there. `start_world` used to clear that
+# flag *after* resuming every thread, so between the two every mutator took the
+# unlocked path against an `index_insert` / `index_remove` from a peer.
+# `GCRY_STW_LATE_CLEAR=1` is that ordering, and the gate requires it to produce
+# the reads the fixed one must not.
+stw-index-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stw_index_race.cr -o $(BIN)/stw_index_race --error-trace
+	$(BIN)/stw_index_race
+
 # Which birth does a full staging table keep? The table is filled with raw
 # pthreads, which never reach Crystal's list, so neither the drain nor the
 # collection's walk can release them and the full table is a fact rather than a

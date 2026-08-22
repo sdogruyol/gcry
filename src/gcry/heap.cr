@@ -1306,6 +1306,17 @@ module Gcry
     # unlocked lookup → false `owns_user_pointer?` ("not a gcry allocation").
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       if @world_stopped
+        # See `@stw_owner_pthread`: whether that skip is safe depends on nobody
+        # but the collector being able to get here, and two threads in this
+        # codebase can.
+        if @index_audit
+          if LibC.pthread_self.unsafe_as(UInt64) == @stw_owner_pthread
+            @index_unlocked_owner &+= 1
+          else
+            @index_unlocked_foreign &+= 1
+            @index_unlocked_foreign_id = LibC.pthread_self.unsafe_as(UInt64)
+          end
+        end
         chunk_containing_unlocked(addr)
       else
         @index_lock.sync { chunk_containing_unlocked(addr) }

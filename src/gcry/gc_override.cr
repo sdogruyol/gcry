@@ -743,6 +743,12 @@ module GC
     # collection, where unmarked does not mean dying
     # (src/gcry/thread_block_audit.cr).
     heap.dying_audit_all_collections = true if env_flag_one?("GCRY_DYING_AUDIT_ALL_COLLECTIONS")
+    # Count unlocked chunk-index reads taken during a stop by a thread that is
+    # not the one that stopped the world (src/gcry/heap.cr `chunk_containing`).
+    heap.index_audit = true if env_flag_one?("GCRY_INDEX_AUDIT")
+    # Research only: the pre-2026-08-22 `start_world` ordering, where every
+    # thread is resumed while `@world_stopped` still says stopped.
+    heap.stw_late_clear = true if env_flag_one?("GCRY_STW_LATE_CLEAR")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

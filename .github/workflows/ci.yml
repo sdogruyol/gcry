@@ -485,6 +485,15 @@ jobs:
         run: |
           make thread-staging
 
+      # `chunk_containing` skips its lock while the world is stopped, which is
+      # only sound if nothing but the collector can be there. `start_world`
+      # resumed every thread before clearing that flag, so every mutator took
+      # the unlocked path against a peer's index mutation — 160 687 such reads
+      # per run, measured.
+      - name: STW chunk-index race
+        run: |
+          make stw-index-race
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
