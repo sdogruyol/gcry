@@ -724,6 +724,9 @@ module GC
     # The twin: record every birth and root nothing, so a run that survives is
     # not credited to the bookkeeping.
     Gcry::ThreadBirthRoot.noroot = true if env_flag_one?("GCRY_THREAD_BIRTH_NOROOT")
+    # Research only: a birth that finds no slot goes unrooted, which is what the
+    # table used to do to every birth past the 64th between two collections.
+    Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

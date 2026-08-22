@@ -388,6 +388,8 @@ thread-birth-root: $(BIN)
 	$(BIN)/thread_birth_root
 	GCRY_THREAD_BIRTH_NOROOT=1 $(BIN)/thread_birth_root --noroot
 	GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_birth_root --control
+	$(BIN)/thread_birth_root --burst
+	GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
 
 # Buy samples of a defect that only happens on CI.
 #

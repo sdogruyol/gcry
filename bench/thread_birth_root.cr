@@ -24,9 +24,23 @@
 #             requires the counters to stay at zero, so the other arms' numbers
 #             are attributable to the knob.
 #
+# And what the table does when it runs out of slots, which is not the rare event
+# the size suggests: a slot is freed by `release`, which runs inside
+# `stop_world`, so the table holds one entry per birth **since the last
+# collection** — 65 `Thread.new`s with no collection between them are enough.
+#
+#   --burst           fill the table with births that can never be released,
+#                     then arm the victim's. Its birth overflows, and it must
+#                     survive anyway: an overflow costs the record, not the root.
+#   --burst-unrooted  `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` — the old
+#                     behaviour, where a full table meant no `add_root` at all.
+#                     Same overflow, and the block must **die**. Without this
+#                     arm the one above is a counter that proves nothing.
+#
 #   crystal build -Dgc_none bench/thread_birth_root.cr -o bin/thread_birth_root
 #   bin/thread_birth_root
 #   bin/thread_birth_root --control
+#   bin/thread_birth_root --burst
 
 require "../src/gcry"
 
@@ -61,6 +75,33 @@ def raw_thread_body(arg : Void*) : Void*
   while Latch.go == 0
   end
   arg
+end
+
+# A birth that can never be released: the thread is raw, so it never reaches
+# Crystal's list, and `release` is the only thing that frees a slot. It may exit
+# immediately — the record outlives it. Deliberately **not** joined: glibc
+# recycles a `pthread_t` once its thread is joined, and a recycled id colliding
+# with a real Crystal thread's would let `stop_world` free one of these slots
+# and quietly un-fill the table this arm is trying to fill.
+def filler_body(arg : Void*) : Void*
+  arg
+end
+
+# Fill every slot, so the next birth is the one under test.
+def fill_birth_table(filler : Void*) : Int32
+  filled = 0
+  Gcry::ThreadBirthRoot::SLOTS.times do
+    handle = uninitialized LibC::PthreadT
+    rc = GC.pthread_create(
+      thread: pointerof(handle),
+      attr: Pointer(LibC::PthreadAttrT).null,
+      start: ->filler_body(Void*),
+      arg: filler,
+    )
+    raise "filler pthread_create failed: #{rc}" unless rc == 0
+    filled += 1
+  end
+  filled
 end
 
 # The raw pointer exists only inside this frame: the caller passes and keeps the
@@ -105,10 +146,24 @@ end
 heap = Gcry.default_heap
 control = ARGV.includes?("--control")
 noroot = ARGV.includes?("--noroot")
-mode = control ? "control (GCRY_THREAD_BIRTH_ROOT=0)" : (noroot ? "noroot (records births, roots nothing)" : "hold (root armed)")
+burst = ARGV.includes?("--burst")
+burst_unrooted = ARGV.includes?("--burst-unrooted")
+burst ||= burst_unrooted
+mode = case
+       when burst_unrooted then "burst-unrooted (GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1, table full)"
+       when burst          then "burst (table full, birth overflows)"
+       when control        then "control (GCRY_THREAD_BIRTH_ROOT=0)"
+       when noroot         then "noroot (records births, roots nothing)"
+       else                     "hold (root armed)"
+       end
 
 puts "=== thread-birth root ==="
 puts "mode: #{mode}"
+
+# A non-null `arg` for the fillers that is not the victim, so filling the table
+# cannot be what keeps the victim alive.
+filled = burst ? fill_birth_table(Pointer(Void).new(0x1000_u64)) : 0
+puts "filled #{filled} birth(s) into a #{Gcry::ThreadBirthRoot::SLOTS}-slot table" if burst
 
 hidden = make_victim_hidden
 wipe_stack
@@ -151,7 +206,19 @@ puts "births armed=#{armed} released=#{released} outstanding=#{outstanding} over
 
 failures = [] of String
 
-if control
+if burst
+  failures << "no birth overflowed, so the full table was never under test" if overflows == 0
+  if burst_unrooted
+    failures << "the table was full, nothing was rooted, and the block survived anyway — " \
+                "the other arm's survival cannot be credited to the overflow root" if alive
+  else
+    unless alive
+      failures << "the block a thread is being born with was collected because the birth table " \
+                  "was full — an overflow is costing the root, not just the record"
+    end
+    failures << "the block survived but its contents were overwritten" if alive && !intact
+  end
+elsif control
   failures << "the knob is off and #{armed} birth(s) were still armed" if armed > 0
   failures << "the knob is off and the block survived, so the other arm proves nothing" if alive
 elsif noroot
@@ -174,9 +241,11 @@ end
 if failures.empty?
   puts
   puts case
-  when control then "ok — with the knob off nothing is armed and the block dies, so the hold arm's survival is the root's doing"
-  when noroot  then "ok — the same births recorded, nothing rooted, and the block dies"
-  else              "ok — the object a thread is being born with survives a collection it could not have survived"
+  when burst_unrooted then "ok — with the table full and the overflow left unrooted, the block dies"
+  when burst          then "ok — the birth overflowed a full table and was rooted anyway"
+  when control        then "ok — with the knob off nothing is armed and the block dies, so the hold arm's survival is the root's doing"
+  when noroot         then "ok — the same births recorded, nothing rooted, and the block dies"
+  else                     "ok — the object a thread is being born with survives a collection it could not have survived"
   end
   exit 0
 else

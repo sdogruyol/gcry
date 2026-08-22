@@ -37,13 +37,24 @@
 # `GCRY_THREAD_BIRTH_ROOT=0` turns it off. `GCRY_THREAD_BIRTH_NOROOT=1` is the
 # twin: it records exactly the same births and roots nothing, so a run that
 # survives cannot be credited to the bookkeeping.
+# `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` is research only and restores the one
+# case this file used to get wrong — see `SLOTS`.
 
 module Gcry
   module ThreadBirthRoot
-    # One slot per thread being born. 64 concurrent births is far past anything
-    # Crystal's scheduler starts at once; overflow is counted rather than
-    # silently dropped, because "no births recorded" and "the table was full"
-    # are different facts.
+    # One slot per thread being born. A slot is freed by `release`, which runs
+    # inside `stop_world`, so what the table has to hold is not the number of
+    # **concurrent** births — it is the number of births **since the last
+    # collection**. The first version of this comment said the former and put
+    # 64 far past anything Crystal starts at once; measured, 65 `Thread.new`s
+    # with no collection between them overflow it, and 200 overflow it 137
+    # times (`bench/thread_birth_root.cr --burst`).
+    #
+    # So the table is sized for the common case and **overflow no longer costs
+    # the root**: a birth that finds no slot is rooted anyway and never
+    # released (see `arm`). What the size buys is whether that root is
+    # temporary or permanent, which is a memory question; an unrooted birth
+    # would be the use-after-free question.
     SLOTS = 64
 
     # The recorded address is stored **masked**. This table is a class variable,
@@ -60,6 +71,7 @@ module Gcry
     @@used = uninitialized StaticArray(Bool, SLOTS)
     @@enabled = uninitialized Bool
     @@noroot = uninitialized Bool
+    @@overflow_unrooted = uninitialized Bool
     @@armed = uninitialized UInt64
     @@released = uninitialized UInt64
     @@overflows = uninitialized UInt64
@@ -80,6 +92,7 @@ module Gcry
       end
       @@enabled = true
       @@noroot = false
+      @@overflow_unrooted = false
       @@armed = 0_u64
       @@released = 0_u64
       @@overflows = 0_u64
@@ -94,6 +107,13 @@ module Gcry
       @@noroot = value
     end
 
+    # Research only: on overflow, do what this path did before — count it and
+    # root nothing. It exists so the gate can show the block that a full table
+    # used to leave uncovered actually dying.
+    def self.overflow_unrooted=(value : Bool) : Bool
+      @@overflow_unrooted = value
+    end
+
     def self.armed : UInt64
       @@armed
     end
@@ -106,9 +126,10 @@ module Gcry
       @@overflows
     end
 
-    # Births rooted and not yet released. Non-zero at exit is a thread that
-    # never published — the root is then held for the life of the process, which
-    # is the lesser harm and is countable.
+    # Births rooted and not yet released. Non-zero at exit is either a thread
+    # that never published, or a birth that overflowed the table — in both cases
+    # the root is held for the life of the process, which is the lesser harm and
+    # is countable.
     def self.outstanding : Int32
       n = @@outstanding
       n < 0 ? 0 : n
@@ -135,7 +156,23 @@ module Gcry
         end
         i += 1
       end
+      # No slot. The root is taken anyway and there is nothing left that can
+      # release it, because `release` matches on a record that was never
+      # written — so this leaks one `Thread` object and the graph it holds.
+      #
+      # That is the deliberate side of the trade. The alternative is what this
+      # path used to do: count the overflow and return without rooting, which
+      # leaves the birth covered by nothing at all — exactly the window this
+      # file exists to close, silently reopened by a table size. A leak is a
+      # memory bug; an unrooted birth is the use-after-free.
+      #
+      # `outstanding` counts it, because the root really is outstanding.
+      # `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` restores the old behaviour, and
+      # is how `make thread-birth-root` shows the block dying.
       @@overflows &+= 1
+      return if @@noroot || @@overflow_unrooted
+      @@outstanding += 1
+      heap.add_root(object)
     end
 
     # From `stop_world`'s pre-suspend walk of Crystal's list: this thread has
