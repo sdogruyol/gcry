@@ -86,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot be a chunk (`0x91`, `0xa1`) — which is the same function the
   unattributed TLAB+nursery crash faults in, and TLAB is precisely what puts
   `find_block` on a real program's allocation fast path.
+  **And the path is now named.** `GCRY_INDEX_AUDIT=1` no longer just counts an
+  impossible chunk — it **refuses** it and returns nil, so the run survives its
+  own answer instead of dying at `ChunkHeader.large?` before it can report. Six
+  runs, every one of which used to crash: `cache_bad=1..5`, `search_bad=0`,
+  `index_cache_oob=0`, `last=0x91`, `index_unlocked_foreign=0`. So it is the
+  **last-chunk cache** path, with the cached index inside the array, under the
+  lock, with no unlocked mutator reads anywhere — and the value is the same
+  small constant every time, which is what a freed libc allocation reads like,
+  not what any writer here puts in that array.
+  The reading that fits, stated as the inference it is: `(@chunk_index +
+  idx).value` loads the array pointer, and a thread suspended by STW between
+  that load and its use resumes against an array that `index_ensure_cap` has
+  since reallocated — holding `@index_lock` does not help, because the suspend
+  does not care that it is held. The same fact has a second consequence worth
+  separating: a mutator frozen while holding `@index_lock` leaves the sweep's
+  own `index_insert` / `index_remove` waiting on it, which is a deadlock and not
+  a crash.
   **Ruled out, each by measurement**: the `@world_stopped` window closed above
   (same rate with the fix and with `GCRY_STW_LATE_CLEAR=1` restoring the old
   ordering — 22 of 25 against 13 of 25 — and zero foreign unlocked reads with

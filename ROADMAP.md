@@ -938,11 +938,27 @@ CI asymmetry that hid both.
       index's own invariants (`GCRY_INDEX_AUDIT=1` validates both return paths
       and the cached slot — zero violations in surviving runs), and anything
       landed on 2026-08-22 (6 of 8 at `daa994b`).
-      **Still unknown**: where the impossible pointer comes from. Nothing in
-      `chunk_containing`'s own bookkeeping is wrong in any run that finishes,
-      which either means the corruption is elsewhere or that a run which sees it
-      never gets to report. `make find-block-race` samples the rate per arm and
-      per architecture and does not gate.
+      **The path is named.** With `GCRY_INDEX_AUDIT=1` now *refusing* an
+      impossible chunk instead of returning it, the runs that used to crash
+      survive and report: `cache_bad=1..5`, `search_bad=0`, `cache_oob=0`,
+      `last=0x91`, `foreign=0`. The **last-chunk cache** produces it, with the
+      cached index inside the array, under the lock, and the value is the same
+      small constant every time — the shape of freed libc memory, not of
+      anything a writer here stores.
+      **The inference, not yet a measurement**: `(@chunk_index + idx).value`
+      loads the array pointer, and a thread suspended by STW between that load
+      and its use resumes against an array `index_ensure_cap` has reallocated.
+      `@index_lock` does not protect against this, because a suspend does not
+      care that it is held — and the same fact predicts a second symptom that is
+      a deadlock rather than a crash: a mutator frozen holding `@index_lock`
+      leaves the sweep's own `index_insert` / `index_remove` spinning on it.
+      That is worth testing against the aarch64 hang above.
+      **Next**: confirm the stale-array reading directly (record the array
+      pointer alongside the index and compare after resume), then decide the
+      fix — the candidates are making the index immortal-and-append-only so it
+      is never freed, or making `@index_lock` STW-aware.
+      `make find-block-race` samples the rate per arm and per architecture and
+      does not gate.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be

@@ -1345,8 +1345,13 @@ module Gcry
         end
         cached = (@chunk_index + idx).value
         if @index_audit && !plausible_chunk?(cached)
+          # Counted **and refused**. Returning it is what crashes the caller at
+          # `ChunkHeader.large?`, and a process that dies there never gets to
+          # say which path produced the pointer. Under the audit knob the
+          # question survives its own answer; the default path is unchanged.
           @index_cache_bad &+= 1
           @index_bad_last = cached.address
+          return nil
         end
         return cached
       end
@@ -1366,6 +1371,7 @@ module Gcry
           if @index_audit && !plausible_chunk?(chunk)
             @index_search_bad &+= 1
             @index_bad_last = chunk.address
+            return nil
           end
           @last_chunk_idx = mid
           @last_chunk_lo = base
