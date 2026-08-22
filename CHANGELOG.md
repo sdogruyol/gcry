@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The dying-type audit called live objects dying on every minor collection.**
+  It walked every used block after the mark and reported each one of the watched
+  type the mark had not reached — a question that only means "about to be swept"
+  in a **full** collection. A minor marks the nursery and reclaims the nursery,
+  so every old live object reads unmarked and reads that way correctly.
+  Measured on `stw_mt_property_test --tlab --nursery`: **262 reports in one
+  run**, against **0** for the same harness with the nursery off, and every one
+  of them a `Thread` the report itself said was still on Crystal's list. That is
+  what an audit looks like when it is asking the wrong question rather than
+  finding an answer.
+  The walk now carries `sweep`'s own two conditions (`collect_sweep.cr:67` and
+  `:144`): skip the chunk unless the collection is major or the chunk is
+  nursery, and skip the block unless major or the block is nursery. 262 → 0, and
+  the arm got cheaper on that harness (11.0 s → 4.3 s) because it stops walking
+  the old heap on minors.
+  `make thread-block-audit` gained two arms to hold it there: `lives-minor`
+  forces 15 minor collections with 200 rooted probes and requires **0** deaths,
+  and `lives-minor-all` runs the same thing under the new
+  `GCRY_DYING_AUDIT_ALL_COLLECTIONS=1`, which removes the predicate and brings
+  the phantoms straight back — **2 800 deaths and 14 address-space walks** over
+  live objects. The existing arms are untouched and still pass: the audit still
+  names 200 planted deaths and still finds live `Thread` blocks under its
+  default, so this narrows the question rather than silencing it.
+
+### Changed
+
+- **The crash diagnostics now ride the TLAB arms, which is where this harness
+  has actually crashed.** `stw_mt_property_test` runs three arms and only the
+  plain one carried `GCRY_POISON_HOLDERS` / `GCRY_THREAD_CENSUS` /
+  `GCRY_THREAD_BLOCK_AUDIT`. That was right for the sighting it was added for —
+  x86_64, 2026-08-17, run `32006847158`, SIGSEGV inside `pthread_getattr_np`,
+  which is the plain arm — but it left the other two arms mute, and they are not
+  quiet. All three now carry them on Linux, and so does the Darwin step, which
+  runs all three through the Makefile and carried nothing.
+
 - **`-Dgc_none` did not compile on x86_64 macOS, and had not for as long as the
   shim existed.** `src/gcry/block.cr` defined `LibC::MAP_ANONYMOUS = MAP_ANON`
   for every Darwin target, on the grounds that "Darwin only defines MAP_ANON" —

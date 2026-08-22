@@ -870,6 +870,23 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
+- [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
+      platforms.** Separate from the `Thread` family above and not shown to be
+      related to it. `stw_mt_property_test --tlab --nursery` died on **x86_64**
+      on 2026-08-17 (run `32002309556`, master) leaving a bare `Segmentation
+      fault` with no backtrace and no gcry output, and on **Darwin** on
+      2026-08-22 (run `32564282704`) with a Crystal backtrace and nothing else:
+      `Heap#find_block` ← `tlab_alloc_small` ← `allocate` ← `malloc_atomic`,
+      faulting on `0xffffffff00000012`. The `Thread` family's signature is a
+      fault inside `pthread_getattr_np` under `stop_world`; this is neither that
+      call nor that phase, so folding the two together would be an assumption.
+      Both ran mute because only the plain arm carried the diagnostics — now
+      fixed, along with the audit that would have flooded them: it reported 262
+      live objects as dying per run on exactly this arm.
+      **Not reproduced locally**: 15 runs of the failing command at the CI
+      parameters, plus the three arms under the full diagnostics, all clean on
+      x86_64 Linux. The next sighting is the one that will say something.
+
 - [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
       The record the pre-stop wait runs on was kept in a 64-slot table drained
       only by the collection's own walk, so it held births since the last
