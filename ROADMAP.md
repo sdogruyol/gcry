@@ -914,14 +914,24 @@ CI asymmetry that hid both.
       mechanism fits and is closed, but nothing here reproduces that crash and
       only its absence from CI will say whether this was it.
 
-- [ ] **Hammering `Heap#live?` from mutator threads faults in `find_block`.**
-      Four threads at 256 lookups per iteration against 200 collections: 22 of
-      25 runs die on a garbage `ChunkHeader*`, and **22 of 25 with the ordering
-      fix above and 13 of 25 without it**, so it is a different thing and not
-      that. At a realistic rate (16 lookups and a 50 µs nap) 15 runs of each arm
-      are clean. Unresolved which it is: a harness asking `find_block` about an
-      address whose chunk the sweep is releasing — a question a mutator does not
-      otherwise ask — or a real concurrency hole on the lazy-sweep path.
+- [ ] **`find_block` from a mutator thread, while collections run, crashes —
+      and it is very likely the same defect as the item below.** Four threads,
+      200 collections: `alloc` 0 of 8, `idle` 0 of 8, `live` **5 of 8**,
+      `realloc` **5 of 8**. It needs a mutator inside `find_block`, and
+      `GC.realloc` — a supported public API reaching it by a different route —
+      crashes alike, which retires the "the harness is misusing `live?`"
+      reading the first version of this item carried. Always the same shape:
+      `ChunkHeader.large?` on a pointer that cannot be a chunk.
+      **Ruled out by measurement**: the `@world_stopped` window (same rate with
+      and without the fix, zero foreign unlocked reads with it in), the chunk
+      index's own invariants (`GCRY_INDEX_AUDIT=1` validates both return paths
+      and the cached slot — zero violations in surviving runs), and anything
+      landed on 2026-08-22 (6 of 8 at `daa994b`).
+      **Still unknown**: where the impossible pointer comes from. Nothing in
+      `chunk_containing`'s own bookkeeping is wrong in any run that finishes,
+      which either means the corruption is elsewhere or that a run which sees it
+      never gets to report. `make find-block-race` samples the rate per arm and
+      per architecture and does not gate.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be

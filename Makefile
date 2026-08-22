@@ -401,6 +401,17 @@ darwin-typecheck: $(BIN)
 	@rm -f $(BIN)/darwin_typecheck_arm64.o $(BIN)/darwin_typecheck_x86.o
 	@echo "ok — the Darwin build type-checks on both targets"
 
+# A rate for the open `find_block` crash, per arm and per platform.
+#
+# Not a gate: four threads calling `Heap#live?` or `GC.realloc` while
+# collections run die on an impossible chunk pointer in 5 runs of 8, and plain
+# allocation at the same rate dies in 0 — so it needs a mutator inside
+# `find_block`, which is where the unattributed CI crash faults. The defect is
+# open, so this reports and exits 0. `FIND_BLOCK_RACE_RUNS` sets the sample.
+find-block-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/find_block_race.cr -o $(BIN)/find_block_race --error-trace
+	$(BIN)/find_block_race
+
 # Does a mutator ever read the chunk index without the lock?
 #
 # `chunk_containing` skips `@index_lock` while `@world_stopped` is set, on the

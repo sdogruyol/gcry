@@ -494,6 +494,17 @@ jobs:
         run: |
           make stw-index-race
 
+      # Sampling, not gating: `find_block` called from a mutator while
+      # collections run dies on an impossible chunk pointer, and plain
+      # allocation at the same rate does not. The defect is open — see
+      # bench/find_block_race.cr — so this reports a rate and exits 0.
+      - name: find_block race sample
+        continue-on-error: true
+        env:
+          FIND_BLOCK_RACE_RUNS: "3"
+        run: |
+          make find-block-race
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
@@ -905,6 +916,10 @@ jobs:
           timeout 300 make ec-queue-audit
           timeout 300 make thread-block-audit
           timeout 300 make thread-birth-root
+          # Sampling, not gating (see the x86_64 job): the rate on this arch is
+          # the one that matters, because this is where the crash was first
+          # seen. `|| true` because the defect is open.
+          FIND_BLOCK_RACE_RUNS=3 timeout 300 make find-block-race || true
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same

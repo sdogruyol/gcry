@@ -1323,6 +1323,14 @@ module Gcry
       end
     end
 
+    # Cheap sanity, not a proof: a real chunk header lives inside the heap's own
+    # address range and is page-aligned by construction.
+    private def plausible_chunk?(chunk : ChunkHeader*) : Bool
+      a = chunk.address
+      return false if a == 0 || (a & 0x7) != 0
+      a >= @heap_min && a < @heap_max
+    end
+
     private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
@@ -1330,7 +1338,17 @@ module Gcry
       # that produced the previous result. Range check first (cheaper than
       # even a L1 index hit) before touching the sorted index.
       if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
-        return (@chunk_index + @last_chunk_idx).value
+        idx = @last_chunk_idx
+        if @index_audit && idx >= @chunk_index_count
+          @index_cache_oob &+= 1
+          @index_bad_last = idx.to_u64
+        end
+        cached = (@chunk_index + idx).value
+        if @index_audit && !plausible_chunk?(cached)
+          @index_cache_bad &+= 1
+          @index_bad_last = cached.address
+        end
+        return cached
       end
 
       lo = 0
@@ -1345,6 +1363,10 @@ module Gcry
         elsif addr >= finish
           lo = mid + 1
         else
+          if @index_audit && !plausible_chunk?(chunk)
+            @index_search_bad &+= 1
+            @index_bad_last = chunk.address
+          end
           @last_chunk_idx = mid
           @last_chunk_lo = base
           @last_chunk_hi = finish
