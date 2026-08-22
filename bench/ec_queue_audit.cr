@@ -48,6 +48,10 @@
 #               knob is the thing doing the work, not something else in the
 #               collection path.
 #
+#   --stall    never release the blocker, so the queued fibers cannot run and the
+#              bounded wait must fail with the state it was stuck in. The
+#              positive control for that bound.
+#
 #   crystal build -Dgc_none bench/ec_queue_audit.cr -o bin/ec_queue_audit
 #   GCRY_EC_QUEUE_AUDIT=1 bin/ec_queue_audit
 #   bin/ec_queue_audit --control
@@ -59,6 +63,46 @@ require "../src/gcry"
 {% end %}
 
 HEAP = Gcry.default_heap.not_nil!
+
+# Every wait in this harness is bounded, and the reason is a hang it has been
+# having on CI in complete silence. Six of the last forty `test (aarch64
+# native)` jobs ended at the 20-minute job timeout, and every one that was
+# checked was killed here — `Terminate orphan process: … (ec_queue_audit)`. A
+# job timeout is reported as *cancelled*, not failed, so a ~15% hang rate on the
+# runner where the open `Thread` use-after-free lives was never read as
+# anything.
+#
+# The waits are where it can hang: a fiber that is queued and never dequeued
+# turns `ran.receive` into a block with no output and no end. Bounding them does
+# not diagnose that — it converts it into a failure that says how many fibers
+# ran, how many are still parked, and what the audit had counted, which is the
+# information the next sighting needs and the last six did not produce.
+# 30 s against waits that finish in milliseconds. Deliberately well under the
+# `timeout 300` the CI step wraps this target in: three waits per arm and two
+# arms have to fit inside it, or the outer bound fires first and the harness
+# never gets to say what it was stuck on — which is the whole point.
+WAIT_SECONDS = (ENV["GCRY_ECQ_WAIT_SECONDS"]?.try(&.to_i?) || 30)
+
+def drain_or_die(ch : Channel(Nil), n : Int32, what : String, & : Int32 -> String) : Nil
+  got = 0
+  while got < n
+    select
+    when ch.receive
+      got += 1
+    when timeout(WAIT_SECONDS.seconds)
+      STDERR.puts "FAIL: #{what}: #{got} of #{n} after #{WAIT_SECONDS}s — this is the hang, " \
+                  "not a slow runner"
+      STDERR.puts "  #{yield got}"
+      STDERR.puts "  audit: ring slots #{HEAP.ec_queue_audit_ring_slots}, list slots " \
+                  "#{HEAP.ec_queue_audit_list_slots}, faults #{HEAP.ec_queue_audit_faults}, " \
+                  "last fault 0x#{HEAP.ec_queue_audit_last_fault.to_s(16)}"
+      STDERR.flush
+      STDOUT.flush
+      # `exit` runs at_exit and can block on the very scheduler that is stuck.
+      LibC._exit(1)
+    end
+  end
+end
 
 # The address the soak died on, reused as the poison so the harness and the
 # crash report read the same.
@@ -108,7 +152,9 @@ def run(control : Bool) : Int32
       ring_seen += HEAP.ec_queue_audit_ring_slots
       list_seen += HEAP.ec_queue_audit_list_slots
     end
-    CHURN_FIBERS.times { done.receive }
+    drain_or_die(done, CHURN_FIBERS, "churn fibers never finished") do |got|
+      "churn context global queue holds #{churn.@global_queue.@list.size} fiber(s)"
+    end
     puts "slots walked over 8 collections: ring=#{ring_seen} list=#{list_seen}"
 
     if audit_on
@@ -128,7 +174,9 @@ def run(control : Bool) : Int32
       while release.get == 0
       end
     end
-    held.receive
+    drain_or_die(held, 1, "the blocker fiber never started") do |got|
+      "context global queue holds #{ec.@global_queue.@list.size} fiber(s)"
+    end
 
     # Queued behind the blocker: spawned from this thread, so they land on the
     # context's global queue.
@@ -238,8 +286,15 @@ def run(control : Bool) : Int32
     end
 
     # ── Arm 4: recovery ──────────────────────────────────────────────────────
-    release.set(1)
-    QUEUED.times { ran.receive }
+    # `--stall` is the positive control for the bound above: the blocker is never
+    # released, so the 24 fibers queued behind it can never run and the wait
+    # cannot finish. Without it, a bound that never fires is indistinguishable
+    # from one that is not wired up.
+    release.set(1) unless ARGV.includes?("--stall")
+    drain_or_die(ran, QUEUED, "queued fibers never ran after the value was restored") do |got|
+      "#{QUEUED - got} still owed; context global queue holds " \
+      "#{ec.@global_queue.@list.size} fiber(s)"
+    end
     GC.collect
     puts "all #{QUEUED} queued fibers ran after the value was restored"
 

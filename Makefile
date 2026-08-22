@@ -527,6 +527,10 @@ ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
 	GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/ec_queue_audit --control
+	@out=$$(GCRY_ECQ_WAIT_SECONDS=3 $(BIN)/ec_queue_audit --stall 2>&1 || true); \
+	echo "$$out" | tail -4; \
+	echo "$$out" | grep -q "this is the hang" || { echo "FAIL: the stall arm did not report the hang"; exit 1; }; \
+	echo "ok — a wait that cannot finish fails with the state it was stuck in"
 
 stw-startup-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
