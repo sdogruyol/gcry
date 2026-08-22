@@ -383,6 +383,24 @@ heap-counters: $(BIN)
 # stays in exactly the state the defect needs for as long as the harness wants.
 # Three arms — rooted (must survive), `--noroot` (same births recorded, nothing
 # rooted: must die), and the knob off (nothing armed: must die).
+# Does the Darwin build still type-check, from a Linux box?
+#
+# `Gcry::Platform` is two files that must present the same surface, and a method
+# added to the Linux half and called unconditionally from `GC.init` compiles
+# fine here and fails on the macOS runner minutes later. That is exactly how
+# `bss_size_cap=` broke CI on 2026-08-22.
+#
+# `--cross-compile` runs the full semantic analysis for the target and stops
+# before linking, so it catches that without a Mac. Both Darwin targets, because
+# the platform files are shared but the arch flags are not. Broken on purpose
+# and observed red: removing the Darwin stub gives back the runner's own line,
+# `undefined method 'bss_size_cap=' for Gcry::Platform:Module`.
+darwin-typecheck: $(BIN)
+	$(CRYSTAL) build --cross-compile --target aarch64-apple-darwin -Dgc_none samples/hello.cr -o $(BIN)/darwin_typecheck_arm64 >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-apple-darwin -Dgc_none samples/hello.cr -o $(BIN)/darwin_typecheck_x86 >/dev/null
+	@rm -f $(BIN)/darwin_typecheck_arm64.o $(BIN)/darwin_typecheck_x86.o
+	@echo "ok — the Darwin build type-checks on both targets"
+
 # Which birth does a full staging table keep? The table is filled with raw
 # pthreads, which never reach Crystal's list, so neither the drain nor the
 # collection's walk can release them and the full table is a fact rather than a

@@ -96,6 +96,13 @@ jobs:
       - name: Ameba
         run: make lint
 
+      # Catch a Darwin-only compile break here rather than on the macOS runner
+      # at the end of the matrix: Gcry::Platform is two files that must present
+      # the same surface, and a Linux-only method called unconditionally from
+      # GC.init compiles fine on this job and fails there.
+      - name: Darwin type-check (cross-compile)
+        run: make darwin-typecheck
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 
