@@ -879,11 +879,15 @@ CI asymmetry that hid both.
       where the `Thread` use-after-free lives and in one of the two gates that
       has caught it.
       **Nothing is diagnosed yet.** What changed is that the next one will say
-      something: every gate in that step is bounded with `timeout 300` so it
-      fails with its output, and the step arms the STW watchdog so a stopped
-      world that never restarts names its phase instead of going quiet. Whether
-      the hang is inside `stop_world` at all is the first thing the next
-      sighting will settle.
+      something, at three levels: the harness's own waits give up after 30 s and
+      print how many fibers arrived, how many are still parked on the context's
+      global queue and what the audit had counted (`--stall` is the positive
+      control for that); every gate in that step is bounded with `timeout 300`
+      so it fails with its output rather than being cancelled; and the step arms
+      the STW watchdog so a stopped world that never restarts names its phase.
+      Whether the hang is inside `stop_world` at all is the first thing the next
+      sighting will settle. Not reproduced locally: 60 runs of the audit-on arm
+      on x86_64 Linux, 0 hangs.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be

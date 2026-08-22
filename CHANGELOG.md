@@ -35,6 +35,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ec_queue_audit`'s own waits are bounded, so the hang says what it was
+  stuck on.** The harness waits on three channels — the churn fibers, the
+  blocker starting, and the 24 fibers queued behind it running once it is
+  released — and none of those waits had an end. A fiber that is queued and
+  never dequeued turns `ran.receive` into a block with no output, which is
+  exactly what the aarch64 runner has been killing at 20 minutes. Each wait now
+  gives up after 30 s and prints how many arrived, how many are still parked on
+  the context's global queue, and what the audit had counted, then leaves
+  through `LibC._exit` rather than an `at_exit` that would run on the scheduler
+  that is stuck.
+  Positive control, because a bound that never fires is indistinguishable from
+  one that is not wired up: `bin/ec_queue_audit --stall` never releases the
+  blocker, so the 24 fibers cannot run, and `make ec-queue-audit` requires the
+  report — `0 of 24 after 3s … 24 still owed; context global queue holds 24
+  fiber(s)`. Not reproduced locally either way: 60 runs of the audit-on arm on
+  x86_64 Linux, 0 hangs.
+
 - **The aarch64 job has been hanging for two days and it read as
   `cancelled`.** Six of its last forty runs ended at the 20-minute job timeout,
   and every one that was examined was killed in the same place: `Terminate
