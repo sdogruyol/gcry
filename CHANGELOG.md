@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A full staging table threw away the birth it had just been handed — the
+  newest one, which is the thread actually inside the window the table exists
+  to see.** `Platform.stage_thread` records a thread from the moment
+  `pthread_create` returns, and `stop_world`'s pre-stop wait uses that record to
+  wait for it to publish itself. A slot is freed when the thread turns up in
+  Crystal's list, and the only thing that looked was the collection's own walk —
+  so the table held every thread created **since the last collection**, not the
+  ones being born. Measured, no collection in between: 65 `Thread.new`s fill it,
+  and at 200 threads only **73 of 201** births were recorded at all.
+  What a missing record costs is the wait. That thread is not waited for, so the
+  world stops with it unpublished: it is neither suspended nor scanned, and
+  anything reachable only from its stack has no root. `ThreadBirthRoot` covers
+  the `Thread` object and nothing else the thread has touched.
+  A full table now **drains** entries whose threads have already published —
+  which is what the occupancy should have been all along — and evicts the
+  **oldest** entry if that frees nothing. The oldest is the birth most likely to
+  be over; the newest is the one in flight. All 201 births are recorded now.
+  Both halves earn their place, and the measurement says which does the work:
+  at 100 threads the drain absorbs almost everything (6 overflows, 4 evictions),
+  while at 200 it absorbs 2 of 107, because those threads have already **exited**
+  and a thread that has left Crystal's list can no more be drained than one that
+  never joined it. Without the eviction half, that case is the one that loses
+  the newest birth.
+  `staged_overflows` no longer means a record was lost — it counts births that
+  found the table full, most of which the drain then accommodates. The number
+  that means a thread will not be waited for is the new
+  `thread_staged_evictions`, on `/gc-stats`.
+  Gated by `make thread-staging`, both directions: the table is filled with raw
+  pthreads, which never reach Crystal's list, so neither the drain nor the
+  collection's walk can release them and the full table is a fact rather than a
+  race. The birth handed to it must be recorded; under the new
+  `GCRY_STAGED_NO_EVICT=1` the same birth must be **absent**, and is.
+  **Still lossy, and counted**: an eviction is a thread that will not be waited
+  for, and a table full of entries for threads that have exited still costs one
+  timed-out spin at the next collection before the wait drops them.
+
 - **A Crystal program with more than 1 MiB of static data had every global root
   dropped.** gcry finds a program's BSS in `/proc/self/maps` by adjacency — the
   anonymous RW mapping that begins exactly where the executable's file-backed RW

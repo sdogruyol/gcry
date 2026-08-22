@@ -870,6 +870,23 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
+- [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
+      The record the pre-stop wait runs on was kept in a 64-slot table drained
+      only by the collection's own walk, so it held births since the last
+      collection rather than births in flight: 65 `Thread.new`s fill it, and at
+      200 threads only 73 of 201 births were recorded. The one refused was the
+      newest, i.e. the thread inside the window — never waited for, so the world
+      stops with it unpublished, neither suspended nor scanned, and anything
+      reachable only from its stack has no root (the birth root covers the
+      `Thread` object alone). A full table now drains published entries and
+      evicts the oldest if that frees nothing; all 201 births are recorded.
+      The drain does the work when the threads are alive (6 overflows / 4
+      evictions at 100) and cannot help once they have exited (107 / 105 at
+      200), which is what the eviction half is for. Gated both ways by
+      `make thread-staging` with `GCRY_STAGED_NO_EVICT=1` as the red arm.
+      **Still lossy and counted**: `thread_staged_evictions` is a thread that
+      will not be waited for.
+
 - [x] **The BSS stopped being a root range above 1 MiB — closed 2026-08-22.**
       The maps parser accepted the executable's BSS only if the mapping was
       under 1 MiB, so a program with more static data than that had every class
