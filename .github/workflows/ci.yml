@@ -414,6 +414,12 @@ jobs:
       # names the first collection that sees such a slot; this gate proves it
       # names the planted value rather than something downstream of it.
       - name: EC run-queue audit
+        # The same bound as the aarch64 job, for the same reason: this is the
+        # gate that hangs there. A step timeout fails with the log; a job
+        # timeout cancels with nothing.
+        timeout-minutes: 5
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           make ec-queue-audit
 
@@ -859,7 +865,21 @@ jobs:
       # three days, so the instrument goes to it rather than the other way
       # round. `thread-block-audit` is that instrument's own gate, run here so a
       # silent arm on this arch is distinguishable from a broken one.
+      # Every gate is bounded, and the reason is a hang this job has been having
+      # in silence. Six of the last forty runs of this job ended `cancelled` at
+      # the 20-minute job timeout, and every one that was checked was killed in
+      # the same place: `Terminate orphan process: … (ec_queue_audit)`. A
+      # cancelled job is not a red job, so a ~15% hang rate on the runner where
+      # the open `Thread` use-after-free lives has never been read as a defect.
+      #
+      # `timeout` turns it into a failure with whatever the run had printed, and
+      # the watchdog makes the collector say so from the inside: if the hang is
+      # a stopped world that never restarts, it prints `STOP-THE-WORLD STALLED
+      # <n> ms in phase=<name>` rather than going quiet until the runner gives
+      # up. 300 s against gates that take seconds.
       - name: Unit + process specs + STW SP + fork on aarch64
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
         run: |
           mkdir -p bin
           crystal spec --error-trace
@@ -870,12 +890,12 @@ jobs:
           ./bin/stw_sp_clamp
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
-          make greg-roots
-          make scheduler-roots
-          make ivar-layout-roots
-          make ec-queue-audit
-          make thread-block-audit
-          make thread-birth-root
+          timeout 300 make greg-roots
+          timeout 300 make scheduler-roots
+          timeout 300 make ivar-layout-roots
+          timeout 300 make ec-queue-audit
+          timeout 300 make thread-block-audit
+          timeout 300 make thread-birth-root
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same
