@@ -37,7 +37,19 @@ QUIET_THRESHOLD_MS = 5000
 
 # ── Child: one collection, under whatever env the parent set ─────────────────
 if ARGV.includes?("--child")
+  # The suspend arm needs mutator threads, or `n of m already have` is `0 of 0`
+  # and the count proves nothing. Cheap and harmless for the other arms.
+  stop = Atomic(Int32).new(0)
+  4.times do
+    Thread.new do
+      while stop.get == 0
+        req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 2_000_000)
+        LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+      end
+    end
+  end
   GC.collect
+  stop.set(1)
   puts "collected"
   exit 0
 end
@@ -66,8 +78,17 @@ armed_stalled = run_child(self_path, {
 })
 armed_quiet = run_child(self_path, {"GCRY_STW_WATCHDOG_MS" => QUIET_THRESHOLD_MS.to_s})
 unarmed_stalled = run_child(self_path, {"GCRY_STW_TEST_STALL_MS" => STALL_MS.to_s})
+# The suspend phase is a different one, and it is the only one the aarch64 hang
+# has ever been seen in (2026-08-22, run `32575506486`). Its report names the
+# thread being waited for, which `GCRY_STW_TEST_STALL_MS` cannot exercise
+# because it holds thread-stacks instead.
+armed_suspend = run_child(self_path, {
+  "GCRY_STW_WATCHDOG_MS"           => THRESHOLD_MS.to_s,
+  "GCRY_STW_TEST_SUSPEND_STALL_MS" => STALL_MS.to_s,
+})
 
 record["armed+stalled"] = armed_stalled
+record["armed+suspend"] = armed_suspend
 record["armed+quiet"] = armed_quiet
 record["unarmed+stalled"] = unarmed_stalled
 
@@ -102,6 +123,24 @@ if fired
   else
     failures << "fired without a parseable duration"
   end
+end
+
+# The suspend arm: it must fire, name that phase, and name a thread. A report
+# that says "stalled in suspend" and stops there is what the first sighting of
+# the aarch64 hang produced, and it is one question short.
+unless armed_suspend.includes?("phase=suspend")
+  failures << "the suspend stall did not fire or named another phase — the report that " \
+              "names the thread a stopped world is waiting for is unproven"
+end
+unless armed_suspend.includes?("to acknowledge its suspend signal")
+  failures << "the suspend arm fired without naming the thread it was waiting for"
+end
+if m = armed_suspend.match(/(\d+) of (\d+) already have/)
+  if m[2].to_i == 0
+    failures << "the suspend report counted 0 threads to wait for, so its count says nothing"
+  end
+else
+  failures << "the suspend report carried no acknowledged/expected count"
 end
 
 if armed_quiet.includes?("STOP-THE-WORLD")

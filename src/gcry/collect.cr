@@ -319,6 +319,12 @@ module Gcry
     # seeing it trigger says nothing. Never ship non-zero.
     property stw_test_stall_ms : UInt64 = 0_u64
 
+    # Research only: hold the **suspend** phase, which is a different one and the
+    # only one the aarch64 hang has ever been seen in. `stw_test_stall_ms`
+    # stalls thread-stacks, so it cannot exercise the report that names the
+    # thread being waited for. Never ship non-zero.
+    property stw_test_suspend_stall_ms : UInt64 = 0_u64
+
     getter low_water_skips : UInt64 = 0_u64
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).

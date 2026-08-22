@@ -72,6 +72,29 @@ module Gcry
       end
     end
 
+    # Who the suspend phase is waiting for.
+    #
+    # The first legible sighting of the aarch64 hang (2026-08-22, run
+    # `32575506486`) said `STALLED 10009 ms in phase=suspend` and stopped there:
+    # the collector had signalled every thread and was spinning on
+    # `until thread.@suspended.get` for one of them, and the report could not
+    # say which. These three are set by that spin, so the next one names it —
+    # the same device as `stack_bounds_in_flight`, which exists because a fault
+    # that names a thread is worth more than one that names a frame.
+    #
+    # Plain stores from the collecting thread, read by the watchdog's own
+    # pthread. Not a protocol: a torn read costs one confusing line in a report
+    # that is already about a process that is not going to finish.
+    @@suspend_expected = 0
+    @@suspend_acked = 0
+    @@suspend_waiting_id = 0_u64
+
+    def self.note_suspend(expected : Int32, acked : Int32, waiting_id : UInt64) : Nil
+      @@suspend_expected = expected
+      @@suspend_acked = acked
+      @@suspend_waiting_id = waiting_id
+    end
+
     def self.threshold_ms=(ms : UInt64) : Nil
       @@threshold_ns = ms * 1_000_000_u64
     end
@@ -155,8 +178,20 @@ module Gcry
       len = append(buf.to_unsafe, len, " ms in phase=")
       len = append(buf.to_unsafe, len, phase_name(id))
       len = append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
-      len = append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
-                                       "reported once per stop\n")
+      if id == PHASE_SUSPEND
+        # This phase does not wait on a lock — it waits for a thread to
+        # acknowledge its suspend signal. Naming it is the whole point.
+        len = append(buf.to_unsafe, len, "gcry: waiting for thread 0x")
+        len = append_hex(buf.to_unsafe, len, @@suspend_waiting_id)
+        len = append(buf.to_unsafe, len, " to acknowledge its suspend signal; ")
+        len = append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
+        len = append(buf.to_unsafe, len, " of ")
+        len = append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
+        len = append(buf.to_unsafe, len, " already have. Reported once per stop\n")
+      else
+        len = append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
+                                         "reported once per stop\n")
+      end
       LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
     end
 
@@ -168,6 +203,31 @@ module Gcry
         buf[len] = src[i]
         len += 1
         i += 1
+      end
+      len
+    end
+
+    # A `pthread_t` is only useful in the form the rest of gcry prints it in.
+    private def self.append_hex(buf : UInt8*, len : Int32, value : UInt64) : Int32
+      digits = uninitialized UInt8[16]
+      count = 0
+      v = value
+      if v == 0
+        digits[0] = '0'.ord.to_u8
+        count = 1
+      else
+        while v > 0 && count < 16
+          nib = (v & 0xf).to_u8
+          digits[count] = nib < 10 ? ('0'.ord.to_u8 + nib) : ('a'.ord.to_u8 + (nib - 10))
+          v >>= 4
+          count += 1
+        end
+      end
+      i = count - 1
+      while i >= 0 && len < 250
+        buf[len] = digits[i]
+        len += 1
+        i -= 1
       end
       len
     end

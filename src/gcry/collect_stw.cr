@@ -134,13 +134,37 @@ module Gcry
             next if stw_signal_exempt?(thread)
             thread.suspend
           end
+          # The breadcrumbs the first legible sighting of the aarch64 hang asked
+          # for. It said `STALLED … in phase=suspend` and could go no further:
+          # the collector was spinning here for a thread that never
+          # acknowledged, and nothing recorded which. Two plain stores per
+          # thread, on a path that runs once per collection.
+          expected = 0
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
-            until thread.@suspended.get
+            expected += 1
+          end
+          # Positive control for the report below: hold this phase open long
+          # enough for the watchdog to fire, with the breadcrumbs already set.
+          if (sstall = @stw_test_suspend_stall_ms) > 0
+            StwWatchdog.note_suspend(expected, 0, 0xdead_0000_0000_0001_u64)
+            deadline = Gcry::Clock.monotonic_ns &+ sstall &* 1_000_000_u64
+            while Gcry::Clock.monotonic_ns < deadline
               Intrinsics.pause
             end
           end
+          acked = 0
+          Thread.unsafe_each do |thread|
+            next if thread == current_thread
+            next if stw_signal_exempt?(thread)
+            StwWatchdog.note_suspend(expected, acked, thread.to_unsafe.unsafe_as(UInt64))
+            until thread.@suspended.get
+              Intrinsics.pause
+            end
+            acked += 1
+          end
+          StwWatchdog.note_suspend(expected, acked, 0_u64)
           @world_stopped = true
         rescue ex
           @world_stopped = false
