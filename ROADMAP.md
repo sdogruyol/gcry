@@ -842,6 +842,18 @@ CI asymmetry that hid both.
       the life of the process, and the interval *inside* `pthread_create` is
       still uncovered (a trampoline on the new thread was tried for the staging
       record and crashed 8 runs in 10).
+      **And one of those "left open" lines was hiding a hole, now closed.** The
+      64-slot table was sized against concurrent births; slots are freed by
+      `release`, which runs inside `stop_world`, so what it actually holds is
+      births **since the last collection** — 65 `Thread.new`s with none in
+      between overflow it, 200 overflow it 137 times, and an overflowing birth
+      used to be rooted by nothing at all. It is now rooted and never released:
+      a leaked `Thread` instead of an uncovered one. `make thread-birth-root`
+      gained `--burst` / `--burst-unrooted`, which is the second local
+      deterministic repro of this window and the first that needs no timing.
+      `Platform`'s staging table has the same shape and overflows on the same
+      input; there it costs the pre-stop wait rather than the root, and
+      `thread_staged_overflows` counts it.
       **The crash-rate measurement**: 9 completed reruns of the aarch64 job with
       the fix in, all green, 0 dying-`Thread` reports (a tenth was cancelled and
       is not counted). Stated with its weight and not more: a batch *before* the

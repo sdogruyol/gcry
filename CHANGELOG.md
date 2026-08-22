@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A full thread-birth table cost the root, not just the record — so the
+  use-after-free v0.20 closed reopened silently past the 64th birth.**
+  `ThreadBirthRoot` roots the `Thread` object `GC.pthread_create` is handed and
+  releases it when the thread publishes; the release runs inside `stop_world`,
+  which is the fact the 64-slot table was sized against the wrong quantity. What
+  it has to hold is not **concurrent** births — it is births **since the last
+  collection**. Measured, with no collection in between: 65 `Thread.new`s
+  overflow it, 100 overflow it 37 times and 200 overflow it 137 times, and every
+  one of those births used to take the `return` that counts an overflow and
+  roots nothing. A `Fiber::ExecutionContext::Parallel` bringing up 128 workers
+  before the heap is big enough to collect had half of them covered by nothing.
+  An overflow now roots the object anyway and never releases it. That leaks one
+  `Thread` and the graph it holds, which is the deliberate half of the trade: a
+  leak is a memory bug, an unrooted birth is the use-after-free this file exists
+  to close. `outstanding` counts it, so the leak is visible rather than implied,
+  and `thread_birth_armed` / `_released` / `_outstanding` / `_overflows` are on
+  `/gc-stats` beside the staging counters.
+  Gated in **both directions**, which is what makes the arm worth having:
+  `make thread-birth-root` gained a `--burst` arm that fills the table with
+  births that can never be released (raw pthreads, which never reach Crystal's
+  list) and requires the victim to survive its overflowing birth, and a
+  `--burst-unrooted` twin under `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` that
+  restores the old behaviour and requires the same block to **die**. It does, every run — the
+  second local, deterministic reproduction of this window, and the first that
+  needs no timing at all.
+  **Stated and not fixed**: `Platform`'s staging table is the same shape and
+  overflows on the same input (37 and 137 in the runs above), because it is
+  drained by the same walk. Its overflow costs the pre-stop *wait* for that
+  thread rather than the root, so with the above it is a degradation and not a
+  hole — `thread_staged_overflows` has always counted it.
+
 - **The allocation counters stop losing updates, and the cost that was traded
   for those losses does not exist on x86_64.** `live_objects`, `total_bytes`
   and `bytes_since_gc` were updated with plain `set(get + n)` unless
