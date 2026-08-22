@@ -401,6 +401,12 @@ darwin-typecheck: $(BIN)
 	@rm -f $(BIN)/darwin_typecheck_arm64.o $(BIN)/darwin_typecheck_x86.o
 	@echo "ok — the Darwin build type-checks on both targets"
 
+# Every knob the source reads has a row in the env reference. The reference had
+# drifted by 33 before this existed, which is what a reference does: going stale
+# breaks nothing, so nothing says so.
+knob-doc-check:
+	@ci/knob-doc-check.sh
+
 # A rate for the open `find_block` crash, per arm and per platform.
 #
 # Not a gate: four threads calling `Heap#live?` or `GC.realloc` while

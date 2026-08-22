@@ -103,6 +103,11 @@ jobs:
       - name: Darwin type-check (cross-compile)
         run: make darwin-typecheck
 
+      # A knob nobody documented is a knob nobody can find. The env reference
+      # had drifted by 33 before this step existed.
+      - name: Env knob reference is complete
+        run: make knob-doc-check
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 

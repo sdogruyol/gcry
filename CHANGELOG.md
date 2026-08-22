@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The env reference had drifted by 33 knobs, and now cannot.**
+  `docs/HARDENING.md` is the only place a user can find out what a `GCRY_*`
+  knob does, and it was missing everything added in v0.20.0 —
+  `GCRY_HEAP_COUNTERS_ATOMIC`, `GCRY_THREAD_BIRTH_ROOT` and its twin, the
+  birth-grace controls, the dead- and pooled-stack root arms, the scrub audit
+  and its overshoot, `GCRY_POST_MARK_SPIN`, the mostly-empty family — and
+  everything added on 2026-08-22. All 33 are documented now, each with the
+  measurement that put it there.
+  `make knob-doc-check` keeps it that way: every `GCRY_*` the source reads must
+  have a row, and CI runs it. Broken on purpose and observed red. That is the
+  failure mode a reference has — going stale breaks nothing, so nothing says so,
+  which is the same shape as every silent degradation this release found.
+
 - **The suspend wait now asks whether the thread it is waiting for still
   exists.** The watchdog says `phase=suspend` and names the thread from outside;
   what it cannot ask is the question that would settle this — is that
