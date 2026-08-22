@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The pthread stack-bounds snapshot stopped at 64 threads, and the counters
+  built to notice that reported full coverage.** `snapshot_pthread_stack_bounds`
+  records each thread's stack range before the suspend signals go out, and the
+  scan under STW looks the range up instead of asking libc. The table was a
+  fixed 64 entries: a process whose thread list is longer recorded the first 64
+  **in list order** and nothing for the rest, at every collection, for the life
+  of the process. A thread with no entry loses the pthread-mapping half of its
+  root coverage — `scan_pthread_stack` returns without scanning — and that is
+  where a Parallel worker's scheduler frames sit while its SP is on a pool
+  fiber, the same frames whose absence is recorded in this file as an acik
+  `ThreadPool` UAF and a collect hang.
+  Measured, threads parked, one collection: **82 threads on Crystal's list gave
+  `visited=64 read=64`** — a clean bill from the pair whose only job is to say
+  the platform answered nothing — with 18 lookups falling through to `nil`. At
+  122 threads, 58. The lookup miss was counted (`pthread_bounds_misses`, which
+  is on `/gc-stats` and whose comment already named "the thread list outgrows
+  the table" as reachable); what was not counted was the **visit**, because the
+  capacity check returned before `visited` was incremented. So the one assertion
+  that would have caught this — `read == visited` — could not.
+  The table now grows, doubling from 64, and the visit is counted before the
+  capacity check. Growth needs no synchronisation and that is a property of the
+  caller: the table is written only by the thread stopping the world, between
+  `Thread.lock` and the first suspend signal, and read only by that thread while
+  the world is stopped — no thread is frozen when `realloc` runs, the same
+  argument that lets `pthread_getattr_np` be called from there at all. After:
+  82 threads `visited=82 read=82`, 202 threads `visited=202 read=202`, zero
+  misses either way.
+  Gated in `process_spec` with a thread list longer than the initial table, and
+  broken on purpose with the new `GCRY_STACK_BOUNDS_NOGROW=1`: the same spec
+  goes red at `visited=150 read=130`, with 18 capacity misses and 18 lookup
+  misses on the 82-thread run. `stack_bounds_capacity_misses` is on
+  `/gc-stats`; a non-zero value there means some thread's OS stack is not being
+  scanned.
+
 - **A full thread-birth table cost the root, not just the record — so the
   use-after-free v0.20 closed reopened silently past the 64th birth.**
   `ThreadBirthRoot` roots the `Thread` object `GC.pthread_create` is handed and

@@ -870,6 +870,22 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
+- [x] **The pthread stack-bounds snapshot stopped at 64 threads — closed
+      2026-08-22.** The table the STW scan looks thread stack ranges up in was a
+      fixed 64 entries, so a process with a longer thread list bounded the first
+      64 in list order and left the rest unscanned on the pthread side, every
+      collection. Measured: 82 threads reported `visited=64 read=64` — the pair
+      that exists to report exactly this gap, reading clean, because the
+      capacity check returned before the visit was counted — with 18 lookups
+      falling through to `nil`; 122 threads, 58. It grows now, and the visit is
+      counted first, so `read == visited` is load-bearing: 82 → 82/82, 202 →
+      202/202, zero misses. Gated in `process_spec` above the initial capacity
+      and broken on purpose with `GCRY_STACK_BOUNDS_NOGROW=1` (red at
+      `visited=150 read=130`). **What is not measured** is whether a thread past
+      the 64th ever held the only reference to something: the loss is a
+      documented half of that thread's coverage, and no arm has yet shown a
+      block dying of it.
+
 - [x] **The coverage audit's residue is labelled — it is the in-flight
       population, and "4 a run" was a sample.** `GCRY_UNOWNED_COVERAGE_AUDIT=1`
       matches fiber-stack-shaped mappings against fibers, pools and dying-fiber
