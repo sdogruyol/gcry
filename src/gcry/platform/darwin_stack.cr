@@ -47,6 +47,17 @@ module Gcry
       0_u64
     end
 
+    # There is no table to run out of, for the same reason there is nothing to
+    # snapshot. Zero rather than a missing method: a caller that gates on this
+    # must not have to ask which platform it is on.
+    def self.stack_bounds_capacity_misses : UInt64
+      0_u64
+    end
+
+    def self.stack_bounds_nogrow=(value : Bool) : Bool
+      value
+    end
+
     # Darwin queries the descriptor directly at lookup time rather than
     # snapshotting (see the note above), so there is no visit/read pair to
     # count and nothing is ever in flight during the snapshot. Zeros rather

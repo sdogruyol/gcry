@@ -65,11 +65,34 @@ module Gcry
     # Ownership: written only by the thread stopping the world, between
     # `Thread.lock` and `Thread.unlock`, and read only by that same thread while
     # the world is stopped. No synchronisation is needed and none is implied.
-    MAX_STACK_BOUNDS_SLOTS = 64
+    # The table **grows**, and the reason is that the alternative was a silent
+    # coverage cliff: it was a fixed 64 entries, and a process whose thread list
+    # is longer than that recorded bounds for the first 64 in list order and
+    # nothing for the rest, every collection, for the life of the process.
+    # Measured before the change, with threads parked and one collection: 82
+    # threads on Crystal's list gave `visited=64 read=64` — full coverage, said
+    # the pair whose whole job is to report a gap — and 18 lookups that fell
+    # through to `nil`. At 122 threads, 58. A thread with no entry loses the
+    # pthread-mapping half of its root coverage: `scan_pthread_stack` returns
+    # without scanning, which is where a Parallel worker's scheduler frames live
+    # while its SP is on a pool fiber.
+    #
+    # Growth is safe here without any synchronisation, and that is a property of
+    # the caller rather than of this code: the table is written only by the
+    # thread stopping the world, between `Thread.lock` and the first suspend
+    # signal, and read only by that same thread while the world is stopped. No
+    # thread is frozen when `realloc` runs, so it cannot be holding libc's
+    # allocator lock against us — the same argument that lets
+    # `pthread_getattr_np`, which parses `/proc` for the main thread, be called
+    # from here at all.
+    STACK_BOUNDS_INITIAL_SLOTS = 64
 
-    @@sb_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STACK_BOUNDS_SLOTS)
-    @@sb_low = uninitialized StaticArray(UInt64, MAX_STACK_BOUNDS_SLOTS)
-    @@sb_high = uninitialized StaticArray(UInt64, MAX_STACK_BOUNDS_SLOTS)
+    @@sb_ids = Pointer(LibC::PthreadT).null
+    @@sb_low = Pointer(UInt64).null
+    @@sb_high = Pointer(UInt64).null
+    @@sb_cap = 0
+    @@sb_capacity_misses = 0_u64
+    @@sb_nogrow = false
     @@sb_count = 0
     @@sb_misses = 0_u64
     @@sb_visited = 0_u64
@@ -114,8 +137,17 @@ module Gcry
     def self.snapshot_pthread_stack_bounds(thread : LibC::PthreadT) : Nil
       {% if flag?(:linux) %}
         i = @@sb_count
-        return if i >= MAX_STACK_BOUNDS_SLOTS
+        # Counted before the capacity check, not after. The old order returned
+        # first, so a thread the table had no room for was never recorded as
+        # visited either — and `visited == read`, the pair that exists to say
+        # "the platform answered nothing for a thread we asked about", read
+        # clean while the coverage was gone. A visit is a visit whether or not
+        # there is somewhere to put the answer.
         @@sb_visited += 1
+        if i >= @@sb_cap && !grow_stack_bounds_table
+          @@sb_capacity_misses += 1
+          return
+        end
         @@sb_in_flight = thread.unsafe_as(UInt64)
         bounds = pthread_stack_bounds(thread)
         @@sb_in_flight = 0_u64
@@ -127,6 +159,38 @@ module Gcry
         @@sb_high[i] = bounds[1].address
         @@sb_count = i + 1
       {% end %}
+    end
+
+    # Doubling, from `STACK_BOUNDS_INITIAL_SLOTS`. Returns false only when the
+    # allocator refuses, in which case the caller counts a capacity miss and the
+    # visit shows up as `visited` without a matching `read`.
+    private def self.grow_stack_bounds_table : Bool
+      return false if @@sb_nogrow && @@sb_cap > 0
+      want = @@sb_cap == 0 ? STACK_BOUNDS_INITIAL_SLOTS : @@sb_cap * 2
+      ids = LibC.realloc(@@sb_ids.as(Void*), LibC::SizeT.new(want * sizeof(LibC::PthreadT)))
+      return false if ids.null?
+      @@sb_ids = ids.as(LibC::PthreadT*)
+      low = LibC.realloc(@@sb_low.as(Void*), LibC::SizeT.new(want * sizeof(UInt64)))
+      return false if low.null?
+      @@sb_low = low.as(UInt64*)
+      high = LibC.realloc(@@sb_high.as(Void*), LibC::SizeT.new(want * sizeof(UInt64)))
+      return false if high.null?
+      @@sb_high = high.as(UInt64*)
+      @@sb_cap = want
+      true
+    end
+
+    # Research only: refuse to grow past the initial capacity, so the gate can
+    # show what the fixed table used to do.
+    def self.stack_bounds_nogrow=(value : Bool) : Bool
+      @@sb_nogrow = value
+    end
+
+    # Threads the snapshot visited and had nowhere to record. Zero is the only
+    # acceptable value on a healthy process; a non-zero one means some thread's
+    # OS stack is not being scanned.
+    def self.stack_bounds_capacity_misses : UInt64
+      @@sb_capacity_misses
     end
 
     private def self.note_seen_id(id : UInt64) : Nil

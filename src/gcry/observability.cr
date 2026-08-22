@@ -183,6 +183,7 @@ module Gcry
         stw_staged_wait_timeouts:              heap.stw_staged_wait_timeouts,
         stack_bounds_visited:                  Gcry::Platform.stack_bounds_visited,
         stack_bounds_read:                     Gcry::Platform.stack_bounds_read,
+        stack_bounds_capacity_misses:          Gcry::Platform.stack_bounds_capacity_misses,
         birth_grace_rooted:                    heap.birth_grace_rooted,
         birth_grace_saved:                     heap.birth_grace_saved,
         birth_grace_overflows:                 heap.birth_grace_overflows,

@@ -471,6 +471,54 @@ end
       Gcry::Platform.stack_bounds_seen_before?(0xdead_beef_u64).should be_false
       Gcry::Platform.stack_bounds_seen_full?.should be_false
     end
+
+    # And the case the assertion above cannot reach on its own, because a spec
+    # process has a handful of threads: more of them than the table starts with.
+    # It used to record the first 64 in list order and drop the rest — silently,
+    # because the capacity check returned before the visit was counted, so
+    # `visited == read` stayed true while some thread's OS stack went unscanned
+    # at every collection. Measured then: 82 threads gave `visited=64 read=64`
+    # and 18 lookups that fell through to nil.
+    it "keeps every thread bounded when the list outgrows the table" do
+      n = Gcry::Platform::STACK_BOUNDS_INITIAL_SLOTS + 16
+      stop = Atomic(Int32).new(0)
+      before_capacity = Gcry::Platform.stack_bounds_capacity_misses
+      before_lookup = Gcry::Platform.stack_bounds_snapshot_misses
+
+      n.times do
+        Thread.new do
+          req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 2_000_000)
+          while stop.get == 0
+            LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+          end
+        end
+      end
+
+      # The threads have to be *on the list* when the world stops, or this
+      # measures a table that was never asked for more than it had.
+      listed = 0
+      until listed > Gcry::Platform::STACK_BOUNDS_INITIAL_SLOTS
+        req = LibC::Timespec.new(tv_sec: 0, tv_nsec: 5_000_000)
+        LibC.nanosleep(pointerof(req), Pointer(LibC::Timespec).null)
+        listed = 0
+        Thread.unsafe_each { listed += 1 }
+      end
+
+      GC.collect
+      visited = Gcry::Platform.stack_bounds_visited
+      read = Gcry::Platform.stack_bounds_read
+
+      begin
+        # Broken on purpose and observed red: `GCRY_STACK_BOUNDS_NOGROW=1`
+        # keeps the old fixed table and gives `visited=82 read=64`, 18 capacity
+        # misses and 18 lookup misses on the same run.
+        read.should eq(visited)
+        Gcry::Platform.stack_bounds_capacity_misses.should eq(before_capacity)
+        Gcry::Platform.stack_bounds_snapshot_misses.should eq(before_lookup)
+      ensure
+        stop.set(1)
+      end
+    end
   end
 
   describe "process GC address-space walk" do

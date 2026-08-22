@@ -727,6 +727,10 @@ module GC
     # Research only: a birth that finds no slot goes unrooted, which is what the
     # table used to do to every birth past the 64th between two collections.
     Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
+    # Research only: keep the pthread stack-bounds snapshot at its initial size
+    # instead of growing it, which is what a thread list longer than 64 used to
+    # run into (src/gcry/platform/linux_stack.cr).
+    Gcry::Platform.stack_bounds_nogrow = true if env_flag_one?("GCRY_STACK_BOUNDS_NOGROW")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #
