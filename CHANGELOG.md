@@ -35,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The aarch64 job has been hanging for two days and it read as
+  `cancelled`.** Six of its last forty runs ended at the 20-minute job timeout,
+  and every one that was examined was killed in the same place: `Terminate
+  orphan process: … (ec_queue_audit)`. GitHub reports a job timeout as
+  *cancelled*, not as a failure, so a ~15% hang rate — on the runner where the
+  open `Thread` use-after-free lives, in one of the two gates that has caught
+  it — never showed up as anything to look at.
+  Every gate in that step is now bounded with `timeout 300`, so the run fails
+  with whatever it had printed instead of the job being cancelled with nothing,
+  and the step arms `GCRY_STW_WATCHDOG_MS=10000` so a stopped world that never
+  restarts says `STOP-THE-WORLD STALLED <n> ms in phase=<name>` from the inside.
+  The x86_64 `EC run-queue audit` step gets the same bound and the same
+  watchdog. Neither of these diagnoses the hang; they are what make the next one
+  legible.
+
 - **The crash diagnostics now ride the TLAB arms, which is where this harness
   has actually crashed.** `stw_mt_property_test` runs three arms and only the
   plain one carried `GCRY_POISON_HOLDERS` / `GCRY_THREAD_CENSUS` /

@@ -870,6 +870,21 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
+- [ ] **The aarch64 job hangs in `ec-queue-audit`, about one run in seven, and
+      it has been reading as `cancelled`.** Six of the last forty runs of `test
+      (aarch64 native)` ended at the 20-minute job timeout — 2026-08-20 (three)
+      and 2026-08-22 — and every one checked was killed with `Terminate orphan
+      process: … (ec_queue_audit)`. A job timeout is reported as *cancelled*
+      rather than failed, so this has never been read as a defect, on the runner
+      where the `Thread` use-after-free lives and in one of the two gates that
+      has caught it.
+      **Nothing is diagnosed yet.** What changed is that the next one will say
+      something: every gate in that step is bounded with `timeout 300` so it
+      fails with its output, and the step arms the STW watchdog so a stopped
+      world that never restarts names its phase instead of going quiet. Whether
+      the hang is inside `stop_world` at all is the first thing the next
+      sighting will settle.
+
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms.** Separate from the `Thread` family above and not shown to be
       related to it. `stw_mt_property_test --tlab --nursery` died on **x86_64**
