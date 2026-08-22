@@ -447,6 +447,15 @@ jobs:
         run: |
           make thread-birth-root
 
+      # The other half of the birth window: the record the pre-stop wait uses.
+      # A full staging table used to refuse the birth being handed in — the
+      # newest one, i.e. the thread actually inside the window — so that thread
+      # was never waited for and the world stopped with it unpublished, neither
+      # suspended nor scanned.
+      - name: Thread staging table
+        run: |
+          make thread-staging
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.

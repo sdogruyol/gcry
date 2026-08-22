@@ -383,6 +383,16 @@ heap-counters: $(BIN)
 # stays in exactly the state the defect needs for as long as the harness wants.
 # Three arms — rooted (must survive), `--noroot` (same births recorded, nothing
 # rooted: must die), and the knob off (nothing armed: must die).
+# Which birth does a full staging table keep? The table is filled with raw
+# pthreads, which never reach Crystal's list, so neither the drain nor the
+# collection's walk can release them and the full table is a fact rather than a
+# race. `GCRY_STAGED_NO_EVICT=1` restores the old refusal, where the birth in
+# flight is the one thrown away.
+thread-staging: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_staging.cr -o $(BIN)/thread_staging --error-trace
+	$(BIN)/thread_staging
+	GCRY_STAGED_NO_EVICT=1 $(BIN)/thread_staging --no-evict
+
 # Is the BSS a root range at any size? Two binaries, because the second
 # threshold is a scan limit rather than a maps-parser one: 8 MiB clears the
 # 1 MiB adjacency cap this closed, 96 MiB clears `Roots::MAX_SCAN_BYTES` and so

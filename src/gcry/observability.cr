@@ -175,6 +175,7 @@ module Gcry
         thread_staged_now:                     Gcry::Platform.staged_count,
         thread_staged_total:                   Gcry::Platform.staged_total,
         thread_staged_overflows:               Gcry::Platform.staged_overflows,
+        thread_staged_evictions:               Gcry::Platform.staged_evictions,
         thread_birth_armed:                    Gcry::ThreadBirthRoot.armed,
         thread_birth_released:                 Gcry::ThreadBirthRoot.released,
         thread_birth_outstanding:              Gcry::ThreadBirthRoot.outstanding,
