@@ -222,6 +222,14 @@ jobs:
       - name: Process-GC STW MT property test with TLAB (50 iterations, 2+4 workers)
         env:
           GCRY_STW_WATCHDOG_MS: "10000"
+          # The diagnostics are on the arm above *and* on these two now, because
+          # the catches are down here. Both x86_64 failures of this harness —
+          # 2026-08-17 and the Darwin one on 2026-08-22 — were in `--tlab
+          # --nursery`, and neither could say anything: no poison, no report, no
+          # census. The plain arm has never failed.
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
+          GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
@@ -229,6 +237,14 @@ jobs:
       - name: Process-GC STW MT property test with TLAB+nursery (50 iterations, 2+4 workers)
         env:
           GCRY_STW_WATCHDOG_MS: "10000"
+          # This is the arm that has actually crashed, twice, on two platforms.
+          # `GCRY_POISON_HOLDERS` implies the freed-payload poison, the address
+          # tag and the SIGSEGV report, so a fault here names the block it read
+          # out of and what still points into it instead of printing one hex
+          # number.
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
+          GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
           ./bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
@@ -941,6 +957,15 @@ jobs:
       # its `/proc/self/status` reader returned 0 here, which passed the RSS
       # ceiling by measuring nothing (bench/bench_rss.cr).
       - name: STW × TLAB property test
+        env:
+          # Darwin runs all three arms through the Makefile, and the one that
+          # crashed here on 2026-08-22 — `find_block` under `tlab_alloc_small`,
+          # faulting on `0xffffffff00000012` — is the TLAB+nursery one. It
+          # printed a Crystal backtrace and nothing from gcry, because none of
+          # these were set. Same set as the x86_64 job's arms.
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
+          GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
           make stw-mt-property-test-short
 
