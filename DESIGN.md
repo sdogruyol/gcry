@@ -4,7 +4,7 @@
 
 Crystal runs on [Boehm](https://github.com/ivmai/bdwgc) today. That works — and it also means the language’s most intimate runtime piece lives in C, behind a wall. **gcry** is the other path: a conservative mark–sweep collector written in Crystal, shipped as a shard, plugged in with `-Dgc_none`. No compiler fork. No waiting for upstream to grow a third backend.
 
-This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.19**.
+This doc is the map: why the shape is what it is, how the pieces fit, and where the frontier is after **v0.20**.
 
 ---
 
@@ -129,42 +129,80 @@ Unit tests exercise `Gcry::Heap` under Boehm as a library allocator; process GC 
 src/gcry.cr                 # VERSION, public entry
 src/gcry/
   heap.cr                   # arenas, size classes, alloc path
-  block.cr · size_classes.cr · tlab.cr
-  roots.cr · layout.cr · blacklist.cr · stack_scrub.cr
+  block.cr · size_classes.cr · tlab.cr · mark_bitmap.cr
+  roots.cr · layout.cr · blacklist.cr · stack_scrub.cr · stack_maps.cr
   collect.cr                # orchestration
   collect_stw.cr · collect_scan.cr · collect_mark.cr · collect_sweep.cr
-  parallel_mark.cr · barrier.cr · mark.cr
-  finalizer.cr · metrics.cr · observability.cr
+  mark.cr · parallel_mark.cr · barrier.cr
+  finalizer.cr · metrics.cr · observability.cr · trace.cr · heap_dump.cr
   gc_override.cr            # module GC reopen
-  platform/                 # linux STW, soft-dirty, mprotect, fork, roots; darwin stack/roots/stw
+  thread_birth_root.cr      # root a Thread from pthread_create until it publishes
+  unowned_stack_roots.cr · birth_grace.cr   # root arms, each with a no-op twin
+  invariant.cr · mark_audit.cr · thread_block_audit.cr
+  address_space_audit.cr · poison_holders.cr · ec_queue_audit.cr
+  segv_report.cr · raw_out.cr · stw_watchdog.cr · monitor_gate.cr
+  clock.cr · crystal_process_compat.cr
+  platform/
+    linux_stw.cr · linux_roots.cr · linux_stack.cr · linux_fork.cr
+    linux_softdirty.cr · linux_mprotect.cr · linux_pagemap.cr
+    linux_proc_sp.cr · linux_address_space.cr · linux_thread_census.cr
+    darwin_stw.cr · darwin_roots.cr · darwin_stack.cr · darwin_stubs.cr
+    thread_staging.cr       # both platforms
 spec/ · process_spec/ · bench/ · samples/
 ```
 
-## Where we are (v0.19)
+The audit modules are **default-off diagnostics**, not collector path: each is
+reached only through its own `GCRY_*` knob, each counts what it walked so a null
+result cannot be an arm that never ran, and each is gated by a `make` target
+that breaks it on purpose and requires the red.
 
-Shipped and dogfooded on Linux + macOS; **v0.19.0** closes a dropped-root class on two platforms — a suspended thread's GP registers were unscanned on Darwin (empty stub) and on Linux aarch64 (`NGREGS = 0`), so a reference the compiler never spilled had no root. v0.18.0 closed fat-app RSS on the shard-only path (finalizer + retain=0); stack maps stay **dormant**. Parallel TLAB-off + lazy sweep remains a **supported opt-in**. Default path: EC parallelism **1**, `GCRY_TLAB` **off** (Linux Kemal headline carries v0.16):
+## Where we are (v0.20)
+
+Shipped and dogfooded on Linux + macOS. **v0.20.0 closes a use-after-free in
+fiber creation**, and ships the instruments that found it. The missing root was
+the stack of a fiber that is *ending*: `Thread#dying_fiber` parks it, the owning
+`Fiber` is already off the fiber list, and the thread may still be running on
+it — interleaved with poison on, **10/24 crashes → 0/24**, against a twin arm
+that walks the same memory and offers nothing at **12/24**, plus a 5 h × 3 soak
+clean (~52 000 collections, ~526 000 fibers, 0 errors). v0.19.0 closed the
+suspended-register class on Darwin and Linux aarch64; v0.18.0 closed fat-app RSS
+on the shard-only path. Stack maps stay **dormant**; Parallel TLAB-off + lazy
+sweep stays a **supported opt-in**. Default path: EC parallelism **1**,
+`GCRY_TLAB` **off** (the Linux Kemal headline still carries v0.16).
+
+**The thread family is a different defect and is still open** — see
+[Frontier](#frontier-after-020).
 
 | Area | State |
 |------|--------|
 | Process GC via shard | ✅ `-Dgc_none` (stock Crystal ≥ 1.21) |
-| Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64 |
+| Fibers + Monitor STW | ✅ SP clamp on x86_64 / aarch64; **dying-fiber stack rooted** (v0.20) |
+| Thread birth window | ⚠️ `GCRY_STAGED_WAIT` **default-on** — the collector waits for a thread `pthread_create` has returned but Crystal has not published (crashes 6/60 → 0/60, census gaps 3/30 → 0/30, ~1.4% of collections wait at all); `thread_birth_root.cr` roots the `Thread` object across the same window. The second UAF that motivated both is **open** |
 | Empty-chunk RSS | ✅ default-on — Kemal Linux ~**0.80×** Boehm (v0.16 carry); fat-app tip ~**1–1.6×** |
 | Layout / type_id / blacklist | ✅ defaults + escapes |
 | Barriers (soft-dirty / mprotect) | ✅; nursery **opt-in** (default off); soft-dirty Linux-only |
 | Observability | ✅ metrics, Prometheus, json_stats, `GCRY_TRACE`, heap dump |
+| Crash instruments | ✅ **default-off**, and each rides the gate that caught the defect it was built for: `GCRY_SEGV_REPORT`, `GCRY_POISON_FREED` / `_TAG` / `_HOLDERS`, `GCRY_MARK_AUDIT`, `GCRY_ADDRESS_SPACE_AUDIT`, `GCRY_THREAD_BLOCK_AUDIT`, `GCRY_THREAD_CENSUS`, `GCRY_EC_QUEUE_AUDIT` |
+| Heap counters | ✅ flip to **atomic** the moment a second thread is created, before it can allocate — the plain path loses **5 723 of 1 200 000** at four threads, and a single-threaded program keeps the cheap one |
 | Fork reinit | ✅ `pthread_atfork` (default) |
-| Stack / fiber scrub | ⚠️ fiber scrub **opt-in** (`GCRY_SCRUB_FIBERS=1`; EC1 **4 KiB** blind, Parallel 512 B + safe) — it wipes below another fiber's *estimated* SP and no measurement supports the default it used to have; `GCRY_CLEAR_STACK` also opt-in |
+| Stack / fiber scrub | ⚠️ fiber scrub **opt-in** (`GCRY_SCRUB_FIBERS=1`; EC1 **4 KiB** blind, Parallel 512 B + safe) — it wipes below another fiber's *estimated* SP and no measurement supports the default it used to have; margin measured at **zero** on both ABIs (x86_64 clean through 56 B, aarch64 through 64 B); `GCRY_CLEAR_STACK` also opt-in |
 | Parallel EC (TLAB-off + lazy) | ✅ **supported opt-in** — EC4 `/json` ~**79%** Boehm; TLAB-on / munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | Parallel mark | ⚠️ experimental — HTTP thr often regresses |
-| Test suite | ✅ invariants, property tests, process-STW MT, ASan/Valgrind, soak (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
+| Test suite | ✅ invariants, property tests, process-STW MT (± TLAB ± nursery), ASan / Valgrind, musl, 5 h soak, nightly fuzz, and **12 purpose-broken `make` gates** across 9 CI jobs (see [TEST_PLAN.md](docs/TEST_PLAN.md)) |
 | macOS process GC | ✅ Mach `thread_suspend` + dyld roots + `MADV_FREE_REUSABLE` (Crystal ≥ 1.21) |
 | Compiler stack maps | ⚠️ machinery shipped **dormant** — not product default; see [STACK_MAPS.md](docs/STACK_MAPS.md) |
 
-**Kemal Linux (v0.16.0 carry):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS ~**0.80×** — [PERF.md](docs/PERF.md).
+**Kemal Linux (v0.16.0 carry):** `/` ~**82%**, `/json` ~**87%**, post-GC RSS
+~**0.80×** — [PERF.md](docs/PERF.md). The tip default-path re-cut (fiber scrub
+off) lands `/json` **81.4%** @ **0.77×**, inside the ~80–85% band this host has
+carried since v0.16, so **the headline does not move on three trials**.
 
-**Kemal macOS (tip):** `/` ~**91%**, `/json` ~**84%**, post-GC RSS ~**0.95–1.01×** — [PERF-macos.md](docs/PERF-macos.md).
+**Kemal macOS (tip):** `/` ~**91%**, `/json` ~**84%**, post-GC RSS
+~**0.95–1.01×** — [PERF-macos.md](docs/PERF-macos.md).
 
-**acikturkiye:** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS — [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin tip ~**98%** @ ~**0.97×** at n=9 (2026-08-14 re-cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+**acikturkiye:** Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS —
+[ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Darwin tip ~**98%** @ ~**0.97×** at n=9
+(2026-08-14 re-cut) — [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 ## v0.10 — macOS process GC
 
@@ -180,19 +218,25 @@ Shipped and dogfooded on Linux + macOS; **v0.19.0** closes a dropped-root class 
 
 Requires Crystal **≥ 1.21** (ExecutionContext Monitor + `Fiber#run` unlock pairing). Linux PERF re-cut completed in **v0.16.0**; Darwin Kemal re-cut in **v0.17.0**.
 
-## Frontier (after 0.17)
+## Frontier (after 0.20)
 
 | Track | Why it matters |
 |-------|----------------|
-| **Stack maps / precise roots** | Darwin fat-app ~18×; Linux tip already ~1× via finalizer + retain=0 — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
-| **Parallel+TLAB / munmap supported** | TLAB-off + lazy is supported opt-in (~79%); TLAB-on + empty munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
-| **Write barriers in codegen** | Sound concurrent / cheaper incremental |
-| **Moving / compacting** | After precise roots |
-| **Windows process GC** | After Darwin |
+| **The thread family — second UAF** | gcry reads a `Thread`'s `@system_handle` out of a block it has already freed, inside `stop_world`. The mechanism is named — the birth window, with the pre-stop wait *giving up* — and `thread_birth_root.cr` roots the object `GC.pthread_create` is already handed, changing nothing about the stopped world. The local gate is deterministic (20/20, window held open with a raw pthread); the CI rate is **not** decisive yet (9 green aarch64 reruns, Fisher p ≈ 0.2 against a 3/10 control on a bursty fleet). Open until CI has the runs to say so |
+| **Stack maps / precise roots** | The only lever left for EC1 `/json` ≥95% @ ≤1.0× RSS — shard-only levers are **exhausted** (i3 + 9950X hunt MISS). Should end in a **decision** rather than an implementation: either precise roots pay measurably, or `GCRY_PRECISE_STACK` stays research and the target is restated — spike [docs/STACK_MAPS.md](docs/STACK_MAPS.md) |
+| **Darwin low-water skip** | Linux took EC4 pause **8.06 → 3.60 ms** from it and Darwin takes none. Blocked on the `mach_vm_page_query` disposition bits, not on code: 4 of 5 arms hold on a Darwin host, and the one the soundness argument turns on — a page that leaves residency with its contents *intact* — is still INCONCLUSIVE because the runner will not compress |
+| **Write barriers in codegen** | Sound concurrent / cheaper incremental — the precondition for nursery + incremental on by default |
+| **Windows process GC** | `platform/` is `linux_*` / `darwin_*` only; the widest good-first-issue surface on the board |
+| **Parallel+TLAB / munmap supported** | TLAB-off + lazy is a supported opt-in (~79%); TLAB-on + empty munmap still experimental — FINDINGS `2026-07-29-parallel-tlab-FINDINGS.md` |
 | **Parallel contexts by default** | Only if TLAB + parallel-mark win thr |
-| **Process-STW property tests** | Library MT property ≠ production STW surface |
+| **Moving / compacting** | After precise roots |
+| **Attribute the residual per-rep spread** | It bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp on post-GC RSS, at 12 reps |
 
-Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page policy). Darwin fat-app RSS still needs stack maps; Linux tip closed the measured Boehm gap without them. Darwin Kemal re-cut + Parallel supported opt-in landed in **0.17.0**.
+Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object page
+policy). Darwin fat-app RSS closed on the tip re-cut without stack maps, as Linux
+did in v0.18; what still wants them is the Kemal `/json` ceiling. Process-STW
+property tests are no longer frontier — they run in CI on both architectures,
+with TLAB and with nursery.
 
 ## Risks
 
@@ -200,9 +244,10 @@ Shard-only polish continues (Parallel thr/RSS, curated layouts, large-object pag
 |------|------------|
 | Collector allocates from GC heap | Immortal arenas; hot-path rules; stress specs |
 | Conservative false retention | Size classes, layout, type_id gate, SP clamp, fiber scrub; measure vs Boehm |
-| Fiber / MT root bugs | Explicit registry; STW; SP clamp; CI samples |
+| Fiber / MT root bugs | Explicit registry; STW; SP clamp; thread staging + census; dying-fiber and thread-birth roots; CI samples |
+| **A defect only CI can see** | Both recent use-after-frees were named by instruments rather than by reading the collector, and the open one has *never* reproduced locally. So the instruments ship: default-off, riding the gates that caught the defect, counting what they walked so a silence is readable, and each broken on purpose and observed red before its quiet is worth anything |
 | “Just make it precise” expectations | Precise is a separate epic — documented, not blocked |
-| Platform divergence | `platform/` isolation; Darwin real surface + soft-dirty stubs; CI Linux + macOS |
+| Platform divergence | `platform/` isolation; Darwin real surface + soft-dirty stubs; CI Linux x86_64 + aarch64 + musl, macOS arm64 |
 
 ## Success bar
 
