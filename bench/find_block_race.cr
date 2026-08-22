@@ -1,44 +1,42 @@
-# `find_block` from a mutator thread, while collections run, crashes.
+# `find_block` from a mutator thread, while collections run, used to crash.
 #
-# Four threads, 200 collections, and one difference between the arms: whether
-# the threads call `Heap#find_block` at all. Measured on x86_64 Linux —
+# The last-chunk cache in `chunk_containing_unlocked` tested `@last_chunk_idx`
+# and then **read it again** to index with. Those are two loads, and a
+# concurrent `invalidate_chunk_cache` between them turns a guard that saw a
+# valid index into a read at `@chunk_index[-1]` — libc's malloc header for the
+# array. That is why the bad value was the same small constant every single
+# time: `0x91`, handed to `ChunkHeader.large?`, which is where the crash lands.
+# One of the writers was unsynchronised too: a second `invalidate_chunk_cache`
+# outside `@index_lock`, on the path every allocating thread takes when it maps
+# a chunk.
 #
-#   alloc    256 `GC.malloc` per iteration ......... 0 of 8 runs crashed
-#   idle     `Intrinsics.pause` .................... 0 of 8
-#   live     256 `Heap#live?` per iteration ........ 5 of 8
-#   realloc  256 `GC.realloc` per iteration ........ 5 of 8
+# It needed a mutator *inside* `find_block`, which is what took four sessions to
+# find: allocation at the same rate never crashes, because it does not look
+# chunks up. `GC.realloc` and `Heap#live?` reach it by different routes and
+# crashed alike, and TLAB reaches it on the allocation fast path — which is why
+# the CI sighting was on the `--tlab --nursery` arm and nowhere else.
 #
-# So it is not allocation rate and not thread count: it needs a mutator to be
-# inside `find_block`. `live?` and `realloc` reach it by different routes and
-# crash alike, which is what rules out one caller being at fault — `GC.realloc`
-# is a supported public API and hammering it from four threads is not exotic.
+# Measured, four threads and 200 collections:
 #
-# The crash is always the same shape: `ChunkHeader.large?(chunk)` on a chunk
-# pointer that is not one (`0x91`, `0xa1`), i.e. `chunk_containing` handed back
-# something impossible. That is the same function the unattributed CI crash
-# faults in — `find_block` ← `tlab_alloc_small` — and TLAB is exactly what puts
-# `find_block` on a real program's allocation fast path.
+#              before      with the fix
+#   alloc      0 of 8      0 of 8
+#   idle       0 of 8      0 of 8
+#   live       5 of 8      0 of 8
+#   realloc    5 of 8      0 of 8
 #
-# **What is already ruled out**, each by measurement rather than argument:
+# And the race is not rare — it is constant. `index_cache_torn` counts a cache
+# read whose index, bounds and array disagreed and which fell through to the
+# binary search instead of trusting any of them: **7 849 in one run** of the
+# `live` arm. It was firing thousands of times per run all along and only
+# occasionally landing on a value that killed the process.
 #
-#   * The `@world_stopped` window closed on 2026-08-22 (`stw-index-race`). Same
-#     crash rate with the fix and with `GCRY_STW_LATE_CLEAR=1` restoring the old
-#     ordering — 22 of 25 against 13 of 25 — and `GCRY_INDEX_AUDIT=1` reports
-#     zero foreign unlocked reads in the fixed arm.
-#   * The chunk index itself, as far as its own invariants go:
-#     `GCRY_INDEX_AUDIT=1` validates every chunk the cache path and the search
-#     path return, and checks the cached slot is inside the array. Zero
-#     violations in the runs that survive.
-#   * Anything introduced today: 6 of 8 at `daa994b`, before any of it.
-#
-# **Not a gate.** The defect is open, so this exits 0 whatever happens: a step
-# expected to fail either blocks every pull request or teaches everyone to
-# ignore a red mark. What it produces is a rate, per arm, per platform — which
-# is the thing nobody has for this crash.
+#   GCRY_INDEX_CACHE_UNCHECKED=1 restores both halves — the two-load read and
+#   the unsynchronised invalidation — and takes `live` and `realloc` to **8 of
+#   8**. Without that arm, "it does not crash any more" is not a measurement.
 #
 #   crystal build -Dgc_none bench/find_block_race.cr -o bin/find_block_race
-#   bin/find_block_race              # parent: every arm, RUNS times each
-#   bin/find_block_race --child live # one run of one arm
+#   bin/find_block_race
+#   bin/find_block_race --child live
 
 require "../src/gcry"
 
@@ -79,41 +77,69 @@ if ARGV.includes?("--child")
   ROUNDS.times { GC.collect }
   stop.set(1)
   threads.each(&.join)
-  puts "arm=#{arm} survived index_cache_bad=#{heap.index_cache_bad} " \
-       "index_search_bad=#{heap.index_search_bad} index_cache_oob=#{heap.index_cache_oob} " \
+  puts "arm=#{arm} survived index_cache_torn=#{heap.index_cache_torn} " \
        "index_unlocked_foreign=#{heap.index_unlocked_foreign}"
   exit 0
 end
 
-runs = (ENV["FIND_BLOCK_RACE_RUNS"]?.try(&.to_i?) || 8)
+runs = (ENV["FIND_BLOCK_RACE_RUNS"]?.try(&.to_i?) || 4)
 exe = Process.executable_path.not_nil!
 
 puts "=== find_block race ==="
 puts "#{WORKERS} threads, #{ROUNDS} collections, #{PER_ITER} calls per iteration, #{runs} runs per arm"
-puts "NOT A GATE — the defect is open; this reports a rate (bench/find_block_race.cr)"
 puts ""
 
-ARMS.each do |arm|
+failures = [] of String
+
+def run_arm(exe : String, arm : String, runs : Int32, unchecked : Bool) : {Int32, String?}
   crashed = 0
-  audits = [] of String
+  first = nil
+  env = {"GCRY_INDEX_AUDIT" => "1"}
+  env["GCRY_INDEX_CACHE_UNCHECKED"] = "1" if unchecked
   runs.times do
     captured = IO::Memory.new
-    status = Process.run(exe, ["--child", arm], env: {"GCRY_INDEX_AUDIT" => "1"},
-      output: captured, error: captured)
+    status = Process.run(exe, ["--child", arm], env: env, output: captured, error: captured)
     if status.success?
-      if line = captured.to_s.lines.find(&.starts_with?("arm="))
-        audits << line.strip
-      end
+      first ||= captured.to_s.lines.find(&.starts_with?("arm="))
     else
       crashed += 1
     end
   end
+  {crashed, first}
+end
+
+torn_seen = 0_u64
+ARMS.each do |arm|
+  crashed, line = run_arm(exe, arm, runs, false)
+  puts "  %-8s crashed %d of %d%s" % [arm, crashed, runs,
+                                      line ? "   #{line.sub("arm=#{arm} survived ", "")}" : ""]
+  failures << "#{arm}: crashed #{crashed} of #{runs} — `find_block` from a mutator is not safe" if crashed > 0
+  if line && (m = line.match(/index_cache_torn=(\d+)/))
+    torn_seen += m[1].to_u64
+  end
+end
+
+# The torn-read counter is what says the race is still *there* and being
+# handled. A zero across every arm would mean this harness never reached the
+# window, and the zeros above would be about nothing.
+failures << "no torn cache read in any arm — the harness never reached the race, so its silence is not evidence" if torn_seen == 0
+
+puts ""
+puts "  restoring the old cache read (GCRY_INDEX_CACHE_UNCHECKED=1):"
+%w[live realloc].each do |arm|
+  crashed, _ = run_arm(exe, arm, runs, true)
   puts "  %-8s crashed %d of %d" % [arm, crashed, runs]
-  # The audit's silence is only worth something from a run that finished.
-  if a = audits.first?
-    puts "           %s" % a.sub("arm=#{arm} survived ", "")
+  if crashed == 0
+    failures << "#{arm}: the old read was restored and nothing crashed, so the arms above " \
+                "cannot be credited to the fix"
   end
 end
 
 puts ""
-puts "reported, not gated"
+if failures.empty?
+  puts "ok — a mutator inside `find_block` survives #{ROUNDS} collections, and the old read does not"
+  exit 0
+else
+  failures.each { |f| STDERR.puts "FAIL: #{f}" }
+  exit 1
+end

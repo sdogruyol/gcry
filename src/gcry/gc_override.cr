@@ -746,6 +746,9 @@ module GC
     # Count unlocked chunk-index reads taken during a stop by a thread that is
     # not the one that stopped the world (src/gcry/heap.cr `chunk_containing`).
     heap.index_audit = true if env_flag_one?("GCRY_INDEX_AUDIT")
+    # Research only: restore the last-chunk cache read that crashed
+    # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
+    heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")
     # Research only: the pre-2026-08-22 `start_world` ordering, where every
     # thread is resumed while `@world_stopped` still says stopped.
     heap.stw_late_clear = true if env_flag_one?("GCRY_STW_LATE_CLEAR")

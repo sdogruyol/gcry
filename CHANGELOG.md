@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`find_block` from a mutator thread handed back `@chunk_index[-1]`, which is
+  libc's malloc header for the array.** The last-chunk cache in
+  `chunk_containing_unlocked` tested `@last_chunk_idx` and then **read it again**
+  to index with. Those are two loads: a concurrent `invalidate_chunk_cache`
+  between them turns a guard that saw a valid index into a read one slot *before*
+  the array. That is why the bad value was the same small constant every single
+  time — `0x91`, handed to `ChunkHeader.large?`, which is exactly where the
+  unattributed CI crash faults. One of the writers was unsynchronised as well: a
+  second `invalidate_chunk_cache` outside `@index_lock`, on the path every
+  allocating thread takes when it maps a chunk.
+  The index is read **once** now, checked against the count, and the chunk it
+  names is *verified to contain the address* rather than assumed to — a miss
+  falls through to the binary search, which is the authority and which already
+  did that check on its own result. The unsynchronised invalidation is gone;
+  `index_insert` already invalidates under the lock.
+
+  | arm | before | after |
+  |-----|-------:|------:|
+  | `alloc` (256 `GC.malloc`/iter) | 0 of 8 | 0 of 8 |
+  | `idle` | 0 of 8 | 0 of 8 |
+  | `live` (256 `Heap#live?`/iter) | **5 of 8** | **0 of 8** |
+  | `realloc` (256 `GC.realloc`/iter) | **5 of 8** | **0 of 8** |
+
+  **And the race was never rare.** `index_cache_torn` counts a cache read whose
+  index, bounds and array disagreed: **6 709 in one three-run arm**, and 600 even
+  in the arms that do no lookups of their own. It was firing thousands of times
+  per run all along and only occasionally landing on a value that killed the
+  process.
+  It took a mutator *inside* `find_block` to see, which is why four sessions
+  missed it: allocation at the same rate never crashes, because it does not look
+  chunks up. `GC.realloc` and `Heap#live?` reach it by different routes and
+  crashed alike; TLAB reaches it on the allocation fast path, which is why the
+  CI sighting was on `--tlab --nursery` and nowhere else.
+  `make find-block-race` gates it in both directions — `GCRY_INDEX_CACHE_UNCHECKED=1`
+  restores both halves of the old behaviour and takes `live` and `realloc` to
+  **8 of 8** — and it requires a non-zero torn count, so a green run cannot come
+  from a harness that never reached the window. On x86_64 and aarch64.
+  **Two readings that were wrong, both retired by measurement rather than by
+  argument**: that the array was reallocated under the reader (`moved=0` in
+  every catch, and making the index immortal changed nothing), and that a slot
+  below the count was never written (zero-filling the new capacity changed
+  nothing). Both experiments are gone from the tree; only the counter that means
+  something stayed.
+
 - **`start_world` resumed every thread before clearing `@world_stopped`, so
   every mutator briefly read the chunk index with no lock.**
   `Heap#chunk_containing` skips `@index_lock` while that flag is set, and its

@@ -407,13 +407,15 @@ darwin-typecheck: $(BIN)
 knob-doc-check:
 	@ci/knob-doc-check.sh
 
-# A rate for the open `find_block` crash, per arm and per platform.
+# A mutator inside `find_block` while collections run.
 #
-# Not a gate: four threads calling `Heap#live?` or `GC.realloc` while
-# collections run die on an impossible chunk pointer in 5 runs of 8, and plain
-# allocation at the same rate dies in 0 — so it needs a mutator inside
-# `find_block`, which is where the unattributed CI crash faults. The defect is
-# open, so this reports and exits 0. `FIND_BLOCK_RACE_RUNS` sets the sample.
+# It used to die in 5 runs of 8, on an impossible chunk pointer the last-chunk
+# cache handed back — the field tested and then read again, with an
+# unsynchronised writer setting it to `-1` in between, so the second read
+# indexed the array at `[-1]`. Plain allocation at the same rate never crashed,
+# because it does not look chunks up. `GCRY_INDEX_CACHE_UNCHECKED=1` restores
+# the old read and takes it to 8 of 8, which is what makes the green arms mean
+# something. `FIND_BLOCK_RACE_RUNS` sets the sample (default 4).
 find-block-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/find_block_race.cr -o $(BIN)/find_block_race --error-trace
 	$(BIN)/find_block_race
