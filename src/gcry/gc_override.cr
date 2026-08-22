@@ -739,6 +739,10 @@ module GC
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).
     Gcry::Platform.staged_no_evict = true if env_flag_one?("GCRY_STAGED_NO_EVICT")
+    # Research only: let the dying-type audit walk every block on a minor
+    # collection, where unmarked does not mean dying
+    # (src/gcry/thread_block_audit.cr).
+    heap.dying_audit_all_collections = true if env_flag_one?("GCRY_DYING_AUDIT_ALL_COLLECTIONS")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

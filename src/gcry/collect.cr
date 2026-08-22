@@ -1208,7 +1208,7 @@ module Gcry
           # separately from `mark_audit` on purpose — the arm has to run on CI
           # steps whose budget will not carry an O(live heap) walk per
           # collection as well.
-          audit_dying_type_blocks if @thread_block_audit
+          audit_dying_type_blocks(major) if @thread_block_audit
 
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.

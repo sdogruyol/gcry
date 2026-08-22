@@ -123,7 +123,15 @@ def run_child(arm : String) : NoReturn
 
   3.times { GC.collect }
 
-  STDERR.puts "walked=#{heap.dying_type_walked} live=#{heap.dying_type_live} " \
+  # Enough allocation to cross the nursery threshold repeatedly. Only the minor
+  # arms set one, so every other arm walks this loop for nothing and reports
+  # `minor=0`, which is what its assertion checks.
+  if arm == "lives"
+    2_000.times { Gcry::Roots.keep_alive(GC.malloc(512_u64)) }
+  end
+
+  STDERR.puts "minor=#{heap.minor_collections} " \
+              "walked=#{heap.dying_type_walked} live=#{heap.dying_type_live} " \
               "deaths=#{heap.dying_type_deaths} audits=#{heap.address_space_audits} " \
               "pop=#{heap.thread_pop_collections} gaps=#{heap.thread_pop_gap_collections} " \
               "staged=#{heap.thread_pop_staged_collections} " \
@@ -150,17 +158,31 @@ puts "mode: #{control ? "control (GCRY_THREAD_BLOCK_AUDIT unset; nothing may be 
 exe = Process.executable_path.not_nil!
 failures = [] of String
 
-["dies", "lives", "thread", "staged", "staged-nowait"].each do |arm|
+["dies", "lives", "lives-minor", "lives-minor-all", "thread", "staged", "staged-nowait"].each do |arm|
   env = {"GCRY_THREAD_BLOCK_AUDIT" => control ? "0" : "1"}
+  # A small nursery threshold, so the churn in the child produces minor
+  # collections rather than one major at the end. On a minor the sweep reclaims
+  # only the nursery, so an old live object reads unmarked and is *not* dying —
+  # which this arm exists to hold the audit to.
+  if arm.starts_with?("lives-minor")
+    env["GCRY_NURSERY"] = "65536"
+  end
+  # And the same run with the predicate removed, which is what the arm looked
+  # like before 2026-08-22: every old live object reported as about to be swept.
+  env["GCRY_DYING_AUDIT_ALL_COLLECTIONS"] = "1" if arm == "lives-minor-all"
   # The same planted entry, with the pre-stop wait on and off. On: the wait
   # cannot drain an id that will never publish, so it must give up and say so.
   # Off: nothing waits, and the world stops with the entry outstanding.
   env["GCRY_STAGED_WAIT"] = "0" if arm == "staged-nowait"
   captured = IO::Memory.new
-  child_arm = arm == "staged-nowait" ? "staged" : arm
+  child_arm = case arm
+              when "staged-nowait"                  then "staged"
+              when "lives-minor", "lives-minor-all" then "lives"
+              else                                       arm
+              end
   Process.run(exe, ["--child=#{child_arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
-  line = text.lines.find(&.starts_with?("walked="))
+  line = text.lines.find(&.starts_with?("minor="))
   unless line
     failures << "#{arm}: the child did not report its counters. What it said:\n#{text.lines.first(8).join("\n")}"
     next
@@ -175,7 +197,8 @@ failures = [] of String
   staged = fields["staged"]
   timeouts = fields["timeouts"]
   staged_now = fields["stagednow"]
-  puts "#{arm}: #{walked} blocks walked, #{live} live, #{deaths} dying, #{audits} address-space audits, " \
+  minors = fields["minor"]
+  puts "#{arm}: #{minors} minor collections, #{walked} blocks walked, #{live} live, #{deaths} dying, #{audits} address-space audits, " \
        "#{pop} collections walked for the precondition (#{gaps} with an unbounded thread, " \
        "#{staged} with a staged one, #{timeouts} where the wait gave up, #{staged_now} staged after it)"
 
@@ -238,6 +261,26 @@ failures = [] of String
       failures << "lives: #{deaths} block(s) of the watched type reported dying while every one of " \
                   "them is rooted. Either the mark is dropping them or the audit reports deaths that " \
                   "are not real"
+    end
+  when "lives-minor"
+    if minors == 0
+      failures << "lives-minor: no minor collection ran, so the arm never reached the case it is " \
+                  "about — every collection here was a full one"
+    end
+    if deaths > 0
+      failures << "lives-minor: #{deaths} block(s) reported dying on a minor collection while every " \
+                  "one of them is rooted. On a minor the sweep reclaims only the nursery, so an " \
+                  "unmarked old object is not about to be swept"
+    end
+  when "lives-minor-all"
+    # The same run with the sweep's predicate removed. If this does not produce
+    # phantom deaths, the arm above is passing for some other reason.
+    if minors == 0
+      failures << "lives-minor-all: no minor collection ran, so this control says nothing"
+    end
+    if deaths == 0
+      failures << "lives-minor-all: the predicate was removed and no phantom death appeared, so " \
+                  "the arm above cannot be credited to it"
     end
   when "thread"
     if live == 0

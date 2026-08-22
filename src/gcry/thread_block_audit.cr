@@ -91,6 +91,11 @@ module Gcry
     # Collections that stopped the world with a thread staged after the wait.
     getter thread_pop_staged_now_collections : UInt64 = 0_u64
 
+    # Research only: walk every used block whatever the collection is, which is
+    # what this arm did before it was taught the sweep's predicate. The gate
+    # uses it to show the phantom deaths coming back.
+    property dying_audit_all_collections : Bool = false
+
     # Sightings reported per run, per kind. The counters carry the rest.
     THREAD_POP_REPORT_LIMIT = 3
 
@@ -99,7 +104,19 @@ module Gcry
     @thread_pop_staged_now_reported = 0
 
     # Called with the world stopped, after `mark_loop` and before `sweep`.
-    protected def audit_dying_type_blocks : Nil
+    #
+    # *major* is the sweep's own flag and this walk needs it, because "unmarked"
+    # only means "about to be swept" in a full collection. A minor marks the
+    # nursery and reclaims the nursery, so every old live object reads unmarked
+    # and reads that way correctly — `sweep` skips it on exactly the two
+    # conditions repeated below (`collect_sweep.cr:67` and `:144`). Without
+    # them the arm reported live objects as dying: measured on
+    # `stw_mt_property_test --tlab --nursery`, **262 reports in one run**,
+    # against 0 for the same harness with the nursery off. Every one of them
+    # was a `Thread` that the report itself said was still on Crystal's list,
+    # which is what an audit looks like when it is asking the wrong question
+    # rather than finding an answer.
+    protected def audit_dying_type_blocks(major : Bool) : Nil
       return unless @thread_block_audit
       note_thread_preconditions
       watched = dying_type_id
@@ -107,6 +124,8 @@ module Gcry
       each_chunk do |chunk|
         next if ChunkHeader.dormant?(chunk)
         next if ChunkHeader.large?(chunk)
+        # `sweep` will not touch this chunk at all, so nothing in it is dying.
+        next unless major || @dying_audit_all_collections || ChunkHeader.nursery?(chunk)
         class_index = chunk.value.size_class.to_i32!
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
         payload = SizeClasses.payload(class_index)
@@ -119,6 +138,8 @@ module Gcry
           header = cursor.as(BlockHeader*)
           cursor += block_bytes
           next if BlockHeader.free?(header)
+          # Same test the sweep applies per block.
+          next unless major || @dying_audit_all_collections || BlockHeader.nursery?(header)
           @dying_type_walked &+= 1
           user = BlockHeader.user_from(header)
           # Unsigned: a `type_id` read as Int32 out of a payload that is not one
