@@ -749,6 +749,11 @@ module GC
     # Research only: the pre-2026-08-22 `start_world` ordering, where every
     # thread is resumed while `@world_stopped` still says stopped.
     heap.stw_late_clear = true if env_flag_one?("GCRY_STW_LATE_CLEAR")
+    # Research only: how long the suspend wait spins before it asks whether the
+    # thread it is waiting for still exists (src/gcry/collect_stw.cr).
+    if ss = env_u64("GCRY_SUSPEND_STALL_SPINS")
+      heap.suspend_stall_spins = ss
+    end
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

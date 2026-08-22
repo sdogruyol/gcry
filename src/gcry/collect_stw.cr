@@ -172,7 +172,7 @@ module Gcry
             until thread.@suspended.get
               Intrinsics.pause
               spins &+= 1
-              if spins == SUSPEND_STALL_SPINS
+              if spins == @suspend_stall_spins
                 report_stuck_suspend(thread, id, expected, acked)
               end
             end
@@ -194,10 +194,14 @@ module Gcry
     # from outside at 10 s; this one runs *inside* the spin, which is the only
     # place that can ask the question the watchdog cannot: is the thread we are
     # waiting for still there?
-    # `GCRY_SUSPEND_STALL_SPINS` lowers it, which is how the gate makes the
-    # report fire without having to arrange a thread that really will not
-    # answer.
-    SUSPEND_STALL_SPINS = (ENV["GCRY_SUSPEND_STALL_SPINS"]?.try(&.to_u64?) || 200_000_000_u64)
+    # Roughly a second of `pause` on either arch, and a **property** rather than
+    # a constant with an `ENV` lookup in it. That first version cost a 120%
+    # heap-growth regression on `make rss-leak`: a Crystal constant with a
+    # runtime initializer is evaluated lazily at first use, and the first use of
+    # this one is inside `stop_world` — so `ENV[]?` allocated a `String` with
+    # the world stopped, which is the one thing this collector must never do.
+    # `GCRY_SUSPEND_STALL_SPINS` is read at init like every other knob.
+    property suspend_stall_spins : UInt64 = 200_000_000_u64
 
     @suspend_stall_reported = false
 
