@@ -54,8 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   libc about a handle that may have come out of a freed object can itself fault:
   a fault there names the defect, while a hang names nothing, and a hang is what
   six aarch64 jobs have produced. `GCRY_SUSPEND_STALL_SPINS` lowers the
-  threshold, and `make stw-watchdog` gained an `armed+in-spin` arm that fires it
-  at one spin and requires both the line and its verdict — arranging a thread
+  threshold — read at init like every other knob, and **not** as a constant with
+  an `ENV` lookup in it, which is how the first version of this shipped: Crystal
+  evaluates a constant with a runtime initializer lazily at first use, that
+  first use is inside `stop_world`, and `ENV[]?` allocates. `make rss-leak`
+  caught it in one CI run at **120.75% heap growth against a 15% limit**, which
+  is exactly what that gate is for. `make stw-watchdog` gained an
+  `armed+in-spin` arm that fires the report at one spin and requires both the
+  line and its verdict — arranging a thread
   that genuinely never answers is the defect itself, so the report is proven on
   a healthy one.
 
