@@ -1262,7 +1262,17 @@ module Gcry
         end
         user = nxt
       end
-      update_heap_bounds_after_unmap
+      # Also under the lock: it walks the chunk list and rewrites `@heap_min` /
+      # `@heap_max`, which `find_block` reads to decide whether an address is
+      # ours at all. Unsynchronised, a peer mapping or unmapping a chunk during
+      # the walk leaves those bounds describing a heap that no longer exists.
+      # Serialising the detach alone left `make large-cache-race` failing 2 of 5
+      # on the locked arm; with this it is 0.
+      if @trim_unlocked
+        update_heap_bounds_after_unmap
+      else
+        with_alloc_lock { update_heap_bounds_after_unmap }
+      end
     end
 
     # Size-class mapped bytes (heap_size minus large VMAs).

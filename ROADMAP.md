@@ -978,10 +978,16 @@ CI asymmetry that hid both.
       **Worth stating**: a smaller buffer would be a size-class block, freed and
       reused rather than unmapped, so the same defect would corrupt silently
       instead of faulting.
-      **A locking asymmetry was found and fixed** — `take_large_free` walks
-      `@large_freelists` holding `@alloc_lock` while `trim_large_cache` walked
-      it holding nothing and unmapped as it went — but it is **not proven to be
-      this crash**: 0 of 24 with the fix against 1 of 24 with the faithful
+      **A locking asymmetry was found, fixed, and then proven on its own terms.**
+      `take_large_free` walks `@large_freelists` holding `@alloc_lock` while
+      `trim_large_cache` walked it holding nothing and unmapped as it went; a
+      second step in the same function, `update_heap_bounds_after_unmap`,
+      rewrote `@heap_min` / `@heap_max` outside the lock as well. Since the
+      application had stopped reproducing, the question was asked directly:
+      `make large-cache-race` puts four workers on 40 KiB allocate-write-verify-
+      free while a peer trims, and it is **5 of 5 faults with
+      `GCRY_TRIM_UNLOCKED=1`, 0 of 5 serialised**. Whether it is **also this
+      crash** remains unproven: 0 of 24 with the fix against 1 of 24 with the faithful
       control, and then 0 against 0 at two concurrencies with the arms
       interleaved. The rate fell from 7 of 60 to nothing for a reason that is
       not the knob, so **step one next time is re-establishing the baseline on

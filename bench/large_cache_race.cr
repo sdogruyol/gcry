@@ -1,0 +1,169 @@
+# Can the large-object cache hand out a chunk that a trimming peer is
+# unmapping?
+#
+# `alloc_large` → `take_large_free` walks `@large_freelists` **holding
+# `@alloc_lock`**, takes a chunk off the list and returns it to the mutator.
+# `trim_large_cache` walks the same list; before 2026-08-23 it held nothing and
+# `munmap`ed each chunk while still walking. Those two racing means a live
+# buffer, just issued, can be unmapped under its owner.
+#
+# That was found while chasing a use-after-free in acikturkiye — a 69 632-byte
+# large chunk released while a fiber wrote JSON into it
+# (`bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`) — and it could not be
+# settled there: the crash rate fell from 7 of 60 to nothing between sessions,
+# for reasons that were not the fix, and neither arm could be told from the
+# other. So the question is asked directly instead of waiting for an
+# application to ask it: this harness needs no Kemal, no Postgres and no rate.
+#
+#   workers   allocate a large block, write a pattern, verify it, free it
+#   trimmer   calls `trim_large_cache(0)` in a loop
+#
+# With the lock, `take_large_free` and the trim's detach are serialised and no
+# block is both handed out and torn down. Without it they interleave, and the
+# worker writes into a chunk that is being unmapped: SIGSEGV, or a pattern that
+# reads back wrong.
+#
+#   default              must survive, every verify clean
+#   GCRY_TRIM_UNLOCKED=1 must fail — otherwise the arm above is not evidence
+#
+#   crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race
+#   bin/large_cache_race
+#   GCRY_TRIM_UNLOCKED=1 bin/large_cache_race --child
+
+require "../src/gcry"
+
+{% unless flag?(:gc_none) %}
+  {% raise "large_cache_race requires -Dgc_none (gcry as process GC)" %}
+{% end %}
+
+# Comfortably over LARGE_THRESHOLD (32 KiB) and a single size, so every free
+# feeds the bucket the next allocation takes from — `take_large_free` matches on
+# exact mapped size, so one size maximises the overlap this is about.
+PAYLOAD = 40_u64 * 1024
+WORKERS =       4
+ROUNDS  =  20_000
+FILL    = 0xA7_u8
+
+class Verdict
+  @@corrupt = Atomic(Int32).new(0)
+  @@done = Atomic(Int32).new(0)
+  @@stop = Atomic(Int32).new(0)
+
+  def self.corrupt!
+    @@corrupt.add(1)
+  end
+
+  def self.corrupt
+    @@corrupt.get
+  end
+
+  def self.finish
+    @@done.add(1)
+  end
+
+  def self.finished
+    @@done.get
+  end
+
+  def self.stop!
+    @@stop.set(1)
+  end
+
+  def self.stop?
+    @@stop.get != 0
+  end
+end
+
+if ARGV.includes?("--child")
+  heap = Gcry.default_heap
+  # Retain enough that a freed block stays cached for the next allocation to
+  # take, which is the hit path `take_large_free` exists for. The trimmer then
+  # asks for 0, so the two are pulling on the same list at the same time.
+  heap.large_cache_retain = 64_u64 * 1024 * 1024
+
+  threads = [] of Thread
+  WORKERS.times do
+    threads << Thread.new do
+      ROUNDS.times do
+        break if Verdict.stop?
+        p = GC.malloc_atomic(PAYLOAD)
+        bytes = p.as(UInt8*)
+        i = 0_u64
+        while i < PAYLOAD
+          bytes[i] = FILL
+          i += 64 # one byte per cache line is enough to touch every page
+        end
+        i = 0_u64
+        while i < PAYLOAD
+          if bytes[i] != FILL
+            Verdict.corrupt!
+            break
+          end
+          i += 64
+        end
+        GC.free(p)
+      end
+      Verdict.finish
+    end
+  end
+
+  # The trimmer: same list, from another thread, as hard as it will go.
+  trimmer = Thread.new do
+    until Verdict.finished >= WORKERS
+      heap.trim_large_cache(0_u64)
+    end
+  end
+
+  threads.each(&.join)
+  Verdict.stop!
+  trimmer.join
+
+  puts "child: #{Verdict.corrupt} corrupt verifies, cache hits #{heap.large_cache_hits}"
+  exit(Verdict.corrupt > 0 ? 1 : 0)
+end
+
+# ── Parent ───────────────────────────────────────────────────────────────────
+exe = Process.executable_path.not_nil!
+attempts = (ENV["LARGE_CACHE_RACE_ATTEMPTS"]?.try(&.to_i?) || 5)
+failures = [] of String
+
+puts "=== large-cache race ==="
+puts "#{WORKERS} workers × #{ROUNDS} rounds of #{PAYLOAD} B, one trimmer, #{attempts} attempts per arm"
+puts ""
+
+def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, String?}
+  bad = 0
+  first = nil
+  env = {} of String => String
+  env["GCRY_TRIM_UNLOCKED"] = "1" if unlocked
+  attempts.times do
+    captured = IO::Memory.new
+    status = Process.run(exe, ["--child"], env: env, output: captured, error: captured)
+    unless status.success?
+      bad += 1
+      first ||= captured.to_s.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
+    end
+  end
+  {bad, first}
+end
+
+locked_bad, locked_note = run(exe, false, attempts)
+puts "  locked (default):    #{locked_bad} of #{attempts} failed#{locked_note ? "   #{locked_note.strip}" : ""}"
+
+unlocked_bad, unlocked_note = run(exe, true, attempts)
+puts "  unlocked (old):      #{unlocked_bad} of #{attempts} failed#{unlocked_note ? "   #{unlocked_note.strip}" : ""}"
+
+failures << "the locked arm failed #{locked_bad} of #{attempts} — the allocator and the trim are not serialised" if locked_bad > 0
+if unlocked_bad == 0
+  failures << "the unlocked arm survived #{attempts} attempts, so this harness does not reach the race " \
+              "and the locked arm's silence is not evidence"
+end
+
+puts ""
+if failures.empty?
+  puts "ok — serialised, the allocator and the trim cannot collide; unserialised, they do"
+  exit 0
+else
+  failures.each { |f| STDERR.puts "FAIL: #{f}" }
+  exit 1
+end

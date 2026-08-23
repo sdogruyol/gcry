@@ -499,6 +499,13 @@ jobs:
         run: |
           make stw-index-race
 
+      # The allocator hands out large chunks under @alloc_lock while the cache
+      # trim walks the same list. Deterministic both ways: the old behaviour
+      # faults 5 of 5, serialised 0 of 5.
+      - name: Large-cache race
+        run: |
+          make large-cache-race
+
       # A mutator inside `find_block` while collections run. It used to crash on
       # a chunk pointer the last-chunk cache handed back after reading its index
       # twice; the arm that restores that read must still crash, or the green
@@ -922,6 +929,7 @@ jobs:
           timeout 300 make thread-birth-root
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
+          timeout 600 make large-cache-race
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same

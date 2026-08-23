@@ -21,13 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `munmap` of many VMAs is slow on Linux and holding the allocator across it
   would stall every mutator. Same shape as the empty-chunk path: decide under
   the lock, tear down after.
-  **Stated plainly: this is not proven to be the cause of the acikturkiye
-  use-after-free it was found while chasing.** With the fix, 0 of 24 runs
-  crashed; with `GCRY_TRIM_UNLOCKED=1` restoring the old behaviour faithfully,
-  1 of 24 — Fisher p = 1.0. The control is also far below the 7-of-60 baseline
-  it is meant to reproduce, so something other than the fix moved the rate
-  between sessions. The change is kept because the asymmetry is wrong on its own
-  terms, not because the measurement vindicated it.
+  **And a second unsynchronised step in the same function.**
+  `update_heap_bounds_after_unmap` walks the chunk list and rewrites `@heap_min`
+  / `@heap_max` — the bounds `find_block` reads to decide whether an address is
+  gcry's at all — and it ran outside the lock too. Serialising the detach alone
+  was not enough; the gate below stayed red at 2 of 5 until this went under the
+  lock as well.
+  **Proven, deterministically, by `make large-cache-race`.** The application
+  this was found in could not settle it — its crash rate fell from 7 of 60 to
+  nothing between sessions, so neither arm meant anything — so the question is
+  asked directly instead: four workers allocating, writing, verifying and
+  freeing 40 KiB blocks while a peer calls `trim_large_cache(0)` in a loop, with
+  no Kemal, no Postgres and no rate to wait for. **`GCRY_TRIM_UNLOCKED=1` faults
+  5 of 5; serialised, 0 of 5**, over 28 000 cache hits per run so the arm
+  provably reaches `take_large_free`. Three further gate runs clean.
+  Whether this was also the acikturkiye use-after-free is still not proven —
+  that crash stopped reproducing before it could be tested — but the race it
+  describes is now measured rather than argued.
   Two things were learned the expensive way and are written down in
   `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`: a control has to
   reproduce the defect rather than merely remove the fix — the first

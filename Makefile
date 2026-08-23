@@ -416,6 +416,17 @@ knob-doc-check:
 acik-ab:
 	bash bench/acik_ab.sh
 
+# Can the large-object cache hand out a chunk a trimming peer is unmapping?
+#
+# `take_large_free` walks `@large_freelists` holding `@alloc_lock`;
+# `trim_large_cache` walks the same list. Asked directly rather than waiting for
+# an application to ask it — the acikturkiye use-after-free this came from could
+# not settle it, because its rate fell from 7 of 60 to nothing between sessions.
+# Deterministic here: `GCRY_TRIM_UNLOCKED=1` fails 5 of 5, serialised 0 of 5.
+large-cache-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
+	$(BIN)/large_cache_race
+
 # A mutator inside `find_block` while collections run.
 #
 # It used to die in 5 runs of 8, on an impossible chunk pointer the last-chunk
