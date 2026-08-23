@@ -135,6 +135,25 @@ crash-rate A/B cannot separate a 5 % defect from a 2 % one without hundreds of
 runs, but a collection starting mid-copy either happens or it does not. A
 workload that reallocs hard (Kemal, acikturkiye) is where to ask it again.
 
+## The harness's own diagnostic amplifies it
+
+`live_graph_audit` printed its shadow through `String.build`, which is itself a
+growing buffer of the kind the ledger named as the victim. Gated behind
+`LIVE_GRAPH_DUMP=1` and measured:
+
+    dump off (no String.build)   1 of 24
+    dump on                      5 of 24
+
+p ≈ 0.19, so not conclusive, but the direction is plain and it matters twice
+over. The rate is roughly five times higher with one extra growing buffer in
+play, which is more evidence that growing buffers are what this defect reaches;
+and every rate quoted from this harness before the gate existed was measured
+with the diagnostic on. Arm-versus-arm comparisons from that period still hold —
+both arms carried it — but the absolute rates were inflated.
+
+It still fires with the diagnostic off, so `String.build` is one instance, not
+the cause.
+
 ## What is established
 
 The arm, the rate, the frame, and that the freed object was live and reachable
