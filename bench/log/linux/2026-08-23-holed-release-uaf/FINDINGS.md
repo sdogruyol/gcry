@@ -114,6 +114,22 @@ inside the copy: **0**, across runs with 18 collections each. The window exists
 in the code and is never entered here, so there is nothing to close, and the
 rooting was reverted rather than shipped on an argument.
 
+### And the premise was stale
+
+The comment that justified rooting `pointer` says the type_id gate rejects raw
+buffer pointers as ambient stack roots. `GC.init` sets
+`type_id_gate_stacks = false` — stacks are **ungated**, and the comment there
+says why: gating them dropped Channel/Deque buffers and crashed
+`Log::AsyncDispatcher`. So a raw buffer in a register or stack slot is already a
+root, and there was never anything for `add_root(fresh)` to add.
+
+That is the mechanism behind the null measurement, and it is worth more than the
+measurement: it says the door is shut rather than that nobody was seen going
+through it. The comment in `Heap#realloc` has been corrected — its second
+reason (a minor may not re-scan an old-gen owner, and Crystal stores the result
+only after `realloc` returns) still stands and still justifies rooting
+`pointer`.
+
 The counter stays. It answers the question directly in any workload — a
 crash-rate A/B cannot separate a 5 % defect from a 2 % one without hundreds of
 runs, but a collection starting mid-copy either happens or it does not. A

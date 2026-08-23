@@ -376,10 +376,18 @@ module Gcry
 
       return pointer if new_size <= old_size
 
-      # Pin across allocate: process-GC type_id_gate rejects raw Pointer buffers
-      # (Hash @entries / Array @buffer) as ambient stack roots, and a minor may
-      # not re-scan an old-gen owner — without an explicit root, collect would
-      # reclaim `pointer` before we copy → UAF (Kemal HTTP).
+      # Pin across allocate. The reason first written here — that the type_id
+      # gate rejects raw Pointer buffers as ambient stack roots — **no longer
+      # holds**: `GC.init` sets `type_id_gate_stacks = false` precisely because
+      # gating stacks dropped Channel/Deque buffers and crashed
+      # `Log::AsyncDispatcher`. Stack roots are ungated, so a raw buffer in a
+      # register or stack slot is already a root.
+      #
+      # What still holds is the second reason, spelled out below: a minor may
+      # not re-scan an old-gen owner, and Crystal stores the result only after
+      # `realloc` returns. Rooting `fresh` on the same (stale) argument was
+      # tried and measured — 3 of 40 against 1 of 40, and
+      # `realloc_collect_overlaps` is 0 — so it is not done.
       #
       # Also suppress auto-collect for the fresh allocate: under Parallel EC a
       # mark miss on the pin still let sweep free `pointer`, then allocate
@@ -400,15 +408,9 @@ module Gcry
         ensure
           @suppress_collect.sub(1)
         end
-        # `fresh` is *not* rooted here, and that is a measured decision rather
-        # than an oversight. It is a raw buffer pointer, so the type_id gate
-        # rejects it as an ambient stack root exactly as it rejects `pointer` —
-        # the hole is real on paper. Rooting it across the copy was tried and
-        # showed nothing: 3 of 40 against 1 of 40, and `realloc_collect_overlaps`
-        # says why. No collection begins while a thread is in this window in the
-        # workloads measured so far, so there is nothing here to close yet.
-        # The counter is left in place to answer the question again in a
-        # workload that reallocs hard.
+        # The counter stays even though the window came back empty: it answers
+        # "did a collection begin while a raw buffer was being copied into"
+        # directly, which a crash-rate A/B cannot do at these rates.
         realloc_copy_enter
         begin
           fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
