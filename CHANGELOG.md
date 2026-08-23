@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no Kemal, no Postgres and no rate to wait for. **`GCRY_TRIM_UNLOCKED=1` faults
   5 of 5; serialised, 0 of 5**, over 28 000 cache hits per run so the arm
   provably reaches `take_large_free`. Three further gate runs clean.
+  **A third instance, in the sweep itself.** `sweep(after_world: true)` — the
+  lazy path, where mutators are running — ends with the same
+  `update_heap_bounds_after_unmap`, and it too ran with no lock. Found by
+  sweeping the call sites rather than by another crash: the same walk, the same
+  two fields, the same mutators mapping chunks underneath it. It takes the
+  allocator's lock on that path now and leaves the stopped-world path alone,
+  where nothing else runs and the lock would buy nothing.
   Whether this was also the acikturkiye use-after-free is still not proven —
   that crash stopped reproducing before it could be tested — but the race it
   describes is now measured rather than argued.
@@ -45,7 +52,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and returned 0 of 24, which said nothing — and rooting `realloc`'s new block
   across the copy was tried, measured at 2 of 24, and reverted.
 
+### Changed
+
+- **The pre-commit hook checked files the repo does not own.** `crystal tool
+  format --check` with no arguments walks the working tree, which includes
+  vendored shards under gitignored `lib/` directories — `bench/kemal/lib/`
+  appears the moment a bench target runs `shards install`, and from then on
+  every commit fails on the formatting of someone else's code. It checks
+  `git ls-files -- '*.cr'` now: exactly what the repo has.
+
 ### Added
+
+- **`make large-cache-race` — the allocator and the cache trim, asked directly.**
+  Four workers allocating, writing, verifying and freeing 40 KiB blocks while a
+  peer calls `trim_large_cache(0)` in a loop. No Kemal, no Postgres, no rate to
+  wait for: `GCRY_TRIM_UNLOCKED=1` faults **5 of 5**, serialised **0 of 5**,
+  with 28 000 cache hits per run so the arm provably reaches `take_large_free`.
+  Built because the application this came from stopped reproducing before the
+  fix could be tested — and it immediately earned itself, by failing the
+  *fixed* arm 2 of 5 and so finding the second unsynchronised step that the
+  first fix had missed.
 
 - **`GCRY_UNMAP_GUARD=1` — a released chunk that can still be identified.**
   A write into released heap memory faults whether the chunk was `munmap`ed or

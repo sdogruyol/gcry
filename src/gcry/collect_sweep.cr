@@ -336,7 +336,17 @@ module Gcry
       end
 
       if any_drop
-        update_heap_bounds_after_unmap
+        # Same reason as `trim_large_cache`: this walks the chunk list and
+        # rewrites `@heap_min` / `@heap_max`, the bounds `find_block` reads to
+        # decide whether an address is gcry's at all. In the lazy path
+        # (`after_world`) the mutators are running and can be mapping chunks
+        # underneath the walk, so it needs the allocator's lock; in the stopped
+        # world nothing else runs and taking it would be pointless.
+        if after_world && !@trim_unlocked
+          with_alloc_lock { update_heap_bounds_after_unmap }
+        else
+          update_heap_bounds_after_unmap
+        end
       end
     end
 

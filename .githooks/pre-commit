@@ -10,8 +10,17 @@ if ! locale -a 2>/dev/null | grep -qx "$LC_ALL"; then
   export LC_ALL=C.UTF-8
 fi
 
+# Only files git tracks. A bare `crystal tool format --check` walks the working
+# tree, which includes vendored shards under gitignored `lib/` directories —
+# `bench/kemal/lib/` appears the moment a bench target runs `shards install`,
+# and then every commit fails on formatting the repo does not own.
 echo "🔍 Checking Crystal formatting..."
-if ! crystal tool format --check 2>&1; then
+tracked_cr=$(git ls-files -- '*.cr')
+if [ -z "$tracked_cr" ]; then
+  echo "✅ No Crystal files to check."
+  exit 0
+fi
+if ! printf '%s\n' "$tracked_cr" | xargs crystal tool format --check 2>&1; then
   cat <<'EOF'
 
 ❌ Formatting check failed!
