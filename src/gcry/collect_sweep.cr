@@ -614,44 +614,6 @@ module Gcry
       end
     end
 
-    # Defer an empty size-class chunk to the post-STW `flush_pending_empty_chunks`
-    # release list. Safe to call from within STW: the chunk is unlinked now and
-    # the actual munmap runs after threads are resumed (avoids blocking other
-    # mutators on kernel VM locks). Also removes the freelist entries that
-    # pointed inside the chunk so we never hand a user pointer that lives in
-    # soon-to-be-unmapped memory back to an allocation.
-    private def reclaim_empty_chunk(chunk : ChunkHeader*) : Nil
-      return if ChunkHeader.large?(chunk)
-
-      class_index = chunk.value.size_class.to_i32
-      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-
-      nursery = ChunkHeader.nursery?(chunk)
-      mapped = chunk.value.mapped_bytes
-      base = chunk.address
-      finish = base + mapped
-
-      # Drop any free-block pointers inside this range BEFORE unlinking — the
-      # freelist may still hold a node that lives in the about-to-be-released
-      # chunk. unlink_freelist_range walks the freelist and rebuilds the head
-      # from entries outside [base, finish).
-      unlink_freelist_range(class_index, nursery, base, finish)
-
-      unlink_chunk(chunk)
-      @heap_size -= mapped if @heap_size >= mapped
-      @released_chunk_bytes += mapped
-      @bytes_reclaimed_since_gc += mapped
-      # Defer the actual munmap to flush_pending_empty_chunks (post-STW).
-      # Previously this called LibC.munmap inline, which could stall mutators
-      # behind the kernel VM lock while we held the world stopped. The
-      # @unmapped_bytes counter is bumped inside flush, after the actual
-      # munmap length is known (which may be a coalesced run larger than
-      # a single chunk's mapped_bytes).
-      chunk.value.next = @pending_empty_chunks
-      @pending_empty_chunks = chunk
-      update_heap_bounds_after_unmap
-    end
-
     # Drop freelist nodes whose user pointer falls in [lo, hi).
     # Never rewrite !free? headers: a USED object can still be linked on the
     # freelist after a mid-`tlab_alloc_small` STW + flush (see scrub_freelists).
@@ -973,23 +935,6 @@ module Gcry
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
       push_size_class_free(class_index, was_nursery, header, user, payload, swept: true)
-    end
-
-    # Accounting only — caller unmaps / drops the chunk from @chunks.
-    private def prepare_reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      mapped = chunk.value.mapped_bytes
-      payload = header.value.size.to_u64
-      @heap_size -= mapped if @heap_size >= mapped
-      @unmapped_bytes += mapped
-      @bytes_reclaimed_since_gc += payload
-      live_objects_dec
-    end
-
-    private def reclaim_large(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      prepare_reclaim_large(chunk, header)
-      unlink_chunk(chunk)
-      update_heap_bounds_after_unmap
-      LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
     end
 
     private def each_block(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil

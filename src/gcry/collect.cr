@@ -1080,9 +1080,8 @@ module Gcry
       # After bounds are tightened, check whether the bitmap has grown
       # well beyond the current need and shrink it if so.  Threshold:
       # capacity > 1.2 × needed  OR  capacity > needed + 1 MiB (absolute waste).
-      # This runs outside STW (called from flush_pending_empty_chunks,
-      # trim_large_cache, and reclaim_empty_chunk) so the syscall cost is
-      # tolerable.
+      # This runs outside STW (called from flush_pending_empty_chunks and
+      # trim_large_cache) so the syscall cost is tolerable.
       if hi > lo && lo != UInt64::MAX
         bm = @mark_bitmap
         if bm
