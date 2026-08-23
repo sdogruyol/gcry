@@ -369,6 +369,41 @@ module Gcry
     # Do not invalidate the static-root maps cache here (same as the former
     # in-STW empty-chunk path): heap VMAs are excluded via the chunk index and
     # static scans use safe probing. Full maps refresh stays on the major interval.
+    # Release the large chunks mutators detached in `trim_large_cache`.
+    #
+    # Collector thread only, and never while a `flush_pending_*` walk is in
+    # flight — that is the whole point of the queue. The chunks have been off
+    # `@chunks` and out of the index since the mutator detached them, so
+    # nothing can hand them out; this is only the teardown.
+    private def flush_pending_large_release : Nil
+      chain = Pointer(Void).null
+      with_alloc_lock do
+        chain = @pending_large_release
+        @pending_large_release = Pointer(Void).null
+        @pending_large_release_bytes = 0_u64
+      end
+      return if chain.null?
+
+      with_alloc_lock { release_large_chain(chain) }
+      with_alloc_lock { update_heap_bounds_after_unmap }
+    end
+
+    # Run a pass that walks `@chunks` with the world running — the lazy sweep
+    # and the three `flush_pending_*` passes. The flag is what a mutator's trim
+    # consults before unmapping; see `Heap#trim_large_cache`. Not reentrant:
+    # these run one after another, never nested.
+    private def during_live_chunk_walk(&) : Nil
+      with_alloc_lock do
+        @live_chunk_walk = true
+        @live_walk_spans &+= 1
+      end
+      begin
+        yield
+      ensure
+        with_alloc_lock { @live_chunk_walk = false }
+      end
+    end
+
     private def flush_pending_empty_chunks : Nil
       chunk = @pending_empty_chunks
       return if chunk.null?
@@ -575,9 +610,9 @@ module Gcry
     # Unlike the chunk-list walks, this one reads a structure mutators *edit*,
     # not just memory they can unmap: `take_large_free` hands an entry to user
     # code, which promptly writes over the `next_free` this walk is following.
-    # It needs the allocator's lock, and it has to keep it across the `madvise`
-    # calls, because an entry taken between a snapshot and the syscall would be
-    # live memory by then.
+    # Marking the walk live is not enough — it needs the allocator's lock, and
+    # it has to keep it across the `madvise` calls, because an entry taken
+    # between a snapshot and the syscall would be live memory by then.
     private def release_large_freelist_pages : Nil
       {% if flag?(:darwin) || flag?(:linux) %}
         with_alloc_lock { release_large_freelist_pages_locked }

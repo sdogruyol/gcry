@@ -1162,6 +1162,39 @@ module Gcry
       nil
     end
 
+    # Unmap a detached chain (linked by `next_free`). Caller holds
+    # `@alloc_lock`, which is what keeps a flush walk from starting underneath.
+    protected def release_large_chain(chain : Void*) : Nil
+      user = chain
+      while user
+        header = BlockHeader.from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        nxt = header.value.next_free
+        mapped = chunk.value.mapped_bytes
+        unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        end
+        user = nxt
+      end
+    end
+
+    # Splice a detached chain (linked by `next_free`) onto the pending-release
+    # queue. Caller holds `@alloc_lock`.
+    private def queue_large_release(chain : Void*) : Nil
+      user = chain
+      while user
+        header = BlockHeader.from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        nxt = header.value.next_free
+        hv = header.value
+        hv.next_free = @pending_large_release
+        header.value = hv
+        @pending_large_release = user
+        @pending_large_release_bytes += chunk.value.mapped_bytes
+        user = nxt
+      end
+    end
+
     # Munmap cached large objects until @large_free_bytes <= *limit*.
     # Call outside STW — munmap of many VMAs is slow on Linux.
     # Hard-capped by LARGE_CACHE_LIMIT even if retain is set higher.
@@ -1185,7 +1218,7 @@ module Gcry
     # down after it.
     #
     # `GCRY_TRIM_UNLOCKED=1` restores the old behaviour for the gate.
-    def trim_large_cache(limit : UInt64 = @large_cache_retain) : Nil
+    def trim_large_cache(limit : UInt64 = @large_cache_retain, defer : Bool = true) : Nil
       effective = limit > LARGE_CACHE_LIMIT ? LARGE_CACHE_LIMIT : limit
       return if @large_free_bytes <= effective
 
@@ -1250,7 +1283,44 @@ module Gcry
       end
       with_alloc_lock { detach.call }
 
-      # Off the list and out of the index: nothing can hand these out now.
+      # Off the list and out of the index, but for a mutator that is as far as
+      # it goes. After `start_world` the collector walks `@chunks` in the three
+      # `flush_pending_*` passes holding no lock, reading — and, in the
+      # mostly-empty pass, writing — each chunk's header before it looks at any
+      # flag. A mutator that unmaps one of those chunks mid-walk is a use after
+      # free at best; at worst the walk's `madvise(MADV_DONTNEED)`, computed
+      # from a header the kernel has already reissued to somebody else's
+      # `mmap`, zeroes live memory with nothing to show for it.
+      #
+      # So a mutator releases only when it can see that no walk is in flight,
+      # and queues for the collector when one is. Deferring *unconditionally*
+      # is not an option: the queue then drains once per collection, and a
+      # `GC.free` loop parks gigabytes of detached-but-mapped chunks until the
+      # next one — measured as a null `mmap` and a fault at 0x18.
+      #
+      # `defer: false` is for the collector's own trims, which run outside the
+      # walks by construction and can keep their syscalls off the lock.
+      if defer && !@trim_immediate
+        deferred = false
+        with_alloc_lock do
+          if @live_chunk_walk
+            @live_walk_queued &+= 1
+            queue_large_release(detached)
+            deferred = true
+          else
+            @live_walk_direct &+= 1
+            release_large_chain(detached)
+          end
+        end
+        if deferred
+          return
+        else
+          with_alloc_lock { update_heap_bounds_after_unmap }
+          return
+        end
+      end
+
+      # Nothing can hand these out now.
       user = detached
       while user
         header = BlockHeader.from_user(user)

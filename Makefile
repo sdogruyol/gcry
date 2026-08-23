@@ -423,6 +423,18 @@ acik-ab:
 # an application to ask it — the acikturkiye use-after-free this came from could
 # not settle it, because its rate fell from 7 of 60 to nothing between sessions.
 # Deterministic here: `GCRY_TRIM_UNLOCKED=1` fails 5 of 5, serialised 0 of 5.
+# A post-STW chunk-list walk against a mutator's unmap.
+#
+# The lazy sweep and the three `flush_pending_*` passes walk `@chunks` after
+# `start_world` holding nothing, and `release_large_freelist_pages` walks a
+# list mutators edit. A `GC.free` of a large object reaches `trim_large_cache`
+# from a mutator thread, which unlinks and unmaps. Crashed 6 of 6 before the
+# fix; the `GCRY_TRIM_IMMEDIATE=1` arm has to keep crashing or the other arm
+# proves nothing.
+dormant-flush-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/dormant_flush_race.cr -o $(BIN)/dormant_flush_race --error-trace
+	$(BIN)/dormant_flush_race
+
 large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
 	$(BIN)/large_cache_race

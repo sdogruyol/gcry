@@ -418,6 +418,14 @@ module Gcry
     # it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
     property trim_unlocked : Bool = false
 
+    # Research only: let a mutator's trim `munmap` on the spot instead of
+    # queueing the chunks for the collector, which is what it did before
+    # 2026-08-23. That is the arm `bench/dormant_flush_race.cr` needs to stay
+    # evidence: the post-STW flush walks read and write chunk headers holding
+    # nothing, so a mutator that unmaps underneath them writes into a chunk
+    # that is gone.
+    property trim_immediate : Bool = false
+
     UNMAP_GUARD_SLOTS = 8192
 
     @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
@@ -484,6 +492,25 @@ module Gcry
     @minor_only = false # mark filter during minor GC
     # Fully free size-class chunks queued in STW; munmap outside (like large trim).
     @pending_empty_chunks : ChunkHeader* = Pointer(ChunkHeader).null
+    # Large chunks a *mutator* detached in `trim_large_cache`: off `@chunks` and
+    # out of the index, but still mapped. Only the collector thread releases
+    # them, in `flush_pending_large_release`, because it is also the thread that
+    # walks `@chunks` after `start_world` — chained through `next_free` so the
+    # chunks' `next` stays intact for a walk already in flight.
+    @pending_large_release : Void* = Pointer(Void).null
+    @pending_large_release_bytes : UInt64 = 0_u64
+    # True while one of the post-STW `flush_pending_*` passes is walking
+    # `@chunks`. Set and cleared under `@alloc_lock`, which is what makes it
+    # useful: a mutator holding the lock and seeing it false knows no walk can
+    # start before it lets go, so it can unmap on the spot. Seeing it true, it
+    # queues instead. The walk itself still takes no lock, so allocation is not
+    # stalled across its syscalls.
+    @live_chunk_walk = false
+    # Instruments for `bench/dormant_flush_race.cr`: how many walks ran, and
+    # how many mutator trims the flag actually diverted into the queue.
+    getter live_walk_spans : UInt64 = 0_u64
+    getter live_walk_queued : UInt64 = 0_u64
+    getter live_walk_direct : UInt64 = 0_u64
     # Set during STW when sweep will run after start_world (see sweep_after_world?).
     @lazy_sweep_pending = false
     getter? soft_dirty_armed : Bool = false
@@ -717,7 +744,8 @@ module Gcry
           @suppress_collect.add(1)
           begin
             flush_pending_empty_chunks
-            trim_large_cache
+            flush_pending_large_release
+            trim_large_cache(defer: false)
           ensure
             @suppress_collect.sub(1)
           end
@@ -896,8 +924,11 @@ module Gcry
 
     protected def destroy_collector : Nil
       flush_pending_empty_chunks
-      flush_pending_dormant_chunks
-      flush_pending_page_release_chunks
+      flush_pending_large_release
+      during_live_chunk_walk do
+        flush_pending_dormant_chunks
+        flush_pending_page_release_chunks
+      end
       abort_incremental
       @roots_lock.sync { @roots.clear }
       @mark_stack.destroy
@@ -1080,8 +1111,9 @@ module Gcry
       # After bounds are tightened, check whether the bitmap has grown
       # well beyond the current need and shrink it if so.  Threshold:
       # capacity > 1.2 × needed  OR  capacity > needed + 1 MiB (absolute waste).
-      # This runs outside STW (called from flush_pending_empty_chunks and
-      # trim_large_cache) so the syscall cost is tolerable.
+      # This runs outside STW (called from flush_pending_empty_chunks,
+      # flush_pending_large_release and trim_large_cache) so the syscall cost
+      # is tolerable.
       if hi > lo && lo != UInt64::MAX
         bm = @mark_bitmap
         if bm
@@ -1381,7 +1413,10 @@ module Gcry
           begin
             if @lazy_sweep_pending
               t0 = monotonic_ns
-              sweep(major: major, after_world: true)
+              # The lazy sweep walks `@chunks` with the mutators running, same
+              # as the flush passes below — and it was the one that kept
+              # `make dormant-flush-race` red after those were fixed.
+              during_live_chunk_walk { sweep(major: major, after_world: true) }
               @last_phase_sweep_ns = monotonic_ns - t0
               @lazy_sweep_pending = false
               if major
@@ -1396,15 +1431,21 @@ module Gcry
             # Munmap outside STW — empty chunks + excess large freelist (reuse common).
             # Still under post-STW mutex so the next collect cannot stop_world here.
             flush_pending_empty_chunks
-            # DORMANT madvise outside STW — kernel VM lock contention avoided.
-            flush_pending_dormant_chunks
-            # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
-            flush_pending_page_release_chunks
-            # Mostly-empty (SPARSE): MADV_FREE or bounded unlink+DONTNEED; no HOLED rebuild.
-            flush_pending_mostly_empty_chunks
+            # Mutator-detached large chunks: release before the walks below start.
+            flush_pending_large_release
+            during_live_chunk_walk do
+              # DORMANT madvise outside STW — kernel VM lock contention avoided.
+              flush_pending_dormant_chunks
+              # Partial-chunk free-page madvise outside STW (HOLED / Darwin all-chunk walk).
+              flush_pending_page_release_chunks
+              # Mostly-empty (SPARSE): MADV_FREE or bounded unlink+DONTNEED; no HOLED rebuild.
+              flush_pending_mostly_empty_chunks
+            end
+            # Anything a mutator queued while the walks were running.
+            flush_pending_large_release
             # Large freelist: Darwin MADV_FREE_REUSABLE; Linux MADV_FREE (content until reclaim).
             release_large_freelist_pages
-            trim_large_cache
+            trim_large_cache(defer: false)
             @last_phase_flush_ns = monotonic_ns - t_flush
           ensure
             if ec1_lazy
