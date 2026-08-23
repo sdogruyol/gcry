@@ -39,6 +39,7 @@
 #   bin/find_block_race --child live
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "find_block_race requires -Dgc_none (gcry as process GC)" %}
@@ -91,29 +92,38 @@ puts ""
 
 failures = [] of String
 
-def run_arm(exe : String, arm : String, runs : Int32, unchecked : Bool) : {Int32, String?}
+# A child killed on the deadline is counted apart: it is a failure, but it is
+# not a crash, and saying "crashed" about a timeout misnames what was seen.
+def run_arm(exe : String, arm : String, runs : Int32, unchecked : Bool) : {Int32, Int32, String?}
   crashed = 0
+  hung = 0
   first = nil
   env = {"GCRY_INDEX_AUDIT" => "1"}
   env["GCRY_INDEX_CACHE_UNCHECKED"] = "1" if unchecked
   runs.times do
-    captured = IO::Memory.new
-    status = Process.run(exe, ["--child", arm], env: env, output: captured, error: captured)
-    if status.success?
-      first ||= captured.to_s.lines.find(&.starts_with?("arm="))
+    result = BoundedChild.run(exe, ["--child", arm], env)
+    if result.ok
+      first ||= result.output.lines.find(&.starts_with?("arm="))
     else
       crashed += 1
+      hung += 1 if result.timed_out
     end
   end
-  {crashed, first}
+  {crashed, hung, first}
 end
 
 torn_seen = 0_u64
 ARMS.each do |arm|
-  crashed, line = run_arm(exe, arm, runs, false)
+  crashed, hung, line = run_arm(exe, arm, runs, false)
   puts "  %-8s crashed %d of %d%s" % [arm, crashed, runs,
                                       line ? "   #{line.sub("arm=#{arm} survived ", "")}" : ""]
-  failures << "#{arm}: crashed #{crashed} of #{runs} — `find_block` from a mutator is not safe" if crashed > 0
+  if hung > 0
+    failures << "#{arm}: timed out #{hung} of #{runs} — a killed child is not evidence about " \
+                "`find_block`; raise BENCH_CHILD_TIMEOUT_S or find the hang"
+  end
+  if crashed > hung
+    failures << "#{arm}: crashed #{crashed - hung} of #{runs} — `find_block` from a mutator is not safe"
+  end
   if line && (m = line.match(/index_cache_torn=(\d+)/))
     torn_seen += m[1].to_u64
   end
@@ -127,7 +137,7 @@ failures << "no torn cache read in any arm — the harness never reached the rac
 puts ""
 puts "  restoring the old cache read (GCRY_INDEX_CACHE_UNCHECKED=1):"
 %w[live realloc].each do |arm|
-  crashed, _ = run_arm(exe, arm, runs, true)
+  crashed, _hung, _ = run_arm(exe, arm, runs, true)
   puts "  %-8s crashed %d of %d" % [arm, crashed, runs]
   if crashed == 0
     failures << "#{arm}: the old read was restored and nothing crashed, so the arms above " \

@@ -31,6 +31,7 @@
 #   GCRY_TRIM_UNLOCKED=1 bin/large_cache_race --child
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "large_cache_race requires -Dgc_none (gcry as process GC)" %}
@@ -131,29 +132,42 @@ puts "=== large-cache race ==="
 puts "#{WORKERS} workers × #{ROUNDS} rounds of #{PAYLOAD} B, one trimmer, #{attempts} attempts per arm"
 puts ""
 
-def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, String?}
+# `timed_out` is reported apart from `bad` on purpose. A child killed on the
+# deadline says nothing about serialisation, and a gate that folds the two
+# together will tell the next reader the allocator raced when all that happened
+# was a slow machine.
+def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String?}
   bad = 0
+  hung = 0
   first = nil
   env = {} of String => String
   env["GCRY_TRIM_UNLOCKED"] = "1" if unlocked
   attempts.times do
-    captured = IO::Memory.new
-    status = Process.run(exe, ["--child"], env: env, output: captured, error: captured)
-    unless status.success?
+    result = BoundedChild.run(exe, ["--child"], env)
+    captured = result.output
+    unless result.ok
       bad += 1
-      first ||= captured.to_s.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
+      hung += 1 if result.timed_out
+      first ||= captured.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
     end
   end
-  {bad, first}
+  {bad, hung, first}
 end
 
-locked_bad, locked_note = run(exe, false, attempts)
+locked_bad, locked_hung, locked_note = run(exe, false, attempts)
 puts "  locked (default):    #{locked_bad} of #{attempts} failed#{locked_note ? "   #{locked_note.strip}" : ""}"
 
-unlocked_bad, unlocked_note = run(exe, true, attempts)
+unlocked_bad, unlocked_hung, unlocked_note = run(exe, true, attempts)
 puts "  unlocked (old):      #{unlocked_bad} of #{attempts} failed#{unlocked_note ? "   #{unlocked_note.strip}" : ""}"
 
-failures << "the locked arm failed #{locked_bad} of #{attempts} — the allocator and the trim are not serialised" if locked_bad > 0
+if locked_hung > 0
+  failures << "the locked arm timed out #{locked_hung} of #{attempts} — a killed child is not " \
+              "evidence about serialisation, so raise BENCH_CHILD_TIMEOUT_S or find the hang"
+end
+if locked_bad > locked_hung
+  failures << "the locked arm faulted #{locked_bad - locked_hung} of #{attempts} — the allocator " \
+              "and the trim are not serialised"
+end
 if unlocked_bad == 0
   failures << "the unlocked arm survived #{attempts} attempts, so this harness does not reach the race " \
               "and the locked arm's silence is not evidence"

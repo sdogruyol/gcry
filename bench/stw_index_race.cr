@@ -29,6 +29,7 @@
 #   bin/stw_index_race
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "stw_index_race requires -Dgc_none (gcry as process GC)" %}
@@ -84,12 +85,11 @@ base = {"GCRY_INDEX_AUDIT" => "1"}
 
 {"default" => {} of String => String, "late-clear" => {"GCRY_STW_LATE_CLEAR" => "1"}}.each do |arm, extra|
   env = base.merge(extra)
-  captured = IO::Memory.new
-  status = Process.run(exe, ["--child"], env: env, output: captured, error: captured)
-  text = captured.to_s
+  result = BoundedChild.run(exe, ["--child"], env)
+  text = result.output
   line = text.lines.find(&.starts_with?("owner="))
-  unless line && status.success?
-    failures << "#{arm}: the child did not report (exit #{status.exit_code?.inspect}). It said:\n#{text.lines.first(6).join("\n")}"
+  unless line && result.ok
+    failures << "#{arm}: the child did not report#{result.timed_out ? " (killed on the deadline)" : ""}. It said:\n#{text.lines.first(6).join("\n")}"
     next
   end
   fields = line.split(' ').to_h { |f| {f.split('=')[0], f.split('=')[1]} }
