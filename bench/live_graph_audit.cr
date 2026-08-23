@@ -207,6 +207,7 @@ if ARGV.includes?("--child")
     threads << Thread.new do
       heap = Gcry.default_heap
       sweep = ENV["LIVE_GRAPH_SWEEP"]? != "0"
+      tlprobe = ENV["LIVE_GRAPH_TLPROBE"]? != "0"
       runtime = Pointer(UInt64).new(LibC.malloc(LibC::SizeT.new(8 * RUNTIME_SLOTS)).address)
       runtime_seen = 0
       shadow = Pointer(Shadow).new(LibC.malloc(LibC::SizeT.new(sizeof(Shadow) * CHAIN)).address)
@@ -246,13 +247,24 @@ if ARGV.includes?("--child")
       # One line per worker naming where its large payloads live, so a crash
       # address can be matched against them afterwards instead of guessed at
       # from its low bits.
+      # Every address this worker will ever touch, so a crash address can be
+      # matched against them afterwards instead of guessed at from its low
+      # bits. Two lines per worker rather than one per node: the point is to be
+      # greppable after the fact, not readable during.
       big = String.build do |io|
-        io << "worker large payloads:"
+        io << "shadow-nodes:"
         j = 0
         while j < CHAIN
-          if shadow[j].payload_size > 32768
-            io << " " << shadow[j].payload_addr << "+" << shadow[j].payload_size
-          end
+          io << " " << shadow[j].node_addr
+          j += 1
+        end
+      end
+      raw_puts(big)
+      big = String.build do |io|
+        io << "shadow-payloads:"
+        j = 0
+        while j < CHAIN
+          io << " " << shadow[j].payload_addr << "+" << shadow[j].payload_size
           j += 1
         end
       end
@@ -267,14 +279,20 @@ if ARGV.includes?("--child")
         # with nothing to show. Recording their addresses on the first round
         # and asking the heap about them before walking turns that into a
         # report naming the object.
-        if runtime_seen == 0
+        # `LIVE_GRAPH_TLPROBE=0` removes this probe. `Thread.unsafe_each` walks
+        # a `Thread::LinkedList`, and the list's *own nodes* are heap objects
+        # this harness never shadows — the one thing the worker touches that a
+        # shadow miss cannot explain. If the crash needs this walk, the victim
+        # is the runtime's thread-list machinery, which is also what the `0x18`
+        # crashes point at.
+        if tlprobe && runtime_seen == 0
           Thread.unsafe_each do |t|
             if runtime_seen < RUNTIME_SLOTS
               runtime[runtime_seen] = t.as(Void*).address
               runtime_seen += 1
             end
           end
-        else
+        elsif tlprobe
           k = 0
           while sweep && k < runtime_seen
             unless heap.address_in_live_chunk?(runtime[k])
@@ -296,8 +314,8 @@ if ARGV.includes?("--child")
         # long gone. `Thread.unsafe_each` goes through `@@threads.try`, so it
         # reports the same emptiness without faulting, and it reports it here.
         seen = 0
-        Thread.unsafe_each { seen += 1 }
-        if seen == 0
+        Thread.unsafe_each { seen += 1 } if tlprobe
+        if tlprobe && seen == 0
           Verdict.threadlist!
           raw_puts("  the thread list is empty — Thread.@@threads read null") if Verdict.detail?
         end

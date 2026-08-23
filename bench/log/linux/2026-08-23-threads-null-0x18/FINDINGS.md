@@ -143,6 +143,37 @@ the sweep asks once and the other workers keep allocating, so the window moves.
 
 What is still unknown is which object the address belongs to.
 
+## Three more eliminations, and one observation
+
+**The thread-list walk is not required.** `LIVE_GRAPH_TLPROBE=0` removes the
+`Thread.unsafe_each` probe, and the crash survives it: 1 of 12 without, 3 of 12
+with (p ≈ 0.59). The probe walks a `Thread::LinkedList` whose own nodes this
+harness never shadows, which made it the one unshadowed thing the worker
+touched — but it is not what the crash needs.
+
+**The fault address is nothing this harness owns.** Every node and payload
+address is printed at startup (4 workers × 1500 each, 6000 payload addresses
+confirmed present in the crashing run) and matched arithmetically against the
+faulting address. No node, no payload, large or small.
+
+**The unmap guard suppresses it.** 14 runs under `GCRY_UNMAP_GUARD=1` with no
+crash, against roughly 2 in 12 without. That is the opposite of what a plain
+use-after-release would do: the guard turns `munmap` into `mprotect`, so
+touching a released chunk should fault *more* reliably, not less. Consistent
+with the fault needing the address space to be **reused** — which the guard
+prevents by never giving it back. Held as an observation, not a conclusion: the
+guard also changes timing, and its table is 8192 slots deep before it falls back
+to real `munmap`.
+
+## A method note
+
+Twice in this investigation the low bits of the faulting address (`...050` in
+several crashes) were used to reason about which object it was. Both times the
+arithmetic did not survive contact with the constants — `ChunkHeader::SIZE` is
+24 and `BlockHeader::SIZE` is 16, so a chunk's first user pointer is at 40, not
+80. Address numerology is not evidence here; the release-path name from the
+guard and the arithmetic match against a printed shadow are.
+
 ## Rates
 
     live_graph_audit, 12 attempts per arm
