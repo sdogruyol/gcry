@@ -67,6 +67,13 @@ matter what — and re-run:
 The verifier is not silently broken: zeroing a held object on purpose reports
 40 corrupt, all forty entirely zero.
 
+**That "0 of 6" for `GCRY_PAGE_DONTNEED` did not hold.** Run 40 times instead of
+six, that arm faults 7 times — not on a checksum, on a released chunk still
+holding a live object. It is a different defect from the one this file is about
+and it is recorded in `../2026-08-23-holed-release-uaf/`. The narrow claim here
+survives: no page was ever zeroed under a live object. The claim that the walk
+was cleared did not.
+
 The default arm in the earlier table releases nothing and still showed a
 failure, so that column was the harness's own noise — three arms back to back on a loaded machine, and the
 child hit its timeout. Re-run quiet, the default arm is 0 of 10. The

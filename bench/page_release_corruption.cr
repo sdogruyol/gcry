@@ -33,6 +33,13 @@
 # reported 40 corrupt, 40 of them entirely zero. A checksum gate that cannot be
 # shown to fail is not a gate.
 #
+# As of 2026-08-23 the HOLED arm does not pass. It faults about one run in six,
+# and not on a checksum — on an address the report places inside the heap span
+# and in no live chunk, reached through the worker's own live array. That is a
+# released chunk holding a live object, not a zeroed page. 7 of 40 with the walk
+# on, 0 of 40 with it off.
+# See `bench/log/linux/2026-08-23-holed-release-uaf/`.
+#
 # Raise `PAGE_RELEASE_ATTEMPTS` when hunting rather than guarding — four per arm
 # is a smoke test, and four cannot separate 0 % from 10 %.
 #
@@ -165,7 +172,12 @@ end
 holed_bad, holed_note, holed_dn = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
 puts "  GCRY_PAGE_DONTNEED=1:     #{holed_bad} of #{attempts}, released #{holed_dn} B#{holed_note ? "\n     #{holed_note.strip}" : ""}"
 
-empty_bad, empty_note, empty_dn = run(exe, {"GCRY_MOSTLY_EMPTY" => "1"}, attempts)
+# `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and Darwin
+# turns that on in `GC.init`. Without disabling it here the arm would quietly
+# measure the HOLED walk a second time and still report bytes released, which
+# is the shape of a gate that says "both walks ran" when only one did.
+empty_bad, empty_note, empty_dn = run(exe,
+  {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"}, attempts)
 puts "  GCRY_MOSTLY_EMPTY=1:      #{empty_bad} of #{attempts}, released #{empty_dn} B#{empty_note ? "\n     #{empty_note.strip}" : ""}"
 
 off_bad, off_note, off_dn = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
@@ -173,9 +185,9 @@ puts "  GCRY_DISABLE_MADVISE=1:   #{off_bad} of #{attempts}, released #{off_dn} 
 puts ""
 
 failures = [] of String
-failures << "the HOLED walk corrupted live objects #{holed_bad} of #{attempts}" if holed_bad > 0
-failures << "the mostly-empty walk corrupted live objects #{empty_bad} of #{attempts}" if empty_bad > 0
-failures << "the control arm corrupted live objects #{off_bad} of #{attempts} — nothing was " \
+failures << "the HOLED walk failed #{holed_bad} of #{attempts}" if holed_bad > 0
+failures << "the mostly-empty walk failed #{empty_bad} of #{attempts}" if empty_bad > 0
+failures << "the control arm failed #{off_bad} of #{attempts} — nothing was " \
             "released, so this harness is measuring something other than page release" if off_bad > 0
 
 # Silence only counts if the walks ran. Without this the whole gate passes on a
@@ -187,7 +199,11 @@ failures << "the control arm corrupted live objects #{off_bad} of #{attempts} �
 # `flush_pending_dormant_chunks`, which answers to the empty-chunk machinery and
 # not to `madvise_free_pages`, so the control releases a little no matter what.
 # An engaged walk releases two orders of magnitude more than that.
-floor = off_dn * 4
+# An absolute floor as well as a relative one: `dontneed_bytes` is shared with
+# the dormant flush, whose output varies run to run and came back as 0 B once —
+# which made a purely relative floor of `off_dn * 4` equal to zero, and the
+# engagement check vacuous.
+floor = {off_dn * 4, 8_u64 * 1024 * 1024}.max
 failures << "GCRY_PAGE_DONTNEED released #{holed_dn} B against a #{off_dn} B control — " \
             "no chunk went HOLED, so a clean result says nothing about that walk" if holed_dn <= floor
 failures << "GCRY_MOSTLY_EMPTY released #{empty_dn} B against a #{off_dn} B control — " \
