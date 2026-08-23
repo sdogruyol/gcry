@@ -925,60 +925,45 @@ CI asymmetry that hid both.
       mechanism fits and is closed, but nothing here reproduces that crash and
       only its absence from CI will say whether this was it.
 
-- [ ] **`find_block` from a mutator thread, while collections run, crashes —
-      and it is very likely the same defect as the item below.** Four threads,
-      200 collections: `alloc` 0 of 8, `idle` 0 of 8, `live` **5 of 8**,
-      `realloc` **5 of 8**. It needs a mutator inside `find_block`, and
-      `GC.realloc` — a supported public API reaching it by a different route —
-      crashes alike, which retires the "the harness is misusing `live?`"
-      reading the first version of this item carried. Always the same shape:
-      `ChunkHeader.large?` on a pointer that cannot be a chunk.
-      **Ruled out by measurement**: the `@world_stopped` window (same rate with
-      and without the fix, zero foreign unlocked reads with it in), the chunk
-      index's own invariants (`GCRY_INDEX_AUDIT=1` validates both return paths
-      and the cached slot — zero violations in surviving runs), and anything
-      landed on 2026-08-22 (6 of 8 at `daa994b`).
-      **The path is named.** With `GCRY_INDEX_AUDIT=1` now *refusing* an
-      impossible chunk instead of returning it, the runs that used to crash
-      survive and report: `cache_bad=1..5`, `search_bad=0`, `cache_oob=0`,
-      `last=0x91`, `foreign=0`. The **last-chunk cache** produces it, with the
-      cached index inside the array, under the lock, and the value is the same
-      small constant every time — the shape of freed libc memory, not of
-      anything a writer here stores.
-      **The stale-array reading was tested and is wrong.** It said
-      `(@chunk_index + idx).value` loads the array pointer, the thread is
-      suspended, `index_ensure_cap` reallocates, and it resumes against a freed
-      array. The audit now records the array the bad read came out of and the
-      array `@chunk_index` names immediately afterwards: **`moved=0`** in every
-      catch, `arr == now`. The array does not move.
-      So what is left is narrower and stranger: a stable array, an index inside
-      it, and the same small constant in the slot. Either something writes into
-      the live index, or a slot inside `@chunk_index_count` was never written.
-      The second is worth checking first — `index_ensure_cap` reallocates without
-      zeroing, and only `index_insert` fills what it added.
-      The suspend-while-holding-`@index_lock` observation stands on its own and
-      predicts a *deadlock* rather than a crash: a mutator frozen holding it
-      leaves the sweep's `index_insert` / `index_remove` spinning. Worth testing
-      against the aarch64 hang above.
-      **And CI split the two arms, which says they are not one defect.** With
-      the guard in, on both architectures: `live` **0 of 3** crashed while
-      reporting `cache_bad=6` (x86_64) and `cache_bad=1` (aarch64) — so the
-      cache path fires on both and the refusal catches it — but `realloc`
-      **3 of 3** crashed anyway. Whatever kills `GC.realloc` is therefore *not*
-      the returned chunk, and the next thing to look at is its own bookkeeping:
-      `Heap#realloc` takes and releases a root around the old block, and
-      `Roots::Set` is a `LibC.malloc` linked list with no lock of its own.
-      **Next**: confirm the stale-array reading directly (record the array
-      pointer alongside the index and compare after resume); separately, find
-      what `realloc` corrupts. Fix candidates for the first are an
-      immortal, append-only index that is never freed, or an STW-aware
-      `@index_lock`.
-      `make find-block-race` samples the rate per arm and per architecture and
-      does not gate.
+- [x] **`find_block` from a mutator handed back `@chunk_index[-1]` — closed
+      2026-08-22.** The last-chunk cache tested `@last_chunk_idx` and then read
+      it again to index with; a concurrent `invalidate_chunk_cache` between the
+      two loads made the second read index one slot *before* the array, which is
+      libc's malloc header — hence the same constant `0x91` every time, handed
+      to `ChunkHeader.large?`. One writer was unsynchronised too: a second
+      `invalidate_chunk_cache` outside `@index_lock` on the chunk-mapping path.
+      Read once, bounds-checked, and the chunk verified to contain the address;
+      the unsynchronised invalidation deleted. `live` and `realloc` 5 of 8 → **0
+      of 8**, `alloc` and `idle` 0 either way, and `index_cache_torn` shows the
+      race was firing **6 709** times in a three-run arm rather than rarely.
+      Gated both ways by `make find-block-race` on x86_64 and aarch64.
+      Two readings retired by measurement on the way: a reallocated array
+      (`moved=0`, and an immortal index changed nothing) and an unwritten slot
+      (zero-filling changed nothing).
+
+- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep.**
+      `chunk_containing` holds that spinlock for the length of a lookup, and a
+      suspend signal arrives wherever it likes; the sweep's own `index_insert` /
+      `index_remove` take the same lock unconditionally, so a thread frozen
+      holding it leaves the collector spinning with the world stopped. Observed
+      only as far as "a thread suspended inside `SpinLock#lock`" under gdb,
+      which is the harmless half — frozen *acquiring* it costs nothing.
+      **Not the aarch64 hang**, and that is settled rather than assumed: that
+      hang names `phase=suspend`, which is before `@world_stopped` is set and
+      before any sweep runs. Left open because the fix is not small — the
+      collector cannot simply take the unlocked path, since a mutator frozen
+      mid-`index_insert` leaves the array itself half-updated — and because
+      nothing has yet been seen to hit it.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
-      platforms.** Separate from the `Thread` family above and not shown to be
-      related to it. `stw_mt_property_test --tlab --nursery` died on **x86_64**
+      platforms — very likely the one closed above, pending its absence.**
+      The mechanism now fits without any gap: the crash faults in `find_block`
+      under `tlab_alloc_small`, TLAB is what puts `find_block` on the allocation
+      fast path, and that is the one arm where mutators make millions of chunk
+      lookups a run. What is missing is the only thing that could make it
+      certain — the CI crash was never reproduced, so this closes when it stops
+      happening and not before. Separate from the `Thread` family above and
+      still not shown to be related to it. `stw_mt_property_test --tlab --nursery` died on **x86_64**
       on 2026-08-17 (run `32002309556`, master) leaving a bare `Segmentation
       fault` with no backtrace and no gcry output, and on **Darwin** on
       2026-08-22 (run `32564282704`) with a Crystal backtrace and nothing else:

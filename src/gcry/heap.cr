@@ -1237,8 +1237,14 @@ module Gcry
       # lock (via with_freelist_lock), so index_insert is serialised per class.
       # Under Boehm (library
       # heap) there is no contention.
+      # `index_insert` invalidates the last-chunk cache **under `@index_lock`**.
+      # A second `invalidate_chunk_cache` used to follow it here, outside the
+      # lock — an unsynchronised `@last_chunk_idx = -1` on the path every
+      # allocating thread takes when it maps a chunk, and the write the read in
+      # `chunk_containing_unlocked` used to race. Restored only by the knob that
+      # restores that read, so the gate has both halves of the old behaviour.
       index_insert(chunk)
-      invalidate_chunk_cache
+      invalidate_chunk_cache if @index_cache_unchecked
       note_mapped(chunk)
       chunk
     end
@@ -1323,44 +1329,50 @@ module Gcry
       end
     end
 
-    # Cheap sanity, not a proof: a real chunk header lives inside the heap's own
-    # address range and is page-aligned by construction.
-    private def plausible_chunk?(chunk : ChunkHeader*) : Bool
-      a = chunk.address
-      return false if a == 0 || (a & 0x7) != 0
-      a >= @heap_min && a < @heap_max
-    end
-
     private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
-      # Last-chunk fast path: most lookups during mark hit the same chunk
-      # that produced the previous result. Range check first (cheaper than
-      # even a L1 index hit) before touching the sorted index.
-      if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
-        idx = @last_chunk_idx
-        if @index_audit && idx >= @chunk_index_count
-          @index_cache_oob &+= 1
-          @index_bad_last = idx.to_u64
+      # Last-chunk fast path: most lookups during mark hit the same chunk that
+      # produced the previous result.
+      #
+      # `@last_chunk_idx` is read **once**. The first version tested the field
+      # and then read it again to index with, and those are two loads: a
+      # concurrent `invalidate_chunk_cache` between them turns a guard that saw
+      # a valid index into a read at `@chunk_index[-1]` — libc's malloc header
+      # for the array, which is why the bad value was the same small constant
+      # (`0x91`) every single time. That is the crash `find_block` has been
+      # dying on: four threads calling it while collections run died in 5 runs
+      # of 8, and plain allocation at the same rate died in 0.
+      #
+      # The three cache fields cannot be read atomically together either, so
+      # even a valid index can be paired with the wrong bounds. The chunk is
+      # therefore *checked* to contain the address rather than assumed to, and a
+      # miss falls through to the binary search, which is the authority. The
+      # search path already did exactly this check on its own result.
+      if @index_cache_unchecked
+        # The pre-2026-08-22 path, kept only so the gate can show the crash:
+        # the field is tested and then read again to index with, and nothing
+        # checks that the chunk contains the address.
+        if @last_chunk_idx >= 0 && addr >= @last_chunk_lo && addr < @last_chunk_hi
+          return (@chunk_index + @last_chunk_idx).value
         end
-        arr = @chunk_index
-        cached = (arr + idx).value
-        if @index_audit && !plausible_chunk?(cached)
-          now = @chunk_index
-          @index_bad_array = arr.address
-          @index_bad_array_now = now.address
-          @index_bad_array_moved &+= 1 if now != arr
-          # Counted **and refused**. Returning it is what crashes the caller at
-          # `ChunkHeader.large?`, and a process that dies there never gets to
-          # say which path produced the pointer. Under the audit knob the
-          # question survives its own answer; the default path is unchanged.
-          @index_cache_bad &+= 1
-          @index_bad_last = cached.address
-          return nil
-        end
-        return cached
+        return chunk_search_unlocked(addr)
       end
 
+      idx = @last_chunk_idx
+      if idx >= 0 && idx < @chunk_index_count && addr >= @last_chunk_lo && addr < @last_chunk_hi
+        cached = (@chunk_index + idx).value
+        return cached if !cached.null? && ChunkHeader.contains?(cached, addr)
+        # The index, the bounds and the array did not agree. Counted, because a
+        # rate here is the difference between a race that is rare and one that
+        # is constant.
+        @index_cache_torn &+= 1
+      end
+
+      chunk_search_unlocked(addr)
+    end
+
+    private def chunk_search_unlocked(addr : UInt64) : ChunkHeader*?
       lo = 0
       hi = @chunk_index_count
       while lo < hi
@@ -1373,11 +1385,6 @@ module Gcry
         elsif addr >= finish
           lo = mid + 1
         else
-          if @index_audit && !plausible_chunk?(chunk)
-            @index_search_bad &+= 1
-            @index_bad_last = chunk.address
-            return nil
-          end
           @last_chunk_idx = mid
           @last_chunk_lo = base
           @last_chunk_hi = finish
