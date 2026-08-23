@@ -1,0 +1,358 @@
+# What does the collector lose, and how?
+#
+# `bench/page_release_corruption.cr` established that turning on a page-release
+# walk makes gcry free a chunk that still holds a live object — 9 of 80 runs
+# with one of the two walks on, 0 of 40 with both off. What it could not say is
+# *why*, because it checksums only leaf objects. Not one of those checksums ever
+# failed. What went missing was the collector's path to a 2 MB buffer, not the
+# buffer's contents, and a harness that verifies leaves cannot see a broken edge.
+#
+# So this one verifies the edges.
+#
+# Each worker builds a chain of `Node`s. A node holds a tag, a payload, and a
+# reference to the next node — a real Crystal object graph, so every edge is one
+# the collector has to trace. Alongside it, in `LibC.malloc` memory the
+# collector never sees and never keeps alive, sits a shadow row per node: the
+# node's address, its tag, its payload's address, and the payload's checksum.
+#
+# Each round the worker checks the graph against the shadow, and the shadow
+# against raw memory. Three things can go wrong and they are reported apart,
+# because they are three different defects:
+#
+#   BROKEN EDGE   the chain is shorter than the shadow, or a node's `nxt` is
+#                 nil where the shadow says a node stands. The collector lost an
+#                 edge — or something zeroed it.
+#   ZEROED        the node's memory reads as all zeros. A live page was
+#                 released: `madvise(MADV_DONTNEED)` on a page a live object sits
+#                 on, which is the hazard the walks were suspected of.
+#   REUSED        the node's memory changed and is *not* zeros. The object was
+#                 freed and its block handed to someone else — a false free, a
+#                 different defect with a different fix.
+#
+# Telling ZEROED from REUSED is the whole point. Both look like corruption from
+# a distance and they come from opposite ends of the collector.
+#
+#   default (no walk)             must be clean
+#   GCRY_PAGE_DONTNEED=1          the HOLED walk, MADV_DONTNEED
+#   GCRY_MOSTLY_EMPTY=1 + DISABLE_PAGE_RELEASE=1   the sparse walk, MADV_FREE
+#
+#   crystal build -Dgc_none bench/live_graph_audit.cr -o bin/live_graph_audit
+#   bin/live_graph_audit
+require "../src/gcry"
+require "./bounded_child"
+
+{% unless flag?(:gc_none) %}
+  {% raise "live_graph_audit requires -Dgc_none (gcry as process GC)" %}
+{% end %}
+
+WORKERS =   4
+ROUNDS  = 130
+# Long enough that the chain spans many chunks, short enough that a full verify
+# each round stays cheap next to the churn that drives collections.
+CHAIN   = 1500
+PAYLOAD =   96
+# Garbage per round. This is what makes chunks go HOLED: allocate a lot, keep
+# almost none, so whole page runs inside a live chunk fall free.
+CHURN = 12000
+# Garbage laid between consecutive chain nodes at build time. Without it the
+# chain lands back to back in chunks that are entirely live, and the churn lands
+# in chunks that end up entirely dead — one is never HOLED and the other goes
+# down the empty-chunk path. See the comment where it is used.
+SCATTER = 40
+# Every LARGE_EVERY-th node carries a payload over the 32 KiB large-object
+# threshold, so the graph has edges into the large path as well as the size
+# classes. That matters: the false free this harness exists to explain took a
+# 1 970 176-byte Array buffer, released through `cache_large_chunk` ->
+# `trim_large_cache`. A graph made only of small objects has no edge that path
+# can break.
+LARGE_EVERY = 50
+LARGE_SIZE  = 40 * 1024
+# Large payloads are checksummed over a prefix only. Summing 40 KiB × 30 nodes ×
+# 130 rounds × 4 workers is minutes of byte comparison for no extra reach: a
+# released page or a reissued block shows up in the first bytes as readily as
+# the last, and the payload's *address* is checked in full either way.
+LARGE_SUM_PREFIX = 512
+
+class Node
+  property nxt : Node?
+  property payload : Bytes
+  property tag : UInt64
+
+  def initialize(@tag : UInt64, @payload : Bytes)
+    @nxt = nil
+  end
+end
+
+# One shadow row per node, in memory gcry does not manage and cannot trace.
+# Keeping it outside the heap matters twice: the collector's view of what is
+# reachable stays exactly what it would be without this harness, and the rows
+# survive whatever happens to the heap.
+struct Shadow
+  property node_addr : UInt64
+  property tag : UInt64
+  property payload_addr : UInt64
+  property payload_sum : UInt64
+
+  def initialize(@node_addr : UInt64, @tag : UInt64, @payload_addr : UInt64, @payload_sum : UInt64)
+  end
+end
+
+def fill(b : Bytes, seed : UInt64) : UInt64
+  sum = 0_u64
+  i = 0
+  while i < b.size
+    v = ((seed &* 1103515245_u64 &+ i) >> 7).to_u8!
+    b[i] = v
+    sum = sum &* 31 &+ v
+    i += 1
+  end
+  sum
+end
+
+def sum_of(b : Bytes) : UInt64
+  sum = 0_u64
+  i = 0
+  while i < b.size
+    sum = sum &* 31 &+ b[i]
+    i += 1
+  end
+  sum
+end
+
+# Is every byte of the object's first `words` machine words zero? A released
+# page reads back as zeros; a reused block almost never does.
+def all_zero?(addr : UInt64, words : Int32) : Bool
+  p = Pointer(UInt64).new(addr)
+  i = 0
+  while i < words
+    return false if p[i] != 0
+    i += 1
+  end
+  true
+end
+
+class Verdict
+  @@edge = Atomic(Int32).new(0)
+  @@zeroed = Atomic(Int32).new(0)
+  @@reused = Atomic(Int32).new(0)
+  @@payload = Atomic(Int32).new(0)
+  @@reported = Atomic(Int32).new(0)
+
+  def self.edge!
+    @@edge.add(1)
+  end
+
+  def self.zeroed!
+    @@zeroed.add(1)
+  end
+
+  def self.reused!
+    @@reused.add(1)
+  end
+
+  def self.payload!
+    @@payload.add(1)
+  end
+
+  # Only the first few details, and only once each — a wedged run can produce
+  # thousands and the interesting part is the first.
+  def self.detail? : Bool
+    @@reported.add(1) < 3
+  end
+
+  def self.line : String
+    "edges #{@@edge.get} zeroed #{@@zeroed.get} reused #{@@reused.get} payload #{@@payload.get}"
+  end
+
+  def self.bad? : Bool
+    @@edge.get + @@zeroed.get + @@reused.get + @@payload.get > 0
+  end
+end
+
+if ARGV.includes?("--child")
+  threads = [] of Thread
+  WORKERS.times do |w|
+    threads << Thread.new do
+      shadow = Pointer(Shadow).new(LibC.malloc(LibC::SizeT.new(sizeof(Shadow) * CHAIN)).address)
+      root : Node? = nil
+      seed = (w.to_u64 &+ 1) &* 2_654_435_761_u64
+
+      # Build the chain, newest at the head, and shadow every node as it goes.
+      #
+      # The garbage between nodes is what makes this reach the walk at all. A
+      # chain built back to back lands in chunks that are entirely live, and the
+      # churn lands in chunks that end up entirely dead — one is never HOLED and
+      # the other goes down the empty-chunk path. HOLED means a chunk with a few
+      # survivors and whole free page runs between them, so the survivors have
+      # to be laid down sparsely. Built without this, the harness released
+      # 200 KB over six collections and would have called that clean.
+      CHAIN.times do |i|
+        SCATTER.times do
+          filler = Bytes.new(PAYLOAD)
+          filler[0] = 2_u8
+        end
+        large = (i % LARGE_EVERY) == 0
+        payload = Bytes.new(large ? LARGE_SIZE : PAYLOAD)
+        seed &+= 1
+        psum = fill(payload, seed)
+        psum = sum_of(payload[0, LARGE_SUM_PREFIX]) if large
+        node = Node.new(seed, payload)
+        node.nxt = root
+        root = node
+        shadow[i] = Shadow.new(
+          node_addr: node.as(Void*).address,
+          tag: seed,
+          payload_addr: payload.to_unsafe.address,
+          payload_sum: psum)
+      end
+
+      ROUNDS.times do
+        # Churn: allocate and drop, so chunks holding the chain go sparse and
+        # whole page runs inside them fall free.
+        CHURN.times do
+          junk = Bytes.new(PAYLOAD)
+          junk[0] = 1_u8
+        end
+
+        # 1. Walk the graph the way the collector has to: edge by edge. The
+        #    shadow rows are in reverse build order, so row CHAIN-1-i is the
+        #    node i hops from the head.
+        cursor = root
+        hops = 0
+        while node = cursor
+          row = shadow[CHAIN - 1 - hops]
+          if node.as(Void*).address != row.node_addr
+            Verdict.edge!
+            STDERR.puts "  hop #{hops}: chain reached #{node.as(Void*).address} where the shadow " \
+                        "says #{row.node_addr}" if Verdict.detail?
+            break
+          end
+          if node.tag != row.tag
+            Verdict.reused!
+            STDERR.puts "  hop #{hops}: tag #{node.tag} where the shadow says #{row.tag}" if Verdict.detail?
+          end
+          if node.payload.to_unsafe.address != row.payload_addr
+            Verdict.edge!
+            STDERR.puts "  hop #{hops}: payload moved to #{node.payload.to_unsafe.address} from " \
+                        "#{row.payload_addr}" if Verdict.detail?
+          else
+            got = node.payload.size > LARGE_SUM_PREFIX ? sum_of(node.payload[0, LARGE_SUM_PREFIX]) : sum_of(node.payload)
+            if got != row.payload_sum
+              Verdict.payload!
+              STDERR.puts "  hop #{hops}: payload at #{row.payload_addr} (#{node.payload.size} B) " \
+                          "checksums #{got} not #{row.payload_sum}" if Verdict.detail?
+            end
+          end
+          hops += 1
+          cursor = node.nxt
+        end
+
+        if hops != CHAIN
+          Verdict.edge!
+          STDERR.puts "  chain walked #{hops} of #{CHAIN} nodes — an edge is gone" if Verdict.detail?
+        end
+
+        # 2. And now the part the graph walk cannot do: reach every node by the
+        #    address it had, whether or not anything still points at it. A node
+        #    the collector dropped is still at that address; what is *in* it is
+        #    the evidence.
+        i = 0
+        while i < CHAIN
+          row = shadow[i]
+          revived = Pointer(Void).new(row.node_addr).as(Node)
+          if revived.tag != row.tag
+            if all_zero?(row.node_addr, 4)
+              Verdict.zeroed!
+              STDERR.puts "  node #{row.node_addr} reads as zeros — a live page was released" if Verdict.detail?
+            else
+              Verdict.reused!
+              STDERR.puts "  node #{row.node_addr} holds #{revived.tag} not #{row.tag} — the block " \
+                          "was handed out again" if Verdict.detail?
+            end
+          end
+          i += 1
+        end
+      end
+
+      # Keep the chain alive to the very end: without this the tail is garbage
+      # halfway through and the audit is auditing nothing.
+      STDERR.print "" if root.nil?
+    end
+  end
+  threads.each(&.join)
+
+  # Same reason as `page_release_corruption`: a run that never marks a chunk
+  # HOLED releases nothing, and its silence is about nothing.
+  heap = Gcry.default_heap
+  puts "child: #{Verdict.line} dontneed #{heap.dontneed_bytes} collections #{heap.collections} " \
+       "range_rejects #{heap.madvise_range_rejects}"
+  exit(Verdict.bad? ? 1 : 0)
+end
+
+# ── Parent ───────────────────────────────────────────────────────────────────
+exe = Process.executable_path.not_nil!
+attempts = (ENV["LIVE_GRAPH_ATTEMPTS"]?.try(&.to_i?) || 6)
+
+puts "=== live graph audit ==="
+puts "#{WORKERS} workers × #{ROUNDS} rounds, chain of #{CHAIN}, #{CHURN} dropped per round"
+puts "#{attempts} attempts per arm"
+puts ""
+
+ARMS = {
+  "no walk"      => {"GCRY_DISABLE_MADVISE" => "1"},
+  "HOLED"        => {"GCRY_PAGE_DONTNEED" => "1"},
+  "mostly-empty" => {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"},
+}
+
+failures = [] of String
+results = {} of String => Tuple(Int32, Int32, String?)
+releases = {} of String => UInt64
+
+ARMS.each do |name, env|
+  bad = 0
+  hung = 0
+  released = 0_u64
+  first = nil
+  attempts.times do
+    result = BoundedChild.run(exe, ["--child"], env.to_h, 300.seconds)
+    unless result.ok
+      bad += 1
+      hung += 1 if result.timed_out
+      first ||= result.output.lines.find { |l| l.includes?("zeros") || l.includes?("handed out") ||
+        l.includes?("edge is gone") || l.includes?("Invalid memory access") }
+    end
+    if m = result.output.match(/dontneed (\d+)/)
+      released += m[1].to_u64
+    end
+  end
+  results[name] = {bad, hung, first}
+  releases[name] = released
+  puts "  %-13s %d of %d, released %d B%s%s" % [name, bad, attempts, released,
+                                                hung > 0 ? " (#{hung} killed on the deadline)" : "",
+                                                first ? "\n     #{first.strip}" : ""]
+end
+
+puts ""
+
+no_walk = results["no walk"][0]
+failures << "the no-walk arm failed #{no_walk} of #{attempts} — this harness breaks without either " \
+            "release walk, so it is not measuring them" if no_walk > 0
+
+# An engaged walk releases orders of magnitude more than the dormant flush the
+# control arm still does, so the floor is the control and never zero.
+floor = {releases["no walk"] * 4, 8_u64 * 1024 * 1024}.max
+["HOLED", "mostly-empty"].each do |arm|
+  failures << "#{arm} released #{releases[arm]} B against a #{releases["no walk"]} B control — the " \
+              "walk did not run, so a clean result says nothing about it" if releases[arm] <= floor
+end
+
+if failures.empty? && results["HOLED"][0] == 0 && results["mostly-empty"][0] == 0
+  puts "ok — every edge and every node survived both release walks"
+  exit 0
+end
+
+results.each do |name, (bad, _hung, _first)|
+  failures << "#{name}: #{bad} of #{attempts}" if bad > 0 && name != "no walk"
+end
+failures.each { |f| STDERR.puts "FAIL: #{f}" }
+exit 1

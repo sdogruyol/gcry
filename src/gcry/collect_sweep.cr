@@ -857,6 +857,23 @@ module Gcry
     # omit those blocks from the freelist via rebuild).
     # preserve_content=true → Linux MADV_FREE (freelist words stay valid until
     # kernel reclaim) — used by mostly-empty without HOLED.
+    # Is this range really inside the chunk it was computed from, and is that
+    # chunk really inside the heap? `data_start`/`data_end` come out of the
+    # chunk header, so checking the range against them proves only that the
+    # header is self-consistent. If the walk stepped onto a released or
+    # otherwise foreign header — the hazard every live-world chunk walk carries
+    # — those bounds are whatever happens to be at that address, and the
+    # `MADV_DONTNEED` built from them lands on memory that is not gcry's.
+    private def madvise_range_ok?(chunk : ChunkHeader*, run_start : UInt64, run_end : UInt64) : Bool
+      return true if @madvise_unchecked
+      base = chunk.as(Void*).address
+      limit = base &+ chunk.value.mapped_bytes
+      ok = run_start >= base && run_end <= limit &&
+           base >= @heap_span_lo && limit <= @heap_span_hi
+      @madvise_range_rejects &+= 1 unless ok
+      ok
+    end
+
     private def release_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32, *, preserve_content : Bool) : Bool
       {% if flag?(:linux) || flag?(:darwin) %}
         page = Platform.host_page_size
@@ -900,7 +917,8 @@ module Gcry
             end
             run_end = first_page + idx.to_u64 * page
             len = run_end - run_start
-            if run_start >= data0 && run_end <= data1 && len > 0
+            if run_start >= data0 && run_end <= data1 && len > 0 &&
+               madvise_range_ok?(chunk, run_start, run_end)
               ok = if preserve_content
                      {% if flag?(:linux) %}
                        Platform.release_physical_pages_free(run_start, len)

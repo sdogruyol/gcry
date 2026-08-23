@@ -423,6 +423,16 @@ acik-ab:
 # an application to ask it — the acikturkiye use-after-free this came from could
 # not settle it, because its rate fell from 7 of 60 to nothing between sessions.
 # Deterministic here: `GCRY_TRIM_UNLOCKED=1` fails 5 of 5, serialised 0 of 5.
+# What does the collector lose, and how?
+#
+# A real object graph with a shadow row per node in `LibC.malloc` memory the
+# collector never sees. Reports a broken edge, a zeroed node and a reused node
+# apart, because they are three different defects: a lost reference, a live page
+# released, and a live block handed out again.
+live-graph-audit: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/live_graph_audit.cr -o $(BIN)/live_graph_audit --error-trace
+	$(BIN)/live_graph_audit
+
 # Do the page-release walks zero a live object?
 #
 # Both build a live-page mask by reading block headers with no lock, then

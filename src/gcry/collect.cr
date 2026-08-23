@@ -103,6 +103,16 @@ module Gcry
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
+    # Page-release ranges that did not lie inside the chunk they were computed
+    # from. `release_free_pages_in_chunk` only ever checked the range against
+    # the chunk's own `data_start`/`data_end`, which is a self-consistency check
+    # — it says nothing if the header those came from is not a live chunk's.
+    # A `madvise(MADV_DONTNEED)` that lands outside the heap zeroes memory gcry
+    # does not own.
+    getter madvise_range_rejects : UInt64 = 0_u64
+    # Research only: skip the check and issue the syscall anyway, which is what
+    # it did before 2026-08-23.
+    property madvise_unchecked : Bool = false
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false

@@ -754,6 +754,7 @@ module GC
     # what it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
     heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     heap.trim_immediate = true if env_flag_one?("GCRY_TRIM_IMMEDIATE")
+    heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")
