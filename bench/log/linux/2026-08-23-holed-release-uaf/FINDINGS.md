@@ -7,10 +7,18 @@ the default on Darwin — makes `bench/page_release_corruption.cr` fault about o
 run in six. With the same binary and the walk turned off, it does not fault at
 all.
 
-    GCRY_PAGE_DONTNEED=1     7 of 40
-    GCRY_DISABLE_MADVISE=1   0 of 40
+    GCRY_PAGE_DONTNEED=1                      7 of 40   (HOLED walk, MADV_DONTNEED)
+    GCRY_MOSTLY_EMPTY=1 GCRY_DISABLE_PAGE_RELEASE=1
+                                              2 of 40   (mostly-empty walk, MADV_FREE)
+    GCRY_DISABLE_MADVISE=1                    0 of 40   (neither walk)
 
-Both arms back to back on an otherwise idle machine. Fisher exact p ≈ 0.012.
+All arms back to back on an otherwise idle machine.
+
+The contrast that holds is **a page-release walk against none**: 9 of 80 with
+one of the two running, 0 of 40 with both off, Fisher p ≈ 0.028. The two walks
+are not distinguishable from each other — 7 of 40 against 2 of 40 is p ≈ 0.15,
+and reading a mechanism into that gap is the mistake this file was rewritten
+once already to avoid.
 
 ## What faults
 
@@ -38,17 +46,38 @@ title is wrong about the path being safe, and the investigation was closed on
 17 runs of an arm that fails at 17 %. The chance of missing it in 17 runs is
 about 6 %, which is what happened.
 
-## Where to look
+## A candidate, tested and eliminated
 
-The HOLED flag is set in STW (`collect_sweep.cr`, `set_holed(chunk, true)`) and
-the chunk's size class is queued for a freelist rebuild in the same pass. The
-release itself runs after `start_world`. Between the two the mutators are live
-and allocating, and the rebuild decides which blocks are free. A chunk whose
-live count is wrong after that rebuild is a chunk the sweep can decide is empty
-and hand to `flush_pending_empty_chunks` to unmap.
+`rebuild_size_class_freelist` looked like the answer. It is the one thing the
+HOLED path adds, it runs in the `after_world` branch with mutators live, it
+walks `@chunks` — a sixth live-world chunk-list walker that the earlier sweep of
+those walkers missed — and it is the only one that *writes*, overwriting the
+header of every block it calls free. A live block wrongly on that freelist is
+both relinked and overwritten, and free blocks are not traced during marking, so
+whatever it points at is collected. That is exactly the shape seen here.
 
-That is a hypothesis about the mechanism; it has not been tested. What is
-established is the arm, the rate, and the frame.
+It is not the cause. The mostly-empty walk is HOLED-less by design and rebuilds
+no freelist, and it fails too.
+
+## What the two arms share
+
+`release_free_pages_in_chunk`: build a live-page mask by reading every
+`BlockHeader.free?` in the chunk holding no lock, then madvise the runs the mask
+calls free. HOLED passes `preserve_content: false` (MADV_DONTNEED, zeroes now),
+mostly-empty passes true (MADV_FREE, content survives until the kernel
+reclaims). That ordering is consistent with 7 against 2, but the sample does not
+carry the claim.
+
+Note what the harness's own checksums say: **not one ever failed.** The
+112-byte objects it verifies were never zeroed. What was lost is the *path* to a
+2 MB buffer — the object holding the reference, not the leaf. A harness that
+checksums only leaves cannot see that, which is why this took a crash to find
+rather than a verification failure.
+
+## What is established
+
+The arm, the rate, the frame, and that the freed object was live and reachable
+from the mutator's own stack. Not the mechanism.
 
 ## The harness
 
