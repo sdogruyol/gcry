@@ -414,6 +414,10 @@ module Gcry
     # a long-running program under this knob will exhaust it.
     property unmap_guard : Bool = false
 
+    # Research only: trim the large cache without `@alloc_lock`, which is what
+    # it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
+    property trim_unlocked : Bool = false
+
     UNMAP_GUARD_SLOTS = 8192
 
     @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)

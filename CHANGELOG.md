@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The large-object cache was trimmed without the lock the allocator holds.**
+  `alloc_large` → `take_large_free` walks `@large_freelists` **holding
+  `@alloc_lock`**, takes a chunk off it and hands it to the mutator.
+  `trim_large_cache` walked the same list holding nothing, and unmapped each
+  chunk while still walking it; all three of its call sites are outside the
+  lock. So an allocating thread could be issued a chunk a trimming peer was
+  tearing down — a live buffer, just handed out, unmapped under its owner.
+  It detaches under the lock and unmaps after it now, which keeps the syscalls
+  outside the lock — the property the original comment was protecting, since
+  `munmap` of many VMAs is slow on Linux and holding the allocator across it
+  would stall every mutator. Same shape as the empty-chunk path: decide under
+  the lock, tear down after.
+  **Stated plainly: this is not proven to be the cause of the acikturkiye
+  use-after-free it was found while chasing.** With the fix, 0 of 24 runs
+  crashed; with `GCRY_TRIM_UNLOCKED=1` restoring the old behaviour faithfully,
+  1 of 24 — Fisher p = 1.0. The control is also far below the 7-of-60 baseline
+  it is meant to reproduce, so something other than the fix moved the rate
+  between sessions. The change is kept because the asymmetry is wrong on its own
+  terms, not because the measurement vindicated it.
+  Two things were learned the expensive way and are written down in
+  `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`: a control has to
+  reproduce the defect rather than merely remove the fix — the first
+  `GCRY_TRIM_UNLOCKED` arm dropped the lock but kept the new two-pass ordering
+  and returned 0 of 24, which said nothing — and rooting `realloc`'s new block
+  across the copy was tried, measured at 2 of 24, and reverted.
+
 ### Added
 
 - **`GCRY_UNMAP_GUARD=1` — a released chunk that can still be identified.**

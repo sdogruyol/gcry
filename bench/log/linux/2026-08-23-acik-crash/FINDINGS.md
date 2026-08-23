@@ -50,13 +50,18 @@ instead of faulting. The crash is the loud end of this, not the whole of it.
 ## Where that leaves it
 
 No heap object holds the buffer when it dies, and the mark's own completeness
-audit agrees. So the only holder is a **stack slot or a register of a mutator**,
-and the root scan is not seeing it. That is the same region as the fiber-stack
-family, and it is where the next session should start.
+audit agrees — so the mark was never the problem, which is what pointed at the
+allocator's own bookkeeping and found the asymmetry above.
 
-The buffer reaches its size through `GC.realloc` growth, which is the first
-thing to look at: between `realloc` handing back a new large block and the
-caller storing it into `@buffer`, the only reference is a register.
+**Open**: whether that asymmetry is the whole of it. The rate is now low enough
+that this harness cannot resolve it; the next session needs either a much
+longer batch or a workload that hits the large cache harder, and it should
+start by re-establishing the baseline on the current tree before testing
+anything.
+
+Also tried and reverted, because the measurement did not support it: rooting
+`realloc`'s new block across the copy (2 of 24, indistinguishable from
+baseline). The window is not inside `realloc`.
 
 ## Reproducing
 

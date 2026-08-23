@@ -1165,31 +1165,102 @@ module Gcry
     # Munmap cached large objects until @large_free_bytes <= *limit*.
     # Call outside STW — munmap of many VMAs is slow on Linux.
     # Hard-capped by LARGE_CACHE_LIMIT even if retain is set higher.
+    # Detach under `@alloc_lock`, unmap outside it.
+    #
+    # This used to do both without the lock, while `alloc_large` →
+    # `take_large_free` walks the very same `@large_freelists` **holding**
+    # `@alloc_lock`. So an allocating thread could take a chunk off the list and
+    # hand it to the mutator while a peer trimming the cache walked past the
+    # same entry and `munmap`ed it: a live buffer, just issued, unmapped under
+    # its owner. That is the acikturkiye use-after-free — a 69 632-byte large
+    # chunk released by this path with the write landing in the same collection
+    # cycle, in a run where `GCRY_MARK_AUDIT` reported no missing heap edge and
+    # `GCRY_SOUND=1` changed nothing, because the mark was never the problem
+    # (`bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`).
+    #
+    # The list mutation is serialised now; the syscalls still are not, which is
+    # the property the old comment was protecting — `munmap` of many VMAs is
+    # slow on Linux and holding the allocator across it would stall every
+    # mutator. Same shape as the empty-chunk path: decide under the lock, tear
+    # down after it.
+    #
+    # `GCRY_TRIM_UNLOCKED=1` restores the old behaviour for the gate.
     def trim_large_cache(limit : UInt64 = @large_cache_retain) : Nil
       effective = limit > LARGE_CACHE_LIMIT ? LARGE_CACHE_LIMIT : limit
       return if @large_free_bytes <= effective
 
-      b = LARGE_FREE_BUCKETS - 1
-      while b >= 0 && @large_free_bytes > effective
-        user = @large_freelists[b]
-        while user && @large_free_bytes > effective
-          header = BlockHeader.from_user(user)
-          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
-          nxt = header.value.next_free
-          @large_freelists[b] = nxt
-          mapped = chunk.value.mapped_bytes
-          unlink_chunk(chunk)
-          @heap_size -= mapped if @heap_size >= mapped
-          free_bytes_sub(mapped)
-          @large_free_bytes -= mapped if @large_free_bytes >= mapped
-          @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
-          @unmapped_bytes += mapped
-          unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
-            LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+      detached = Pointer(Void).null # chain of users, linked by next_free
+      detach = -> do
+        b = LARGE_FREE_BUCKETS - 1
+        while b >= 0 && @large_free_bytes > effective
+          user = @large_freelists[b]
+          while user && @large_free_bytes > effective
+            header = BlockHeader.from_user(user)
+            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            nxt = header.value.next_free
+            @large_freelists[b] = nxt
+            mapped = chunk.value.mapped_bytes
+            unlink_chunk(chunk)
+            @heap_size -= mapped if @heap_size >= mapped
+            free_bytes_sub(mapped)
+            @large_free_bytes -= mapped if @large_free_bytes >= mapped
+            @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
+            @unmapped_bytes += mapped
+            hv = header.value
+            hv.next_free = detached
+            header.value = hv
+            detached = user
+            user = nxt
           end
-          user = nxt
+          b -= 1
         end
-        b -= 1
+      end
+
+      if @trim_unlocked
+        # A faithful control has to reproduce the *interleaving*, not just the
+        # missing lock: the original unmapped each chunk while still walking the
+        # list, so a peer inside `take_large_free` could take an entry that was
+        # about to be torn down. Detaching everything first and unmapping after
+        # narrows that window even without the lock — the first version of this
+        # control did exactly that and produced 0 of 24, which said nothing.
+        b = LARGE_FREE_BUCKETS - 1
+        while b >= 0 && @large_free_bytes > effective
+          user = @large_freelists[b]
+          while user && @large_free_bytes > effective
+            header = BlockHeader.from_user(user)
+            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            nxt = header.value.next_free
+            @large_freelists[b] = nxt
+            mapped = chunk.value.mapped_bytes
+            unlink_chunk(chunk)
+            @heap_size -= mapped if @heap_size >= mapped
+            free_bytes_sub(mapped)
+            @large_free_bytes -= mapped if @large_free_bytes >= mapped
+            @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
+            @unmapped_bytes += mapped
+            unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+              LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+            end
+            user = nxt
+          end
+          b -= 1
+        end
+        update_heap_bounds_after_unmap
+        return
+      end
+      with_alloc_lock { detach.call }
+
+      # Off the list and out of the index: nothing can hand these out now.
+      user = detached
+      while user
+        header = BlockHeader.from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        nxt = header.value.next_free
+        mapped = chunk.value.mapped_bytes
+        unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+        end
+        user = nxt
       end
       update_heap_bounds_after_unmap
     end

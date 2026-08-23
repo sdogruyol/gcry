@@ -750,6 +750,9 @@ module GC
     # so a fault in released memory can be told which chunk it was and when
     # (src/gcry/collect.cr `guard_release`).
     heap.unmap_guard = true if env_flag_one?("GCRY_UNMAP_GUARD")
+    # Research only: trim the large cache without the allocator lock, which is
+    # what it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
+    heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")

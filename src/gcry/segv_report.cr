@@ -416,7 +416,12 @@ module Gcry
           len = RawOut.append_u64(buf.to_unsafe, len, gen)
           len = RawOut.append(buf.to_unsafe, len, "; the write is ")
           len = RawOut.append_u64(buf.to_unsafe, len, a - base)
-          len = RawOut.append(buf.to_unsafe, len, " bytes into it\n")
+          len = RawOut.append(buf.to_unsafe, len, " bytes into it. Collections since: ")
+          # Zero or one is a race inside the release window; many means the
+          # mutator has been carrying a pointer into released memory for a long
+          # time, which is a different defect with a different fix.
+          len = RawOut.append_u64(buf.to_unsafe, len, heap.collections - gen)
+          len = RawOut.append(buf.to_unsafe, len, "\n")
           RawOut.flush(buf.to_unsafe, len)
           return
         end
