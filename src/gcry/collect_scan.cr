@@ -1033,7 +1033,12 @@ module Gcry
 
     # Emit [low, high) minus each mapped heap chunk via sorted chunk index merge.
     private def each_static_range_excluding_heap(low : Void*, high : Void*, & : Void*, Void* ->) : Nil
-      ensure_chunk_index
+      # No rebuild here any more. `@chunk_index` is maintained incrementally —
+      # `map_chunk` inserts, `unlink_chunk` and the sweep's drop path remove —
+      # and the rebuild this used to call never ran: its guard read an ivar that
+      # nothing ever set true, measured as 0 rebuilds over runs of 18
+      # collections. A safety net that cannot fire is worse than none, because
+      # it reads like one.
       lo = low.address
       hi = high.address
       return if hi <= lo

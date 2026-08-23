@@ -1643,39 +1643,6 @@ module Gcry
       end
     {% end %}
 
-    # Rebuild the sorted chunk index from @chunks linked list.
-    # Called during mark (range scan) — all mutators stopped, no lock needed.
-    protected def ensure_chunk_index : Nil
-      return unless @chunk_index_dirty
-
-      count = 0
-      each_chunk { count += 1 }
-
-      index_ensure_cap(count)
-
-      i = 0
-      each_chunk do |chunk|
-        (@chunk_index + i).value = chunk
-        i += 1
-      end
-      @chunk_index_count = count
-
-      i = 1
-      while i < @chunk_index_count
-        key = (@chunk_index + i).value
-        key_addr = key.address
-        j = i - 1
-        while j >= 0 && (@chunk_index + j).value.address > key_addr
-          (@chunk_index + (j + 1)).value = (@chunk_index + j).value
-          j -= 1
-        end
-        (@chunk_index + (j + 1)).value = key
-        i += 1
-      end
-
-      @chunk_index_dirty = false
-    end
-
     private def index_ensure_cap(need : Int32) : Nil
       return if need <= @chunk_index_cap
       new_cap = @chunk_index_cap == 0 ? 16 : @chunk_index_cap
