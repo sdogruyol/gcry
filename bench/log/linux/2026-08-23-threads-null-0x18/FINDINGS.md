@@ -101,6 +101,48 @@ what it is aimed at goes quiet rather than saying so. The `dontneed_bytes`
 counter exists for that reason, and so does the engagement floor, and so does
 `BoundedChild` reporting a timeout apart from a fault.
 
+## Two results from this file were invalid, and why
+
+Adding a diagnostic line broke the harness silently. `STDERR.puts` from a thread
+started with `Thread.new` raises `Thread#execution_context cannot be nil` —
+Crystal's IO reaches for the current execution context and a bare thread has
+none. Every child died in its first round from then on.
+
+The hunts run in that window are withdrawn:
+
+- **0 of 46** was not a clean result. The children were dying before they
+  verified anything, and the hunt was grepping for `Invalid memory access`,
+  which this exception is not.
+- **20 of 20 in both arms** was not "the defect is in both arms". It was the
+  same bug seen from the other side, every child failing for a reason that had
+  nothing to do with gcry.
+
+The second one is the more instructive: a result that symmetric and that clean
+is far more likely to be a broken harness than a finding, and it was only caught
+by looking at what a child actually printed. Diagnostics now go through
+`write(2)`, which needs none of the runtime's machinery.
+
+## The instrument does not suppress what it measures
+
+Worth checking, because the liveness sweep asks the heap 3000 times a round per
+worker and each ask takes `@index_lock` — enough mutator-side synchronisation to
+plausibly change the timing of the race. It does not:
+
+    sweep on    dontneed 10.4 MB, 14.2 MB
+    sweep off   dontneed 13.2 MB, 10.0 MB
+
+`LIVE_GRAPH_SWEEP=0` turns it off so this stays checkable.
+
+## After the repair
+
+The defect still fires — 2 of 6 in the first runs after the fix, which is in
+line with the pre-repair rate and unlike the invalid 0 of 46. The fault address
+is not inside any large payload (the harness prints their ranges and matches
+arithmetically), and the round-start sweep does not flag it, which is expected:
+the sweep asks once and the other workers keep allocating, so the window moves.
+
+What is still unknown is which object the address belongs to.
+
 ## Rates
 
     live_graph_audit, 12 attempts per arm

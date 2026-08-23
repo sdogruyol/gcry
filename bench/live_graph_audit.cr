@@ -75,6 +75,17 @@ LARGE_SUM_PREFIX = 512
 # Room for the runtime's own threads, shadowed the same way the graph is.
 RUNTIME_SLOTS = 64
 
+# Diagnostics from a bare `Thread` cannot go through `STDERR`. Crystal's IO
+# reaches for the current execution context and a thread started with
+# `Thread.new` has none, so the first write raises
+# `Thread#execution_context cannot be nil` — which killed every child of this
+# harness for a stretch, silently, because the hunt was grepping for a segfault
+# and this is not one. `write(2)` needs none of that machinery.
+def raw_puts(line : String) : Nil
+  s = line + "\n"
+  LibC.write(2, s.to_unsafe.as(Void*), LibC::SizeT.new(s.bytesize))
+end
+
 class Node
   property nxt : Node?
   property payload : Bytes
@@ -195,6 +206,7 @@ if ARGV.includes?("--child")
   WORKERS.times do |w|
     threads << Thread.new do
       heap = Gcry.default_heap
+      sweep = ENV["LIVE_GRAPH_SWEEP"]? != "0"
       runtime = Pointer(UInt64).new(LibC.malloc(LibC::SizeT.new(8 * RUNTIME_SLOTS)).address)
       runtime_seen = 0
       shadow = Pointer(Shadow).new(LibC.malloc(LibC::SizeT.new(sizeof(Shadow) * CHAIN)).address)
@@ -244,7 +256,7 @@ if ARGV.includes?("--child")
           j += 1
         end
       end
-      STDERR.puts big
+      raw_puts(big)
 
       ROUNDS.times do
         gone = false
@@ -264,11 +276,11 @@ if ARGV.includes?("--child")
           end
         else
           k = 0
-          while k < runtime_seen
+          while sweep && k < runtime_seen
             unless heap.address_in_live_chunk?(runtime[k])
               Verdict.freed!
-              STDERR.puts "  runtime Thread object #{k} at #{runtime[k]} is in no live chunk — the " \
-                          "collector released a thread the runtime still holds" if Verdict.detail?
+              raw_puts("  runtime Thread object #{k} at #{runtime[k]} is in no live chunk — the " \
+                       "collector released a thread the runtime still holds") if Verdict.detail?
               gone = true
             end
             k += 1
@@ -287,7 +299,7 @@ if ARGV.includes?("--child")
         Thread.unsafe_each { seen += 1 }
         if seen == 0
           Verdict.threadlist!
-          STDERR.puts "  the thread list is empty — Thread.@@threads read null" if Verdict.detail?
+          raw_puts("  the thread list is empty — Thread.@@threads read null") if Verdict.detail?
         end
 
         # Churn: allocate and drop, so chunks holding the chain go sparse and
@@ -303,19 +315,24 @@ if ARGV.includes?("--child")
         #    an index, a kind and a size attached instead of a segfault with
         #    nothing attached. Without this pass the run dies inside the walk
         #    below and takes its own findings with it.
+        # `LIVE_GRAPH_SWEEP=0` turns this pass off. It is not a convenience:
+        # the sweep asks the heap 3000 times a round per worker and every ask
+        # takes `@index_lock`, which is enough mutator-side synchronisation to
+        # change the timing of the very race it was added to describe. Whether
+        # it does is a measurement, not a guess — run both ways.
         i = 0
-        while i < CHAIN
+        while sweep && i < CHAIN
           row = shadow[i]
           unless heap.address_in_live_chunk?(row.node_addr)
             Verdict.freed!
-            STDERR.puts "  node #{i} at #{row.node_addr} is in no live chunk — released while the " \
-                        "chain still pointed at it" if Verdict.detail?
+            raw_puts("  node #{i} at #{row.node_addr} is in no live chunk — released while the " \
+                     "chain still pointed at it") if Verdict.detail?
             gone = true
           end
           unless heap.address_in_live_chunk?(row.payload_addr)
             Verdict.freed!
-            STDERR.puts "  payload of node #{i} at #{row.payload_addr} (#{row.payload_size} B, " \
-                        "#{row.payload_size > 32768 ? "large" : "size-class"}) is in no live chunk" if Verdict.detail?
+            raw_puts("  payload of node #{i} at #{row.payload_addr} (#{row.payload_size} B, " \
+                     "#{row.payload_size > 32768 ? "large" : "size-class"}) is in no live chunk") if Verdict.detail?
             gone = true
           end
           i += 1
@@ -333,24 +350,24 @@ if ARGV.includes?("--child")
           row = shadow[CHAIN - 1 - hops]
           if node.as(Void*).address != row.node_addr
             Verdict.edge!
-            STDERR.puts "  hop #{hops}: chain reached #{node.as(Void*).address} where the shadow " \
-                        "says #{row.node_addr}" if Verdict.detail?
+            raw_puts("  hop #{hops}: chain reached #{node.as(Void*).address} where the shadow " \
+                     "says #{row.node_addr}") if Verdict.detail?
             break
           end
           if node.tag != row.tag
             Verdict.reused!
-            STDERR.puts "  hop #{hops}: tag #{node.tag} where the shadow says #{row.tag}" if Verdict.detail?
+            raw_puts("  hop #{hops}: tag #{node.tag} where the shadow says #{row.tag}") if Verdict.detail?
           end
           if node.payload.to_unsafe.address != row.payload_addr
             Verdict.edge!
-            STDERR.puts "  hop #{hops}: payload moved to #{node.payload.to_unsafe.address} from " \
-                        "#{row.payload_addr}" if Verdict.detail?
+            raw_puts("  hop #{hops}: payload moved to #{node.payload.to_unsafe.address} from " \
+                     "#{row.payload_addr}") if Verdict.detail?
           else
             got = node.payload.size > LARGE_SUM_PREFIX ? sum_of(node.payload[0, LARGE_SUM_PREFIX]) : sum_of(node.payload)
             if got != row.payload_sum
               Verdict.payload!
-              STDERR.puts "  hop #{hops}: payload at #{row.payload_addr} (#{node.payload.size} B) " \
-                          "checksums #{got} not #{row.payload_sum}" if Verdict.detail?
+              raw_puts("  hop #{hops}: payload at #{row.payload_addr} (#{node.payload.size} B) " \
+                       "checksums #{got} not #{row.payload_sum}") if Verdict.detail?
             end
           end
           hops += 1
@@ -359,7 +376,7 @@ if ARGV.includes?("--child")
 
         if hops != CHAIN
           Verdict.edge!
-          STDERR.puts "  chain walked #{hops} of #{CHAIN} nodes — an edge is gone" if Verdict.detail?
+          raw_puts("  chain walked #{hops} of #{CHAIN} nodes — an edge is gone") if Verdict.detail?
         end
 
         # 2. And now the part the graph walk cannot do: reach every node by the
@@ -375,8 +392,8 @@ if ARGV.includes?("--child")
           # existed.
           unless heap.address_in_live_chunk?(row.node_addr)
             Verdict.freed!
-            STDERR.puts "  node #{row.node_addr} is in no live chunk — its chunk was released " \
-                        "while the chain still pointed at it" if Verdict.detail?
+            raw_puts("  node #{row.node_addr} is in no live chunk — its chunk was released " \
+                     "while the chain still pointed at it") if Verdict.detail?
             i += 1
             next
           end
@@ -384,11 +401,11 @@ if ARGV.includes?("--child")
           if revived.tag != row.tag
             if all_zero?(row.node_addr, 4)
               Verdict.zeroed!
-              STDERR.puts "  node #{row.node_addr} reads as zeros — a live page was released" if Verdict.detail?
+              raw_puts("  node #{row.node_addr} reads as zeros — a live page was released") if Verdict.detail?
             else
               Verdict.reused!
-              STDERR.puts "  node #{row.node_addr} holds #{revived.tag} not #{row.tag} — the block " \
-                          "was handed out again" if Verdict.detail?
+              raw_puts("  node #{row.node_addr} holds #{revived.tag} not #{row.tag} — the block " \
+                       "was handed out again") if Verdict.detail?
             end
           end
           i += 1
@@ -396,8 +413,9 @@ if ARGV.includes?("--child")
       end
 
       # Keep the chain alive to the very end: without this the tail is garbage
-      # halfway through and the audit is auditing nothing.
-      STDERR.print "" if root.nil?
+      # halfway through and the audit is auditing nothing. `raw_puts` rather
+      # than `STDERR` for the same reason as everything else in this thread.
+      raw_puts("") if root.nil?
     end
   end
   threads.each(&.join)
