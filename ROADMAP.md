@@ -1009,10 +1009,19 @@ CI asymmetry that hid both.
       where a >64 MiB range was skipped with nothing counted, so static ranges
       are chunked now and the refusal is counted. Gated by
       `make static-bss-roots` at both thresholds, with `GCRY_STATIC_BSS_CAP=1`
-      as the red arm. **Open**: what this did to the numbers. Any affected
-      program was freeing objects it should have kept, so its RSS and pause
-      figures were not the collector's; the fat-app cuts want re-running if that
-      binary's BSS is over 1 MiB.
+      as the red arm.
+      **What it did to the numbers — measured 2026-08-23, and they stand.** Any
+      affected program was freeing objects it should have kept, so its RSS and
+      pause figures were not the collector's, which put every fat-app cut in
+      question. Built the way those cuts are built (`-Dgc_none --release`),
+      acikturkiye's BSS mapping is **495 616 bytes (0.473 MiB)** against the
+      1 MiB cap — read from `/proc/<pid>/maps` on the running process, with
+      `/gc-stats` confirming gcry underneath. Its own static data is ~15 KiB
+      above the gcry + Crystal baseline of ~480 KiB, so the headroom was never
+      close. Two ways to get this wrong, both of which a first attempt did: the
+      ELF `.bss` **section** is not the mapping gcry measures, and a non-release
+      Boehm build of the same app reports 1 136 696 bytes — over the cap, and
+      about a binary no cut ever used.
 
 - [x] **The pthread stack-bounds snapshot stopped at 64 threads — closed
       2026-08-22.** The table the STW scan looks thread stack ranges up in was a
