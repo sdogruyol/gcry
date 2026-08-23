@@ -403,9 +403,16 @@ module Gcry
         # rather than unmapping it, precisely so this branch can say more than
         # "it is gone": which chunk, how big, which release path let it go, and
         # at which collection.
+        #
+        # `GCRY_RELEASE_LEDGER=1` keeps the same record and unmaps anyway. That
+        # buys the identity back for faults the guard cannot be present for —
+        # anything that needs the range to be reused — at the cost of certainty
+        # about what is there *now*, which is why the two say different things
+        # below.
         if g = heap.guarded_release_at(a)
           base, glen, kind, gen = g
-          len = RawOut.append(buf.to_unsafe, len, "in a chunk gcry RELEASED — base 0x")
+          len = RawOut.append(buf.to_unsafe, len,
+            heap.unmap_guard? ? "in a chunk gcry RELEASED — base 0x" : "in a range gcry RELEASED and unmapped — base 0x")
           len = RawOut.append_hex(buf.to_unsafe, len, base)
           len = RawOut.append(buf.to_unsafe, len, ", ")
           len = RawOut.append_u64(buf.to_unsafe, len, glen)
@@ -421,7 +428,12 @@ module Gcry
           # mutator has been carrying a pointer into released memory for a long
           # time, which is a different defect with a different fix.
           len = RawOut.append_u64(buf.to_unsafe, len, heap.collections - gen)
-          len = RawOut.append(buf.to_unsafe, len, "\n")
+          # Under the ledger the mapping was handed back to the kernel, so
+          # whatever answers at this address now may belong to something else
+          # entirely. Saying otherwise would borrow the guard's certainty.
+          len = RawOut.append(buf.to_unsafe, len,
+            heap.unmap_guard? ? "\n" : ". The range was unmapped, so this address may since have " \
+                                       "been remapped by something else\n")
           RawOut.flush(buf.to_unsafe, len)
           return
         end

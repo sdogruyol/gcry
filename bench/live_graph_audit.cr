@@ -442,7 +442,7 @@ if ARGV.includes?("--child")
   # HOLED releases nothing, and its silence is about nothing.
   heap = Gcry.default_heap
   puts "child: #{Verdict.line} dontneed #{heap.dontneed_bytes} collections #{heap.collections} " \
-       "range_rejects #{heap.madvise_range_rejects}"
+       "range_rejects #{heap.madvise_range_rejects} realloc_overlaps #{heap.realloc_collect_overlaps}"
   exit(Verdict.bad? ? 1 : 0)
 end
 

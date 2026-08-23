@@ -161,6 +161,9 @@ module Gcry
               Intrinsics.pause
             end
           end
+          # Is anyone mid-`realloc` copy as the world stops? See
+          # `note_realloc_overlap`.
+          note_realloc_overlap
           acked = 0
           @suspend_stall_reported = false
           Thread.unsafe_each do |thread|

@@ -424,6 +424,36 @@ module Gcry
     # a long-running program under this knob will exhaust it.
     property unmap_guard : Bool = false
 
+    def unmap_guard? : Bool
+      @unmap_guard
+    end
+
+    # Record every chunk release without holding the address space, so a fault
+    # on memory that has since been remapped can still name what used to be
+    # there. See the note on `@guard_next`.
+    property release_ledger : Bool = false
+
+    # How many threads are inside `realloc`'s copy right now, and how many
+    # collections have begun while at least one was. This measures the *window*
+    # rather than its consequences: a crash-rate A/B cannot separate a 5 %
+    # defect from a 2 % one without hundreds of runs, but a collection that
+    # starts while a raw buffer is being copied into is either happening or it
+    # is not.
+    @realloc_copy_depth = Atomic(Int32).new(0)
+    getter realloc_collect_overlaps : UInt64 = 0_u64
+
+    protected def realloc_copy_enter : Nil
+      @realloc_copy_depth.add(1)
+    end
+
+    protected def realloc_copy_leave : Nil
+      @realloc_copy_depth.sub(1)
+    end
+
+    protected def note_realloc_overlap : Nil
+      @realloc_collect_overlaps &+= 1 if @realloc_copy_depth.get > 0
+    end
+
     # Research only: trim the large cache without `@alloc_lock`, which is what
     # it did before 2026-08-23 (src/gcry/heap.cr `trim_large_cache`).
     property trim_unlocked : Bool = false
@@ -449,6 +479,16 @@ module Gcry
     @guard_kind = uninitialized StaticArray(UInt8, UNMAP_GUARD_SLOTS)
     @guard_gen = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
     @guard_count = 0
+    # Ledger mode: the same record, without holding the address space. The
+    # guard answers "what was here" by never giving the mapping back, which
+    # costs address space and — measured on 2026-08-23 — changes the defect it
+    # was pointed at: 14 clean runs under the guard against roughly 2 in 12
+    # without it. A fault that needs the range to be *reused* cannot happen
+    # while the guard is preventing reuse. So record and unmap anyway, and
+    # accept that the memory may be someone else's by the time the report is
+    # read.
+    @guard_next = 0
+    @guard_filled = 0
     getter guard_overflows : UInt64 = 0_u64
 
     GUARD_KIND_EMPTY_CHUNK = 0_u8
@@ -456,7 +496,20 @@ module Gcry
 
     # Returns true when the region was guarded (caller must not munmap it).
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
-      return false unless @unmap_guard
+      unless @unmap_guard
+        return false unless @release_ledger
+        # Ring, not a bounded list: a ledger that fills up stops recording the
+        # recent releases, which are the ones a fault is about.
+        i = @guard_next
+        @guard_base[i] = base
+        @guard_len[i] = len
+        @guard_kind[i] = kind
+        @guard_gen[i] = @collections
+        @guard_next = (i + 1) % UNMAP_GUARD_SLOTS
+        @guard_filled += 1 if @guard_filled < UNMAP_GUARD_SLOTS
+        # False: the caller still unmaps. The record is the whole contribution.
+        return false
+      end
       if @guard_count >= UNMAP_GUARD_SLOTS
         @guard_overflows &+= 1
         return false
@@ -475,8 +528,9 @@ module Gcry
 
     # For the SIGSEGV report: which released region holds *addr*, if any.
     def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64}?
+      limit = @unmap_guard ? @guard_count : @guard_filled
       i = 0
-      while i < @guard_count
+      while i < limit
         base = @guard_base[i]
         if addr >= base && addr < base + @guard_len[i]
           return {base, @guard_len[i], @guard_kind[i], @guard_gen[i]}

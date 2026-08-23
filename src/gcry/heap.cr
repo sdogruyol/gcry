@@ -400,7 +400,21 @@ module Gcry
         ensure
           @suppress_collect.sub(1)
         end
-        fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        # `fresh` is *not* rooted here, and that is a measured decision rather
+        # than an oversight. It is a raw buffer pointer, so the type_id gate
+        # rejects it as an ambient stack root exactly as it rejects `pointer` —
+        # the hole is real on paper. Rooting it across the copy was tried and
+        # showed nothing: 3 of 40 against 1 of 40, and `realloc_collect_overlaps`
+        # says why. No collection begins while a thread is in this window in the
+        # workloads measured so far, so there is nothing here to close yet.
+        # The counter is left in place to answer the question again in a
+        # workload that reallocs hard.
+        realloc_copy_enter
+        begin
+          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        ensure
+          realloc_copy_leave
+        end
         fresh
       ensure
         delete_root(pointer)

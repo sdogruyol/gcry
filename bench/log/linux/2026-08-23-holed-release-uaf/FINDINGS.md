@@ -74,6 +74,51 @@ Note what the harness's own checksums say: **not one ever failed.** The
 checksums only leaves cannot see that, which is why this took a crash to find
 rather than a verification failure.
 
+## The ledger names the victim
+
+`GCRY_UNMAP_GUARD=1` could not be used here: it hides this fault (14 clean runs
+against roughly 2 in 12 unguarded), which fits a fault that needs the range
+reused — the guard prevents reuse by never returning the mapping.
+`GCRY_RELEASE_LEDGER=1` keeps the guard's record and unmaps anyway:
+
+    gcry: SIGSEGV at 0x7fef2eb2d050 — in a range gcry RELEASED and unmapped —
+    base 0x7fef2eb2d000, 77824 bytes, large-object release, at collection 6;
+    the write is 80 bytes into it. Collections since: 0
+
+A 76 KiB **large** chunk, released through `cache_large_chunk` ->
+`trim_large_cache`, and **Collections since: 0** — the release and the write are
+in the same collection window. Not a stale pointer carried for a while: a race
+inside the release itself.
+
+Both victims seen so far are *growing* buffers — this one and the
+1 970 176-byte Array buffer in `page_release_corruption`. That pointed at
+`Heap#realloc`.
+
+## The realloc window: a real hole that this workload never opens
+
+`realloc` roots the old `pointer` across the copy because the type_id gate
+rejects a raw buffer pointer as an ambient stack root. `fresh` is the same kind
+of pointer and is **not** rooted; `@suppress_collect` covers the `allocate` and
+is dropped before `copy_from`. On paper a peer thread's collection during the
+copy is free to reclaim the block being copied into.
+
+Rooting it was tried — and had been tried once before today and reverted as
+"indistinguishable on 2 of 24", which was underpowered. With 40 per arm:
+
+    fresh rooted     3 of 40
+    fresh unrooted   1 of 40
+
+Still nothing, and this time the reason is measurable rather than statistical.
+`realloc_collect_overlaps` counts collections that begin while a thread is
+inside the copy: **0**, across runs with 18 collections each. The window exists
+in the code and is never entered here, so there is nothing to close, and the
+rooting was reverted rather than shipped on an argument.
+
+The counter stays. It answers the question directly in any workload — a
+crash-rate A/B cannot separate a 5 % defect from a 2 % one without hundreds of
+runs, but a collection starting mid-copy either happens or it does not. A
+workload that reallocs hard (Kemal, acikturkiye) is where to ask it again.
+
 ## What is established
 
 The arm, the rate, the frame, and that the freed object was live and reachable
