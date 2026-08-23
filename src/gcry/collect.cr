@@ -426,6 +426,12 @@ module Gcry
     # that is gone.
     property trim_immediate : Bool = false
 
+    # Research only: hold the suspend phase open *after* the wait loop has
+    # finished, which is what CI showed on aarch64 — `phase=suspend` with the
+    # breadcrumb already cleared. `GCRY_STW_TEST_SUSPEND_STALL_MS` cannot
+    # produce that shape: it stalls before the loop, with a thread named.
+    property stw_test_postsuspend_stall_ms : UInt64 = 0_u64
+
     UNMAP_GUARD_SLOTS = 8192
 
     @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)

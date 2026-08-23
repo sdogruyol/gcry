@@ -179,6 +179,14 @@ module Gcry
             acked += 1
           end
           StwWatchdog.note_suspend(expected, acked, 0_u64)
+          # Positive control for the other half of the report: the loop is
+          # done, the breadcrumb is cleared, and the phase is still suspend.
+          if (pstall = @stw_test_postsuspend_stall_ms) > 0
+            deadline = Gcry::Clock.monotonic_ns &+ pstall &* 1_000_000_u64
+            while Gcry::Clock.monotonic_ns < deadline
+              Intrinsics.pause
+            end
+          end
           @world_stopped = true
         rescue ex
           @world_stopped = false

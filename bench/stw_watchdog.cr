@@ -96,8 +96,17 @@ armed_inspin = run_child(self_path, {
   "GCRY_SUSPEND_STALL_SPINS" => "1",
 })
 
+# The same phase, stalled *after* the wait loop instead of before it. CI showed
+# this shape on aarch64 (run 32638359761) and the report called it "waiting for
+# thread 0x0" — the breadcrumb the loop had just cleared, read as a thread.
+armed_postsuspend = run_child(self_path, {
+  "GCRY_STW_WATCHDOG_MS"               => THRESHOLD_MS.to_s,
+  "GCRY_STW_TEST_POSTSUSPEND_STALL_MS" => STALL_MS.to_s,
+})
+
 record["armed+stalled"] = armed_stalled
 record["armed+suspend"] = armed_suspend
+record["armed+postsusp"] = armed_postsuspend
 record["armed+in-spin"] = armed_inspin
 record["armed+quiet"] = armed_quiet
 record["unarmed+stalled"] = unarmed_stalled
@@ -109,6 +118,15 @@ end
 puts ""
 
 failures = [] of String
+
+unless armed_postsuspend.includes?("the stall is after the wait loop")
+  failures << "a stall after the suspend loop did not say so — the report is " \
+              "reading the cleared breadcrumb as a thread again"
+end
+if armed_postsuspend.includes?("waiting for thread 0x0 ")
+  failures << "the report still names thread 0x0, which is the loop's cleared " \
+              "breadcrumb and not a thread"
+end
 
 fired = armed_stalled.includes?("STOP-THE-WORLD STALLED")
 unless fired

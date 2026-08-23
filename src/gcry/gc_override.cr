@@ -814,6 +814,9 @@ module GC
       heap.stw_test_stall_ms = st if st <= 60_000
     end
     # The same, for the suspend phase — the one the aarch64 hang lives in.
+    if pst = env_u64("GCRY_STW_TEST_POSTSUSPEND_STALL_MS")
+      heap.stw_test_postsuspend_stall_ms = pst if pst <= 60_000
+    end
     if sst = env_u64("GCRY_STW_TEST_SUSPEND_STALL_MS")
       heap.stw_test_suspend_stall_ms = sst if sst <= 60_000
     end

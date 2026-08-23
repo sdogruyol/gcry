@@ -178,7 +178,19 @@ module Gcry
       len = append(buf.to_unsafe, len, " ms in phase=")
       len = append(buf.to_unsafe, len, phase_name(id))
       len = append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
-      if id == PHASE_SUSPEND
+      if id == PHASE_SUSPEND && @@suspend_waiting_id == 0_u64
+        # The wait loop clears the breadcrumb when it finishes, so a zero here
+        # does not mean "waiting on thread 0" — it means the loop is done and
+        # the stall is after it, before the phase advances. Saying otherwise
+        # sent a reader looking at thread handles for a stall that was not
+        # there (CI run 32638359761, aarch64).
+        len = append(buf.to_unsafe, len, "gcry: every thread acknowledged (")
+        len = append_u64(buf.to_unsafe, len, @@suspend_acked.to_u64)
+        len = append(buf.to_unsafe, len, " of ")
+        len = append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
+        len = append(buf.to_unsafe, len, "); the stall is after the wait loop, " \
+                                         "not in it. Reported once per stop\n")
+      elsif id == PHASE_SUSPEND
         # This phase does not wait on a lock — it waits for a thread to
         # acknowledge its suspend signal. Naming it is the whole point.
         len = append(buf.to_unsafe, len, "gcry: waiting for thread 0x")
