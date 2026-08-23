@@ -136,11 +136,24 @@ failures << "no torn cache read in any arm — the harness never reached the rac
 
 puts ""
 puts "  restoring the old cache read (GCRY_INDEX_CACHE_UNCHECKED=1):"
+# The control arm needs *one* crash to do its job, and it is the arm that is
+# supposed to fail — so it gets tries rather than a fixed budget. Sharing the
+# fixed arms' count made it the flakiest thing in CI: on aarch64 that is three
+# runs of something that crashes maybe three times in four, which comes up
+# empty about one run in sixty and takes the whole job red with it
+# (32656849637). Stops at the first crash, so the usual cost is one run.
+control_cap = {runs * 4, 8}.max
 %w[live realloc].each do |arm|
-  crashed, _hung, _ = run_arm(exe, arm, runs, true)
-  puts "  %-8s crashed %d of %d" % [arm, crashed, runs]
+  crashed = 0
+  tries = 0
+  while tries < control_cap && crashed == 0
+    c, _hung, _ = run_arm(exe, arm, 1, true)
+    crashed += c
+    tries += 1
+  end
+  puts "  %-8s crashed %d of %d" % [arm, crashed, tries]
   if crashed == 0
-    failures << "#{arm}: the old read was restored and nothing crashed, so the arms above " \
+    failures << "#{arm}: the old read was restored and nothing crashed in #{tries} tries, so the arms above " \
                 "cannot be credited to the fix"
   end
 end

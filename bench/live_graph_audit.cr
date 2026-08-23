@@ -251,24 +251,31 @@ if ARGV.includes?("--child")
       # matched against them afterwards instead of guessed at from its low
       # bits. Two lines per worker rather than one per node: the point is to be
       # greppable after the fact, not readable during.
-      big = String.build do |io|
-        io << "shadow-nodes:"
-        j = 0
-        while j < CHAIN
-          io << " " << shadow[j].node_addr
-          j += 1
+      #
+      # Off by default (`LIVE_GRAPH_DUMP=1` enables it) because it is itself a
+      # growing-buffer allocation of exactly the kind the ledger named as the
+      # victim — a 76 KiB large chunk. A harness whose diagnostic might be the
+      # thing being freed cannot answer whether it is.
+      if ENV["LIVE_GRAPH_DUMP"]? == "1"
+        big = String.build do |io|
+          io << "shadow-nodes:"
+          j = 0
+          while j < CHAIN
+            io << " " << shadow[j].node_addr
+            j += 1
+          end
         end
-      end
-      raw_puts(big)
-      big = String.build do |io|
-        io << "shadow-payloads:"
-        j = 0
-        while j < CHAIN
-          io << " " << shadow[j].payload_addr << "+" << shadow[j].payload_size
-          j += 1
+        raw_puts(big)
+        big = String.build do |io|
+          io << "shadow-payloads:"
+          j = 0
+          while j < CHAIN
+            io << " " << shadow[j].payload_addr << "+" << shadow[j].payload_size
+            j += 1
+          end
         end
+        raw_puts(big)
       end
-      raw_puts(big)
 
       ROUNDS.times do
         gone = false
