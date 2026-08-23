@@ -179,6 +179,7 @@ module Gcry
         index_unlocked_owner:                  heap.index_unlocked_owner,
         index_unlocked_foreign:                heap.index_unlocked_foreign,
         index_unlocked_foreign_id:             heap.index_unlocked_foreign_id,
+        index_cache_torn:                      heap.index_cache_torn,
         thread_birth_armed:                    Gcry::ThreadBirthRoot.armed,
         thread_birth_released:                 Gcry::ThreadBirthRoot.released,
         thread_birth_outstanding:              Gcry::ThreadBirthRoot.outstanding,
