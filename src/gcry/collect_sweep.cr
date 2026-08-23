@@ -572,7 +572,19 @@ module Gcry
     # rises; page content is preserved until reclaimed.  Unlike
     # MADV_DONTNEED (which zeroes and evicts immediately), this avoids the
     # re-fault storms that made larger RSS under acikturkiye.
+    # Unlike the chunk-list walks, this one reads a structure mutators *edit*,
+    # not just memory they can unmap: `take_large_free` hands an entry to user
+    # code, which promptly writes over the `next_free` this walk is following.
+    # It needs the allocator's lock, and it has to keep it across the `madvise`
+    # calls, because an entry taken between a snapshot and the syscall would be
+    # live memory by then.
     private def release_large_freelist_pages : Nil
+      {% if flag?(:darwin) || flag?(:linux) %}
+        with_alloc_lock { release_large_freelist_pages_locked }
+      {% end %}
+    end
+
+    private def release_large_freelist_pages_locked : Nil
       {% if flag?(:darwin) || flag?(:linux) %}
         page = Platform.host_page_size
         LARGE_FREE_BUCKETS.times do |b|
