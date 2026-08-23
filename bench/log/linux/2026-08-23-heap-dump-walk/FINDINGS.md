@@ -52,7 +52,7 @@ were six-attempt readings, and both were wrong.
       patched        2 of 24
 
 Indistinguishable. HEAD already fails that workload at about 12 %, for an
-unrelated reason (`../2026-08-23-mostly-empty-corruption/`).
+unrelated reason (`../2026-08-23-zeroed-object-0x18/`).
 
 **The fix was not a fix.** With the mostly-empty walk out of the way so only
 this defect is in play, over 16 attempts:

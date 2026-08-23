@@ -423,6 +423,20 @@ acik-ab:
 # an application to ask it — the acikturkiye use-after-free this came from could
 # not settle it, because its rate fell from 7 of 60 to nothing between sessions.
 # Deterministic here: `GCRY_TRIM_UNLOCKED=1` fails 5 of 5, serialised 0 of 5.
+# Do the page-release walks zero a live object?
+#
+# Both build a live-page mask by reading block headers with no lock, then
+# madvise the pages the mask calls free. Every live object carries a checksum
+# and is re-verified each round, so a zeroed page is caught without waiting for
+# a crash. `dontneed_bytes` is reported per arm because a run that never marks a
+# chunk HOLED releases nothing and looks perfectly clean.
+#
+# Linux keeps both walks opt-in; Darwin turns the HOLED one on in GC.init and
+# walks every chunk.
+page-release-corruption: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/page_release_corruption.cr -o $(BIN)/page_release_corruption --error-trace
+	$(BIN)/page_release_corruption
+
 # A post-STW chunk-list walk against a mutator's unmap.
 #
 # The lazy sweep and the three `flush_pending_*` passes walk `@chunks` after

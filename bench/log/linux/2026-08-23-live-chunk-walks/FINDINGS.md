@@ -52,7 +52,7 @@ space exhaustion. No frame was ever captured for it, and the only `0x18` in this
 family that has since been traced is `stop_world -> Thread.lock ->
 pthread_mutex_lock` — a *zeroed live object*, not a failed `mmap`. The
 unbounded-queue argument stands on its own; the mechanism claim did not, and is
-withdrawn. See `../2026-08-23-mostly-empty-corruption/`.
+withdrawn. See `../2026-08-23-zeroed-object-0x18/`.
 
 **Queue only while a walk is live.** `@live_chunk_walk`, set and cleared under
 `@alloc_lock`. A mutator holding the lock and seeing it false knows no walk can
@@ -81,7 +81,7 @@ for a fix that measurement did not support. Six attempts cannot separate 0 %
 from 12 %.
 
 The same harness also trips a second, unrelated defect at about 12 % — the
-mostly-empty `madvise` walk (`../2026-08-23-mostly-empty-corruption/`). HEAD
+mostly-empty `madvise` walk (`../2026-08-23-zeroed-object-0x18/`). HEAD
 fails this workload 3 of 24 for that reason, with a different signature
 (`SIGSEGV at 0x18`). A red run here is only evidence about *this* defect if the
 report names a released chunk.
