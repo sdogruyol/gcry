@@ -407,6 +407,15 @@ darwin-typecheck: $(BIN)
 knob-doc-check:
 	@ci/knob-doc-check.sh
 
+# gcry vs Boehm on the fat app, paired and order-rotated.
+#
+# Needs ../acikturkiye with a reachable Postgres and `wrk`. Reports the median
+# of the per-trial ratios, not the ratio of the medians — a fixed arm order
+# charges the within-trial drift to whichever arm runs second, which on
+# 2026-08-23 was the difference between 77.8% and 87.1% on the same machine.
+acik-ab:
+	bash bench/acik_ab.sh
+
 # A mutator inside `find_block` while collections run.
 #
 # It used to die in 5 runs of 8, on an impossible chunk pointer the last-chunk
