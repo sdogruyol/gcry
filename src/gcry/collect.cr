@@ -400,6 +400,64 @@ module Gcry
     # the race being live; it must never turn into a returned chunk again.
     getter index_cache_torn : UInt64 = 0_u64
 
+    # `GCRY_UNMAP_GUARD=1` — release a chunk with `mprotect(PROT_NONE)` instead
+    # of `munmap`, and keep a record of it.
+    #
+    # A write into released heap memory faults either way, but an unmapped
+    # region can only be described as "in no live chunk": the report cannot say
+    # which chunk it was, how big, which release path let it go, or when. Under
+    # the guard the address is still ours, so the report names all four. The
+    # cost is address space, not memory — the pages are dropped by `PROT_NONE`
+    # just as `munmap` drops them.
+    #
+    # Research only, and never a default: the address space is never reused, so
+    # a long-running program under this knob will exhaust it.
+    property unmap_guard : Bool = false
+
+    UNMAP_GUARD_SLOTS = 8192
+
+    @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    @guard_len = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    @guard_kind = uninitialized StaticArray(UInt8, UNMAP_GUARD_SLOTS)
+    @guard_gen = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    @guard_count = 0
+    getter guard_overflows : UInt64 = 0_u64
+
+    GUARD_KIND_EMPTY_CHUNK = 0_u8
+    GUARD_KIND_LARGE       = 1_u8
+
+    # Returns true when the region was guarded (caller must not munmap it).
+    protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
+      return false unless @unmap_guard
+      if @guard_count >= UNMAP_GUARD_SLOTS
+        @guard_overflows &+= 1
+        return false
+      end
+      # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
+      # mapping's identity, which is the whole point.
+      return false if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
+      i = @guard_count
+      @guard_base[i] = base
+      @guard_len[i] = len
+      @guard_kind[i] = kind
+      @guard_gen[i] = @collections
+      @guard_count = i + 1
+      true
+    end
+
+    # For the SIGSEGV report: which released region holds *addr*, if any.
+    def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64}?
+      i = 0
+      while i < @guard_count
+        base = @guard_base[i]
+        if addr >= base && addr < base + @guard_len[i]
+          return {base, @guard_len[i], @guard_kind[i], @guard_gen[i]}
+        end
+        i += 1
+      end
+      nil
+    end
+
     # Research only: the pre-2026-08-22 last-chunk cache — the index read twice,
     # no containment check, and the unsynchronised invalidation that made the
     # second read see `-1`.

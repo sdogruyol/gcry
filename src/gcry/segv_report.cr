@@ -399,6 +399,27 @@ module Gcry
 
       info = heap.debug_block_info(addr)
       unless info[:found]
+        # `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as `PROT_NONE`
+        # rather than unmapping it, precisely so this branch can say more than
+        # "it is gone": which chunk, how big, which release path let it go, and
+        # at which collection.
+        if g = heap.guarded_release_at(a)
+          base, glen, kind, gen = g
+          len = RawOut.append(buf.to_unsafe, len, "in a chunk gcry RELEASED — base 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, base)
+          len = RawOut.append(buf.to_unsafe, len, ", ")
+          len = RawOut.append_u64(buf.to_unsafe, len, glen)
+          len = RawOut.append(buf.to_unsafe, len, " bytes, ")
+          len = RawOut.append(buf.to_unsafe, len,
+            kind == Heap::GUARD_KIND_LARGE ? "large-object release" : "empty size-class chunk release")
+          len = RawOut.append(buf.to_unsafe, len, ", at collection ")
+          len = RawOut.append_u64(buf.to_unsafe, len, gen)
+          len = RawOut.append(buf.to_unsafe, len, "; the write is ")
+          len = RawOut.append_u64(buf.to_unsafe, len, a - base)
+          len = RawOut.append(buf.to_unsafe, len, " bytes into it\n")
+          RawOut.flush(buf.to_unsafe, len)
+          return
+        end
         len = RawOut.append(buf.to_unsafe, len,
           "inside the heap span but in no live chunk — the chunk was unmapped, or the address " \
           "is in a hole between chunks\n")

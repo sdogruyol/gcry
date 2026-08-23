@@ -955,6 +955,30 @@ CI asymmetry that hid both.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
+- [ ] **A live large object is released under load on the fat app.** Found
+      2026-08-23 while cutting gcry vs Boehm on acikturkiye: the gcry binary
+      dies under `wrk` in about one run in eight, in a request fiber writing
+      JSON. `GCRY_UNMAP_GUARD=1` — added for this, and what made it legible —
+      releases a chunk with `mprotect(PROT_NONE)` instead of `munmap` and keeps
+      its identity, so the report names it. Two sightings agree: a **69 632-byte
+      large-object chunk**, released by the **large-object path**, with the write
+      28 672 and 34 343 bytes into it. That is the JSON response buffer after it
+      outgrows the 32 KiB size classes. A live object was collected.
+      **Ruled out**: the empty-chunk release (`GCRY_KEEP_CHUNKS=1` still died),
+      unmarked allocation during a collection (`alloc_large` marks on both paths
+      — read), a `noscan` layout field dropping its target (`mark_noscan` marks
+      it), `MADV_DONTNEED` (cannot fault), and interior pointers
+      (`GCRY_INTERIOR=1`: 1 of 16 against a guarded baseline of 3 of 16).
+      **The fork is decided**: `GCRY_MARK_AUDIT=1` reported **0 edges** in the
+      run that crashed, so no heap object holds the buffer when it dies. The
+      only holder is a stack slot or a register, and the root scan is not seeing
+      it. First place to look is `GC.realloc` growth — between `realloc`
+      returning a new large block and the caller storing it, the only reference
+      is a register.
+      **Worth stating**: a smaller buffer would be a size-class block, freed and
+      reused rather than unmapped, so the same defect would corrupt silently
+      instead of faulting. `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
+
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**
       The mechanism now fits without any gap: the crash faults in `find_block`

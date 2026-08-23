@@ -1184,7 +1184,9 @@ module Gcry
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
           @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
           @unmapped_bytes += mapped
-          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+            LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          end
           user = nxt
         end
         b -= 1

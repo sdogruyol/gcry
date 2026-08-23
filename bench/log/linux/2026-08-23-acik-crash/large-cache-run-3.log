@@ -1,0 +1,12 @@
+INF 2026-08-23T08:42:51.173Z > Connecting to postgres://REDACTED:REDACTED@localhost/acikturkiye_demo?sslmode=disable
+| event = db_connect
+Unhandled exception: Could not bind to '127.0.0.1:3000': Address already in use (Socket::BindError)
+  from /usr/lib/crystal/socket/addrinfo.cr:94:9 in 'new:reuse_port'
+  from lib/kemal/src/kemal.cr:56:9 in 'run'
+  from lib/kemal/src/kemal.cr:19:5 in '__crystal_main'
+  from /usr/lib/crystal/crystal/main.cr:129:5 in 'main'
+  from /usr/lib/crystal/crystal/system/unix/main.cr:10:3 in 'main'
+  from /usr/lib/libc.so.6 in '??'
+  from /usr/lib/libc.so.6 in '__libc_start_main'
+  from ./bin/acikturkiye-gcry in '_start'
+  from ???

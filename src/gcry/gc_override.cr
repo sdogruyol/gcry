@@ -746,6 +746,10 @@ module GC
     # Count unlocked chunk-index reads taken during a stop by a thread that is
     # not the one that stopped the world (src/gcry/heap.cr `chunk_containing`).
     heap.index_audit = true if env_flag_one?("GCRY_INDEX_AUDIT")
+    # Research only: release chunks with mprotect(PROT_NONE) instead of munmap,
+    # so a fault in released memory can be told which chunk it was and when
+    # (src/gcry/collect.cr `guard_release`).
+    heap.unmap_guard = true if env_flag_one?("GCRY_UNMAP_GUARD")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")

@@ -391,7 +391,9 @@ module Gcry
         end
         run_total = (run_end - run_base).to_u64
         @unmapped_bytes += run_total
-        LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
+        unless guard_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK)
+          LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
+        end
         chunk = nxt
       end
     end
