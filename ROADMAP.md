@@ -977,7 +977,17 @@ CI asymmetry that hid both.
       is a register.
       **Worth stating**: a smaller buffer would be a size-class block, freed and
       reused rather than unmapped, so the same defect would corrupt silently
-      instead of faulting. `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
+      instead of faulting.
+      **A locking asymmetry was found and fixed** — `take_large_free` walks
+      `@large_freelists` holding `@alloc_lock` while `trim_large_cache` walked
+      it holding nothing and unmapped as it went — but it is **not proven to be
+      this crash**: 0 of 24 with the fix against 1 of 24 with the faithful
+      control, and then 0 against 0 at two concurrencies with the arms
+      interleaved. The rate fell from 7 of 60 to nothing for a reason that is
+      not the knob, so **step one next time is re-establishing the baseline on
+      the current tree**; until the crash reproduces at a resolvable rate, no
+      arm here means anything.
+      `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**

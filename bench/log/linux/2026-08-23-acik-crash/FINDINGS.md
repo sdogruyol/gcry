@@ -53,6 +53,37 @@ No heap object holds the buffer when it dies, and the mark's own completeness
 audit agrees — so the mark was never the problem, which is what pointed at the
 allocator's own bookkeeping and found the asymmetry above.
 
+### The rate collapsed, and that is the first thing to fix next time
+
+| arm | crashed | when |
+|-----|--------:|------|
+| baseline, before any change (guarded) | 7 of 60 | early session |
+| lock fix | 0 of 24 | later |
+| faithful control, sequential | 1 of 24 | later |
+| **interleaved, `-c 100`** | **control 0 of 14, fixed 0 of 14** | later still |
+| **interleaved, `-c 250`** | **control 0 of 16, fixed 0 of 16** | last |
+
+The control arm restores the old behaviour and should reproduce the 11.7%
+baseline. It does not — it produces nothing, at either concurrency, with the
+arms interleaved so machine drift cannot favour one. So the defect's rate moved
+by an order of magnitude for a reason that is not the knob, some time between
+the early runs and the later ones, and every comparison since is measuring
+noise against noise.
+
+Two candidates, neither tested: the machine (load moved between 2 and 13 across
+the day, in both directions), and the several rebuilds of both gcry and the app
+in between. Until that is settled no arm here means anything, which is why
+**re-establishing the baseline on the current tree is step one for the next
+session** — before testing any hypothesis, confirm the crash still happens at a
+rate this harness can resolve.
+
+What was tried to raise it: a heavier endpoint (none exists — `/api/v1/` at
+36 192 B is the largest, and every other route is far below the 32 KiB
+threshold so it never produces a large object at all), and higher concurrency
+(`-c 250`, no effect). `LARGE_THRESHOLD` is a compile-time constant with no
+knob; adding one would raise the rate but would also change size-class
+behaviour across the board, i.e. change what is being measured.
+
 **Open**: whether that asymmetry is the whole of it. The rate is now low enough
 that this harness cannot resolve it; the next session needs either a much
 longer batch or a workload that hits the large cache harder, and it should
