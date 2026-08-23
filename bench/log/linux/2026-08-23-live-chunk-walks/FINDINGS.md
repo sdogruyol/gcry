@@ -42,10 +42,17 @@ flag that would make them skip it.
 
 ## What it took, and what each attempt got wrong
 
-**Queue unconditionally.** Mutators stop unmapping; the collector drains. Wrong:
-the queue then drains once per collection, and a `GC.free` loop parks gigabytes
-of detached-but-mapped chunks in between. Measured as a null `mmap` and a fault
-at `0x18` — a different crash, 5 of 6, wearing the fix as a disguise.
+**Queue unconditionally.** Mutators stop unmapping; the collector drains. The
+queue then drains once per collection, and a `GC.free` loop parks
+detached-but-mapped chunks in between — a real design problem, and the reason
+the flag exists. It showed up as a different crash, 5 of 6, faulting at `0x18`.
+
+**Retracted:** that `0x18` was written up here as "a null `mmap`", i.e. address
+space exhaustion. No frame was ever captured for it, and the only `0x18` in this
+family that has since been traced is `stop_world -> Thread.lock ->
+pthread_mutex_lock` — a *zeroed live object*, not a failed `mmap`. The
+unbounded-queue argument stands on its own; the mechanism claim did not, and is
+withdrawn. See `../2026-08-23-mostly-empty-corruption/`.
 
 **Queue only while a walk is live.** `@live_chunk_walk`, set and cleared under
 `@alloc_lock`. A mutator holding the lock and seeing it false knows no walk can
@@ -67,6 +74,17 @@ by the time the syscall lands.
 
     default (after)            0 of 6
     GCRY_TRIM_IMMEDIATE=1      6 of 6
+
+Twice, so 0 of 12 against 12 of 12. That contrast is strong; a *single* 0 of 6
+is not, and later the same day a 0-of-6 reading from this harness was mistaken
+for a fix that measurement did not support. Six attempts cannot separate 0 %
+from 12 %.
+
+The same harness also trips a second, unrelated defect at about 12 % — the
+mostly-empty `madvise` walk (`../2026-08-23-mostly-empty-corruption/`). HEAD
+fails this workload 3 of 24 for that reason, with a different signature
+(`SIGSEGV at 0x18`). A red run here is only evidence about *this* defect if the
+report names a released chunk.
 
 ## How wide the window is
 

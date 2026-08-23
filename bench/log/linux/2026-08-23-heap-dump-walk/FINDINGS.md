@@ -24,7 +24,7 @@ that allocation can trigger a collection on the walking thread itself.
 `bench/heap_dump_race.cr`. Three workers churning size classes and 40 KiB large
 blocks, one thread dumping in a loop, 20 000 live objects of ballast.
 
-    6 of 6 failed
+    14 of 16 failed  (GCRY_MOSTLY_EMPTY=0, so only this defect is in play)
 
 Two threads fault at once, eight bytes apart, in `update_heap_bounds_after_unmap`
 (reached from a mutator's `trim_large_cache` -> `Heap#free`) and in
@@ -34,30 +34,49 @@ releasing side did not hold it, so the lock excluded nothing.
 **Not wired into `make`.** It is red, and a red target in CI is noise, not
 evidence. Wire it when it passes.
 
-## The attempt that was backed out
+## The attempt, and two readings that were wrong
 
-Not committed. The approach: give `@chunks` one discipline — every
-release of chunk memory under `@alloc_lock`, plus a `@chunk_walkers` count for
-the dumps, which cannot hold the lock because they allocate while they walk
-(`each_chunk_guarded`). Releases that see a walker leave their chunks queued.
+The approach: give `@chunks` one discipline — every release of chunk memory
+under `@alloc_lock`, plus a `@chunk_walkers` count for the dumps, which cannot
+hold the lock because they allocate while they walk (`each_chunk_guarded`).
+Releases that see a walker leave their chunks queued.
 
-That took the dump race from 6 of 6 to 1 of 6, with the survivor now attributed:
-a large-object release, written to 8 bytes into the chunk header.
+It was first read as 6 of 6 -> 1 of 6, and rejected anyway because it looked
+like it regressed `make dormant-flush-race` from 0 of 6 to 2 of 6. Both readings
+were six-attempt readings, and both were wrong.
 
-It also took `make dormant-flush-race` from 0 of 6 to **2 of 6**, in the
-null-`mmap` shape (`SIGSEGV at 0x18`) that means something stopped draining.
-Trading a green gate for a partial fix is not a trade, so it was reverted rather
-than committed. The cause of the drain regression was not found before backing
-out — that is the first thing the next attempt has to explain.
+**The regression was not a regression.** Over 24 attempts:
+
+    dormant-flush-race, GCRY_MOSTLY_EMPTY=1
+      green (HEAD)   3 of 24
+      patched        2 of 24
+
+Indistinguishable. HEAD already fails that workload at about 12 %, for an
+unrelated reason (`../2026-08-23-mostly-empty-corruption/`).
+
+**The fix was not a fix.** With the mostly-empty walk out of the way so only
+this defect is in play, over 16 attempts:
+
+    heap_dump_race, GCRY_MOSTLY_EMPTY=0
+      green (HEAD)   14 of 16
+      patched        11 of 16
+
+88 % against 69 % on sixteen samples is not evidence of anything. The earlier
+"1 of 6" was luck. The patch was reverted — not for the regression it did not
+cause, but because it does not demonstrably fix what it was written for.
 
 ## What the next attempt should know
 
+- Six attempts cannot separate 0 % from 12 %, and sixteen cannot separate 69 %
+  from 88 %. Size the run to the effect before reading anything into it.
+- `GCRY_MOSTLY_EMPTY=0` isolates this defect from the mostly-empty one. Without
+  that split, the two are read as one.
 - `with_alloc_lock` is `Crystal::SpinLock#sync` and returns the block's value,
-  so `return if with_alloc_lock { ... }` is sound. That was suspected and
-  cleared.
+  so `return if with_alloc_lock { ... }` is sound. Suspected and cleared.
 - The lock is a spinlock on purpose: `tlab.cr` records that a `pthread_mutex`
   deadlocks against STW suspend-while-holding. Holding it across `munmap` and
-  `madvise` runs is therefore a real cost, and aarch64 CI is where that would
-  show first.
+  `madvise` runs is a real cost, and aarch64 CI is where it would show first.
 - `relink_chunks_after_world?` is `!multi_mutator_threads?`, so the lazy relink
   of `@chunks` is not what a multi-threaded gate hits.
+- `make dormant-flush-race` is in the Makefile but **not** wired into CI. None
+  of today's new gates are.
