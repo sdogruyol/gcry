@@ -72,6 +72,8 @@ LARGE_SIZE  = 40 * 1024
 # released page or a reissued block shows up in the first bytes as readily as
 # the last, and the payload's *address* is checked in full either way.
 LARGE_SUM_PREFIX = 512
+# Room for the runtime's own threads, shadowed the same way the graph is.
+RUNTIME_SLOTS = 64
 
 class Node
   property nxt : Node?
@@ -92,8 +94,10 @@ struct Shadow
   property tag : UInt64
   property payload_addr : UInt64
   property payload_sum : UInt64
+  property payload_size : UInt64
 
-  def initialize(@node_addr : UInt64, @tag : UInt64, @payload_addr : UInt64, @payload_sum : UInt64)
+  def initialize(@node_addr : UInt64, @tag : UInt64, @payload_addr : UInt64, @payload_sum : UInt64,
+                 @payload_size : UInt64)
   end
 end
 
@@ -154,6 +158,22 @@ class Verdict
     @@payload.add(1)
   end
 
+  @@threadlist = Atomic(Int32).new(0)
+
+  def self.threadlist!
+    @@threadlist.add(1)
+  end
+
+  def self.threadlist
+    @@threadlist.get
+  end
+
+  @@freed = Atomic(Int32).new(0)
+
+  def self.freed!
+    @@freed.add(1)
+  end
+
   # Only the first few details, and only once each — a wedged run can produce
   # thousands and the interesting part is the first.
   def self.detail? : Bool
@@ -161,11 +181,12 @@ class Verdict
   end
 
   def self.line : String
-    "edges #{@@edge.get} zeroed #{@@zeroed.get} reused #{@@reused.get} payload #{@@payload.get}"
+    "edges #{@@edge.get} zeroed #{@@zeroed.get} reused #{@@reused.get} payload #{@@payload.get} " \
+    "threadlist #{@@threadlist.get} freed #{@@freed.get}"
   end
 
   def self.bad? : Bool
-    @@edge.get + @@zeroed.get + @@reused.get + @@payload.get > 0
+    @@edge.get + @@zeroed.get + @@reused.get + @@payload.get + @@threadlist.get + @@freed.get > 0
   end
 end
 
@@ -173,6 +194,9 @@ if ARGV.includes?("--child")
   threads = [] of Thread
   WORKERS.times do |w|
     threads << Thread.new do
+      heap = Gcry.default_heap
+      runtime = Pointer(UInt64).new(LibC.malloc(LibC::SizeT.new(8 * RUNTIME_SLOTS)).address)
+      runtime_seen = 0
       shadow = Pointer(Shadow).new(LibC.malloc(LibC::SizeT.new(sizeof(Shadow) * CHAIN)).address)
       root : Node? = nil
       seed = (w.to_u64 &+ 1) &* 2_654_435_761_u64
@@ -203,16 +227,102 @@ if ARGV.includes?("--child")
           node_addr: node.as(Void*).address,
           tag: seed,
           payload_addr: payload.to_unsafe.address,
-          payload_sum: psum)
+          payload_sum: psum,
+          payload_size: payload.size.to_u64)
       end
 
+      # One line per worker naming where its large payloads live, so a crash
+      # address can be matched against them afterwards instead of guessed at
+      # from its low bits.
+      big = String.build do |io|
+        io << "worker large payloads:"
+        j = 0
+        while j < CHAIN
+          if shadow[j].payload_size > 32768
+            io << " " << shadow[j].payload_addr << "+" << shadow[j].payload_size
+          end
+          j += 1
+        end
+      end
+      STDERR.puts big
+
       ROUNDS.times do
+        gone = false
+        # The runtime's own long-lived objects. These are shadowed like the
+        # graph is, and for the same reason: walking `Thread.unsafe_each`
+        # dereferences every `Thread` the runtime holds, and if one of them is
+        # in a chunk that has been released, the walk faults inside this proc
+        # with nothing to show. Recording their addresses on the first round
+        # and asking the heap about them before walking turns that into a
+        # report naming the object.
+        if runtime_seen == 0
+          Thread.unsafe_each do |t|
+            if runtime_seen < RUNTIME_SLOTS
+              runtime[runtime_seen] = t.as(Void*).address
+              runtime_seen += 1
+            end
+          end
+        else
+          k = 0
+          while k < runtime_seen
+            unless heap.address_in_live_chunk?(runtime[k])
+              Verdict.freed!
+              STDERR.puts "  runtime Thread object #{k} at #{runtime[k]} is in no live chunk — the " \
+                          "collector released a thread the runtime still holds" if Verdict.detail?
+              gone = true
+            end
+            k += 1
+          end
+        end
+        next if gone
+
+        #
+        # `stop_world` calls `Thread.lock`, which is `threads.@mutex.lock` over
+        # `@@threads = uninitialized Thread::LinkedList(Thread)`. Both crashes
+        # this harness produces are that base reading zero — a fault at exactly
+        # `0x18`. By the time the collector hits it the round it happened in is
+        # long gone. `Thread.unsafe_each` goes through `@@threads.try`, so it
+        # reports the same emptiness without faulting, and it reports it here.
+        seen = 0
+        Thread.unsafe_each { seen += 1 }
+        if seen == 0
+          Verdict.threadlist!
+          STDERR.puts "  the thread list is empty — Thread.@@threads read null" if Verdict.detail?
+        end
+
         # Churn: allocate and drop, so chunks holding the chain go sparse and
         # whole page runs inside them fall free.
         CHURN.times do
           junk = Bytes.new(PAYLOAD)
           junk[0] = 1_u8
         end
+
+        # 0. Before touching anything: is every address the shadow knows about
+        #    still inside a chunk this heap has mapped? This asks the heap
+        #    rather than the memory, so a released chunk becomes a report with
+        #    an index, a kind and a size attached instead of a segfault with
+        #    nothing attached. Without this pass the run dies inside the walk
+        #    below and takes its own findings with it.
+        i = 0
+        while i < CHAIN
+          row = shadow[i]
+          unless heap.address_in_live_chunk?(row.node_addr)
+            Verdict.freed!
+            STDERR.puts "  node #{i} at #{row.node_addr} is in no live chunk — released while the " \
+                        "chain still pointed at it" if Verdict.detail?
+            gone = true
+          end
+          unless heap.address_in_live_chunk?(row.payload_addr)
+            Verdict.freed!
+            STDERR.puts "  payload of node #{i} at #{row.payload_addr} (#{row.payload_size} B, " \
+                        "#{row.payload_size > 32768 ? "large" : "size-class"}) is in no live chunk" if Verdict.detail?
+            gone = true
+          end
+          i += 1
+        end
+        # Nothing below is safe to read once an address is gone, and the point
+        # has already been made.
+        next if gone
 
         # 1. Walk the graph the way the collector has to: edge by edge. The
         #    shadow rows are in reverse build order, so row CHAIN-1-i is the
@@ -259,6 +369,17 @@ if ARGV.includes?("--child")
         i = 0
         while i < CHAIN
           row = shadow[i]
+          # Ask before reading. A node whose chunk has been released is the
+          # finding; dereferencing it turns that finding into a segfault with
+          # nothing attached, which is exactly what happened before this check
+          # existed.
+          unless heap.address_in_live_chunk?(row.node_addr)
+            Verdict.freed!
+            STDERR.puts "  node #{row.node_addr} is in no live chunk — its chunk was released " \
+                        "while the chain still pointed at it" if Verdict.detail?
+            i += 1
+            next
+          end
           revived = Pointer(Void).new(row.node_addr).as(Node)
           if revived.tag != row.tag
             if all_zero?(row.node_addr, 4)

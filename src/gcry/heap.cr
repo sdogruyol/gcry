@@ -1463,6 +1463,17 @@ module Gcry
     # for `@collecting` alone: post-STW flush keeps `@collecting` with the
     # world restarted so mutators mmap/index_insert while peers realloc —
     # unlocked lookup → false `owns_user_pointer?` ("not a gcry allocation").
+    # Is *addr* still inside a chunk this heap has mapped?
+    #
+    # For audits that hold an address from earlier and need to know whether
+    # reading it is safe *before* reading it. Dereferencing a released chunk
+    # faults, and a fault is a crash where an audit wants a finding — see
+    # `bench/live_graph_audit.cr`, which lost the report it was built to make
+    # because it read a node whose chunk had been unmapped.
+    def address_in_live_chunk?(addr : UInt64) : Bool
+      !chunk_containing(addr).nil?
+    end
+
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       if @world_stopped
         # See `@stw_owner_pthread`: whether that skip is safe depends on nobody

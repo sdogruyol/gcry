@@ -69,6 +69,38 @@ this harness owns. It is not evidence for it. The next instrument has to shadow
 `Thread.threads` itself, so a null shows up as a report at the round it happens
 in rather than as a fault in the next `stop_world`.
 
+## Three more probes, none of which fired
+
+Added to `live_graph_audit`, in order, each because the previous crash landed
+somewhere the harness could not describe:
+
+1. **The runtime thread list.** `stop_world` crashes on `Thread.@@threads`
+   reading null, and by then the round it happened in is gone.
+   `Thread.unsafe_each` goes through `@@threads.try`, so it reports the same
+   emptiness without faulting. Never fired.
+2. **Liveness before dereference.** `Heap#address_in_live_chunk?` (new, public)
+   asks the heap whether an address is still mapped, so an audit can find a
+   released chunk instead of faulting on it. Applied first to the revive pass,
+   then to a sweep over every shadowed node and payload at the top of each
+   round. Never fired.
+3. **The runtime's `Thread` objects, shadowed.** Recorded on the first round and
+   checked before each `unsafe_each` walk. Never fired.
+
+The crash continued through all three, in the worker proc, always
+`inside the heap span but in no live chunk`.
+
+## Why "check first, then read" does not close it
+
+The sweep asks the heap at the top of the round. It cannot keep the answer true:
+the verification pass allocates nothing, but the *other three workers* do, and a
+collection they trigger can release the chunk mid-walk. So a probe that does not
+fire is not evidence of a live object — only that the window moved.
+
+This is the same shape as everything else here: an instrument that cannot see
+what it is aimed at goes quiet rather than saying so. The `dontneed_bytes`
+counter exists for that reason, and so does the engagement floor, and so does
+`BoundedChild` reporting a timeout apart from a fault.
+
 ## Rates
 
     live_graph_audit, 12 attempts per arm
