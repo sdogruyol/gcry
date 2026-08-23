@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_UNMAP_GUARD=1` — a released chunk that can still be identified.**
+  A write into released heap memory faults whether the chunk was `munmap`ed or
+  `mprotect(PROT_NONE)`d, but only the second leaves the address ours: the
+  SIGSEGV report can then say which chunk it was, how big, which release path
+  let it go, at which collection, and how far into it the write landed. Under
+  `munmap` the same fault can only be reported as "inside the heap span but in
+  no live chunk", which is where the acikturkiye investigation had been stuck.
+  With the guard, the first sighting identified it: a **69 632-byte
+  large-object chunk**, released by the large-object path, written 34 343 bytes
+  in — a live ~64 KiB JSON response buffer, collected while a fiber was writing
+  into it. Costs address space rather than memory, is bounded at 8192 records
+  and counts what it drops past that, and is never a default because the
+  address space is never reused.
+  `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
+
 ### Fixed
 
 - **`find_block` from a mutator thread handed back `@chunk_index[-1]`, which is
