@@ -585,6 +585,13 @@ module Gcry
     @guard_filled = 0
     getter guard_overflows : UInt64 = 0_u64
 
+    # How many slots the guard has taken. Without this, "the guarded arm did
+    # not crash" cannot be told apart from "the guard filled up early and the
+    # arm was the baseline".
+    def guard_slots_used : UInt64
+      (@unmap_guard ? @guard_count : @guard_filled).to_u64
+    end
+
     GUARD_KIND_EMPTY_CHUNK = 0_u8
     GUARD_KIND_LARGE       = 1_u8
 
