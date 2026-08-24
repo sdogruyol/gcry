@@ -1099,6 +1099,7 @@ module Gcry
       @large_cache_misses += 1
 
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
+      trace_large_map(chunk, mapped, payload) if @trace_large
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
       heap_set_mark(header) if @incremental_marking || @collecting
@@ -1196,6 +1197,24 @@ module Gcry
 
     # Splice a detached chain (linked by `next_free`) onto the pending-release
     # queue. Caller holds `@alloc_lock`.
+    # `GCRY_TRACE_LARGE=1`. Raw `write(2)`: this runs on the allocation path and
+    # must not allocate.
+    private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64) : Nil
+      return if chunk.null?
+      buf = uninitialized UInt8[160]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: large map base=0x")
+      len = RawOut.append_hex(p, len, chunk.as(Void*).address)
+      len = RawOut.append(p, len, " mapped=")
+      len = RawOut.append_u64(p, len, mapped)
+      len = RawOut.append(p, len, " payload=")
+      len = RawOut.append_u64(p, len, payload)
+      len = RawOut.append(p, len, " coll=")
+      len = RawOut.append_u64(p, len, @collections)
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
+    end
+
     private def queue_large_release(chain : Void*) : Nil
       user = chain
       while user

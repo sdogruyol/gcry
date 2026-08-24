@@ -154,6 +154,45 @@ both arms carried it — but the absolute rates were inflated.
 It still fires with the diagnostic off, so `String.build` is one instance, not
 the cause.
 
+## The victim is the same object every time
+
+`GCRY_TRACE_LARGE=1` writes a line for every large chunk mapped — base, chunk
+size, payload, collection. Across a run there are 186 of them, and exactly
+**one** is the size the ledger keeps naming:
+
+    gcry: large map base=… mapped=77824 payload=75192 coll=0
+
+Two independent sightings, in two harness configurations, gave the identical
+release: 77 824 bytes, `large-object release`, **at collection 6**, the write
+**80 bytes in**, `Collections since: 0`. Same size, same collection, same
+offset. This is one specific allocation, not a random casualty.
+
+`coll=0` and — with phase markers printed from the harness — **before any
+`PHASE worker-start`**. It is allocated during process startup, before the
+harness's own threads exist. So it belongs to the Crystal runtime, reached
+through `GC.malloc`; 75 192 bytes of payload.
+
+Ruled out as candidates for it:
+
+- **`MarkBitmap`** — `LibC.mmap`, not a gcry heap object, would not appear in
+  this trace at all.
+- **`@chunk_index`** — `LibC.realloc`, same reason.
+- **anything the harness allocates** — the graph's payloads are 96 B and
+  40 960 B (chunk 45 056, which is the size `page_release_corruption` saw), the
+  shadow and runtime tables are `LibC.malloc`, and the deliberately-grown
+  `Array(UInt64)` doubles through 65 536 and 131 072.
+
+## What is still needed
+
+The identity of that 75 192-byte object. The next instrument is the obvious one:
+when the ledger matches a fault, print the block's `type_id` — the release path
+has the header in hand, and a type_id turns "a 75 KiB something" into a name.
+
+Note what this does *not* say. The object being a runtime allocation does not
+make it the collector's fault or the runtime's; it says the fault is
+reproducible against a fixed target, which is the first time in this
+investigation that has been true.
+
 ## What is established
 
 The arm, the rate, the frame, and that the freed object was live and reachable

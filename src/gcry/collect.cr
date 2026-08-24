@@ -433,6 +433,11 @@ module Gcry
     # there. See the note on `@guard_next`.
     property release_ledger : Bool = false
 
+    # Research only: raw-write a line for every large chunk mapped, so a range
+    # the ledger names on a fault can be traced back to the allocation that
+    # created it. The ledger says what was released; this says what it was.
+    property trace_large : Bool = false
+
     # How many threads are inside `realloc`'s copy right now, and how many
     # collections have begun while at least one was. This measures the *window*
     # rather than its consequences: a crash-rate A/B cannot separate a 5 %

@@ -74,6 +74,9 @@ LARGE_SIZE  = 40 * 1024
 LARGE_SUM_PREFIX = 512
 # Room for the runtime's own threads, shadowed the same way the graph is.
 RUNTIME_SLOTS = 64
+# Entries appended to the shadowed growing buffer each round. Enough that it
+# reallocs repeatedly and crosses the large-object threshold.
+GROW_PER_ROUND = 900
 
 # Diagnostics from a bare `Thread` cannot go through `STDERR`. Crystal's IO
 # reaches for the current execution context and a thread started with
@@ -205,6 +208,7 @@ if ARGV.includes?("--child")
   threads = [] of Thread
   WORKERS.times do |w|
     threads << Thread.new do
+      raw_puts("PHASE worker-start")
       heap = Gcry.default_heap
       sweep = ENV["LIVE_GRAPH_SWEEP"]? != "0"
       tlprobe = ENV["LIVE_GRAPH_TLPROBE"]? != "0"
@@ -223,6 +227,7 @@ if ARGV.includes?("--child")
       # survivors and whole free page runs between them, so the survivors have
       # to be laid down sparsely. Built without this, the harness released
       # 200 KB over six collections and would have called that clean.
+      raw_puts("PHASE chain-build")
       CHAIN.times do |i|
         SCATTER.times do
           filler = Bytes.new(PAYLOAD)
@@ -277,8 +282,52 @@ if ARGV.includes?("--child")
         raw_puts(big)
       end
 
+      # A growing buffer, shadowed. Every payload above is a fixed size, and the
+      # shadow match has never once hit the faulting address — the victim has
+      # always been an allocation this harness does not own. The ledger names
+      # growing buffers (76 KiB here, 1 970 176 B in `page_release_corruption`)
+      # and turning one extra one on took the rate from 1 of 24 to 5 of 24. So:
+      # keep one deliberately, re-shadow it every time it moves, and let the
+      # round-start sweep name it rather than fault on it.
+      raw_puts("PHASE grower-init")
+      grower = Array(UInt64).new(16)
+      grower_addr = grower.to_unsafe.address
+      grower_len = 0_u64
+
+      raw_puts("PHASE rounds")
       ROUNDS.times do
         gone = false
+
+        # Grow it, then re-shadow: `Array#<<` reallocs, so the buffer moves and
+        # the address recorded a moment ago is stale by design.
+        GROW_PER_ROUND.times do
+          grower << (grower.size.to_u64 &* 2_654_435_761_u64)
+        end
+        grower_addr = grower.to_unsafe.address
+        grower_len = grower.size.to_u64
+
+        unless heap.address_in_live_chunk?(grower_addr)
+          Verdict.freed!
+          raw_puts("  the growing buffer at #{grower_addr} (#{grower_len} entries) is in no live " \
+                   "chunk — released while this thread still held the Array") if Verdict.detail?
+          gone = true
+        end
+
+        # And its contents, so a zeroed or reissued buffer is caught even when
+        # the chunk is still mapped.
+        if !gone && grower_len > 0
+          k = 0_u64
+          bad = false
+          while k < grower_len
+            bad = true if grower[k] != (k &* 2_654_435_761_u64)
+            k += 97 # sample, not a full sweep: this array reaches six figures
+          end
+          if bad
+            Verdict.reused!
+            raw_puts("  the growing buffer at #{grower_addr} does not read back what was " \
+                     "written") if Verdict.detail?
+          end
+        end
         # The runtime's own long-lived objects. These are shadowed like the
         # graph is, and for the same reason: walking `Thread.unsafe_each`
         # dereferences every `Thread` the runtime holds, and if one of them is
@@ -440,7 +489,7 @@ if ARGV.includes?("--child")
       # Keep the chain alive to the very end: without this the tail is garbage
       # halfway through and the audit is auditing nothing. `raw_puts` rather
       # than `STDERR` for the same reason as everything else in this thread.
-      raw_puts("") if root.nil?
+      raw_puts("") if root.nil? || grower.size == 0
     end
   end
   threads.each(&.join)
