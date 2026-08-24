@@ -488,6 +488,12 @@ module Gcry
     @guard_len = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
     @guard_kind = uninitialized StaticArray(UInt8, UNMAP_GUARD_SLOTS)
     @guard_gen = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    # First eight bytes of the released block's user data, captured while it is
+    # still mapped. Under the ledger the range is handed back to the kernel, so
+    # by the time a fault reports on it there is nothing left to read — the
+    # identity has to be taken at release time or not at all. For a Crystal
+    # reference the low four bytes are the type_id.
+    @guard_tag = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
     @guard_count = 0
     # Ledger mode: the same record, without holding the address space. The
     # guard answers "what was here" by never giving the mapping back, which
@@ -505,6 +511,15 @@ module Gcry
     GUARD_KIND_LARGE       = 1_u8
 
     # Returns true when the region was guarded (caller must not munmap it).
+    # The first user word of a large chunk: past the chunk header and the block
+    # header. Read before anything releases the range.
+    private def guard_user_tag(base : UInt64, len : UInt64, kind : UInt8) : UInt64
+      return 0_u64 unless kind == GUARD_KIND_LARGE
+      off = ChunkHeader::SIZE.to_u64 &+ BlockHeader::SIZE.to_u64
+      return 0_u64 if len <= off &+ 8
+      Pointer(UInt64).new(base &+ off).value
+    end
+
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
       unless @unmap_guard
         return false unless @release_ledger
@@ -515,6 +530,7 @@ module Gcry
         @guard_len[i] = len
         @guard_kind[i] = kind
         @guard_gen[i] = @collections
+        @guard_tag[i] = guard_user_tag(base, len, kind)
         @guard_next = (i + 1) % UNMAP_GUARD_SLOTS
         @guard_filled += 1 if @guard_filled < UNMAP_GUARD_SLOTS
         # False: the caller still unmaps. The record is the whole contribution.
@@ -532,18 +548,19 @@ module Gcry
       @guard_len[i] = len
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
+      @guard_tag[i] = guard_user_tag(base, len, kind)
       @guard_count = i + 1
       true
     end
 
     # For the SIGSEGV report: which released region holds *addr*, if any.
-    def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64}?
+    def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64, UInt64}?
       limit = @unmap_guard ? @guard_count : @guard_filled
       i = 0
       while i < limit
         base = @guard_base[i]
         if addr >= base && addr < base + @guard_len[i]
-          return {base, @guard_len[i], @guard_kind[i], @guard_gen[i]}
+          return {base, @guard_len[i], @guard_kind[i], @guard_gen[i], @guard_tag[i]}
         end
         i += 1
       end

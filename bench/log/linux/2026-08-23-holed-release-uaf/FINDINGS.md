@@ -182,6 +182,33 @@ Ruled out as candidates for it:
   shadow and runtime tables are `LibC.malloc`, and the deliberately-grown
   `Array(UInt64)` doubles through 65 536 and 131 072.
 
+## It carries no type_id
+
+The ledger now records the released block's first user word — captured inside
+`guard_release`, which runs *before* the unmap, because under the ledger there
+is nothing left to read by the time a fault reports on the range.
+
+For the victim that word is **zero**. It is not a Crystal object with a
+type_id; it is a raw buffer. That agrees with both sightings being growing
+buffers, and it closes off the "print the type_id and read off the class"
+route.
+
+What the sightings give, together:
+
+- 75 192 bytes of payload in a 77 824-byte chunk — one such map in 186
+- allocated at `coll=0`, **before any worker thread starts**
+- first user word zero, so a raw buffer rather than an object
+- faulted at user offset 40 — five machine words in
+- released through `large-object release`, `Collections since: 0`
+- the collection number varies (1 and 6 across sightings); the size and the
+  offset do not
+
+Ruled out as its owner, all of them because they do not allocate on the gcry
+heap at all: `MarkBitmap` (mmap), the mark stack (mmap), `@chunk_index`
+(`LibC.realloc`), the finalizer entry/link tables (`LibC.malloc`, and the file
+says why), `Roots::Set` (`LibC.malloc`), and the layout tables (`StaticArray`,
+so BSS). Whatever it is, it belongs to the Crystal runtime's own startup.
+
 ## What is still needed
 
 The identity of that 75 192-byte object. The next instrument is the obvious one:

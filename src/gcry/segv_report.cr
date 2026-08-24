@@ -410,7 +410,7 @@ module Gcry
         # about what is there *now*, which is why the two say different things
         # below.
         if g = heap.guarded_release_at(a)
-          base, glen, kind, gen = g
+          base, glen, kind, gen, tag = g
           len = RawOut.append(buf.to_unsafe, len,
             heap.unmap_guard? ? "in a chunk gcry RELEASED — base 0x" : "in a range gcry RELEASED and unmapped — base 0x")
           len = RawOut.append_hex(buf.to_unsafe, len, base)
@@ -428,6 +428,16 @@ module Gcry
           # mutator has been carrying a pointer into released memory for a long
           # time, which is a different defect with a different fix.
           len = RawOut.append_u64(buf.to_unsafe, len, heap.collections - gen)
+          # Captured while the block was still mapped. For a Crystal reference
+          # the low 32 bits are the type_id, which is what turns "a 75 KiB
+          # something" into a name.
+          if tag != 0
+            len = RawOut.append(buf.to_unsafe, len, ". First user word at release: 0x")
+            len = RawOut.append_hex(buf.to_unsafe, len, tag)
+            len = RawOut.append(buf.to_unsafe, len, " (type_id ")
+            len = RawOut.append_u64(buf.to_unsafe, len, tag & 0xffff_ffff_u64)
+            len = RawOut.append(buf.to_unsafe, len, ")")
+          end
           # Under the ledger the mapping was handed back to the kernel, so
           # whatever answers at this address now may belong to something else
           # entirely. Saying otherwise would borrow the guard's certainty.
