@@ -10,6 +10,7 @@
 #     Hash @indices and Array(value) @buffer, which are integer tables.
 
 require "json"
+require "./raw_out"
 
 module Gcry
   module Layout
@@ -223,6 +224,66 @@ module Gcry
       entry_for(type_id).try(&.scan_offsets)
     end
 
+    # `GCRY_LAYOUT_DUMP=1` — print every registration as it is installed: the
+    # type's name, its type_id, and the offsets the macro actually emitted.
+    #
+    # This exists because a *missing* offset is invisible from the outside. The
+    # mark audit says "marked block type_id 208 points at +24 to an UNMARKED
+    # block"; it cannot say which type 208 is, nor whether +24 was left out of
+    # `scan_offsets` or dropped somewhere later. This answers both at once, and
+    # answers them for every type in the program rather than the one that
+    # happened to crash.
+    #
+    # `getenv` and `RawOut`, not `ENV` and `STDERR`: registration walks every
+    # `Reference` subclass in the program, and a collection triggered halfway
+    # through would run against a half-installed table.
+    @@dump_checked = false
+    @@dump = false
+
+    private def self.dump? : Bool
+      unless @@dump_checked
+        @@dump_checked = true
+        v = LibC.getenv("GCRY_LAYOUT_DUMP")
+        @@dump = !v.null? && v.value == '1'.ord.to_u8 && (v + 1).value == 0_u8
+      end
+      @@dump
+    end
+
+    private def self.dump_registration(type_name : String, type_id : Int32,
+                                       scan_ptr : UInt16*, n_scan : Int32,
+                                       noscan_ptr : UInt16*, n_noscan : Int32,
+                                       alloc_size : UInt32, scan_cap : UInt32,
+                                       kind : UInt8) : Nil
+      return unless dump?
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: layout tid ")
+      len = RawOut.append_u64(buf.to_unsafe, len, type_id.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, kind == KIND_HASH ? " hash" : " plain")
+      len = RawOut.append(buf.to_unsafe, len, " alloc ")
+      len = RawOut.append_u64(buf.to_unsafe, len, alloc_size.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " cap ")
+      len = RawOut.append_u64(buf.to_unsafe, len, scan_cap.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " scan[")
+      i = 0
+      while i < n_scan
+        len = RawOut.append(buf.to_unsafe, len, " ") if i > 0
+        len = RawOut.append_u64(buf.to_unsafe, len, scan_ptr[i].to_u64)
+        i += 1
+      end
+      len = RawOut.append(buf.to_unsafe, len, "] noscan[")
+      i = 0
+      while i < n_noscan
+        len = RawOut.append(buf.to_unsafe, len, " ") if i > 0
+        len = RawOut.append_u64(buf.to_unsafe, len, noscan_ptr[i].to_u64)
+        i += 1
+      end
+      len = RawOut.append(buf.to_unsafe, len, "] ")
+      len = RawOut.append(buf.to_unsafe, len, type_name.empty? ? "(unnamed)" : type_name)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     # Install pointer-field byte offsets (tests). *alloc_size* 0 → no size gate.
     def self.install(type_id : Int32, offsets : Array(UInt16), alloc_size : UInt32 = 0_u32, scan_cap : UInt32 = 0_u32) : Nil
       install_full(type_id, offsets.to_unsafe, offsets.size, Pointer(UInt16).null, 0, alloc_size, scan_cap,
@@ -231,10 +292,11 @@ module Gcry
     end
 
     # Size-class slack cap only (no pointer offsets). Conservative scan stops at *scan_cap*.
-    def self.install_scan_cap(type_id : Int32, alloc_size : UInt32, scan_cap : UInt32) : Nil
+    def self.install_scan_cap(type_id : Int32, alloc_size : UInt32, scan_cap : UInt32,
+                              type_name : String = "") : Nil
       install_full(type_id, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0, alloc_size, scan_cap,
         KIND_PLAIN, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
-        0_u16, 0_u16, 0_u16, 0_u16)
+        0_u16, 0_u16, 0_u16, 0_u16, type_name)
     end
 
     def self.install_full(type_id : Int32,
@@ -249,8 +311,10 @@ module Gcry
                           hash_value_off : UInt16,
                           hash_value_mode : UInt8, hash_value_bytes : UInt16,
                           hash_size_off : UInt16 = 0_u16, hash_deleted_off : UInt16 = 0_u16,
-                          hash_block_off : UInt16 = 0_u16, hash_block_bytes : UInt16 = 0_u16) : Nil
+                          hash_block_off : UInt16 = 0_u16, hash_block_bytes : UInt16 = 0_u16,
+                          type_name : String = "") : Nil
       ensure_booted
+      dump_registration(type_name, type_id, scan_ptr, n_scan, noscan_ptr, n_noscan, alloc_size, scan_cap, kind)
       total = n_scan + n_noscan
       # Allow: precise offsets, hash walk, leaf (alloc only), or scan-cap-only.
       return if total <= 0 && kind == KIND_PLAIN && alloc_size == 0 && scan_cap == 0
@@ -383,7 +447,7 @@ module Gcry
         scan_cap = bytes.to_u32
 
         {% if force_scan_cap %}
-          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap)
+          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap, {{T.stringify}})
         {% elsif scan_count + noscan_count > 0 %}
           scan = StaticArray(UInt16, {{scan_count == 0 ? 1 : scan_count}}).new(0)
           noscan = StaticArray(UInt16, {{noscan_count == 0 ? 1 : noscan_count}}).new(0)
@@ -428,11 +492,11 @@ module Gcry
             noscan.to_unsafe, {{noscan_count}},
             rounded.to_u32, scan_cap, KIND_PLAIN,
             0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
-            0_u16, 0_u16, 0_u16, 0_u16)
+            0_u16, 0_u16, 0_u16, 0_u16, {{T.stringify}})
         {% else %}
           # No direct pointer ivars — still scan_cap (not leaf): hidden refs via
           # unusual ivar shapes have caused UAF with empty precise bodies.
-          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap)
+          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap, {{T.stringify}})
         {% end %}
       {% end %}
       {% end %}

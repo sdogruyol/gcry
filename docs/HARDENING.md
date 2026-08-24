@@ -77,6 +77,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
+| `GCRY_LAYOUT_DUMP=1` | Print every layout registration at boot: type name, type_id, and the scan/noscan offsets the macro emitted. A *missing* offset is otherwise invisible — the mark audit can name the type_id that lost an edge but not the type. |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
 | `GCRY_DISABLE_AUTO_LAYOUTS=1` | When auto-layouts opted in: keep builtins only |
 | `GCRY_AUTO_LAYOUTS=1` | Opt-in whole-program precise layouts (Linux Kemal `/json` thr cost ~7pp) |
