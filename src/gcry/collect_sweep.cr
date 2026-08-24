@@ -353,6 +353,28 @@ module Gcry
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool) : Nil
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       return if BlockHeader.free?(header)
+      # A chunk whose block header is still all zeroes is one `alloc_large`
+      # published and has not filled in yet. `map_chunk` links the chunk and
+      # inserts it into the index before `set_used` runs, and STW takes no part
+      # in `@alloc_lock` — it suspends by signal, so a mutator can be stopped
+      # between those two writes. The block then reads as neither FREE nor
+      # marked, which is exactly the shape sweep reclaims: the mutator resumes,
+      # finishes the allocation, and hands out memory already on the large
+      # freelist and headed for munmap.
+      #
+      # Size zero is the tell, and it is not otherwise reachable: a real large
+      # allocation has a payload.
+      #
+      # A tripwire, not a fix: it has **measured zero** — 334 collections of
+      # acikturkiye under `wrk -t4 -c64` for 260 s, while the crash this was
+      # written to explain was still happening. So the window is either much
+      # narrower than the argument above, or it is closed by something this
+      # file does not name. The counter stays because the next time that
+      # argument is made, it should have to answer this number.
+      if header.value.size == 0
+        @sweep_large_uninitialised &+= 1
+        return
+      end
       if heap_marked?(header)
         heap_clear_mark(header)
       elsif major

@@ -175,6 +175,9 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
+    # Large chunks the sweep found published but not yet filled in. Non-zero
+    # means a mutator was suspended between `map_chunk` and `set_used`.
+    getter sweep_large_uninitialised : UInt64 = 0_u64
     # Hash-kind objects whose own body was word-scanned alongside the entry
     # walk. Silence here would mean the collision guard is not engaged.
     getter layout_hash_bodies : UInt64 = 0_u64
