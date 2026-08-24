@@ -200,6 +200,35 @@ page: a 64 KiB allocation.
 only through the zlib and GMP hooks, so the block was freed by the sweep:
 it was unmarked at a major collection.
 
+## Rate
+
+Six runs at the tip, 220 s each, `GCRY_SEGV_REPORT=1 GCRY_RELEASE_LEDGER=1`:
+**3 of 6 died**, all with the 69632-byte signature. Before the layout fix the
+same harness family was 6 of 6. The survivors ran at 412–438 req/s and the
+deaths at 92–349, so the crash correlates with the slower runs rather than the
+busier ones.
+
+## It hides from its own instrument
+
+With **both** audits on — `GCRY_MARK_AUDIT=1 GCRY_ADDRESS_SPACE_AUDIT=1` — the
+run finished 87,750 requests with **0 missed edges, no marked holder, and no
+crash**. Both audits run inside the pause and lengthen it considerably. So the
+remaining defect is timing-sensitive in a way the marking questions are not,
+and the instrument that would name it is also the thing that suppresses it.
+`GCRY_UNMAP_GUARD=1` behaves the same way: one 260 s run at 461 req/s, no
+crash.
+
+That, plus the elimination table above, points away from liveness entirely.
+Nothing marked referenced the block when it died, no root did, and no thread
+is missing from the stopped set — yet a mutator writes into it afterwards.
+
+## Also eliminated
+
+| Hypothesis | Arm | Result |
+|---|---|---|
+| a thread gcry never sees, so never stops or scans | `GCRY_THREAD_CENSUS=1` | **291 checks, 0 gaps** — the stopped set accounts for every OS thread |
+| the same block cached twice, or taken off a freelist while USED | `large_cached_twice` / `large_taken_used` | **0** and **0** over 672 collections |
+
 ## The one live thread
 
 With the audit aimed at 64 KiB blocks, one dying block's address was found
