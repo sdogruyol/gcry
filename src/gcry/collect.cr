@@ -439,6 +439,9 @@ module Gcry
     # that no longer describes it.
     getter index_overlaps : UInt64 = 0_u64
     getter index_count_mismatch : UInt64 = 0_u64
+    # Releases refused because a chunk that is still indexed lived inside the
+    # range. Non-zero means gcry was about to unmap live memory.
+    getter release_hit_live : UInt64 = 0_u64
 
     # Research only: clear `@world_stopped` after the resume loop rather than
     # before it, which is what `start_world` did until 2026-08-22.

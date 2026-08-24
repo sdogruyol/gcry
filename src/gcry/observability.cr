@@ -99,6 +99,7 @@ module Gcry
         index_count_mismatch:        heap.index_count_mismatch,
         guard_slots_used:            heap.guard_slots_used,
         guard_overflows:             heap.guard_overflows,
+        release_hit_live:            heap.release_hit_live,
         layout_conservative_scans:   heap.layout_conservative_scans,
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement

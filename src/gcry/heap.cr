@@ -1210,7 +1210,8 @@ module Gcry
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
-        unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+        base = chunk.as(Void*).address
+        unless guard_release(base, mapped, GUARD_KIND_LARGE) || refuse_live_release(base, mapped, GUARD_KIND_LARGE)
           LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         end
         user = nxt
@@ -1699,6 +1700,65 @@ module Gcry
     end
 
     # First index i where chunk_index[i].address >= addr (or count).
+    # Is any chunk that is still live sitting inside the range about to be
+    # unmapped?
+    #
+    # `unlink_chunk` removes a chunk from the index *before* anything releases
+    # it, so an index entry that overlaps a range on its way to `munmap` is by
+    # construction a chunk that is still in use — and unmapping it takes live
+    # objects with it, leaving the mutator to fault at whatever page boundary
+    # it walks into. That is the one story that fits every negative result in
+    # `bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`: the object graph
+    # is intact, nothing is marked wrong, nothing holds a dangling pointer, and
+    # `GCRY_UNMAP_GUARD=1` — which makes no `munmap` calls at all — took the
+    # crash from 3 of 6 to 0 of 11.
+    #
+    # The empty-chunk flush is where a range can grow beyond what was released:
+    # it coalesces neighbours into one `munmap`, and the run end comes from
+    # chunk headers.
+    #
+    # One binary search per release, so it stays on: refusing to unmap is a
+    # leak, and a leak is a better outcome than tearing down live memory.
+    #
+    # Measured **zero** over 163 collections of acikturkiye under load while
+    # the crash was still happening 3 runs in 4, so this is not that crash.
+    # It stays as an invariant, not as a fix.
+    protected def release_range_hits_live?(base : UInt64, len : UInt64) : Bool
+      finish = base &+ len
+      @index_lock.sync do
+        pos = index_lower_bound(base)
+        # The entry before `pos` starts below `base`; it overlaps if it reaches
+        # into the range.
+        if pos > 0
+          prev = (@chunk_index + (pos - 1)).value
+          return true if prev.address &+ prev.value.mapped_bytes > base
+        end
+        return false if pos >= @chunk_index_count
+        (@chunk_index + pos).value.address < finish
+      end
+    end
+
+    # Refuse the release and say so once. Returns true when the caller must not
+    # unmap.
+    protected def refuse_live_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
+      return false unless release_range_hits_live?(base, len)
+      @release_hit_live &+= 1
+      return true unless @release_hit_live == 1
+      buf = uninitialized UInt8[256]
+      n = 0
+      n = RawOut.append(buf.to_unsafe, n, "gcry: refusing to unmap [0x")
+      n = RawOut.append_hex(buf.to_unsafe, n, base)
+      n = RawOut.append(buf.to_unsafe, n, ", 0x")
+      n = RawOut.append_hex(buf.to_unsafe, n, base &+ len)
+      n = RawOut.append(buf.to_unsafe, n, ") — a chunk that is still indexed lives inside it. kind ")
+      n = RawOut.append_u64(buf.to_unsafe, n, kind.to_u64)
+      n = RawOut.append(buf.to_unsafe, n, ", collection ")
+      n = RawOut.append_u64(buf.to_unsafe, n, @collections)
+      n = RawOut.append(buf.to_unsafe, n, "\n")
+      RawOut.flush(buf.to_unsafe, n)
+      true
+    end
+
     private def index_lower_bound(addr : UInt64) : Int32
       lo = 0
       hi = @chunk_index_count
