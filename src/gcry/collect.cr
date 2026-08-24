@@ -477,6 +477,11 @@ module Gcry
     # produce that shape: it stalls before the loop, with a thread named.
     property stw_test_postsuspend_stall_ms : UInt64 = 0_u64
 
+    # Research only: hold the stop open after `PHASE_STOPPED` is entered — the
+    # span that used to be reported as `suspend` and is where the aarch64 hangs
+    # land. A phase with no control is a phase nobody has seen fire.
+    property stw_test_stopped_stall_ms : UInt64 = 0_u64
+
     UNMAP_GUARD_SLOTS = 8192
 
     @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)

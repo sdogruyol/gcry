@@ -47,6 +47,12 @@ module Gcry
     PHASE_FINALIZERS =  8
     PHASE_SWEEP      =  9
     PHASE_RESUME     = 10
+    # The span between the suspend wait finishing and PHASE_FLUSH used to be
+    # reported as `suspend`, which is where aarch64 hangs kept landing —
+    # "every thread acknowledged, the stall is after the wait loop" is true but
+    # covers three different regions. These name them.
+    PHASE_STOPPED = 11
+    PHASE_QUIESCE = 12
 
     POLL_NS = 50_000_000_u64 # 50 ms
 
@@ -59,6 +65,8 @@ module Gcry
     def self.phase_name(id : Int32) : String
       case id
       when PHASE_SUSPEND    then "suspend"
+      when PHASE_STOPPED    then "stopped-before-flush"
+      when PHASE_QUIESCE    then "quiesce-release"
       when PHASE_FLUSH      then "flush"
       when PHASE_CLEAR      then "clear-marks"
       when PHASE_ROOTS      then "roots"

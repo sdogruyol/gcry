@@ -191,6 +191,15 @@ module Gcry
             end
           end
           @world_stopped = true
+          # Past the wait loop and past every ack. Anything that hangs from here
+          # to PHASE_FLUSH is not the suspension.
+          StwWatchdog.enter(StwWatchdog::PHASE_STOPPED)
+          if (tstall = @stw_test_stopped_stall_ms) > 0
+            deadline = Gcry::Clock.monotonic_ns &+ tstall &* 1_000_000_u64
+            while Gcry::Clock.monotonic_ns < deadline
+              Intrinsics.pause
+            end
+          end
         rescue ex
           @world_stopped = false
           @stw_owner = nil
@@ -260,6 +269,10 @@ module Gcry
       @finalizers.lock_for_stw
       begin
         stop_world
+        # The locks below are released with the world already stopped. If that
+        # is where a stop wedges, the report should say so rather than blaming
+        # the suspension it has already finished.
+        StwWatchdog.enter(StwWatchdog::PHASE_QUIESCE)
       ensure
         @finalizers.unlock_for_stw
         @roots_lock.unlock

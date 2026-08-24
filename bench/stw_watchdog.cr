@@ -104,7 +104,16 @@ armed_postsuspend = run_child(self_path, {
   "GCRY_STW_TEST_POSTSUSPEND_STALL_MS" => STALL_MS.to_s,
 })
 
+# The span after the suspend wait, which used to report as `suspend` and is
+# where the aarch64 hangs land (32698202277). Split into its own phase; this is
+# the arm that shows the split works.
+armed_stopped = run_child(self_path, {
+  "GCRY_STW_WATCHDOG_MS"           => THRESHOLD_MS.to_s,
+  "GCRY_STW_TEST_STOPPED_STALL_MS" => STALL_MS.to_s,
+})
+
 record["armed+stalled"] = armed_stalled
+record["armed+stopped"] = armed_stopped
 record["armed+suspend"] = armed_suspend
 record["armed+postsusp"] = armed_postsuspend
 record["armed+in-spin"] = armed_inspin
@@ -118,6 +127,11 @@ end
 puts ""
 
 failures = [] of String
+
+unless armed_stopped.includes?("phase=stopped-before-flush")
+  failures << "a stall after PHASE_STOPPED did not name that phase — the span between the " \
+              "suspend wait and the flush is still reported as `suspend`"
+end
 
 unless armed_postsuspend.includes?("the stall is after the wait loop")
   failures << "a stall after the suspend loop did not say so — the report is " \

@@ -820,6 +820,9 @@ module GC
     if pst = env_u64("GCRY_STW_TEST_POSTSUSPEND_STALL_MS")
       heap.stw_test_postsuspend_stall_ms = pst if pst <= 60_000
     end
+    if tst = env_u64("GCRY_STW_TEST_STOPPED_STALL_MS")
+      heap.stw_test_stopped_stall_ms = tst if tst <= 60_000
+    end
     if sst = env_u64("GCRY_STW_TEST_SUSPEND_STALL_MS")
       heap.stw_test_suspend_stall_ms = sst if sst <= 60_000
     end

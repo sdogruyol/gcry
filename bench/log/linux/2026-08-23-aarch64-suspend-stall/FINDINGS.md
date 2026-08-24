@@ -35,6 +35,35 @@ asserts the report says
 
 Broken on purpose, both assertions fire.
 
+## 2026-08-24: the corrected report earned its keep
+
+Run `32698202277`, aarch64 native, `make ec-queue-audit`, exit 124 again — and
+this time the watchdog said something usable:
+
+    gcry: STOP-THE-WORLD STALLED 10018 ms in phase=suspend
+    gcry: every thread acknowledged (2 of 2); the stall is after the wait loop,
+          not in it
+
+Both threads acknowledged their suspend. The collector is wedged *after* the
+wait, which is exactly what the old "waiting for thread 0x0" wording hid.
+
+That still was not narrow enough, because `PHASE_SUSPEND` covered three
+regions: the tail of `stop_world` after the last ack, the return through
+`stop_world_quiescing_roots`, and that wrapper releasing `@roots_lock` and the
+finalizer lock with the world already stopped. Reading the code rules out the
+first two — the tail is one assignment and the caller does one timestamp before
+`PHASE_FLUSH` — but reading is not measuring, and this is the third structure
+today whose comment outlived its condition.
+
+So the span is split. `PHASE_STOPPED` (stopped-before-flush) is entered right
+after the last ack; `PHASE_QUIESCE` (quiesce-release) before those unlocks. The
+next sighting names one of the three instead of all of them.
+
+`GCRY_STW_TEST_STOPPED_STALL_MS` is the control, and `make stw-watchdog`
+asserts on it. Broken on purpose — the phase entry removed — the gate goes red
+with "the span between the suspend wait and the flush is still reported as
+`suspend`". A phase nobody can show firing is a phase nobody has seen.
+
 ## What is still open
 
 Where the 10 seconds went. The breadcrumb now says only that it was *after* the
