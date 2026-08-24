@@ -672,6 +672,7 @@ module GC
     # After mark, before sweep: does any marked object point at a block the
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
+    heap.always_clear = true if env_flag_one?("GCRY_ALWAYS_CLEAR")
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
     if v = env_u64("GCRY_DYING_AUDIT_MIN_BYTES")
       heap.dying_audit_min_bytes = v

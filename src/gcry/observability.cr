@@ -92,6 +92,8 @@ module Gcry
         sweep_large_uninitialised:   heap.sweep_large_uninitialised,
         large_cached_twice:          heap.large_cached_twice,
         large_taken_used:            heap.large_taken_used,
+        release_double:              heap.release_double,
+        release_remapped:            heap.release_remapped,
         layout_conservative_scans:   heap.layout_conservative_scans,
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement

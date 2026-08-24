@@ -581,6 +581,84 @@ module Gcry
     GUARD_KIND_EMPTY_CHUNK = 0_u8
     GUARD_KIND_LARGE       = 1_u8
 
+    # Direct-mapped record of "this base is currently released", so a release
+    # can ask whether the same base is being let go twice.
+    #
+    # The question is worth asking because everything else has come back
+    # negative. In the acikturkiye crash the dying block is unreferenced by
+    # every measure gcry has — no marked parent, no root, no thread outside the
+    # stopped set — and yet a mutator writes into its range afterwards. A
+    # release that runs twice over one base explains that without any of them:
+    # the first is correct, the kernel hands the same address back to the next
+    # `mmap`, and the second unmaps a chunk that is alive and whose owner has
+    # every right to be writing into it.
+    #
+    # Keyed on `base >> 12` and O(1) at both ends, because the alternative —
+    # walking the 8192-slot ring on every map and every release — is slow
+    # enough to change the timing of the very race it is looking for.
+    # Collisions lose a record; they never invent one.
+    RELEASE_MAP_SLOTS = 8192
+    @rel_base = uninitialized StaticArray(UInt64, RELEASE_MAP_SLOTS)
+    @rel_live = uninitialized StaticArray(Bool, RELEASE_MAP_SLOTS)
+    @rel_booted = false
+    # Bases released while an earlier release of the same base had not been
+    # cancelled by a remap.
+    getter release_double : UInt64 = 0_u64
+    # Released bases the kernel handed back to a later `mmap`. Silence here
+    # would mean the cancel side never fires and the counter above is unread.
+    getter release_remapped : UInt64 = 0_u64
+    # `GCRY_ALWAYS_CLEAR=1`: zero every allocation, including the ones whose
+    # bytes are already believed to be zero.
+    property always_clear : Bool = false
+
+    private def release_map_slot(base : UInt64) : Int32
+      ((base >> 12) % RELEASE_MAP_SLOTS).to_i32
+    end
+
+    private def release_map_boot : Nil
+      return if @rel_booted
+      @rel_booted = true
+      i = 0
+      while i < RELEASE_MAP_SLOTS
+        @rel_base[i] = 0_u64
+        @rel_live[i] = false
+        i += 1
+      end
+    end
+
+    protected def note_release_base(base : UInt64) : Nil
+      release_map_boot
+      i = release_map_slot(base)
+      if @rel_live[i] && @rel_base[i] == base
+        @release_double &+= 1
+        if @release_double == 1
+          buf = uninitialized UInt8[256]
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len,
+            "gcry: released base 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, base)
+          len = RawOut.append(buf.to_unsafe, len,
+            " a second time with no remap in between — the second unmap takes a live chunk. collection ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+          len = RawOut.append(buf.to_unsafe, len, "\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+      end
+      @rel_base[i] = base
+      @rel_live[i] = true
+    end
+
+    # The kernel gave this base back, so the release recorded against it is
+    # spent. Called from `map_chunk`.
+    protected def note_map_base(base : UInt64) : Nil
+      release_map_boot
+      i = release_map_slot(base)
+      if @rel_live[i] && @rel_base[i] == base
+        @rel_live[i] = false
+        @release_remapped &+= 1
+      end
+    end
+
     # Returns true when the region was guarded (caller must not munmap it).
     # The first user word of a large chunk: past the chunk header and the block
     # header. Read before anything releases the range.
@@ -592,6 +670,7 @@ module Gcry
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
+      note_release_base(base) if @release_ledger
       unless @unmap_guard
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the

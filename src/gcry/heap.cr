@@ -541,6 +541,15 @@ module Gcry
         needs_clear = clear && !@freelist_clean[class_index]
       end
 
+      # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
+      # the bytes are already zero: `MAP_ANONYMOUS` for a fresh chunk,
+      # `@freelist_clean` for a refill that came straight off one. Crystal
+      # relies on that: `Reference.allocate` zeroes nothing itself, so an ivar
+      # the initializer does not assign reads whatever the previous occupant
+      # left. A stale pointer arriving that way is the one story that fits the
+      # acikturkiye crash — nothing referenced the block when it died, and the
+      # mutator writes into it afterwards through a field it never set.
+      needs_clear = true if @always_clear && !user.null?
       user.as(UInt8*).clear(rounded) if needs_clear
       # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
       # unreachable to the collector between here and the caller's store.
@@ -1447,6 +1456,7 @@ module Gcry
       index_insert(chunk)
       invalidate_chunk_cache if @index_cache_unchecked
       note_mapped(chunk)
+      note_map_base(ptr.address) if @release_ledger
       chunk
     end
 
