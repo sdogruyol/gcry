@@ -445,6 +445,12 @@ module Gcry
             heap.unmap_guard? ? "\n" : ". The range was unmapped, so this address may since have " \
                                        "been remapped by something else\n")
           RawOut.flush(buf.to_unsafe, len)
+          # Same question the poison path asks, asked of a released range: the
+          # ledger says *what* was let go and when, never who was still holding
+          # it. Under `GCRY_UNMAP_GUARD=1` this is the sharpest form of the
+          # question — the range is still mapped, so nothing has been reissued
+          # over the evidence.
+          PoisonHolders.search(heap, base, glen) if PoisonHolders.requested?
           return
         end
         len = RawOut.append(buf.to_unsafe, len,

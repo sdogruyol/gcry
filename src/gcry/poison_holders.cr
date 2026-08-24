@@ -81,7 +81,7 @@ module Gcry
       len = RawOut.append_hex(buf.to_unsafe, len, user)
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, user &+ size)
-      len = RawOut.append(buf.to_unsafe, len, "), the block whose free wrote the poison\n")
+      len = RawOut.append(buf.to_unsafe, len, "), the range gcry released\n")
       RawOut.flush(buf.to_unsafe, len)
 
       @@first_holder_base = 0_u64
