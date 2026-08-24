@@ -568,6 +568,13 @@ module Gcry
         @guard_overflows &+= 1
         return false
       end
+      # Read the identity *before* the mprotect. Reading it after was a crash
+      # this file introduced hours earlier the same day: every release under
+      # the guard then touched a range it had just made PROT_NONE, and
+      # `make heap-dump-race` died 40 of 40 in **both** arms — which is what a
+      # broken harness looks like, not a finding. Any measurement taken with
+      # `GCRY_UNMAP_GUARD=1` between 406f3ac and this commit is void.
+      tag = guard_user_tag(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
       return false if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
@@ -576,7 +583,7 @@ module Gcry
       @guard_len[i] = len
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
-      @guard_tag[i] = guard_user_tag(base, len, kind)
+      @guard_tag[i] = tag
       @guard_count = i + 1
       true
     end
