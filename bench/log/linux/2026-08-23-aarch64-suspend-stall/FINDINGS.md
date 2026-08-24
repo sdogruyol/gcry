@@ -64,6 +64,40 @@ asserts on it. Broken on purpose — the phase entry removed — the gate goes r
 with "the span between the suspend wait and the flush is still reported as
 `suspend`". A phase nobody can show firing is a phase nobody has seen.
 
+## 2026-08-24, later: the corrected report was still misreading, one stop back
+
+Run `32722237222`, same job, same target, exit 124 again — and the phase split
+did not take:
+
+    gcry: STOP-THE-WORLD STALLED 10007 ms in phase=suspend
+    gcry: every thread acknowledged (1 of 1); the stall is after the wait loop
+
+But on Linux the code enters `PHASE_STOPPED` immediately after
+`@world_stopped = true`, and between the last ack and that line there is one
+assignment and a disabled test knob. Nothing there can hang for ten seconds.
+
+The report was wrong again, for a new reason. `@@suspend_waiting_id`,
+`@@suspend_acked` and `@@suspend_expected` are written **only** by
+`note_suspend`, so they survive from one stop to the next. A stop that hangs
+*before* it reaches the wait loop — in `MonitorGate.close`, in `Thread.lock`,
+in anything the stop takes first — leaves yesterday's cleared breadcrumb
+standing, and the report reads it as "every thread acknowledged".
+
+Which means **the conclusion drawn from all four sightings so far may be
+wrong**: the stall may never have been after the wait loop at all.
+
+Fixed by stamping the breadcrumb `SUSPEND_UNSET` on entering `PHASE_SUSPEND`,
+so it cannot carry. The report now separates three states — never reached the
+loop, waiting on a named thread, loop finished — and
+`GCRY_STW_TEST_PRESUSPEND_STALL_MS` is the control for the first.
+`make stw-watchdog` asserts both that a pre-loop stall says so and that no arm
+claims acknowledgement it did not see; removing the stamping turns both red,
+the second with the CI line verbatim.
+
+That is twice now that this report has sent the reader somewhere the collector
+was not. Both times the mechanism was the same: a value that means "cleared"
+being read as if it meant "current".
+
 ## What is still open
 
 Where the 10 seconds went. The breadcrumb now says only that it was *after* the
