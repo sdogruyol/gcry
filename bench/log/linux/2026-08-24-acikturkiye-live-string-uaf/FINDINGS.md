@@ -164,3 +164,51 @@ is a second defect here, and it is the one that also killed the
 `GCRY_DISABLE_LAYOUT=1` run at 240 s. The mark audit reports zero missed **heap**
 edges after the fix, which points the remainder at a **root**, not an edge: a
 64 KiB buffer held only from a stack, a register, or a parked fiber.
+
+
+---
+
+# The second defect, and what it is not
+
+The layout fix takes the mark audit to zero missed edges and takes most
+runs to the end, but the crash this log opened with is still there: a
+**69632-byte large chunk**, released down the large-object path, written
+into afterwards. Four paired 260 s runs after the fix, `default` and
+`GCRY_SOUND=1` alternating, died **4 of 4** with that signature.
+
+## What the victim is
+
+The write offsets across five reports — 3112, 5672, 6376, 7784, 17384 —
+are all congruent modulo 32 once the chunk and block headers are taken
+off. Stride 32 is `Hash::Entry(String, JSON::Any)`, which is the entry
+table of the type this application registers. 69632 is 65536 plus one
+page: a 64 KiB allocation.
+
+## Ruled out, each by measurement
+
+| Hypothesis | Arm | Result |
+|---|---|---|
+| a missed ambient root | `GCRY_SOUND=1` (interior, unaligned, lag 0, gate off) | died 2 of 2 |
+| interior pointers alone | `GCRY_INTERIOR=1` | died |
+| precise bodies | `GCRY_DISABLE_LAYOUT=1` | died at 240 s |
+| the lazy post-STW sweep | `GCRY_DISABLE_LAZY_SWEEP=1` | died |
+| a chunk published before its block header | `sweep_large_uninitialised` counter | **0** over 334 collections |
+| parked fiber stacks not scanned at all | `first_mark_parked_objects` | 6701 objects / 4.6 MB per run — they are scanned |
+| the plain layout branch losing edges the way the hash one did | word-scan the plain body | died 2 of 2, and the mark audit had already reported 0 missed edges with the branch unchanged. Reverted: an argued fix that fixes nothing. |
+
+`Heap#realloc` does not free its argument and Crystal reaches `GC.free`
+only through the zlib and GMP hooks, so the block was freed by the sweep:
+it was unmarked at a major collection.
+
+## The one live thread
+
+With the audit aimed at 64 KiB blocks, one dying block's address was found
+in a **marked, used, 32-byte, scanned** heap block whose first Int32 reads
+128 — an `Array`-shaped object, and 128 is not a registered type_id in
+this program, so it is scanned conservatively and the edge should have
+been followed. The mark audit was not enabled in that run, so this is one
+observation and not yet a contradiction. Running both audits together is
+the next step.
+
+`GCRY_UNMAP_GUARD=1` survived a 260 s run at 461 req/s where the ledger
+arm died — one run, and not yet a claim.
