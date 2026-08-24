@@ -432,6 +432,13 @@ module Gcry
     # `GCRY_INDEX_AUDIT=1`. Off by default: it costs a `pthread_self` on the
     # unlocked lookup path.
     property index_audit : Bool = false
+    getter index_audit_runs : UInt64 = 0_u64
+    # Index entries whose range starts inside the previous entry's, and
+    # collections where the index and `@chunks` disagreed on how many chunks
+    # exist. Either one means an address can resolve through a chunk record
+    # that no longer describes it.
+    getter index_overlaps : UInt64 = 0_u64
+    getter index_count_mismatch : UInt64 = 0_u64
 
     # Research only: clear `@world_stopped` after the resume loop rather than
     # before it, which is what `start_world` did until 2026-08-22.
@@ -1604,6 +1611,7 @@ module Gcry
           # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,
           # src/gcry/mark_audit.cr). Off by default — O(live heap) in the pause.
           run_mark_audit if @mark_audit
+          audit_chunk_index if @index_audit
 
           # The same window, one question narrower: is a block of the watched
           # type about to be swept, and if so what still holds its address?

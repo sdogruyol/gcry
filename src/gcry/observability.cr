@@ -94,6 +94,9 @@ module Gcry
         large_taken_used:            heap.large_taken_used,
         release_double:              heap.release_double,
         release_remapped:            heap.release_remapped,
+        index_audit_runs:            heap.index_audit_runs,
+        index_overlaps:              heap.index_overlaps,
+        index_count_mismatch:        heap.index_count_mismatch,
         layout_conservative_scans:   heap.layout_conservative_scans,
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement

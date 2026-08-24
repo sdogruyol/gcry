@@ -1713,6 +1713,74 @@ module Gcry
       lo
     end
 
+    # Does the chunk index still describe the chunks that exist?
+    #
+    # `GCRY_INDEX_AUDIT=1`, from inside the stopped world so `@chunks` and the
+    # index are both quiescent. Two questions, both of which a release is what
+    # would break:
+    #
+    #   - **overlap.** Entries are sorted by base and a chunk owns
+    #     `[base, base + mapped_bytes)`. Two entries that overlap mean one of
+    #     them describes memory the other owns — which is what an index entry
+    #     for a released chunk looks like once the kernel hands that base back
+    #     to a later `mmap`. `chunk_containing` binary-searches this array, so
+    #     from then on some addresses in the *new* chunk resolve through the
+    #     *old* geometry.
+    #   - **count.** The index and `@chunks` should hold the same chunks.
+    #
+    # Worth asking here because `GCRY_UNMAP_GUARD=1` — whose only effect is to
+    # stop handing released address space back to the kernel — took the
+    # acikturkiye crash from 3 of 6 to 0 of 4.
+    private def report_index_overlap(base : UInt64, prev_end : UInt64) : Nil
+      buf = uninitialized UInt8[256]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: chunk index — entry 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, base)
+      len = RawOut.append(buf.to_unsafe, len, " starts inside the previous entry, which ends at 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, prev_end)
+      len = RawOut.append(buf.to_unsafe, len, ". collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    protected def audit_chunk_index : Nil
+      @index_audit_runs &+= 1
+      prev_end = 0_u64
+      i = 0
+      while i < @chunk_index_count
+        chunk = (@chunk_index + i).value
+        base = chunk.address
+        if i > 0 && base < prev_end
+          @index_overlaps &+= 1
+          report_index_overlap(base, prev_end) if @index_overlaps == 1
+        end
+        finish = base &+ chunk.value.mapped_bytes
+        prev_end = finish if finish > prev_end
+        i += 1
+      end
+
+      linked = 0
+      walk = @chunks
+      while walk
+        linked += 1
+        walk = walk.value.next
+      end
+      return if linked == @chunk_index_count
+      @index_count_mismatch &+= 1
+      return unless @index_count_mismatch == 1
+      buf = uninitialized UInt8[256]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: chunk index — ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @chunk_index_count.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " indexed against ")
+      len = RawOut.append_u64(buf.to_unsafe, len, linked.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " linked. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     private def index_insert(chunk : ChunkHeader*) : Nil
       @index_lock.sync do
         invalidate_chunk_cache
