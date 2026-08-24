@@ -276,7 +276,12 @@ module Gcry
           if size_match && entry.precise_fields?
             @layout_precise_scans += 1
             if entry.hash?
-              scan_hash_object(user, size, entry)
+              # Trust the map only as far as the object's shape supports it.
+              # A collision that reaches here degrades to exactly the
+              # conservative scan it would have got unregistered.
+              plausible = hash_shape_plausible?(user, size, entry)
+              scan_hash_object(user, size, entry) if plausible
+              scan_hash_body(user, size, entry, demote: plausible)
             else
               entry.scan_offsets.each do |off|
                 next if off.to_u64 + sizeof(Void*).to_u64 > size
@@ -344,6 +349,94 @@ module Gcry
       words.times do |i|
         mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
+    end
+
+    # The object's own body, every word of it, with `@entries` / `@indices`
+    # demoted to `mark_noscan` so the two blobs stay alive without being walked
+    # as pointer arrays — which is the whole reason the Hash kind exists.
+    #
+    # `scan_hash_object` alone was not enough, and the reason generalises past
+    # Hash. A layout is keyed on the payload's **first Int32**, read
+    # conservatively; a raw buffer of union values starts with exactly such an
+    # id, because Crystal stores the union's type id in the first four bytes.
+    # So a 64-byte `Array(JSON::Any)` buffer whose first element is a String is
+    # indistinguishable, by that key, from an instance of whichever class holds
+    # the same id — and when the size class matches too, nothing downstream
+    # notices. Measured on acikturkiye: blocks reading `type_id 208` were
+    # scanned to `Hash`'s map, the pointers they really held at +24 and +56
+    # were never marked, and the mark audit reported missed edges on 193 of 216
+    # collections. The Strings underneath were swept while a request was
+    # serialising them (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`).
+    #
+    # Seven words for a 56-byte `Hash`, and it also covers what the map never
+    # modelled: `@block`'s closure pointer, and the size-class slack a previous
+    # occupant left behind.
+    private def scan_hash_body(user : UInt8*, size : UInt64, entry : Layout::Entry,
+                               demote : Bool) : Nil
+      word = sizeof(Void*).to_u64
+      words = size // word
+      cursor = user.as(UInt64*)
+      i = 0_u64
+      while i < words
+        value = Pointer(Void).new(cursor[i])
+        # Demoting a word to `mark_noscan` is itself a claim about the type —
+        # marked, never traced. Make it only where the shape backs the claim;
+        # on a colliding block that word may be an ordinary reference whose
+        # children still need marking.
+        if demote && hash_blob_offset?(entry, i &* word)
+          mark_noscan(value)
+        else
+          mark_impl(value, gate_type_id: false, base_only: false, source: RootSource::Heap)
+        end
+        i &+= 1
+      end
+      @layout_hash_bodies &+= 1
+    end
+
+    # Does this block actually look like the `Hash` its first Int32 claims?
+    #
+    # Cheap structural questions only, all of them things a real `Hash` cannot
+    # get wrong: a sane `@indices_size_pow2`, non-negative `@size` and
+    # `@deleted_count` that fit the capacity that pow2 implies, and `@entries` /
+    # `@indices` that are either null or point into the heap. A raw buffer that
+    # collided on the type_id passes none of these except by accident.
+    private def hash_shape_plausible?(user : UInt8*, size : UInt64, entry : Layout::Entry) : Bool
+      word = sizeof(Void*).to_u64
+      entries_off = entry.hash_entries_off.to_u64
+      indices_off = entry.hash_indices_off.to_u64
+      pow2_off = entry.hash_pow2_off.to_u64
+      size_off = entry.hash_size_off.to_u64
+      deleted_off = entry.hash_deleted_off.to_u64
+      return false if entries_off + word > size || indices_off + word > size
+      return false if pow2_off + 1 > size
+      return false if size_off + 4 > size || deleted_off + 4 > size
+
+      pow2 = Pointer(UInt8).new(user.address + pow2_off).value
+      return false if pow2 >= 63
+
+      live = Pointer(Int32).new(user.address + size_off).value
+      deleted = Pointer(Int32).new(user.address + deleted_off).value
+      return false if live < 0 || deleted < 0
+
+      entries = Pointer(Void*).new(user.address + entries_off).value
+      indices = Pointer(Void*).new(user.address + indices_off).value
+      return false unless entries.null? || is_heap_ptr(entries)
+      return false unless indices.null? || is_heap_ptr(indices)
+
+      # An empty Hash has no tables and no entries; a populated one has both.
+      if entries.null?
+        return live == 0 && deleted == 0
+      end
+      capacity = (1_u64 << pow2) // 2
+      return false if capacity == 0
+      live.to_u64 &+ deleted.to_u64 <= capacity
+    end
+
+    private def hash_blob_offset?(entry : Layout::Entry, offset : UInt64) : Bool
+      entry.noscan_offsets.each do |off|
+        return true if off.to_u64 == offset
+      end
+      false
     end
 
     # Precise Hash: keep @indices/@entries blobs alive without scanning them as

@@ -175,6 +175,9 @@ module Gcry
     # Precise scan via Gcry::Layout (type_id → pointer offsets). Unknown → conservative.
     property layout_precise : Bool = true
     getter layout_precise_scans : UInt64 = 0_u64
+    # Hash-kind objects whose own body was word-scanned alongside the entry
+    # walk. Silence here would mean the collision guard is not engaged.
+    getter layout_hash_bodies : UInt64 = 0_u64
     # When true, load `.llvm_stackmaps` and mark_precise_root.
     # Opt-in: GCRY_PRECISE_STACK=1 (hybrid) or =2 (exclusive). See STACK_MAPS.md.
     property precise_stack_roots : Bool = false
