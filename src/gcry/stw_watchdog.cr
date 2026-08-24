@@ -63,6 +63,36 @@ module Gcry
     # "every thread acknowledged" — which is the same mistake as reading a
     # cleared id as thread 0, one stop removed. Stamped unset at phase entry.
     SUSPEND_UNSET = 0xffff_ffff_ffff_ffff_u64
+
+    # Where inside `PHASE_SUSPEND` the stop got to. The phase covers a sequence
+    # — close the monitor gate, wait for staged threads, take `Thread.lock`,
+    # snapshot every stack's bounds, send the signals, wait for the acks — and
+    # a stall reported as "suspend" could be any of them. aarch64 has hung here
+    # four times without the region ever being named.
+    STEP_ENTER        = 0
+    STEP_GATE_CLOSED  = 1
+    STEP_STAGED_DONE  = 2
+    STEP_THREAD_LOCK  = 3
+    STEP_BOUNDS_DONE  = 4
+    STEP_SIGNALS_SENT = 5
+    @@suspend_step = STEP_ENTER
+
+    def self.note_suspend_step(step : Int32) : Nil
+      @@suspend_step = step
+    end
+
+    def self.step_name(step : Int32) : String
+      case step
+      when STEP_ENTER        then "entered, monitor gate not yet closed"
+      when STEP_GATE_CLOSED  then "monitor gate closed, waiting on staged threads"
+      when STEP_STAGED_DONE  then "staged wait done, taking Thread.lock"
+      when STEP_THREAD_LOCK  then "Thread.lock held, snapshotting stack bounds"
+      when STEP_BOUNDS_DONE  then "bounds taken, sending suspend signals"
+      when STEP_SIGNALS_SENT then "signals sent, waiting for acknowledgements"
+      else                        "unknown"
+      end
+    end
+
     @@since_ns = 0_u64
     @@threshold_ns = 0_u64
     @@started = false
@@ -153,6 +183,7 @@ module Gcry
         @@suspend_waiting_id = SUSPEND_UNSET
         @@suspend_expected = 0
         @@suspend_acked = 0
+        @@suspend_step = STEP_ENTER
       end
       @@phase = id
     end
@@ -198,9 +229,9 @@ module Gcry
       len = append(buf.to_unsafe, len, phase_name(id))
       len = append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
       if id == PHASE_SUSPEND && @@suspend_waiting_id == SUSPEND_UNSET
-        len = append(buf.to_unsafe, len, "gcry: the stop never reached the suspend wait — it is " \
-                                         "stuck before it, in the handshake or a lock it takes " \
-                                         "first. Reported once per stop\n")
+        len = append(buf.to_unsafe, len, "gcry: the stop never reached the suspend wait — ")
+        len = append(buf.to_unsafe, len, step_name(@@suspend_step))
+        len = append(buf.to_unsafe, len, ". Reported once per stop\n")
       elsif id == PHASE_SUSPEND && @@suspend_waiting_id == 0_u64
         # The wait loop clears the breadcrumb when it finishes, so a zero here
         # does not mean "waiting on thread 0" — it means the loop is done and

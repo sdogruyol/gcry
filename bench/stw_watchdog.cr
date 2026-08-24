@@ -143,6 +143,14 @@ failures = [] of String
 # thread-stacks, which is a later phase — the arm that exercises the
 # before-the-loop case is `armed+quiet` plus a fresh process, so the assertion
 # here is the negative one: no arm may claim acknowledgement it did not see.
+# And it must name *which* step. The phase covers six of them — gate, staged
+# wait, Thread.lock, stack bounds, signals, acks — and four aarch64 hangs were
+# reported as "suspend" without ever saying which.
+unless armed_presuspend.includes?("monitor gate not yet closed")
+  failures << "a pre-loop stall did not name the step it was in — `phase=suspend` covers six " \
+              "and naming the phase alone is what left four aarch64 hangs unplaced"
+end
+
 unless armed_presuspend.includes?("never reached the suspend wait")
   failures << "a stall before the suspend loop did not say so — it is reporting a breadcrumb " \
               "from an earlier stop"

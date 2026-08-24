@@ -86,6 +86,7 @@ module Gcry
       # The Monitor is never signal-suspended, so it is shut out by handshake
       # instead — before anything it could be mutating is touched.
       MonitorGate.close
+      StwWatchdog.note_suspend_step(StwWatchdog::STEP_GATE_CLOSED)
       @stw_owner = current_thread
       @stw_owner_pthread = LibC.pthread_self.unsafe_as(UInt64)
       {% if flag?(:darwin) %}
@@ -111,8 +112,10 @@ module Gcry
         # bounded delay and not a hung collector, so the wait gives up and says
         # so in `stw_staged_wait_timeouts`.
         wait_for_staged_threads if @staged_wait
+        StwWatchdog.note_suspend_step(StwWatchdog::STEP_STAGED_DONE)
 
         Thread.lock
+        StwWatchdog.note_suspend_step(StwWatchdog::STEP_THREAD_LOCK)
         begin
           # Take every thread's stack bounds while they are all still running.
           # `pthread_getattr_np` locks the *target's* descriptor, so asking it
@@ -141,6 +144,7 @@ module Gcry
           # thread that exists but has not pushed itself yet is neither
           # suspended nor scanned (src/gcry/platform/linux_thread_census.cr).
           # Off by default: it reads /proc inside the pause.
+          StwWatchdog.note_suspend_step(StwWatchdog::STEP_BOUNDS_DONE)
           census_threads(listed) if @thread_census
           Thread.unsafe_each do |thread|
             next if thread == current_thread
@@ -170,6 +174,7 @@ module Gcry
           # Is anyone mid-`realloc` copy as the world stops? See
           # `note_realloc_overlap`.
           note_realloc_overlap
+          StwWatchdog.note_suspend_step(StwWatchdog::STEP_SIGNALS_SENT)
           acked = 0
           @suspend_stall_reported = false
           Thread.unsafe_each do |thread|
