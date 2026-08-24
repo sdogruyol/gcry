@@ -241,3 +241,60 @@ the next step.
 
 `GCRY_UNMAP_GUARD=1` survived a 260 s run at 461 req/s where the ledger
 arm died — one run, and not yet a claim.
+
+
+---
+
+# Where the second defect actually lives: the address space, not the object graph
+
+Every liveness question has now come back negative, and one non-liveness
+question has come back positive.
+
+## The positive result
+
+`GCRY_UNMAP_GUARD=1` — whose only effect is that a released range is
+`mprotect(PROT_NONE)`ed and **kept** instead of being handed back to the
+kernel:
+
+| Arm | Runs | Died | Throughput |
+|-----|-----:|-----:|-----------:|
+| tip | 6 | **3** | 92–438 req/s |
+| `GCRY_UNMAP_GUARD=1` | **11** | **0** | 432–537 req/s |
+
+Fisher exact on 0/11 against 3/6 is p ≈ 0.02. The guard arm is also
+consistently the *faster* one, which is what a run that is not thrashing
+toward a crash looks like.
+
+Engagement is verified rather than assumed: `guard_slots_used` reached 675 of
+8192 with **0 overflows** by collection 299, so every release in that run was
+guarded and the arm never degenerated into the baseline.
+
+## What that rules in, and what it rules out
+
+Under the guard a stale pointer into a released range would still fault —
+`PROT_NONE` faults on read. **Nothing faulted, in 11 runs.** So the defect is
+not a dangling pointer being dereferenced. What the guard removes is the other
+thing: the address is never handed back, so no later `mmap` can be given it.
+And reuse is not rare — `release_remapped` counted 15 released bases handed
+back by collection 22.
+
+That is consistent with everything else here. Nothing marked referenced the
+block when it died; no root did; no thread was missing from the stopped set;
+the chunk index was consistent at every one of 172 collections; no base was
+released twice; zeroing every allocation changed nothing. The object graph is
+not where this lives.
+
+## Eliminated, with engagement shown
+
+| Hypothesis | Arm | Engagement | Result |
+|---|---|---|---|
+| a base released twice with no remap between | `note_release_base` | `release_remapped` = 15 | `release_double` = **0** |
+| a fresh block that is not really zero | `GCRY_ALWAYS_CLEAR=1` | — | **4 of 4** died |
+| a stale or overlapping chunk-index entry | `GCRY_INDEX_AUDIT=1` | 172 audits in 172 collections | overlaps **0**, mismatch **0**; 3 of 3 still died, so the audit does not hide it |
+
+## Mitigation available today
+
+`GCRY_UNMAP_GUARD=1` is a measured, significant mitigation and costs address
+space rather than RSS (the pages are dropped by `PROT_NONE` exactly as `munmap`
+drops them). It is bounded: after 8192 guarded ranges it overflows and releases
+normally again, so it is protection with a ceiling, not a fix.
