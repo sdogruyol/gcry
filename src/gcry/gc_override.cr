@@ -143,11 +143,19 @@ module GC
     # Crystal 1.21+ ExecutionContext does not call GC.set_stackbottom on swap —
     # refresh the running fiber bottom each collect.
     heap.before_collect do
-      heap.set_stackbottom(Fiber.current.@stack.bottom)
-      # Arm the crash reporter here rather than above: Crystal installs its own
-      # SIGSEGV handler after GC.init and does not chain, so anything installed
-      # earlier is discarded. See Gcry::SegvReport.install_if_requested.
+      # Arm the crash reporter *first*. It is installed here rather than at
+      # `GC.init` because Crystal installs its own SIGSEGV handler after init
+      # and does not chain, so anything installed earlier is discarded
+      # (`Gcry::SegvReport.install_if_requested`).
+      #
+      # Before the `Fiber.current` call below rather than after it: that call
+      # is the one thing in this block that can raise, and a reporter armed
+      # after it is a reporter that is not armed when it does. A/B'd on
+      # `bench/large_cache_race.cr` and the two orders were indistinguishable
+      # there — the reporter installs either way — so this is ordering for a
+      # reason, not a measured fix.
       Gcry::SegvReport.install_if_requested
+      heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
 
     # Layout tables must be built on LibC malloc (before @@gcry_ready). Hash/Array
@@ -766,6 +774,7 @@ module GC
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
     heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
+    Gcry::MarkBitmap.retain_old = true if env_flag_one?("GCRY_BITMAP_RETAIN_OLD")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: restore the last-chunk cache read that crashed

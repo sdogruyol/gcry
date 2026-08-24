@@ -26,6 +26,17 @@ module Gcry
   # The bitmap is stored in its own mmap, separate from the managed heap, so
   # allocating it never recurses into the collector.
   class MarkBitmap
+    @@retain_old = false
+    @@retired = 0_u64
+
+    def self.retain_old=(v : Bool)
+      @@retain_old = v
+    end
+
+    def self.retired : UInt64
+      @@retired
+    end
+
     INITIAL_BYTES = 65536_u64 # 64 KiB — covers ~512 KiB of managed heap (1 bit per word)
 
     @base : UInt8* = Pointer(UInt8).null
@@ -107,7 +118,17 @@ module Gcry
         @mapped_bytes = target
         @capacity_bytes = target
         @base_addr = base_addr
-        LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        # Retiring rather than freeing, when asked. `update_heap_bounds_after_unmap`
+        # resizes this from two places that do not agree about locking: the
+        # mutator paths hold `@alloc_lock`, the in-STW path does not — and a
+        # mutator suspended mid-resize still holds a pointer into the old
+        # mapping. `GCRY_BITMAP_RETAIN_OLD=1` keeps the old mapping to find out
+        # whether that is what faults.
+        if @@retain_old
+          @@retired &+= 1
+        else
+          LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        end
         yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64
       elsif target < @capacity_bytes && base_addr == @base_addr
         # Shrink: allocate new (smaller) mapping, copy valid bits from old.
@@ -122,7 +143,17 @@ module Gcry
         @mapped_bytes = target
         @capacity_bytes = target
         # base_addr unchanged
-        LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        # Retiring rather than freeing, when asked. `update_heap_bounds_after_unmap`
+        # resizes this from two places that do not agree about locking: the
+        # mutator paths hold `@alloc_lock`, the in-STW path does not — and a
+        # mutator suspended mid-resize still holds a pointer into the old
+        # mapping. `GCRY_BITMAP_RETAIN_OLD=1` keeps the old mapping to find out
+        # whether that is what faults.
+        if @@retain_old
+          @@retired &+= 1
+        else
+          LibC.munmap(old_base.as(Void*), LibC::SizeT.new(old_mapped))
+        end
         yield new_base.as(UInt64*), base_addr, target.to_u64 * 8_u64
       else
         # Same size, base_addr shifted — old bits are at wrong offsets.
