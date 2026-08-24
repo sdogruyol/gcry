@@ -57,6 +57,12 @@ module Gcry
     POLL_NS = 50_000_000_u64 # 50 ms
 
     @@phase = PHASE_NONE
+    # `@@suspend_*` are written only by `note_suspend`, so without this they
+    # survive from one stop to the next. A stop that hangs *before* it reaches
+    # the wait loop then reports the previous stop's cleared breadcrumb —
+    # "every thread acknowledged" — which is the same mistake as reading a
+    # cleared id as thread 0, one stop removed. Stamped unset at phase entry.
+    SUSPEND_UNSET = 0xffff_ffff_ffff_ffff_u64
     @@since_ns = 0_u64
     @@threshold_ns = 0_u64
     @@started = false
@@ -143,6 +149,11 @@ module Gcry
     # phase after measuring and drops the sample if it moved.
     def self.enter(id : Int32) : Nil
       @@since_ns = now_ns
+      if id == PHASE_SUSPEND
+        @@suspend_waiting_id = SUSPEND_UNSET
+        @@suspend_expected = 0
+        @@suspend_acked = 0
+      end
       @@phase = id
     end
 
@@ -186,7 +197,11 @@ module Gcry
       len = append(buf.to_unsafe, len, " ms in phase=")
       len = append(buf.to_unsafe, len, phase_name(id))
       len = append(buf.to_unsafe, len, " — every mutator is frozen and the collector is not\n")
-      if id == PHASE_SUSPEND && @@suspend_waiting_id == 0_u64
+      if id == PHASE_SUSPEND && @@suspend_waiting_id == SUSPEND_UNSET
+        len = append(buf.to_unsafe, len, "gcry: the stop never reached the suspend wait — it is " \
+                                         "stuck before it, in the handshake or a lock it takes " \
+                                         "first. Reported once per stop\n")
+      elsif id == PHASE_SUSPEND && @@suspend_waiting_id == 0_u64
         # The wait loop clears the breadcrumb when it finishes, so a zero here
         # does not mean "waiting on thread 0" — it means the loop is done and
         # the stall is after it, before the phase advances. Saying otherwise

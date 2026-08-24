@@ -865,6 +865,28 @@ module Gcry
     # otherwise foreign header — the hazard every live-world chunk walk carries
     # — those bounds are whatever happens to be at that address, and the
     # `MADV_DONTNEED` built from them lands on memory that is not gcry's.
+    # Re-read the block headers covering a run just before it is released. The
+    # mask that chose this run was built earlier and without a lock; anything
+    # that reads USED now was allocated into a page this call is about to drop.
+    private def audit_page_run_live(chunk : ChunkHeader*, payload : UInt32,
+                                    run_start : UInt64, run_end : UInt64) : UInt32
+      live = 0_u32
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      while (cursor + block_bytes) <= limit
+        b0 = cursor.address
+        if b0 + block_bytes > run_start && b0 < run_end
+          unless BlockHeader.free?(cursor.as(BlockHeader*))
+            live &+= 1
+            @page_release_live_blocks &+= 1
+          end
+        end
+        cursor += block_bytes
+      end
+      live
+    end
+
     private def madvise_range_ok?(chunk : ChunkHeader*, run_start : UInt64, run_end : UInt64) : Bool
       return true if @madvise_unchecked
       base = chunk.as(Void*).address
@@ -920,7 +942,16 @@ module Gcry
             len = run_end - run_start
             if run_start >= data0 && run_end <= data1 && len > 0 &&
                madvise_range_ok?(chunk, run_start, run_end)
-              ok = if preserve_content
+              # The mask that chose this run was built by reading every block
+              # header in the chunk with no lock, and mutators have been
+              # allocating ever since. Measured: 30, 31, 5 and 41 live blocks
+              # sitting in runs that were about to be dropped, against 0 with
+              # the walk off. Re-read now — this is the last moment the answer
+              # is current — and leave the run alone if anything is live in it.
+              live_now = audit_page_run_live(chunk, payload, run_start, run_end)
+              skip_run = live_now > 0 && !@page_release_unchecked
+              @page_release_skipped_runs &+= 1 if skip_run
+              ok = skip_run ? false : if preserve_content
                      {% if flag?(:linux) %}
                        Platform.release_physical_pages_free(run_start, len)
                      {% else %}

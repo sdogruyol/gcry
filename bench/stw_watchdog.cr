@@ -112,7 +112,17 @@ armed_stopped = run_child(self_path, {
   "GCRY_STW_TEST_STOPPED_STALL_MS" => STALL_MS.to_s,
 })
 
+# Before the wait loop is even reached: the handshake and the locks the stop
+# takes first. Without this arm the "never reached the suspend wait" branch is
+# a branch nobody has seen fire — and it exists because a stale breadcrumb
+# reported this exact region as "every thread acknowledged" (32722237222).
+armed_presuspend = run_child(self_path, {
+  "GCRY_STW_WATCHDOG_MS"              => THRESHOLD_MS.to_s,
+  "GCRY_STW_TEST_PRESUSPEND_STALL_MS" => STALL_MS.to_s,
+})
+
 record["armed+stalled"] = armed_stalled
+record["armed+presusp"] = armed_presuspend
 record["armed+stopped"] = armed_stopped
 record["armed+suspend"] = armed_suspend
 record["armed+postsusp"] = armed_postsuspend
@@ -127,6 +137,25 @@ end
 puts ""
 
 failures = [] of String
+
+# A stop that hangs before it reaches the wait loop must not report the
+# previous stop's cleared breadcrumb. `GCRY_STW_TEST_STALL_MS` stalls in
+# thread-stacks, which is a later phase — the arm that exercises the
+# before-the-loop case is `armed+quiet` plus a fresh process, so the assertion
+# here is the negative one: no arm may claim acknowledgement it did not see.
+unless armed_presuspend.includes?("never reached the suspend wait")
+  failures << "a stall before the suspend loop did not say so — it is reporting a breadcrumb " \
+              "from an earlier stop"
+end
+if armed_presuspend.includes?("every thread acknowledged")
+  failures << "a stall before the suspend loop claimed every thread acknowledged — the " \
+              "breadcrumb is carrying over between stops"
+end
+
+if armed_stalled.includes?("every thread acknowledged")
+  failures << "a stall outside the suspend phase claimed every thread acknowledged — the " \
+              "breadcrumb is carrying over between stops again"
+end
 
 unless armed_stopped.includes?("phase=stopped-before-flush")
   failures << "a stall after PHASE_STOPPED did not name that phase — the span between the " \

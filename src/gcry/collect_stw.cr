@@ -77,6 +77,12 @@ module Gcry
 
       current_thread = Thread.current
       StwWatchdog.enter(StwWatchdog::PHASE_SUSPEND)
+      if (prestall = @stw_test_presuspend_stall_ms) > 0
+        deadline = Gcry::Clock.monotonic_ns &+ prestall &* 1_000_000_u64
+        while Gcry::Clock.monotonic_ns < deadline
+          Intrinsics.pause
+        end
+      end
       # The Monitor is never signal-suspended, so it is shut out by handshake
       # instead — before anything it could be mutating is touched.
       MonitorGate.close

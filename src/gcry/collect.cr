@@ -445,6 +445,21 @@ module Gcry
     getter large_cached_by_sweep : UInt64 = 0_u64
     getter large_cached_by_free : UInt64 = 0_u64
 
+    # Live blocks found inside a page run at the moment it was about to be
+    # released. The live-page mask is built by reading every block header with
+    # no lock, and the `madvise` goes out afterwards — so a block allocated in
+    # between is live memory in a range about to be dropped. Counting it is
+    # binary where a crash-rate A/B is not: either a live block is in the run or
+    # it is not.
+    getter page_release_live_blocks : UInt64 = 0_u64
+    # Runs skipped because that re-read found a live block. Without the
+    # re-read they were released with the object still in them.
+    getter page_release_skipped_runs : UInt64 = 0_u64
+
+    # Research only: release a page run without re-reading its headers, which
+    # is what it did before 2026-08-24.
+    property page_release_unchecked : Bool = false
+
     # How many threads are inside `realloc`'s copy right now, and how many
     # collections have begun while at least one was. This measures the *window*
     # rather than its consequences: a crash-rate A/B cannot separate a 5 %
@@ -488,6 +503,12 @@ module Gcry
     # span that used to be reported as `suspend` and is where the aarch64 hangs
     # land. A phase with no control is a phase nobody has seen fire.
     property stw_test_stopped_stall_ms : UInt64 = 0_u64
+
+    # Research only: stall between entering PHASE_SUSPEND and the first
+    # `note_suspend` — the handshake and the locks the stop takes before it
+    # suspends anyone. That is the region a stale breadcrumb used to report as
+    # "every thread acknowledged".
+    property stw_test_presuspend_stall_ms : UInt64 = 0_u64
 
     UNMAP_GUARD_SLOTS = 8192
 

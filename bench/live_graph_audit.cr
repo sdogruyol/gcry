@@ -506,7 +506,8 @@ if ARGV.includes?("--child")
   heap = Gcry.default_heap
   puts "child: #{Verdict.line} dontneed #{heap.dontneed_bytes} collections #{heap.collections} " \
        "range_rejects #{heap.madvise_range_rejects} realloc_overlaps #{heap.realloc_collect_overlaps} " \
-       "large_swept #{heap.large_cached_by_sweep} large_freed #{heap.large_cached_by_free}"
+       "large_swept #{heap.large_cached_by_sweep} large_freed #{heap.large_cached_by_free} " \
+       "live_in_run #{heap.page_release_live_blocks} skipped_runs #{heap.page_release_skipped_runs}"
   exit(Verdict.bad? ? 1 : 0)
 end
 

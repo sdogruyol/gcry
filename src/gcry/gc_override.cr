@@ -764,6 +764,7 @@ module GC
     heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
+    heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")
@@ -829,6 +830,9 @@ module GC
     end
     if tst = env_u64("GCRY_STW_TEST_STOPPED_STALL_MS")
       heap.stw_test_stopped_stall_ms = tst if tst <= 60_000
+    end
+    if pre = env_u64("GCRY_STW_TEST_PRESUSPEND_STALL_MS")
+      heap.stw_test_presuspend_stall_ms = pre if pre <= 60_000
     end
     if sst = env_u64("GCRY_STW_TEST_SUSPEND_STALL_MS")
       heap.stw_test_suspend_stall_ms = sst if sst <= 60_000
