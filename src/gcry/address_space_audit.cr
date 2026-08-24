@@ -103,6 +103,7 @@ module Gcry
       base_hits = 0_u64
       interior_hits = 0_u64
       reported = 0
+      @collector_frame_hits = 0_u64
       truncated = false
       high = target &+ size
 
@@ -234,9 +235,21 @@ module Gcry
         value = words[i]
         if value == target
           base.value &+= 1
-          if reported < ADDRESS_SPACE_REPORT_LIMIT
+          hit_at = at &+ (i.to_u64 &* 8)
+          # The collector's own call chain is explicitly *not evidence* — the
+          # audit carries the target through it as an argument — and it was
+          # spending the whole report budget: 245 of the 276 holder lines in
+          # the acikturkiye run were that, and only the four leftover slots
+          # said anything about where the value really lives. Count them,
+          # print one, and leave the budget to holders that could be evidence.
+          if collector_own_frame?(hit_at)
+            @collector_frame_hits &+= 1
+            if @collector_frame_hits == 1
+              report_address_space_hit(target, hit_at, lo, hi, perms, name, name_len)
+            end
+          elsif reported < ADDRESS_SPACE_REPORT_LIMIT
             reported += 1
-            report_address_space_hit(target, at &+ (i.to_u64 &* 8), lo, hi, perms, name, name_len)
+            report_address_space_hit(target, hit_at, lo, hi, perms, name, name_len)
           end
         elsif value > target && value < high
           interior.value &+= 1
@@ -299,7 +312,22 @@ module Gcry
         len = RawOut.append(buf, len, "gcry heap block 0x")
         len = RawOut.append_hex(buf, len, BlockHeader.user_from(holder).address)
         len = RawOut.append(buf, len, BlockHeader.free?(holder) ? " (FREE" : " (used")
-        len = RawOut.append(buf, len, heap_marked?(holder) ? ", marked)" : ", unmarked)")
+        len = RawOut.append(buf, len, heap_marked?(holder) ? ", marked" : ", unmarked")
+        # Size, ATOMIC and the payload's first Int32, because "a marked heap
+        # block holds it" is not yet an answer. The mark audit skips ATOMIC
+        # parents exactly as `scan_object` does, so a marked ATOMIC holder is a
+        # *different* defect from a marked scanned one: it means something
+        # stored a heap pointer in an allocation Crystal declared pointer-free,
+        # and no walk will ever follow it.
+        len = RawOut.append(buf, len, ", ")
+        len = RawOut.append_u64(buf, len, holder.value.size.to_u64)
+        len = RawOut.append(buf, len, BlockHeader.atomic?(holder) ? " bytes, ATOMIC" : " bytes, scanned")
+        if holder.value.size >= 4
+          len = RawOut.append(buf, len, ", first Int32 ")
+          len = RawOut.append_u64(buf, len,
+            BlockHeader.user_from(holder).as(UInt32*).value.to_u64)
+        end
+        len = RawOut.append(buf, len, ")")
         return len
       end
 
@@ -381,6 +409,17 @@ module Gcry
       {% end %}
     end
 
+    # Same test `describe_mutator_stack_holder` applies, asked before the
+    # report budget is charged rather than after.
+    private def collector_own_frame?(at : UInt64) : Bool
+      stack = Fiber.current.@stack
+      lo = stack.pointer.address
+      hi = stack.bottom.address
+      return false unless lo < hi && at >= lo && at < hi
+      entry = @collect_entry_sp
+      entry > 0 && at < entry
+    end
+
     private def describe_mutator_stack_holder(buf : UInt8*, len : Int32, at : UInt64) : Int32?
       stack = Fiber.current.@stack
       lo = stack.pointer.address
@@ -460,6 +499,11 @@ module Gcry
     getter classifier_fibers : UInt64 = 0_u64
     getter classifier_pooled_stacks : UInt64 = 0_u64
     getter classifier_thread_bounds : UInt64 = 0_u64
+
+    # Hits that landed in the collector's own call chain, which the audit
+    # carries the target through. Reported once and otherwise counted, so the
+    # report budget is spent on holders that could be evidence.
+    getter collector_frame_hits : UInt64 = 0_u64
 
     private def describe_pooled_stack_holder(buf : UInt8*, len : Int32, at : UInt64) : Int32?
       out = nil

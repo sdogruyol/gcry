@@ -161,7 +161,16 @@ module Gcry
       reported = 0
       each_chunk do |chunk|
         next if ChunkHeader.dormant?(chunk)
-        next if ChunkHeader.large?(chunk)
+        if ChunkHeader.large?(chunk)
+          # This walk used to skip large chunks outright, so the audit written
+          # to say *where a dying block's address lives* could not look at the
+          # only class of block that dies in the acikturkiye crash: every one
+          # of those is a 69632-byte large chunk
+          # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`).
+          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          reported = audit_dying_block(header, pointerof(checked), pointerof(hits), reported)
+          next
+        end
         class_index = chunk.value.size_class.to_i32!
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
         payload = SizeClasses.payload(class_index)
@@ -172,72 +181,89 @@ module Gcry
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
           cursor += block_bytes
-          next if BlockHeader.free?(header)
-          next if heap_marked?(header)
-          # About to be freed.
-          checked &+= 1
-          addr = BlockHeader.user_from(header).address
-          found = false
-          Thread.unsafe_each do |thread|
-            Platform.each_thread_greg(thread.to_unsafe) do |value|
-              found = true if value.address == addr
-            end
-          end
-          offered = mutator_offered?(addr)
-          unless found || offered
-            # The interesting case: about to be freed, in no suspended thread's
-            # registers, and never handed to the mark by the mutator-stack scan
-            # either. Reported once per collection so the volume stays readable.
-            if reported < MARK_AUDIT_REPORT_LIMIT
-              reported += 1
-              b2 = uninitialized UInt8[512]
-              l2 = 0
-              l2 = RawOut.append(b2.to_unsafe, l2, "gcry: dying audit — block 0x")
-              l2 = RawOut.append_hex(b2.to_unsafe, l2, addr)
-              l2 = RawOut.append(b2.to_unsafe, l2, " size ")
-              l2 = RawOut.append_u64(b2.to_unsafe, l2, header.value.size.to_u64)
-              l2 = RawOut.append(b2.to_unsafe, l2,
-                " dies unreferenced: not in the heap, not in a suspended thread's registers, and " \
-                "never offered by the mutator-stack scan. collection ")
-              l2 = RawOut.append_u64(b2.to_unsafe, l2, @collections)
-              # The offered/not-offered claim is only as good as the table it is
-              # read from. A full table drops later addresses silently, and the
-              # answer would then be "not recorded", not "not offered".
-              l2 = RawOut.append(b2.to_unsafe, l2, " [mutator table ")
-              l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_count.to_u64)
-              l2 = RawOut.append(b2.to_unsafe, l2, "/")
-              l2 = RawOut.append_u64(b2.to_unsafe, l2, MUTATOR_SEEN_SLOTS.to_u64)
-              l2 = RawOut.append(b2.to_unsafe, l2, ", dropped ")
-              l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_dropped)
-              l2 = RawOut.append(b2.to_unsafe, l2, "]")
-              l2 = RawOut.append(b2.to_unsafe, l2, "\n")
-              RawOut.flush(b2.to_unsafe, l2)
-            end
-            # Every place gcry looks has now said no. Ask the kernel where the
-            # value actually is (src/gcry/address_space_audit.cr).
-            audit_address_space_once(addr, header.value.size.to_u64)
-          end
-          @dying_offered_by_mutator &+= 1 if offered
-          next unless found
-          hits &+= 1
-          next unless reported < MARK_AUDIT_REPORT_LIMIT
-          reported += 1
-          buf = uninitialized UInt8[512]
-          len = 0
-          len = RawOut.append(buf.to_unsafe, len,
-            "gcry: dying-register audit — block 0x")
-          len = RawOut.append_hex(buf.to_unsafe, len, addr)
-          len = RawOut.append(buf.to_unsafe, len, " size ")
-          len = RawOut.append_u64(buf.to_unsafe, len, header.value.size.to_u64)
-          len = RawOut.append(buf.to_unsafe, len,
-            " is about to be swept and its address is in a suspended thread's registers. collection ")
-          len = RawOut.append_u64(buf.to_unsafe, len, @collections)
-          len = RawOut.append(buf.to_unsafe, len, "\n")
-          RawOut.flush(buf.to_unsafe, len)
+          reported = audit_dying_block(header, pointerof(checked), pointerof(hits), reported)
         end
       end
       @dying_blocks_checked &+= checked
       @dying_register_hits &+= hits
+    end
+
+    # One block that the sweep is about to reclaim. Counters go through
+    # pointers because this runs inside the stopped world and must not
+    # allocate a tuple to return them.
+    private def audit_dying_block(header : BlockHeader*, checked : UInt64*, hits : UInt64*,
+                                  reported : Int32) : Int32
+      return reported if BlockHeader.free?(header)
+      return reported if heap_marked?(header)
+      # The address-space walk fires **once per collection**, for the first
+      # dying block that survives every other check — and left to itself it
+      # always picks a small one. `GCRY_DYING_AUDIT_MIN_BYTES` aims that single
+      # shot: the block that dies in the acikturkiye crash is always 65536
+      # bytes, and without this the audit spent 111 collections describing
+      # other people's garbage.
+      min = @dying_audit_min_bytes
+      return reported if min > 0 && header.value.size.to_u64 < min
+      # About to be freed.
+      checked.value &+= 1
+      addr = BlockHeader.user_from(header).address
+      found = false
+      Thread.unsafe_each do |thread|
+        Platform.each_thread_greg(thread.to_unsafe) do |value|
+          found = true if value.address == addr
+        end
+      end
+      offered = mutator_offered?(addr)
+      unless found || offered
+        # The interesting case: about to be freed, in no suspended thread's
+        # registers, and never handed to the mark by the mutator-stack scan
+        # either. Reported once per collection so the volume stays readable.
+        if reported < MARK_AUDIT_REPORT_LIMIT
+          reported += 1
+          b2 = uninitialized UInt8[512]
+          l2 = 0
+          l2 = RawOut.append(b2.to_unsafe, l2, "gcry: dying audit — block 0x")
+          l2 = RawOut.append_hex(b2.to_unsafe, l2, addr)
+          l2 = RawOut.append(b2.to_unsafe, l2, " size ")
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, header.value.size.to_u64)
+          l2 = RawOut.append(b2.to_unsafe, l2,
+            " dies unreferenced: not in the heap, not in a suspended thread's registers, and " \
+            "never offered by the mutator-stack scan. collection ")
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, @collections)
+          # The offered/not-offered claim is only as good as the table it is
+          # read from. A full table drops later addresses silently, and the
+          # answer would then be "not recorded", not "not offered".
+          l2 = RawOut.append(b2.to_unsafe, l2, " [mutator table ")
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_count.to_u64)
+          l2 = RawOut.append(b2.to_unsafe, l2, "/")
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, MUTATOR_SEEN_SLOTS.to_u64)
+          l2 = RawOut.append(b2.to_unsafe, l2, ", dropped ")
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, @mutator_seen_dropped)
+          l2 = RawOut.append(b2.to_unsafe, l2, "]")
+          l2 = RawOut.append(b2.to_unsafe, l2, "\n")
+          RawOut.flush(b2.to_unsafe, l2)
+        end
+        # Every place gcry looks has now said no. Ask the kernel where the
+        # value actually is (src/gcry/address_space_audit.cr).
+        audit_address_space_once(addr, header.value.size.to_u64)
+      end
+      @dying_offered_by_mutator &+= 1 if offered
+      return reported unless found
+      hits.value &+= 1
+      return reported unless reported < MARK_AUDIT_REPORT_LIMIT
+      reported += 1
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len,
+        "gcry: dying-register audit — block 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, addr)
+      len = RawOut.append(buf.to_unsafe, len, " size ")
+      len = RawOut.append_u64(buf.to_unsafe, len, header.value.size.to_u64)
+      len = RawOut.append(buf.to_unsafe, len,
+        " is about to be swept and its address is in a suspended thread's registers. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+      reported
     end
 
     # Runs after `mark_loop` and before `sweep`, with the world stopped, so the

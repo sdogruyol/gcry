@@ -77,6 +77,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
+| `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying / address-space audit. That walk fires once per collection and left to itself always picks a small block; this aims the single shot at a size. |
 | `GCRY_BITMAP_RETAIN_OLD=1` | Research arm: keep the old mark-bitmap mapping alive across a resize instead of unmapping it. `update_heap_bounds_after_unmap` resizes the bitmap from two paths that do not agree about locking, and a mutator suspended mid-resize still holds a pointer into the old mapping. Measured 4 of 60 against 5 of 60 — no effect; the arm stays because the next question about that resize will want it. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying/address-space audit. The address-space walk fires once per collection and otherwise always picks a small block; this aims that single shot at a size. |
 | `GCRY_LAYOUT_DUMP=1` | Print every layout registration at boot: type name, type_id, and the scan/noscan offsets the macro emitted. A *missing* offset is otherwise invisible — the mark audit can name the type_id that lost an edge but not the type. |

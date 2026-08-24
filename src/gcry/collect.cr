@@ -178,6 +178,9 @@ module Gcry
     # Large chunks the sweep found published but not yet filled in. Non-zero
     # means a mutator was suspended between `map_chunk` and `set_used`.
     getter sweep_large_uninitialised : UInt64 = 0_u64
+    # `GCRY_DYING_AUDIT_MIN_BYTES` — ignore dying blocks smaller than this, so
+    # the once-per-collection address-space walk can be aimed at a size.
+    property dying_audit_min_bytes : UInt64 = 0_u64
     # Hash-kind objects whose own body was word-scanned alongside the entry
     # walk. Silence here would mean the collision guard is not engaged.
     getter layout_hash_bodies : UInt64 = 0_u64
