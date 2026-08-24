@@ -597,6 +597,13 @@ module Gcry
         @guard_overflows &+= 1
         return false
       end
+      # Read the identity *before* the mprotect. Reading it after faults on
+      # every guarded release, because the range it reads is the one just made
+      # PROT_NONE. Committed once as 46060bc and then lost to an over-broad
+      # `git checkout <older> -- src/gcry/collect.cr` during an unrelated
+      # backout; the crash it causes was chased for several rounds afterwards
+      # and briefly read as a double free.
+      tag = guard_user_tag(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
       return false if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
@@ -605,7 +612,7 @@ module Gcry
       @guard_len[i] = len
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
-      @guard_tag[i] = guard_user_tag(base, len, kind)
+      @guard_tag[i] = tag
       @guard_count = i + 1
       true
     end
