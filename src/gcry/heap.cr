@@ -439,6 +439,7 @@ module Gcry
         note_explicit_free(payload)
         live_objects_dec
         @finalizers.notice_reclaim(pointer)
+        @large_cached_by_free &+= 1
         with_alloc_lock { cache_large_chunk(chunk, header) }
         trim_large_cache
         Invariant.after_free(self, pointer)

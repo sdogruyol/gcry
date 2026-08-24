@@ -438,6 +438,13 @@ module Gcry
     # created it. The ledger says what was released; this says what it was.
     property trace_large : Bool = false
 
+    # Which door a large chunk left by. The ledger names the *release*, which is
+    # always the trim — but a chunk reaches the trim either because the sweep
+    # found it unmarked or because someone called `GC.free` on it, and those are
+    # different defects with different owners.
+    getter large_cached_by_sweep : UInt64 = 0_u64
+    getter large_cached_by_free : UInt64 = 0_u64
+
     # How many threads are inside `realloc`'s copy right now, and how many
     # collections have begun while at least one was. This measures the *window*
     # rather than its consequences: a crash-rate A/B cannot separate a 5 %

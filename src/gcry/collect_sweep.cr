@@ -359,6 +359,7 @@ module Gcry
         # Recycle mapping — never munmap inside STW (Linux VMA munmap
         # of thousands of large HTTP buffers dominated pause time).
         mapped = chunk.value.mapped_bytes
+        @large_cached_by_sweep &+= 1
         cache_large_chunk(chunk, header)
         @bytes_reclaimed_since_gc += mapped
         live_objects_dec

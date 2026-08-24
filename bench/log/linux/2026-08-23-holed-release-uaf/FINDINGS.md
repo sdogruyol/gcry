@@ -240,6 +240,47 @@ So: a raw buffer, 75 192 bytes, allocated by the Crystal runtime between
 `GC.init` finishing and `main`, released by gcry through `large-object release`
 while still being written five words in.
 
+## It is swept, not freed
+
+A large chunk reaches the trim by one of two doors: the sweep found it unmarked
+(`collect_sweep.cr`, the `elsif major` branch), or somebody called `GC.free`
+(`Heap#free`). Those are different defects with different owners, so they are
+counted apart:
+
+    large_swept 90    large_freed 0
+
+Nothing in this workload frees a large object explicitly. **The sweep decides
+the victim is unreachable.** So its MARK bit — in the block header, since the
+side bitmap is opt-in via `-Dgcry_side_bitmap` and these builds do not set it —
+is never set during marking.
+
+The question is no longer "why is a live object released" but "why is a live
+object not marked".
+
+## Two more eliminations
+
+**The static `type_id` gate.** The best hypothesis of the session, and wrong.
+The victim is a raw buffer with no type_id, born before `main`, so its reference
+should live in a global — and `mark_root_candidate` gates exactly that case
+(`source == RootSource::Static`), while `mark_candidate` and
+`mark_explicit_root` both carry comments saying raw buffers must not be gated.
+The inconsistency is real. It is not this defect:
+
+    type_id gate on (default)   3 of 24
+    type_id gate off            4 of 24
+
+**The mark bitmap shrinking.** `update_heap_bounds_after_unmap` shrinks the
+bitmap when bounds move, and the page-release walk moves them more — but the
+default build marks in the block header. The side bitmap is behind a
+compile-time flag these builds do not set, so no runtime measurement is needed
+to rule it out.
+
+**`GCRY_DISABLE_STATIC_ROOTS=1` cannot discriminate here.** It kills 16 of 16,
+which is what disabling every global root does to any Crystal program; it says
+nothing about this victim. Recorded because the first three runs of it read as
+"clean" — the probe only looked for a `gcry: SIGSEGV` line and counted every
+other death as a pass.
+
 ## What is still needed
 
 The identity of that 75 192-byte object. The next instrument is the obvious one:
