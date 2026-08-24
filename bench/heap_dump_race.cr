@@ -80,7 +80,8 @@ if ARGV.includes?("--child")
 
   threads.each(&.join)
   dumper.join
-  puts "child: ballast #{ballast.size}"
+  heap = Gcry.default_heap
+  puts "child: ballast #{ballast.size} still_linked #{heap.released_chunks_still_linked} guard_overflows #{heap.guard_overflows}"
   exit 0
 end
 

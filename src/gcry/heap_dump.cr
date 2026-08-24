@@ -21,7 +21,7 @@ module Gcry
   # Warning: dumping heaps ≥ ~1 GiB may take > 10s.
   def self.dump_heap(io : IO, heap : Heap = default_heap) : UInt64
     count = 0_u64
-    heap.each_chunk_guarded do |chunk|
+    heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
         next if BlockHeader.free?(header)
@@ -50,7 +50,7 @@ module Gcry
   # Collect live user-pointer addresses (allocation-light for small heaps).
   def self.dump_heap_addresses(heap : Heap = default_heap) : Set(UInt64)
     addrs = Set(UInt64).new
-    heap.each_chunk_guarded do |chunk|
+    heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
         next if BlockHeader.free?(header)

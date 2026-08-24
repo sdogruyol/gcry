@@ -110,6 +110,13 @@ module Gcry
     # A `madvise(MADV_DONTNEED)` that lands outside the heap zeroes memory gcry
     # does not own.
     getter madvise_range_rejects : UInt64 = 0_u64
+
+    # Chunks still reachable from `@chunks` that the ledger says were already
+    # released. `unlink_chunk` runs inside the detach that precedes every
+    # release, so this should be impossible — and a crash in
+    # `update_heap_bounds_after_unmap`, eight bytes into a released chunk,
+    # says it is not. Only counted when a ledger or guard is recording.
+    getter released_chunks_still_linked : UInt64 = 0_u64
     # Research only: skip the check and issue the syscall anyway, which is what
     # it did before 2026-08-23.
     property madvise_unchecked : Bool = false
@@ -568,13 +575,6 @@ module Gcry
         @guard_overflows &+= 1
         return false
       end
-      # Read the identity *before* the mprotect. Reading it after was a crash
-      # this file introduced hours earlier the same day: every release under
-      # the guard then touched a range it had just made PROT_NONE, and
-      # `make heap-dump-race` died 40 of 40 in **both** arms — which is what a
-      # broken harness looks like, not a finding. Any measurement taken with
-      # `GCRY_UNMAP_GUARD=1` between 406f3ac and this commit is void.
-      tag = guard_user_tag(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
       return false if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
@@ -583,7 +583,7 @@ module Gcry
       @guard_len[i] = len
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
-      @guard_tag[i] = tag
+      @guard_tag[i] = guard_user_tag(base, len, kind)
       @guard_count = i + 1
       true
     end
@@ -638,10 +638,6 @@ module Gcry
     # queues instead. The walk itself still takes no lock, so allocation is not
     # stalled across its syscalls.
     @live_chunk_walk = false
-    # Threads walking `@chunks` that cannot hold `@alloc_lock` because they
-    # allocate as they go — the documented debug dumps. Guarded by
-    # `@alloc_lock`; a release that sees it non-zero leaves its chunks queued.
-    @chunk_walkers = 0
     # Instruments for `bench/dormant_flush_race.cr`: how many walks ran, and
     # how many mutator trims the flag actually diverted into the queue.
     getter live_walk_spans : UInt64 = 0_u64
@@ -1235,8 +1231,13 @@ module Gcry
       # (avoids O(N) `note_mapped` per chunk → O(N) `ensure_bitmap_covers`).
       lo = UInt64::MAX
       hi = 0_u64
+      audit = @unmap_guard || @release_ledger
       each_chunk do |chunk|
         base = chunk.address
+        if audit && guarded_release_at(base)
+          @released_chunks_still_linked &+= 1
+          next
+        end
         finish = base + chunk.value.mapped_bytes
         lo = base if base < lo
         hi = finish if finish > hi
