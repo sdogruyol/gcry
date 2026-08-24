@@ -204,7 +204,14 @@ class Verdict
   end
 end
 
+# Ordering markers against `GCRY_TRACE_LARGE=1`. The 77 824-byte map that the
+# ledger keeps naming happens at `coll=0` and before any worker starts; these
+# say whether it happens before this file's own top-level code runs at all,
+# which separates "the Crystal runtime brought it up" from "the harness did".
+raw_puts("PHASE toplevel")
+
 if ARGV.includes?("--child")
+  raw_puts("PHASE child-entry")
   threads = [] of Thread
   WORKERS.times do |w|
     threads << Thread.new do

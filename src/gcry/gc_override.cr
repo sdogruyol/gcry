@@ -175,6 +175,13 @@ module GC
       end
     end
 
+    # Ordering marker for `GCRY_TRACE_LARGE=1`: everything above is gcry
+    # bringing itself up, everything below is the program.
+    if env_flag_one?("GCRY_TRACE_LARGE")
+      buf = uninitialized UInt8[32]
+      n = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: init done\n")
+      Gcry::RawOut.flush(buf.to_unsafe, n)
+    end
     @@gcry_ready = true
     apply_env_config(heap)
 

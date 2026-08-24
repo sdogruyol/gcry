@@ -209,6 +209,37 @@ heap at all: `MarkBitmap` (mmap), the mark stack (mmap), `@chunk_index`
 says why), `Roots::Set` (`LibC.malloc`), and the layout tables (`StaticArray`,
 so BSS). Whatever it is, it belongs to the Crystal runtime's own startup.
 
+## When it is allocated
+
+An `init done` marker at the end of `GC.init`, printed only under
+`GCRY_TRACE_LARGE=1`, places both startup large maps precisely:
+
+    gcry: init done
+    gcry: large map … mapped=69632 payload=65536 coll=0
+    gcry: large map … mapped=77824 payload=75192 coll=0
+    PHASE toplevel            <- the harness's first statement
+
+Both are **after gcry has finished bringing itself up and before any user
+code**. That is Crystal's own runtime startup. One is exactly 64 KiB — a fixed
+buffer. The other, the victim, is 75 192: a computed size.
+
+Two readings were tried and neither survived:
+
+- *"it scales with type count"* — `small` (gcry only) shows one map,
+  `big` (`+http/server, +json, +uri`) shows two, the second 167 936 bytes. But
+  that changed two things at once: the type count **and** the startup work
+  those shards do (MIME tables, `Log` registry). The measurement cannot
+  separate them, and `register_all_from_reference_subclasses` turns out to be a
+  compile-time loop writing into `StaticArray`s, with no heap allocation to
+  scale. Withdrawn.
+- *"one of the harness's requires brings it"* — a probe requiring exactly what
+  the audit requires (`gcry` + `bounded_child`), and another that also touches
+  `Process`, show only the 69 632 map. Not the requires.
+
+So: a raw buffer, 75 192 bytes, allocated by the Crystal runtime between
+`GC.init` finishing and `main`, released by gcry through `large-object release`
+while still being written five words in.
+
 ## What is still needed
 
 The identity of that 75 192-byte object. The next instrument is the obvious one:
