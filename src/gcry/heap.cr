@@ -1123,6 +1123,14 @@ module Gcry
     # Inserts at tail of freelist bucket for LRU eviction: trim_large_cache
     # pops from the head, evicting the least recently re-used entry.
     protected def cache_large_chunk(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      # Already on a freelist. Inserting it a second time puts one block in the
+      # bucket chain twice, and `take_large_free` then hands the same memory to
+      # two owners while `trim_large_cache` is still free to unmap it under
+      # both. Counted rather than raised: this runs inside the sweep.
+      if BlockHeader.free?(header)
+        @large_cached_twice &+= 1
+        return
+      end
       mapped = chunk.value.mapped_bytes
       payload = header.value.size
       bucket = self.class.large_bucket(mapped)
@@ -1160,6 +1168,10 @@ module Gcry
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         if chunk.value.mapped_bytes == mapped_need
+          # A bucket chain should only ever hold FREE blocks. A USED one means
+          # the block was handed out already and something put it back, or
+          # never took it off.
+          @large_taken_used &+= 1 unless BlockHeader.free?(header)
           if prev.null?
             @large_freelists[b] = nxt
           else

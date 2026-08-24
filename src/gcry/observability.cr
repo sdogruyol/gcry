@@ -90,6 +90,8 @@ module Gcry
         layout_precise_scans:        heap.layout_precise_scans,
         layout_hash_bodies:          heap.layout_hash_bodies,
         sweep_large_uninitialised:   heap.sweep_large_uninitialised,
+        large_cached_twice:          heap.large_cached_twice,
+        large_taken_used:            heap.large_taken_used,
         layout_conservative_scans:   heap.layout_conservative_scans,
         # Root-completeness state (docs/SOUND-DEFAULTS.md). Reported as the
         # actual field values, not as "GCRY_SOUND was set" — a measurement
