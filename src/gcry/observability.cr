@@ -282,7 +282,7 @@ module Gcry
       heap_min = heap.@heap_min
       heap_max = heap.@heap_max
 
-      heap.each_chunk do |chunk|
+      heap.each_chunk_guarded do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.data_start(chunk).as(BlockHeader*)
           next if BlockHeader.free?(header)

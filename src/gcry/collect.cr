@@ -631,6 +631,10 @@ module Gcry
     # queues instead. The walk itself still takes no lock, so allocation is not
     # stalled across its syscalls.
     @live_chunk_walk = false
+    # Threads walking `@chunks` that cannot hold `@alloc_lock` because they
+    # allocate as they go — the documented debug dumps. Guarded by
+    # `@alloc_lock`; a release that sees it non-zero leaves its chunks queued.
+    @chunk_walkers = 0
     # Instruments for `bench/dormant_flush_race.cr`: how many walks ran, and
     # how many mutator trims the flag actually diverted into the queue.
     getter live_walk_spans : UInt64 = 0_u64

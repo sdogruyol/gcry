@@ -98,6 +98,39 @@ That is twice now that this report has sent the reader somewhere the collector
 was not. Both times the mechanism was the same: a value that means "cleared"
 being read as if it meant "current".
 
+## 2026-08-24: the corrected breadcrumb answered on its first run
+
+Run `32724367581`, the first aarch64 hang after the stamping fix:
+
+    gcry: STOP-THE-WORLD STALLED 10031 ms in phase=suspend
+    gcry: the stop never reached the suspend wait — it is stuck before it,
+          in the handshake or a lock it takes first
+
+**The stall is before the suspend loop.** Every earlier reading — four
+sightings, all saying "the stall is after the wait loop" — was the previous
+stop's cleared breadcrumb, and every conclusion drawn from them is void.
+
+What that region contains, in order: `MonitorGate.close`, the staged-thread
+wait, `Thread.lock`, the per-thread `pthread_getattr_np` stack-bounds snapshot,
+and sending the signals. `326827c` names which of them the next sighting is in.
+
+### A hypothesis for the gate, worth writing down before the next sighting
+
+`stop_world_quiescing_roots` takes `@roots_lock` **before** calling
+`stop_world`, and `stop_world` opens with `MonitorGate.close` — a handshake
+with a thread that is deliberately never signal-suspended. If the Monitor is
+itself blocked on something the collector holds, the handshake cannot complete
+and the collector cannot proceed: a cycle with no signal to break it.
+
+The Monitor runs periodically and allocates; an allocation that crosses the
+threshold calls `collect`, which waits on `@post_stw_mutex` — held by the
+collector for the duration of the stop. Monitor waits for the collector, the
+collector waits for the Monitor.
+
+Untested. It predicts the next sighting names `monitor gate closed` as the step
+it did *not* reach — i.e. the report should say "entered, monitor gate not yet
+closed".
+
 ## What is still open
 
 Where the 10 seconds went. The breadcrumb now says only that it was *after* the

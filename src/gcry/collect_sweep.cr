@@ -379,9 +379,13 @@ module Gcry
     private def flush_pending_large_release : Nil
       chain = Pointer(Void).null
       with_alloc_lock do
-        chain = @pending_large_release
-        @pending_large_release = Pointer(Void).null
-        @pending_large_release_bytes = 0_u64
+        # Same as the empty-chunk flush: a dump in flight may be standing on
+        # one of these, so they wait for it.
+        unless @chunk_walkers > 0
+          chain = @pending_large_release
+          @pending_large_release = Pointer(Void).null
+          @pending_large_release_bytes = 0_u64
+        end
       end
       return if chain.null?
 
@@ -408,9 +412,20 @@ module Gcry
     private def flush_pending_empty_chunks : Nil
       chunk = @pending_empty_chunks
       return if chunk.null?
+      # A dump is walking `@chunks` and may be standing on one of these: they
+      # were dropped from the list, not from anyone's hand. Leave them queued.
+      return if with_alloc_lock { @chunk_walkers > 0 }
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
 
+      # And the teardown itself under the lock: `update_heap_bounds_after_unmap`
+      # and the dormant-chunk revive both walk `@chunks` holding it, and a
+      # chunk dropped from the list is still reachable from a walker standing
+      # on it — `unlink_chunk` leaves `next` intact.
+      with_alloc_lock { flush_pending_empty_chunks_locked(chunk) }
+    end
+
+    private def flush_pending_empty_chunks_locked(chunk : ChunkHeader*) : Nil
       # The pending list is built by sweep in heap-walk order, so addresses
       # are already mostly monotonically increasing. Find the longest
       # monotonically-non-decreasing prefix and merge it into single munmap

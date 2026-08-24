@@ -1180,6 +1180,29 @@ module Gcry
       nil
     end
 
+    # `each_chunk` for a caller that allocates while it walks, so it cannot
+    # hold `@alloc_lock` the way the in-allocator walkers do. Releases that
+    # land during the walk leave their chunks queued instead.
+    def each_chunk_guarded(& : ChunkHeader* ->) : Nil
+      begin_chunk_walk
+      begin
+        each_chunk { |c| yield c }
+      ensure
+        end_chunk_walk
+      end
+    end
+
+    # Mark a walk over `@chunks` by a thread that cannot hold `@alloc_lock`
+    # because it allocates while it walks — the debug dumps. A release that
+    # sees a walker leaves its chunks queued instead of unmapping them.
+    def begin_chunk_walk : Nil
+      with_alloc_lock { @chunk_walkers += 1 }
+    end
+
+    def end_chunk_walk : Nil
+      with_alloc_lock { @chunk_walkers -= 1 if @chunk_walkers > 0 }
+    end
+
     # Unmap a detached chain (linked by `next_free`). Caller holds
     # `@alloc_lock`, which is what keeps a flush walk from starting underneath.
     protected def release_large_chain(chain : Void*) : Nil
@@ -1339,7 +1362,7 @@ module Gcry
       if defer && !@trim_immediate
         deferred = false
         with_alloc_lock do
-          if @live_chunk_walk
+          if @live_chunk_walk || @chunk_walkers > 0
             @live_walk_queued &+= 1
             queue_large_release(detached)
             deferred = true
@@ -1356,17 +1379,21 @@ module Gcry
         end
       end
 
-      # Nothing can hand these out now.
-      user = detached
-      while user
-        header = BlockHeader.from_user(user)
-        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
-        nxt = header.value.next_free
-        mapped = chunk.value.mapped_bytes
-        unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
-          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+      # Nothing can hand these out now — but `unlink_chunk` leaves the removed
+      # chunk's `next` intact, so a walker already standing on one keeps
+      # following it. Off the list is not off limits: the release has to happen
+      # under the lock every walker of `@chunks` holds, or be queued while a
+      # walker that cannot hold it is running.
+      with_alloc_lock do
+        if @chunk_walkers > 0
+          queue_large_release(detached)
+          detached = Pointer(Void).null
+        else
+          release_large_chain(detached)
         end
-        user = nxt
+      end
+      if detached.null?
+        return
       end
       # Also under the lock: it walks the chunk list and rewrites `@heap_min` /
       # `@heap_max`, which `find_block` reads to decide whether an address is
