@@ -38,6 +38,7 @@ module Gcry
     @@stw_wait_max_ns = 0_u64
     # Times the Monitor was held off at the gate.
     @@monitor_blocks = 0_u64
+    @@site = Atomic(Int32).new(0)
 
     def self.enabled? : Bool
       @@enabled
@@ -88,8 +89,49 @@ module Gcry
     end
 
     # Monitor side.
-    def self.enter : Nil
+    SITE_NONE     = 0
+    SITE_TRANSFER = 1
+    SITE_COLLECT  = 2
+    SITE_OTHER    = 3
+
+    def self.site : Int32
+      @@site.get
+    end
+
+    def self.site_name(v : Int32) : String
+      case v
+      when SITE_TRANSFER then "transfer_schedulers_blocked_on_syscall"
+      when SITE_COLLECT  then "collect_stacks"
+      when SITE_OTHER    then "other monitor work"
+      else                    "none"
+      end
+    end
+
+    # Research only. Makes the real Monitor do, inside its handshake, the one
+    # thing `transfer_schedulers_blocked_on_syscall` does that reaches the
+    # collector's locks: `thread_pool.checkout` with nothing parked is
+    # `Thread.new`, and gcry wraps `pthread_create` to root the new `Thread`
+    # through `@roots_lock`.
+    #
+    # A harness cannot stand in for the Monitor here. `@@busy` is one shared
+    # bit, not a count, so a second thread calling `enter` has its hold cleared
+    # by the real Monitor's next back-off — measured: `stw_waits=1`,
+    # `monitor_blocks=12`, and no deadlock in either arm.
+    @@test_spawn = false
+
+    def self.test_spawn=(v : Bool)
+      @@test_spawn = v
+    end
+
+    def self.test_spawn_hook : Nil
+      return unless @@test_spawn
+      t = Thread.new { }
+      t.join
+    end
+
+    def self.enter(site : Int32 = SITE_OTHER) : Nil
       return unless @@enabled
+      @@site.set(site)
       loop do
         @@busy.set(1)
         return if @@stopped.get == 0
@@ -106,6 +148,7 @@ module Gcry
 
     def self.leave : Nil
       @@busy.set(0)
+      @@site.set(SITE_NONE)
     end
 
     private def self.now_ns : UInt64
@@ -123,8 +166,9 @@ end
 {% if flag?(:gc_none) && @top_level.has_constant?("Fiber") && Fiber.has_constant?("ExecutionContext") && Fiber::ExecutionContext.has_constant?("Monitor") %}
   class Fiber::ExecutionContext::Monitor
     private def transfer_schedulers_blocked_on_syscall
-      Gcry::MonitorGate.enter
+      Gcry::MonitorGate.enter(Gcry::MonitorGate::SITE_TRANSFER)
       begin
+        Gcry::MonitorGate.test_spawn_hook
         previous_def
       ensure
         Gcry::MonitorGate.leave
@@ -132,7 +176,7 @@ end
     end
 
     private def increase_parallelism(now)
-      Gcry::MonitorGate.enter
+      Gcry::MonitorGate.enter(Gcry::MonitorGate::SITE_OTHER)
       begin
         previous_def
       ensure
@@ -141,7 +185,7 @@ end
     end
 
     private def collect_stacks(now)
-      Gcry::MonitorGate.enter
+      Gcry::MonitorGate.enter(Gcry::MonitorGate::SITE_COLLECT)
       begin
         previous_def
       ensure

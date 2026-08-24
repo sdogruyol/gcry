@@ -411,6 +411,22 @@ module Gcry
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
 
+      # Under `@alloc_lock`, because the teardown races readers that do hold it.
+      # `update_heap_bounds_after_unmap` walks `@chunks` under the lock, from a
+      # mutator's `trim_large_cache` — and `unlink_chunk` leaves the removed
+      # chunk's `next` intact, so a walker standing on one keeps following it
+      # into memory this loop is unmapping. Measured as a SIGSEGV in that walk,
+      # 1 of 30 children of `make large-cache-race` on an unchanged tree.
+      #
+      # `GCRY_EMPTY_FLUSH_UNLOCKED=1` restores the old behaviour for the gate.
+      if @empty_flush_unlocked
+        flush_pending_empty_chunks_locked(chunk)
+      else
+        with_alloc_lock { flush_pending_empty_chunks_locked(chunk) }
+      end
+    end
+
+    private def flush_pending_empty_chunks_locked(chunk : ChunkHeader*) : Nil
       # The pending list is built by sweep in heap-walk order, so addresses
       # are already mostly monotonically increasing. Find the longest
       # monotonically-non-decreasing prefix and merge it into single munmap

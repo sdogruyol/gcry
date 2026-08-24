@@ -433,6 +433,18 @@ live-graph-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/live_graph_audit.cr -o $(BIN)/live_graph_audit --error-trace
 	$(BIN)/live_graph_audit
 
+# The collector waits for the Monitor; the Monitor waits for the collector.
+#
+# `MonitorGate.close` spins until the Monitor's current call ends. One of those
+# calls reaches `thread_pool.checkout` -> `Thread.new` -> `pthread_create`,
+# which gcry wraps to root the new `Thread` through `@roots_lock` — the lock the
+# collector took before it started stopping. Closing the gate first breaks it.
+# The control arm gets tries rather than a budget: the cycle is a race and one
+# attempt comes up empty about half the time.
+monitor-gate-deadlock: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/monitor_gate_deadlock.cr -o $(BIN)/monitor_gate_deadlock --error-trace
+	$(BIN)/monitor_gate_deadlock
+
 # Do the page-release walks zero a live object?
 #
 # Both build a live-page mask by reading block headers with no lock, then

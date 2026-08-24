@@ -83,7 +83,8 @@ module Gcry
 
     def self.step_name(step : Int32) : String
       case step
-      when STEP_ENTER        then "entered, monitor gate not yet closed"
+      when STEP_ENTER then "entered, monitor gate not yet closed (monitor is in " +
+        MonitorGate.site_name(MonitorGate.site) + ")"
       when STEP_GATE_CLOSED  then "monitor gate closed, waiting on staged threads"
       when STEP_STAGED_DONE  then "staged wait done, taking Thread.lock"
       when STEP_THREAD_LOCK  then "Thread.lock held, snapshotting stack bounds"

@@ -85,6 +85,10 @@ module Gcry
       end
       # The Monitor is never signal-suspended, so it is shut out by handshake
       # instead — before anything it could be mutating is touched.
+      # Second close, kept deliberately: `GC.stop_world` calls `stop_world`
+      # directly, so removing this would leave that entry point with the
+      # Monitor still running. On the normal path the gate is already shut and
+      # this costs two atomic reads.
       MonitorGate.close
       StwWatchdog.note_suspend_step(StwWatchdog::STEP_GATE_CLOSED)
       @stw_owner = current_thread
@@ -276,6 +280,29 @@ module Gcry
     # stop_world only after root-list / finalizer-table mutators finish
     # (see @roots_lock, Finalizers::Registry#lock_for_stw).
     private def stop_world_quiescing_roots : Nil
+      # Shut the Monitor out **before** taking `@roots_lock`, and that is not a
+      # detail either.
+      #
+      # `MonitorGate.close` spins until the Monitor's current call finishes.
+      # One of those calls is `transfer_schedulers_blocked_on_syscall`, which
+      # reaches `ExecutionContext.thread_pool.checkout` and, with no parked
+      # thread to hand out, `Thread.new` — `pthread_create`, which gcry wraps
+      # to root the new `Thread` object (`ThreadBirthRoot.arm` ->
+      # `heap.add_root` -> `@roots_lock`).
+      #
+      # Holding `@roots_lock` across that handshake closes a cycle the
+      # collector cannot break: it waits for the Monitor to finish, the Monitor
+      # waits for the lock the collector holds, and the Monitor is the one
+      # thread the suspend signals deliberately never touch.
+      #
+      # That is the aarch64 hang — `ec-queue-audit`, ten seconds in
+      # phase=suspend at step "entered, monitor gate not yet closed"
+      # (run 32725238411). Closing first costs a slightly longer exclusion
+      # window and nothing else: once `stopped` is set the Monitor declines to
+      # start new work, and the call it is already in can finish.
+      #
+      # `GCRY_MONITOR_GATE_LATE_CLOSE=1` restores the old ordering for the gate.
+      MonitorGate.close unless @monitor_gate_late_close
       @roots_lock.lock
       @finalizers.lock_for_stw
       begin

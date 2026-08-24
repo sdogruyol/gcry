@@ -117,6 +117,28 @@ module Gcry
     # `update_heap_bounds_after_unmap`, eight bytes into a released chunk,
     # says it is not. Only counted when a ledger or guard is recording.
     getter released_chunks_still_linked : UInt64 = 0_u64
+
+    # Research only: close the Monitor gate inside `stop_world` (after
+    # `@roots_lock` is taken) instead of before it — the ordering that
+    # deadlocked on aarch64.
+    property monitor_gate_late_close : Bool = false
+
+    # Research only: flush empty chunks without `@alloc_lock`, which is what it
+    # did before 2026-08-24.
+    property empty_flush_unlocked : Bool = false
+
+    # Hold off automatic collection for a window a caller cannot be interrupted
+    # in. `MonitorGate` uses it: the Monitor is never signal-suspended, so a
+    # stop waits for it by spinning on a busy bit — and a collection started
+    # inside that window would wait for the mutex the spinner holds.
+    def suppress_collect_enter : Nil
+      @suppress_collect.add(1)
+    end
+
+    def suppress_collect_leave : Nil
+      @suppress_collect.sub(1)
+    end
+
     # Research only: skip the check and issue the syscall anyway, which is what
     # it did before 2026-08-23.
     property madvise_unchecked : Bool = false
