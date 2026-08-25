@@ -298,3 +298,37 @@ not where this lives.
 space rather than RSS (the pages are dropped by `PROT_NONE` exactly as `munmap`
 drops them). It is bounded: after 8192 guarded ranges it overflows and releases
 normally again, so it is protection with a ceiling, not a fix.
+
+
+## How long does the danger last?
+
+`GCRY_RELEASE_QUARANTINE=N` holds a released range `PROT_NONE` for N
+collections and only then returns the address. The pages go back to the OS
+exactly as `munmap` sends them, so the cost is address space, not RSS.
+
+| Arm | Runs | Died | Engagement |
+|-----|-----:|-----:|------------|
+| tip | 6 | 3 | — |
+| `GCRY_RELEASE_QUARANTINE=1` | 4 | **2** | 140–172 quarantined releases per run, 0 forced drains |
+| `GCRY_UNMAP_GUARD=1` (hold forever) | 11 | **0** | 675 of 8192 slots, 0 overflows |
+
+One collection is not enough. The first attempt at this arm measured
+`quarantined_releases = 0` and would have read as "no effect" — the release
+loop inside `trim_large_cache` was not wired to the quarantine, so the arm was
+the baseline. Caught by asking the counter rather than trusting the knob.
+
+## A second, local reproducer
+
+The re-measurement of `make large-cache-race` with the `guard_user_tag`
+ordering restored finished:
+
+| Arm | segv |
+|-----|-----:|
+| `GCRY_UNMAP_GUARD=1` | **2 of 40** |
+| default | **0 of 40** |
+
+Under the guard a released range stays mapped `PROT_NONE`, so a stale access
+faults instead of quietly landing in whatever the kernel put there next. Those
+two crashes are therefore real use-after-frees that the default arm **hides** —
+a local, reproducible defect at ~5%, with every instrument in this tree
+available to it and no HTTP server in the way.
