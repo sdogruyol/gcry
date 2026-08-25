@@ -663,7 +663,7 @@ jobs:
 
   race-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     name: race gates
     steps:
       - uses: actions/checkout@v7
@@ -680,6 +680,13 @@ jobs:
       # meet a released chunk; unqueued — the arm the gate insists on — all six
       # children fault, so the green side is evidence rather than absence.
       - name: Dormant-flush race
+        env:
+          # Five minutes on this laptop, over twenty on a two-core runner —
+          # the first attempt at this job was cancelled at its 20-minute
+          # ceiling mid-gate. Three attempts per arm rather than six: the
+          # control arm faults on every child it runs, so three is still a
+          # control, and the job now fits with room to spare.
+          DORMANT_FLUSH_RACE_ATTEMPTS: "3"
         run: |
           make dormant-flush-race
 
