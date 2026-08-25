@@ -71,7 +71,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_UNALIGNED_CANDIDATES=1` | Follow misaligned candidate values (`str.to_unsafe + 3`); implied by `GCRY_SOUND` |
 | `GCRY_ALIGNED_CANDIDATES=1` | Force the cheap alignment filter back on (escape from `GCRY_SOUND`) |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on) |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on). **Known unsound:** the post-STW walk madvises a free-page run computed from a live-mask taken in the pause, and a mutator can allocate into that run before the syscall — `MADV_DONTNEED` then zeroes a live object. `make page-release-corruption` faults 1 of 4 on this arm against 0 of 4 for `GCRY_MOSTLY_EMPTY=1` and `GCRY_DISABLE_MADVISE=1`. Warns at boot. |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
 | `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **0**; Darwin **1 MiB**; adaptive from non-zero) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
