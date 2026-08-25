@@ -516,28 +516,6 @@ jobs:
         run: |
           make find-block-race
 
-      # The post-STW walks against a mutator's unmap. Queued, the walks never
-      # meet a released chunk; unqueued — the arm the gate insists on — all six
-      # children fault, so the green side is evidence rather than absence.
-      - name: Dormant-flush race
-        run: |
-          make dormant-flush-race
-
-      # `MonitorGate.close` spins on the Monitor while the Monitor blocks on
-      # `@roots_lock` through `Thread.new`. Closing the gate before the lock
-      # completes the stop; closing it after wedges, which is what the control
-      # arm has to show.
-      - name: Monitor gate deadlock
-        run: |
-          make monitor-gate-deadlock
-
-      # `make page-release-corruption` is deliberately NOT here. Its
-      # `GCRY_PAGE_DONTNEED=1` arm is a defect that is still open — 4 of 28
-      # attempts across six gate runs — so as a required step it would paint CI
-      # red at that rate and teach everyone to ignore it. The knob warns at boot
-      # and `docs/HARDENING.md` carries the number; wire this up when the
-      # mask-then-syscall window is closed.
-
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
@@ -682,6 +660,40 @@ jobs:
       - name: Run ASan specs
         run: |
           bin/all_specs_asan
+
+  race-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: race gates
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      # Its own job because it is five minutes on its own, and the `test` job
+      # was already at its 30-minute ceiling — adding it there cancelled the
+      # run mid-gate and skipped everything after it.
+      #
+      # The post-STW walks against a mutator's unmap. Queued, the walks never
+      # meet a released chunk; unqueued — the arm the gate insists on — all six
+      # children fault, so the green side is evidence rather than absence.
+      - name: Dormant-flush race
+        run: |
+          make dormant-flush-race
+
+      # Two gates are deliberately NOT here.
+      #
+      # `make monitor-gate-deadlock` refuses to pass unless its control arm
+      # actually deadlocks, and the control reaches it in some runs and not
+      # others — "finished 6 tries" once, "HUNG on try 1" the run before. That
+      # is the gate being honest, but as a required step it is a coin toss.
+      #
+      # `make page-release-corruption` is an open defect: its
+      # `GCRY_PAGE_DONTNEED=1` arm faults 4 of 28 attempts across six gate runs.
+      # Required and red at that rate would only teach everyone to ignore it.
+      # The knob warns at boot and `docs/HARDENING.md` carries the number.
 
   valgrind:
     runs-on: ubuntu-latest
