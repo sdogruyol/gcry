@@ -965,7 +965,10 @@ jobs:
           done_n=0
           while [ "$done_n" -lt "$want" ]; do
             out=$(LARGE_CACHE_RACE_ATTEMPTS=$batch bin/large_cache_race 2>&1 || true)
-            echo "$out" | grep -E "locked \(default\)|unlocked \(old\)|what the locked|^    gcry:" || true
+            # Everything except the banner: the filter used to drop the gate's
+            # own FAIL lines, which are the ones that say whether a failure was
+            # a fault or a killed child.
+            printf '%s\n' "$out" | grep -vE "^(===|4 workers|[0-9]+ attempts)" || true
             n=$(printf '%s\n' "$out" | sed -n 's/.*locked (default): *\([0-9][0-9]*\) of.*/\1/p' | head -1)
             locked=$((locked + ${n:-0}))
             done_n=$((done_n + batch))

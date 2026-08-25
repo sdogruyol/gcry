@@ -168,7 +168,14 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
 end
 
 locked_bad, locked_hung, locked_note, locked_report = run(exe, false, attempts)
-puts "  locked (default):    #{locked_bad} of #{attempts} failed#{locked_note ? "   #{locked_note.strip}" : ""}"
+# The hung count belongs on the line itself, not only in the failure list at
+# the end. A reader who sees "1 of 20 failed" cannot tell a use-after-free from
+# a child killed on the deadline, and those are different defects with
+# different owners — the gate says so in its own failure text and then prints a
+# summary that hides it.
+puts "  locked (default):    #{locked_bad} of #{attempts} failed" \
+     "#{locked_hung > 0 ? " (#{locked_hung} timed out)" : ""}" \
+     "#{locked_note ? "   #{locked_note.strip}" : ""}"
 if locked_report
   puts "  what the locked arm's first crash said:"
   locked_report.each_line { |l| puts "    #{l}" }
