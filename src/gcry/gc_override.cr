@@ -444,15 +444,16 @@ module GC
       # Sparse-chunk free-page release (HOLED + post-STW madvise).
       heap.madvise_free_pages = true
       # Known unsound, and the docs used to price it as a throughput choice.
-      # `make page-release-corruption` faults **1 of 4** on this arm while the
-      # other two are 0 of 4: the post-STW walk computes a run of free pages
-      # from a live-mask taken in the pause and madvises it after `start_world`,
-      # by which point a mutator may have allocated into that run. `MADV_DONTNEED`
-      # then zeroes a live object.
+      # The post-STW walk computes a run of free pages from a live mask and
+      # then syscalls with the world running, so a mutator can allocate into a
+      # page the mask called free before the call lands; `MADV_DONTNEED` then
+      # zeroes a live object. `make page-release-corruption` faults **4 of 28**
+      # attempts on this arm across six gate runs, while `GCRY_MOSTLY_EMPTY=1`
+      # and `GCRY_DISABLE_MADVISE=1` are 0 throughout.
       warn_unsupported_env(
         "gcry: GCRY_PAGE_DONTNEED=1 is known to zero live objects — the post-STW " \
         "free-page walk madvises a run a mutator may have allocated into " \
-        "(`make page-release-corruption`: 1 of 4). Research only.\n")
+        "(`make page-release-corruption`: 4 of 28). Research only.\n")
     end
 
     {% if flag?(:darwin) %}
