@@ -39,6 +39,9 @@ module Gcry
   class Heap
     # `GCRY_MARK_AUDIT=1`. See src/gcry/mark_audit.cr.
     property mark_audit : Bool = false
+    # `GCRY_MARK_AUDIT_EVERY=N`: run it on one collection in N. 0 or 1 is every
+    # collection, which is what makes the crash it is looking for stop.
+    property mark_audit_every : UInt64 = 0_u64
 
     # `GCRY_MARK_AUDIT_ALL=1`: walk **every** used block as a parent, not only
     # the marked ones, and report the parent's mark state with each edge into a

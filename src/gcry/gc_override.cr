@@ -677,6 +677,9 @@ module GC
       heap.release_quarantine = q
     end
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
+    if every = env_u64("GCRY_MARK_AUDIT_EVERY")
+      heap.mark_audit_every = every
+    end
     if v = env_u64("GCRY_DYING_AUDIT_MIN_BYTES")
       heap.dying_audit_min_bytes = v
     end

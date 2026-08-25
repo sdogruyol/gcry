@@ -1053,6 +1053,10 @@ module Gcry
            ChunkHeader.dormant?(chunk) &&
            chunk.value.size_class == index.to_u32 &&
            ChunkHeader.nursery?(chunk) == nursery
+          # A revival that lands inside the post-STW dormant pass is the shape
+          # that would let that pass madvise a chunk this thread is about to
+          # hand blocks out of. Counted here, where both facts are in hand.
+          @dormant_revive_during_flush &+= 1 if @dormant_flush_active
           ChunkHeader.set_dormant(chunk, false)
           mapped = chunk.value.mapped_bytes
           @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped

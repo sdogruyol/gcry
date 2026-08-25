@@ -442,6 +442,11 @@ module Gcry
     # Releases refused because a chunk that is still indexed lived inside the
     # range. Non-zero means gcry was about to unmap live memory.
     getter release_hit_live : UInt64 = 0_u64
+    # True while the post-STW dormant pass is walking. It takes no lock, so a
+    # mutator reviving a dormant chunk during it is the window that would let
+    # `MADV_DONTNEED` zero live objects.
+    @dormant_flush_active = false
+    getter dormant_revive_during_flush : UInt64 = 0_u64
 
     # Research only: clear `@world_stopped` after the resume loop rather than
     # before it, which is what `start_world` did until 2026-08-22.
@@ -1428,6 +1433,24 @@ module Gcry
       sum // count.to_u64
     end
 
+    # Chunks that the bounds assignment shut out and this walk brought back.
+    # Non-zero means the race is live in this workload.
+    getter bounds_excluded_chunks : UInt64 = 0_u64
+    @bounds_excluded_reports = 0
+
+    private def report_bounds_exclusion(count : UInt64) : Nil
+      @bounds_excluded_reports += 1
+      buf = uninitialized UInt8[256]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append_u64(buf.to_unsafe, len, count)
+      len = RawOut.append(buf.to_unsafe, len,
+        " chunk(s) fell outside the heap bounds this walk published, and were taken back in. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     protected def update_heap_bounds_after_unmap : Nil
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
@@ -1449,6 +1472,45 @@ module Gcry
       end
       @heap_min = lo
       @heap_max = hi
+      # This walk runs with the world running, and it *assigns* the bounds
+      # rather than widening them. `map_chunk` publishes a new chunk's bounds
+      # through `note_mapped`, and small chunks reach `map_chunk` under the
+      # size-class freelist lock — not `@alloc_lock`, which is the only lock
+      # most callers of this hold. A chunk mapped while this walk is in flight
+      # can therefore have its bounds published and then overwritten here, and
+      # a chunk outside `[@heap_min, @heap_max)` is a chunk `find_block`
+      # answers `nil` for: every pointer into it is dropped by the mark, and
+      # its objects are freed while live.
+      #
+      # The mark audit cannot see that happen — it resolves candidates with the
+      # same `find_block` — which is why it reports zero missed edges in runs
+      # that crash.
+      #
+      # Measured on acikturkiye under load: **it fires**, one chunk at a time,
+      # at collection 21 and 24 of two runs that then crashed
+      # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`). So this
+      # second walk both counts it and repairs it: widen back to include
+      # anything the assignment above shut out.
+      #
+      # Widening is safe against a chunk mapped *after* this walk, too:
+      # `map_chunk` links the chunk into `@chunks` before `note_mapped`
+      # publishes its bounds, so either this walk sees it and widens, or its
+      # own publication lands after the store above and survives.
+      excluded = 0_u64
+      each_chunk do |chunk|
+        base = chunk.address
+        finish = base &+ chunk.value.mapped_bytes
+        next if base >= lo && finish <= hi
+        excluded &+= 1
+        lo = base if base < lo
+        hi = finish if finish > hi
+      end
+      if excluded > 0
+        @bounds_excluded_chunks &+= excluded
+        @heap_min = lo
+        @heap_max = hi
+        report_bounds_exclusion(excluded) if @bounds_excluded_reports < 1
+      end
       ensure_bitmap_covers(lo, hi)
       # After bounds are tightened, check whether the bitmap has grown
       # well beyond the current need and shrink it if so.  Threshold:
@@ -1686,7 +1748,15 @@ module Gcry
           # Mark completeness, in the only window where the answer exists: the
           # mark is final and nothing has been reclaimed yet (GCRY_MARK_AUDIT=1,
           # src/gcry/mark_audit.cr). Off by default — O(live heap) in the pause.
-          run_mark_audit if @mark_audit
+          # Sampled, because the full audit is O(live heap) *inside the pause*
+          # and that is not a neutral instrument: with it on, the acikturkiye
+          # crash stops happening (87,750 requests, 0 missed edges, no crash),
+          # so its zero was only ever measured on runs that did not crash.
+          # `GCRY_MARK_AUDIT_EVERY=N` runs it on one collection in N, which is
+          # the only way its answer and that crash can be observed together.
+          if @mark_audit && (@mark_audit_every <= 1_u64 || @collections % @mark_audit_every == 0)
+            run_mark_audit
+          end
           audit_chunk_index if @index_audit
 
           # The same window, one question narrower: is a block of the watched

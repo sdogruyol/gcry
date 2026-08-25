@@ -77,6 +77,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |
 | `GCRY_DISABLE_LAYOUT=1` | Disable layout-precise scan |
+| `GCRY_MARK_AUDIT_EVERY=N` | Run the mark audit on one collection in N. The full audit is O(live heap) inside the pause and suppresses the very crash it is looking for, so its zero is otherwise only measurable on runs that do not crash. |
 | `GCRY_RELEASE_QUARANTINE=N` | Hold a released range `PROT_NONE` for N collections before returning the address to the kernel. Pages are dropped as `munmap` would drop them, so the cost is address space, not RSS. `GCRY_UNMAP_GUARD=1` (never return it at all) removes the acikturkiye crash; this bounds how long the danger lasts. |
 | `GCRY_ALWAYS_CLEAR=1` | Research arm: zero every allocation, including the ones whose bytes are already believed zero (fresh `MAP_ANONYMOUS`, clean freelist). Crystal's `Reference.allocate` zeroes nothing itself, so an unassigned ivar reads whatever the previous occupant left. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying / address-space audit. That walk fires once per collection and left to itself always picks a small block; this aims the single shot at a size. |

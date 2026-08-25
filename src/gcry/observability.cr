@@ -100,6 +100,8 @@ module Gcry
         guard_slots_used:            heap.guard_slots_used,
         guard_overflows:             heap.guard_overflows,
         release_hit_live:            heap.release_hit_live,
+        dormant_revive_during_flush: heap.dormant_revive_during_flush,
+        bounds_excluded_chunks:      heap.bounds_excluded_chunks,
         quarantined_releases:        heap.quarantined_releases,
         quarantine_held:             heap.quarantine_held,
         quarantine_forced_drains:    heap.quarantine_forced_drains,

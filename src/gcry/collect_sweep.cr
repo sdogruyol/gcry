@@ -491,6 +491,18 @@ module Gcry
     private def flush_pending_dormant_chunks : Nil
       return if @dormant_chunk_bytes == 0
 
+      # Dormancy was decided by the sweep, inside the stopped world. This pass
+      # runs after `start_world`, holds no lock, and `MADV_DONTNEED` over a
+      # chunk's data range zeroes whatever is there — while
+      # `revive_dormant_chunk` is free to hand blocks out of exactly such a
+      # chunk from any mutator, under the size-class freelist lock that this
+      # pass does not take.
+      #
+      # So the window is real by construction. Whether it is ever *hit* is a
+      # different question, and this counts it rather than assuming: the flag
+      # costs two stores per collection and changes no behaviour.
+      @dormant_flush_active = true
+
       data_lo = UInt64::MAX
       data_hi = 0_u64
       page = Platform.host_page_size
@@ -518,6 +530,7 @@ module Gcry
         Platform.release_physical_pages(data_lo, data_hi - data_lo)
         @dontneed_bytes += data_hi - data_lo
       end
+      @dormant_flush_active = false
     end
 
     # Apply per-chunk free-page madvise to HOLED chunks after STW.
