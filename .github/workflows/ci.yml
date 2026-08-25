@@ -934,7 +934,7 @@ jobs:
   aarch64-lcr-rate:
     if: github.event_name == 'workflow_dispatch' && inputs.lcr_attempts != '0'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 90
     name: aarch64 large-cache-race rate
     steps:
       - uses: actions/checkout@v7
@@ -945,15 +945,29 @@ jobs:
 
       - name: Sample the locked arm
         env:
-          LARGE_CACHE_RACE_ATTEMPTS: ${{ inputs.lcr_attempts }}
-          # Classify the address the child died on. Without this the gate can
-          # say a fault happened and nothing about where it landed.
+          # Batches of 20 rather than one long invocation. The gate prints its
+          # tally only at the end, so a single run of 250 attempts that hits the
+          # job ceiling yields *nothing* — which is what happened on run
+          # 32880389706, cancelled at 60 minutes with no number. Twenty at a
+          # time prints as it goes and a timeout costs one batch.
           GCRY_SEGV_REPORT: "1"
           GCRY_RELEASE_LEDGER: "1"
         run: |
           mkdir -p bin
           crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race --error-trace
-          bin/large_cache_race || true
+          want=${{ inputs.lcr_attempts }}
+          batch=20
+          locked=0
+          done_n=0
+          while [ "$done_n" -lt "$want" ]; do
+            out=$(LARGE_CACHE_RACE_ATTEMPTS=$batch bin/large_cache_race 2>&1 || true)
+            echo "$out" | grep -E "locked \(default\)|unlocked \(old\)|what the locked|^    gcry:" || true
+            n=$(printf '%s\n' "$out" | sed -n 's/.*locked (default): *\([0-9][0-9]*\) of.*/\1/p' | head -1)
+            locked=$((locked + ${n:-0}))
+            done_n=$((done_n + batch))
+            echo "  running total: $locked locked-arm faults in $done_n attempts"
+          done
+          echo "TOTAL: $locked locked-arm faults in $done_n attempts"
 
   # Native aarch64 (GitHub ubuntu-24.04-arm).
   test-aarch64-native:
