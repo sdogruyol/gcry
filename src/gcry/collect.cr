@@ -736,6 +736,21 @@ module Gcry
       @rel_live[i] = true
     end
 
+    # Is this base currently recorded as released? O(1), against
+    # `guarded_release_at`'s linear walk of up to 8192 slots.
+    #
+    # The distinction is not academic. `update_heap_bounds_after_unmap` asked
+    # the linear form **once per chunk**, on a walk the trimmer runs in a loop,
+    # so turning the ledger on to observe a race slowed the thing being
+    # observed past its own harness deadline: `large_cache_race` children went
+    # from ~1 s to ~114 s and the gate read 20 of 20 "failures" that were all
+    # timeouts. An instrument that changes the answer is not an instrument.
+    protected def released_base_recorded?(base : UInt64) : Bool
+      return false unless @rel_booted
+      i = release_map_slot(base)
+      @rel_live[i] && @rel_base[i] == base
+    end
+
     # The kernel gave this base back, so the release recorded against it is
     # spent. Called from `map_chunk`.
     protected def note_map_base(base : UInt64) : Nil
@@ -758,7 +773,7 @@ module Gcry
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
-      note_release_base(base) if @release_ledger
+      note_release_base(base) if @release_ledger || @unmap_guard
       unless @unmap_guard
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the
@@ -1462,7 +1477,7 @@ module Gcry
       audit = @unmap_guard || @release_ledger
       each_chunk do |chunk|
         base = chunk.address
-        if audit && guarded_release_at(base)
+        if audit && released_base_recorded?(base)
           @released_chunks_still_linked &+= 1
           next
         end

@@ -950,8 +950,12 @@ jobs:
           # job ceiling yields *nothing* — which is what happened on run
           # 32880389706, cancelled at 60 minutes with no number. Twenty at a
           # time prints as it goes and a timeout costs one batch.
+          # SEGV_REPORT only. GCRY_RELEASE_LEDGER=1 was here and it invalidated
+          # the measurement: the ledger made `update_heap_bounds_after_unmap`
+          # scan up to 8192 slots per chunk on a walk the trimmer runs in a
+          # loop, children went from ~1 s to ~114 s, and every one of them was
+          # killed on the harness deadline and counted as a fault.
           GCRY_SEGV_REPORT: "1"
-          GCRY_RELEASE_LEDGER: "1"
         run: |
           mkdir -p bin
           crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race --error-trace
