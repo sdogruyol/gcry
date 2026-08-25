@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A precise object layout was chosen by a word the mutator picked.**
+  `scan_object` looks up the layout for a block with `tid = user.as(Int32*).value`
+  — the payload's **first Int32**. For a real object that is the type id. For a
+  raw buffer it is whatever the first element holds, and Crystal stores a
+  union's type id in its first four bytes, so a buffer of union values
+  (`Array(JSON::Any)`, a `Hash::Entry` table with a union value) begins with
+  exactly the kind of small integer that collides with a registered class. The
+  `alloc_size` gate does not separate them: both are 64-byte blocks.
+  Under the collision the block was scanned to the wrong map and lost every
+  pointer that map did not mention, and `scan_hash_object`'s sanity checks each
+  `return`ed rather than falling back, so the body was not scanned
+  conservatively either. The same collision had been found once from the other
+  side — the `scan_cap` branch carries a comment about "raw buffers whose first
+  Int32 randomly equals a registered type_id" — and the precise-fields branch
+  had the identical key with no such guard.
+  A hash-kind body is now word-scanned alongside the entry walk, demoting only
+  `@entries` / `@indices` to `mark_noscan`, and the shape is validated first:
+  a sane `@indices_size_pow2`, non-negative `@size` / `@deleted_count` that fit
+  the implied capacity, `@entries` / `@indices` null or in the heap. A block
+  that fails degrades to exactly the conservative scan it would have got
+  unregistered — demotion included, since calling a word a blob is itself a
+  claim about the type.
+  **Measured on acikturkiye under `wrk -t4 -c64`**, with `GCRY_MARK_AUDIT=1`
+  reporting what the sweep was about to free that something still pointed at:
+  **193 of 216 collections had missed edges before, 0 of 216 after**, over
+  75 022 requests against 25 835. Every reported edge had the same shape — a
+  marked parent whose first Int32 read 208, pointing at +24 and +56 to unmarked
+  32-byte blocks — and `GCRY_LAYOUT_DUMP=1` (added here) named 208 as a `Hash`,
+  which has no pointer at either offset.
+  `bench/log/linux/2026-08-24-acikturkiye-live-string-uaf/FINDINGS.md`.
+
+- **The bounds walk after an unmap could shut a live chunk out of the heap.**
+  `update_heap_bounds_after_unmap` recomputes `@heap_min` / `@heap_max` from a
+  walk of `@chunks` and then **assigns** them. Putting that walk under
+  `@alloc_lock` — the fix below — was not enough: small chunks reach
+  `map_chunk` from `refill_size_class` under the **size-class freelist lock**,
+  which is a different lock, so a chunk mapped during the walk can have its
+  bounds published by `note_mapped` and then overwritten by the assignment.
+  A chunk outside `[@heap_min, @heap_max)` is a chunk `find_block` answers
+  `nil` for. Every conservative pointer into it is dropped by the mark and its
+  objects are swept while live.
+  **This is why every instrument said the heap was fine.** The mark audit
+  resolves its candidates with the same `find_block`, so it is blind to exactly
+  the edges being lost — it reported **0 missed edges over 106 402 audited
+  edges** in runs that crashed. It also explains why `GCRY_UNMAP_GUARD=1` was
+  0 of 11 (the bounds are only recomputed after an unmap, and the guard never
+  unmaps) and why `GCRY_RELEASE_QUARANTINE=32` moved the fault later by exactly
+  the quarantine length.
+  The walk now runs a second time and widens back to include anything the
+  assignment shut out. Widening is safe against a chunk mapped after it, too:
+  `map_chunk` links the chunk into `@chunks` before `note_mapped` publishes its
+  bounds, so either the walk sees it and widens, or the publication lands after
+  the store and survives.
+  **Measured**: a detector version of that second walk fired in **3 of 3**
+  crashing runs, at collections 21, 24 and 126. With the repair, acikturkiye
+  under the same load went from **6 of 9 runs dead (92–438 req/s)** to **0 of
+  12 (339–586 req/s)**, Fisher exact p ≈ 0.0007, with the repair engaged rather
+  than assumed — its counter reaches 63 in a single 220 s run.
+
 - **The large-object cache was trimmed without the lock the allocator holds.**
   `alloc_large` → `take_large_free` walks `@large_freelists` **holding
   `@alloc_lock`**, takes a chunk off it and hands it to the mutator.
