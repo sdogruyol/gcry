@@ -332,3 +332,66 @@ faults instead of quietly landing in whatever the kernel put there next. Those
 two crashes are therefore real use-after-frees that the default arm **hides** —
 a local, reproducible defect at ~5%, with every instrument in this tree
 available to it and no HTTP server in the way.
+
+
+---
+
+# The second defect, found: the bounds walk could shut a live chunk out
+
+## What it is
+
+`update_heap_bounds_after_unmap` recomputes `@heap_min` / `@heap_max` by
+walking `@chunks`, then **assigns** them. It runs with the world running, from
+`trim_large_cache`, `flush_pending_empty_chunks` and
+`flush_pending_large_release`. Small chunks reach `map_chunk` under the
+**size-class freelist lock**, not the `@alloc_lock` most of those callers hold,
+so a chunk mapped during the walk can have its bounds published by
+`note_mapped` and then overwritten by the assignment.
+
+A chunk outside `[@heap_min, @heap_max)` is a chunk `find_block` answers `nil`
+for. Every conservative pointer into it is dropped by the mark, and its objects
+are swept while live.
+
+## Why every instrument said the heap was fine
+
+The mark audit resolves its candidates with the same `find_block`. When the
+bounds exclude a chunk, the audit is blind to exactly the edges that are being
+lost — which is why it reported **0 missed edges over 106,402 audited edges**
+in runs that crashed, and why the kernel-side address-space walk could find a
+*marked* holder for a dying block while gcry's own heap walk called the same
+address "not in the heap".
+
+It also explains the shape of every other result here:
+
+- `GCRY_UNMAP_GUARD=1` was 0 of 11 — the bounds are only recomputed after an
+  unmap, and the guard never unmaps.
+- `GCRY_RELEASE_QUARANTINE=32` moved the fault later by exactly the quarantine
+  length (`Collections since` 34, 36, 57, 85, all > 32) — the recompute happens
+  at the real `munmap`, not at the release decision.
+- Everything else came back negative because the object graph really was
+  intact.
+
+## Measured
+
+A detector that walks `@chunks` again after the assignment and counts chunks
+outside the new bounds:
+
+| Arm | Runs | Died | Detector |
+|-----|-----:|-----:|----------|
+| tip, detector only | 3 | **3** | fired in **3 of 3**, at collections 21, 24, 126 |
+
+The fix is that same walk, widening instead of only counting. Widening is safe
+against a chunk mapped after it, too: `map_chunk` links the chunk into
+`@chunks` before `note_mapped` publishes its bounds, so either the walk sees it
+and widens, or the publication lands after the store and survives.
+
+| Arm | Runs | Died | Throughput |
+|-----|-----:|-----:|-----------:|
+| tip (comparable arms) | 9 | **6** | 92–438 req/s |
+| with the repair | **12** | **0** | 339–586 req/s |
+
+Fisher exact p ≈ 0.0007, and the repair is engaged rather than assumed — the
+counter reaches 63 in a single 220 s run.
+
+Throughput moves with it: the fastest runs before the fix were the ones that
+happened not to crash, and after it every run is in that band.
