@@ -22,6 +22,9 @@ on:
       stall_ms:
         description: "GCRY_STW_TEST_STALL_MS — widens the stopped window so a rare overlap becomes frequent. Research only; 0 for a normal soak."
         default: "0"
+      lcr_attempts:
+        description: "aarch64 large-cache-race rate: attempts per arm. 0 skips the job. The locked arm faulted 1 of 5 on run 32862284372 and this is how many samples that number gets."
+        default: "0"
       ec_queue_audit:
         description: "GCRY_EC_QUEUE_AUDIT — walk the Parallel run queues each collection and report the first slot that stops being a live Fiber. 'off' to disable."
         required: false
@@ -916,6 +919,33 @@ jobs:
           test -f "bin/hello_${suffix}.o"
           test -f "bin/min_${suffix}.o"
           test -f "bin/alloc_${suffix}.o"
+
+  # How often does the *locked* arm of `large-cache-race` fault on aarch64?
+  #
+  # Run 32862284372 caught it at 1 of 5 on the default configuration, and the
+  # same job was green on the run before and the run after — so a green job
+  # says nothing and 5 attempts is not a rate. Dispatch-only, and skipped
+  # unless `lcr_attempts` is set, so it never touches push CI. `|| true`
+  # because the tally is the output here, not the verdict.
+  aarch64-lcr-rate:
+    if: github.event_name == 'workflow_dispatch' && inputs.lcr_attempts != '0'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    name: aarch64 large-cache-race rate
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Sample the locked arm
+        env:
+          LARGE_CACHE_RACE_ATTEMPTS: ${{ inputs.lcr_attempts }}
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race --error-trace
+          bin/large_cache_race || true
 
   # Native aarch64 (GitHub ubuntu-24.04-arm).
   test-aarch64-native:
