@@ -1,4 +1,4 @@
-# aarch64: the locked arm of `large-cache-race` faults
+# The locked arm of `large-cache-race` faults — and it is not aarch64-only
 
 ## The observation
 
@@ -47,3 +47,88 @@ attempts per push run, most runs will be green.
 This is not fixed. It is a use-after-free on the default configuration of a
 supported platform, and it should either be reproduced and closed or stated
 plainly in the release notes before 0.21.0 is cut.
+
+
+---
+
+# It is not aarch64-specific, and the backtrace names it
+
+## Reproduced locally on x86_64
+
+Running the gate on this laptop with more attempts than the default five:
+
+    locked (default):    3 of 10 failed        (no knobs)
+    locked (default):    2 of 10 failed        (GCRY_SEGV_REPORT=1)
+    locked (default):    1 of 10 failed        (GCRY_RELEASE_LEDGER=1)
+
+The knobs make no difference; the default configuration faults. The same
+commit that CI's x86_64 job passes on. So the rate is **machine-dependent**,
+not architecture-dependent: roughly 10–15% per child on a many-core laptop,
+about 1.3% on the aarch64 runner, and apparently zero on the two-core x86_64
+runner. A green `Large-cache race` step means the runner is slow, not that the
+defect is gone.
+
+It is also **not new**: the worktree at `b007984`, before the bounds repair,
+faults 2 of 10.
+
+## What faults
+
+`GCRY_SEGV_REPORT` had to be installed by the harness to say anything — gcry
+arms it from its collect callback and this child barely collects, so the knob
+was silently inert. With it armed, three children in a row said the same thing:
+
+    gcry: SIGSEGV at 0x7eff25e73000 — in a range gcry RELEASED and unmapped —
+    base 0x7eff25e73000, 45056 bytes, large-object release, at collection 0;
+    the write is 0 bytes into it. Collections since: 0.
+
+The fault address **is the chunk's own base** — `ChunkHeader.next`, offset 0 —
+and "collection 0" means no collection was involved: this is the explicit
+`free` → `cache_large_chunk` → `trim_large_cache` path. The two aarch64
+addresses ended in `008`, which is `mapped_bytes`, the next field along.
+
+The backtrace names the walk:
+
+    Gcry::Heap#update_heap_bounds_after_unmap
+    Gcry::Heap#trim_large_cache<UInt64>
+    ~procProc(Thread, Nil)
+
+## Why a walk under `@alloc_lock` can meet an unmapped chunk
+
+`unlink_chunk` removes a chunk from `@chunks` under `@alloc_lock` before
+anything unmaps it. But **`@chunks` is mutated under two different locks**:
+`map_chunk` reaches the list from `refill_size_class` holding the *size-class
+freelist* lock, not `@alloc_lock`. A prepend interleaved with an unlink can
+leave a removed chunk reachable through `next`, and the walk then dereferences
+it after `munmap`.
+
+That is the same two-lock problem behind the heap-bounds exclusion found
+earlier the same day (`2026-08-24-acikturkiye-live-string-uaf`): one list,
+two locks.
+
+## What was changed, and what it is worth
+
+`update_heap_bounds_after_unmap` no longer walks the `next` chain. It reads the
+lowest base and highest end off the **chunk index** — a flat array, sorted by
+base, of chunks that are by construction still mapped, guarded by one lock that
+nothing takes `@alloc_lock` inside — and reads *and* stores the bounds inside
+that lock, with `note_mapped` using the same lock for the same fields. O(1)
+instead of O(chunks), and no dereference of a pointer another thread may have
+freed.
+
+Measured **interleaved**, alternating binaries child by child so both arms see
+the same machine:
+
+| Arm | SIGSEGV | children |
+|-----|--------:|---------:|
+| before (`708ee7b`) | **9** | 60 |
+| after | **4** | 60 |
+
+Fisher exact p ≈ 0.24. **Not significant**, and a later 45-child post-fix batch
+returned 0 while an earlier 40-child pre-fix batch also returned 0 — this
+machine's rate swings by more than the effect being measured.
+
+So: one confirmed dereference site is gone and the rate looks roughly halved,
+but the defect is **not closed**. The real fix is to put `@chunks` under a
+single lock; every walk of it is exposed to the same race until then. Non-
+interleaved comparisons on this machine are worthless, which is how the first
+"before 2–3 of 10, after 0 of 60" reading was produced and why it was dropped.

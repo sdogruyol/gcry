@@ -76,6 +76,16 @@ class Verdict
 end
 
 if ARGV.includes?("--child")
+  # Install the crash reporter here, not through `GCRY_SEGV_REPORT` alone.
+  #
+  # gcry arms it from its collect callback, and this child barely collects — it
+  # allocates and frees explicitly — so the knob was silently inert and two
+  # 200-attempt samples on aarch64 produced faults with no classification, only
+  # Crystal's own "Invalid memory access". Arming it earlier does not work
+  # either: Crystal installs its own SIGSEGV handler after `GC.init` and does
+  # not chain, so anything installed during the first allocation is discarded.
+  # Here is after that, and it is the harness that wants the answer.
+  Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
   heap = Gcry.default_heap
   # Retain enough that a freed block stays cached for the next allocation to
   # take, which is the hit path `take_large_free` exists for. The trimmer then

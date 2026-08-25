@@ -1333,10 +1333,17 @@ module Gcry
     protected def note_mapped(chunk : ChunkHeader*) : Nil
       base = chunk.address
       finish = base + chunk.value.mapped_bytes
-      @heap_min = base if base < @heap_min
-      @heap_max = finish if finish > @heap_max
-      @heap_span_lo = base if base < @heap_span_lo
-      @heap_span_hi = finish if finish > @heap_span_hi
+      # Under `@index_lock`, because `update_heap_bounds_after_unmap` reads the
+      # index and assigns these under it: without the lock this widen can land
+      # between that read and its store and be lost, which shuts a live chunk
+      # out of the heap bounds. `ensure_bitmap_covers` stays outside — it can
+      # mmap, and a spinlock is the wrong place for that.
+      @index_lock.sync do
+        @heap_min = base if base < @heap_min
+        @heap_max = finish if finish > @heap_max
+        @heap_span_lo = base if base < @heap_span_lo
+        @heap_span_hi = finish if finish > @heap_span_hi
+      end
       ensure_bitmap_covers(@heap_min, @heap_max)
     end
 
@@ -1448,83 +1455,58 @@ module Gcry
       sum // count.to_u64
     end
 
-    # Chunks that the bounds assignment shut out and this walk brought back.
-    # Non-zero means the race is live in this workload.
-    getter bounds_excluded_chunks : UInt64 = 0_u64
-    @bounds_excluded_reports = 0
-
-    private def report_bounds_exclusion(count : UInt64) : Nil
-      @bounds_excluded_reports += 1
-      buf = uninitialized UInt8[256]
-      len = 0
-      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
-      len = RawOut.append_u64(buf.to_unsafe, len, count)
-      len = RawOut.append(buf.to_unsafe, len,
-        " chunk(s) fell outside the heap bounds this walk published, and were taken back in. collection ")
-      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
-      len = RawOut.append(buf.to_unsafe, len, "\n")
-      RawOut.flush(buf.to_unsafe, len)
-    end
-
     protected def update_heap_bounds_after_unmap : Nil
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
       @last_chunk_hi = 0_u64
-      # Single pass to recompute bounds, then one call to ensure_bitmap_covers
-      # (avoids O(N) `note_mapped` per chunk → O(N) `ensure_bitmap_covers`).
+
+      # Read the bounds off the **chunk index**, not by walking `@chunks`.
+      #
+      # The walk was the defect. `unlink_chunk` removes a chunk from the index
+      # before anything unmaps it, but the `@chunks` list is mutated under two
+      # different locks — `unlink_chunk` under `@alloc_lock`, and `map_chunk`
+      # from `refill_size_class` under the size-class freelist lock — so a
+      # prepend racing an unlink can leave a removed chunk reachable through
+      # `next`. This walk then dereferenced it after `munmap`:
+      #
+      #   Gcry::Heap#update_heap_bounds_after_unmap
+      #   Gcry::Heap#trim_large_cache<UInt64>
+      #   ~procProc(Thread, Nil)
+      #
+      # faulting on the chunk's own base — `ChunkHeader.next`, offset 0 — with
+      # the report saying "in a range gcry RELEASED and unmapped ... at
+      # collection 0", i.e. the explicit free path, no collection involved.
+      # (`bench/log/linux/2026-08-25-aarch64-large-cache-locked-arm`.)
+      #
+      # The index answers the same question without following a pointer the
+      # other thread may have freed: it is a flat array, sorted by base, of
+      # chunks that are by construction still mapped, and it is guarded by one
+      # lock that nothing takes `@alloc_lock` inside. Chunks do not overlap, so
+      # the lowest base is the first entry and the highest end is the last —
+      # O(1) instead of O(chunks), and no `next` chain at all.
+      #
+      # A chunk mapped while this runs is safe either way: `map_chunk` inserts
+      # into the index before `note_mapped` publishes its bounds, so either it
+      # is in the array this reads, or its own publication lands after the
+      # store below and survives.
+      # Read *and* store under the one lock. Reading the index and then storing
+      # outside it leaves the same window the old walk had: `note_mapped`
+      # widens the bounds for a chunk mapped in between, and the store
+      # overwrites it — a chunk outside `[@heap_min, @heap_max)` is one
+      # `find_block` answers `nil` for, so its objects are swept while live.
+      # `note_mapped` takes the same lock for the same four fields.
       lo = UInt64::MAX
       hi = 0_u64
-      audit = @unmap_guard || @release_ledger
-      each_chunk do |chunk|
-        base = chunk.address
-        if audit && released_base_recorded?(base)
-          @released_chunks_still_linked &+= 1
-          next
+      @index_lock.sync do
+        count = @chunk_index_count
+        if count > 0
+          first = (@chunk_index + 0).value
+          last = (@chunk_index + (count - 1)).value
+          lo = first.address
+          hi = last.address &+ last.value.mapped_bytes
         end
-        finish = base + chunk.value.mapped_bytes
-        lo = base if base < lo
-        hi = finish if finish > hi
-      end
-      @heap_min = lo
-      @heap_max = hi
-      # This walk runs with the world running, and it *assigns* the bounds
-      # rather than widening them. `map_chunk` publishes a new chunk's bounds
-      # through `note_mapped`, and small chunks reach `map_chunk` under the
-      # size-class freelist lock — not `@alloc_lock`, which is the only lock
-      # most callers of this hold. A chunk mapped while this walk is in flight
-      # can therefore have its bounds published and then overwritten here, and
-      # a chunk outside `[@heap_min, @heap_max)` is a chunk `find_block`
-      # answers `nil` for: every pointer into it is dropped by the mark, and
-      # its objects are freed while live.
-      #
-      # The mark audit cannot see that happen — it resolves candidates with the
-      # same `find_block` — which is why it reports zero missed edges in runs
-      # that crash.
-      #
-      # Measured on acikturkiye under load: **it fires**, one chunk at a time,
-      # at collection 21 and 24 of two runs that then crashed
-      # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`). So this
-      # second walk both counts it and repairs it: widen back to include
-      # anything the assignment above shut out.
-      #
-      # Widening is safe against a chunk mapped *after* this walk, too:
-      # `map_chunk` links the chunk into `@chunks` before `note_mapped`
-      # publishes its bounds, so either this walk sees it and widens, or its
-      # own publication lands after the store above and survives.
-      excluded = 0_u64
-      each_chunk do |chunk|
-        base = chunk.address
-        finish = base &+ chunk.value.mapped_bytes
-        next if base >= lo && finish <= hi
-        excluded &+= 1
-        lo = base if base < lo
-        hi = finish if finish > hi
-      end
-      if excluded > 0
-        @bounds_excluded_chunks &+= excluded
         @heap_min = lo
         @heap_max = hi
-        report_bounds_exclusion(excluded) if @bounds_excluded_reports < 1
       end
       ensure_bitmap_covers(lo, hi)
       # After bounds are tightened, check whether the bitmap has grown
