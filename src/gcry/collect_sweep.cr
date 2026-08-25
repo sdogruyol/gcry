@@ -539,6 +539,19 @@ module Gcry
     # Safe because the live-mask computation correctly identifies free pages
     # regardless of HOLED; MADV_FREE_REUSABLE on Darwin does not zero headers.
     private def flush_pending_page_release_chunks : Nil
+      # Neither branch used to consult this, which made the documented escape
+      # a no-op where it matters most: on Darwin the walk is default-on and
+      # visits *every* kept size-class chunk, so `GCRY_DISABLE_PAGE_RELEASE=1`
+      # and `GCRY_DISABLE_MADVISE=1` set a flag nothing here read. On Linux the
+      # flag gates HOLED marking upstream, so the escape worked by accident.
+      #
+      # It matters because this walk computes a free-page mask and then
+      # syscalls, with the world running: a mutator can allocate into a page
+      # the mask called free before the call lands. `make page-release-corruption`
+      # faults 1 of 4 on the Linux arm, and Darwin's `MADV_FREE_REUSABLE`
+      # zero-fills a reclaimed page, so the same window is reachable there
+      # under memory pressure. The off switch has to actually switch it off.
+      return unless @madvise_free_pages
       {% if flag?(:darwin) %}
         each_chunk do |chunk|
           next if ChunkHeader.large?(chunk)
