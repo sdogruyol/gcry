@@ -1211,7 +1211,9 @@ module Gcry
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
         base = chunk.as(Void*).address
-        unless guard_release(base, mapped, GUARD_KIND_LARGE) || refuse_live_release(base, mapped, GUARD_KIND_LARGE)
+        unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
+               refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
+               quarantine_release(base, mapped)
           LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         end
         user = nxt
@@ -1385,7 +1387,10 @@ module Gcry
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
-        unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
+        base = chunk.as(Void*).address
+        unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
+               refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
+               quarantine_release(base, mapped)
           LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         end
         user = nxt

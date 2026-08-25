@@ -673,6 +673,9 @@ module GC
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
     heap.always_clear = true if env_flag_one?("GCRY_ALWAYS_CLEAR")
+    if q = env_u64("GCRY_RELEASE_QUARANTINE")
+      heap.release_quarantine = q
+    end
     heap.mark_audit = true if env_flag_one?("GCRY_MARK_AUDIT")
     if v = env_u64("GCRY_DYING_AUDIT_MIN_BYTES")
       heap.dying_audit_min_bytes = v

@@ -598,6 +598,72 @@ module Gcry
     GUARD_KIND_EMPTY_CHUNK = 0_u8
     GUARD_KIND_LARGE       = 1_u8
 
+    # Hold a released range unmapped-but-unreturned for N collections before
+    # giving it back to the kernel.
+    #
+    # `GCRY_UNMAP_GUARD=1` — which never calls `munmap` at all — took the
+    # acikturkiye crash from 3 of 6 to 0 of 11 with the guard verified engaged.
+    # That says the crash needs the address handed back, but not *how long*
+    # after the release the danger lasts. This bounds it: if holding a range
+    # for one collection is enough, whatever still refers to it is dropped by
+    # the next mark, and that is a much smaller place to look than "somewhere".
+    #
+    # `mprotect(PROT_NONE)` first, so the pages are returned to the OS exactly
+    # as `munmap` would return them and only the address stays reserved — the
+    # cost is address space, not RSS.
+    QUARANTINE_SLOTS = 4096
+    @q_base = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
+    @q_len = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
+    @q_gen = uninitialized StaticArray(UInt64, QUARANTINE_SLOTS)
+    @q_head = 0
+    @q_count = 0
+    # `GCRY_RELEASE_QUARANTINE=<collections>`; 0 disables.
+    property release_quarantine : UInt64 = 0_u64
+    getter quarantined_releases : UInt64 = 0_u64
+    getter quarantine_forced_drains : UInt64 = 0_u64
+
+    def quarantine_held : UInt64
+      @q_count.to_u64
+    end
+
+    # Returns true when the caller must not unmap: the range is held here.
+    protected def quarantine_release(base : UInt64, len : UInt64) : Bool
+      return false if @release_quarantine == 0
+      if @q_count >= QUARANTINE_SLOTS
+        # Full. Give the oldest back now rather than growing without bound;
+        # counted, because a quarantine that is always full is not a
+        # quarantine and its zero would not mean anything.
+        i = @q_head
+        LibC.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        @q_head = (i + 1) % QUARANTINE_SLOTS
+        @q_count -= 1
+        @quarantine_forced_drains &+= 1
+      end
+      # Drop the pages; keep the address.
+      LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE)
+      i = (@q_head + @q_count) % QUARANTINE_SLOTS
+      @q_base[i] = base
+      @q_len[i] = len
+      @q_gen[i] = @collections
+      @q_count += 1
+      @quarantined_releases &+= 1
+      true
+    end
+
+    # Give back everything held for at least `@release_quarantine` collections.
+    # Entries are appended in collection order, so the head is always the
+    # oldest and the walk can stop at the first one that is too young.
+    protected def drain_release_quarantine : Nil
+      return if @release_quarantine == 0
+      while @q_count > 0
+        i = @q_head
+        break if @collections - @q_gen[i] < @release_quarantine
+        LibC.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        @q_head = (i + 1) % QUARANTINE_SLOTS
+        @q_count -= 1
+      end
+    end
+
     # Direct-mapped record of "this base is currently released", so a release
     # can ask whether the same base is being let go twice.
     #
@@ -1708,6 +1774,9 @@ module Gcry
             # Munmap outside STW — empty chunks + excess large freelist (reuse common).
             # Still under post-STW mutex so the next collect cannot stop_world here.
             flush_pending_empty_chunks
+            # Anything held long enough goes back to the kernel here, on the
+            # collector, outside the walks (`GCRY_RELEASE_QUARANTINE`).
+            drain_release_quarantine
             # Mutator-detached large chunks: release before the walks below start.
             flush_pending_large_release
             during_live_chunk_walk do
