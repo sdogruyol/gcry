@@ -946,6 +946,10 @@ jobs:
       - name: Sample the locked arm
         env:
           LARGE_CACHE_RACE_ATTEMPTS: ${{ inputs.lcr_attempts }}
+          # Classify the address the child died on. Without this the gate can
+          # say a fault happened and nothing about where it landed.
+          GCRY_SEGV_REPORT: "1"
+          GCRY_RELEASE_LEDGER: "1"
         run: |
           mkdir -p bin
           crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race --error-trace

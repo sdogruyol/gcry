@@ -136,10 +136,22 @@ puts ""
 # deadline says nothing about serialisation, and a gate that folds the two
 # together will tell the next reader the allocator raced when all that happened
 # was a slow machine.
-def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String?}
+# The gcry lines a crashed child left behind. `GCRY_SEGV_REPORT=1` classifies
+# the address — released chunk, free block, hole — and without keeping them the
+# gate can say a fault happened and nothing about what faulted. That is the
+# difference between "the locked arm faulted 1 of 60 on aarch64" and knowing
+# which of gcry's own structures it landed in.
+def gcry_lines(captured : String) : String?
+  lines = captured.lines.select { |l| l.starts_with?("gcry:") }
+  return nil if lines.empty?
+  lines.first(12).join("\n")
+end
+
+def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String?, String?}
   bad = 0
   hung = 0
   first = nil
+  report = nil
   env = {} of String => String
   env["GCRY_TRIM_UNLOCKED"] = "1" if unlocked
   attempts.times do
@@ -149,15 +161,20 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
       bad += 1
       hung += 1 if result.timed_out
       first ||= captured.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
+      report ||= gcry_lines(captured)
     end
   end
-  {bad, hung, first}
+  {bad, hung, first, report}
 end
 
-locked_bad, locked_hung, locked_note = run(exe, false, attempts)
+locked_bad, locked_hung, locked_note, locked_report = run(exe, false, attempts)
 puts "  locked (default):    #{locked_bad} of #{attempts} failed#{locked_note ? "   #{locked_note.strip}" : ""}"
+if locked_report
+  puts "  what the locked arm's first crash said:"
+  locked_report.each_line { |l| puts "    #{l}" }
+end
 
-unlocked_bad, unlocked_hung, unlocked_note = run(exe, true, attempts)
+unlocked_bad, unlocked_hung, unlocked_note, _ = run(exe, true, attempts)
 puts "  unlocked (old):      #{unlocked_bad} of #{attempts} failed#{unlocked_note ? "   #{unlocked_note.strip}" : ""}"
 
 if locked_hung > 0
