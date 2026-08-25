@@ -28,10 +28,19 @@ default arm apparently sees unaided on aarch64.
 
 ## Rate
 
-Unknown. One red run, and the same job passed on the run before it
-(32857778274) and the run after (32864614391). At 5 attempts per gate run the
-rate is somewhere below 1 in 5 attempts, and a green run costs nothing to
-produce, so **a green aarch64 job is not evidence that this is closed**.
+**1 of 60.** Measured on the aarch64 runner with `LARGE_CACHE_RACE_ATTEMPTS=60`
+(CI run 32878170978, dispatch-only `aarch64-lcr-rate` job):
+
+    4 workers × 20000 rounds of 40960 B, one trimmer, 60 attempts per arm
+      locked (default):    1 of 60 failed
+      unlocked (old):     60 of 60 failed   Invalid memory access (signal 11)
+
+The control arm is **60 of 60**, so the gate is sound and its green side is
+evidence. With the earlier sighting that is **2 faults in 65 attempts**, about
+3%, against **0** for the same gate on x86_64 across every run in this session.
+
+A green aarch64 job is therefore not evidence that this is closed: at 5
+attempts per push run, most runs will be green.
 
 ## Open
 

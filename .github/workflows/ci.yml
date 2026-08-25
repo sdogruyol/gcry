@@ -793,7 +793,11 @@ jobs:
   # because it crashed first (SEGV at 1h24m). 5 h fits, with headroom for the
   # build and the drain. The 24 h number lives on locally — `make soak`.
   soak:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # `soak_duration: 0` opts out. Any dispatch used to start all three 5 h
+    # arms, so asking this workflow for anything else — a rate measurement, a
+    # one-off gate — cost fifteen runner-hours nobody wanted. The schedule is
+    # unaffected and a dispatch that leaves the default alone still soaks.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.soak_duration != '0')
     runs-on: ubuntu-latest
     timeout-minutes: 330
     # Three arms, concurrently. One 5 h arm a week cannot chase a crash that took
