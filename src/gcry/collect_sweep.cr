@@ -297,7 +297,11 @@ module Gcry
       end
 
       if !after_world || relink_chunks_after_world?
-        @chunks = kept
+        # Under `@index_lock`, the one lock that guards `@chunks`. In the
+        # stopped world nothing else can be here and the lock is free; on the
+        # `after_world` path mutators are running and a prepend racing this
+        # store would be lost, which puts a live chunk on no list at all.
+        @index_lock.sync { @chunks = kept }
       end
 
       # Queue for post-STW munmap (do not munmap while world stopped).

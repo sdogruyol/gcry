@@ -1448,8 +1448,28 @@ module Gcry
       {% end %}
 
       chunk = ptr.as(ChunkHeader*)
-      chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
-      @chunks = chunk
+      # Prepend and index-insert under the **one** lock that guards `@chunks`.
+      #
+      # This list used to be mutated under two: `unlink_chunk` holds
+      # `@alloc_lock`, and this path reaches here from `refill_size_class`
+      # holding only the size-class freelist lock. A prepend interleaved with
+      # an unlink can leave the unlinked chunk reachable through `next` — the
+      # predecessor search reads a head that changes under it — and the chunk
+      # is then unmapped while still on the list. Every later walker
+      # dereferences freed memory; `large_cache_race` children die on the
+      # chunk's own base with `update_heap_bounds_after_unmap` on the stack
+      # (`bench/log/linux/2026-08-25-aarch64-large-cache-locked-arm`).
+      #
+      # `@index_lock` and not `@alloc_lock`: the large path already holds
+      # `@alloc_lock` across `alloc_large` → `map_chunk`, and the spinlock is
+      # not reentrant. `@index_lock` is a leaf — nothing takes `@alloc_lock`
+      # inside it — and both mutation paths already took it for the index, so
+      # this widens an existing section rather than adding a lock.
+      @index_lock.sync do
+        chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
+        @chunks = chunk
+        index_insert_locked(chunk)
+      end
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
       # Inline insert into sorted chunk index. Under TLAB MT this is called
@@ -1463,7 +1483,6 @@ module Gcry
       # allocating thread takes when it maps a chunk, and the write the read in
       # `chunk_containing_unlocked` used to race. Restored only by the knob that
       # restores that read, so the gate has both halves of the old behaviour.
-      index_insert(chunk)
       invalidate_chunk_cache if @index_cache_unchecked
       note_mapped(chunk)
       note_map_base(ptr.address) if @release_ledger
@@ -1482,21 +1501,29 @@ module Gcry
     end
 
     protected def unlink_chunk(target : ChunkHeader*) : Nil
-      index_remove(target)
-      if @chunks == target
-        @chunks = target.value.next
-        return
-      end
-
-      prev = @chunks
-      while prev
-        if prev.value.next == target
-          node = prev.value
-          node.next = target.value.next
-          prev.value = node
-          return
+      # Index removal and the list surgery in one section, for the reason
+      # `map_chunk` spells out: the predecessor search reads `@chunks` and
+      # every `next` along it, and a concurrent prepend under a *different*
+      # lock can move the head out from under it. The search then walks a list
+      # the target is no longer on, finds no predecessor, and returns having
+      # removed the chunk from the index but **not** from the list — after
+      # which the caller unmaps it and the next walker faults.
+      @index_lock.sync do
+        index_remove_locked(target)
+        if @chunks == target
+          @chunks = target.value.next
+        else
+          prev = @chunks
+          while prev
+            if prev.value.next == target
+              node = prev.value
+              node.next = target.value.next
+              prev.value = node
+              break
+            end
+            prev = prev.value.next
+          end
         end
-        prev = prev.value.next
       end
     end
 
@@ -1851,7 +1878,12 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
-      @index_lock.sync do
+      @index_lock.sync { index_insert_locked(chunk) }
+    end
+
+    # Caller holds `@index_lock`.
+    private def index_insert_locked(chunk : ChunkHeader*) : Nil
+      begin
         invalidate_chunk_cache
         index_ensure_cap(@chunk_index_count + 1)
         pos = index_lower_bound(chunk.address)
@@ -1866,7 +1898,12 @@ module Gcry
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
-      @index_lock.sync do
+      @index_lock.sync { index_remove_locked(chunk) }
+    end
+
+    # Caller holds `@index_lock`.
+    private def index_remove_locked(chunk : ChunkHeader*) : Nil
+      begin
         invalidate_chunk_cache
         pos = index_lower_bound(chunk.address)
         unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
