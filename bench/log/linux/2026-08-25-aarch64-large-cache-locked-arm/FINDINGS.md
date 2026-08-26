@@ -184,6 +184,31 @@ Throughput did not pay for it: acikturkiye under `wrk -t4 -c64` for 220 s ran
 at **682 req/s**, against the 545–586 band measured earlier the same day, and
 the server survived.
 
+## The lock had to be its own
+
+The first version put the list surgery under `@index_lock`. That fixed the race
+and starved everything else: `unlink_chunk` walks the list to find a
+predecessor, and `@index_lock` is the lock every `chunk_containing` takes. On a
+two-core Darwin runner the job went from **1m50s to a 20-minute timeout**,
+cancelled inside the STW × TLAB property test — not a deadlock, a spinlock held
+across an O(n) walk while every other thread spun on it.
+
+`@chunk_list_lock` is contended only by other list mutations. Order is
+list → index, and nothing goes the other way. The alternative — a `prev` link
+for O(1) unlink — would change `ChunkHeader::SIZE` and every chunk's layout,
+which is not a change to land at the end of a long session.
+
+Final numbers, interleaved, alternating binaries child by child:
+
+| Batch | before | after |
+|-------|-------:|------:|
+| 70 each | 2 | 0 |
+| 150 each | 7 | 0 |
+| 120 each (dedicated lock) | 9 (+2 timeouts) | 0 |
+| **total** | **18 of 340** | **0 of 340** |
+
+CI green on every job afterwards, Darwin included.
+
 ## What this closes, and what it does not
 
 It closes the `large-cache-race` locked-arm fault, which is the same defect the
