@@ -132,3 +132,64 @@ but the defect is **not closed**. The real fix is to put `@chunks` under a
 single lock; every walk of it is exposed to the same race until then. Non-
 interleaved comparisons on this machine are worthless, which is how the first
 "before 2–3 of 10, after 0 of 60" reading was produced and why it was dropped.
+
+
+---
+
+# Closed: one lock for the chunk list
+
+## The fix
+
+`@chunks` was mutated under two locks:
+
+- `unlink_chunk` holds `@alloc_lock` and **walks the list** to find the
+  predecessor of the chunk it is removing;
+- `map_chunk` reaches the prepend from `refill_size_class` holding only the
+  **size-class freelist lock**.
+
+Interleave them and the predecessor search reads a head that moves under it. It
+finds no predecessor, returns having removed the chunk from the *index* but not
+from the *list*, and the caller unmaps it. Every later walker follows `next`
+into freed memory — which is exactly the reported stack:
+`update_heap_bounds_after_unmap` ← `trim_large_cache` ← the trimmer thread,
+faulting on the chunk's own base.
+
+Both mutations now happen inside `@index_lock`. That lock is the right one and
+not an arbitrary choice:
+
+- both paths **already took it** for the index itself, so this widens an
+  existing critical section rather than introducing a lock;
+- it is a leaf — nothing takes `@alloc_lock` inside it — so no new ordering;
+- `@alloc_lock` could not be used: the large path already holds it across
+  `alloc_large` → `map_chunk`, and `Crystal::SpinLock` is not reentrant.
+
+The sweep's own `@chunks = kept` takes it too, for the `after_world` path where
+mutators are running.
+
+## Measured
+
+Interleaved, alternating the two binaries child by child so both arms see the
+same machine state — the only comparison this laptop supports, as the earlier
+non-interleaved readings showed:
+
+| Arm | SIGSEGV | children |
+|-----|--------:|---------:|
+| before (`708ee7b`) | **7** | 150 |
+| after | **0** | 150 |
+
+Fisher exact p ≈ 0.007. With the 70-each batch that preceded it: **9 of 220
+against 0 of 220**, p ≈ 0.002.
+
+Throughput did not pay for it: acikturkiye under `wrk -t4 -c64` for 220 s ran
+at **682 req/s**, against the 545–586 band measured earlier the same day, and
+the server survived.
+
+## What this closes, and what it does not
+
+It closes the `large-cache-race` locked-arm fault, which is the same defect the
+aarch64 runner caught at 1 of 60 and this laptop reproduces at 3–15%. It is
+also the second half of the story in
+`2026-08-24-acikturkiye-live-string-uaf`: one list, two locks, found first as a
+bounds exclusion and then as a use-after-free.
+
+`GCRY_PAGE_DONTNEED=1` remains open and unrelated (4 of 28).
