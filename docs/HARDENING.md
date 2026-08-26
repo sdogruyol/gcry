@@ -31,7 +31,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
   numbers belong in a correctness claim. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
 - Large-object freelist retain: Linux process **0**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive grows only from a non-zero floor, up to 32 MiB)
-- Free-page physical release: Darwin **on** (`MADV_FREE_REUSABLE`); Linux HOLED **opt-in** (`GCRY_PAGE_DONTNEED=1` — measured thr+RSS regression as default). Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
+- Free-page physical release: **opt-in on both platforms** (`GCRY_PAGE_DONTNEED=1`). Linux HOLED was already opt-in (measured thr+RSS regression as default); Darwin shipped it **on** until 0.21.0 and it is off now, because the walk is unsound and the defect is open — see the knob table below. Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.
@@ -71,8 +71,8 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_UNALIGNED_CANDIDATES=1` | Follow misaligned candidate values (`str.to_unsafe + 3`); implied by `GCRY_SOUND` |
 | `GCRY_ALIGNED_CANDIDATES=1` | Force the cheap alignment filter back on (escape from `GCRY_SOUND`) |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release (Linux opt-in; Darwin process default-on). **Known unsound:** the post-STW walk madvises a free-page run computed from a live-mask taken in the pause, and a mutator can allocate into that run before the syscall — `MADV_DONTNEED` then zeroes a live object. `make page-release-corruption` faults **4 of 28** attempts on this arm across six gate runs, against **0** throughout for `GCRY_MOSTLY_EMPTY=1` and `GCRY_DISABLE_MADVISE=1`. Warns at boot. **On Darwin this walk is default-on and visits every kept size-class chunk**; `MADV_FREE_REUSABLE` zero-fills a reclaimed page, so the same window is reachable there — turn it off with `GCRY_DISABLE_PAGE_RELEASE=1`. |
-| `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim (Darwin default-on; Linux if forced on) |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release, **opt-in on Linux and Darwin alike** (Darwin was default-on before 0.21.0). **Known unsound:** the post-STW walk madvises a free-page run computed from a live-mask taken in the pause, and a mutator can allocate into that run before the syscall — `MADV_DONTNEED` then zeroes a live object. `make page-release-corruption` faults **4 of 28** attempts on this arm across six gate runs, against **0** throughout for `GCRY_MOSTLY_EMPTY=1` and `GCRY_DISABLE_MADVISE=1`. Warns at boot. On Darwin the walk visits **every** kept size-class chunk rather than only the HOLED ones, and `MADV_FREE_REUSABLE` zero-fills a reclaimed page, so the same window is reachable there — which is why the Darwin default was turned off rather than documented. |
+| `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim. Now only meaningful alongside `GCRY_PAGE_DONTNEED=1`, since the release is off by default everywhere. |
 | `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **0**; Darwin **1 MiB**; adaptive from non-zero) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | Disable root type_id filter |

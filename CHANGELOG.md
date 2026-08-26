@@ -7,789 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.21.0] - 2026-08-26
 
-- **A precise object layout was chosen by a word the mutator picked.**
-  `scan_object` looks up the layout for a block with `tid = user.as(Int32*).value`
-  — the payload's **first Int32**. For a real object that is the type id. For a
-  raw buffer it is whatever the first element holds, and Crystal stores a
-  union's type id in its first four bytes, so a buffer of union values
-  (`Array(JSON::Any)`, a `Hash::Entry` table with a union value) begins with
-  exactly the kind of small integer that collides with a registered class. The
-  `alloc_size` gate does not separate them: both are 64-byte blocks.
-  Under the collision the block was scanned to the wrong map and lost every
-  pointer that map did not mention, and `scan_hash_object`'s sanity checks each
-  `return`ed rather than falling back, so the body was not scanned
-  conservatively either. The same collision had been found once from the other
-  side — the `scan_cap` branch carries a comment about "raw buffers whose first
-  Int32 randomly equals a registered type_id" — and the precise-fields branch
-  had the identical key with no such guard.
-  A hash-kind body is now word-scanned alongside the entry walk, demoting only
-  `@entries` / `@indices` to `mark_noscan`, and the shape is validated first:
-  a sane `@indices_size_pow2`, non-negative `@size` / `@deleted_count` that fit
-  the implied capacity, `@entries` / `@indices` null or in the heap. A block
-  that fails degrades to exactly the conservative scan it would have got
-  unregistered — demotion included, since calling a word a blob is itself a
-  claim about the type.
-  **Measured on acikturkiye under `wrk -t4 -c64`**, with `GCRY_MARK_AUDIT=1`
-  reporting what the sweep was about to free that something still pointed at:
-  **193 of 216 collections had missed edges before, 0 of 216 after**, over
-  75 022 requests against 25 835. Every reported edge had the same shape — a
-  marked parent whose first Int32 read 208, pointing at +24 and +56 to unmarked
-  32-byte blocks — and `GCRY_LAYOUT_DUMP=1` (added here) named 208 as a `Hash`,
-  which has no pointer at either offset.
-  `bench/log/linux/2026-08-24-acikturkiye-live-string-uaf/FINDINGS.md`.
-
-- **The bounds walk after an unmap could shut a live chunk out of the heap.**
-  `update_heap_bounds_after_unmap` recomputes `@heap_min` / `@heap_max` from a
-  walk of `@chunks` and then **assigns** them. Putting that walk under
-  `@alloc_lock` — the fix below — was not enough: small chunks reach
-  `map_chunk` from `refill_size_class` under the **size-class freelist lock**,
-  which is a different lock, so a chunk mapped during the walk can have its
-  bounds published by `note_mapped` and then overwritten by the assignment.
-  A chunk outside `[@heap_min, @heap_max)` is a chunk `find_block` answers
-  `nil` for. Every conservative pointer into it is dropped by the mark and its
-  objects are swept while live.
-  **This is why every instrument said the heap was fine.** The mark audit
-  resolves its candidates with the same `find_block`, so it is blind to exactly
-  the edges being lost — it reported **0 missed edges over 106 402 audited
-  edges** in runs that crashed. It also explains why `GCRY_UNMAP_GUARD=1` was
-  0 of 11 (the bounds are only recomputed after an unmap, and the guard never
-  unmaps) and why `GCRY_RELEASE_QUARANTINE=32` moved the fault later by exactly
-  the quarantine length.
-  The walk now runs a second time and widens back to include anything the
-  assignment shut out. Widening is safe against a chunk mapped after it, too:
-  `map_chunk` links the chunk into `@chunks` before `note_mapped` publishes its
-  bounds, so either the walk sees it and widens, or the publication lands after
-  the store and survives.
-  **Measured**: a detector version of that second walk fired in **3 of 3**
-  crashing runs, at collections 21, 24 and 126. With the repair, acikturkiye
-  under the same load went from **6 of 9 runs dead (92–438 req/s)** to **0 of
-  12 (339–586 req/s)**, Fisher exact p ≈ 0.0007, with the repair engaged rather
-  than assumed — its counter reaches 63 in a single 220 s run.
-
-- **The large-object cache was trimmed without the lock the allocator holds.**
-  `alloc_large` → `take_large_free` walks `@large_freelists` **holding
-  `@alloc_lock`**, takes a chunk off it and hands it to the mutator.
-  `trim_large_cache` walked the same list holding nothing, and unmapped each
-  chunk while still walking it; all three of its call sites are outside the
-  lock. So an allocating thread could be issued a chunk a trimming peer was
-  tearing down — a live buffer, just handed out, unmapped under its owner.
-  It detaches under the lock and unmaps after it now, which keeps the syscalls
-  outside the lock — the property the original comment was protecting, since
-  `munmap` of many VMAs is slow on Linux and holding the allocator across it
-  would stall every mutator. Same shape as the empty-chunk path: decide under
-  the lock, tear down after.
-  **And a second unsynchronised step in the same function.**
-  `update_heap_bounds_after_unmap` walks the chunk list and rewrites `@heap_min`
-  / `@heap_max` — the bounds `find_block` reads to decide whether an address is
-  gcry's at all — and it ran outside the lock too. Serialising the detach alone
-  was not enough; the gate below stayed red at 2 of 5 until this went under the
-  lock as well.
-  **Proven, deterministically, by `make large-cache-race`.** The application
-  this was found in could not settle it — its crash rate fell from 7 of 60 to
-  nothing between sessions, so neither arm meant anything — so the question is
-  asked directly instead: four workers allocating, writing, verifying and
-  freeing 40 KiB blocks while a peer calls `trim_large_cache(0)` in a loop, with
-  no Kemal, no Postgres and no rate to wait for. **`GCRY_TRIM_UNLOCKED=1` faults
-  5 of 5; serialised, 0 of 5**, over 28 000 cache hits per run so the arm
-  provably reaches `take_large_free`. Three further gate runs clean.
-  **A third instance, in the sweep itself.** `sweep(after_world: true)` — the
-  lazy path, where mutators are running — ends with the same
-  `update_heap_bounds_after_unmap`, and it too ran with no lock. Found by
-  sweeping the call sites rather than by another crash: the same walk, the same
-  two fields, the same mutators mapping chunks underneath it. It takes the
-  allocator's lock on that path now and leaves the stopped-world path alone,
-  where nothing else runs and the lock would buy nothing.
-  Whether this was also the acikturkiye use-after-free is still not proven —
-  that crash stopped reproducing before it could be tested — but the race it
-  describes is now measured rather than argued.
-  Two things were learned the expensive way and are written down in
-  `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`: a control has to
-  reproduce the defect rather than merely remove the fix — the first
-  `GCRY_TRIM_UNLOCKED` arm dropped the lock but kept the new two-pass ordering
-  and returned 0 of 24, which said nothing — and rooting `realloc`'s new block
-  across the copy was tried, measured at 2 of 24, and reverted.
-
-### Changed
-
-- **The pre-commit hook checked files the repo does not own.** `crystal tool
-  format --check` with no arguments walks the working tree, which includes
-  vendored shards under gitignored `lib/` directories — `bench/kemal/lib/`
-  appears the moment a bench target runs `shards install`, and from then on
-  every commit fails on the formatting of someone else's code. It checks
-  `git ls-files -- '*.cr'` now: exactly what the repo has.
-
-### Added
-
-- **`make large-cache-race` — the allocator and the cache trim, asked directly.**
-  Four workers allocating, writing, verifying and freeing 40 KiB blocks while a
-  peer calls `trim_large_cache(0)` in a loop. No Kemal, no Postgres, no rate to
-  wait for: `GCRY_TRIM_UNLOCKED=1` faults **5 of 5**, serialised **0 of 5**,
-  with 28 000 cache hits per run so the arm provably reaches `take_large_free`.
-  Built because the application this came from stopped reproducing before the
-  fix could be tested — and it immediately earned itself, by failing the
-  *fixed* arm 2 of 5 and so finding the second unsynchronised step that the
-  first fix had missed.
-
-- **`GCRY_UNMAP_GUARD=1` — a released chunk that can still be identified.**
-  A write into released heap memory faults whether the chunk was `munmap`ed or
-  `mprotect(PROT_NONE)`d, but only the second leaves the address ours: the
-  SIGSEGV report can then say which chunk it was, how big, which release path
-  let it go, at which collection, and how far into it the write landed. Under
-  `munmap` the same fault can only be reported as "inside the heap span but in
-  no live chunk", which is where the acikturkiye investigation had been stuck.
-  With the guard, the first sighting identified it: a **69 632-byte
-  large-object chunk**, released by the large-object path, written 34 343 bytes
-  in — a live ~64 KiB JSON response buffer, collected while a fiber was writing
-  into it. Costs address space rather than memory, is bounded at 8192 records
-  and counts what it drops past that, and is never a default because the
-  address space is never reused.
-  `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
+Correctness release. Closes the acikturkiye live-string UAF (layout collision
+on Hash/union buffers), chunk-list and large-cache races, the Thread birth
+use-after-free, and several root-coverage holes (BSS cap, 64-thread stack
+bounds, birth/staging overflow).
 
 ### Fixed
 
-- **`find_block` from a mutator thread handed back `@chunk_index[-1]`, which is
-  libc's malloc header for the array.** The last-chunk cache in
-  `chunk_containing_unlocked` tested `@last_chunk_idx` and then **read it again**
-  to index with. Those are two loads: a concurrent `invalidate_chunk_cache`
-  between them turns a guard that saw a valid index into a read one slot *before*
-  the array. That is why the bad value was the same small constant every single
-  time — `0x91`, handed to `ChunkHeader.large?`, which is exactly where the
-  unattributed CI crash faults. One of the writers was unsynchronised as well: a
-  second `invalidate_chunk_cache` outside `@index_lock`, on the path every
-  allocating thread takes when it maps a chunk.
-  The index is read **once** now, checked against the count, and the chunk it
-  names is *verified to contain the address* rather than assumed to — a miss
-  falls through to the binary search, which is the authority and which already
-  did that check on its own result. The unsynchronised invalidation is gone;
-  `index_insert` already invalidates under the lock.
+- **Precise layout chosen by a mutator word.** `scan_object` treated a block's
+  first Int32 as a type id. A raw buffer of union values (`Array(JSON::Any)`, a
+  Hash entry table) starts with exactly that kind of small integer, so a 64-byte
+  Hash body was scanned to the wrong map and lost its pointers. Hash-kind bodies
+  are now word-scanned beside the entry walk; the shape is validated first; a
+  miss falls back to the conservative scan (demotion included). Acikturkiye
+  `wrk -t4 -c64`: **193 of 216** collections missed edges before, **0 of 216**
+  after. `bench/log/linux/2026-08-24-acikturkiye-live-string-uaf/FINDINGS.md`.
 
-  | arm | before | after |
-  |-----|-------:|------:|
-  | `alloc` (256 `GC.malloc`/iter) | 0 of 8 | 0 of 8 |
-  | `idle` | 0 of 8 | 0 of 8 |
-  | `live` (256 `Heap#live?`/iter) | **5 of 8** | **0 of 8** |
-  | `realloc` (256 `GC.realloc`/iter) | **5 of 8** | **0 of 8** |
+- **Chunk list, heap bounds, and large-cache trim races.** `@chunks` was mutated
+  under two locks; `unlink_chunk` could unmap a still-linked chunk;
+  `update_heap_bounds_after_unmap` overwrote bounds a concurrent `map_chunk` had
+  published; `trim_large_cache` unmapped while `alloc_large` issued the same
+  chunk; the lazy sweep did the bounds walk unlocked too. List mutations share
+  `@chunk_list_lock`; bounds are read off the chunk index under one lock; trim
+  detaches under `@alloc_lock` and unmaps after. `large_cache_race`: **18 of 340**
+  SIGSEGVs → **0**; `GCRY_TRIM_UNLOCKED=1` **5 of 5** → **0** serialised.
+  `bench/log/linux/2026-08-25-aarch64-large-cache-locked-arm/FINDINGS.md`,
+  `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`.
 
-  **And the race was never rare.** `index_cache_torn` counts a cache read whose
-  index, bounds and array disagreed: **6 709 in one three-run arm**, and 600 even
-  in the arms that do no lookups of their own. It was firing thousands of times
-  per run all along and only occasionally landing on a value that killed the
-  process.
-  It took a mutator *inside* `find_block` to see, which is why four sessions
-  missed it: allocation at the same rate never crashes, because it does not look
-  chunks up. `GC.realloc` and `Heap#live?` reach it by different routes and
-  crashed alike; TLAB reaches it on the allocation fast path, which is why the
-  CI sighting was on `--tlab --nursery` and nowhere else.
-  `make find-block-race` gates it in both directions — `GCRY_INDEX_CACHE_UNCHECKED=1`
-  restores both halves of the old behaviour and takes `live` and `realloc` to
-  **8 of 8** — and it requires a non-zero torn count, so a green run cannot come
-  from a harness that never reached the window. On x86_64 and aarch64.
-  **Two readings that were wrong, both retired by measurement rather than by
-  argument**: that the array was reallocated under the reader (`moved=0` in
-  every catch, and making the index immortal changed nothing), and that a slot
-  below the count was never written (zero-filling the new capacity changed
-  nothing). Both experiments are gone from the tree; only the counter that means
-  something stayed.
+- **`find_block` last-chunk cache and `start_world` index window.** The cache
+  loaded `@last_chunk_idx` twice and could index `[-1]` (libc's malloc header —
+  the `0x91` CI crash). The index is read once and verified to contain the
+  address. Separately, `start_world` resumed threads before clearing
+  `@world_stopped`, so mutators took the unlocked index path; the flag is
+  cleared first. `make find-block-race`, `make stw-index-race`.
 
-- **`start_world` resumed every thread before clearing `@world_stopped`, so
-  every mutator briefly read the chunk index with no lock.**
-  `Heap#chunk_containing` skips `@index_lock` while that flag is set, and its
-  comment says why: only the collector can be reading the index while the world
-  is stopped. `start_world` cleared the flag *after* the resume loop, so between
-  the first `thread.resume` and that store every thread was running with the
-  flag still saying stopped — taking the unlocked path against an
-  `index_insert` / `index_remove` from any peer that maps or unmaps a chunk. A
-  binary search over an array that is being shifted under it returns a garbage
-  `ChunkHeader*`, and the first thing done with one is
-  `ChunkHeader.large?(chunk)`.
-  Measured with the new `GCRY_INDEX_AUDIT=1`, which counts unlocked index reads
-  during a stop and splits them by whether the reader is the thread that stopped
-  the world: **173 326 foreign reads across 15 runs** with the old ordering,
-  **0** with the flag cleared before the resume loop. The readers are ordinary
-  named worker threads — not the signal-exempt Monitor and not an unpublished
-  one, both of which were the obvious suspects and neither of which it is.
-  The flag is cleared first now. `make stw-index-race` gates it in both
-  directions, with `GCRY_STW_LATE_CLEAR=1` restoring the old order, and it
-  checks that the collector's own unlocked count is non-zero so a zero on the
-  other side cannot come from an arm that never ran.
-  **What this is and is not evidence for.** The unattributed crash in the
-  TLAB+nursery arm faults in `Heap#find_block` under `tlab_alloc_small` — a
-  mutator index lookup — and that arm is the one where mutators do 11.5 million
-  such lookups a run against 193 thousand without TLAB, which is why it and not
-  the plain arm. So the mechanism fits the sighting and is now closed. It is
-  **not** a reproduction: the CI crash has never been reproduced locally, and
-  whether this was its cause will show as the crash not coming back.
+- **Thread birth use-after-free.** A `Thread` is now rooted from
+  `GC.pthread_create` until it publishes on Crystal's list. Overflow of the
+  64-slot table used to drop the root (the UAF reopened past the 64th birth
+  since the last collection); it now roots anyway and leaks, which is the
+  deliberate trade. A full staging table drained nothing and dropped the
+  *newest* birth; it now drains published entries and evicts the oldest.
+  `make thread-birth-root`, `make thread-staging`.
+
+- **Global roots and stack coverage.** BSS larger than 1 MiB was refused as a
+  root range, so every class var and constant slot was dropped; the cap is gone
+  and oversized ranges are scanned in chunks. The pthread stack-bounds snapshot
+  stopped at 64 threads and reported full coverage; the table grows, and the
+  visit is counted before the capacity check. `make static-bss-roots`.
+
+- **Heap counters lost updates.** `live_objects` / `total_bytes` /
+  `bytes_since_gc` now go atomic in `GC.pthread_create`, *before* the call.
+  `GCRY_HEAP_COUNTERS_ATOMIC=0/1`.
+  `bench/log/linux/2026-08-20-heap-counter-cost/FINDINGS.md`.
+
+- **Darwin compile.** `LibC::MAP_ANONYMOUS` is no longer redefined when Crystal
+  already has it (x86_64 macOS). `bss_size_cap=` lives on both platforms.
+  `make darwin-typecheck`.
+
+- **Crash reporter and dying-audit false readings.** Out-of-span faults no
+  longer exclude a swept object; reissued-block flags are not a free-path
+  verdict; the address-space audit no longer reports its own frames as a scan
+  hole; the dying audit records watched types below the 384-byte band.
 
 ### Added
 
-- **The env reference had drifted by 33 knobs, and now cannot.**
-  `docs/HARDENING.md` is the only place a user can find out what a `GCRY_*`
-  knob does, and it was missing everything added in v0.20.0 —
-  `GCRY_HEAP_COUNTERS_ATOMIC`, `GCRY_THREAD_BIRTH_ROOT` and its twin, the
-  birth-grace controls, the dead- and pooled-stack root arms, the scrub audit
-  and its overshoot, `GCRY_POST_MARK_SPIN`, the mostly-empty family — and
-  everything added on 2026-08-22. All 33 are documented now, each with the
-  measurement that put it there.
-  `make knob-doc-check` keeps it that way: every `GCRY_*` the source reads must
-  have a row, and CI runs it. Broken on purpose and observed red. That is the
-  failure mode a reference has — going stale breaks nothing, so nothing says so,
-  which is the same shape as every silent degradation this release found.
-
-- **The suspend wait now asks whether the thread it is waiting for still
-  exists.** The watchdog says `phase=suspend` and names the thread from outside;
-  what it cannot ask is the question that would settle this — is that
-  `pthread_t` still a live thread? The wait now asks it from the inside, once
-  per stop, after about a second of spinning:
-  `SUSPEND STALLED on thread 0x… — n of m acknowledged. the handle is live
-  (pthread_kill 0 → 0)`, or `pthread_kill(0) → 3 ESRCH: the handle names no live
-  thread`. ESRCH is what a `Thread` object that was swept and whose handle was
-  reissued would look like from here — the open use-after-free lives on the same
-  runner as this hang, and nothing has been able to connect or separate them.
-  Armed only when the STW watchdog is (`GCRY_STW_WATCHDOG_MS`), because asking
-  libc about a handle that may have come out of a freed object can itself fault:
-  a fault there names the defect, while a hang names nothing, and a hang is what
-  six aarch64 jobs have produced. `GCRY_SUSPEND_STALL_SPINS` lowers the
-  threshold — read at init like every other knob, and **not** as a constant with
-  an `ENV` lookup in it, which is how the first version of this shipped: Crystal
-  evaluates a constant with a runtime initializer lazily at first use, that
-  first use is inside `stop_world`, and `ENV[]?` allocates. `make rss-leak`
-  caught it in one CI run at **120.75% heap growth against a 15% limit**, which
-  is exactly what that gate is for. `make stw-watchdog` gained an
-  `armed+in-spin` arm that fires the report at one spin and requires both the
-  line and its verdict — arranging a thread
-  that genuinely never answers is the defect itself, so the report is proven on
-  a healthy one.
-
-- **`make find-block-race` — a rate for the open `find_block` crash, and the
-  arm that says it is not the harness.** Four threads and 200 collections, with
-  one difference between the arms: whether the threads are inside `find_block`.
-
-  | arm | what the threads do | crashed |
-  |-----|---------------------|--------:|
-  | `alloc` | 256 `GC.malloc` per iteration | **0 of 8** |
-  | `idle` | `Intrinsics.pause` | **0 of 8** |
-  | `live` | 256 `Heap#live?` per iteration | **5 of 8** |
-  | `realloc` | 256 `GC.realloc` per iteration | **5 of 8** |
-
-  So it is not allocation rate and not thread count: it needs a mutator inside
-  `find_block`. The first version of this note guessed the harness was misusing
-  `Heap#live?` by asking about an address whose chunk the sweep was releasing —
-  the `realloc` arm retires that. `GC.realloc` is a supported public API, it
-  reaches `find_block` by a different route, and it crashes alike; the probe is
-  rooted in both.
-  The crash is always the same shape — `ChunkHeader.large?` on a pointer that
-  cannot be a chunk (`0x91`, `0xa1`) — which is the same function the
-  unattributed TLAB+nursery crash faults in, and TLAB is precisely what puts
-  `find_block` on a real program's allocation fast path.
-  **And the path is now named.** `GCRY_INDEX_AUDIT=1` no longer just counts an
-  impossible chunk — it **refuses** it and returns nil, so the run survives its
-  own answer instead of dying at `ChunkHeader.large?` before it can report. Six
-  runs, every one of which used to crash: `cache_bad=1..5`, `search_bad=0`,
-  `index_cache_oob=0`, `last=0x91`, `index_unlocked_foreign=0`. So it is the
-  **last-chunk cache** path, with the cached index inside the array, under the
-  lock, with no unlocked mutator reads anywhere — and the value is the same
-  small constant every time, which is what a freed libc allocation reads like,
-  not what any writer here puts in that array.
-  The reading that fitted — a thread suspended between loading `@chunk_index`
-  and using it, resuming against an array `index_ensure_cap` had reallocated —
-  **is wrong, and was tested rather than argued away**: the audit records the
-  array the bad read came out of and the array `@chunk_index` names immediately
-  afterwards, and it is `moved=0`, `arr == now`, in every catch. What is left is
-  narrower: a stable array, an index inside it, and the same constant in the
-  slot. Either something writes into the live index, or a slot below
-  `@chunk_index_count` was never written — `index_ensure_cap` reallocates
-  without zeroing.
-  One observation survives independently: a mutator frozen while holding
-  `@index_lock` leaves the sweep's own `index_insert` / `index_remove` waiting
-  on it, which is a deadlock rather than a crash, and is worth testing against
-  the aarch64 hang.
-  **Ruled out, each by measurement**: the `@world_stopped` window closed above
-  (same rate with the fix and with `GCRY_STW_LATE_CLEAR=1` restoring the old
-  ordering — 22 of 25 against 13 of 25 — and zero foreign unlocked reads with
-  it in); the chunk index's own invariants (`GCRY_INDEX_AUDIT=1` now validates
-  every chunk both paths return and checks the cached slot is inside the array —
-  zero violations in every run that survives); and anything landed today, since
-  it reproduces at `daa994b` in 6 runs of 8.
-  Not a gate. The defect is open, so it reports and exits 0, on x86_64 and
-  aarch64, for the same reason `thread-uaf-sample` does — and its first CI run
-  already earned its place: with the audit refusing impossible chunks, `live`
-  went **0 of 3** on both architectures while still reporting `cache_bad` 6 and
-  1, and `realloc` still crashed **3 of 3**. So the two arms are not one defect:
-  whatever kills `GC.realloc` is not the chunk the cache returns.
-
-- **The dying-type audit called live objects dying on every minor collection.**
-  It walked every used block after the mark and reported each one of the watched
-  type the mark had not reached — a question that only means "about to be swept"
-  in a **full** collection. A minor marks the nursery and reclaims the nursery,
-  so every old live object reads unmarked and reads that way correctly.
-  Measured on `stw_mt_property_test --tlab --nursery`: **262 reports in one
-  run**, against **0** for the same harness with the nursery off, and every one
-  of them a `Thread` the report itself said was still on Crystal's list. That is
-  what an audit looks like when it is asking the wrong question rather than
-  finding an answer.
-  The walk now carries `sweep`'s own two conditions (`collect_sweep.cr:67` and
-  `:144`): skip the chunk unless the collection is major or the chunk is
-  nursery, and skip the block unless major or the block is nursery. 262 → 0, and
-  the arm got cheaper on that harness (11.0 s → 4.3 s) because it stops walking
-  the old heap on minors.
-  `make thread-block-audit` gained two arms to hold it there: `lives-minor`
-  forces 15 minor collections with 200 rooted probes and requires **0** deaths,
-  and `lives-minor-all` runs the same thing under the new
-  `GCRY_DYING_AUDIT_ALL_COLLECTIONS=1`, which removes the predicate and brings
-  the phantoms straight back — **2 800 deaths and 14 address-space walks** over
-  live objects. The existing arms are untouched and still pass: the audit still
-  names 200 planted deaths and still finds live `Thread` blocks under its
-  default, so this narrows the question rather than silencing it.
+- **`GCRY_UNMAP_GUARD=1`** — released chunks stay identified (`mprotect` instead
+  of `munmap`) so a SIGSEGV can name the chunk, path, and offset.
+- **Thread-death audit.** `GCRY_THREAD_BLOCK_AUDIT=1` names a dying `Thread` in
+  the collection that frees it; `GCRY_DYING_TYPE_ID` / `make thread-block-audit`
+  prove the walk; `make thread-uaf-sample` buys CI samples. The report says
+  whether the object is still on Crystal's list.
+- **Race gates.** `make large-cache-race`, `make find-block-race`.
+- **Knob reference.** `docs/HARDENING.md` covers the 33 knobs added since
+  v0.20.0; `make knob-doc-check` fails CI if a `GCRY_*` has no row.
+- **STW stall diagnostics.** The suspend wait names the thread it is waiting for
+  and asks libc whether that `pthread_t` still exists (`ESRCH` vs live).
 
 ### Changed
 
-- **The aarch64 hang is in `stop_world`'s suspend phase, and the report now
-  names the thread it is waiting for.** The instrumentation answered on its
-  first sighting (2026-08-22, run `32575506486`): the job failed at 7m46s
-  instead of being cancelled at 20 minutes, and it said
-  `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`. So it is not the
-  harness's fiber waits — those never fired — and not a slow runner: the
-  collector had signalled every mutator and was spinning in
-  `until thread.@suspended.get` for one that never acknowledged.
-  What that report could not say is **which** thread, so the spin now records
-  it: the id being waited on, how many have acknowledged, and how many were
-  expected. The stall line for that phase reads `waiting for thread 0x… to
-  acknowledge its suspend signal; n of m already have`. Two plain stores per
-  thread on a path that runs once per collection, and the same device as
-  `stack_bounds_in_flight` — a report that names a thread is worth more than one
-  that names a frame.
-  `GCRY_STW_TEST_SUSPEND_STALL_MS` is the positive control, because
-  `GCRY_STW_TEST_STALL_MS` holds *thread-stacks* and cannot reach this branch.
-  `make stw-watchdog` gained an `armed+suspend` arm that requires the phase to
-  be named, the thread to be named, and the expected count to be non-zero —
-  broken on purpose by removing the child's mutator threads and observed red at
-  `counted 0 threads to wait for`.
-
-- **`ec_queue_audit`'s own waits are bounded, so the hang says what it was
-  stuck on.** The harness waits on three channels — the churn fibers, the
-  blocker starting, and the 24 fibers queued behind it running once it is
-  released — and none of those waits had an end. A fiber that is queued and
-  never dequeued turns `ran.receive` into a block with no output, which is
-  exactly what the aarch64 runner has been killing at 20 minutes. Each wait now
-  gives up after 30 s and prints how many arrived, how many are still parked on
-  the context's global queue, and what the audit had counted, then leaves
-  through `LibC._exit` rather than an `at_exit` that would run on the scheduler
-  that is stuck.
-  Positive control, because a bound that never fires is indistinguishable from
-  one that is not wired up: `bin/ec_queue_audit --stall` never releases the
-  blocker, so the 24 fibers cannot run, and `make ec-queue-audit` requires the
-  report — `0 of 24 after 3s … 24 still owed; context global queue holds 24
-  fiber(s)`. Not reproduced locally either way: 60 runs of the audit-on arm on
-  x86_64 Linux, 0 hangs.
-
-- **The aarch64 job has been hanging for two days and it read as
-  `cancelled`.** Six of its last forty runs ended at the 20-minute job timeout,
-  and every one that was examined was killed in the same place: `Terminate
-  orphan process: … (ec_queue_audit)`. GitHub reports a job timeout as
-  *cancelled*, not as a failure, so a ~15% hang rate — on the runner where the
-  open `Thread` use-after-free lives, in one of the two gates that has caught
-  it — never showed up as anything to look at.
-  Every gate in that step is now bounded with `timeout 300`, so the run fails
-  with whatever it had printed instead of the job being cancelled with nothing,
-  and the step arms `GCRY_STW_WATCHDOG_MS=10000` so a stopped world that never
-  restarts says `STOP-THE-WORLD STALLED <n> ms in phase=<name>` from the inside.
-  The x86_64 `EC run-queue audit` step gets the same bound and the same
-  watchdog. Neither of these diagnoses the hang; they are what make the next one
-  legible.
-
-- **The crash diagnostics now ride the TLAB arms, which is where this harness
-  has actually crashed.** `stw_mt_property_test` runs three arms and only the
-  plain one carried `GCRY_POISON_HOLDERS` / `GCRY_THREAD_CENSUS` /
-  `GCRY_THREAD_BLOCK_AUDIT`. That was right for the sighting it was added for —
-  x86_64, 2026-08-17, run `32006847158`, SIGSEGV inside `pthread_getattr_np`,
-  which is the plain arm — but it left the other two arms mute, and they are not
-  quiet. All three now carry them on Linux, and so does the Darwin step, which
-  runs all three through the Makefile and carried nothing.
-
-- **`-Dgc_none` did not compile on x86_64 macOS, and had not for as long as the
-  shim existed.** `src/gcry/block.cr` defined `LibC::MAP_ANONYMOUS = MAP_ANON`
-  for every Darwin target, on the grounds that "Darwin only defines MAP_ANON" —
-  but Crystal's `x86_64-macosx-darwin` bindings define `MAP_ANONYMOUS`
-  themselves, and defining it again is a hard error: `already initialized
-  constant LibC::MAP_ANONYMOUS`. CI runs `macos-latest`, which is Apple Silicon,
-  so a platform the README and `shard.yml` both claim was never once compiled
-  for. The shim is now conditional on the constant actually being absent
-  (`LibC.has_constant?`), which is a test rather than a guess about which target
-  has it.
-
-- **The Darwin build broke on a method that only existed on Linux.**
-  `GCRY_STATIC_BSS_CAP`'s setter was added to `linux_roots.cr` and called
-  unconditionally from `GC.init`, so every Linux job passed and the macOS one
-  failed to compile — `undefined method 'bss_size_cap=' for
-  Gcry::Platform:Module`. `Gcry::Platform` is two files that have to present the
-  same surface, and nothing checked that until the last job in the matrix.
-  `make darwin-typecheck` now does, from Linux: `--cross-compile` runs the full
-  semantic analysis for both Darwin targets and stops before linking. It runs
-  early in the Linux job, and it is what found the `MAP_ANONYMOUS` collision
-  above. Broken on purpose and observed red: removing the Darwin stub reproduces
-  the runner's own line.
-
-- **A full staging table threw away the birth it had just been handed — the
-  newest one, which is the thread actually inside the window the table exists
-  to see.** `Platform.stage_thread` records a thread from the moment
-  `pthread_create` returns, and `stop_world`'s pre-stop wait uses that record to
-  wait for it to publish itself. A slot is freed when the thread turns up in
-  Crystal's list, and the only thing that looked was the collection's own walk —
-  so the table held every thread created **since the last collection**, not the
-  ones being born. Measured, no collection in between: 65 `Thread.new`s fill it,
-  and at 200 threads only **73 of 201** births were recorded at all.
-  What a missing record costs is the wait. That thread is not waited for, so the
-  world stops with it unpublished: it is neither suspended nor scanned, and
-  anything reachable only from its stack has no root. `ThreadBirthRoot` covers
-  the `Thread` object and nothing else the thread has touched.
-  A full table now **drains** entries whose threads have already published —
-  which is what the occupancy should have been all along — and evicts the
-  **oldest** entry if that frees nothing. The oldest is the birth most likely to
-  be over; the newest is the one in flight. All 201 births are recorded now.
-  Both halves earn their place, and the measurement says which does the work:
-  at 100 threads the drain absorbs almost everything (6 overflows, 4 evictions),
-  while at 200 it absorbs 2 of 107, because those threads have already **exited**
-  and a thread that has left Crystal's list can no more be drained than one that
-  never joined it. Without the eviction half, that case is the one that loses
-  the newest birth.
-  `staged_overflows` no longer means a record was lost — it counts births that
-  found the table full, most of which the drain then accommodates. The number
-  that means a thread will not be waited for is the new
-  `thread_staged_evictions`, on `/gc-stats`.
-  Gated by `make thread-staging`, both directions: the table is filled with raw
-  pthreads, which never reach Crystal's list, so neither the drain nor the
-  collection's walk can release them and the full table is a fact rather than a
-  race. The birth handed to it must be recorded; under the new
-  `GCRY_STAGED_NO_EVICT=1` the same birth must be **absent**, and is.
-  **Still lossy, and counted**: an eviction is a thread that will not be waited
-  for, and a table full of entries for threads that have exited still costs one
-  timed-out spin at the next collection before the wait drops them.
-  **And the risk the drain adds is measured rather than argued.** It walks
-  Crystal's thread list without the list mutex — the same choice
-  `Heap#drain_published_staged` makes, and for the same reason, but on the
-  thread-creation path, which is where concurrent pushes actually happen. The
-  gate's `--race` arm puts six threads on creating forty each and requires the
-  table to have filled, so the drain provably ran while the list was being
-  mutated: 42 overflows and 20 evictions in one run, 25 runs of the same shape
-  clean, and 12 runs of the gate clean.
-
-- **A Crystal program with more than 1 MiB of static data had every global root
-  dropped.** gcry finds a program's BSS in `/proc/self/maps` by adjacency — the
-  anonymous RW mapping that begins exactly where the executable's file-backed RW
-  `.data` ended — and then required it to be **smaller than 1 MiB**. Above that
-  the whole BSS was refused as a root range, so every class variable and every
-  constant slot holding a heap reference was invisible to the mark and was
-  swept. It reproduces in twenty lines: an 8 MiB static class variable, one
-  `GC.malloc` stored into it, two collections, and the process dies inside
-  `IO#encoder` — because `STDERR`, a constant living in that BSS, had been
-  collected and **finalized**, which closes fd 2. The block does not merely get
-  freed: its chunk goes back to the OS, so reading the payload afterwards faults
-  with `Cannot access memory`. That the failure is loud is luck; what the
-  collector did was free reachable objects.
-  The condition was also inverted with respect to the reason written above it.
-  That comment says gcry's own large objects are anonymous and **under** 1 MiB
-  and that caching one and scanning it after `munmap` is a SIGSEGV — but
-  `< 1 MiB` *accepts* exactly that band and rejects the sizes a gcry large
-  object cannot have. What keeps gcry's mappings out is the adjacency test,
-  which an unhinted `mmap` cannot satisfy, backed by
-  `each_static_range_excluding_heap`, which subtracts gcry's chunks from every
-  range the parser yields and exists for precisely this case.
-  **Removing the cap alone would only have moved the hole**, because
-  `Roots.scan_range` refuses any range longer than `MAX_SCAN_BYTES` (64 MiB) —
-  silently, until now. Static ranges go through a new `scan_range_chunked`, and
-  the refusal is counted (`Gcry::Roots.oversize_skips`) so nothing can skip a
-  root range without saying so again.
-  `make static-bss-roots` gates it with two binaries and four arms: 8 MiB of
-  BSS clears the parser cap, 96 MiB clears `MAX_SCAN_BYTES` and can only pass
-  through the chunked scan, and each is run again under the new
-  `GCRY_STATIC_BSS_CAP=1`, which restores the old refusal and requires the same
-  block to **die**. It does, both sizes, `live=false` with the static slot still
-  holding the address. Each arm measures its own BSS from `/proc/self/maps`
-  first, so an arm that never crossed its threshold fails instead of passing
-  quietly, and the verdict goes out through a duplicated fd because the arm
-  under test closes fd 2.
-  **Unmeasured and worth stating**: any program this affected was collecting
-  objects it should have retained, so its RSS and pause numbers were not
-  measuring the same collector as a correct run. The published fat-app figures
-  may move if that app's BSS is over 1 MiB; nothing here re-cuts them.
-
-- **The pthread stack-bounds snapshot stopped at 64 threads, and the counters
-  built to notice that reported full coverage.** `snapshot_pthread_stack_bounds`
-  records each thread's stack range before the suspend signals go out, and the
-  scan under STW looks the range up instead of asking libc. The table was a
-  fixed 64 entries: a process whose thread list is longer recorded the first 64
-  **in list order** and nothing for the rest, at every collection, for the life
-  of the process. A thread with no entry loses the pthread-mapping half of its
-  root coverage — `scan_pthread_stack` returns without scanning — and that is
-  where a Parallel worker's scheduler frames sit while its SP is on a pool
-  fiber, the same frames whose absence is recorded in this file as an acik
-  `ThreadPool` UAF and a collect hang.
-  Measured, threads parked, one collection: **82 threads on Crystal's list gave
-  `visited=64 read=64`** — a clean bill from the pair whose only job is to say
-  the platform answered nothing — with 18 lookups falling through to `nil`. At
-  122 threads, 58. The lookup miss was counted (`pthread_bounds_misses`, which
-  is on `/gc-stats` and whose comment already named "the thread list outgrows
-  the table" as reachable); what was not counted was the **visit**, because the
-  capacity check returned before `visited` was incremented. So the one assertion
-  that would have caught this — `read == visited` — could not.
-  The table now grows, doubling from 64, and the visit is counted before the
-  capacity check. Growth needs no synchronisation and that is a property of the
-  caller: the table is written only by the thread stopping the world, between
-  `Thread.lock` and the first suspend signal, and read only by that thread while
-  the world is stopped — no thread is frozen when `realloc` runs, the same
-  argument that lets `pthread_getattr_np` be called from there at all. After:
-  82 threads `visited=82 read=82`, 202 threads `visited=202 read=202`, zero
-  misses either way.
-  Gated in `process_spec` with a thread list longer than the initial table, and
-  broken on purpose with the new `GCRY_STACK_BOUNDS_NOGROW=1`: the same spec
-  goes red at `visited=150 read=130`, with 18 capacity misses and 18 lookup
-  misses on the 82-thread run. `stack_bounds_capacity_misses` is on
-  `/gc-stats`; a non-zero value there means some thread's OS stack is not being
-  scanned.
-
-- **A full thread-birth table cost the root, not just the record — so the
-  use-after-free v0.20 closed reopened silently past the 64th birth.**
-  `ThreadBirthRoot` roots the `Thread` object `GC.pthread_create` is handed and
-  releases it when the thread publishes; the release runs inside `stop_world`,
-  which is the fact the 64-slot table was sized against the wrong quantity. What
-  it has to hold is not **concurrent** births — it is births **since the last
-  collection**. Measured, with no collection in between: 65 `Thread.new`s
-  overflow it, 100 overflow it 37 times and 200 overflow it 137 times, and every
-  one of those births used to take the `return` that counts an overflow and
-  roots nothing. A `Fiber::ExecutionContext::Parallel` bringing up 128 workers
-  before the heap is big enough to collect had half of them covered by nothing.
-  An overflow now roots the object anyway and never releases it. That leaks one
-  `Thread` and the graph it holds, which is the deliberate half of the trade: a
-  leak is a memory bug, an unrooted birth is the use-after-free this file exists
-  to close. `outstanding` counts it, so the leak is visible rather than implied,
-  and `thread_birth_armed` / `_released` / `_outstanding` / `_overflows` are on
-  `/gc-stats` beside the staging counters.
-  Gated in **both directions**, which is what makes the arm worth having:
-  `make thread-birth-root` gained a `--burst` arm that fills the table with
-  births that can never be released (raw pthreads, which never reach Crystal's
-  list) and requires the victim to survive its overflowing birth, and a
-  `--burst-unrooted` twin under `GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1` that
-  restores the old behaviour and requires the same block to **die**. It does, every run — the
-  second local, deterministic reproduction of this window, and the first that
-  needs no timing at all.
-  **Stated and not fixed**: `Platform`'s staging table is the same shape and
-  overflows on the same input (37 and 137 in the runs above), because it is
-  drained by the same walk. Its overflow costs the pre-stop *wait* for that
-  thread rather than the root, so with the above it is a degradation and not a
-  hole — `thread_staged_overflows` has always counted it.
-
-- **The allocation counters stop losing updates, and the cost that was traded
-  for those losses does not exist on x86_64.** `live_objects`, `total_bytes`
-  and `bytes_since_gc` were updated with plain `set(get + n)` unless
-  `heap_counters_atomic` was set — measured, four threads lose **5 723 of
-  1 200 000** increments. They now flip to atomic in `GC.pthread_create`,
-  **before** the call rather than after it — flipping on the way out leaves a
-  window in which the new thread is already allocating, and leaves the flag's
-  visibility to it unordered, while setting it first is published by the thread
-  creation itself. A single-threaded program never reaches the hook and keeps
-  the cheap path.
-  The comment that justified the losses said an atomic RMW would cost Kemal
-  throughput. On x86_64 `Atomic#set` compiles to `mov; inc; xchg`, and `xchg` to
-  memory is locked whether you ask or not — so the "cheap" path was already
-  paying for a locked instruction per counter and losing updates for it, against
-  a single `lock incq` for the atomic. Interleaved and pinned: 55.69 / 55.47 /
-  56.13 ns per allocation for plain / atomic / relaxed, within a ~3 ns
-  within-arm spread. On **aarch64** the cost is real (`ldar; add; stlr` against
-  an `ldaxr/stlxr` retry loop), which is why this flips on a second thread
-  rather than shipping on.
-  `GCRY_HEAP_COUNTERS_ATOMIC=0/1` pins an arm and survives the flip, which is
-  what makes `make heap-counters` two-directional: the old path must be shown to
-  lose or the new one's exactness proves nothing.
-  `bench/log/linux/2026-08-20-heap-counter-cost/FINDINGS.md`
-
-### Changed
-
-- **The unowned-coverage audit now names thread stacks, and its residue is
-  labelled.** What it could not account for is exactly the population the
-  in-flight arm walks — measured on `nested_spawn_uaf`, `accounted + not`
-  equals `maps_inflight_walked` in every run — so the split is "parked in a
-  `Thread#dying_fiber` slot or not", not "known or unknown". Three corrections
-  to the reading it shipped with: it is **not 4 a run** (1 to 36 on the same
-  harness), it **cannot be thread stacks** — measured, the geometry test looks
-  for `STACK_SIZE - PAGE_SIZE` = 8 384 512 bytes while a Crystal thread's stack
-  maps exactly 8 388 608, one page apart, so they never reach the audit — and it
-  needs a Parallel execution context under concurrent spawning, a quiesced
-  single-context program reporting 0 either side of a spawn storm.
-  The thread-stack check ships as a **tripwire** whose zero is structural and
-  documented as such: that page is where glibc happens to put the guard, not a
-  guarantee, and a non-zero count would mean a libc has made the two shapes
-  identical. It carries the number of bounds it compared against, so it can also
-  say when it had nothing to compare. The first version of this entry offered
-  the zero as a measurement ruling thread stacks out; it ruled nothing out.
-
-### Added
-
-- **`GCRY_THREAD_BLOCK_AUDIT=1` — name the dying `Thread`, in the collection
-  that frees it.** The second use-after-free is only ever seen on CI: gcry calls
-  `pthread_getattr_np` under `stop_world` on a `pthread_t` that is its own freed
-  block poison, i.e. it read a `Thread`'s `@system_handle` out of memory it had
-  already reclaimed. Eight sightings, three gates, both architectures, and no
-  local repro in three days. The instrument that cracked the fiber family —
-  walk `/proc/self/maps` at the moment of death and name the region that holds
-  the address — could not see this one, and the reason was size in both halves:
-  the dying-register audit that triggers it only walks size classes at or above
-  384 bytes (the `Deque(Fiber::Stack)` band) and a `Thread` is 192, and it fires
-  for whichever block died first in a collection, which in a fiber-churning
-  program is never the one wanted. So the arm aims the same question at one
-  type: after the mark and before the sweep, read Crystal's `type_id` out of
-  every used block, report each one of the watched type the mark did not reach,
-  and hand its address to the address-space walk. Wired into the gates that have
-  caught this defect — `scheduler-roots` and `ec-queue-audit` (both
-  architectures, and six of the eight sightings are on the aarch64 runner) and
-  the x86_64 `stw_mt_property_test` step. Measured: +3% on the property test,
-  nothing on the root gates.
-
-- **`GCRY_DYING_TYPE_ID=<n>` and `make thread-block-audit`**, which are what let
-  the arm's silence on CI be read as evidence. The knob points the same walk at
-  a type whose life and death the harness controls, and the gate has three arms:
-  200 dropped objects of that type must be named as dying **and** must trigger
-  the address-space walk; the same 200 held alive must produce zero deaths and a
-  non-zero *live* count; and the shipped default must find live `Thread` blocks
-  with four threads running — a default aimed at a `type_id` that matches
-  nothing in the heap would be quiet on CI for a reason that has nothing to do
-  with the defect. Broken on purpose in three directions and observed red:
-  treating every block as marked fails the first arm, dropping the type
-  comparison fails the second (8 phantom deaths among rooted objects), and a
-  bogus default id fails the third.
-
-- **The dying-type arm now counts the defect's precondition every collection,
-  not just its consequence** — and the first version of that count was zero by
-  construction, which is why it now reports three separate things: what the
-  pre-stop wait saw, whether it **gave up** (the world then stopped with a
-  thread unpublished), and whether a thread was staged *after* the wait ran, so
-  nothing waited for it at all. Asking `Platform.staged_count` after the mark,
-  as the first version did, can only ever return zero: the wait drains what has
-  published and drops the rest.
-  Measured in the failing harness locally: **24 sightings in 12 runs** of a
-  thread staged when the world was about to stop, every one caught by the wait.
-  Both branches that would say otherwise are shown to fire by staging an id that
-  can never publish — `make thread-block-audit` gained `staged` and
-  `staged-nowait` arms for exactly that, since a real thread publishes too fast
-  to be held in the state the defect needs.
-  The two kinds are the two candidate mechanisms and they need different fixes:
-  staged (created, not yet on Crystal's list) and a gap (on the list, no bounds
-  from the snapshot). Both are countable in **green** runs, which is what makes
-  them worth having — the consequence arrives in bursts (4 of 20 in one batch, 0
-  of 60 across the three after it). The gap half is silent locally too, and that
-  silence is evidence: stubbing `snapshotted_stack_bounds` to `nil` makes the
-  same run report `6 listed, 0 bounded` at every collection.
-
-- **The report is three lines now, and the reason is the one this file keeps
-  recording:** it grew past `RawOut::LIMIT` (480 bytes) and was silently
-  truncated, losing the end of its own verdict — the same failure mode the crash
-  reporter has been corrected for three times, committed by the instrument
-  written to correct it. In the same pass, "not on Crystal's list" stopped
-  asserting "the thread has exited": off-list has two causes and the first catch
-  to reach that line was the other one, a thread that had not published yet. The
-  line now states both and quotes the pre-stop wait's own record beside it,
-  including the dying object's `@system_handle` against the staged ids — as
-  *consistent with*, never as an identification, because glibc recycles thread
-  ids (measured: one value across eight collections while the staged total went
-  4 → 11).
-
-- **The dying-type report now says whether the dying `Thread` is still on
-  Crystal's list, and whether any live thread's list node still links to it.**
-  Those are different defects — a listed `Thread` dying means the static root
-  that is `Thread.threads` did not cover it, while an unlisted one is legitimate
-  garbage and the defect is whatever still walks to it, `Thread::LinkedList`
-  being intrusive. Both are answerable on any catch, without waiting for the
-  address-space walk to find a holder, and the line carries a self-check: a "not
-  on the list" from a walk that cannot find the collecting thread either is a
-  broken comparison, not a finding.
-
-- **`make thread-uaf-sample` — buy samples of a defect that only happens on
-  CI.** The `Thread` use-after-free fires in about one aarch64 job in three and
-  in none of 40 local runs of the same harness, and the arm that names its
-  holder only speaks when it fires. The target runs the failing harness ten
-  times with the arm on and keeps the logs of the runs that said something. It
-  is deliberately **not** a gate — it exits 0 either way, because a step
-  expected to fail while the defect is open would block every pull request or
-  train everyone to ignore it — and it ships as a `continue-on-error` aarch64
-  job that uploads what it caught. `THREAD_UAF_BIN` points it at another
-  harness, which is how its own reporting path is shown to work: against
-  `thread_storm`, where a dying `Thread` is routine, it must keep and print.
-
-### Fixed
-
-- **The `Thread` use-after-free is closed: the object is rooted from
-  `pthread_create` until the thread publishes itself.** Between the two, the
-  `Thread` is covered by no root — it is not on `Thread.threads` yet, so the
-  static root that is the list cannot reach it, and its only other holder is the
-  new thread's own stack, which gcry has no bounds for and never scans. The
-  pre-stop wait was supposed to cover the window and does, in 40 sightings
-  across 20 green CI runs; the two catches that crashed are the ones where it
-  **gave up** and stopped the world anyway, with the kernel reporting one more
-  thread than Crystal's list held.
-  The fix needs none of that machinery, because the object was already in
-  gcry's hands: Crystal calls `GC.pthread_create(…, arg: self.as(Void*))`, so
-  the `Thread` *is* the argument the hook is handed. It is rooted there and
-  released in `stop_world`'s walk once the thread is on the list — one
-  `add_root` per thread created, and no change to what the stopped world does,
-  which matters because two earlier attempts at this defect changed collector
-  behaviour and broke it. `GCRY_THREAD_BIRTH_ROOT=0` turns it off;
-  `GCRY_THREAD_BIRTH_NOROOT=1` records the same births and roots nothing.
-  Gated by `make thread-birth-root`, which holds the window open the only way it
-  can be held open — a **raw** pthread created through the same hook, which
-  never joins Crystal's list — and requires the block to survive rooted, and to
-  **die** in both the twin and the knob-off arms. The first version of the
-  release path deadlocked the collector: `stop_world` runs under `@roots_lock`
-  and it is not reentrant, so the release hands the pointer back and the caller
-  mutates the set directly.
-  The twin earned its place on the first CI run: it failed on aarch64 because
-  the record table is a class variable, i.e. static memory the conservative root
-  scan reads — so storing the address there rooted it, and neither arm could
-  have told `add_root` from the bookkeeping. Addresses are masked in the table
-  now, and the harness materialises the victim's pointer only inside a
-  `@[NoInline]` frame it then wipes.
-  Known and counted: a thread that never publishes keeps its root for the life
-  of the process (`ThreadBirthRoot.outstanding`), and the interval *inside*
-  `pthread_create` is still uncovered — closing that needs a trampoline on the
-  new thread, tried before and crashed 8 runs in 10.
-
-- **The crash reporter excluded the defect it was reporting.** A fault outside
-  the heap span printed "never a gcry allocation, so a swept object is not the
-  explanation" — in three control runs, two lines after naming the `pthread_t`
-  the collector was querying, and at exactly that id **+ `0x418`**. The address
-  is a field of the descriptor that id points at, the id came out of a
-  `Thread`'s `@system_handle`, and a reissued `Thread` block carries no poison,
-  so a swept object is the *leading* reading there rather than an excluded one.
-  The decision is now a pure function (`SegvReport.out_of_span_reading`) with
-  five cases in `spec/segv_report_spec.cr`, because the branch that matters can
-  only fire while libc is inside the query and no harness can enter it.
-
-- **The crash reporter named a free path from a reissued block's flags.**
-  `SWEPT` is set beside `FREE` by the sweep and cleared when the block is handed
-  out again, so on a reissued block those flags describe the reissue — and the
-  line was read as "freed by an explicit free" three times, the last against a
-  block the dying-type audit had watched the **sweep** condemn one collection
-  earlier. It now declines the verdict unless the block is still free, and says
-  why. `make segv-report` grew a `reissued-poison` arm that requires exactly
-  that, broken on purpose in both directions.
-
-- **The address-space audit reported its own call chain as a hole in the stack
-  scan.** Its first version reported 47 hits that were its own frames and was
-  fixed by comparing against the window the scan actually used — but the audit
-  runs at roughly the depth the scan ran at, so its frames land *inside* that
-  window, and the verdict they earned was "the scan walked these bytes and did
-  not offer the value": a filter bug that does not exist. It now excludes
-  everything below `collect_entry_sp`, the same boundary `GCRY_BIRTH_GRACE`'s
-  holder search already uses, and says so — the collector's own call chain, this
-  audit's included, is not evidence. Measured on the new gate: 6 of 7 base hits
-  on a dropped object were the audit's own chain and one was its caller's local;
-  before the fix, one of them was classified as inside the scanned window.
-
-- **The dying audit's "never offered by the mutator-stack scan" line could not
-  be true for a 192-byte block.** The table it reads records only candidates at
-  or above the 384-byte band, so any smaller block was "not recorded" rather
-  than "not offered". It now also records blocks of the watched type, whatever
-  their size.
+- **`GCRY_PAGE_DONTNEED=1` is unsound** (post-STW `MADV_DONTNEED` can zero a live
+  object). Documented as such, warns at boot; `GCRY_DISABLE_PAGE_RELEASE=1` /
+  `GCRY_DISABLE_MADVISE=1` now actually skip Darwin's walk. Defect still open.
+- **Dying-type audit** skips the old heap on minor collections (was reporting
+  every live `Thread` as dying).
+- **CI hang legibility.** aarch64 gates are bounded (`timeout 300`,
+  `GCRY_STW_WATCHDOG_MS`); `ec_queue_audit` waits give up after 30 s. Crash
+  diagnostics ride all three `stw_mt_property_test` arms, including TLAB and
+  Darwin.
+- **Pre-commit format** checks `git ls-files -- '*.cr'` instead of walking
+  vendored `lib/`.
 
 ## [0.20.0] - 2026-08-18
 
@@ -2783,7 +2091,9 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/sdogruyol/gcry/compare/v0.20.0...v0.21.0
+[0.20.0]: https://github.com/sdogruyol/gcry/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sdogruyol/gcry/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sdogruyol/gcry/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sdogruyol/gcry/compare/v0.16.0...v0.17.0

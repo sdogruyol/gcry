@@ -457,14 +457,29 @@ module GC
     end
 
     {% if flag?(:darwin) %}
-      # Darwin: MADV_FREE_REUSABLE drops RSS; enable free-page release.
-      # (MADV_DONTNEED on Darwin does NOT drop RSS — advisory only.)
-      if env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE")
-        heap.madvise_free_pages = false
-      else
+      # Darwin: MADV_FREE_REUSABLE drops RSS, and this used to be **on by
+      # default** here — the one platform where the free-page walk shipped
+      # enabled, and where it visits every kept size-class chunk rather than
+      # only the HOLED ones.
+      #
+      # It is opt-in now, matching Linux, because the walk is unsound and the
+      # defect is still open: it computes a free-page run from a live mask and
+      # then syscalls with the world running, so a mutator can allocate into a
+      # page the mask called free before the call lands. `make
+      # page-release-corruption` faults 4 of 28 attempts on that arm across six
+      # gate runs, against 0 throughout for the other two. `MADV_FREE_REUSABLE`
+      # zero-fills a reclaimed page, so the same window is reachable here under
+      # memory pressure — read from the code rather than measured, since the
+      # gate has no Darwin runner.
+      #
+      # The cost is macOS RSS, which is a smaller thing to be wrong about than
+      # zeroing a live object. `GCRY_PAGE_DONTNEED=1` turns it back on and
+      # warns, and the escape hatches keep working for anyone who does.
+      if env_flag_one?("GCRY_PAGE_DONTNEED") &&
+         !(env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE"))
         heap.madvise_free_pages = true
-        # flush_pending_page_release_chunks also walks ALL chunks on Darwin
-        # (not just HOLED) for more aggressive RSS recovery.
+      else
+        heap.madvise_free_pages = false
       end
     {% elsif flag?(:linux) %}
       # Linux HOLED free-page release stays OPT-IN (`GCRY_PAGE_DONTNEED=1`).
