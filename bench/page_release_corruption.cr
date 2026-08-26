@@ -135,7 +135,8 @@ if ARGV.includes?("--child")
   # here means this harness never reached the path and proves nothing.
   heap = Gcry.default_heap
   puts "child: #{Verdict.bad} corrupt (#{Verdict.zeroed} entirely zero), " \
-       "dontneed #{heap.dontneed_bytes} B, collections #{heap.collections}"
+       "dontneed #{heap.dontneed_bytes} B, unlinked #{heap.page_release_unlinked_chunks}, " \
+       "collections #{heap.collections}"
   exit(Verdict.bad > 0 ? 1 : 0)
 end
 
@@ -160,16 +161,20 @@ puts ""
 #
 # It also means every rate this gate has ever printed counted **crashes only**:
 # a child that hung never returned, so it never entered the denominator either.
-def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?, UInt64}
+def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?, UInt64, UInt64}
   bad = 0
   hung = 0
   first = nil
   dontneed = 0_u64
+  unlinked = 0_u64
   attempts.times do
     result = BoundedChild.run(exe, ["--child"], env)
     text = result.output
     if m = text.match(/dontneed (\d+) B/)
       dontneed += m[1].to_u64
+    end
+    if m = text.match(/unlinked (\d+)/)
+      unlinked += m[1].to_u64
     end
     unless result.ok
       bad += 1
@@ -177,31 +182,31 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?, UInt64}
       first ||= text.lines.find { |l| l.includes?("corrupt") || l.includes?("Invalid memory") }
     end
   end
-  {bad, hung, first, dontneed}
+  {bad, hung, first, dontneed, unlinked}
 end
 
 def arm_line(label : String, bad : Int32, hung : Int32, attempts : Int32,
-             dn : UInt64, note : String?) : String
+             dn : UInt64, ul : UInt64, note : String?) : String
   "  #{label} #{bad} of #{attempts}#{hung > 0 ? " (#{hung} timed out)" : ""}, " \
-  "released #{dn} B#{note ? "\n     #{note.strip}" : ""}"
+  "released #{dn} B, unlinked #{ul}#{note ? "\n     #{note.strip}" : ""}"
 end
 
 # Linux keeps the HOLED walk opt-in, so the arm that exercises it has to ask
 # for it. Darwin turns it on in `GC.init` and walks every chunk, not just the
 # HOLED ones — the same code, reached without a knob.
-holed_bad, holed_hung, holed_note, holed_dn = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
-puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, holed_dn, holed_note)
+holed_bad, holed_hung, holed_note, holed_dn, holed_ul = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
+puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, holed_dn, holed_ul, holed_note)
 
 # `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and Darwin
 # turns that on in `GC.init`. Without disabling it here the arm would quietly
 # measure the HOLED walk a second time and still report bytes released, which
 # is the shape of a gate that says "both walks ran" when only one did.
-empty_bad, empty_hung, empty_note, empty_dn = run(exe,
+empty_bad, empty_hung, empty_note, empty_dn, empty_ul = run(exe,
   {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"}, attempts)
-puts arm_line("GCRY_MOSTLY_EMPTY=1:     ", empty_bad, empty_hung, attempts, empty_dn, empty_note)
+puts arm_line("GCRY_MOSTLY_EMPTY=1:     ", empty_bad, empty_hung, attempts, empty_dn, empty_ul, empty_note)
 
-off_bad, off_hung, off_note, off_dn = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
-puts arm_line("GCRY_DISABLE_MADVISE=1:  ", off_bad, off_hung, attempts, off_dn, off_note)
+off_bad, off_hung, off_note, off_dn, off_ul = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
+puts arm_line("GCRY_DISABLE_MADVISE=1:  ", off_bad, off_hung, attempts, off_dn, off_ul, off_note)
 puts ""
 
 failures = [] of String
