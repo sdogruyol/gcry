@@ -513,6 +513,10 @@ module Gcry
     # Runs skipped because that re-read found a live block. Without the
     # re-read they were released with the object still in them.
     getter page_release_skipped_runs : UInt64 = 0_u64
+    # Chunks whose free-only page runs were taken off the class freelist
+    # before the release syscall. Zero here means the unlink never ran and
+    # a clean gate says nothing.
+    getter page_release_unlinked_chunks : UInt64 = 0_u64
 
     # Research only: release a page run without re-reading its headers, which
     # is what it did before 2026-08-24.

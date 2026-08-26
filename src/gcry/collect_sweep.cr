@@ -564,6 +564,38 @@ module Gcry
     # kept size-class chunks (not just HOLED) for more aggressive RSS recovery.
     # Safe because the live-mask computation correctly identifies free pages
     # regardless of HOLED; MADV_FREE_REUSABLE on Darwin does not zero headers.
+    # Take the pages out of circulation *before* the syscall that zeroes them.
+    #
+    # `MADV_DONTNEED` zeroes; `MADV_FREE_REUSABLE` zero-fills a page the kernel
+    # reclaims. Either way the freelist nodes living in those pages stop being
+    # readable, and the chunk's blocks are still on the class freelist when the
+    # call goes out. Unlinking the free-only runs first means no allocator can
+    # be handed a block in a run that is about to be dropped — which is a
+    # different guarantee from re-reading the mask, and a stronger one:
+    # re-reading closes the window from "mask built" to "about to release" and
+    # leaves the one from "checked" to "syscall issued".
+    #
+    # That was measured rather than assumed. Holding the freelist lock across
+    # the re-read and the `madvise` — serialising the release against the
+    # allocator instead of removing the pages from it — still crashed 5 of 40
+    # (`bench/log/linux/2026-08-26-stw-sweep-hang/FINDINGS.md`).
+    #
+    # The unlink runs under the class's freelist lock; the syscall does not.
+    # The machinery already existed for `@mostly_empty_dontneed` and was simply
+    # never applied to the HOLED walk, which is the one `GCRY_PAGE_DONTNEED=1`
+    # turns on.
+    private def unlink_before_release(chunk : ChunkHeader*, payload : UInt32,
+                                      preserve_content : Bool) : Nil
+      return if preserve_content
+      class_index = chunk.value.size_class.to_i32
+      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      nursery = ChunkHeader.nursery?(chunk)
+      with_freelist_lock(class_index, nursery) do
+        unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+      end
+      @page_release_unlinked_chunks &+= 1
+    end
+
     private def flush_pending_page_release_chunks : Nil
       # Neither branch used to consult this, which made the documented escape
       # a no-op where it matters most: on Darwin the walk is default-on and
@@ -584,6 +616,7 @@ module Gcry
           next if ChunkHeader.dormant?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          unlink_before_release(chunk, SizeClasses.payload(class_index), false)
           release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% else %}
@@ -592,6 +625,7 @@ module Gcry
           next if ChunkHeader.large?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+          unlink_before_release(chunk, SizeClasses.payload(class_index), false)
           release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
         end
       {% end %}
