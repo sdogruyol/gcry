@@ -47,6 +47,7 @@
 #   bin/page_release_corruption
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "page_release_corruption requires -Dgc_none (gcry as process GC)" %}
@@ -147,48 +148,79 @@ puts "#{WORKERS} workers × #{ROUNDS} rounds × #{BATCH} of #{PAYLOAD} B, keepin
 puts "#{attempts} attempts per arm"
 puts ""
 
-def run(exe : String, env, attempts : Int32) : {Int32, String?, UInt64}
+# Bounded, and hangs counted apart from faults.
+#
+# This ran children through a bare `Process.run` with no deadline, so a child
+# that stopped making progress hung the gate instead of failing it — and a
+# hung gate reads as a slow one. That is not hypothetical: the stop-the-world
+# hang fixed in 0.21.1 lived here for a day looking like a slow machine, and
+# two measurements were thrown away as noise before anyone looked at a process
+# and found four threads parked in `rt_sigsuspend` with two spinning
+# (`bench/log/linux/2026-08-26-stw-sweep-hang/FINDINGS.md`).
+#
+# It also means every rate this gate has ever printed counted **crashes only**:
+# a child that hung never returned, so it never entered the denominator either.
+def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?, UInt64}
   bad = 0
+  hung = 0
   first = nil
   dontneed = 0_u64
   attempts.times do
-    captured = IO::Memory.new
-    status = Process.run(exe, ["--child"], env: env, output: captured, error: captured)
-    text = captured.to_s
+    result = BoundedChild.run(exe, ["--child"], env)
+    text = result.output
     if m = text.match(/dontneed (\d+) B/)
       dontneed += m[1].to_u64
     end
-    unless status.success?
+    unless result.ok
       bad += 1
+      hung += 1 if result.timed_out
       first ||= text.lines.find { |l| l.includes?("corrupt") || l.includes?("Invalid memory") }
     end
   end
-  {bad, first, dontneed}
+  {bad, hung, first, dontneed}
+end
+
+def arm_line(label : String, bad : Int32, hung : Int32, attempts : Int32,
+             dn : UInt64, note : String?) : String
+  "  #{label} #{bad} of #{attempts}#{hung > 0 ? " (#{hung} timed out)" : ""}, " \
+  "released #{dn} B#{note ? "\n     #{note.strip}" : ""}"
 end
 
 # Linux keeps the HOLED walk opt-in, so the arm that exercises it has to ask
 # for it. Darwin turns it on in `GC.init` and walks every chunk, not just the
 # HOLED ones — the same code, reached without a knob.
-holed_bad, holed_note, holed_dn = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
-puts "  GCRY_PAGE_DONTNEED=1:     #{holed_bad} of #{attempts}, released #{holed_dn} B#{holed_note ? "\n     #{holed_note.strip}" : ""}"
+holed_bad, holed_hung, holed_note, holed_dn = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
+puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, holed_dn, holed_note)
 
 # `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and Darwin
 # turns that on in `GC.init`. Without disabling it here the arm would quietly
 # measure the HOLED walk a second time and still report bytes released, which
 # is the shape of a gate that says "both walks ran" when only one did.
-empty_bad, empty_note, empty_dn = run(exe,
+empty_bad, empty_hung, empty_note, empty_dn = run(exe,
   {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"}, attempts)
-puts "  GCRY_MOSTLY_EMPTY=1:      #{empty_bad} of #{attempts}, released #{empty_dn} B#{empty_note ? "\n     #{empty_note.strip}" : ""}"
+puts arm_line("GCRY_MOSTLY_EMPTY=1:     ", empty_bad, empty_hung, attempts, empty_dn, empty_note)
 
-off_bad, off_note, off_dn = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
-puts "  GCRY_DISABLE_MADVISE=1:   #{off_bad} of #{attempts}, released #{off_dn} B#{off_note ? "\n     #{off_note.strip}" : ""}"
+off_bad, off_hung, off_note, off_dn = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
+puts arm_line("GCRY_DISABLE_MADVISE=1:  ", off_bad, off_hung, attempts, off_dn, off_note)
 puts ""
 
 failures = [] of String
-failures << "the HOLED walk failed #{holed_bad} of #{attempts}" if holed_bad > 0
-failures << "the mostly-empty walk failed #{empty_bad} of #{attempts}" if empty_bad > 0
-failures << "the control arm failed #{off_bad} of #{attempts} — nothing was " \
-            "released, so this harness is measuring something other than page release" if off_bad > 0
+
+# A hang and a corrupted object are different defects with different owners,
+# and folding them into one count is how the 0.21.1 stop-the-world hang hid
+# here. Say which happened.
+hung_total = holed_hung + empty_hung + off_hung
+if hung_total > 0
+  failures << "#{hung_total} child(ren) were killed on the deadline — a killed " \
+              "child says nothing about page release. Re-run with " \
+              "GCRY_STW_WATCHDOG_MS set: the last one of these was the collector " \
+              "spinning in phase=sweep on a lock a suspended mutator held"
+end
+
+failures << "the HOLED walk faulted #{holed_bad - holed_hung} of #{attempts}" if holed_bad - holed_hung > 0
+failures << "the mostly-empty walk faulted #{empty_bad - empty_hung} of #{attempts}" if empty_bad - empty_hung > 0
+failures << "the control arm faulted #{off_bad - off_hung} of #{attempts} — nothing was " \
+            "released, so this harness is measuring something other than page release" if off_bad - off_hung > 0
 
 # Silence only counts if the walks ran. Without this the whole gate passes on a
 # workload whose survivors are spread one per page, where no chunk is ever

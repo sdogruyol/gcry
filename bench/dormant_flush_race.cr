@@ -33,6 +33,7 @@
 #   bin/dormant_flush_race
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "dormant_flush_race requires -Dgc_none (gcry as process GC)" %}
@@ -118,18 +119,23 @@ puts "=== post-STW flush walk vs. mutator unmap ==="
 puts "#{WORKERS} workers × #{ROUNDS} rounds of #{PAYLOAD} B, one collector, #{BALLAST} ballast objects"
 puts ""
 
-def run(exe : String, env, attempts : Int32) : {Int32, String?}
+# Bounded, and hangs counted apart from faults — see the same change in
+# `page_release_corruption.cr`. A bare `Process.run` with no deadline turns a
+# hung child into a hung gate, and a hung gate reads as a slow one; that is how
+# the stop-the-world hang fixed in 0.21.1 stayed invisible for a day.
+def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
   bad = 0
+  hung = 0
   first = nil
   attempts.times do
-    captured = IO::Memory.new
-    status = Process.run(exe, ["--child"], env: env, output: captured, error: captured)
-    unless status.success?
+    result = BoundedChild.run(exe, ["--child"], env)
+    unless result.ok
       bad += 1
-      first ||= captured.to_s.lines.find { |l| l.includes?("gcry:") || l.includes?("Invalid memory access") }
+      hung += 1 if result.timed_out
+      first ||= result.output.lines.find { |l| l.includes?("gcry:") || l.includes?("Invalid memory access") }
     end
   end
-  {bad, first}
+  {bad, hung, first}
 end
 
 base = {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_UNMAP_GUARD" => "1", "GCRY_SEGV_REPORT" => "1"}
@@ -137,14 +143,24 @@ immediate = base.merge({"GCRY_TRIM_IMMEDIATE" => "1"})
 
 failures = [] of String
 
-queued_bad, queued_note = run(exe, base, attempts)
-puts "  queued (default):    #{queued_bad} of #{attempts} failed#{queued_note ? "\n     #{queued_note.strip}" : ""}"
+queued_bad, queued_hung, queued_note = run(exe, base, attempts)
+puts "  queued (default):    #{queued_bad} of #{attempts} failed" \
+     "#{queued_hung > 0 ? " (#{queued_hung} timed out)" : ""}" \
+     "#{queued_note ? "\n     #{queued_note.strip}" : ""}"
 
-immediate_bad, immediate_note = run(exe, immediate, attempts)
-puts "  immediate (old):     #{immediate_bad} of #{attempts} failed#{immediate_note ? "\n     #{immediate_note.strip}" : ""}"
+immediate_bad, immediate_hung, immediate_note = run(exe, immediate, attempts)
+puts "  immediate (old):     #{immediate_bad} of #{attempts} failed" \
+     "#{immediate_hung > 0 ? " (#{immediate_hung} timed out)" : ""}" \
+     "#{immediate_note ? "\n     #{immediate_note.strip}" : ""}"
 
-failures << "the queued arm failed #{queued_bad} of #{attempts} — a flush walk still meets a released chunk" if queued_bad > 0
-if immediate_bad == 0
+hung_total = queued_hung + immediate_hung
+if hung_total > 0
+  failures << "#{hung_total} child(ren) were killed on the deadline — a killed child " \
+              "says nothing about whether a flush walk meets a released chunk. " \
+              "Re-run with GCRY_STW_WATCHDOG_MS set"
+end
+failures << "the queued arm faulted #{queued_bad - queued_hung} of #{attempts} — a flush walk still meets a released chunk" if queued_bad - queued_hung > 0
+if immediate_bad - immediate_hung == 0
   failures << "the immediate arm survived #{attempts} attempts, so this harness does not reach the race " \
               "and the queued arm's silence is not evidence"
 end
