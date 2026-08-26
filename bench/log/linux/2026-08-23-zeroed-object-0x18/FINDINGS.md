@@ -107,3 +107,29 @@ had to be withdrawn — see `../2026-08-23-heap-dump-walk/`. A fourth was drawn
 from reading a branch that the tested configuration does not execute. The
 `dontneed_bytes` counter in the new harness exists because of the fourth: it is
 the difference between "nothing went wrong" and "nothing happened".
+
+
+---
+
+## 2026-08-26: it took the v0.21.0 tag run red
+
+`make dormant-flush-race` was wired into CI as a required step on 2026-08-25.
+It passed on the `master` run of the release commit and then failed six minutes
+later on the **tag** run of the same commit — the **default** arm, 1 of 3:
+
+    queued (default):    1 of 3 failed
+       gcry: SIGSEGV at 0x18 — outside gcry's heap span [0x7f1013d71000, 0x7f103f981000)
+       — never a gcry allocation, so a swept object is not the explanation
+    immediate (old):     3 of 3 failed
+
+Same signature as this file's, and the gate's base env is what reaches it:
+`GCRY_MOSTLY_EMPTY=1`. So this gate has always been running an open defect, and
+wiring it in as required only moved that fact into the release's CI.
+
+Rate remains machine-dependent and nobody's estimate is worth much at these
+sample sizes: **3 of 24** when this file was written, **0 of 15** on the
+workstation the day it was removed from CI, **1 of 3** on the runner.
+
+The gate is out of CI again. It is still the right harness for this defect and
+`make dormant-flush-race` runs it by hand; what it is not is a step that can
+gate a release while the defect it exercises is open.
