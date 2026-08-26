@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-26
+
+Patch release. Fixes a stop-the-world hang introduced in 0.21.0.
+
+### Fixed
+
+- **The collector could spin forever on a lock a suspended mutator held.**
+  `sweep` ended with `@chunks = kept` under `@chunk_list_lock` unconditionally.
+  STW suspends by signal, not at safepoints, so a mutator can be frozen inside
+  `map_chunk` or `unlink_chunk` still holding it. Reached only where the sweep
+  runs in-STW — `GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`,
+  `GCRY_DISABLE_LAZY_SWEEP=1`; a default build sweeps after the world restarts
+  and never hits it (0 of 40). The lock is taken on the `after_world` path
+  only. Interleaved, 40 children each: 9 hangs on 0.21.0, 0 with the fix;
+  0.21.0 totals 21 in 160. `GCRY_STW_WATCHDOG_MS` names it as
+  `STALLED in phase=sweep`.
+  `bench/log/linux/2026-08-26-stw-sweep-hang/FINDINGS.md`
+
 ## [0.21.0] - 2026-08-26
 
 Correctness release. Closes the acikturkiye live-string UAF (layout collision
@@ -2097,7 +2115,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/sdogruyol/gcry/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sdogruyol/gcry/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/sdogruyol/gcry/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sdogruyol/gcry/compare/v0.18.0...v0.19.0
