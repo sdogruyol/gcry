@@ -297,11 +297,33 @@ module Gcry
       end
 
       if !after_world || relink_chunks_after_world?
-        # Under `@index_lock`, the one lock that guards `@chunks`. In the
-        # stopped world nothing else can be here and the lock is free; on the
-        # `after_world` path mutators are running and a prepend racing this
+        # Only on the `after_world` path, and the distinction is not a detail.
+        #
+        # The first version took the lock unconditionally, on the argument that
+        # "in the stopped world nothing else can be here and the lock is free".
+        # That is false, and it shipped in 0.21.0 as a hang: STW suspends by
+        # **signal**, not at safepoints, so a mutator can be frozen inside
+        # `map_chunk` or `unlink_chunk` still holding this lock, and the
+        # collector then spins on it with every mutator parked. The watchdog
+        # names it — `STALLED in phase=sweep — waiting on something a suspended
+        # thread holds` — and it reproduces wherever the sweep runs in-STW
+        # rather than after it: `GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`,
+        # `GCRY_DISABLE_LAZY_SWEEP=1`.
+        #
+        # Measured interleaved, 40 children each: **0 hangs on the tree before
+        # the lock, 5 on v0.21.0, 0 with this**. The hangs were also masking
+        # what the gate exists to catch — the same 40 children crash 5 times on
+        # the page-release corruption once they are allowed to finish.
+        #
+        # In the stopped world the store needs no lock: the mutators that could
+        # race it are the ones that are suspended. The lock is for the
+        # `after_world` path, where they are running and a prepend racing this
         # store would be lost, which puts a live chunk on no list at all.
-        @chunk_list_lock.sync { @chunks = kept }
+        if after_world
+          @chunk_list_lock.sync { @chunks = kept }
+        else
+          @chunks = kept
+        end
       end
 
       # Queue for post-STW munmap (do not munmap while world stopped).
