@@ -88,8 +88,14 @@ bounds, birth/staging overflow).
 ### Changed
 
 - **`GCRY_PAGE_DONTNEED=1` is unsound** (post-STW `MADV_DONTNEED` can zero a live
-  object). Documented as such, warns at boot; `GCRY_DISABLE_PAGE_RELEASE=1` /
-  `GCRY_DISABLE_MADVISE=1` now actually skip Darwin's walk. Defect still open.
+  object; 4 of 28 attempts on `make page-release-corruption`). Documented as
+  such, warns at boot; `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
+  now actually skip Darwin's walk. Defect still open.
+- **Free-page release is opt-in on macOS too** (was the one platform where it
+  shipped on). `MADV_FREE_REUSABLE` zero-fills a reclaimed page, so the same
+  window is reachable there — read from the code, since the gate has no Darwin
+  runner, which is why the default was the wrong place to leave it. Costs macOS
+  RSS; `GCRY_PAGE_DONTNEED=1` turns it back on.
 - **Dying-type audit** skips the old heap on minor collections (was reporting
   every live `Thread` as dying).
 - **CI hang legibility.** aarch64 gates are bounded (`timeout 300`,
