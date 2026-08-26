@@ -301,7 +301,7 @@ module Gcry
         # stopped world nothing else can be here and the lock is free; on the
         # `after_world` path mutators are running and a prepend racing this
         # store would be lost, which puts a live chunk on no list at all.
-        @index_lock.sync { @chunks = kept }
+        @chunk_list_lock.sync { @chunks = kept }
       end
 
       # Queue for post-STW munmap (do not munmap while world stopped).

@@ -397,6 +397,7 @@ module Gcry
       init_freelist_locks
       @roots_lock = Crystal::SpinLock.new
       @index_lock = Crystal::SpinLock.new
+      @chunk_list_lock = Crystal::SpinLock.new
       init_post_stw_mutex
       @tlabs_booted = false
       @alloc_batches_booted = false

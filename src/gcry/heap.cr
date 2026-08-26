@@ -151,6 +151,13 @@ module Gcry
     # the gate can never be shown.
     property heap_counters_atomic_pinned : Bool = false
     @index_lock = Crystal::SpinLock.new
+    # `@chunks` surgery only. Separate from `@index_lock` on purpose: the
+    # unlink walks the list to find a predecessor, and holding the index
+    # lock across that O(n) walk starves every `chunk_containing` — a
+    # 2-core Darwin runner went from a 1m50s job to a 20-minute timeout in
+    # the STW × TLAB property test. This one is contended only by other
+    # list mutations. Order is list → index; nothing goes the other way.
+    @chunk_list_lock = Crystal::SpinLock.new
     @post_stw_mutex = uninitialized LibC::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
@@ -230,6 +237,7 @@ module Gcry
       @alloc_lock = Crystal::SpinLock.new
       init_freelist_locks
       @index_lock = Crystal::SpinLock.new
+      @chunk_list_lock = Crystal::SpinLock.new
       init_post_stw_mutex
       @parallel_mark_workers = 1
       @parallel_mark_runs = 0_u64
@@ -1460,15 +1468,16 @@ module Gcry
       # chunk's own base with `update_heap_bounds_after_unmap` on the stack
       # (`bench/log/linux/2026-08-25-aarch64-large-cache-locked-arm`).
       #
-      # `@index_lock` and not `@alloc_lock`: the large path already holds
-      # `@alloc_lock` across `alloc_large` → `map_chunk`, and the spinlock is
-      # not reentrant. `@index_lock` is a leaf — nothing takes `@alloc_lock`
-      # inside it — and both mutation paths already took it for the index, so
-      # this widens an existing section rather than adding a lock.
-      @index_lock.sync do
+      # A lock of its own, not `@alloc_lock` and not `@index_lock`. Not
+      # `@alloc_lock`: the large path already holds it across `alloc_large` →
+      # `map_chunk` and the spinlock is not reentrant. Not `@index_lock`: the
+      # unlink walks the list to find a predecessor, and holding the index lock
+      # across that starves every `chunk_containing` — measured as a Darwin job
+      # going from 1m50s to a 20-minute timeout. Order is list → index.
+      @chunk_list_lock.sync do
         chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
         @chunks = chunk
-        index_insert_locked(chunk)
+        index_insert(chunk)
       end
       @heap_size += bytes
       @large_mapped_bytes += bytes if size_class == UInt32::MAX
@@ -1508,8 +1517,8 @@ module Gcry
       # the target is no longer on, finds no predecessor, and returns having
       # removed the chunk from the index but **not** from the list — after
       # which the caller unmaps it and the next walker faults.
-      @index_lock.sync do
-        index_remove_locked(target)
+      @chunk_list_lock.sync do
+        index_remove(target)
         if @chunks == target
           @chunks = target.value.next
         else
