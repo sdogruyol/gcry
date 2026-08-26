@@ -372,6 +372,17 @@ module Gcry
     # seeing it trigger says nothing. Never ship non-zero.
     property stw_test_stall_ms : UInt64 = 0_u64
 
+    # Research only (`GCRY_PAGE_RELEASE_TEST_STALL_MS`, default 0): sleep
+    # between building the free-page mask and the release syscalls, so the
+    # window a mutator can allocate into becomes wide enough to measure.
+    property page_release_test_stall_ms : UInt64 = 0_u64
+
+    # `GCRY_MOSTLY_EMPTY_UNLINK=1` — research arm: unlink the free-only runs
+    # from the class freelist while keeping `MADV_FREE`, so the unlink can be
+    # measured apart from the syscall change `MOSTLY_EMPTY_MODE=dontneed`
+    # makes at the same time.
+    property mostly_empty_unlink : Bool = false
+
     # Research only: hold the **suspend** phase, which is a different one and the
     # only one the aarch64 hang has ever been seen in. `stw_test_stall_ms`
     # stalls thread-stacks, so it cannot exercise the report that names the
@@ -692,6 +703,9 @@ module Gcry
     RELEASE_MAP_SLOTS = 8192
     @rel_base = uninitialized StaticArray(UInt64, RELEASE_MAP_SLOTS)
     @rel_live = uninitialized StaticArray(Bool, RELEASE_MAP_SLOTS)
+    # Which path released the base. A double release is only actionable once
+    # you know which two paths raced; the pair names the bug.
+    @rel_kind = uninitialized StaticArray(UInt8, RELEASE_MAP_SLOTS)
     @rel_booted = false
     # Bases released while an earlier release of the same base had not been
     # cancelled by a remap.
@@ -714,11 +728,47 @@ module Gcry
       while i < RELEASE_MAP_SLOTS
         @rel_base[i] = 0_u64
         @rel_live[i] = false
+        @rel_kind[i] = 0_u8
         i += 1
       end
     end
 
-    protected def note_release_base(base : UInt64) : Nil
+    # Bytes actually handed to the mark as static roots, and the least any
+    # collection has handed it. The ranges the parser finds are one thing; what
+    # survives `each_static_range_excluding_heap` is what the mark sees, and a
+    # collection that scans far less than the others is a collection where the
+    # globals were not roots.
+    getter static_scanned_last : UInt64 = 0_u64
+    getter static_scanned_min : UInt64 = UInt64::MAX
+    getter static_scanned_max : UInt64 = 0_u64
+
+    protected def note_static_scanned(bytes : UInt64) : Nil
+      @static_scanned_last = bytes
+      @static_scanned_min = bytes if bytes < @static_scanned_min
+      # Report a collapse where it happens. A child that dies of a missed root
+      # never reaches the line that prints these counters, so a counter read at
+      # exit is a counter read only on the runs that had nothing to say.
+      if @static_scanned_max > 0 && bytes * 2 < @static_scanned_max
+        @static_scanned_drops &+= 1
+        if @static_scanned_drops == 1
+          buf = uninitialized UInt8[224]
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len, "gcry: static roots collapsed to ")
+          len = RawOut.append_u64(buf.to_unsafe, len, bytes)
+          len = RawOut.append(buf.to_unsafe, len, " bytes from ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @static_scanned_max)
+          len = RawOut.append(buf.to_unsafe, len, " — globals are not roots this collection. collection ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+          len = RawOut.append(buf.to_unsafe, len, "\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+      end
+      @static_scanned_max = bytes if bytes > @static_scanned_max
+    end
+
+    getter static_scanned_drops : UInt64 = 0_u64
+
+    protected def note_release_base(base : UInt64, kind : UInt8 = 0_u8) : Nil
       release_map_boot
       i = release_map_slot(base)
       if @rel_live[i] && @rel_base[i] == base
@@ -732,12 +782,17 @@ module Gcry
           len = RawOut.append(buf.to_unsafe, len,
             " a second time with no remap in between — the second unmap takes a live chunk. collection ")
           len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+          len = RawOut.append(buf.to_unsafe, len, ", first kind ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @rel_kind[i].to_u64)
+          len = RawOut.append(buf.to_unsafe, len, ", second kind ")
+          len = RawOut.append_u64(buf.to_unsafe, len, kind.to_u64)
           len = RawOut.append(buf.to_unsafe, len, "\n")
           RawOut.flush(buf.to_unsafe, len)
         end
       end
       @rel_base[i] = base
       @rel_live[i] = true
+      @rel_kind[i] = kind
     end
 
     # Is this base currently recorded as released? O(1), against
@@ -777,7 +832,7 @@ module Gcry
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
-      note_release_base(base) if @release_ledger || @unmap_guard
+      note_release_base(base, kind) if @release_ledger || @unmap_guard
       unless @unmap_guard
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the
@@ -1675,11 +1730,14 @@ module Gcry
 
           t0 = monotonic_ns
           if @scan_static_roots
+            scanned = 0_u64
             Platform.scan_static_roots do |low, high|
               each_static_range_excluding_heap(low, high) do |a, b|
+                scanned += b.address - a.address
                 Roots.scan_range_chunked(a, b, safe: true) { |candidate| mark_root_candidate(candidate, source: RootSource::Static) }
               end
             end
+            note_static_scanned(scanned)
           end
           @last_phase_static_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_STACKS)

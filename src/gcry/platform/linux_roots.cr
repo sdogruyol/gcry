@@ -44,16 +44,81 @@ module Gcry
       {% end %}
     end
 
+    # The largest root coverage any parse has produced, and the number of
+    # parses that came back with less than that.
+    #
+    # `/proc/self/maps` is read in 8 KiB pieces and the file is not a snapshot:
+    # the kernel regenerates it as it is read, so a mapping that changes
+    # between two `read`s can shift entries under the reader and drop a line.
+    # Every mutator in a program under gcry maps and unmaps constantly, and the
+    # entry that matters most is the executable's file-backed RW mapping —
+    # lose that one line and `try_yield_adjacent_bss` refuses the BSS that
+    # follows it, so for that collection **every class variable stops being a
+    # root**. That is not a degraded scan, it is a missed root, and what it
+    # collects is whatever is held only in a global.
+    #
+    # A parse that comes back smaller than one that came before is the signal.
+    @@max_range_bytes = 0_u64
+    @@static_root_shrinks = 0_u64
+    # The adjacency-BSS range the first parse found. The executable is never
+    # unmapped, so a later parse that does not produce this range again has
+    # lost it to the read, not to the program.
+    @@bss_lo = 0_u64
+    @@bss_hi = 0_u64
+    @@bss_seen_this_parse = false
+    @@static_root_bss_lost = 0_u64
+
+    def self.static_root_bss_lost : UInt64
+      @@static_root_bss_lost
+    end
+
+    def self.static_root_shrinks : UInt64
+      @@static_root_shrinks
+    end
+
+    def self.static_root_bytes : UInt64
+      total = 0_u64
+      i = 0
+      while i < @@range_count
+        r = (@@ranges + i).value
+        total += r.high - r.low
+        i += 1
+      end
+      total
+    end
+
     private def self.ensure_static_root_cache : Nil
       return if @@cached_generation == @@maps_generation && @@range_count > 0
 
       @@range_count = 0
       @@parse_prev_hi = 0_u64
       @@parse_prev_file_rw = false
+      @@bss_seen_this_parse = false
       scan_proc_maps do |low, high|
         push_range(low.address, high.address)
       end
       @@cached_generation = @@maps_generation
+
+      if @@bss_lo != 0 && !@@bss_seen_this_parse
+        @@static_root_bss_lost &+= 1
+        if @@static_root_bss_lost == 1
+          buf = uninitialized UInt8[224]
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len,
+            "gcry: the static-root parse lost the executable's BSS range 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, @@bss_lo)
+          len = RawOut.append(buf.to_unsafe, len,
+            " — for this collection no class variable is a root\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+      end
+
+      total = static_root_bytes
+      if total < @@max_range_bytes
+        @@static_root_shrinks &+= 1
+      else
+        @@max_range_bytes = total
+      end
     end
 
     @@bss_size_cap = false
@@ -228,6 +293,11 @@ module Gcry
          lo == @@parse_prev_hi &&
          perms[1] == 'w'.ord.to_u8 &&
          (!@@bss_size_cap || size < 1_u64 * 1024 * 1024)
+        if @@bss_lo == 0
+          @@bss_lo = lo
+          @@bss_hi = hi
+        end
+        @@bss_seen_this_parse = true if lo == @@bss_lo
         yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       end
       @@parse_prev_file_rw = false

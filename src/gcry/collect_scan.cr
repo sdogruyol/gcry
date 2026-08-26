@@ -329,6 +329,12 @@ module Gcry
     private def scan_mutator_stack : Nil
       bottom = Fiber.current.@stack.bottom
       @stack_bottom = bottom
+      # A window that does not contain the stack pointer is not a scan. The
+      # bottom comes from `Fiber.current`, and a fiber whose stack has not been
+      # recorded yet hands back something the scan below silently does nothing
+      # with — the setjmp buffer still yields register-held pointers, so the
+      # collection looks like it scanned a stack when it did not.
+      note_mutator_window(Roots.hardware_stack_pointer.address, bottom.address)
       if @precise_stack_exclusive
         # Exclusive: no full SP→bottom word scan (RSS experiment). Still need
         # setjmp regs + a shallow window for LLVM spill slots in active frames;
@@ -351,6 +357,34 @@ module Gcry
     # too shallow under acik --release (ThreadPool UAF / collect hang); 16 KiB
     # still << full stack.
     EXCLUSIVE_MUTATOR_SPILL_WINDOW = 16_u64 * 1024
+
+    # Collections whose own-stack window was empty or inverted, and the widest
+    # window any collection used — silence here would only mean the check never
+    # ran.
+    getter mutator_window_empty : UInt64 = 0_u64
+    getter mutator_window_max : UInt64 = 0_u64
+
+    private def note_mutator_window(sp : UInt64, bottom : UInt64) : Nil
+      if bottom <= sp
+        @mutator_window_empty &+= 1
+        if @mutator_window_empty == 1
+          buf = uninitialized UInt8[224]
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len,
+            "gcry: the collecting thread's own stack window is empty — sp 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, sp)
+          len = RawOut.append(buf.to_unsafe, len, ", fiber stack bottom 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, bottom)
+          len = RawOut.append(buf.to_unsafe, len, ", collection ")
+          len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+          len = RawOut.append(buf.to_unsafe, len, "\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+      else
+        span = bottom - sp
+        @mutator_window_max = span if span > @mutator_window_max
+      end
+    end
 
     private def scan_exclusive_mutator_spill_window(bottom : Void*) : Nil
       red = STACK_SCAN_RED_ZONE.to_u64
@@ -588,13 +622,22 @@ module Gcry
 
     private def fiber_stack_scan_top(fiber : Fiber, guard : UInt64, stw_multi : Bool) : UInt64
       if low = fiber_stack_sp_scan_low(fiber, guard)
+        @fiber_scan_from_sp &+= 1
         return low
       end
 
       if fiber.running?
         # Parallel: full span (mid-swap / stale stack_top). EC1: stack_top only
         # — full guard→bottom on SYSMON crushed Kemal thr (~86%→~80% Boehm).
-        return guard if stw_multi
+        if stw_multi
+          @fiber_scan_from_guard &+= 1
+          return guard
+        end
+        # A running fiber's `@context.stack_top` is only written on a context
+        # switch, so for a fiber that has not switched it describes no frame
+        # that exists. Counted because a scan that starts there is a scan of
+        # the wrong window, and it looks the same in every other counter.
+        @fiber_scan_running_stale &+= 1
         t = fiber.@context.stack_top.address
         return t < guard ? guard : t
       end
@@ -682,6 +725,11 @@ module Gcry
             "or set GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
       LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
     end
+
+    # Which window each running fiber's stack scan started from.
+    getter fiber_scan_from_sp : UInt64 = 0_u64
+    getter fiber_scan_from_guard : UInt64 = 0_u64
+    getter fiber_scan_running_stale : UInt64 = 0_u64
 
     private def scan_all_fiber_roots : Nil
       current = Fiber.current

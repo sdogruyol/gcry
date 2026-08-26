@@ -60,6 +60,11 @@ module Gcry
     # the same finding printed again inside a stopped world.
     ADDRESS_SPACE_REPORT_LIMIT = 6
 
+    # `GCRY_ADDRESS_SPACE_REPORT_LIMIT=<n>` raises it. The default keeps a
+    # stopped world short; a hunt that needs every holder named — because the
+    # one that matters is the one the default did not print — can pay for it.
+    property address_space_report_limit : Int32 = ADDRESS_SPACE_REPORT_LIMIT
+
     # `pread` block size. Small enough to sit on a fiber stack, large enough
     # that the syscall count is not the cost of the walk.
     ADDRESS_SPACE_READ_BLOCK = 8192
@@ -247,7 +252,7 @@ module Gcry
             if @collector_frame_hits == 1
               report_address_space_hit(target, hit_at, lo, hi, perms, name, name_len)
             end
-          elsif reported < ADDRESS_SPACE_REPORT_LIMIT
+          elsif reported < @address_space_report_limit
             reported += 1
             report_address_space_hit(target, hit_at, lo, hi, perms, name, name_len)
           end
