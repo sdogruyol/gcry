@@ -178,6 +178,10 @@ module Gcry
     # Large chunks the sweep found published but not yet filled in. Non-zero
     # means a mutator was suspended between `map_chunk` and `set_used`.
     getter sweep_large_uninitialised : UInt64 = 0_u64
+    # Same tell on the small path: a zeroed header (size 0, flags 0) inside a
+    # size-class chunk is a mutator frozen mid-`refill_size_class`. The sweep
+    # treats the chunk as live instead of reclaiming blocks that never lived.
+    getter sweep_small_uninitialised : UInt64 = 0_u64
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.
@@ -916,6 +920,14 @@ module Gcry
     # chunks' `next` stays intact for a walk already in flight.
     @pending_large_release : Void* = Pointer(Void).null
     @pending_large_release_bytes : UInt64 = 0_u64
+    # Large chunks the in-STW sweep decided to recycle. Inserting into
+    # `@large_freelists` needs `@alloc_lock`-quiescence the pause cannot have
+    # (a suspended mutator may be frozen mid-cache/mid-take under that lock),
+    # so the sweep queues them here — linked through their own headers'
+    # `next_free`, the `@pending_large_release` pattern — and
+    # `flush_pending_large_cache` inserts them under the lock after
+    # `start_world`.
+    @pending_large_cache : Void* = Pointer(Void).null
     # True while one of the post-STW `flush_pending_*` passes is walking
     # `@chunks`. Set and cleared under `@alloc_lock`, which is what makes it
     # useful: a mutator holding the lock and seeing it false knows no walk can
@@ -1161,6 +1173,7 @@ module Gcry
           @suppress_collect.add(1)
           begin
             flush_pending_empty_chunks
+            flush_pending_large_cache
             flush_pending_large_release
             trim_large_cache(defer: false)
           ensure
@@ -1341,6 +1354,7 @@ module Gcry
 
     protected def destroy_collector : Nil
       flush_pending_empty_chunks
+      flush_pending_large_cache
       flush_pending_large_release
       during_live_chunk_walk do
         flush_pending_dormant_chunks
@@ -1916,6 +1930,9 @@ module Gcry
             # collector, outside the walks (`GCRY_RELEASE_QUARANTINE`).
             drain_release_quarantine
             # Mutator-detached large chunks: release before the walks below start.
+            # In-STW-recycled large chunks into the cache first — under
+            # `@alloc_lock`, which means something again now.
+            flush_pending_large_cache
             flush_pending_large_release
             during_live_chunk_walk do
               # DORMANT madvise outside STW — kernel VM lock contention avoided.

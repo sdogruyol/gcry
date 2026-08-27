@@ -67,9 +67,9 @@ module Gcry
         if major || ChunkHeader.nursery?(chunk)
           if ChunkHeader.large?(chunk)
             if after_world
-              with_alloc_lock { sweep_large_one(chunk, major) }
+              with_alloc_lock { sweep_large_one(chunk, major, after_world: true) }
             else
-              sweep_large_one(chunk, major)
+              sweep_large_one(chunk, major, after_world: false)
             end
           else
             # Inline size-class sweep — avoid each_block yield overhead on
@@ -109,7 +109,18 @@ module Gcry
                         live_payload += payload.to_u64
                       end
                     else
-                      if heap_marked?(header)
+                      if uninitialised_small_block?(header)
+                        # Mid-`refill_size_class`: a mutator frozen inside the
+                        # header-init loop leaves mmap-zeroed headers — neither
+                        # FREE nor marked, which is exactly what the sweep
+                        # reclaims. The large path has had this tripwire since
+                        # 2026-08-24 (`sweep_large_one`); the small path could
+                        # reclaim the blocks AND classify the chunk fully-dead
+                        # into the warm/DORMANT/munmap paths under a mutator
+                        # still writing it. Count it, call the chunk live.
+                        @sweep_small_uninitialised &+= 1
+                        any_live = true
+                      elsif heap_marked?(header)
                         any_live = true
                         live_payload += payload.to_u64
                       else
@@ -123,7 +134,9 @@ module Gcry
                     while (cursor + block_bytes) <= limit
                       header = cursor.as(BlockHeader*)
                       unless BlockHeader.free?(header)
-                        if heap_marked?(header)
+                        if uninitialised_small_block?(header)
+                          # Counted in the discover pass; never reclaim.
+                        elsif heap_marked?(header)
                           heap_clear_mark(header)
                         else
                           reclaim_small(chunk, header, payload)
@@ -141,7 +154,12 @@ module Gcry
                     usable_payload += payload.to_u64 if major
                     header = cursor.as(BlockHeader*)
                     unless BlockHeader.free?(header)
-                      if major || BlockHeader.nursery?(header)
+                      if uninitialised_small_block?(header)
+                        # See the discover-pass comment above: a mutator frozen
+                        # mid-refill leaves zeroed headers; never reclaim them.
+                        @sweep_small_uninitialised &+= 1
+                        any_live = true
+                      elsif major || BlockHeader.nursery?(header)
                         if heap_marked?(header)
                           heap_clear_mark(header)
                           BlockHeader.promote(header) unless major
@@ -221,7 +239,16 @@ module Gcry
                       else
                         rebuild_mask |= bit
                       end
-                      index_remove(chunk)
+                      # `index_remove` used to run here. Deferred to
+                      # `flush_pending_empty_chunks_locked`: this branch runs
+                      # inside the pause in the in-STW sweep configs, and
+                      # `index_remove` takes `@index_lock` — a lock any
+                      # suspended mutator can hold across `chunk_containing` /
+                      # `index_insert` / the bounds updates. The collector
+                      # spinning on a frozen peer's lock is the 0.21.1
+                      # `@chunk_list_lock` hang, one lock over. The munmap this
+                      # remove serves is already deferred to the same flush,
+                      # and remove-before-munmap ordering is preserved there.
                       if @tight_grow && @grow_lo[class_index] == ChunkHeader.data_start(chunk).address
                         @grow_lo[class_index] = 0_u64
                         @grow_hi[class_index] = 0_u64
@@ -376,7 +403,7 @@ module Gcry
       end
     end
 
-    private def sweep_large_one(chunk : ChunkHeader*, major : Bool) : Nil
+    private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       return if BlockHeader.free?(header)
       # A chunk whose block header is still all zeroes is one `alloc_large`
@@ -408,9 +435,51 @@ module Gcry
         # of thousands of large HTTP buffers dominated pause time).
         mapped = chunk.value.mapped_bytes
         @large_cached_by_sweep &+= 1
-        cache_large_chunk(chunk, header)
+        if after_world
+          # Caller holds `@alloc_lock`; the bucket lists are quiescent.
+          cache_large_chunk(chunk, header)
+        else
+          # In-STW: `cache_large_chunk` walks and writes `@large_freelists`,
+          # which a suspended mutator can be frozen mid-`cache`/mid-`take`
+          # under `@alloc_lock` — a tail-append against a half-done protocol
+          # orphans bucket entries and drifts the byte counters. Queue the
+          # chunk (linked through its own header, the `queue_large_release`
+          # pattern) and insert it under the lock in
+          # `flush_pending_large_cache`, with the world running.
+          hv = header.value
+          hv.next_free = @pending_large_cache
+          header.value = hv
+          @pending_large_cache = BlockHeader.user_from(header)
+        end
         @bytes_reclaimed_since_gc += mapped
         live_objects_dec
+      end
+    end
+
+    # True only for a header no code path ever writes: `set_used` stores a
+    # real payload size, `refill_size_class` stores size+FREE, and the sweep's
+    # own links keep FREE set. All-zero is mmap-fresh memory — a chunk whose
+    # refill loop a suspended mutator has not finished.
+    @[AlwaysInline]
+    private def uninitialised_small_block?(header : BlockHeader*) : Bool
+      header.value.size == 0 && header.value.flags == 0
+    end
+
+    # Insert the large chunks the in-STW sweep queued, now that mutators run
+    # and `@alloc_lock` means what it says. Before `flush_pending_large_release`
+    # and the trim, so this collection's recycled chunks are reusable at once.
+    private def flush_pending_large_cache : Nil
+      return if @pending_large_cache.null?
+      with_alloc_lock do
+        user = @pending_large_cache
+        @pending_large_cache = Pointer(Void).null
+        while user
+          header = BlockHeader.from_user(user)
+          chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+          nxt = header.value.next_free
+          cache_large_chunk(chunk, header)
+          user = nxt
+        end
       end
     end
 
@@ -485,6 +554,11 @@ module Gcry
       # chunk-release decision; the actual VMA teardown happens in flush).
       while chunk
         run_base = chunk.as(Void*).address
+        # Deferred from the sweep's drop branch (see the comment there): the
+        # entry leaves the index here, immediately before its memory goes, and
+        # before `refuse_live_release` would read its own entry as "still
+        # indexed inside the range".
+        index_remove(chunk)
         run_end = run_base + chunk.value.mapped_bytes
         nxt = chunk.value.next
         # Coalesce ONLY fully-contiguous chunks (next.base == current end).
@@ -496,6 +570,7 @@ module Gcry
         while nxt && nxt.as(Void*).address == run_end
           new_end = nxt.as(Void*).address + nxt.value.mapped_bytes
           run_end = new_end if new_end > run_end
+          index_remove(nxt)
           chunk = nxt
           nxt = nxt.value.next
         end

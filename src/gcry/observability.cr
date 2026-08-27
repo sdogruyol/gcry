@@ -90,6 +90,7 @@ module Gcry
         layout_precise_scans:        heap.layout_precise_scans,
         layout_hash_bodies:          heap.layout_hash_bodies,
         sweep_large_uninitialised:   heap.sweep_large_uninitialised,
+        sweep_small_uninitialised:   heap.sweep_small_uninitialised,
         large_cached_twice:          heap.large_cached_twice,
         large_taken_used:            heap.large_taken_used,
         release_double:              heap.release_double,

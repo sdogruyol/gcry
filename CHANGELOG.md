@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The pattern behind 0.21.2's fix, audited to exhaustion — three siblings
+  found and closed.** Every structure the stopped world reads unlocked was
+  crossed against every writer a suspend signal can freeze mid-protocol:
+  (1) the in-STW sweep's empty-chunk drop acquired `@index_lock` — a lock a
+  frozen mutator can hold — the last such site in the tree; the
+  `index_remove` is deferred to the post-STW flush beside the munmap it
+  serves. (2) A mutator frozen inside `refill_size_class` leaves mmap-zeroed
+  headers the sweep read as dead-USED and reclaimed — blocks that never
+  lived, double-owned once the mutator resumed, and a chunk classified fully
+  dead under a live writer; the small path now has the size==0 tripwire the
+  large path has had since 2026-08-24 (`sweep_small_uninitialised` on
+  `/gc-stats`). (3) The in-STW sweep appended to `@large_freelists` without
+  `@alloc_lock`, orphaning bucket entries against a frozen mid-cache/mid-take
+  mutator; insertions are queued and flushed under the lock after
+  `start_world`. Plus one hardening: the `@chunks` head publish is a release
+  store, so its safety no longer rests on unfenced source order.
+  `GCRY_PAGE_DONTNEED=1` — the config that reaches all three — went from
+  2/100 + 1/40 checksum corruptions to **0/90**, and
+  `make page-release-corruption` is green end to end for the first time.
+  `bench/log/linux/2026-08-27-stw-write-protocols/FINDINGS.md`
+
 ## [0.21.2] - 2026-08-27
 
 Patch release. Closes the `0x18` / null-field crash family at its root — a

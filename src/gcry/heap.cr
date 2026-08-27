@@ -1483,7 +1483,14 @@ module Gcry
       # going from 1m50s to a 20-minute timeout. Order is list → index.
       @chunk_list_lock.sync do
         chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
-        @chunks = chunk
+        # Release store: the in-STW sweep and `each_chunk` walk this list
+        # unlocked, and a mutator can be suspended between these two stores.
+        # Frozen in SOURCE order the new chunk is merely invisible (it holds
+        # nothing live yet); but nothing except this fence stops the compiler
+        # sinking the header init past the head publish, and a frozen thread
+        # between the REORDERED stores hands the walker an uninitialised
+        # `next`. Same discipline as `index_insert_locked`'s count store.
+        Atomic::Ops.store(pointerof(@chunks), chunk, :release, true)
         index_insert(chunk)
       end
       @heap_size += bytes
