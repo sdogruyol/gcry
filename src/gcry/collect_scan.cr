@@ -600,7 +600,24 @@ module Gcry
     @warned_stw_lag_zero = false
 
     # Lowest scan address from a suspended thread SP on *fiber*, or nil.
+    # `GCRY_FULL_SUSPENDED_STACK=1`: decline the SP clamp so a running fiber's
+    # stack is scanned from the guard page instead of from the suspended SP.
+    #
+    # This is the question the `0x18` hunt ends on. The holders of the dying
+    # object all sat *below* the suspended SP — dead slots by the ABI, which a
+    # collector is right to skip — while Boehm, whose per-thread stack pointer
+    # is taken inside its signal handler and is therefore deeper, keeps the
+    # object. If scanning the whole stack saves it, the difference between the
+    # two collectors is over-retention on Boehm's side and not a missed root on
+    # gcry's, and that is worth knowing before anything else is changed.
+    #
+    # Runtime, not a rebuild: in this bench a recompile moves where the value
+    # lives, so a two-build A/B measures the compiler
+    # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`).
+    property full_suspended_stack : Bool = false
+
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
+      return nil if @full_suspended_stack
       return nil unless @world_stopped
 
       stack = fiber.@stack
@@ -841,6 +858,12 @@ module Gcry
       {% end %}
     end
 
+    # `GCRY_DISABLE_GREG_ROOTS=1`: research arm, never a product setting.
+    property disable_greg_roots : Bool = false
+
+    # Register words the mark has been offered over the life of the process.
+    getter thread_greg_words_total : UInt64 = 0_u64
+
     private def scan_other_thread_stacks : Nil
       return unless @stop_the_world
 
@@ -855,7 +878,17 @@ module Gcry
         fiber = thread.@current_fiber
 
         # Always spill GP registers at suspend — may hold the only live copy.
+        # `GCRY_DISABLE_GREG_ROOTS=1` skips this loop. It exists so the worth of
+        # registers-as-roots can be A/B'd inside **one** binary: comparing two
+        # builds measures the compiler, because where a value lives moves with
+        # any edit to the source
+        # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`).
         Platform.each_thread_greg(pthread) do |candidate|
+          next if @disable_greg_roots
+          # Cumulative and never reset, unlike `@thread_greg_candidates`, which
+          # is cleared on one of the two mark paths and not the other — so its
+          # value cannot be read as either a total or a per-collection count.
+          @thread_greg_words_total &+= 1
           @thread_greg_candidates += 1
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
@@ -1001,8 +1034,30 @@ module Gcry
       STACK_SCAN_RED_ZONE = 0_u64
     {% end %}
 
+    # Extra bytes below a suspended thread's SP to keep in the scan, on top of
+    # the red zone. `GCRY_SUSPENDED_SP_SLACK=<bytes>`; 0 restores the old bound.
+    #
+    # The kernel writes the signal frame *below* the SP it reports in the
+    # `ucontext`, and that frame carries register state the GP-register walk
+    # does not cover — the FP/SSE area among it, which is where a pointer
+    # spilled to an XMM register lives. Clamping the scan at the reported SP
+    # skips all of it, and an object whose last reference is there is collected.
+    #
+    # Measured, and only after three single-run readings of this same defect had
+    # to be withdrawn: interleaved child by child in **one** binary, the switch
+    # flipped at runtime because a rebuild moves where the compiler keeps
+    # values.
+    #
+    #     4096 bytes of slack   0 objects lost of 262
+    #     0 (the old bound)     9 objects lost of 264
+    #
+    # Fisher p ≈ 0.004. 4096 is the value that was measured; a full guard→bottom
+    # scan fixes it too and costs far more (`full_suspended_stack`).
+    property suspended_sp_slack : UInt64 = 4096_u64
+
     private def stack_scan_low(sp_addr : UInt64, floor : UInt64) : UInt64
-      low = sp_addr > STACK_SCAN_RED_ZONE ? sp_addr - STACK_SCAN_RED_ZONE : 0_u64
+      drop = STACK_SCAN_RED_ZONE.to_u64 &+ @suspended_sp_slack
+      low = sp_addr > drop ? sp_addr - drop : 0_u64
       low < floor ? floor : low
     end
 

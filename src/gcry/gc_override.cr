@@ -869,6 +869,23 @@ module GC
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.
+    heap.mostly_empty_unlink = true if env_flag_one?("GCRY_MOSTLY_EMPTY_UNLINK")
+    # Research only: an unlocked walk of the runtime thread list before
+    # `Thread.lock`. See src/gcry/thread_list_tripwire.cr for why it is off by
+    # default.
+    heap.thread_list_tripwire = true if env_flag_one?("GCRY_THREAD_LIST_TRIPWIRE")
+    heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
+    heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
+    heap.full_suspended_stack = true if env_flag_one?("GCRY_FULL_SUSPENDED_STACK")
+    if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
+      heap.suspended_sp_slack = sl
+    end
+    if lim = env_u64("GCRY_ADDRESS_SPACE_REPORT_LIMIT")
+      heap.address_space_report_limit = lim.to_i32
+    end
+    if st = env_u64("GCRY_PAGE_RELEASE_TEST_STALL_MS")
+      heap.page_release_test_stall_ms = st
+    end
     if st = env_u64("GCRY_STW_TEST_STALL_MS")
       heap.stw_test_stall_ms = st if st <= 60_000
     end
