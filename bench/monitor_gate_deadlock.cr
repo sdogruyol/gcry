@@ -38,7 +38,17 @@ require "./bounded_child"
 COLLECTS = 400
 WORKERS  =   3
 # Attempts the control arm gets before it gives up; see where it is used.
-CONTROL_TRIES = 6
+#
+# Six was not enough to be a gate. The control reaches the deadlock in some
+# runs and not others — "HUNG on try 1" one run, "finished 6 tries" the next —
+# and a gate whose control is a coin toss cannot be a required CI step, which
+# is why this one is not in CI. Each try that does not hang is cheap (it runs
+# `COLLECTS` stops and returns); only the try that hangs costs the timeout, and
+# the loop stops at the first one. So more tries buy reliability at almost no
+# cost in the common case.
+#
+# `MONITOR_GATE_CONTROL_TRIES` overrides it.
+CONTROL_TRIES = (ENV["MONITOR_GATE_CONTROL_TRIES"]?.try(&.to_i?) || 24)
 
 if ARGV.includes?("--child")
   # The real Monitor does the spawning, via `GCRY_MONITOR_GATE_TEST_SPAWN=1`.

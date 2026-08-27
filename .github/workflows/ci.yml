@@ -664,14 +664,33 @@ jobs:
         run: |
           bin/all_specs_asan
 
-  # Three race gates are deliberately NOT wired in here. All three are worth
-  # running by hand — `make monitor-gate-deadlock`, `make page-release-corruption`,
-  # `make dormant-flush-race` — and none of them can be a required step today.
-  #
-  # `make monitor-gate-deadlock` refuses to pass unless its control arm actually
-  # deadlocks, and the control reaches it in some runs and not others —
-  # "finished 6 tries" once, "HUNG on try 1" the run before. That is the gate
-  # being honest, and a coin toss as a required step.
+  # `make monitor-gate-deadlock` in a job of its own: 106–193 s here, and the
+  # worst case is 23 quick tries plus one 60 s hang, so a two-core runner needs
+  # room the `test` job does not have — it is already at its 30-minute ceiling,
+  # and adding a gate to it once cancelled a run mid-step.
+  monitor-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: monitor gate
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      # The control arm has to reach the deadlock or the green arm proves
+      # nothing, and it reaches it about one try in four and a half — measured
+      # over eight runs, which hung on tries 1, 2, 3, 4, 5, 6, 7 and 8. Six
+      # tries left a ~22% chance of a spurious red, which is why this gate was
+      # out of CI; twenty-four leaves ~0.3%, and 8 of 8 runs passed.
+      - name: Monitor gate deadlock
+        run: |
+          make monitor-gate-deadlock
+
+  # Two race gates are deliberately NOT wired in here. Both are worth running by
+  # hand — `make page-release-corruption`, `make dormant-flush-race` — and
+  # neither can be a required step today.
   #
   # `make page-release-corruption` is an open defect: its `GCRY_PAGE_DONTNEED=1`
   # arm faults 4 of 28 attempts across six gate runs. The knob warns at boot and
