@@ -112,3 +112,101 @@ overwritten while live.
   that follows it), which is what the page-release log said this hunt needs.
 
 Raw child logs: `raw/` beside this file (not committed, 320 files).
+
+
+---
+
+# Same day, continued: the chain walked to its root, and the root fixed
+
+Eleven more instrument iterations, one wrong instrument withdrawn, one fix,
+one clean batch of 100. Every step below is 100–120 children under the same
+protocol (4 concurrent, `GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1
+GCRY_THREAD_LIST_TRIPWIRE=1`), and every claim is the *unanimous* reading of
+that step's crashed children — none of these are majorities.
+
+## Step by step, each link measured
+
+1. **Who writes over the object?** `set_free`/`set_used` hooks on every block
+   transition: 21 of 21 crashes carried
+   `a block set_used (hand-out) covers the thread list object … prior flags
+   0x81` — FREE|SWEPT. The allocator re-issued the live list's own block, and
+   the backtrace at the hand-out is one stack, all 21: `GC.free →
+   trim_large_cache → __crystal_malloc64 → alloc_old_small_locked` — the
+   32-byte closure `trim_large_cache` allocates for its detach lambda. That
+   closure's captured locals are large-block user pointers, which is why the
+   overwritten list held pointers shaped exactly like `chunk base + 0x28`.
+   The zero-fill of malloc's clean path is the other presentation ("held 7,
+   reads empty"). The lottery between them is just who claims the block.
+2. **Why was it on a freelist?** `SWEPT` says the sweep freed it. The sweep
+   report shows `marked no, header gen 0` with static roots at full width —
+   and always on a **major**.
+3. **Did the mark ever see it?** Per-cycle candidate tracking: 35 of 35 fatal
+   cycles read `offered to the mark this cycle` — the BSS slot was scanned
+   and the value delivered. Not a root-coverage hole.
+4. **Why was the offer rejected?** The reject-reason probe: 215 of 215 reject
+   lines across 44 fatal children read `find_block returned nothing`. The
+   lookup, not the root, not the gate (`clear_nursery_marks` explains the
+   gen-0 shape: the boot chunk is a nursery chunk, so every minor clears the
+   promoted block's gen bits and every healthy cycle re-marks it).
+5. **Why does the lookup fail?** The chunk is *gone from the chunk index* —
+   first seen **at the suspension**, i.e. the loss happens outside the pause.
+   A linear pass says: absent from the array, **0 order inversions**, and a
+   base-identity pass (immune to a corrupted `mapped_bytes`) agrees. Not
+   unsorted, not header-blinded: the entry is not in the visible window.
+6. **Which operation loses it?** None. The `index_remove` hook (range *and*
+   base identity): 0 hits. A verifier at the end of **every**
+   `index_insert_locked` / `index_remove_locked`: 0 hits across 17 fatal
+   children. Every index operation completes with the entry present, and the
+   entry is nonetheless absent at the next suspension.
+
+One instrument was withdrawn on the way: the first version of the linear pass
+took `@index_lock` inside the stopped world and hung 18 of 100 children on
+the deadline — a mutator suspended mid-index-operation still owns that lock.
+The walk is unlocked now, and those 18 timeouts were the instrument's own.
+
+## The mechanism
+
+`index_insert_locked` wrote, in this order: shift the tail right
+(`a[count] = a[count-1]`, …), write the new slot, **then**
+`@chunk_index_count += 1`. `chunk_containing` reads the index *unlocked*
+during a stop — the documented rationale being that only the collector
+touches it then — and `stop_world` suspends by signal, anywhere. A mutator
+frozen between the shift and the increment leaves a window in which the top
+entry has been copied to `a[count]` while `count` still hides it: the
+collector sees a **sorted array whose last entry does not exist**, for that
+entire collection.
+
+That closes every observation at once. Absent-yet-sorted; no remove; every
+operation verifying clean at its own end (the increment has happened by
+then); first seen at the suspension (the suspension is what freezes the
+window open); load-dependent (more mutators mapping chunks, more chances to
+freeze one mid-insert); and always this victim — the highest-addressed chunk
+is always the **boot chunk**, mmap hands later chunks lower addresses, so the
+hidden last entry is always the chunk holding the runtime's own objects, and
+the only one of those whose sole reference lives outside a re-scanned stack
+is `Thread::LinkedList`. The `0x18` at `Thread.lock`, the
+`pthread_mutex_unlock: EINVAL` at thread exit, and the payload pointers the
+walk followed were one lost mark wearing three coats.
+
+## The fix, and its measurement
+
+Publish order inverted: duplicate the top entry into the new slot, publish
+`count + 1` with a release store, then shift. Every state a suspended thread
+can now expose is a sorted array with at most one *adjacent duplicate* —
+harmless to a binary search — and never one with an entry hidden.
+
+Same binary shape, same arm, same load, 100 children:
+
+| | failed | `0x18` | walk faults | tripwire | GONE |
+|---|---:|---:|---:|---:|---:|
+| before (raw6–raw14, per 100) | 8–44 | — | — | — | every crash |
+| **fixed** | **0** | **0** | **0** | **0** | **0** |
+
+Fisher on 0/100 against the weakest baseline in this file (8/100) is
+p ≈ 0.003; against the typical 20–30 per 100 it is beyond argument. The
+instruments stay in the tree under the same knob, because the next defect in
+this family will want them: the watch (`ThreadListWatch`), the phase probes,
+the offer/reject reporter, and the per-operation index verifier.
+
+Raw logs for every step: `raw2/`–`raw14/`, `rawfix/` beside this file (not
+committed).

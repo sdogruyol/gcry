@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A chunk-index insert could hide the boot chunk from an entire collection.**
+  `index_insert_locked` shifted the array and wrote the new slot before
+  publishing `@chunk_index_count`, and `chunk_containing` reads the index
+  unlocked inside a stop — so a mutator suspended by `stop_world` between the
+  shift and the increment left the collector a sorted array whose *last* entry
+  did not exist. The topmost address is always the boot chunk, so the mark
+  lost `Thread::LinkedList` (its only reference is the `@@threads` BSS slot,
+  and `find_block` failed on it), the sweep reclaimed the live list, and the
+  allocator re-issued its block — the `0x18` crash at `Thread.lock`, the
+  `pthread_mutex_unlock: EINVAL` at thread exit, and the "walk follows a
+  payload pointer" faults were one lost mark wearing three coats. The insert
+  now duplicates the top entry, publishes the count with a release store, and
+  then shifts: every state a suspended thread can expose is sorted with at
+  most one adjacent duplicate. Measured on the arm that reproduced it at
+  8–44 of 100 children: **0 of 100** with the fix.
+  `bench/log/linux/2026-08-27-thread-list-tripwire/FINDINGS.md`
+
+### Added
+
+- `GCRY_THREAD_LIST_TRIPWIRE=1` grew into the instrument family that found the
+  above: a watch on the `Thread::LinkedList` object (`ThreadListWatch`), block
+  set_free/set_used hooks with a backtrace at the corrupting hand-out,
+  phase-boundary header probes, a mark-offer reject reporter, and a
+  per-operation chunk-index verifier. All armed by the one knob, all free when
+  it is off.
+
 ## [0.21.1] - 2026-08-26
 
 Patch release. Fixes a stop-the-world hang introduced in 0.21.0.

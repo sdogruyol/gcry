@@ -219,3 +219,24 @@ more crashes moved from `0x18` to faults *inside the walk*, at `+0x50` from the
 base of a large-object chunk released one collection earlier — the list slot
 held a payload-block pointer, not noise. The full batch, its numbers and what
 they retire: `../2026-08-27-thread-list-tripwire/FINDINGS.md`.
+
+
+---
+
+## 2026-08-27, later: CLOSED — a chunk-index insert hid the boot chunk from the mark
+
+The chain, each link measured unanimously on its own batch: the allocator
+re-issued the live list's block (`set_used`, prior flags FREE|SWEPT, one
+backtrace ×21) ← the sweep reclaimed it unmarked on a major ← the mark was
+*offered* the `@@threads` slot and rejected it, 215 of 215 times as
+`find_block returned nothing` ← the boot chunk was absent from the chunk
+index, sorted, with no `index_remove` and every index operation verifying
+clean at completion ← `index_insert_locked` published `@chunk_index_count`
+**after** the shift, so a mutator suspended mid-insert hid the last —
+highest-addressed, always the boot — entry from the collection's unlocked
+index reads.
+
+Fixed by inverting the publish order (duplicate the top entry, release-store
+the count, then shift): 8–44 of 100 children before, **0 of 100** after, same
+arm, same load. The whole hunt:
+`../2026-08-27-thread-list-tripwire/FINDINGS.md`.
