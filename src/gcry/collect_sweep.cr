@@ -1186,6 +1186,9 @@ module Gcry
     end
 
     private def link_small_to_freelist(chunk : ChunkHeader*, header : BlockHeader*, payload : UInt32, class_index : Int32) : Nil
+      if ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64 &+ payload, ThreadListWatch::SITE_SWEEP, header.value.flags)
+        report_thread_list_sweep(header)
+      end
       user = BlockHeader.user_from(header)
       was_nursery = BlockHeader.nursery?(header)
       push_size_class_free(class_index, was_nursery, header, user, payload, swept: true)

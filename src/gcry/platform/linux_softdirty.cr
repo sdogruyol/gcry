@@ -126,6 +126,7 @@ module Gcry
         return false if len == 0
         return false if (addr & (PAGE_SIZE - 1)) != 0
         return false if (len & (PAGE_SIZE - 1)) != 0
+        ThreadListWatch.check(addr, len, ThreadListWatch::SITE_DONTNEED)
         LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), LibC::MADV_DONTNEED) == 0
       {% else %}
         false
@@ -142,6 +143,7 @@ module Gcry
         return false if len == 0
         return false if (addr & (PAGE_SIZE - 1)) != 0
         return false if (len & (PAGE_SIZE - 1)) != 0
+        ThreadListWatch.check(addr, len, ThreadListWatch::SITE_MADV_COLD)
         LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), MADV_COLD) == 0
       {% else %}
         false
@@ -158,6 +160,7 @@ module Gcry
         return false if len == 0
         return false if (addr & (PAGE_SIZE - 1)) != 0
         return false if (len & (PAGE_SIZE - 1)) != 0
+        ThreadListWatch.check(addr, len, ThreadListWatch::SITE_MADV_FREE)
         LibC.madvise(Pointer(Void).new(addr), LibC::SizeT.new(len), MADV_FREE) == 0
       {% else %}
         false

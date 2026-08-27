@@ -207,6 +207,7 @@ if ARGV.includes?("--child")
        "dying_walked #{heap.dying_type_walked}, dying_live #{heap.dying_type_live}, " \
        "dying_deaths #{heap.dying_type_deaths}, " \
        "tl_max #{heap.thread_list_seen_max}, tl_empty #{heap.thread_list_empty}, " \
+       "tlw_hits #{Gcry::ThreadListWatch.hits}, " \
        "root_shrinks #{Gcry::Platform.static_root_shrinks}, bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
        "stash_damaged #{stash_damaged}, ballast_seen #{ballast_seen}, " \
        "greg_candidates #{heap.thread_greg_candidates}, greg_total #{heap.thread_greg_words_total}, " \

@@ -1113,6 +1113,7 @@ module Gcry
 
       if user = take_large_free(mapped)
         header = BlockHeader.from_user(user)
+        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
         BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
         heap_set_mark(header) if @incremental_marking || @collecting
         return {user, true}
@@ -1153,6 +1154,7 @@ module Gcry
         return
       end
       mapped = chunk.value.mapped_bytes
+      ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
       payload = header.value.size
       bucket = self.class.large_bucket(mapped)
       user = BlockHeader.user_from(header)
@@ -1165,10 +1167,12 @@ module Gcry
         tail = tnxt
       end
       poison_payload(user, payload) if @poison_freed
+      ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
       header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE | BlockHeader::Flags::LARGE, Pointer(Void).null)
       if tail.null?
         @large_freelists[bucket] = user
       else
+        ThreadListWatch.check(BlockHeader.from_user(tail).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         th = BlockHeader.from_user(tail)
         tv = th.value
         tv.next_free = user
@@ -1196,12 +1200,14 @@ module Gcry
           if prev.null?
             @large_freelists[b] = nxt
           else
+            ThreadListWatch.check(BlockHeader.from_user(prev).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
             ph = BlockHeader.from_user(prev)
             pv = ph.value
             pv.next_free = nxt
             ph.value = pv
           end
           mapped = chunk.value.mapped_bytes
+          ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_OUT)
           free_bytes_sub(mapped)
           @large_free_bytes -= mapped if @large_free_bytes >= mapped
           @large_cache_hits += 1
@@ -1258,6 +1264,7 @@ module Gcry
         header = BlockHeader.from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
+        ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
         hv = header.value
         hv.next_free = @pending_large_release
         header.value = hv
@@ -1897,19 +1904,50 @@ module Gcry
     end
 
     # Caller holds `@index_lock`.
+    #
+    # The store order here is load-bearing for a reader this lock does not
+    # cover: `chunk_containing` reads the index *unlocked* while the world is
+    # stopped, and `stop_world` can suspend a mutator anywhere inside this
+    # method. The old order — shift right, write the slot, THEN
+    # `@chunk_index_count += 1` — has a window in which the top entry has been
+    # copied to `a[count]` while `count` still hides it: a mutator frozen
+    # there leaves the collector a sorted array whose **last entry does not
+    # exist**, for the whole collection. The topmost address is always the
+    # boot chunk, so the object that loses its mark to this is always one of
+    # the runtime's own — measured as the `Thread::LinkedList` `0x18` family:
+    # 19 of 19 fatal children read "absent from the array, 0 order
+    # inversions" one suspension after a healthy walk, with no index_remove
+    # and every insert/remove verifying clean at completion
+    # (`bench/log/linux/2026-08-27-thread-list-tripwire/`).
+    #
+    # New order: duplicate the top entry into the new slot, publish the new
+    # count with a release store, then shift. Every intermediate state a
+    # suspended thread can expose is a sorted array with at most one
+    # *adjacent duplicate* — harmless to a binary search — and never one
+    # with an entry hidden.
     private def index_insert_locked(chunk : ChunkHeader*) : Nil
-      begin
-        invalidate_chunk_cache
-        index_ensure_cap(@chunk_index_count + 1)
-        pos = index_lower_bound(chunk.address)
-        i = @chunk_index_count
+      invalidate_chunk_cache
+      index_ensure_cap(@chunk_index_count + 1)
+      pos = index_lower_bound(chunk.address)
+      count = @chunk_index_count
+      if count > pos
+        (@chunk_index + count).value = (@chunk_index + (count - 1)).value
+      else
+        # Top insert (or empty index): the new slot is the new chunk itself.
+        (@chunk_index + pos).value = chunk
+      end
+      # Release, for the slot store above; the suspension that makes the
+      # unlocked read legal syncs the rest.
+      Atomic::Ops.store(pointerof(@chunk_index_count), count + 1, :release, true)
+      if count > pos
+        i = count - 1
         while i > pos
           (@chunk_index + i).value = (@chunk_index + (i - 1)).value
           i -= 1
         end
         (@chunk_index + pos).value = chunk
-        @chunk_index_count += 1
       end
+      verify_thread_list_indexed("an index_insert")
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
@@ -1920,6 +1958,14 @@ module Gcry
     private def index_remove_locked(chunk : ChunkHeader*) : Nil
       begin
         invalidate_chunk_cache
+        # Range test AND base identity: the hook exists because the entry
+        # vanishes, and a defect that has already rewritten `mapped_bytes`
+        # would blind a range-only test while the base still names the chunk.
+        if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
+           (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
+           ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
+          Exception::CallStack.print_backtrace
+        end
         pos = index_lower_bound(chunk.address)
         unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk
           i = pos
@@ -1930,6 +1976,7 @@ module Gcry
           end
           @chunk_index_count -= 1
         end
+        verify_thread_list_indexed("an index_remove")
       end
     end
 

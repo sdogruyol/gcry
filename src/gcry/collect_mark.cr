@@ -72,6 +72,9 @@ module Gcry
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
       addr = pointer.address
+      if ThreadListWatch.note_candidate(addr)
+        report_thread_list_offer(pointer, gate_type_id)
+      end
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
       # scan_unaligned_candidates keeps them (GCRY_SOUND) — a misaligned interior
