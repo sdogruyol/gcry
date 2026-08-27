@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-08-27
+
+Patch release. Closes the `0x18` / null-field crash family at its root — a
+publish-order defect in the chunk-index insert. Production sighting on 0.21.1
+the same day: `0x4` in `String#empty?` via Kemal's `unescape_url_param`, the
+second at that frame; the fixed defect produces exactly that shape (a null
+reference read out of a live structure) in multi-threaded builds, so 0.21.2
+is the build production should be on.
+
 ### Fixed
 
 - **A chunk-index insert could hide the boot chunk from an entire collection.**
@@ -25,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most one adjacent duplicate. Measured on the arm that reproduced it at
   8–44 of 100 children: **0 of 100** with the fix.
   `bench/log/linux/2026-08-27-thread-list-tripwire/FINDINGS.md`
+  A 30-minute local `wrk` soak did not reproduce the field crash on either
+  binary — its rate is below what half an hour resolves — so the field claim
+  stays an inference; the bench-family claim is measured.
 
 ### Added
 
@@ -2143,7 +2155,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/sdogruyol/gcry/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sdogruyol/gcry/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sdogruyol/gcry/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/sdogruyol/gcry/compare/v0.19.0...v0.20.0
