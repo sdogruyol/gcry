@@ -66,14 +66,55 @@ class Verdict
   end
 end
 
+# Held only in a class variable, and checked from the main thread while the
+# workers churn. If gcry loses the executable's BSS from its static roots — and
+# that is a parse of `/proc/self/maps`, a file that is not a snapshot — then
+# nothing holds this and it is swept like garbage. Checking a pattern rather
+# than the pointer is deliberate: the reference stays valid-looking, it is the
+# bytes underneath that change once the block is handed out again.
+class Stash
+  PATTERN = 0xAB_u8
+  SIZE    = 4096
+
+  @@held : Bytes? = nil
+
+  def self.fill : Nil
+    b = Bytes.new(SIZE)
+    i = 0
+    while i < SIZE
+      b[i] = PATTERN
+      i += 1
+    end
+    @@held = b
+  end
+
+  def self.damaged? : Bool
+    b = @@held
+    return true if b.nil?
+    i = 0
+    while i < SIZE
+      return true if b[i] != PATTERN
+      i += 64
+    end
+    false
+  end
+end
+
 if ARGV.includes?("--child")
   heap = Gcry.default_heap
+  Stash.fill
+
+  # Crystal installs its own handler during `GC.init`, so gcry's has to be armed
+  # here, in the child, rather than anywhere inside the heap's own startup.
+  # Without it a fault prints an address and nothing that locates it.
+  Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
 
   # A long chunk list: the flush walks visit every one of these, so the window
   # in which a peer can unmap something the walk has not reached yet is as wide
   # as the list is long. Keep them reachable so the sweep cannot shorten it.
   ballast = Array(Bytes).new(BALLAST)
   BALLAST.times { ballast << Bytes.new(256) }
+  STDOUT.puts "child: ballast built #{ballast.size} at 0x#{ballast.object_id.to_s(16)}" if ENV["GCRY_BALLAST_TRACE"]? == "1"
 
   threads = [] of Thread
   WORKERS.times do
@@ -103,11 +144,80 @@ if ARGV.includes?("--child")
     end
   end
 
+  # The class-variable canary, watched from the main thread. Diagnostics from a
+  # bare `Thread.new` raise (`Thread#execution_context cannot be nil`), which is
+  # how two results in this family were silently invalidated before; the main
+  # thread has a context and can print.
+  # `ballast` is read on every turn on purpose. Without a use inside this loop
+  # the only reference to a 40,000-element array sat in a frame slot nothing
+  # touched until the final `puts`, and it was collected: the run printed
+  # `ballast 0` and the long chunk list this bench exists to build was not
+  # there. A watcher that quietly disables the thing it watches is worse than
+  # no watcher.
+  stash_damaged = false
+  ballast_seen = 0
+  # A `pointerof(ballast)` probe used to sit here. It is gone on purpose: taking
+  # the address forces the local into a stack slot for the whole function, the
+  # collector then sees it, and the loss this bench exists to reproduce goes
+  # away. The reading it produced is in
+  # `bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`.
+  until Verdict.finished >= WORKERS
+    ballast_seen = ballast.size
+    if Stash.damaged?
+      stash_damaged = true
+      STDOUT.puts "child: STASH DAMAGED — an object held only in a class variable was collected"
+      STDOUT.flush
+      break
+    end
+  end
+
+  STDOUT.puts "child: ballast before join #{ballast.size} at 0x#{ballast.object_id.to_s(16)}" if ENV["GCRY_BALLAST_TRACE"]? == "1"
   threads.each(&.join)
   collector.join
+  stash_damaged ||= Stash.damaged?
 
+  # `live_blocks` / `skipped_runs` are the **precursor**, and they are printed
+  # because the crash is not measurable on this arm: the same binary gave 2 of
+  # 40 and 11 of 60 across batches, which is wider than any fix being looked
+  # for (`bench/log/linux/2026-08-26-page-release-unlink/FINDINGS.md`).
+  #
+  # A live block found inside a run the mask called free is the mask being
+  # wrong, observed directly, whether or not this particular child goes on to
+  # crash. It is a denser signal by orders of magnitude and it does not depend
+  # on the kernel choosing to reclaim a `MADV_FREE`d page.
+  # Type ids are per-binary, so the id `GCRY_DYING_TYPE_ID` needs has to come
+  # from this binary. The crash this bench produces is `Thread.lock` reading a
+  # null through the runtime's thread list, so those are the types to aim at.
+  if ENV["GCRY_PRINT_TYPE_IDS"]? == "1"
+    STDOUT.puts "type_id Thread::Mutex #{Thread::Mutex.new.crystal_type_id}"
+    STDOUT.puts "type_id Thread::LinkedList #{Thread::LinkedList(Thread).new.crystal_type_id}"
+    STDOUT.puts "type_id Thread #{Thread.current.crystal_type_id}"
+    STDOUT.puts "type_id Array(Bytes) #{Array(Bytes).new(1).crystal_type_id}"
+  end
+
+  # `rel_remapped` is the double-release tripwire's engagement counter: if it
+  # reads 0 while `rel_double` is high, the tripwire is counting reuse it
+  # failed to observe, not a defect. (A comment placed *inside* the `\`
+  # continuation below silently drops the literal that follows it.)
   puts "child: #{Verdict.corrupt} corrupt verifies, walks #{heap.live_walk_spans}, " \
-       "queued #{heap.live_walk_queued}, direct #{heap.live_walk_direct}, ballast #{ballast.size}"
+       "queued #{heap.live_walk_queued}, direct #{heap.live_walk_direct}, " \
+       "live_blocks #{heap.page_release_live_blocks}, skipped_runs #{heap.page_release_skipped_runs}, " \
+       "ballast #{ballast.size} at 0x#{ballast.object_id.to_s(16)}, " \
+       "rel_double #{heap.release_double}, rel_remapped #{heap.release_remapped}, " \
+       "dying_walked #{heap.dying_type_walked}, dying_live #{heap.dying_type_live}, " \
+       "dying_deaths #{heap.dying_type_deaths}, " \
+       "tl_max #{heap.thread_list_seen_max}, tl_empty #{heap.thread_list_empty}, " \
+       "root_shrinks #{Gcry::Platform.static_root_shrinks}, bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
+       "stash_damaged #{stash_damaged}, ballast_seen #{ballast_seen}, " \
+       "greg_candidates #{heap.thread_greg_candidates}, greg_total #{heap.thread_greg_words_total}, " \
+       "handler_calls #{Gcry::Platform.stw_handler_calls}, sp_zero #{Gcry::Platform.stw_sp_zero}, " \
+       "records #{Gcry::Platform.stw_records}, " \
+       "staged_waits #{heap.stw_staged_waits}, staged_timeouts #{heap.stw_staged_wait_timeouts}, " \
+       "static_min #{heap.static_scanned_min}, static_max #{heap.static_scanned_max}, " \
+       "static_drops #{heap.static_scanned_drops}, " \
+       "win_empty #{heap.mutator_window_empty}, win_max #{heap.mutator_window_max}, " \
+       "fib_sp #{heap.fiber_scan_from_sp}, fib_guard #{heap.fiber_scan_from_guard}, " \
+       "fib_stale #{heap.fiber_scan_running_stale}"
   exit(Verdict.corrupt > 0 ? 1 : 0)
 end
 
