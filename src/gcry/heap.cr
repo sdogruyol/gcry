@@ -1494,7 +1494,13 @@ module Gcry
       # restores that read, so the gate has both halves of the old behaviour.
       invalidate_chunk_cache if @index_cache_unchecked
       note_mapped(chunk)
-      note_map_base(ptr.address) if @release_ledger
+      # Cancel side must be armed wherever the record side is
+      # (`guard_release` records under `@release_ledger || @unmap_guard`).
+      # Gated on the ledger alone it recorded releases it never cancelled, so
+      # every legal reuse of a base made the *next* release of that base look
+      # like a double release: 21 of 24 children under `GCRY_UNMAP_GUARD=1`,
+      # a reading with no defect behind it.
+      note_map_base(ptr.address) if @release_ledger || @unmap_guard
       chunk
     end
 
