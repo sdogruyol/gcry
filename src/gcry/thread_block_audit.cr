@@ -163,15 +163,69 @@ module Gcry
       end
     end
 
+    # `GCRY_DYING_GREG_DUMP=1`.
+    property dying_greg_dump : Bool = false
+
+    # Suspended threads that reported no registers at the stop the audit ran in.
+    getter greg_missing_threads : UInt64 = 0_u64
+
     private def report_dying_type_block(addr : UInt64, size : UInt64, watched : UInt32) : Nil
       greg_words = 0_u64
       in_registers = false
+      threads_listed = 0_u64
+      threads_with_gregs = 0_u64
+      current = Thread.current
       Thread.unsafe_each do |thread|
+        threads_listed &+= 1
+        before = greg_words
         Platform.each_thread_greg(thread.to_unsafe) do |value|
           greg_words &+= 1
           in_registers = true if value.address == addr
         end
+        if greg_words > before
+          threads_with_gregs &+= 1
+        elsif thread != current
+          # A suspended thread that contributed no registers is a hole in the
+          # root set that no stack scan closes: a value the compiler kept only
+          # in a callee-saved register of that thread is invisible. The
+          # collecting thread is expected here — it has no ucontext — so it is
+          # not counted against the total.
+          @greg_missing_threads &+= 1
+        end
       end
+      # `GCRY_DYING_GREG_DUMP=1`: print every captured register word for every
+      # thread. "Not in any register" is a claim about the capture as much as
+      # about the value, and the two have never been told apart here.
+      if @dying_greg_dump
+        Thread.unsafe_each do |thread|
+          dbuf = uninitialized UInt8[480]
+          dlen = 0
+          dlen = RawOut.append(dbuf.to_unsafe, dlen, "gcry:   gregs of thread 0x")
+          dlen = RawOut.append_hex(dbuf.to_unsafe, dlen, thread.to_unsafe.unsafe_as(UInt64))
+          if thread == Thread.current
+            dlen = RawOut.append(dbuf.to_unsafe, dlen, " (the collecting thread)")
+          end
+          if nm = thread.@name
+            dlen = RawOut.append(dbuf.to_unsafe, dlen, " \"")
+            dlen = RawOut.append_bytes(dbuf.to_unsafe, dlen, nm.to_unsafe, nm.bytesize)
+            dlen = RawOut.append(dbuf.to_unsafe, dlen, "\"")
+          else
+            dlen = RawOut.append(dbuf.to_unsafe, dlen, " (unnamed)")
+          end
+          dlen = RawOut.append(dbuf.to_unsafe, dlen, ":")
+          any = false
+          Platform.each_thread_greg(thread.to_unsafe) do |value|
+            any = true
+            if dlen < 400
+              dlen = RawOut.append(dbuf.to_unsafe, dlen, " 0x")
+              dlen = RawOut.append_hex(dbuf.to_unsafe, dlen, value.address)
+            end
+          end
+          dlen = RawOut.append(dbuf.to_unsafe, dlen, any ? "\n" : " (none)\n")
+          RawOut.flush(dbuf.to_unsafe, dlen)
+        end
+      end
+
       offered = mutator_offered?(addr)
 
       # The question that splits the mechanism, and it can be answered on every
@@ -235,7 +289,11 @@ module Gcry
       # A "no" from a walk that read no registers at all is not a no.
       len = RawOut.append(buf.to_unsafe, len, " (of ")
       len = RawOut.append_u64(buf.to_unsafe, len, greg_words)
-      len = RawOut.append(buf.to_unsafe, len, " words). Offered by the collecting thread's own stack scan: ")
+      len = RawOut.append(buf.to_unsafe, len, " words from ")
+      len = RawOut.append_u64(buf.to_unsafe, len, threads_with_gregs)
+      len = RawOut.append(buf.to_unsafe, len, " of ")
+      len = RawOut.append_u64(buf.to_unsafe, len, threads_listed)
+      len = RawOut.append(buf.to_unsafe, len, " threads). Offered by the collecting thread's own stack scan: ")
       len = RawOut.append(buf.to_unsafe, len, offered ? "yes" : "no")
       len = RawOut.append(buf.to_unsafe, len, ". collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)

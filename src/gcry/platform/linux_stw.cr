@@ -73,6 +73,14 @@ module Gcry
     # `Atomic(...).new` goes through Crystal.once and SIGSEGVs in GC.init
     # before Thread/Fiber exist. Atomic-in-StaticArray also fails (CAS on copy).
     @@stw_claimed = uninitialized Atomic(UInt64)
+    # Handler bookkeeping. A thread that reports no registers is either one the
+    # handler never ran for, or one it ran for and could not record — and those
+    # are different defects. Plain `UInt64`, set in `ensure_stw_table`: a class
+    # variable with an initializer goes through `Crystal.once`, which is not
+    # available where this runs.
+    @@stw_handler_calls = uninitialized UInt64
+    @@stw_sp_zero = uninitialized UInt64
+    @@stw_records = uninitialized UInt64
     @@stw_booted = false
     @@stw_enabled = true
     @@stw_installed = false
@@ -92,12 +100,35 @@ module Gcry
     private def self.ensure_stw_table : Nil
       return if @@stw_booted
       @@stw_claimed.set(0_u64)
+      @@stw_handler_calls = 0_u64
+      @@stw_sp_zero = 0_u64
+      @@stw_records = 0_u64
       @@stw_booted = true
     end
 
     # Record SP (+ GP regs) for the interrupted thread (signal-handler safe).
+    # Signal-handler safe: three plain increments, no allocation, no locks.
+    def self.note_stw_handler(sp : UInt64) : Nil
+      ensure_stw_table
+      @@stw_handler_calls &+= 1
+      @@stw_sp_zero &+= 1 if sp == 0
+    end
+
+    def self.stw_handler_calls : UInt64
+      @@stw_booted ? @@stw_handler_calls : 0_u64
+    end
+
+    def self.stw_sp_zero : UInt64
+      @@stw_booted ? @@stw_sp_zero : 0_u64
+    end
+
+    def self.stw_records : UInt64
+      @@stw_booted ? @@stw_records : 0_u64
+    end
+
     def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Nil
       ensure_stw_table
+      @@stw_records &+= 1
       claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
@@ -134,9 +165,22 @@ module Gcry
       return if uctx.null? || UCONTEXT_NGREGS <= 0
       n = UCONTEXT_NGREGS
       n = MAX_STW_GREGS if n > MAX_STW_GREGS
+      # Through a pointer, not `@@stw_gregs[slot][i] = …`. `StaticArray` is a
+      # value type: the inner subscript returns a **copy** of the row, the
+      # assignment lands in that copy, and the copy is discarded. The table
+      # therefore stayed zero and `each_thread_greg` handed the mark 23 zero
+      # words per thread — a register was never a root on this path, so any
+      # value LLVM kept only in a callee-saved register was collected.
+      #
+      # Found by dumping the captured registers of every thread at the moment a
+      # live object was about to be swept: all zeros, for every thread that
+      # reported any (`bench/log/linux/2026-08-26-debug-build-own-stack-root/`).
+      # The SP was right the whole time because it is read straight from the
+      # `ucontext` by `sp_from_ucontext`, never through this table.
+      row = (@@stw_gregs.to_unsafe + slot).as(UInt64*)
       i = 0
       while i < n
-        @@stw_gregs[slot][i] = (uctx + UCONTEXT_GREGS_OFFSET + i * 8).as(UInt64*).value
+        row[i] = (uctx + UCONTEXT_GREGS_OFFSET + i * 8).as(UInt64*).value
         i += 1
       end
       @@stw_ngregs[slot] = n
@@ -237,6 +281,7 @@ module Gcry
       action.sa_flags = LibC::SA_SIGINFO
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, _info, uctx|
         sp = Platform.sp_from_ucontext(uctx)
+        Platform.note_stw_handler(sp)
         Platform.record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
 
         # Mirror Crystal::System::Thread suspend handler, but clear
