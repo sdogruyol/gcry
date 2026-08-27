@@ -208,3 +208,22 @@ What it needs is a reproducer with a stable rate, or a diagnostic that catches
 the corrupting write rather than the crash that follows it. Until then the knob
 stays opt-in, off by default, documented unsound, and out of CI — which is
 where 0.21.1 already leaves it.
+
+
+---
+
+## 2026-08-27: the arm measures now, and the answer is zero
+
+The "cannot currently be measured" verdict above is withdrawn with its cause
+named: the 2-to-11-per-40 baseline swing was not measurement noise but a
+lottery — `index_insert_locked` published `@chunk_index_count` after its
+shift, and a mutator suspended mid-insert hid the boot chunk from the whole
+collection's unlocked index reads, which cost `Thread::LinkedList` its mark
+whenever the timing landed. The five nulls above were five fixes measured
+against a defect that lived somewhere else entirely.
+
+With the insert's publish order fixed
+(`../2026-08-27-thread-list-tripwire/FINDINGS.md`): this arm reads **0 of
+100** under the 4-concurrent load whose baseline was ~21% per child, and
+**0 of 40** in `make page-release-corruption`'s mostly-empty arm with the
+walk engaged (647 MB released).

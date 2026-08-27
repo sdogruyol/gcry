@@ -210,3 +210,41 @@ the offer/reject reporter, and the per-operation index verifier.
 
 Raw logs for every step: `raw2/`–`raw14/`, `rawfix/` beside this file (not
 committed).
+
+
+---
+
+## The field sighting, and what the closed family re-measures to
+
+While this file was being written, acikturkiye production (0.21.1, built
+`-Dpreview_mt -Dexecution_context` — multi-threaded, so the mid-insert window
+is reachable) died at **`0x4` in `String#empty?`** reached from Kemal's
+`unescape_url_param`, on a 200 route with URL parameters. That is the second
+sighting at that exact frame — the first read `0x0`
+(`bench/url_params_hash.cr`'s header). `0x4` is `@bytesize` of a null String
+reference: a value slot of a live `Hash(String, String)` reading zero — the
+same shape as the `@mutex` of a live list reading zero, and the index-hide
+kills whole chunks at a time, so any boot-adjacent object qualifies as a
+victim. **[INFERENCE]** the fix plausibly covers it; a local closed loop was
+attempted and is reported honestly below: 30 minutes of `wrk -t4 -c64` on the
+parameterised tags route did **not** reproduce the crash on the 0.21.1 binary
+(268k requests, clean) — the field rate is below what half an hour resolves —
+and the fixed binary ran the same load clean. Production is the only
+instrument with enough hours; 0.21.2 exists so it can be pointed at this.
+
+## The family's other arms, re-measured on the fix
+
+- **Plain mostly-empty arm, no tripwire** (the instrument ruled out): 0
+  crashes of 100 under the same 4-concurrent load whose baseline was ~21%
+  per child. Two children hit the 120 s deadline with no output — hangs, not
+  faults, previously seen at low rate in this gate's family and not new here.
+- **`make page-release-corruption`, 40 per arm**: mostly-empty **0 of 40**
+  (engaged, 647 MB released), control 0 of 40. The "cannot currently be
+  measured" verdict in `../2026-08-26-page-release-unlink/` is withdrawn —
+  the unstable 2–11 baseline those five nulls were measured against was this
+  defect's lottery, not measurement noise.
+- **`GCRY_PAGE_DONTNEED=1` (HOLED walk)**: still red, now legibly so — 1 of
+  40 in the gate plus 2 of 100 direct children, and all of it **checksum
+  corruption** (`40 corrupt, 0 entirely zero`), no segfaults. The crash
+  portion of the old 4-of-28 belonged to the index-hide; what remains is the
+  arm's own documented unsoundness, opt-in and warned at boot.

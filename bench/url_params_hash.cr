@@ -27,6 +27,18 @@
 # value slot that no longer holds the String it was given — the shape of an
 # object collected while live, or of a page released under one.
 #
+# **2026-08-27:** a second production sighting at the same frame, this time at
+# `0x4` — `@bytesize` of a null String, same shape — on 0.21.1, built
+# `-Dpreview_mt -Dexecution_context`. The chunk-index insert defect fixed that
+# day (`bench/log/linux/2026-08-27-thread-list-tripwire/FINDINGS.md`) produces
+# exactly this: a mutator suspended mid-`index_insert_locked` hid the
+# highest-addressed chunk from the collection's index reads, and every object
+# in the hidden chunk lost its mark at once, whoever pointed at it. Whether it
+# was *this* crash only production hours can say — a 30-minute local
+# `wrk -t4 -c64` on the parameterised route did not reproduce on 0.21.1
+# (268k requests clean), so the field rate is below what half an hour
+# resolves. 0.21.2 carries the fix.
+#
 # The app registers a *different* instantiation with gcry:
 #
 #     Gcry.register_hash(String, JSON::Any)
