@@ -654,8 +654,20 @@ module Gcry
         payload = SizeClasses.payload(class_index)
         nursery = ChunkHeader.nursery?(chunk)
         before = @dontneed_bytes
-        if @mostly_empty_dontneed
-          unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+        # `GCRY_MOSTLY_EMPTY_UNLINK=1` separates the two things
+        # `GCRY_MOSTLY_EMPTY_MODE=dontneed` changes at once. That mode both
+        # unlinks the free-only runs *and* switches the syscall from `MADV_FREE`
+        # to `MADV_DONTNEED`, so its 7 of 30 says nothing about which half
+        # matters. This arm unlinks and keeps `MADV_FREE`.
+        #
+        # Research only: unlinked blocks do not come back without a freelist
+        # rebuild, and the SPARSE path deliberately does not ask for one — the
+        # whole point of the mode is to avoid it. If this arm turns out to be
+        # the fix, the rebuild is the price and that is a separate decision.
+        if @mostly_empty_dontneed || @mostly_empty_unlink
+          with_freelist_lock(class_index, nursery) do
+            unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+          end
         end
         if release_free_pages_in_chunk(chunk, payload, preserve_content: preserve)
           gained = @dontneed_bytes - before
@@ -1052,6 +1064,25 @@ module Gcry
             end
           end
           cursor += block_bytes
+        end
+
+        # Research only (`GCRY_PAGE_RELEASE_TEST_STALL_MS`, default 0): hold the
+        # gap between the mask and the syscalls open on purpose.
+        #
+        # The defect this walk has is a window — a mutator allocating into a
+        # page the mask called free before the `madvise` lands — and its natural
+        # rate is both low and unstable: the same binary gave 10 of 40 in one
+        # batch of `dormant_flush_race` and 2 of 40 in the next. Three candidate
+        # fixes were measured against that moving baseline and none of the
+        # readings could be trusted. Widening the window makes the defect
+        # frequent enough to measure a fix against, and a real fix has to hold
+        # it at zero *with the stall on*.
+        if (stall = @page_release_test_stall_ms) > 0
+          ts = uninitialized LibC::Timespec
+          ts.tv_sec = typeof(ts.tv_sec).new(stall // 1000)
+          ts.tv_nsec = typeof(ts.tv_nsec).new((stall % 1000) * 1_000_000)
+          rem = uninitialized LibC::Timespec
+          LibC.nanosleep(pointerof(ts), pointerof(rem))
         end
 
         any = false
