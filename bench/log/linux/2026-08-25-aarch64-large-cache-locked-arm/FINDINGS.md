@@ -218,3 +218,26 @@ also the second half of the story in
 bounds exclusion and then as a use-after-free.
 
 `GCRY_PAGE_DONTNEED=1` remains open and unrelated (4 of 28).
+
+
+---
+
+## 2026-08-26: the guard arm is clean too
+
+The one observation this file could never reproduce was the **guarded** arm:
+`GCRY_UNMAP_GUARD=1 make large-cache-race` returned 2 of 40 once and then 0 of
+48 across two later sweeps. Under the guard a released range stays mapped
+`PROT_NONE`, so a stale access faults instead of landing in whatever the kernel
+put there next — it is a detector, and its silence is only worth something if
+it is engaged.
+
+Re-measured on the tree with the chunk-list lock:
+
+| arm | faults | children |
+|-----|-------:|---------:|
+| default, guarded | **0** | 60 |
+| `GCRY_TRIM_UNLOCKED=1`, guarded | **12** | 12 |
+
+The control faults on every child it runs, so the detector is live and the zero
+above is evidence rather than absence. Together with the 0 of 220 unguarded
+after the fix, this family is closed.

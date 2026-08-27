@@ -25,6 +25,10 @@ read back as zero. That is what `MADV_DONTNEED` leaves behind.
 
 With `GCRY_MOSTLY_EMPTY=0` the same binary is 0 of 8. The walk is the cause.
 
+> **2026-08-26: that last sentence is withdrawn.** Eight samples against a
+> defect this rare say nothing, and run interleaved at 80 per arm the knob goes
+> the other way — see the section at the end of this file.
+
 ## The mechanism written here first was wrong
 
 The original version of this file blamed `unlink_free_only_page_runs` and TLAB
@@ -133,3 +137,72 @@ workstation the day it was removed from CI, **1 of 3** on the runner.
 The gate is out of CI again. It is still the right harness for this defect and
 `make dormant-flush-race` runs it by hand; what it is not is a step that can
 gate a release while the defect it exercises is open.
+
+
+---
+
+## 2026-08-26: the walk is not the cause
+
+Every arm below is interleaved child-by-child on one machine, so the two arms
+share the load rather than following each other through it.
+
+    GCRY_MOSTLY_EMPTY=1     0 non-clean of 80,  0x18 in 0
+    GCRY_MOSTLY_EMPTY=0     3 non-clean of 80,  0x18 in 1
+
+The knob this file is named after is off in the arm that crashed. So the walk is
+not what zeroes the object, and the file's original title claimed a mechanism in
+the right family for the wrong reason.
+
+Two further arms, same protocol, 80 children each:
+
+    GCRY_DISABLE_MADVISE=1  1 non-clean of 80,  0x18 in 0
+    default                 0 non-clean of 80,  0x18 in 0
+
+Neither reaches the defect. The honest reading of all four is that the rate on
+this workstation is around 1–3 %, which 80 children cannot resolve into a
+difference between arms — an earlier batch the same afternoon gave 2 of 80 and
+5 of 80 on the *same* two binaries. What the first table does support is the
+narrow negative, because the crash appeared in the arm with the walk switched
+off; what none of them support is any positive claim about which path is
+responsible.
+
+### What the frame does say
+
+`Thread::Mutex#lock` is a real frame above `Thread::lock`, so the receiver was
+fetched and `pointerof(@mutex)` then came out at `0x18`. That makes the null the
+`@mutex` field of `Thread::LinkedList` — a field of a live heap object — and not
+`@@threads` in BSS, which would have faulted one frame earlier.
+
+Under `GCRY_UNMAP_GUARD=1` the same crash still appears (2 of 80 on v0.21.0's
+binary). The guard turns `munmap` into `mprotect`, so no released range is ever
+handed back by the kernel and no remap can write over that field. Whatever
+produces the null is therefore not address reuse.
+
+### The dying-type audit, aimed at the right types
+
+`GCRY_THREAD_BLOCK_AUDIT=1` has only ever watched `Thread`. Aimed by type id at
+`Thread::Mutex` and `Thread::LinkedList` as well, 8 children each:
+
+    Thread::Mutex       dying_walked 2.1M,  dying_live 364,  dying_deaths 0
+    Thread::LinkedList  dying_walked 2.0M,  dying_live  49,  dying_deaths 0
+    Thread              dying_walked 2.4M,  dying_live 420,  dying_deaths 0
+
+No block of any of the three is ever swept unmarked. (`dying_live` is far above
+the number of real objects of each type, so the arm is also matching raw buffers
+whose first word happens to equal the id — that inflates false positives and
+leaves the zero above unaffected.) So the object is not being collected as
+garbage. Whatever writes the zero writes it under a live, marked object.
+
+### The double-release tripwire said nothing, twice
+
+`note_release_base` fired in 21 of 24 children and none of those readings were
+real: `guard_release` records under `@release_ledger || @unmap_guard`, but the
+cancel side, `note_map_base`, was gated on `@release_ledger` alone. Run with the
+guard and no ledger — which is how the crash arm runs — every legal reuse of a
+base went unrecorded, so the next ordinary release of that base looked like a
+double release.
+
+With the cancel side armed to match, and its engagement counter reading ~30,000
+remaps per child: `rel_double 0` across 77 children. There is no chunk-level
+double release, and the reading that suggested one was the instrument's own
+gating.
