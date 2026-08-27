@@ -118,6 +118,12 @@ module Gcry
         wait_for_staged_threads if @staged_wait
         StwWatchdog.note_suspend_step(StwWatchdog::STEP_STAGED_DONE)
 
+        # One walk of the list before locking it. The `0x18` fault below is
+        # `Thread.lock` reading a null out of the list object, so the last
+        # moment it can be reported as damage rather than as a signal is here.
+        # See src/gcry/thread_list_tripwire.cr.
+        check_thread_list_before_lock
+
         Thread.lock
         StwWatchdog.note_suspend_step(StwWatchdog::STEP_THREAD_LOCK)
         begin
