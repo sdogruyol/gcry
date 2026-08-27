@@ -264,11 +264,22 @@ puts "  immediate (old):     #{immediate_bad} of #{attempts} failed" \
      "#{immediate_hung > 0 ? " (#{immediate_hung} timed out)" : ""}" \
      "#{immediate_note ? "\n     #{immediate_note.strip}" : ""}"
 
-hung_total = queued_hung + immediate_hung
-if hung_total > 0
-  failures << "#{hung_total} child(ren) were killed on the deadline — a killed child " \
+# A killed child says nothing, but the two arms need that nothing differently.
+# A queued-arm hang is a defect on the arm being gated — fatal. A control-arm
+# hang only weakens the control, and the check below already demands the
+# control produce at least one *genuine* fault: with that satisfied, a hung
+# control child cannot turn a clean queued arm into a red run. This is what
+# took the gate out of CI on its first day back — a two-core runner hung 3 of
+# 6 TRIM_IMMEDIATE children while the queued arm read 0 of 6 and the control
+# still faulted for real.
+if queued_hung > 0
+  failures << "#{queued_hung} queued-arm child(ren) were killed on the deadline — a killed child " \
               "says nothing about whether a flush walk meets a released chunk. " \
               "Re-run with GCRY_STW_WATCHDOG_MS set"
+end
+if immediate_hung > 0
+  puts "  note: #{immediate_hung} control child(ren) killed on the deadline — counted as " \
+       "neither fault nor pass; the control stands on its faulting children alone"
 end
 failures << "the queued arm faulted #{queued_bad - queued_hung} of #{attempts} — a flush walk still meets a released chunk" if queued_bad - queued_hung > 0
 if immediate_bad - immediate_hung == 0

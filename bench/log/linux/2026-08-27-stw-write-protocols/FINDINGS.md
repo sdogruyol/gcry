@@ -128,3 +128,13 @@ run through `hang_catch.sh` rather than re-derived. What is already known: it
 is not a stuck STW (watchdog silent), it is rare (~0.1–2% depending on load),
 and it predates every fix made today — the 0.21.1 sweep-hang family was
 in-STW and is closed; this one is something else.
+
+One more sighting for that file: the gate's first dispatch run back in CI had
+the **control** arm (`GCRY_TRIM_IMMEDIATE=1`, the deliberately-unsound old
+behaviour) hang 3 of 6 children on a two-core runner while the queued arm read
+0 of 6 and the control still faulted for real. The gate now scores a hung
+control child as neither fault nor pass — the control stands on its faulting
+children, and only a queued-arm hang is fatal. Whether the control-arm hang is
+this same silent family under a different knob is unknown; it is at least a
+far cheaper reproducer candidate (3 of 6 on two cores) for the next
+`hang_catch.sh` session.
