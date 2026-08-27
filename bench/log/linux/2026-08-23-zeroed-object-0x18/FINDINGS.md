@@ -206,3 +206,16 @@ With the cancel side armed to match, and its engagement counter reading ~30,000
 remaps per child: `rel_double 0` across 77 children. There is no chunk-level
 double release, and the reading that suggested one was the instrument's own
 gating.
+
+
+---
+
+## 2026-08-27: the victim watched directly — confirmed, with a second presentation
+
+The tripwire this file's title asked for exists
+(`GCRY_THREAD_LIST_TRIPWIRE=1`) and was run 160/160 interleaved: every `0x18`
+on the instrumented arm was preceded by "held 7 threads, reads empty", and 26
+more crashes moved from `0x18` to faults *inside the walk*, at `+0x50` from the
+base of a large-object chunk released one collection earlier — the list slot
+held a payload-block pointer, not noise. The full batch, its numbers and what
+they retire: `../2026-08-27-thread-list-tripwire/FINDINGS.md`.

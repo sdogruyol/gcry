@@ -36,3 +36,4 @@
 /bench/mutations/SCORE.log
 # `make thread-uaf-sample` output: evidence from a CI run, not a source file.
 bench/log/ci-samples/
+bench/log/**/raw/
