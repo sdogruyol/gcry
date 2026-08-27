@@ -58,31 +58,32 @@ module Gcry
     # `Crystal.once`, which must not run on a collection path.
     def self.site_name(site : UInt8) : String
       case site
-      when SITE_DONTNEED  then "MADV_DONTNEED"
-      when SITE_MADV_FREE then "MADV_FREE"
-      when SITE_MADV_COLD then "MADV_COLD"
-      when SITE_RELEASE   then "a release (munmap/guard/quarantine)"
-      when SITE_CACHE_IN  then "a large-cache insertion"
-      when SITE_CACHE_OUT  then "a large-cache hand-out"
-      when SITE_HDR_WRITE  then "a large block-header write"
-      when SITE_LINK_WRITE then "a large freelist link write"
-      when SITE_SET_FREE   then "a block set_free"
-      when SITE_SET_USED   then "a block set_used (hand-out)"
+      when SITE_DONTNEED     then "MADV_DONTNEED"
+      when SITE_MADV_FREE    then "MADV_FREE"
+      when SITE_MADV_COLD    then "MADV_COLD"
+      when SITE_RELEASE      then "a release (munmap/guard/quarantine)"
+      when SITE_CACHE_IN     then "a large-cache insertion"
+      when SITE_CACHE_OUT    then "a large-cache hand-out"
+      when SITE_HDR_WRITE    then "a large block-header write"
+      when SITE_LINK_WRITE   then "a large freelist link write"
+      when SITE_SET_FREE     then "a block set_free"
+      when SITE_SET_USED     then "a block set_used (hand-out)"
       when SITE_SWEEP        then "the sweep reclaiming the block"
       when SITE_INDEX_REMOVE then "an index remove of the chunk"
       else                        "site ?"
       end
     end
-    SITE_DONTNEED   = 1_u8
-    SITE_MADV_FREE  = 2_u8
-    SITE_MADV_COLD  = 3_u8
-    SITE_RELEASE    = 4_u8
-    SITE_CACHE_IN   = 5_u8
-    SITE_CACHE_OUT  = 6_u8
-    SITE_HDR_WRITE  = 7_u8
-    SITE_LINK_WRITE = 8_u8
-    SITE_SET_FREE   = 9_u8
-    SITE_SET_USED   = 10_u8
+
+    SITE_DONTNEED     =  1_u8
+    SITE_MADV_FREE    =  2_u8
+    SITE_MADV_COLD    =  3_u8
+    SITE_RELEASE      =  4_u8
+    SITE_CACHE_IN     =  5_u8
+    SITE_CACHE_OUT    =  6_u8
+    SITE_HDR_WRITE    =  7_u8
+    SITE_LINK_WRITE   =  8_u8
+    SITE_SET_FREE     =  9_u8
+    SITE_SET_USED     = 10_u8
     SITE_SWEEP        = 11_u8
     SITE_INDEX_REMOVE = 12_u8
 
@@ -411,6 +412,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
     end
+
     # Runs under `@index_lock`, at the end of every index insert and remove:
     # a linear pass for the watched chunk's base. The operation that completes
     # with the entry missing is the one that lost it, whatever its mechanism —

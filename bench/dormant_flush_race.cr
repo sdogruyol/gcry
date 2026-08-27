@@ -74,7 +74,7 @@ end
 # bytes underneath that change once the block is handed out again.
 class Stash
   PATTERN = 0xAB_u8
-  SIZE    = 4096
+  SIZE    =    4096
 
   @@held : Bytes? = nil
 
