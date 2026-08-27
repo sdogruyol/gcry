@@ -103,3 +103,28 @@ Three invariants are now load-bearing and named: **no user pointer into a
 chunk exists before `map_chunk` returns**; **USED blocks carry
 `next_free == null`**; **in-STW code takes no lock a mutator can hold** — the
 last one held everywhere except one site, and that site is gone.
+
+
+---
+
+## The residual hang, hunted and not caught
+
+The one failure mode left in the mostly-empty arm is a child that produces no
+output and dies on the 120 s deadline: 2 of 100 this morning, 1 of 50 after
+the fixes above, then **1 of 200 with `GCRY_STW_WATCHDOG_MS=5000` armed — and
+the watchdog printed nothing**, so whatever wedges is not a world that stayed
+stopped: it hangs outside the pause, or before ever reaching one. That rules
+out the whole family the watchdog was built for.
+
+A live catcher was built (`hang_catch.sh` beside this file): children run
+with no deadline, anything alive past 90 s gets `gdb -p` with
+`thread apply all bt` before it is killed. **580 children over an hour, zero
+hangs** — today's combined rate is 1 of 780 on the fixed tree, and it did not
+reproduce while being watched. Load-sensitivity is suspected (the 2-of-100
+morning batch shared the machine with heavier jobs) but not established.
+
+Left open, with the tool in the tree: the next silent deadline kill should be
+run through `hang_catch.sh` rather than re-derived. What is already known: it
+is not a stuck STW (watchdog silent), it is rare (~0.1–2% depending on load),
+and it predates every fix made today — the 0.21.1 sweep-hang family was
+in-STW and is closed; this one is something else.
