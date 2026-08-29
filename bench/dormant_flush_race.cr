@@ -54,7 +54,12 @@ require "./bounded_child"
 {% end %}
 
 PAYLOAD = 40_u64 * 1024
-WORKERS =       4
+# Four is the gate's number and stays the default, so a CI run means what it
+# has always meant. The knob exists because the refusal this bench catches
+# (`Verdict.refused!`) needs concurrent take/free traffic against the large
+# cache, and four workers on a twenty-core box is not much of it: 340 children
+# at four produced none.
+WORKERS = (ENV["DORMANT_FLUSH_RACE_WORKERS"]?.try(&.to_i?) || 4)
 ROUNDS  =  10_000
 BALLAST =  40_000
 FILL    = 0x5C_u8
@@ -286,6 +291,8 @@ if ARGV.includes?("--child")
        "dying_walked #{heap.dying_type_walked}, dying_live #{heap.dying_type_live}, " \
        "dying_deaths #{heap.dying_type_deaths}, " \
        "tl_max #{heap.thread_list_seen_max}, tl_empty #{heap.thread_list_empty}, " \
+       "lg_twice #{heap.large_cached_twice}, lg_taken_used #{heap.large_taken_used}, " \
+       "lg_by_sweep #{heap.large_cached_by_sweep}, " \
        "tlw_hits #{Gcry::ThreadListWatch.hits}, " \
        "root_shrinks #{Gcry::Platform.static_root_shrinks}, bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
        "stash_damaged #{stash_damaged}, ballast_seen #{ballast_seen}, " \

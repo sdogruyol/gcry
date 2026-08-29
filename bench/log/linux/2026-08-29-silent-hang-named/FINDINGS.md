@@ -201,9 +201,39 @@ it prints carries the bit that decides the question:
 legitimately afterwards — a lost root. **USED** means the chunk left the index
 with a live block still in it, which is the cache/trim race
 (`../2026-08-25-aarch64-large-cache-locked-arm/`) and has nothing to do with
-roots. 100 children since the instrument went in have not produced a hit; at
-~0.7% that is 0.7 expected, so it says nothing yet. The next hit answers it in
-one line.
+roots. 380 children since the instrument went in have not produced a hit; at
+~0.5% that is about two expected, so it is a thin miss and not yet a reading.
+The next hit answers it in one line.
+
+### The lost root is now the weaker half of that pair
+
+Reading the counters, not the crash. `sweep_large_one` opens with
+`return if BlockHeader.free?(header)`, so the only way it reaches the recycle
+branch — and increments `large_cached_by_sweep` — is a large block that is
+**USED, non-zero-sized, and unmarked** on a major collection. In this bench
+every USED large block is one a worker is holding at that instant. So in this
+workload, and only in this one, that counter *is* the lost-root detector: a
+non-zero reading means the mark did not reach a live large block, with no need
+for the cache, the trim and the free to line up afterwards.
+
+It is now printed by the child (`lg_by_sweep`, beside `lg_twice` and
+`lg_taken_used`), and the worker count is a knob so the concurrency the race
+wants can be turned up without changing what CI runs.
+
+**40 children at 12 workers — roughly 4.8 million large allocations under
+continuous major collections — read `lg_by_sweep 0`, `lg_twice 0`,
+`lg_taken_used 0`.** Zero, not small. If a live large block's mark were being
+missed at anything like the refusal's rate, this is where it would show, and it
+does not.
+
+That leaves the other half: the chunk was put on the large cache by an ordinary
+`GC.free` of a block that really was dead, and then handed out again by
+`take_large_free` while a trim was in flight against the same entry. Both of
+those take `@alloc_lock`, so the next thing to read is not another bench — it
+is the deferred trim path under `GCRY_MOSTLY_EMPTY=1`, where
+`trim_large_cache` detaches under the lock but queues in a *second* critical
+section (`heap.cr` `with_alloc_lock { detach.call }`, then the
+`@live_chunk_walk` branch), and `flush_pending_large_cache` inserts in a third.
 
 The gate's arm labels deserve a word: the arm called "queued (default)" runs
 `GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1`. It is the default *trim* path, not a
