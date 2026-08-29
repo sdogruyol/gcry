@@ -507,6 +507,87 @@ module Gcry
       SizeClasses.index_of(payload)
     end
 
+    # One emergency collection, run with **no allocator lock held**.
+    #
+    # `map_chunk` returns null when `mmap` refuses, and a collection may well
+    # free the mappings that would let a retry succeed — but it can only run
+    # from a caller that has already released its freelist / alloc lock, which
+    # is why this is a step at the entry points and not a branch inside
+    # `map_chunk`. Returns whether a retry is worth making at all.
+    #
+    # **Not reentrant, and the guard is its own flag rather than `@collecting`.**
+    # A collection allocates — `ensure_static_root_cache` parses
+    # `/proc/self/maps` — and at the edge of the address space those
+    # allocations fail too. Guarded only by `@collecting`, which is not set for
+    # the whole of `collect`, the second failure asks for a third collection
+    # and the process dies of stack overflow inside `run_collection` (measured,
+    # 3 of 3). One emergency collection at a time, process-wide: a thread that
+    # finds the flag taken raises instead, which is the honest answer when
+    # another thread is already reclaiming everything there is to reclaim.
+    private def retry_after_emergency_collect? : Bool
+      return false if @destroyed || @collecting || !@enabled || @tlab_enabled
+      return false unless @emergency_collecting.compare_and_set(0, 1)[1]
+      begin
+        @emergency_collects &+= 1
+        collect(scan_stack: true)
+      ensure
+        @emergency_collecting.set(0)
+      end
+      true
+    end
+
+    @emergency_collecting = Atomic(Int32).new(0)
+
+    # **Raising out of the allocator allocates**, and that is a loop.
+    #
+    # `raise ex` fills in `ex.callstack ||= Exception::CallStack.new`, a
+    # `CallStack` is an `Array`, and an `Array` is an allocation — asked for at
+    # the one moment allocation is failing. It recurses: measured **174** frames
+    # of `raise → CallStack#unwind → Array → allocate → alloc_old_small → raise`
+    # before the stack overflowed, three runs of three, which is how an
+    # out-of-memory process died instead of reporting that it was out of memory.
+    #
+    # So the first raise is the normal one, with a true backtrace, and any raise
+    # nested inside it uses this instance — built at boot with its callstack
+    # already set, so `raise` finds nothing left to allocate. Its backtrace is
+    # the boot stack and says so.
+    @oom_error : OutOfMemoryError = begin
+      e = OutOfMemoryError.new(
+        "out of memory (nested raise; this backtrace is gcry's boot stack, not the allocation site)")
+      e.callstack = Exception::CallStack.new
+      e
+    end
+    @oom_raising = Atomic(Int32).new(0)
+
+    private def oom!(message : String) : NoReturn
+      if @oom_raising.compare_and_set(0, 1)[1]
+        begin
+          # Evaluating the argument is what allocates; a failure in there lands
+          # back here with the flag set and takes the branch below.
+          raise OutOfMemoryError.new(message)
+        ensure
+          @oom_raising.set(0)
+        end
+      end
+      raise @oom_error
+    end
+
+    # How many times an allocation failure asked for a collection and retried.
+    # Non-zero means the process has been to the edge of its address space,
+    # which is worth knowing before reading anything else in `/gc-stats`.
+    getter emergency_collects : UInt64 = 0_u64
+
+    # `alloc_large` plus its byte accounting, under `@alloc_lock`. A separate
+    # method only so the entry point can call it twice — once, then again after
+    # an emergency collection — without repeating the block.
+    private def alloc_large_counted(rounded : UInt64, flags : UInt32) : {Void*, Bool}
+      with_alloc_lock do
+        u, fc = alloc_large(rounded, flags)
+        note_alloc_bytes(rounded) unless u.null?
+        {u, fc}
+      end
+    end
+
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
@@ -526,10 +607,14 @@ module Gcry
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
-        user, from_cache = with_alloc_lock do
-          u, fc = alloc_large(rounded, flags)
-          note_alloc_bytes(rounded)
-          {u, fc}
+        user, from_cache = alloc_large_counted(rounded, flags)
+        if user.null?
+          # `map_chunk` returned null rather than raising under `@alloc_lock`;
+          # the lock is gone by now, so the collection and the error both
+          # belong here.
+          oom!("mmap failed") unless retry_after_emergency_collect?
+          user, from_cache = alloc_large_counted(rounded, flags)
+          oom!("mmap failed") if user.null?
         end
         needs_clear = clear && from_cache
       elsif @nursery_enabled
@@ -634,13 +719,26 @@ module Gcry
     end
 
     private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      user = with_freelist_lock(index, true) do
+      user = alloc_nursery_locked(payload, flags, index)
+      if user.null?
+        oom!("failed to refill nursery size class #{payload}") unless retry_after_emergency_collect?
+        user = alloc_nursery_locked(payload, flags, index)
+        oom!("failed to refill nursery size class #{payload}") if user.null?
+      end
+      free_bytes_sub(payload.to_u64)
+      @nursery_alloc_bytes.add(payload.to_u64)
+      note_alloc_bytes(rounded)
+      user
+    end
+
+    private def alloc_nursery_locked(payload : UInt32, flags : UInt32, index : Int32) : Void*
+      with_freelist_lock(index, true) do
         u = @nursery_freelists[index]
 
         if u.null?
           refill_size_class(index, payload, nursery: true)
           u = @nursery_freelists[index]
-          raise OutOfMemoryError.new("failed to refill nursery size class #{payload}") if u.null?
+          return Pointer(Void).null if u.null?
         end
 
         if @blacklist_enabled
@@ -663,10 +761,6 @@ module Gcry
         end
         u
       end
-      free_bytes_sub(payload.to_u64)
-      @nursery_alloc_bytes.add(payload.to_u64)
-      note_alloc_bytes(rounded)
-      user
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
@@ -693,8 +787,13 @@ module Gcry
         end
       end
 
-      user = with_freelist_lock(index, false) do
-        alloc_old_small_locked(payload, flags, index)
+      user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+      if user.null?
+        # The freelist lock is gone by now, so both the collection and the
+        # raise are legal here — neither was inside `map_chunk`.
+        oom!("failed to refill size class #{payload}") unless retry_after_emergency_collect?
+        user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+        oom!("failed to refill size class #{payload}") if user.null?
       end
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
@@ -724,7 +823,10 @@ module Gcry
           u = @freelists[index]
           prefer_hit = false
         end
-        raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
+        # Null, not a raise: the freelist lock is held here and `raise`
+        # allocates. `alloc_old_small` turns this into an `OutOfMemoryError`
+        # after the lock is gone.
+        return Pointer(Void).null if u.null?
       end
 
       if @blacklist_enabled
@@ -736,7 +838,7 @@ module Gcry
             refill_size_class(index, payload, nursery: false)
             fold_prefer_into_global(index) if @tight_grow
             u = @freelists[index]
-            raise OutOfMemoryError.new("failed to refill size class #{payload}") if u.null?
+            return Pointer(Void).null if u.null?
           end
         end
         taken = take_non_blacklisted(u, index, false)
@@ -1006,6 +1108,9 @@ module Gcry
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
       chunk_flags = nursery ? ChunkHeader::Flags::NURSERY : 0_u32
       chunk = map_chunk(@small_chunk_bytes, index.to_u32, chunk_flags)
+      # Out of address space. The freelist stays empty and the caller sees a
+      # null allocation, which is what the entry point retries on.
+      return if chunk.null?
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
 
@@ -1122,6 +1227,7 @@ module Gcry
       @large_cache_misses += 1
 
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
+      return {Pointer(Void).null, false} if chunk.null?
       trace_large_map(chunk, mapped, payload) if @trace_large
       header = ChunkHeader.data_start(chunk).as(BlockHeader*)
       BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
@@ -1438,19 +1544,27 @@ module Gcry
       fb >= @large_free_bytes ? fb - @large_free_bytes : 0_u64
     end
 
+    # Null on failure, and **never a raise**: every caller holds a
+    # non-reentrant `Crystal::SpinLock` across this call — `alloc_large` inside
+    # `with_alloc_lock`, `refill_size_class` inside the size-class freelist
+    # lock — and in Crystal `raise` allocates. It builds a `CallStack`, which
+    # is an `Array`, which goes straight back into `allocate` and takes the
+    # very lock this thread is holding. Measured under `ulimit -v`: **5 of 5**
+    # children spinning at 100% CPU forever, `SpinLock#lock` under
+    # `CallStack#unwind` under `raise` under `map_chunk`, with no output and no
+    # OOM error. An emergency collection from here is the same mistake one step
+    # further on — the after-world sweep takes `freelist_lock_ptr(class_index)`
+    # and `flush_pending_large_release` opens with `with_alloc_lock` — and it
+    # used to live right here, excluded only for TLAB although the TLAB-off
+    # refill holds a freelist lock just the same.
+    #
+    # So: fail quietly, let the caller unwind out of its lock, and leave both
+    # the collection and the raise to the allocation entry points, where no
+    # allocator lock is held. `alloc_old_small` already states the rule at its
+    # own tight-grow collect: never collect under the freelist lock.
     private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
       ptr = mmap_anonymous(bytes)
-
-      # One emergency collect may free large objects (munmap) before failing hard.
-      # Never collect here under TLAB: refill holds a freelist SpinLock, and
-      # STW+collect while that lock is held deadlocks Parallel mutators spinning
-      # on it.
-      if Gcry.mmap_failed?(ptr) && !@collecting && @enabled && !@tlab_enabled
-        collect(scan_stack: true)
-        ptr = mmap_anonymous(bytes)
-      end
-
-      raise OutOfMemoryError.new("mmap failed") if Gcry.mmap_failed?(ptr)
+      return Pointer(ChunkHeader).null if Gcry.mmap_failed?(ptr)
 
       # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
       # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a

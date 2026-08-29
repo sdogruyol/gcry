@@ -83,6 +83,7 @@ module Gcry
         tight_grow_gc:               heap.tight_grow_gc,
         tight_grow_gc_pct:           heap.tight_grow_gc_pct,
         tight_grow_collects:         heap.tight_grow_collects,
+        emergency_collects:          heap.emergency_collects,
         tight_grow_prefer_allocs:    heap.tight_grow_prefer_allocs,
         tight_grow_maps:             heap.tight_grow_maps,
         empty_chunk_retain:          heap.empty_chunk_retain,
