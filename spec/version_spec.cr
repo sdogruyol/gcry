@@ -11,7 +11,7 @@ require "./spec_helper"
 describe "Gcry::VERSION" do
   it "matches the version in shard.yml" do
     shard = File.read(File.join(__DIR__, "..", "shard.yml"))
-    line = shard.lines.find { |l| l.starts_with?("version:") }
+    line = shard.lines.find(&.starts_with?("version:"))
     line.should_not be_nil
     line.not_nil!.split(':', 2)[1].strip.should eq Gcry::VERSION
   end
