@@ -1,6 +1,12 @@
 #!/bin/sh
 # Catch the ~0.5% silent hang live: any child alive past 90 s gets
 # `gdb -p` (thread apply all bt) before it is killed. Stops at first capture.
+#
+# `GCRY_ANY_PTRACER=1` is not optional on a stock Linux desktop: yama
+# `ptrace_scope=1` lets only an *ancestor* attach, and `gdb` here is a sibling
+# of the child. Every capture this script took on 2026-08-27 came back
+# "ptrace: Operation not permitted" — an hour of children watched and nothing
+# read. The knob is the child's own `PR_SET_PTRACER_ANY`.
 set -u
 BIN=bin/dfr_fix2
 OUT=bench/log/linux/2026-08-27-stw-write-protocols/rawhang2
@@ -9,7 +15,7 @@ i=0
 while [ "$i" -lt 150 ] && [ ! -e "$OUT/CAPTURED" ]; do
   pids=""
   for t in a b c d; do
-    GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1 GCRY_SEGV_REPORT=1 \
+    GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1 GCRY_SEGV_REPORT=1 GCRY_ANY_PTRACER=1 \
       "$BIN" --child >"$OUT/w-$i-$t.log" 2>&1 &
     pids="$pids $!"
   done

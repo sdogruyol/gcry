@@ -39,6 +39,20 @@ require "./bounded_child"
   {% raise "dormant_flush_race requires -Dgc_none (gcry as process GC)" %}
 {% end %}
 
+# yama `ptrace_scope=1` lets only an ancestor attach, and the hang catcher
+# (`bench/log/linux/2026-08-27-stw-write-protocols/hang_catch.sh`) runs `gdb -p`
+# from a sibling shell. Every capture it took came back "ptrace: Operation not
+# permitted", which is a hang that stays unnamed. `PR_SET_PTRACER_ANY` is the
+# child's own consent to be inspected; armed by knob, so a normal gate run is
+# not made debuggable by anyone on the box.
+{% if flag?(:linux) %}
+  lib LibC
+    fun prctl(option : Int, arg2 : ULong, arg3 : ULong, arg4 : ULong, arg5 : ULong) : Int
+  end
+
+  PR_SET_PTRACER = 0x59616d61
+{% end %}
+
 PAYLOAD = 40_u64 * 1024
 WORKERS =       4
 ROUNDS  =  10_000
@@ -109,6 +123,10 @@ if ARGV.includes?("--child")
   # Without it a fault prints an address and nothing that locates it.
   Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
 
+  {% if flag?(:linux) %}
+    LibC.prctl(PR_SET_PTRACER, UInt64::MAX, 0_u64, 0_u64, 0_u64) if ENV["GCRY_ANY_PTRACER"]? == "1"
+  {% end %}
+
   # A long chunk list: the flush walks visit every one of these, so the window
   # in which a peer can unmap something the walk has not reached yet is as wide
   # as the list is long. Keep them reachable so the sweep cannot shorten it.
@@ -119,22 +137,40 @@ if ARGV.includes?("--child")
   threads = [] of Thread
   WORKERS.times do
     threads << Thread.new do
-      ROUNDS.times do
-        p = GC.malloc_atomic(PAYLOAD)
-        bytes = p.as(UInt8*)
-        i = 0_u64
-        while i < PAYLOAD
-          bytes[i] = FILL
-          i += 64
+      begin
+        ROUNDS.times do
+          p = GC.malloc_atomic(PAYLOAD)
+          bytes = p.as(UInt8*)
+          i = 0_u64
+          while i < PAYLOAD
+            bytes[i] = FILL
+            i += 64
+          end
+          i = 0_u64
+          while i < PAYLOAD
+            Verdict.corrupt! if bytes[i] != FILL
+            i += 64
+          end
+          GC.free(p)
         end
-        i = 0_u64
-        while i < PAYLOAD
-          Verdict.corrupt! if bytes[i] != FILL
-          i += 64
-        end
-        GC.free(p)
+      ensure
+        # **`ensure`, and that is the whole of this gate's silent-hang family.**
+        #
+        # A worker that dies of the corruption this arm exists to produce —
+        # `Thread.new` stores the exception and re-raises it at `join`, it
+        # prints nothing on its own — used to leave the count one short
+        # forever. Both waiters spin on it: the collector's
+        # `until Verdict.finished >= WORKERS` and the main thread's poll loop.
+        # The child then collects forever with every mutator frozen, produces
+        # no output, and dies on the deadline: no fault, no watchdog line
+        # (every stop completes, so no phase is ever stalled), nothing to read.
+        # Measured on three wedged children under `gdb`: zero worker threads
+        # alive and `Verdict::done` reading 3, 3 and 1 of 4.
+        #
+        # Counting the death lets both waiters finish and `join` re-raise, so
+        # the arm faults with a named exception instead of hanging.
+        Verdict.finish
       end
-      Verdict.finish
     end
   end
 
@@ -243,7 +279,13 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
     unless result.ok
       bad += 1
       hung += 1 if result.timed_out
-      first ||= result.output.lines.find { |l| l.includes?("gcry:") || l.includes?("Invalid memory access") }
+      # A worker that dies now re-raises at `join`, so the line worth quoting
+      # is often Crystal's unhandled-exception header rather than a gcry
+      # report or a SEGV.
+      first ||= result.output.lines.find do |l|
+        l.includes?("gcry:") || l.includes?("Invalid memory access") ||
+          l.includes?("Unhandled exception")
+      end
     end
   end
   {bad, hung, first}
