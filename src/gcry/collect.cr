@@ -944,6 +944,45 @@ module Gcry
       nil
     end
 
+    # The same question the SIGSEGV report asks of a fault address, asked of a
+    # pointer the allocator has just refused to own.
+    #
+    # "not a live gcry allocation" is a symptom — it says the chunk left the
+    # index, never which release path took it or when. On 2026-08-29 that
+    # message was the only thing a default-arm `dormant_flush_race` worker left
+    # behind before it died, and it named nothing. Empty when neither the guard
+    # nor the ledger is armed, so this costs a refused pointer one nil check.
+    def release_note(addr : UInt64) : String
+      if g = guarded_release_at(addr)
+        base, glen, kind, gen, tag = g
+        path = kind == GUARD_KIND_LARGE ? "large-object release" : "empty size-class chunk release"
+        note = " — the chunk was RELEASED: base 0x#{base.to_s(16)}, #{glen} bytes, #{path}, " \
+               "at collection #{gen} (#{@collections - gen} since); the pointer is " \
+               "#{addr - base} bytes into it"
+        note += ", first user word at release 0x#{tag.to_s(16)}" unless tag == 0
+        return note
+      end
+
+      # No release on record — and with the guard armed there is no release
+      # path that does not pass through `guard_release`, so the refusal has to
+      # be explained by the *lookup* instead. These three answers separate the
+      # three ways that can happen, and they are not guessable from the
+      # symptom: bounds that exclude a live chunk, an index that lost an entry
+      # the list still has, or a chunk that really is gone.
+      listed = Pointer(ChunkHeader).null
+      each_chunk do |chunk|
+        lo = ChunkHeader.data_start(chunk).address
+        hi = ChunkHeader.data_end(chunk).address
+        listed = chunk if addr >= lo && addr < hi
+      end
+      " — no release on record; bounds [0x#{@heap_min.to_s(16)}, 0x#{@heap_max.to_s(16)}), " \
+      "span [0x#{@heap_span_lo.to_s(16)}, 0x#{@heap_span_hi.to_s(16)}), " \
+      "#{@chunk_index_count} indexed chunks; in bounds: " \
+      "#{addr >= @heap_min && addr < @heap_max}; on @chunks: " \
+      "#{listed.null? ? "no" : "yes, base 0x#{listed.address.to_s(16)}"}; " \
+      "second lookup: #{chunk_containing(addr).nil? ? "still nil" : "found"}"
+    end
+
     # Research only: the pre-2026-08-22 last-chunk cache — the index read twice,
     # no containment check, and the unsynchronised invalidation that made the
     # second read see `-1`.

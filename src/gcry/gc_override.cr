@@ -1036,7 +1036,8 @@ module GC
         # (or racing flush) makes is_heap_ptr false while the address is still
         # in the historic heap span — LibC.realloc aborts "invalid pointer".
         if Gcry.default_heap.in_heap_span?(pointer)
-          raise ArgumentError.new("GC.realloc: not a live gcry allocation")
+          raise ArgumentError.new("GC.realloc: not a live gcry allocation" +
+                                  Gcry.default_heap.release_note(pointer.address))
         end
         return bootstrap_realloc(pointer, size)
       end
@@ -1080,7 +1081,8 @@ module GC
       Gcry.default_heap.free(pointer)
     elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
       # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
-      raise ArgumentError.new("GC.free: not a live gcry allocation")
+      raise ArgumentError.new("GC.free: not a live gcry allocation" +
+                              Gcry.default_heap.release_note(pointer.address))
     else
       LibC.free(pointer)
     end
