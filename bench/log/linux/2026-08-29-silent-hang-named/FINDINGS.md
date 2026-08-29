@@ -158,6 +158,53 @@ the one named above, and the defect upstream of it is a lost root — the trim
 only detaches chunks that are already on the large cache, which a chunk holding
 a live block has no business being on.
 
+### What the hunt for it has ruled out
+
+Four attempts, three of them refutations, all on 2026-08-29 after the probe
+fired. Recorded because the next session will otherwise pay for them again.
+
+- **It is not "a collection lands while the block is live".** That reading
+  makes the live window the dial, so a dedicated bench held each 40 KiB block
+  across a window and then asked whether the heap still owned it. Widening the
+  window **50×** — 4,000 to 200,000 reads of the block — produced **0 losses in
+  6 children either way**. A lost root that needs a collection inside the
+  window should have gone up by two orders of magnitude.
+- **Poison says nothing.** `GCRY_POISON_FREED=1 GCRY_POISON_TAG=1` for 60
+  children of the queued arm: **0** corrupt verifies, 0 refusals. If the sweep
+  had reclaimed the live block, its payload would have been overwritten with
+  `0xdeadf2ee…` and the worker's own byte check would have caught it before the
+  free. It never did — consistent with the one direct observation, where the
+  payload was **intact** at the moment of the refusal.
+- **Measuring it with `is_heap_ptr` destroys it.** The dedicated bench asked
+  `GC.is_heap_ptr(p)` before each free — the same lookup the free refuses on,
+  asked without dying. **0 losses in 240 children.** Removing that one call and
+  catching the `ArgumentError` instead: **1 loss in 120**. The probe takes
+  `@index_lock` once per block, on the path whose racing writers contend for
+  that very lock, and serialises the window shut. Anything that reads the index
+  on the free path is not an instrument here.
+- **A purpose-built bench is a worse reproducer than the gate.** Same shape as
+  `dormant_flush_race` — 4 workers × 10,000 × 40 KiB, one collector, 40,000
+  ballast, same knobs — and it reproduced at roughly 1 in 360 children against
+  the gate's ~1 in 90–140. It was deleted rather than committed: a bench that
+  reproduces less than the gate it copies is maintenance with no instrument in
+  it.
+
+So the instrument went into `dormant_flush_race` itself instead. The refusal is
+now caught rather than fatal, and described **at the moment it happens** —
+asking `release_note` at the end of the run describes a base that has since been
+released and reused, which is how the first capture came back empty. The line
+it prints carries the bit that decides the question:
+
+> `refused 0x… — header FREE|USED size=… flags=…` + the release note
+
+**FREE** means the sweep took a live block for dead and the chunk was cached
+legitimately afterwards — a lost root. **USED** means the chunk left the index
+with a live block still in it, which is the cache/trim race
+(`../2026-08-25-aarch64-large-cache-locked-arm/`) and has nothing to do with
+roots. 100 children since the instrument went in have not produced a hit; at
+~0.7% that is 0.7 expected, so it says nothing yet. The next hit answers it in
+one line.
+
 The gate's arm labels deserve a word: the arm called "queued (default)" runs
 `GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1`. It is the default *trim* path, not a
 default configuration, and nothing measured here says anything about a stock

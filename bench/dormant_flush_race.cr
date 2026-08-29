@@ -78,6 +78,42 @@ class Verdict
   def self.finished
     @@done.get
   end
+
+  # The refusal, described at the moment it happens.
+  #
+  # A worker's `GC.free` of a block it allocated four lines earlier is refused
+  # about once in ninety children: `is_heap_ptr` → `chunk_containing` finds no
+  # live chunk. It used to kill the worker, and everything worth knowing was
+  # gone by the time anyone looked — asking `release_note` at the end of the run
+  # describes a base that has since been released and reused.
+  #
+  # `header` is the bit that separates the two candidate defects. **FREE** means
+  # the sweep took a live block for dead and the chunk was cached legitimately
+  # afterwards — a lost root. **USED** means the chunk left the index with a
+  # live block still in it, which is the cache/trim race and has nothing to do
+  # with roots.
+  @@refusals = Atomic(Int32).new(0)
+  @@refusal_seen = Atomic(UInt64).new(0_u64)
+  @@refusal = ""
+
+  def self.refused!(user : Void*, note : String) : Nil
+    @@refusals.add(1)
+    return unless @@refusal_seen.compare_and_set(0_u64, user.address)[1]
+    header = Gcry::BlockHeader.from_user(user)
+    # The chunk is detached, not unmapped, so the header behind the user pointer
+    # is still readable.
+    state = Gcry::BlockHeader.free?(header) ? "FREE" : "USED"
+    @@refusal = "refused 0x#{user.address.to_s(16)} — header #{state} " \
+                "size=#{header.value.size} flags=0x#{header.value.flags.to_s(16)}#{note}"
+  end
+
+  def self.refusals
+    @@refusals.get
+  end
+
+  def self.refusal
+    @@refusal
+  end
 end
 
 # Held only in a class variable, and checked from the main thread while the
@@ -151,7 +187,14 @@ if ARGV.includes?("--child")
             Verdict.corrupt! if bytes[i] != FILL
             i += 64
           end
-          GC.free(p)
+          begin
+            GC.free(p)
+          rescue ArgumentError
+            # Counted and described rather than fatal. The worker carries on, so
+            # a child that hits this can hit it again, and the run still fails —
+            # `Verdict.refusals` is checked at the exit below.
+            Verdict.refused!(p, heap.release_note(p.address))
+          end
         end
       ensure
         # **`ensure`, and that is the whole of this gate's silent-hang family.**
@@ -255,7 +298,8 @@ if ARGV.includes?("--child")
        "win_empty #{heap.mutator_window_empty}, win_max #{heap.mutator_window_max}, " \
        "fib_sp #{heap.fiber_scan_from_sp}, fib_guard #{heap.fiber_scan_from_guard}, " \
        "fib_stale #{heap.fiber_scan_running_stale}"
-  exit(Verdict.corrupt > 0 ? 1 : 0)
+  puts "child: #{Verdict.refusals} refused frees\n  #{Verdict.refusal}" if Verdict.refusals > 0
+  exit(Verdict.corrupt > 0 || Verdict.refusals > 0 ? 1 : 0)
 end
 
 # ── Parent ───────────────────────────────────────────────────────────────────
@@ -284,7 +328,7 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
       # report or a SEGV.
       first ||= result.output.lines.find do |l|
         l.includes?("gcry:") || l.includes?("Invalid memory access") ||
-          l.includes?("Unhandled exception")
+          l.includes?("Unhandled exception") || l.includes?("refused 0x")
       end
     end
   end
