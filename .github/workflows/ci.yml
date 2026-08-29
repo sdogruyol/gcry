@@ -724,6 +724,26 @@ jobs:
           make dormant-flush-race
 
 
+  oom-no-hang:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: oom no hang
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      # Deterministic, unlike the race gates around it: the child caps its own
+      # RLIMIT_AS, retains everything, and must report an out-of-memory error
+      # inside the deadline. 3 of 3 children hung before the fix, 0 of 3 after,
+      # on both the large and the small path — so a red here is a regression
+      # and never a coin toss.
+      - name: Out of memory must not hang
+        run: |
+          make oom-no-hang
+
   valgrind:
     runs-on: ubuntu-latest
     timeout-minutes: 20
