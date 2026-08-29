@@ -30,6 +30,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `make page-release-corruption` is green end to end for the first time.
   `bench/log/linux/2026-08-27-stw-write-protocols/FINDINGS.md`
 
+- **Running out of memory hung the process instead of reporting it — three
+  layers, all on the default path.** (1) `map_chunk` raised `OutOfMemoryError`
+  when `mmap` refused, and every caller holds a non-reentrant `SpinLock` across
+  that call (`alloc_large` under `@alloc_lock`, `refill_size_class` under the
+  size-class freelist lock) while Crystal's `raise` *allocates*: it fills in
+  `exception.callstack ||= CallStack.new`, which is an `Array`, which re-enters
+  `allocate` and spins on the lock the raising thread already holds. (2) The
+  emergency collection sat in the same place, excluded only for TLAB although
+  the TLAB-off refill holds a freelist lock just the same — the after-world
+  sweep takes that lock and `flush_pending_large_release` opens with
+  `with_alloc_lock`, so that recovery path had never once worked. (3) With both
+  moved out, the retry recursed: a collection allocates
+  (`ensure_static_root_cache` parses `/proc/self/maps`), and the raise recursed
+  on its own for 174 frames before the stack overflowed. Now `map_chunk`
+  returns null and the refusal travels as a null user pointer to the allocation
+  entry points, which hold no lock and own both the one emergency collection
+  (`retry_after_emergency_collect?`, non-reentrant behind its own atomic) and
+  the raise; a raise nested inside a raise uses a boot-built error whose
+  callstack is already set, so it allocates nothing. Measured under `ulimit -v`:
+  **5 of 5 children spinning at 100% CPU with no output → 3 of 3 clean
+  `OutOfMemoryError`**, both size paths. New deterministic gate
+  `make oom-no-hang`, in CI, verified red against the pre-fix tree. New counter
+  `emergency_collects` on `/gc-stats`.
+  `bench/log/linux/2026-08-29-oom-hangs-not-raises/FINDINGS.md`
+
 - **The unmap guard's ledger claimed a slot with two unsynchronised reads, and
   the `IndexError` it raised was the `dormant_flush_race` silent hang.**
   `guard_release` tested `@guard_count` against the capacity and then read it

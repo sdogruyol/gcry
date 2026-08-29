@@ -151,6 +151,13 @@ either it is a very unlucky sample or the rate moves with something not
 identified here. Worth remembering before anyone reads a future 0-of-N as a
 fix: this needs a few hundred children per arm to say anything.
 
+**The probe fired the same day** (`../2026-08-29-oom-hangs-not-raises/`, last
+section): `the chunk is on the collector's release queue, detached and not yet
+unmapped — base 0x7fa9e9a60000, 585728 bytes queued in total`. The window is
+the one named above, and the defect upstream of it is a lost root — the trim
+only detaches chunks that are already on the large cache, which a chunk holding
+a live block has no business being on.
+
 The gate's arm labels deserve a word: the arm called "queued (default)" runs
 `GCRY_MOSTLY_EMPTY=1 GCRY_UNMAP_GUARD=1`. It is the default *trim* path, not a
 default configuration, and nothing measured here says anything about a stock
