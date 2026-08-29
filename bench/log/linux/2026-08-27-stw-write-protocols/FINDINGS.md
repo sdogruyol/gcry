@@ -138,3 +138,17 @@ children, and only a queued-arm hang is fatal. Whether the control-arm hang is
 this same silent family under a different knob is unknown; it is at least a
 far cheaper reproducer candidate (3 of 6 on two cores) for the next
 `hang_catch.sh` session.
+
+**Closed 2026-08-29 — `../2026-08-29-silent-hang-named/FINDINGS.md`.** The
+two-core control arm was the right reproducer (20 hangs of 66 there, 0 of 240
+on the queued arm), and `hang_catch.sh` could never have answered it: yama
+`ptrace_scope=1` refused every `gdb -p` it ran, which is why an hour of watched
+children read nothing. With the child consenting
+(`GCRY_ANY_PTRACER=1` → `PR_SET_PTRACER_ANY`) the wedge is a worker thread that
+died of an `IndexError` inside the unmap guard's own racy ledger: `Thread.new`
+holds the exception until `join`, the harness's completion count never arrives,
+and the collector stops the world forever. The watchdog was silent because it
+is correct — every stop completes; it measures time in one phase and can never
+see this. The queued arm's silence hid a second door, now named and open:
+`GC.free: not a live gcry allocation`, 1 of 14 serial children on the default
+arm.
