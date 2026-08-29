@@ -232,20 +232,29 @@ failures << "the control arm faulted #{off_bad - off_hung} of #{attempts} — no
 # HOLED and no page is ever released — which is exactly how it was first
 # written, and it looked clean.
 #
-# The floor is the control arm rather than zero: `dontneed_bytes` is shared with
-# `flush_pending_dormant_chunks`, which answers to the empty-chunk machinery and
-# not to `madvise_free_pages`, so the control releases a little no matter what.
-# An engaged walk releases two orders of magnitude more than that.
-# An absolute floor as well as a relative one: `dontneed_bytes` is shared with
-# the dormant flush, whose output varies run to run and came back as 0 B once —
-# which made a purely relative floor of `off_dn * 4` equal to zero, and the
-# engagement check vacuous.
-floor = {off_dn * 4, 8_u64 * 1024 * 1024}.max
-failures << "GCRY_PAGE_DONTNEED released #{holed_dn} B against a #{off_dn} B control — " \
-            "no chunk went HOLED, so a clean result says nothing about that walk" if holed_dn <= floor
-failures << "GCRY_MOSTLY_EMPTY released #{empty_dn} B against a #{off_dn} B control — " \
-            "no chunk was sparse enough, so a clean result says nothing about that " \
-            "walk" if empty_dn <= floor
+# **Each walk is asked about itself.** The check used to compare
+# `dontneed_bytes` against the control arm's `dontneed_bytes`, and that counter
+# does not belong to either walk: it is shared with
+# `flush_pending_dormant_chunks`, which answers to the empty-chunk machinery.
+# Seven runs on 2026-08-29 measured the control at 0, 0, 0, 1.97, 1.97, 7.88 MB
+# — a "floor" that moved by 4× between runs — while the HOLED arm sat at
+# 7.79–11.98 MB. Every threshold drawn against it, `off_dn * 4`, then
+# `off_dn * 2`, landed *inside* the range it was meant to sit below and failed
+# a third to a half of runs, each time reading as "the walk did not engage"
+# about a walk that had just unlinked twelve thousand page runs. An engagement
+# check that flaky is worse than none: the next person reads it as a regression
+# in whatever changed last, which is exactly what happened.
+#
+# `page_release_unlinked_chunks` is the HOLED walk's own output and nothing
+# else's: 10,644–12,783 on that arm, **0** on both other arms in every run. The
+# mostly-empty walk has no unlink counter, but its release is its own and an
+# order of magnitude clear of the noise: 64–67 MB against a control that has
+# never exceeded 8 MB.
+failures << "GCRY_PAGE_DONTNEED unlinked no page runs (#{holed_ul}) — no chunk went " \
+            "HOLED, so a clean result says nothing about that walk" if holed_ul == 0
+failures << "GCRY_MOSTLY_EMPTY released #{empty_dn} B, under the 16 MiB this walk clears " \
+            "whenever it engages — no chunk was sparse enough, so a clean result says " \
+            "nothing about that walk" if empty_dn < 16_u64 * 1024 * 1024
 
 if failures.empty?
   puts "ok — both release walks ran and no live object was corrupted"
