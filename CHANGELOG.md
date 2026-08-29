@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-08-29
+
+Patch release. The line that matters in production: **a process that runs out of
+address space now reports it and stops, instead of spinning at 100% CPU
+forever.** That recovery path had never once worked — `map_chunk` raised while
+its caller held a non-reentrant allocator spinlock, and Crystal's `raise`
+allocates, so the raising thread deadlocked against itself; the emergency
+collection sitting in the same place could only ever do the same. 5 of 5
+children hung before, 3 of 3 clean `OutOfMemoryError` after, gated
+deterministically by `make oom-no-hang` and verified red against the pre-fix
+tree.
+
+The rest is 0.21.2's defect pattern audited to exhaustion — every structure the
+stopped world reads unlocked, crossed against every writer a suspend signal can
+freeze — which found three siblings of the chunk-index defect and closed them.
+Those three are reachable only where the sweep runs inside the pause
+(`GCRY_PAGE_DONTNEED=1`, `GCRY_TLAB=1`, `GCRY_DISABLE_LAZY_SWEEP=1`); a default
+build is not exposed to any of them, and the small-chunk guard from the second
+ships unconditionally regardless. No default-configuration collection behaves
+differently from 0.21.2.
+
 ### Fixed
 
 - **The pattern behind 0.21.2's fix, audited to exhaustion — three siblings
@@ -2222,7 +2243,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.3...HEAD
+[0.21.3]: https://github.com/sdogruyol/gcry/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sdogruyol/gcry/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sdogruyol/gcry/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sdogruyol/gcry/compare/v0.20.0...v0.21.0
