@@ -965,10 +965,12 @@ module Gcry
 
       # No release on record — and with the guard armed there is no release
       # path that does not pass through `guard_release`, so the refusal has to
-      # be explained by the *lookup* instead. These three answers separate the
-      # three ways that can happen, and they are not guessable from the
-      # symptom: bounds that exclude a live chunk, an index that lost an entry
-      # the list still has, or a chunk that really is gone.
+      # be explained by where the chunk went instead. Off the list *and* out of
+      # the index *and* not yet released is one specific state and it has one
+      # owner: a chunk a mutator detached in `trim_large_cache` and queued for
+      # the collector, which is off both structures and still mapped until
+      # `flush_pending_large_release` runs. Asking the queue directly is the
+      # difference between naming that window and inferring it.
       listed = Pointer(ChunkHeader).null
       each_chunk do |chunk|
         lo = ChunkHeader.data_start(chunk).address
@@ -980,7 +982,45 @@ module Gcry
       "#{@chunk_index_count} indexed chunks; in bounds: " \
       "#{addr >= @heap_min && addr < @heap_max}; on @chunks: " \
       "#{listed.null? ? "no" : "yes, base 0x#{listed.address.to_s(16)}"}; " \
-      "second lookup: #{chunk_containing(addr).nil? ? "still nil" : "found"}"
+      "second lookup: #{chunk_containing(addr).nil? ? "still nil" : "found"}" \
+      "#{large_chain_note(addr)}"
+    end
+
+    # Is *addr* inside a large chunk that is detached and waiting, either on the
+    # collector's release queue or in a large-cache bucket? Both chains are
+    # linked through the blocks' own `next_free`, both are only mutated under
+    # `@alloc_lock`, and this walks them without it — a bounded, read-only walk
+    # in a process that is already raising. Every chunk on either chain is still
+    # mapped by construction, so the header reads are safe where a read of a
+    # released range would fault.
+    private def large_chain_note(addr : UInt64) : String
+      if base = large_chain_hit(@pending_large_release, addr)
+        return "; the chunk is on the collector's release queue, detached and " \
+               "not yet unmapped — base 0x#{base.to_s(16)}, " \
+               "#{@pending_large_release_bytes} bytes queued in total"
+      end
+      b = 0
+      while b < LARGE_FREE_BUCKETS
+        if base = large_chain_hit(@large_freelists[b], addr)
+          return "; the chunk is in large-cache bucket #{b} — base 0x#{base.to_s(16)}"
+        end
+        b += 1
+      end
+      "; on neither the release queue nor a large-cache bucket"
+    end
+
+    private def large_chain_hit(chain : Void*, addr : UInt64) : UInt64?
+      user = chain
+      steps = 0
+      while user && steps < 1_000_000
+        header = BlockHeader.from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        base = chunk.as(Void*).address
+        return base if addr >= base && addr < base &+ chunk.value.mapped_bytes
+        user = header.value.next_free
+        steps += 1
+      end
+      nil
     end
 
     # Research only: the pre-2026-08-22 last-chunk cache — the index read twice,
