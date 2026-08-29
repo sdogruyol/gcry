@@ -30,6 +30,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `make page-release-corruption` is green end to end for the first time.
   `bench/log/linux/2026-08-27-stw-write-protocols/FINDINGS.md`
 
+- **The unmap guard's ledger claimed a slot with two unsynchronised reads, and
+  the `IndexError` it raised was the `dormant_flush_race` silent hang.**
+  `guard_release` tested `@guard_count` against the capacity and then read it
+  again to index with, from `GC.free` → `trim_large_cache` on whatever thread
+  frees and under no lock: two racing frees write slot `UNMAP_GUARD_SLOTS`.
+  `Thread.new` stores a worker's exception until `join` and prints nothing, so
+  the death was silent — and the gate's own completion count then never
+  arrived, leaving the collector stopping the world forever with no output and
+  nothing for `GCRY_STW_WATCHDOG_MS` to report (it is *right* to be quiet:
+  every stop completes). The slot is now claimed with one atomic
+  read-modify-write, the ring arm's cursor likewise, `@guard_overflows` is
+  atomic, and the length column is written last and zeroed at arm time so a
+  concurrent SEGV report skips a record another thread is still filling rather
+  than naming a half-written region. Two pinned cores, six children at a time:
+  **20 hangs of 66 → 0 of 48**, and the arm's failures are named exceptions
+  instead of killed children. Research knobs only
+  (`GCRY_UNMAP_GUARD`, `GCRY_RELEASE_LEDGER`); no default path change.
+  `bench/log/linux/2026-08-29-silent-hang-named/FINDINGS.md`
+
 ## [0.21.2] - 2026-08-27
 
 Patch release. Closes the `0x18` / null-field crash family at its root — a

@@ -495,16 +495,33 @@ module Gcry
     #
     # Research only, and never a default: the address space is never reused, so
     # a long-running program under this knob will exhaust it.
-    property unmap_guard : Bool = false
+    getter? unmap_guard : Bool = false
+    getter? release_ledger : Bool = false
 
-    def unmap_guard? : Bool
-      @unmap_guard
+    # Arming zeroes the length column, because that column is the read
+    # protocol: `guarded_release_at` skips a slot whose length is zero, which
+    # is how a report walks past a record another thread is still writing.
+    # `uninitialized` gives no such guarantee.
+    def unmap_guard=(v : Bool) : Bool
+      clear_guard_lengths if v
+      @unmap_guard = v
     end
 
     # Record every chunk release without holding the address space, so a fault
     # on memory that has since been remapped can still name what used to be
-    # there. See the note on `@guard_next`.
-    property release_ledger : Bool = false
+    # there. See the note on `@guard_ring`.
+    def release_ledger=(v : Bool) : Bool
+      clear_guard_lengths if v
+      @release_ledger = v
+    end
+
+    private def clear_guard_lengths : Nil
+      i = 0
+      while i < UNMAP_GUARD_SLOTS
+        @guard_len[i] = 0_u64
+        i += 1
+      end
+    end
 
     # Research only: raw-write a line for every large chunk mapped, so a range
     # the ledger names on a fault can be traced back to the allocation that
@@ -599,7 +616,18 @@ module Gcry
     # identity has to be taken at release time or not at all. For a Crystal
     # reference the low four bytes are the type_id.
     @guard_tag = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
-    @guard_count = 0
+    # **Atomic, because every writer is a mutator and none of them holds a
+    # lock.** `guard_release` runs from `GC.free` → `trim_large_cache` on
+    # whichever thread frees, and the old code read this counter twice — once
+    # to test it against the capacity, once to index with. Two frees racing
+    # there index slot `UNMAP_GUARD_SLOTS`, which is an `IndexError` raised
+    # inside a worker thread, and `Thread.new` stores that exception until
+    # `join` instead of printing it. That is the whole of the
+    # `dormant_flush_race` silent-hang family: the worker dies without a word,
+    # the counter it was going to bump never arrives, and every waiter spins
+    # forever (20 hangs of 66 children on two cores, 0 of 48 with this fixed
+    # and the harness counting a dead worker).
+    @guard_slot = Atomic(Int32).new(0)
     # Ledger mode: the same record, without holding the address space. The
     # guard answers "what was here" by never giving the mapping back, which
     # costs address space and — measured on 2026-08-23 — changes the defect it
@@ -608,15 +636,28 @@ module Gcry
     # while the guard is preventing reuse. So record and unmap anyway, and
     # accept that the memory may be someone else's by the time the report is
     # read.
-    @guard_next = 0
-    @guard_filled = 0
-    getter guard_overflows : UInt64 = 0_u64
+    # Same race, same fix: the ring cursor is bumped by whichever mutator
+    # frees, and two of them sharing a slot lose one record and leave the other
+    # half-written. The total is what the cursor counts; the ring index is that
+    # total modulo the capacity.
+    @guard_ring = Atomic(UInt64).new(0_u64)
+    @guard_overflows = Atomic(UInt64).new(0_u64)
+
+    def guard_overflows : UInt64
+      @guard_overflows.get
+    end
 
     # How many slots the guard has taken. Without this, "the guarded arm did
     # not crash" cannot be told apart from "the guard filled up early and the
     # arm was the baseline".
     def guard_slots_used : UInt64
-      (@unmap_guard ? @guard_count : @guard_filled).to_u64
+      if @unmap_guard
+        slot = @guard_slot.get
+        (slot > UNMAP_GUARD_SLOTS ? UNMAP_GUARD_SLOTS : slot).to_u64
+      else
+        total = @guard_ring.get
+        total > UNMAP_GUARD_SLOTS ? UNMAP_GUARD_SLOTS.to_u64 : total
+      end
     end
 
     GUARD_KIND_EMPTY_CHUNK = 0_u8
@@ -842,19 +883,28 @@ module Gcry
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the
         # recent releases, which are the ones a fault is about.
-        i = @guard_next
+        i = (@guard_ring.add(1_u64) % UNMAP_GUARD_SLOTS).to_i32
         @guard_base[i] = base
-        @guard_len[i] = len
         @guard_kind[i] = kind
         @guard_gen[i] = @collections
         @guard_tag[i] = guard_user_tag(base, len, kind)
-        @guard_next = (i + 1) % UNMAP_GUARD_SLOTS
-        @guard_filled += 1 if @guard_filled < UNMAP_GUARD_SLOTS
+        # Length last, and that is the read protocol: `guarded_release_at`
+        # tests `addr < base + len`, so a slot whose length is not in yet
+        # matches nothing and a concurrent report skips it instead of naming a
+        # half-written region.
+        @guard_len[i] = len
         # False: the caller still unmaps. The record is the whole contribution.
         return false
       end
-      if @guard_count >= UNMAP_GUARD_SLOTS
-        @guard_overflows &+= 1
+      # Claim, then check. One atomic read-modify-write instead of the read
+      # that used to happen twice — the capacity test and the index have to be
+      # the same value or two racing frees write slot `UNMAP_GUARD_SLOTS`.
+      i = @guard_slot.add(1)
+      if i >= UNMAP_GUARD_SLOTS
+        # Park the counter at the capacity so a long run cannot wrap it, and
+        # so `guard_slots_used` keeps reading the truth.
+        @guard_slot.set(UNMAP_GUARD_SLOTS)
+        @guard_overflows.add(1_u64)
         return false
       end
       # Read the identity *before* the mprotect. Reading it after faults on
@@ -866,20 +916,23 @@ module Gcry
       tag = guard_user_tag(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
-      return false if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
-      i = @guard_count
+      if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
+        # The slot is claimed and this release did not happen: leave it with a
+        # zero length so the walk steps over it.
+        @guard_len[i] = 0_u64
+        return false
+      end
       @guard_base[i] = base
-      @guard_len[i] = len
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
       @guard_tag[i] = tag
-      @guard_count = i + 1
+      @guard_len[i] = len
       true
     end
 
     # For the SIGSEGV report: which released region holds *addr*, if any.
     def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64, UInt64}?
-      limit = @unmap_guard ? @guard_count : @guard_filled
+      limit = guard_slots_used
       i = 0
       while i < limit
         base = @guard_base[i]
