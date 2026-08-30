@@ -39,6 +39,31 @@
 # (268k requests clean), so the field rate is below what half an hour
 # resolves. 0.21.2 carries the fix.
 #
+# **2026-08-29: a third sighting, and it closes the question the second one
+# left open — the wrong way.** A different application (invidious, reported by
+# fixju) on **0.21.3**, which carries the chunk-index fix, faulted at the same
+# frame and the same address as the first: `0x0` in `String#empty?`
+# (`string.cr:3015`), reached from `Routes::Feeds.rss_channel` — a route whose
+# first two acts are `env.params.url["ucid"]` and
+# `env.params.query["params"]?`, the same `Hash(String, String)` lookups
+# Kemal's `unescape_url_param` walks.
+#
+# So the inference in the 0.21.2 release notes — "the fixed defect produces
+# exactly that shape, so 0.21.2 is the build production should be on" — is
+# **refuted for this frame**. It was labelled an inference at the time and the
+# label was right. Two applications, three sightings, and the fix that was
+# supposed to explain it is in the build that crashed.
+#
+# What the third sighting adds is the address. `0x0` is not a stale pointer
+# into reused memory — a reused block holds somebody's data, not zeros. A value
+# slot reading exactly zero is a page that has been handed back to the kernel
+# and faulted in fresh, which points at the *release* paths rather than at the
+# mark: empty-chunk release (Linux process default retains **nothing** —
+# `GCRY_EMPTY_CHUNK_RETAIN=0`, `GCRY_LARGE_CACHE=0`), the dormant madvise, or
+# the page-release walk. `GCRY_POISON_FREED=1` separates the two readings in
+# one restart: a block that was freed and reused reads `0xdeadf2ee…` and faults
+# non-canonically, a zeroed page still reads `0x0`.
+#
 # The app registers a *different* instantiation with gcry:
 #
 #     Gcry.register_hash(String, JSON::Any)

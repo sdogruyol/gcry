@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Corrected
+
+- **0.21.2's field claim is refuted.** Its notes said of the chunk-index insert
+  defect that "the fixed defect produces exactly that shape (a null reference
+  read out of a live structure) … so 0.21.2 is the build production should be
+  on", and labelled the field half an inference rather than a measurement. On
+  2026-08-29 a second application — invidious, reported by fixju, on **0.21.3**
+  — faulted at the same frame and the same address as the first sighting:
+  `0x0` in `String#empty?` (`string.cr:3015`), reached from a route whose first
+  acts are `env.params.url[…]` and `env.params.query[…]?`. Three sightings, two
+  applications, and the fix that was supposed to explain them is in the build
+  that crashed. The frame is open again — and `0x0` exactly, rather than a
+  stale pointer, points at a page returned to the kernel rather than at a
+  collected object.
+  `bench/log/linux/2026-08-29-invidious-empty-frame/FINDINGS.md`
+
 ## [0.21.3] - 2026-08-29
 
 Patch release. The line that matters in production: **a process that runs out of
