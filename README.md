@@ -75,26 +75,27 @@ Readable. Debuggable. Changeable. Yours.
 ## How it works
 
 ```
-┌──────────────────────────────────────────────┐
-│                Crystal runtime                │
-│  (GC.malloc → GC.realloc → GC.free → …)      │
-└────────────────────┬─────────────────────────┘
-                     │
-┌────────────────────▼─────────────────────────┐
-│           require "gcry" (shard)              │
-│                                                │
-│  ┌──────────┐  ┌──────┐  ┌──────┐  ┌──────┐  │
-│  │  Heap    │  │ Mark │  │Sweep │  │Roots │  │
-│  │ mmap     │  │ STW  │  │ free │  │ fiber│  │
-│  │ size-cls │  │ mark │  │release│  │ stack│  │
-│  └──────────┘  └──────┘  └──────┘  └──────┘  │
-│                                                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │Metrics   │  │ Layout   │  │Platform  │    │
-│  │Prometheus│  │ precise  │  │ Linux    │    │
-│  │HDR pause │  │ type_id  │  │ Darwin   │    │
-│  └──────────┘  └──────────┘  └──────────┘    │
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                       Crystal runtime                        │
+│            (GC.malloc → GC.realloc → GC.free → …)            │
+└───────────────────────────────┬──────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    require "gcry" (shard)                    │
+│                                                              │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+│   │   Heap   │  │   Mark   │  │  Sweep   │  │  Roots   │     │
+│   │   mmap   │  │   STW    │  │   free   │  │  fiber   │     │
+│   │ size-cls │  │   mark   │  │ release  │  │  stack   │     │
+│   └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
+│                                                              │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐                   │
+│   │ Metrics  │  │  Layout  │  │ Platform │                   │
+│   │Prometheus│  │ precise  │  │  Linux   │                   │
+│   │HDR pause │  │ type_id  │  │  Darwin  │                   │
+│   └──────────┘  └──────────┘  └──────────┘                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 Build with `-Dgc_none` → Crystal skips libgc → gcry reopens `module GC`.
