@@ -53,16 +53,27 @@
 # **refuted for this frame**. It was labelled an inference at the time and the
 # label was right. Two applications, three sightings, and the fix that was
 # supposed to explain it is in the build that crashed.
+# What the third sighting adds is the address. `0x0` is not a stale pointer into
+# reused memory — a reused block holds somebody's data, not zeros. A value slot
+# reading exactly zero is memory that was zeroed under a live Hash.
 #
-# What the third sighting adds is the address. `0x0` is not a stale pointer
-# into reused memory — a reused block holds somebody's data, not zeros. A value
-# slot reading exactly zero is a page that has been handed back to the kernel
-# and faulted in fresh, which points at the *release* paths rather than at the
-# mark: empty-chunk release (Linux process default retains **nothing** —
-# `GCRY_EMPTY_CHUNK_RETAIN=0`, `GCRY_LARGE_CACHE=0`), the dormant madvise, or
-# the page-release walk. `GCRY_POISON_FREED=1` separates the two readings in
-# one restart: a block that was freed and reused reads `0xdeadf2ee…` and faults
-# non-canonically, a zeroed page still reads `0x0`.
+# **2026-08-30: a fourth sighting, acikturkiye again, `0x4`, with the full
+# thirty-frame chain** — `empty?` ← `unescape_url_param` ← `parse_url` ←
+# `url` ← the controller ← eleven Kemal handlers ← `fiber.cr:168`. It settles
+# what the address means, and it is not what the paragraph above guessed.
+#
+# `0x4` is `value_ptr + 4` with `value_ptr == 0`: the **slot** read zero. A
+# swept-then-reused String would leave the slot holding its old address and
+# fault somewhere in the heap instead. And since both `scan_hash_body` and
+# `scan_hash_object` mark `@entries` whenever the Hash object is scanned at all,
+# a dead entries buffer means the Hash object itself was never marked — and the
+# only thing holding it is the stack of the fiber serving the request. A fiber
+# stack root miss, not this file's Hash-layout question.
+#
+# `GCRY_POISON_FREED=1` was offered as the discriminator and **withdrawn**: a
+# block that is freed *and reused* has its poison overwritten by the hand-out
+# clear, so `0x0` under poison means nothing either way.
+# `bench/log/linux/2026-08-30-zeroed-hash-slot/FINDINGS.md`
 #
 # The app registers a *different* instantiation with gcry:
 #

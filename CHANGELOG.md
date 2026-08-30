@@ -18,10 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0x0` in `String#empty?` (`string.cr:3015`), reached from a route whose first
   acts are `env.params.url[…]` and `env.params.query[…]?`. Three sightings, two
   applications, and the fix that was supposed to explain them is in the build
-  that crashed. The frame is open again — and `0x0` exactly, rather than a
-  stale pointer, points at a page returned to the kernel rather than at a
-  collected object.
-  `bench/log/linux/2026-08-29-invidious-empty-frame/FINDINGS.md`
+  that crashed. A fourth the next day — acikturkiye, `0x4`, with the full
+  thirty-frame chain — settles what the address means: `value_ptr + 4` with
+  `value_ptr == 0`, so the Hash **slot** read zero rather than holding a swept
+  String's old address. Both Hash scan paths mark `@entries` whenever the Hash
+  object is scanned at all, so a dead entries buffer means the Hash object was
+  never marked — and the only thing holding it is the stack of the fiber
+  serving the request. The frame is open, and the leading hypothesis is now a
+  fiber stack root miss rather than the Hash layout machinery it has always
+  been blamed on.
+  `bench/log/linux/2026-08-30-zeroed-hash-slot/FINDINGS.md`
 
 ## [0.21.3] - 2026-08-29
 

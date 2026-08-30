@@ -57,22 +57,24 @@ It also fits the route. `rss_channel` opens with `env.params.url["ucid"]` and
 acikturkiye sightings. Both applications fault at the first thing that reads a
 query parameter's characters.
 
-## The one experiment worth a restart
+## The one experiment worth a restart — **withdrawn 2026-08-30**
 
-`GCRY_POISON_FREED=1` separates the two readings in a single run, because it
-changes what a use-after-free *looks like*:
+This section offered `GCRY_POISON_FREED=1` as the experiment that halves the
+search space: a freed String would read `0xdeadf2ee…` and fault
+non-canonically, so a fault still at `0x0` would mean nothing had been freed
+and a release path was the subject.
 
-- **fault address becomes `0xdeadf2ee…`** (non-canonical) — the String was freed
-  and its payload poisoned. A collected-while-live object; the mark is the
-  subject.
-- **fault address stays `0x0`** — nothing was poisoned because nothing was
-  freed through the block path. A zeroed page; a release path is the subject.
+**That does not follow.** gcry clears a block on hand-out unless the memory is
+still mmap-fresh, so a block that is freed *and reused* has its poison
+overwritten by the clear and reads zero again. A `0x0` under poison is
+therefore consistent with both readings, and the negative result this recipe
+would have produced could not have been read the way it promised. Withdrawn
+before anyone spent a restart on it.
 
-Add `GCRY_POISON_TAG=1` and the poison carries the freed block's own address, so
-the crash says *which* free wrote what it read.
-
-That is one environment variable and one restart, and it halves the search
-space. Everything else below is secondary.
+The fourth sighting, the next day, settled the same question from the address
+itself and pointed somewhere else entirely — a fiber stack root miss rather
+than a release path. See `../2026-08-30-zeroed-hash-slot/FINDINGS.md`, which
+carries the current recipe.
 
 ## Everything else worth collecting
 
