@@ -81,8 +81,9 @@ module Gcry
       # into a byte buffer is a root bdwgc would resolve via GC_base.
       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
-      header = find_block(pointer)
-      return unless header
+      found = find_block_with_chunk(pointer)
+      return unless found
+      header, chunk = found
 
       # Mid-`tlab_alloc_small` STW: mutator holds FREE freelist nodes on-stack.
       # find_object ignores FREE → empty-chunk munmap risk. Clear FREE but keep
@@ -111,13 +112,15 @@ module Gcry
         h = header.value
         h.flags = h.flags & ~BlockHeader::Flags::FREE
         header.value = h
-        heap_set_mark(header) unless heap_marked?(header)
+        set_block_mark_in(chunk, header) unless block_marked_in?(chunk, header)
         walk = h.next_free
         while walk
-          break unless find_block(walk)
+          walk_found = find_block_with_chunk(walk)
+          break unless walk_found
+          _, walk_chunk = walk_found
           wh = BlockHeader.from_user(walk)
           break unless BlockHeader.free?(wh)
-          heap_set_mark(wh) unless heap_marked?(wh)
+          set_block_mark_in(walk_chunk, wh) unless block_marked_in?(walk_chunk, wh)
           walk = wh.value.next_free
         end
         return
@@ -141,12 +144,12 @@ module Gcry
         return
       end
 
-      return if heap_marked?(header)
+      return if block_marked_in?(chunk, header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      heap_set_mark(header)
+      set_block_mark_in(chunk, header)
       note_first_mark(header, source) if @live_attr_roots
       @mark_stack.push(header)
     end
@@ -696,63 +699,66 @@ module Gcry
     end
 
     private def clear_all_marks : Nil
-      {% unless flag?(:gcry_side_bitmap) %}
-        # Mark generation: bump O(1) so prior marks fail marked? without a heap
-        # walk. Was ~3ms phase_clear under Parallel reclaim-off (FREE-dominated).
-        # Wrap at 255 → full clear of gen bits (and legacy MARK) then gen=1.
-        if @header_mark_gen >= 255_u8
-          each_chunk do |chunk|
-            each_block_or_large(chunk) do |header|
-              next if BlockHeader.free?(header)
-              BlockHeader.clear_mark(header)
-            end
-          end
-          @header_mark_gen = 1_u8
-          @header_mark_gen_full_clears &+= 1_u64
-        else
-          @header_mark_gen &+= 1_u8
-        end
-        BlockHeader.mark_gen = @header_mark_gen
-      {% else %}
-        # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
-        # to managed heap, not to the live-object count. Replaces the legacy
-        # per-object header write that dominated clear_all_marks under HTTP.
-        # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
-        # -Dgc_none a test heap does not clobber the process GC's bitmap.
-        if bm = @mark_bitmap
-          if @heap_max > @heap_min && @heap_min != UInt64::MAX
-            bm.reset(@heap_min, @heap_max)
-          else
-            bm.zero_all
+      # Header generation: bump O(1) so prior marks fail `marked?` without a
+      # heap walk. Was ~3ms phase_clear under Parallel reclaim-off
+      # (FREE-dominated). Wrap at 255 -> full clear of gen bits (and legacy
+      # MARK) then gen=1. Large chunks use this under both representations, so
+      # it runs either way.
+      if @header_mark_gen >= 255_u8
+        each_chunk do |chunk|
+          each_block_or_large(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
           end
         end
-      {% end %}
+        @header_mark_gen = 1_u8
+        @header_mark_gen_full_clears &+= 1_u64
+      else
+        @header_mark_gen &+= 1_u8
+      end
+      BlockHeader.mark_gen = @header_mark_gen
+
+      # Size-class chunks on the bitmap path have no generation to bump, so
+      # their marks are zeroed wholesale, one chunk at a time. Never per bit:
+      # 64 blocks share a word, so clearing one block's bit is a
+      # read-modify-write over 63 other blocks' marks.
+      #
+      # This runs at the *start* of a cycle, before mark, so the marks the
+      # previous cycle's sweep read are still intact when it reads them.
+      #
+      # O(bitmap bytes) rather than O(1) — 1/512th of the heap, so ~2 MiB of
+      # memset per GiB, against a mark phase measured in milliseconds. It could
+      # be made a no-op in the common case (the sweep visits every non-dormant
+      # chunk anyway, so it could clear as it goes, leaving this needed only
+      # after a minor), but that is an optimisation with a correctness edge —
+      # dormant chunks the sweep skips, chunks mapped mid-cycle — and it is not
+      # worth taking before the cost shows up in a measurement.
+      if @bitmap_marks
+        each_chunk do |chunk|
+          next if ChunkHeader.large?(chunk)
+          chunk_clear_marks(chunk)
+        end
+      end
     end
 
     # Minor GC: reset nursery mark bits only.
+    #
+    # Old-generation marks are retained on purpose — a minor bumps no
+    # generation, and `mark_impl`'s `@minor_only` gate skips non-nursery blocks,
+    # so the old generation's marks stay valid from the prior major. The bitmap
+    # arm has to preserve exactly that asymmetry.
     private def clear_nursery_marks : Nil
-      {% unless flag?(:gcry_side_bitmap) %}
-        each_chunk do |chunk|
-          next unless ChunkHeader.nursery?(chunk)
+      each_chunk do |chunk|
+        next unless ChunkHeader.nursery?(chunk)
+        if @bitmap_marks && !ChunkHeader.large?(chunk)
+          chunk_clear_marks(chunk)
+        else
           each_block(chunk) do |header|
             next if BlockHeader.free?(header)
             BlockHeader.clear_mark(header)
           end
         end
-      {% else %}
-        # Side mark bitmap: zero only the address ranges that correspond to
-        # nursery chunks. Chunks are page-aligned at multiples of the chunk size
-        # so we can issue narrow resets without touching the old generation's
-        # bits (which carry over from the prior major and remain valid).
-        bm = @mark_bitmap
-        return unless bm
-        each_chunk do |chunk|
-          next unless ChunkHeader.nursery?(chunk)
-          lo = ChunkHeader.data_start(chunk).address
-          hi = chunk.address + chunk.value.mapped_bytes
-          bm.reset(lo, hi) if hi > lo
-        end
-      {% end %}
+      end
     end
 
     private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
@@ -804,9 +810,9 @@ module Gcry
       # During generational minor, old objects are intentionally unmarked.
       # Only nursery deaths may enqueue finalizers / clear WeakRef links.
       return false if @minor_only && !BlockHeader.nursery?(header)
-      # Use heap-local mark check (not BlockHeader.marked? which reads the
-      # global Gcry.current_mark_bitmap) — under -Dgc_none a test heap may
-      # have swapped the global bitmap, causing cross-heap false negatives.
+      # Use the heap-local mark check, not the static `BlockHeader.marked?`:
+      # under `GCRY_BITMAP=1` the header generation is not where the marks are,
+      # and the static reader would answer for the wrong representation.
       if heap_marked?(header)
         return false
       end

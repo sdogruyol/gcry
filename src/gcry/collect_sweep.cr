@@ -792,6 +792,33 @@ module Gcry
       end
     end
 
+    # Mark read for a block the sweep already has in hand.
+    #
+    # The ordinal is a counter, not a computation: the walk visits blocks in
+    # address order, so it increments by one per block and the bitmap index
+    # costs nothing. That is the whole reason `heap_marked?`'s chunk lookup must
+    # not appear in this loop — a lookup per block is what took a 2026-08-01
+    # experiment to 56.3% of Boehm.
+    @[AlwaysInline]
+    private def block_marked?(chunk : ChunkHeader*, header : BlockHeader*, ordinal : UInt64) : Bool
+      return BlockHeader.marked?(header) unless @bitmap_marks
+      # Union: the trace writes the bitmap, allocate-black writes the header
+      # generation. See the note on `block_marked_in?` in heap.cr — keeping
+      # allocate-black on the header is what keeps a chunk lookup off the
+      # mutator's allocation path in this phase.
+      chunk_marked?(chunk, ordinal) || BlockHeader.marked?(header)
+    end
+
+    # Clearing one block's mark is a header write on the header path and
+    # **nothing at all** on the bitmap path: 64 blocks share a word, so a
+    # per-bit clear is a read-modify-write over 63 other blocks' marks, and this
+    # walk runs with mutators live under lazy sweep. The bitmap is zeroed
+    # wholesale by `clear_all_marks` at the start of the next cycle.
+    @[AlwaysInline]
+    private def clear_block_mark(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      BlockHeader.clear_mark(header) unless @bitmap_marks
+    end
+
     # The header-walk arm of the size-class sweep.
     #
     # Still inline loops rather than `each_block`: the yield overhead per block
@@ -826,13 +853,14 @@ module Gcry
         # Count unmarked USED + FREE payload in the discover pass so
         # fully-dead chunks skip a second O(blocks) walk.
         dead = 0_u64
+        ordinal = 0_u64
         while (cursor + block_bytes) <= limit
           usable_payload += payload.to_u64
           header = cursor.as(BlockHeader*)
           if BlockHeader.free?(header)
             free_payload &+= payload.to_u64
             # FREE + marked: mid-alloc claimed from a stack root.
-            if heap_marked?(header)
+            if block_marked?(chunk, header, ordinal)
               any_live = true
               live_payload += payload.to_u64
             end
@@ -848,7 +876,7 @@ module Gcry
               # still writing it. Count it, call the chunk live.
               @sweep_small_uninitialised &+= 1
               any_live = true
-            elsif heap_marked?(header)
+            elsif block_marked?(chunk, header, ordinal)
               any_live = true
               live_payload += payload.to_u64
             else
@@ -856,21 +884,29 @@ module Gcry
             end
           end
           cursor += block_bytes
+          ordinal &+= 1
         end
         if any_live
           cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          ordinal = 0_u64
           while (cursor + block_bytes) <= limit
             header = cursor.as(BlockHeader*)
             unless BlockHeader.free?(header)
               if uninitialised_small_block?(header)
                 # Counted in the discover pass; never reclaim.
-              elsif heap_marked?(header)
-                heap_clear_mark(header)
+              elsif block_marked?(chunk, header, ordinal)
+                # No per-block clear on the bitmap path — `clear_all_marks`
+                # zeroes the whole bitmap at the start of the next cycle,
+                # because clearing one bit is a read-modify-write over the 63
+                # other blocks sharing its word and this walk runs with
+                # mutators live under lazy sweep.
+                clear_block_mark(chunk, header)
               else
                 reclaim_small(chunk, header, payload)
               end
             end
             cursor += block_bytes
+            ordinal &+= 1
           end
         else
           # Fully-dead chunk: batch the live_objects accounting (one
@@ -878,6 +914,7 @@ module Gcry
           live_objects_sub(dead)
         end
       else
+        ordinal = 0_u64
         while (cursor + block_bytes) <= limit
           usable_payload += payload.to_u64 if major
           header = cursor.as(BlockHeader*)
@@ -888,8 +925,8 @@ module Gcry
               @sweep_small_uninitialised &+= 1
               any_live = true
             elsif major || BlockHeader.nursery?(header)
-              if heap_marked?(header)
-                heap_clear_mark(header)
+              if block_marked?(chunk, header, ordinal)
+                clear_block_mark(chunk, header)
                 BlockHeader.promote(header) unless major
                 unless major
                   @nursery_survival_bytes += payload.to_u64
@@ -905,6 +942,7 @@ module Gcry
             end
           end
           cursor += block_bytes
+          ordinal &+= 1
         end
       end
 

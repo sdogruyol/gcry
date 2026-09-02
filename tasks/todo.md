@@ -39,9 +39,27 @@ Prior art that bounds this work — read before touching the allocator:
 - [x] Large chunks keep `data_offset == SIZE` → all 12 `header - SIZE`
       back-references correct with no edit
 - [x] R6: `find_block` + `owns_user_pointer?` off the hardcoded offset, spec-pinned
-- [ ] **NEXT**: `heap_marked?` / `set` on the chunk bitmap, `GCRY_BITMAP` knob
-- [ ] Delete `mark_bitmap.cr` and `-Dgcry_side_bitmap`
-- [ ] NO `occ`, NO allocator change in this phase
+- [x] `GCRY_BITMAP` knob read in `Heap#initialize` via `LibC.getenv`; `bitmap_marks=`
+      setter refuses to change once chunks exist (data_offset is baked per chunk)
+- [x] `map_chunk` carves geometry; mmap zeroing means bitmaps start clear
+- [x] `chunk_marked?` / `chunk_set_mark` (atomic OR + relaxed pre-load) /
+      `chunk_clear_marks` (wholesale only)
+- [x] Large chunks stay on the header generation — one object each, and a bitmap
+      region would move `data_start` and break 12 back-references
+- [x] R1 atomic OR ships ON
+- [x] R2 no per-bit clear; `clear_all_marks` zeroes wholesale at cycle start
+      (minors keep old-gen marks, matching `clear_nursery_marks`' contract)
+- [x] R3 `barrier.cr:222` routed through `heap_set_mark`; `heap_dump.cr` and
+      `thread_list_tripwire.cr` through `marked_for_report?` / `heap_marked?`
+- [x] R5 fast `(chunk, ordinal)` pair + slow `(header)` wrapper; sweep's ordinal
+      is a counter, and `find_block_with_chunk` keeps mark off a second lookup
+- [x] Delete `mark_bitmap.cr` and `-Dgcry_side_bitmap` — gone, along with the
+      `@@mark_bitmap` global, the growth/headroom machinery in `collect.cr`
+      (`ensure_bitmap_covers`, `note_bitmap_growth`, `compute_bitmap_growth_avg`)
+      and the `GCRY_BITMAP_RETAIN_OLD` arm that only configured it
+- [ ] Spec: same workload under both representations, same live set
+- [ ] Run every gate under `GCRY_BITMAP=1`
+- [x] NO `occ`, NO allocator change in this phase
 - [ ] Gate: Kemal `/json` flat, RSS flat — `wrk` now installed, baseline cut in flight
 
 ## Landed alongside (not part of the plan)

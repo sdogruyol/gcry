@@ -170,7 +170,7 @@ not reclaim.
 | Post-retain=0 ~1.4–1.6× | Idle live_sc falls; heap/RSS stay — **mapped freelist** / sparse chunks (`…/acik-i3-residual/`) |
 | `GCRY_TIGHT_GROW=1` | Closes freelist floor on acik (**~103%** @ **~0.92×**); Kemal thr soft — **opt-in only** |
 | `GCRY_PARALLEL_MARK` | Experimental — thr **regressed** here; keep `N=1` |
-| Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr — **opt-in only** (`-Dgcry_side_bitmap`) |
+| Side mark bitmap | Linux HTTP: ~9× Kemal RSS / ~50% acik thr. The side-mmap build flag is **removed**; mark bitmaps now live inside each chunk (`GCRY_BITMAP=1`, opt-in) and cost no separate mapping |
 
 ## Don’t bother (measured)
 

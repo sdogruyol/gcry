@@ -12,12 +12,12 @@ Stress the collector. Tune process GC. Know where false retention comes from.
 ```sh
 crystal spec
 crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
-# optional: side mark bitmap (higher RSS on Linux HTTP) — crystal build -Dgc_none -Dgcry_side_bitmap …
+# optional: per-chunk mark bitmaps — GCRY_BITMAP=1 ./bin/stress 300
 ```
 
 ## Defaults that matter (process GC)
 
-- Marks live in the **BlockHeader** (`MARK` flag). Side `MarkBitmap` mmap is **opt-in** (`-Dgcry_side_bitmap`) — Linux HTTP A/B: ~9× Kemal RSS vs ~1× header marks
+- Marks live in the **BlockHeader** (mark generation byte). Per-chunk mark bitmaps are **opt-in** (`GCRY_BITMAP=1`) — the bits ride in each chunk's own header, so there is no side mmap and no RSS tail
 - Majors: Linux **32 MiB**, Darwin **16 MiB**; **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
@@ -54,6 +54,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INCREMENTAL=1` | Sliced majors (+ dirty re-scan if barrier armed) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW (process default) |
 | `GCRY_INCREMENTAL_WORK` | Objects per slice (default **1024**) |
+| `GCRY_BITMAP=1` | Mark bits in a per-chunk bitmap (one bit per block, in the chunk's own header) instead of the mark-generation byte in each `BlockHeader`. Opt-in, **default off** — the header path stays the shipping representation until a Kemal + acikturkiye cut says otherwise, and it is also the fallback on a CPU without the SIMD baseline. Read once at heap `initialize`: a chunk's `data_offset` is baked in at `map_chunk`, so it cannot change under a live heap |
 | `GCRY_SIMD` | SIMD tier for the bitmap kernels: `off`/`scalar`/`none`, `neon`, `avx2`, `avx512`. Clamps **down** only — naming a tier the CPU lacks would be a SIGILL, so an unsupported or unrecognised value falls back to what `cpuid` detected. Default: detected. `off` is the A/B arm that separates a vector-kernel bug from a representation bug |
 | `GCRY_LARGE_RELEASE_FROM_BASE=1` | Research/positive control only: restore the pre-0.21.4 lower bound in the large-freelist page release, which started the range at the chunk base and so covered the chunk's own header page. `madvise_range_ok?` refuses those ranges, so this is how `make large-freelist-madvise` proves its guard has teeth. Never set it in production |
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
@@ -91,7 +92,6 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_RELEASE_QUARANTINE=N` | Hold a released range `PROT_NONE` for N collections before returning the address to the kernel. Pages are dropped as `munmap` would drop them, so the cost is address space, not RSS. `GCRY_UNMAP_GUARD=1` (never return it at all) removes the acikturkiye crash; this bounds how long the danger lasts. |
 | `GCRY_ALWAYS_CLEAR=1` | Research arm: zero every allocation, including the ones whose bytes are already believed zero (fresh `MAP_ANONYMOUS`, clean freelist). Crystal's `Reference.allocate` zeroes nothing itself, so an unassigned ivar reads whatever the previous occupant left. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying / address-space audit. That walk fires once per collection and left to itself always picks a small block; this aims the single shot at a size. |
-| `GCRY_BITMAP_RETAIN_OLD=1` | Research arm: keep the old mark-bitmap mapping alive across a resize instead of unmapping it. `update_heap_bounds_after_unmap` resizes the bitmap from two paths that do not agree about locking, and a mutator suspended mid-resize still holds a pointer into the old mapping. Measured 4 of 60 against 5 of 60 — no effect; the arm stays because the next question about that resize will want it. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying/address-space audit. The address-space walk fires once per collection and otherwise always picks a small block; this aims that single shot at a size. |
 | `GCRY_LAYOUT_DUMP=1` | Print every layout registration at boot: type name, type_id, and the scan/noscan offsets the macro emitted. A *missing* offset is otherwise invisible — the mark audit can name the type_id that lost an edge but not the type. |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |

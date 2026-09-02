@@ -1,6 +1,5 @@
 require "./block"
 require "./size_classes"
-require "./mark_bitmap"
 require "./chunk_layout"
 require "crystal/spin_lock"
 require "c/pthread"
@@ -81,17 +80,17 @@ module Gcry
     property small_chunk_bytes : UInt64 = SMALL_CHUNK_BYTES
 
     @chunks : ChunkHeader* = Pointer(ChunkHeader).null
-    # Side mark bitmap (`-Dgcry_side_bitmap` only): one bit per word-aligned
-    # heap address in its own mmap. Default path keeps MARK in BlockHeader.
-    @mark_bitmap : MarkBitmap? = nil
-    # Inline bitmap state (mirrored from @mark_bitmap on relocate/destroy).
-    # Kept on the heap struct so `marked?`/`set_mark`/`clear_mark` can answer
-    # in O(1) without dereferencing the singleton — the heap's hot fields
-    # (`@heap_min`, `@heap_max`) live in the same cache line and the bitmap
-    # state is read on every mark candidate.
-    @mark_bitmap_base : UInt64 = 0_u64
-    @mark_bitmap_base_addr : UInt64 = 0_u64
-    @mark_bitmap_cap_bits : UInt64 = 0_u64
+    # Per-chunk mark bitmaps instead of the header mark-generation byte
+    # (`GCRY_BITMAP=1`). Decided once at `initialize` and never changed while
+    # chunks exist: it determines each chunk's `data_offset`, so flipping it
+    # under a live heap would make already-carved chunks unreadable.
+    #
+    # Off by default. The header path stays the shipping representation until a
+    # Kemal + acikturkiye cut says the bitmap wins, and it is also the fallback
+    # on a CPU without the SIMD baseline.
+    getter? bitmap_marks : Bool = false
+    # Instruction-set tier for the bitmap kernels; see `Gcry::Cpu`.
+    getter simd_tier : UInt8 = Kernels::TIER_SCALAR
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # Tight-grow: freelist nodes that live in the current grow chunk (newest
@@ -204,10 +203,11 @@ module Gcry
     @suppress_collect = Atomic(Int32).new(0)
 
     def initialize
-      {% if flag?(:gcry_side_bitmap) %}
-        @mark_bitmap = MarkBitmap.new
-        Gcry.current_mark_bitmap = @mark_bitmap
-      {% end %}
+      # Both read through LibC.getenv rather than ENV[]: under -Dgc_none this
+      # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
+      # SEGV (gc_override.cr:520).
+      @simd_tier = Cpu.tier_from_env
+      @bitmap_marks = Heap.bitmap_marks_from_env
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @prefer_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -218,10 +218,6 @@ module Gcry
       @large_freelists = StaticArray(Void*, LARGE_FREE_BUCKETS).new(Pointer(Void).null)
       @pause_ring = StaticArray(UInt64, PAUSE_RING_SIZE).new(0_u64)
       @pause_hdr = StaticArray(UInt64, PAUSE_HDR_BUCKETS).new(0_u64)
-      @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
-      @bitmap_growth_count = 0
-      @bitmap_growth_pos = 0
-      @bitmap_headroom_bytes = (SMALL_CHUNK_BYTES >> 3)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       @block_magic = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
@@ -259,9 +255,8 @@ module Gcry
       @mark_epoch = Atomic(UInt64).new(0_u64)
       @header_mark_gen = 1_u8
       @header_mark_gen_full_clears = 0_u64
-      {% unless flag?(:gcry_side_bitmap) %}
-        BlockHeader.mark_gen = @header_mark_gen
-      {% end %}
+      # Large chunks use the header generation under both representations.
+      BlockHeader.mark_gen = @header_mark_gen
       @mark_shutdown = Atomic(Int32).new(0)
       @mark_workers_busy = Atomic(Int32).new(0)
       @clear_stack_enabled = false
@@ -327,22 +322,26 @@ module Gcry
       end
       @chunk_index_count = 0
       @chunk_index_cap = 0
-      if bm = @mark_bitmap
-        # Clear the global bitmap pointer only if we still own it — another
-        # heap may have taken over since we installed ourselves.
-        # Under -Dgc_none this avoids nulling the process-GC heap's bitmap
-        # at test teardown.
-        if Gcry.current_mark_bitmap.same?(bm)
-          Gcry.current_mark_bitmap = nil
-        end
-        # Null the hot mirrored fields so a stale heap read doesn't dereference
-        # an unmapped mapping.
-        @mark_bitmap_base = 0_u64
-        @mark_bitmap_base_addr = 0_u64
-        @mark_bitmap_cap_bits = 0_u64
-        bm.destroy
-        @mark_bitmap = nil
+      # No bitmap teardown: the mark bitmaps live inside the chunks and are
+      # unmapped with them. That is the whole point of putting them there.
+    end
+
+    # `GCRY_BITMAP=1`. Read with LibC.getenv, not ENV[] — see `initialize`.
+    def self.bitmap_marks_from_env : Bool
+      raw = LibC.getenv("GCRY_BITMAP")
+      return false if raw.null?
+      raw.value == '1'.ord.to_u8 && (raw + 1).value == 0
+    end
+
+    # Specs and `gc_override` may switch representation, but only before any
+    # chunk has been carved: `data_offset` is baked into every chunk at
+    # `map_chunk`, so flipping this under a live heap would leave chunks whose
+    # blocks start somewhere the heap no longer believes they do.
+    def bitmap_marks=(value : Bool) : Bool
+      if value != @bitmap_marks && !@chunks.null?
+        raise ArgumentError.new("bitmap_marks cannot change once chunks are mapped")
       end
+      @bitmap_marks = value
     end
 
     def malloc(size : Int) : Void*
@@ -1582,6 +1581,23 @@ module Gcry
       {% end %}
 
       chunk = ptr.as(ChunkHeader*)
+
+      # Carve the metadata region. `mmap` hands back zeroed pages, so both
+      # bitmaps start clear with no work — a chunk is born with nothing marked
+      # and nothing occupied, which is exactly right.
+      #
+      # Large chunks never get one: they hold a single object, so there is
+      # nothing to amortise, and a bitmap region would move `data_start` and
+      # break the twelve sites that recover a large chunk as
+      # `header - ChunkHeader::SIZE`.
+      bitmap_words = 0_u32
+      data_offset = ChunkHeader::SIZE.to_u32
+      if @bitmap_marks && size_class != UInt32::MAX &&
+         size_class < SIZE_CLASS_COUNT.to_u32
+        bitmap_words, data_offset =
+          Heap.chunk_geometry(@block_bytes[size_class.to_i32], bytes, true)
+      end
+
       # Prepend and index-insert under the **one** lock that guards `@chunks`.
       #
       # This list used to be mutated under two: `unlink_chunk` holds
@@ -1601,7 +1617,7 @@ module Gcry
       # across that starves every `chunk_containing` — measured as a Darwin job
       # going from 1m50s to a 20-minute timeout. Order is list → index.
       @chunk_list_lock.sync do
-        chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags)
+        chunk.value = ChunkHeader.new(@chunks, bytes, size_class, flags, data_offset, bitmap_words)
         # Release store: the in-STW sweep and `each_chunk` walk this list
         # unlocked, and a mutator can be suspended between these two stores.
         # Frozen in SOURCE order the new chunk is merely invisible (it holds
@@ -1808,67 +1824,166 @@ module Gcry
       @last_chunk_hi = 0_u64
     end
 
-    {% unless flag?(:gcry_side_bitmap) %}
-      # In-header MARK (default): no side bitmap mmap.
-      @[AlwaysInline]
-      private def heap_marked?(header : BlockHeader*) : Bool
+    # ----- Mark bits -----
+    #
+    # Two representations, chosen once at `Heap#initialize` and never per call.
+    #
+    # Header (default): the mark-generation byte in `BlockHeader.flags`. One
+    # object per write, so a lost update can only ever affect that object.
+    #
+    # Bitmap (`GCRY_BITMAP=1`): one bit per block, in the chunk's own `mark`
+    # bitmap. **64 blocks share a word**, which changes the concurrency
+    # contract — see `chunk_set_mark`.
+    #
+    # Large chunks stay on the header generation under both. They hold exactly
+    # one object, so there is nothing for a bitmap to amortise, and keeping them
+    # on the header avoids a bitmap region that would move `data_start` and
+    # break the twelve sites that recover a large chunk as
+    # `header - ChunkHeader::SIZE`.
+
+    @[AlwaysInline]
+    private def chunk_block_ordinal(chunk : ChunkHeader*, addr : UInt64) : UInt64
+      class_index = chunk.value.size_class.to_i32
+      offset = addr - ChunkHeader.data_start(chunk).address
+      Heap.block_ordinal(offset, @block_magic[class_index])
+    end
+
+    @[AlwaysInline]
+    private def chunk_marked?(chunk : ChunkHeader*, ordinal : UInt64) : Bool
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return false if mark.null?
+      ((mark[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
+    end
+
+    # Set one block's mark bit.
+    #
+    # The OR is atomic and it is not optional. 64 blocks share a word, and there
+    # are two concurrent writers in configurations gcry ships: parallel mark
+    # workers, and **allocate-black in the mutator** — `heap_set_mark(header) if
+    # @incremental_marking || @collecting` at heap.cr and tlab.cr, seven sites,
+    # where `tlab_alloc_small` holds only its per-slot lock. A plain `|=` there
+    # drops a *different* object's mark, which the header representation
+    # structurally cannot do: it would be a live object swept, presenting as a
+    # rare load-dependent use-after-free.
+    #
+    # The relaxed load first is what keeps this cheap: re-marking an
+    # already-marked object is the common case during a trace, and it skips the
+    # locked instruction entirely.
+    @[AlwaysInline]
+    private def chunk_set_mark(chunk : ChunkHeader*, ordinal : UInt64) : Nil
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return if mark.null?
+      word = mark + (ordinal >> 6)
+      bit = 1_u64 << (ordinal & 63)
+      return if (word.value & bit) != 0
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, word, bit,
+        LLVM::AtomicOrdering::Monotonic, false)
+    end
+
+    # Zero a chunk's whole mark bitmap.
+    #
+    # This is the ONLY way marks are cleared on the bitmap path. There is no
+    # per-block clear, because clearing one bit is a read-modify-write of a word
+    # holding 63 other blocks' marks — the same lost-update hazard as the set,
+    # in the other direction, and the after-world sweep clears marks with
+    # mutators running.
+    @[AlwaysInline]
+    private def chunk_clear_marks(chunk : ChunkHeader*) : Nil
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return if mark.null?
+      words = chunk.value.bitmap_words.to_i32
+      i = 0
+      while i < words
+        mark[i] = 0_u64
+        i += 1
+      end
+    end
+
+    # ----- The Phase 1 union, and why it exists -----
+    #
+    # An object is marked if the bitmap says so **or** the header generation
+    # does. That is transitional, and it buys one specific thing: the mutator's
+    # allocation path is not touched at all.
+    #
+    # Allocate-black (`heap_set_mark(header) if @incremental_marking ||
+    # @collecting`, seven sites across heap.cr and tlab.cr) holds a header and
+    # no chunk. Routing it to the bitmap would mean `chunk_containing` per
+    # allocation — which takes `@index_lock` whenever the world is not stopped,
+    # so during the post-STW flush window it is a lock on the allocation fast
+    # path. That is the exact shape that took the 2026-08-01 experiment to
+    # 56.3% of Boehm, and this plan's hard constraint forbids it.
+    #
+    # So allocate-black keeps writing the header generation, unchanged, and the
+    # *readers* take the union. Sound because the generation is bumped every
+    # cycle (`clear_all_marks`), so a mark from cycle N stops counting in N+1
+    # exactly as it does today. Cheap because the sweep is still walking headers
+    # in this phase and `mark_impl` already reads the header for the FREE check
+    # and the type_id gate.
+    #
+    # Phase 3 retires it: once allocation is pool-cursor driven the chunk is in
+    # hand for free, allocate-black writes the bitmap directly, and the sweep
+    # stops reading headers at all. **The union must go when the sweep does** —
+    # a bitmap-only sweep with allocate-black still on the header would reclaim
+    # live objects.
+
+    # Union read for callers holding only a header: diagnostics, finalizer
+    # liveness, birth-grace, the audits. Pays a chunk lookup, which is why no
+    # hot path uses it — `sweep_small_blocks` counts ordinals, and
+    # `mark_impl_unlocked` gets its chunk from `find_block_with_chunk`.
+    @[AlwaysInline]
+    private def heap_marked?(header : BlockHeader*) : Bool
+      return BlockHeader.marked?(header) unless @bitmap_marks
+      return true if BlockHeader.marked?(header)
+      chunk = chunk_containing(header.address)
+      return false if chunk.nil? || ChunkHeader.large?(chunk)
+      chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address))
+    end
+
+    # Writes the header generation under **both** representations, so it costs
+    # no lookup on any path. This is what allocate-black calls; see the union
+    # note above for why that is deliberate rather than an oversight.
+    @[AlwaysInline]
+    private def heap_set_mark(header : BlockHeader*) : Nil
+      BlockHeader.set_mark(header)
+    end
+
+    # Clears the header generation only. Bitmap marks are never cleared one bit
+    # at a time — see `chunk_clear_marks`.
+    @[AlwaysInline]
+    private def heap_clear_mark(header : BlockHeader*) : Nil
+      BlockHeader.clear_mark(header)
+    end
+
+    # Mark read/write for a block whose chunk the caller already resolved: the
+    # hot-path pair, reached from `mark_impl_unlocked`.
+    @[AlwaysInline]
+    private def block_marked_in?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      return BlockHeader.marked?(header) unless @bitmap_marks
+      return BlockHeader.marked?(header) if ChunkHeader.large?(chunk)
+      chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address)) ||
         BlockHeader.marked?(header)
-      end
+    end
 
-      @[AlwaysInline]
-      private def heap_set_mark(header : BlockHeader*) : Nil
+    # The trace's mark write: bitmap for size-class blocks, header generation
+    # for large. No lookup — the caller resolved the chunk anyway.
+    @[AlwaysInline]
+    private def set_block_mark_in(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      if !@bitmap_marks || ChunkHeader.large?(chunk)
         BlockHeader.set_mark(header)
+        return
       end
+      chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
+    end
 
-      @[AlwaysInline]
-      private def heap_clear_mark(header : BlockHeader*) : Nil
-        BlockHeader.clear_mark(header)
-      end
-    {% else %}
-      # ----- Bitmap hot path (heap-inlined mirrors of MarkBitmap) -----
-      # Opt-in via `-Dgcry_side_bitmap`. These read the heap's mirrored fields
-      # (same cache line as @heap_min / @heap_max) instead of going through
-      # `Gcry.current_mark_bitmap` plus a MarkBitmap#marked? virtual dispatch.
-
-      @[AlwaysInline]
-      private def heap_marked?(header : BlockHeader*) : Bool
-        base = @mark_bitmap_base
-        return false if base == 0
-        user_addr = BlockHeader.user_from(header).address
-        bit_index = user_addr - @mark_bitmap_base_addr
-        return false if bit_index >= @mark_bitmap_cap_bits
-        word_index = (bit_index >> 6).to_i32
-        bit = (bit_index & 63).to_i32
-        word_ptr = Pointer(UInt64).new(base) + word_index
-        ((word_ptr.value >> bit) & 1_u64) != 0
-      end
-
-      @[AlwaysInline]
-      private def heap_set_mark(header : BlockHeader*) : Nil
-        base = @mark_bitmap_base
-        return if base == 0
-        user_addr = BlockHeader.user_from(header).address
-        bit_index = user_addr - @mark_bitmap_base_addr
-        return if bit_index >= @mark_bitmap_cap_bits
-        word_index = (bit_index >> 6).to_i32
-        bit = (bit_index & 63).to_i32
-        word_ptr = Pointer(UInt64).new(base) + word_index
-        word_ptr.value |= 1_u64 << bit
-      end
-
-      @[AlwaysInline]
-      private def heap_clear_mark(header : BlockHeader*) : Nil
-        base = @mark_bitmap_base
-        return if base == 0
-        user_addr = BlockHeader.user_from(header).address
-        bit_index = user_addr - @mark_bitmap_base_addr
-        return if bit_index >= @mark_bitmap_cap_bits
-        word_index = (bit_index >> 6).to_i32
-        bit = (bit_index & 63).to_i32
-        word_ptr = Pointer(UInt64).new(base) + word_index
-        word_ptr.value &= ~(1_u64 << bit)
-      end
-    {% end %}
+    # Public read for diagnostics, which live outside `Heap` and must not be
+    # allowed to disagree with the collector about what is marked. Reading
+    # `BlockHeader.marked?` directly reports the header generation, which under
+    # `GCRY_BITMAP=1` is not what the sweep consults — a diagnostic that
+    # confidently reports the wrong answer is worse than one that is absent,
+    # and these are the tools reached for when something is already wrong.
+    def marked_for_report?(header : BlockHeader*) : Bool
+      heap_marked?(header)
+    end
 
     private def index_ensure_cap(need : Int32) : Nil
       return if need <= @chunk_index_cap

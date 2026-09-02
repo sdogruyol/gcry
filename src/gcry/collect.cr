@@ -259,17 +259,6 @@ module Gcry
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
-    # Ring buffer for heap range observations (raw bytes, not headroom-inflated).
-    # On each major we record the heap range in bitmap-bytes; the average × 25 %
-    # becomes the adaptive headroom for the next interval.
-    BITMAP_GROWTH_HISTORY_CAPACITY = 16
-    @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
-    @bitmap_growth_count : Int32 = 0
-    @bitmap_growth_pos : Int32 = 0
-    # Cached adaptive headroom (in bitmap-bytes), recomputed after each major.
-    # Read by `ensure_bitmap_covers` on the allocation hot path — must be O(1).
-    @bitmap_headroom_bytes : UInt64 = 0
-
     property nursery_enabled : Bool = true
     # Adaptive nursery threshold: adjusted after each minor based on the
     # survival rate of the last N minors. When survival is below the target
@@ -1401,6 +1390,41 @@ module Gcry
        offset:     offset}
     end
 
+    # `find_block` plus the chunk it resolved through.
+    #
+    # The mark path needs both: the chunk is what indexes the mark bitmap, and
+    # re-deriving it with a second `chunk_containing` per candidate is the cost
+    # that took a 2026-08-01 experiment to 56.3% of Boehm. `find_block` is a
+    # thin wrapper so every existing caller is unaffected.
+    def find_block_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
+      return nil if pointer.null?
+      addr = pointer.address
+      return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
+
+      chunk = chunk_containing(addr)
+      return nil unless chunk
+
+      if ChunkHeader.large?(chunk)
+        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        finish = BlockHeader.user_from(header).address + header.value.size
+        return {header, chunk} if addr >= header.address && addr < finish
+        return nil
+      end
+
+      class_index = chunk.value.size_class.to_i32
+      return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+
+      block_bytes = @block_bytes[class_index]
+      data_start = ChunkHeader.data_start(chunk).address
+      return nil if addr < data_start
+
+      offset = addr - data_start
+      header_addr = data_start + Heap.block_ordinal(offset, @block_magic[class_index]) * block_bytes
+      return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
+
+      {Pointer(BlockHeader).new(header_addr), chunk}
+    end
+
     def find_block(pointer : Void*) : BlockHeader*?
       return nil if pointer.null?
       addr = pointer.address
@@ -1553,53 +1577,13 @@ module Gcry
       # Under `@index_lock`, because `update_heap_bounds_after_unmap` reads the
       # index and assigns these under it: without the lock this widen can land
       # between that read and its store and be lost, which shuts a live chunk
-      # out of the heap bounds. `ensure_bitmap_covers` stays outside — it can
-      # mmap, and a spinlock is the wrong place for that.
+      # out of the heap bounds.
       @index_lock.sync do
         @heap_min = base if base < @heap_min
         @heap_max = finish if finish > @heap_max
         @heap_span_lo = base if base < @heap_span_lo
         @heap_span_hi = finish if finish > @heap_span_hi
       end
-      ensure_bitmap_covers(@heap_min, @heap_max)
-    end
-
-    protected def ensure_bitmap_covers(lo : UInt64, hi : UInt64) : Nil
-      return if lo >= hi || lo == UInt64::MAX
-      bm = @mark_bitmap
-      return unless bm
-      # 1 bit per word-aligned address → bytes_needed = (range / 8).
-      range_bytes = (hi - lo) >> 3
-      # Adaptive headroom: cached from last major (recomputed outside hot path).
-      headroom = @bitmap_headroom_bytes
-      headroom = @small_chunk_bytes >> 3 if headroom < (@small_chunk_bytes >> 3)
-      needed = range_bytes + headroom
-      if bm.base_addr != lo || !bm.covers?(lo, hi)
-        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
-          @mark_bitmap_base = base.address
-          @mark_bitmap_base_addr = base_addr
-          @mark_bitmap_cap_bits = cap_bits
-        end
-      elsif bm.capacity_bytes < needed
-        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
-          @mark_bitmap_base = base.address
-          @mark_bitmap_base_addr = base_addr
-          @mark_bitmap_cap_bits = cap_bits
-        end
-      end
-    end
-
-    # Record a heap range observation (bytes, not headroom-inflated).
-    # Called after each major collect with the current `range_bytes`.
-    # Also recomputes the cached `@bitmap_headroom_bytes`.
-    private def note_bitmap_growth(actual_range_bytes : UInt64) : Nil
-      @bitmap_growth_history[@bitmap_growth_pos] = actual_range_bytes
-      @bitmap_growth_pos = (@bitmap_growth_pos + 1) % BITMAP_GROWTH_HISTORY_CAPACITY
-      @bitmap_growth_count += 1 if @bitmap_growth_count < BITMAP_GROWTH_HISTORY_CAPACITY
-      # Recompute cached headroom: 25 % of the running average of raw heap
-      # range observations. Done once per major — never on the allocation path.
-      avg_range = compute_bitmap_growth_avg
-      @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 3) : (@small_chunk_bytes >> 3)
     end
 
     # Record nursery survival from the just-completed minor collection. Updates
@@ -1661,17 +1645,6 @@ module Gcry
       @nursery_threshold = thr
     end
 
-    # Average of recorded growth history entries (0 if none).
-    private def compute_bitmap_growth_avg : UInt64
-      return 0_u64 if @bitmap_growth_count == 0
-      sum = 0_u64
-      count = @bitmap_growth_count
-      BITMAP_GROWTH_HISTORY_CAPACITY.times do |i|
-        sum += @bitmap_growth_history[i] if i < count
-      end
-      sum // count.to_u64
-    end
-
     protected def update_heap_bounds_after_unmap : Nil
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
@@ -1724,26 +1697,6 @@ module Gcry
         end
         @heap_min = lo
         @heap_max = hi
-      end
-      ensure_bitmap_covers(lo, hi)
-      # After bounds are tightened, check whether the bitmap has grown
-      # well beyond the current need and shrink it if so.  Threshold:
-      # capacity > 1.2 × needed  OR  capacity > needed + 1 MiB (absolute waste).
-      # This runs outside STW (called from flush_pending_empty_chunks,
-      # flush_pending_large_release and trim_large_cache) so the syscall cost
-      # is tolerable.
-      if hi > lo && lo != UInt64::MAX
-        bm = @mark_bitmap
-        if bm
-          needed = ((hi - lo) >> 3) + @bitmap_headroom_bytes
-          waste = bm.capacity_bytes > needed ? bm.capacity_bytes - needed : 0_u64
-          if waste > needed / 5 || waste > 1048576_u64 # 1.2× OR >1 MiB waste
-            bm.shrink_to_fit!(needed)
-            @mark_bitmap_base = bm.base.as(UInt64*).address
-            @mark_bitmap_base_addr = bm.base_addr
-            @mark_bitmap_cap_bits = bm.capacity_bytes * 8_u64
-          end
-        end
       end
     end
 
@@ -2098,14 +2051,7 @@ module Gcry
             end
           end
 
-          # After a major collect, record the heap range observation so the
-          # adaptive headroom in `ensure_bitmap_covers` stays tight.
-          # We record the raw range_bytes (not headroom-inflated) to avoid a
-          # positive-feedback loop where headroom drives up the running average.
           if major
-            range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
-            note_bitmap_growth(range_bytes)
-
             # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
             # Resets counters each major so the policy tracks the current working set.
             total_large = @large_cache_hits + @large_cache_misses
