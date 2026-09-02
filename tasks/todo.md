@@ -42,7 +42,26 @@ Prior art that bounds this work — read before touching the allocator:
 - [ ] **NEXT**: `heap_marked?` / `set` on the chunk bitmap, `GCRY_BITMAP` knob
 - [ ] Delete `mark_bitmap.cr` and `-Dgcry_side_bitmap`
 - [ ] NO `occ`, NO allocator change in this phase
-- [ ] Gate: Kemal `/json` flat, RSS flat — **BLOCKED: no `wrk` on this box**
+- [ ] Gate: Kemal `/json` flat, RSS flat — `wrk` now installed, baseline cut in flight
+
+## Landed alongside (not part of the plan)
+
+- [x] **`master` bug fixed** — `release_large_freelist_pages_locked` madvised the
+      page holding its own `ChunkHeader`/`BlockHeader`. Branch
+      `fix-large-freelist-madvise` off master, merged into `simdgc`.
+      `madvise_range_ok?` now bounds on `data_start`, not the chunk base, so the
+      whole class is caught rather than this one instance.
+      Gate `make large-freelist-madvise`: default arm 0 rejects / 4.4 MB
+      released, control arm (`GCRY_LARGE_RELEASE_FROM_BASE=1`) **119 of 119
+      refused**. FINDINGS at
+      `bench/log/linux/2026-09-03-large-freelist-header-madvise/`.
+- [x] **16-byte allocation alignment** — gcry returned 8-mod-16 pointers for
+      every allocation, small and large (140/140 measured at c62f722), against a
+      platform `max_align_t` of 16. Fixed as a side effect of ChunkHeader
+      24→32; pinned by spec so it cannot silently regress.
+- [ ] Latent sibling noted, not fixed: dormant flush at `collect_sweep.cr:612`
+      computes `finish = data_start + mapped_bytes`, overshooting the chunk end
+      by `data_offset`. Harmless today only because `end_page` rounds back down.
 
 ### Mark-clear design (settled by reading, not assumed)
 
