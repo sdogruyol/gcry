@@ -72,116 +72,24 @@ module Gcry
               sweep_large_one(chunk, major, after_world: false)
             end
           else
-            # Inline size-class sweep — avoid each_block yield overhead on
-            # multi-million block heaps (dominated phase_sweep under HTTP).
+            # Size-class sweep. The block walk itself is `sweep_small_blocks`;
+            # everything below it is the policy that consumes the four numbers
+            # it returns — live accounting, warm/DORMANT/munmap selection,
+            # HOLED/SPARSE classification, freelist rebuild bits. Keeping that
+            # policy in one place is what lets a second representation supply
+            # the same four numbers without restating any of it.
             class_index = chunk.value.size_class.to_i32
-            any_live = false
-            live_payload = 0_u64
-            usable_payload = 0_u64
-            # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
-            free_payload = 0_u64
             fl_locked = false
             if after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT
               freelist_lock_ptr(class_index, ChunkHeader.nursery?(chunk)).value.lock
               fl_locked = true
             end
             begin
-              if class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                payload = SizeClasses.payload(class_index)
-                block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-                cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                limit = ChunkHeader.data_end(chunk).as(UInt8*)
-                # When releasing empties: discover live first so fully-dead chunks
-                # skip freelist link (unlink-only for pre-existing free blocks).
-                defer_reclaim = major && release_empty_chunks_this_collect?
-                if defer_reclaim
-                  # Count unmarked USED + FREE payload in the discover pass so
-                  # fully-dead chunks skip a second O(blocks) walk.
-                  dead = 0_u64
-                  while (cursor + block_bytes) <= limit
-                    usable_payload += payload.to_u64
-                    header = cursor.as(BlockHeader*)
-                    if BlockHeader.free?(header)
-                      free_payload &+= payload.to_u64
-                      # FREE + marked: mid-alloc claimed from a stack root.
-                      if heap_marked?(header)
-                        any_live = true
-                        live_payload += payload.to_u64
-                      end
-                    else
-                      if uninitialised_small_block?(header)
-                        # Mid-`refill_size_class`: a mutator frozen inside the
-                        # header-init loop leaves mmap-zeroed headers — neither
-                        # FREE nor marked, which is exactly what the sweep
-                        # reclaims. The large path has had this tripwire since
-                        # 2026-08-24 (`sweep_large_one`); the small path could
-                        # reclaim the blocks AND classify the chunk fully-dead
-                        # into the warm/DORMANT/munmap paths under a mutator
-                        # still writing it. Count it, call the chunk live.
-                        @sweep_small_uninitialised &+= 1
-                        any_live = true
-                      elsif heap_marked?(header)
-                        any_live = true
-                        live_payload += payload.to_u64
-                      else
-                        dead &+= 1
-                      end
-                    end
-                    cursor += block_bytes
-                  end
-                  if any_live
-                    cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                    while (cursor + block_bytes) <= limit
-                      header = cursor.as(BlockHeader*)
-                      unless BlockHeader.free?(header)
-                        if uninitialised_small_block?(header)
-                          # Counted in the discover pass; never reclaim.
-                        elsif heap_marked?(header)
-                          heap_clear_mark(header)
-                        else
-                          reclaim_small(chunk, header, payload)
-                        end
-                      end
-                      cursor += block_bytes
-                    end
-                  else
-                    # Fully-dead chunk: batch the live_objects accounting (one
-                    # store under STW) instead of a CAS per block.
-                    live_objects_sub(dead)
-                  end
-                else
-                  while (cursor + block_bytes) <= limit
-                    usable_payload += payload.to_u64 if major
-                    header = cursor.as(BlockHeader*)
-                    unless BlockHeader.free?(header)
-                      if uninitialised_small_block?(header)
-                        # See the discover-pass comment above: a mutator frozen
-                        # mid-refill leaves zeroed headers; never reclaim them.
-                        @sweep_small_uninitialised &+= 1
-                        any_live = true
-                      elsif major || BlockHeader.nursery?(header)
-                        if heap_marked?(header)
-                          heap_clear_mark(header)
-                          BlockHeader.promote(header) unless major
-                          unless major
-                            @nursery_survival_bytes += payload.to_u64
-                          end
-                          any_live = true
-                          live_payload += payload.to_u64 if major
-                        else
-                          reclaim_small(chunk, header, payload)
-                        end
-                      else
-                        any_live = true
-                        live_payload += payload.to_u64 if major
-                      end
-                    end
-                    cursor += block_bytes
-                  end
-                end
-              else
-                any_live = true
-              end
+              counts = sweep_small_blocks(chunk, class_index, major)
+              any_live = counts.any_live
+              live_payload = counts.live_payload
+              usable_payload = counts.usable_payload
+              free_payload = counts.free_payload
 
               if major
                 @size_class_live_bytes += live_payload
@@ -860,6 +768,141 @@ module Gcry
           end
         end
       {% end %}
+    end
+
+    # What one chunk's block walk found. Extracted so the bitmap representation
+    # can supply the same four numbers from a streaming `occ &= mark` popcount
+    # instead of a header walk, without either arm having to restate the
+    # warm/DORMANT/munmap/HOLED/SPARSE policy that consumes them — that policy is
+    # the delicate part of `sweep` and it stays in exactly one place.
+    private struct SmallSweepCounts
+      getter any_live : Bool
+      getter live_payload : UInt64
+      getter usable_payload : UInt64
+      getter free_payload : UInt64
+
+      def initialize(@any_live : Bool, @live_payload : UInt64,
+                     @usable_payload : UInt64, @free_payload : UInt64)
+      end
+    end
+
+    # The header-walk arm of the size-class sweep.
+    #
+    # Still inline loops rather than `each_block`: the yield overhead per block
+    # dominated `phase_sweep` on multi-million-block HTTP heaps, and moving the
+    # walk behind one call per *chunk* does not reintroduce it.
+    #
+    # Two modes, unchanged. When empties are being released, a discover pass
+    # counts live/dead first so a fully-dead chunk skips the second O(blocks)
+    # walk entirely and settles `live_objects` with one store instead of a CAS
+    # per block. Otherwise a single pass reclaims as it goes.
+    private def sweep_small_blocks(chunk : ChunkHeader*, class_index : Int32,
+                                   major : Bool) : SmallSweepCounts
+      unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
+        # A chunk whose class we cannot read is never reclaimed from.
+        return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64)
+      end
+
+      any_live = false
+      live_payload = 0_u64
+      usable_payload = 0_u64
+      # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
+      free_payload = 0_u64
+
+      payload = SizeClasses.payload(class_index)
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+
+      # When releasing empties: discover live first so fully-dead chunks
+      # skip freelist link (unlink-only for pre-existing free blocks).
+      if major && release_empty_chunks_this_collect?
+        # Count unmarked USED + FREE payload in the discover pass so
+        # fully-dead chunks skip a second O(blocks) walk.
+        dead = 0_u64
+        while (cursor + block_bytes) <= limit
+          usable_payload += payload.to_u64
+          header = cursor.as(BlockHeader*)
+          if BlockHeader.free?(header)
+            free_payload &+= payload.to_u64
+            # FREE + marked: mid-alloc claimed from a stack root.
+            if heap_marked?(header)
+              any_live = true
+              live_payload += payload.to_u64
+            end
+          else
+            if uninitialised_small_block?(header)
+              # Mid-`refill_size_class`: a mutator frozen inside the
+              # header-init loop leaves mmap-zeroed headers — neither
+              # FREE nor marked, which is exactly what the sweep
+              # reclaims. The large path has had this tripwire since
+              # 2026-08-24 (`sweep_large_one`); the small path could
+              # reclaim the blocks AND classify the chunk fully-dead
+              # into the warm/DORMANT/munmap paths under a mutator
+              # still writing it. Count it, call the chunk live.
+              @sweep_small_uninitialised &+= 1
+              any_live = true
+            elsif heap_marked?(header)
+              any_live = true
+              live_payload += payload.to_u64
+            else
+              dead &+= 1
+            end
+          end
+          cursor += block_bytes
+        end
+        if any_live
+          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          while (cursor + block_bytes) <= limit
+            header = cursor.as(BlockHeader*)
+            unless BlockHeader.free?(header)
+              if uninitialised_small_block?(header)
+                # Counted in the discover pass; never reclaim.
+              elsif heap_marked?(header)
+                heap_clear_mark(header)
+              else
+                reclaim_small(chunk, header, payload)
+              end
+            end
+            cursor += block_bytes
+          end
+        else
+          # Fully-dead chunk: batch the live_objects accounting (one
+          # store under STW) instead of a CAS per block.
+          live_objects_sub(dead)
+        end
+      else
+        while (cursor + block_bytes) <= limit
+          usable_payload += payload.to_u64 if major
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            if uninitialised_small_block?(header)
+              # See the discover-pass comment above: a mutator frozen
+              # mid-refill leaves zeroed headers; never reclaim them.
+              @sweep_small_uninitialised &+= 1
+              any_live = true
+            elsif major || BlockHeader.nursery?(header)
+              if heap_marked?(header)
+                heap_clear_mark(header)
+                BlockHeader.promote(header) unless major
+                unless major
+                  @nursery_survival_bytes += payload.to_u64
+                end
+                any_live = true
+                live_payload += payload.to_u64 if major
+              else
+                reclaim_small(chunk, header, payload)
+              end
+            else
+              any_live = true
+              live_payload += payload.to_u64 if major
+            end
+          end
+          cursor += block_bytes
+        end
+      end
+
+      SmallSweepCounts.new(any_live, live_payload, usable_payload, free_payload)
     end
 
     # Classify a kept size-class chunk by live_payload / usable_payload.
