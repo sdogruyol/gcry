@@ -142,6 +142,12 @@ module Gcry
     # Research only: skip the check and issue the syscall anyway, which is what
     # it did before 2026-08-23.
     property madvise_unchecked : Bool = false
+    # Research only (`GCRY_LARGE_RELEASE_FROM_BASE=1`): restore the pre-2026-09-03
+    # lower bound in the large-freelist page release, which started the range at
+    # the chunk base and so covered the chunk's own header page. It exists so
+    # `make large-freelist-madvise` has a positive control — a guard that can
+    # only ever report zero proves nothing.
+    property large_release_from_base : Bool = false
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false
