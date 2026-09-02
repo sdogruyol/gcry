@@ -163,4 +163,68 @@ describe Gcry::Heap do
       (mark.address + words.to_u64 * 8).should be <= Gcry::ChunkHeader.data_start(chunk).address
     end
   end
+  describe "allocation alignment" do
+    # gcry's `GC.malloc` stands in for the platform allocator, so what it
+    # returns has to be aligned for any type — `max_align_t` is 16 on x86-64
+    # and aarch64, and Boehm returns 16-byte-aligned memory.
+    #
+    # It did not. Before the header grew, `data_start` was `chunk + 24` and a
+    # block is `16 + payload`, so every user pointer landed at `chunk + 40`
+    # plus a multiple of 16 — i.e. **8 mod 16, every allocation, small and
+    # large**. Measured at c62f722: 140 of 140 misaligned. Anything needing
+    # 16-byte alignment on GC memory (an SSE load, a C library handed a gcry
+    # pointer, a type containing a 16-byte-aligned member) was relying on luck.
+    #
+    # `ChunkHeader::SIZE` 24 -> 32 makes `24 + 16 = 40` into `32 + 16 = 48` and
+    # fixes it. That is currently a *consequence* of the bitmap work rather than
+    # its purpose, which is exactly why it is pinned here: the next change to
+    # the header size must not quietly undo it.
+    it "returns 16-byte-aligned memory for every size class and for large objects" do
+      heap = Gcry::Heap.new
+      begin
+        misaligned = 0
+        checked = 0
+        Gcry::SizeClasses::COUNT.times do |i|
+          payload = Gcry::SizeClasses.payload(i)
+          4.times do
+            ptr = heap.malloc(payload.to_u64)
+            next if ptr.null?
+            checked += 1
+            misaligned += 1 if (ptr.address % 16) != 0
+          end
+        end
+        # Large objects take a different path and were equally misaligned.
+        [40_000_u64, 100_000_u64, 300_000_u64].each do |size|
+          4.times do
+            ptr = heap.malloc(size)
+            next if ptr.null?
+            checked += 1
+            misaligned += 1 if (ptr.address % 16) != 0
+          end
+        end
+        checked.should be > 150
+        misaligned.should eq(0)
+      ensure
+        heap.destroy
+      end
+    end
+
+    it "derives that alignment from the layout rather than from luck" do
+      # The property that makes it hold: the first block starts at a multiple
+      # of 16 from a page-aligned chunk base, and every block stride is a
+      # multiple of 16, so `data_offset + BlockHeader::SIZE` being 0 mod 16 is
+      # what carries it to every block in the chunk.
+      (Gcry::ChunkHeader::SIZE % 16).should eq(0)
+      (Gcry::BlockHeader::SIZE % 16).should eq(0)
+      Gcry::SizeClasses::COUNT.times do |i|
+        block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
+        (block_bytes % 16).should eq(0)
+        _, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, true)
+        ((data_offset.to_u64 + Gcry::BlockHeader::SIZE) % 16).should eq(0)
+        # And with bitmaps off, which is the default until the cut says otherwise.
+        _, plain = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, false)
+        ((plain.to_u64 + Gcry::BlockHeader::SIZE) % 16).should eq(0)
+      end
+    end
+  end
 end

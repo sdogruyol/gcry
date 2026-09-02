@@ -32,14 +32,47 @@ Prior art that bounds this work — read before touching the allocator:
 
 ## Phase 1 — per-chunk mark bitmap
 
-- [ ] `ChunkHeader` gains `data_offset : UInt32` (SIZE 24 → 32)
-- [ ] Assert `chunk_data_offset[class] < Platform.host_page_size` at init
-- [ ] Magic reciprocal per class + exhaustive spec vs `//`
-- [ ] `heap_marked?` / `set` / `clear` on the chunk bitmap
-- [ ] Large chunks: one bit in flags, `data_offset` stays 24
+- [x] `ChunkHeader` gains `data_offset` + `bitmap_words` (SIZE 24 → 32) — 09edc19
+- [x] `data_offset < Platform.host_page_size` pinned by spec (1056 B / 2080 B)
+- [x] Magic reciprocal + exhaustive spec vs `//`; ceiling 64 MiB clamped in
+      `gc_override`. Tightest class first fails at 86.3 MiB.
+- [x] Large chunks keep `data_offset == SIZE` → all 12 `header - SIZE`
+      back-references correct with no edit
+- [x] R6: `find_block` + `owns_user_pointer?` off the hardcoded offset, spec-pinned
+- [ ] **NEXT**: `heap_marked?` / `set` on the chunk bitmap, `GCRY_BITMAP` knob
 - [ ] Delete `mark_bitmap.cr` and `-Dgcry_side_bitmap`
 - [ ] NO `occ`, NO allocator change in this phase
-- [ ] Gate: Kemal `/json` flat, RSS flat
+- [ ] Gate: Kemal `/json` flat, RSS flat — **BLOCKED: no `wrk` on this box**
+
+### Mark-clear design (settled by reading, not assumed)
+
+`clear_nursery_marks` retains old-generation marks across a minor on purpose
+(`collect_mark.cr:744` — "remain valid"), and a minor bumps no generation. So:
+
+- Minor: zero nursery chunks' mark bitmaps only. Matches today.
+- Major: old chunks may still hold marks from the last major *if a minor ran
+  since*. So `clear_all_marks` is a no-op when no minor has run since the last
+  major — which is **every collection in the default config, nursery being
+  off** — and a full per-chunk zero otherwise. One boolean, free on the default
+  path, instead of an unconditional 4 MiB-per-GiB memset (~0.2 ms/GiB).
+- Sweep zeroes each chunk's mark bitmap wholesale after its walk (R2), never
+  per bit.
+- DORMANT transition and `revive_dormant_chunk` both zero the bitmaps: a
+  fully-free chunk sweep skips could otherwise carry a stale mark from the
+  FREE+marked TLAB-claim path (`collect_mark.cr:101-123`).
+- `GCRY_DEBUG_INVARIANTS` audit: after `clear_all_marks`, every mark bitmap is
+  zero. Turns a silent divergence into a finding.
+
+### Concurrency (R1/R2), from the call-site census
+
+11 `heap_set_mark` sites. **7 are mutator-side allocate-black** —
+`heap.cr:765,869,1228,1239` and `tlab.cr:376,611,682`, all
+`if @incremental_marking || @collecting`. 64 blocks share a bitmap word, so a
+non-atomic `|=` there drops a *different* object's mark. Atomic OR ships ON.
+
+3 real `heap_clear_mark` sites: `collect_sweep.cr:340` (large — one bit in
+`flags`, no sharing, fine) and `:862`, `:886` (inside `sweep_small_blocks` —
+both must become the post-walk wholesale zero).
 
 ### Phase 1 hard requirements (from design review)
 
