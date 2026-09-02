@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed kernels-broken bench-kernels segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query poison-freed kernels-broken bench-kernels segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -326,6 +326,52 @@ segv-report: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/segv_report.cr -o $(BIN)/segv_report --error-trace
 	$(BIN)/segv_report
 	$(BIN)/segv_report --control
+
+# The SIMD bitmap kernels are stamped from one source body into a scalar clone
+# and, on x86_64, an AVX2 and an AVX-512 clone, so `spec/kernels_spec.cr` fuzzes
+# every clone against the scalar one as oracle. That fuzz can only ever report
+# "they agree", which is worth nothing on its own — a vectoriser that silently
+# did nothing would also agree. So the gate is two arms and the first one is the
+# point: `-Dgcry_kernels_broken` drops the last word from the vector clones
+# only, and the fuzz has to go **red**. Then the same fuzz, unbroken, has to go
+# green. On a host whose top tier is scalar there are no vector clones to break,
+# so the positive control cannot fire and the target refuses the run rather than
+# reporting a green it did not earn.
+#
+# The broken arm is matched on "N examples, M failures" with M > 0, not on a
+# non-zero exit code: a compile error, a moved spec file or a typo'd flag all
+# exit non-zero too, and any of them would leave this gate cheerfully reporting
+# a positive control that never ran. ~12 s.
+# Phase 0 floor for the SIMD bitmap kernels: what sweep costs per byte of
+# bitmap before any of it is wired into the collector, so Phase 3's phase_sweep
+# has something to be attributed to. Reports every tier the host can run, at an
+# L2-resident and a DRAM-resident working set. The plan's bar is sweep >= 20
+# GB/s on AVX2. Expect the tiers to spread at L2 and converge at DRAM — the
+# kernel is bandwidth-bound there, which is why AVX-512 is worth ~1.3x on sweep
+# and not 2x (simdgc-perf-notes.md). ~10 s.
+bench-kernels: $(BIN)
+	$(CRYSTAL) build --release bench/micro/kernels.cr -o $(BIN)/kernels_micro --error-trace
+	$(BIN)/kernels_micro --passes=$${KERNEL_PASSES:-12}
+
+kernels-broken:
+	@echo "== positive control: broken vector clones must fail the equivalence fuzz =="
+	@if [ "$$($(CRYSTAL) run ci/kernel_tier.cr --no-debug 2>/dev/null)" = "scalar" ]; then \
+	  echo "REFUSED: host top tier is scalar, so -Dgcry_kernels_broken changes nothing"; \
+	  echo "         and a green run here would prove nothing. Run on an AVX2+ host."; \
+	  exit 1; \
+	fi
+	@out=$$($(CRYSTAL) spec spec/kernels_spec.cr -Dgcry_kernels_broken 2>&1); \
+	if echo "$$out" | grep -qE '[0-9]+ examples, [1-9][0-9]* failures'; then \
+	  echo "OK: broken vector clones observed red -- $$(echo "$$out" | grep -E 'examples,' | tail -1)"; \
+	else \
+	  echo "FAIL: the broken arm did not fail as an equivalence mismatch."; \
+	  echo "      A non-zero exit is not enough: a compile error would also be non-zero"; \
+	  echo "      and would leave this gate reporting a green it did not earn."; \
+	  echo "$$out" | tail -20; \
+	  exit 1; \
+	fi
+	@echo "== control: unbroken kernels must pass =="
+	$(CRYSTAL) spec spec/kernels_spec.cr
 
 poison-freed: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_freed.cr -o $(BIN)/poison_freed --error-trace

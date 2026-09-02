@@ -54,6 +54,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INCREMENTAL=1` | Sliced majors (+ dirty re-scan if barrier armed) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW (process default) |
 | `GCRY_INCREMENTAL_WORK` | Objects per slice (default **1024**) |
+| `GCRY_SIMD` | SIMD tier for the bitmap kernels: `off`/`scalar`/`none`, `neon`, `avx2`, `avx512`. Clamps **down** only — naming a tier the CPU lacks would be a SIGILL, so an unsupported or unrecognised value falls back to what `cpuid` detected. Default: detected. `off` is the A/B arm that separates a vector-kernel bug from a representation bug |
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
