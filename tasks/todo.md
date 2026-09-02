@@ -122,6 +122,13 @@ both must become the post-walk wholesale zero).
 - [ ] R6 `collect.cr:1417` and `heap.cr:2121` use `ChunkHeader.data_start`, + spec
 - [ ] R7 sweep block-walk extraction as its own no-behaviour-change commit FIRST
 
+## Phase 1 — CLOSED
+
+Gate was "flat", and flat is what the measurement supports. Note what that is
+worth: the bitmap arm does strictly *more* work (union reads, allocate-black
+still on the header, sweep still walking headers), so flat means the added cost
+is under the noise floor. It licenses continuing; it is not a win.
+
 ## Phase 2 — O(1) chunk lookup
 
 - [ ] Radix lock-free iff `@world_stopped`, `@index_lock` otherwise (today's rule)

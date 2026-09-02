@@ -69,7 +69,12 @@ So the protocol for every later phase is fixed here, not improvised then:
 2. **Report a paired t-statistic and a 95% CI**, not a ratio of medians. A
    difference whose CI spans zero is not a result.
 3. **Carry a null control** — same-GC vs same-GC — in any batch whose headline
-   is a small effect. If the null does not land on 1.00, the batch is unusable.
+   is a small effect, **at the same n as the comparison it validates**. If the
+   null does not land on 1.00, the batch is unusable.
+   *(Amended 2026-09-03 by `../2026-09-03-simdgc-bitmap-ab/`: at n=4 that
+   batch's `/json` null read −12.80%, 0/4 wins, p=0.051 — condemning a batch
+   that was in fact fine. At n=16 it was clean. A 4-pair null is a coin flip
+   that will condemn good batches and bless bad ones.)*
 4. **Size the batch to the effect.** The CI half-width above is ~±10% at n=8.
    Resolving 5pp needs roughly n=32 pairs (CI shrinks as 1/√n), which is about
    11 minutes per path at 10 s trials — affordable, and cheaper than a retracted
