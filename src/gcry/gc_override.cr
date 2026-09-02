@@ -590,9 +590,14 @@ module GC
     end
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
-    # Must be ≥64 KiB and page-aligned.
+    # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
+    # ordinal's magic reciprocal is exact to — past that a block address would
+    # resolve to the wrong ordinal, silently, on the collector's hottest path.
+    # The tightest size class first disagrees at 86.3 MiB; the bound is 64 MiB.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
-      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
+      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES &&
+         chunk_bytes <= Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES &&
+         (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
       end
     end

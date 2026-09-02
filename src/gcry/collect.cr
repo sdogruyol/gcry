@@ -1414,7 +1414,12 @@ module Gcry
       return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       block_bytes = @block_bytes[class_index]
-      data_start = chunk.address + ChunkHeader::SIZE
+      # Not `chunk.address + ChunkHeader::SIZE`: a size-class chunk's blocks
+      # start after its bitmaps, and `owns_user_pointer?` (heap.cr) derives the
+      # same address the same way. If these two ever disagree, a valid pointer
+      # starts reporting "not a gcry allocation" — see the spec that pins them
+      # together.
+      data_start = ChunkHeader.data_start(chunk).address
       return nil if addr < data_start
 
       offset = addr - data_start

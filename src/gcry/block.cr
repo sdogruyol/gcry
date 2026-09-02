@@ -207,12 +207,29 @@ module Gcry
 
   # Header at the start of every mmap'd region (small chunk or large object).
   struct ChunkHeader
-    SIZE = 24
+    # 24 -> 32 for `data_offset` and `bitmap_words`.
+    #
+    # Every site that recovers a large chunk from its block does
+    # `header - ChunkHeader::SIZE` (heap.cr:1299 and five siblings,
+    # collect.cr:1017, collect_sweep.cr:478, :843), and every site that sizes a
+    # large mapping does `ChunkHeader::SIZE + BlockHeader::SIZE + payload`
+    # (heap.cr:1216). Those stay correct *by construction* because large chunks
+    # keep `data_offset == SIZE`: they hold one object and need no bitmap, so
+    # their single mark bit lives in `flags`. Only size-class chunks move their
+    # data start, and they are never reached by pointer arithmetic on this
+    # constant.
+    SIZE = 32
 
-    property next : ChunkHeader*
-    property mapped_bytes : UInt64
-    property size_class : UInt32 # index into SIZE_CLASSES, or UInt32::MAX for large
-    property flags : UInt32
+    property next : ChunkHeader*   # 0
+    property mapped_bytes : UInt64 # 8
+    property size_class : UInt32   # 16 — index into SIZE_CLASSES, or UInt32::MAX for large
+    property flags : UInt32        # 20
+    # Bytes from the chunk base to the first block. `SIZE` for large chunks and
+    # for every chunk when the bitmap representation is off; otherwise it also
+    # covers the two bitmaps that sit between this header and the first block.
+    property data_offset : UInt32 # 24
+    # Words in EACH of the `occ` and `mark` bitmaps. Zero when there are none.
+    property bitmap_words : UInt32 # 28
 
     module Flags
       NURSERY = 1_u32
@@ -225,7 +242,9 @@ module Gcry
       SPARSE = 8_u32
     end
 
-    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32, @flags : UInt32 = 0_u32)
+    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
+                   @flags : UInt32 = 0_u32, @data_offset : UInt32 = SIZE.to_u32,
+                   @bitmap_words : UInt32 = 0_u32)
     end
 
     def self.base(chunk : ChunkHeader*) : Void*
@@ -233,7 +252,22 @@ module Gcry
     end
 
     def self.data_start(chunk : ChunkHeader*) : Void*
-      (chunk.as(UInt8*) + SIZE).as(Void*)
+      (chunk.as(UInt8*) + chunk.value.data_offset).as(Void*)
+    end
+
+    # `occ` — allocated blocks. Null until Phase 3 gives it a consumer.
+    def self.occ_bitmap(chunk : ChunkHeader*) : UInt64*
+      return Pointer(UInt64).null if chunk.value.bitmap_words == 0
+      (chunk.as(UInt8*) + SIZE).as(UInt64*)
+    end
+
+    # `mark` — reachable blocks, authoritative when the bitmap representation
+    # is on. Sits immediately after `occ`, so one chunk's metadata is one
+    # contiguous run and the sweep streams both together.
+    def self.mark_bitmap(chunk : ChunkHeader*) : UInt64*
+      words = chunk.value.bitmap_words
+      return Pointer(UInt64).null if words == 0
+      (chunk.as(UInt8*) + SIZE).as(UInt64*) + words
     end
 
     def self.data_end(chunk : ChunkHeader*) : Void*

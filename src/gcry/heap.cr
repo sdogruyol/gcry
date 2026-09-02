@@ -1,6 +1,7 @@
 require "./block"
 require "./size_classes"
 require "./mark_bitmap"
+require "./chunk_layout"
 require "crystal/spin_lock"
 require "c/pthread"
 
@@ -104,6 +105,8 @@ module Gcry
     @nursery_freelist_clean = uninitialized StaticArray(Bool, SIZE_CLASS_COUNT)
     @large_freelists = uninitialized StaticArray(Void*, LARGE_FREE_BUCKETS)
     @block_bytes = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+    # Magic reciprocals for `offset / block_bytes` — see `Heap.block_magic`.
+    @block_magic = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
     @destroyed = false
     @nursery_alloc_bytes = Atomic(UInt64).new(0_u64)
     # Lazily rebuilt address-sorted index (mark / static exclusion).
@@ -220,8 +223,10 @@ module Gcry
       @bitmap_growth_pos = 0
       @bitmap_headroom_bytes = (SMALL_CHUNK_BYTES >> 3)
       @block_bytes = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+      @block_magic = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
       SIZE_CLASS_COUNT.times do |i|
         @block_bytes[i] = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
+        @block_magic[i] = Heap.block_magic(@block_bytes[i])
       end
       @tlab_enabled = false
       @tlab_refills = 0_u64
@@ -2118,7 +2123,8 @@ module Gcry
       return false if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       block_bytes = @block_bytes[class_index]
-      data_start = chunk.address + ChunkHeader::SIZE
+      # Must agree with `find_block` (collect.cr) exactly — see the note there.
+      data_start = ChunkHeader.data_start(chunk).address
       return false if header.address < data_start
 
       offset = header.address - data_start
