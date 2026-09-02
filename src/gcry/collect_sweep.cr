@@ -750,11 +750,17 @@ module Gcry
             header = BlockHeader.from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             next_user = header.value.next_free
-            data_lo = chunk.address
-            data_hi = data_lo + chunk.value.mapped_bytes
+            # Round up from `data_start`, not from the chunk base. The base is
+            # already page-aligned, so rounding up from it is a no-op and the
+            # range began at page 0 — the page holding this chunk's own
+            # `ChunkHeader` and the `BlockHeader` whose `next_free` threads this
+            # very bucket chain. Every sibling release site rounds up from
+            # `data_start` for this reason (:615, :1059).
+            data_lo = @large_release_from_base ? chunk.address : ChunkHeader.data_start(chunk).address
+            data_hi = chunk.address + chunk.value.mapped_bytes
             start = (data_lo + page - 1) & ~(page - 1)
             finish = data_hi & ~(page - 1)
-            if start < finish
+            if start < finish && madvise_range_ok?(chunk, start, finish)
               ok = {% if flag?(:darwin) %}
                      Platform.release_physical_pages(start, finish - start)
                    {% else %}
@@ -1143,11 +1149,26 @@ module Gcry
       live
     end
 
+    # A release range must lie inside the chunk **and above its own metadata**.
+    #
+    # The lower bound is `data_start`, not `base`. A chunk's `ChunkHeader` — and
+    # for a large chunk the object's `BlockHeader` with the `next_free` link the
+    # large freelist is threaded through — live below `data_start`, so a range
+    # that reaches page 0 hands the kernel permission to discard the bookkeeping
+    # that finds the chunk again. `release_large_freelist_pages_locked` did
+    # exactly that until 2026-09-03, and it did it on the default post-STW path.
+    #
+    # Bounding here rather than only at that one call site is deliberate: every
+    # other release site already rounds up from `data_start` (:615, :1059) or
+    # filters on `run_start >= data0` (:803, :1175), so tightening this costs
+    # them nothing and turns "remembered to start above the header" from a
+    # convention into a checked property.
     private def madvise_range_ok?(chunk : ChunkHeader*, run_start : UInt64, run_end : UInt64) : Bool
       return true if @madvise_unchecked
       base = chunk.as(Void*).address
       limit = base &+ chunk.value.mapped_bytes
-      ok = run_start >= base && run_end <= limit &&
+      data_start = ChunkHeader.data_start(chunk).address
+      ok = run_start >= data_start && run_end <= limit &&
            base >= @heap_span_lo && limit <= @heap_span_hi
       @madvise_range_rejects &+= 1 unless ok
       ok
