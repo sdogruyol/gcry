@@ -194,7 +194,12 @@ end
 # Linux keeps the HOLED walk opt-in, so the arm that exercises it has to ask
 # for it. Darwin turns it on in `GC.init` and walks every chunk, not just the
 # HOLED ones — the same code, reached without a knob.
-holed_bad, holed_hung, holed_note, holed_dn, holed_ul = run(exe, {"GCRY_PAGE_DONTNEED" => "1"}, attempts)
+# Every arm pins GCRY_BITMAP_ALLOC=0. The free-page release walks are freelist-
+# shaped and not ported to the bitmap allocator — they stand down on bitmap
+# chunks — so an inherited GCRY_BITMAP_ALLOC=1 leaves nothing for the walk to
+# do and the gate cannot certify it ran. Same disarmed-control shape the radix
+# gave find-block-race and the bitmap allocator gave heap-counters.
+holed_bad, holed_hung, holed_note, holed_dn, holed_ul = run(exe, {"GCRY_PAGE_DONTNEED" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
 puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, holed_dn, holed_ul, holed_note)
 
 # `GCRY_MOSTLY_EMPTY` is ignored while `madvise_free_pages` is on, and Darwin
@@ -202,10 +207,10 @@ puts arm_line("GCRY_PAGE_DONTNEED=1:    ", holed_bad, holed_hung, attempts, hole
 # measure the HOLED walk a second time and still report bytes released, which
 # is the shape of a gate that says "both walks ran" when only one did.
 empty_bad, empty_hung, empty_note, empty_dn, empty_ul = run(exe,
-  {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1"}, attempts)
+  {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_DISABLE_PAGE_RELEASE" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
 puts arm_line("GCRY_MOSTLY_EMPTY=1:     ", empty_bad, empty_hung, attempts, empty_dn, empty_ul, empty_note)
 
-off_bad, off_hung, off_note, off_dn, off_ul = run(exe, {"GCRY_DISABLE_MADVISE" => "1"}, attempts)
+off_bad, off_hung, off_note, off_dn, off_ul = run(exe, {"GCRY_DISABLE_MADVISE" => "1", "GCRY_BITMAP_ALLOC" => "0"}, attempts)
 puts arm_line("GCRY_DISABLE_MADVISE=1:  ", off_bad, off_hung, attempts, off_dn, off_ul, off_note)
 puts ""
 

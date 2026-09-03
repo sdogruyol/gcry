@@ -500,7 +500,20 @@ module Gcry
 
       header = BlockHeader.from_user(pointer)
       raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
-      raise ArgumentError.new("double free") if BlockHeader.free?(header)
+
+      # The double-free check asks the same authority everything else does.
+      #
+      # `BlockHeader.free?` is stale on a bitmap chunk for every block the
+      # streaming sweep reclaimed, so freeing one of those passed this check,
+      # `bitmap_free_block` was a no-op on an already-clear bit, and
+      # `live_objects_dec` still ran. That over-decrement is the exact shape of
+      # `mt-property-test`'s `live_objects mismatch reported=98 walked=233`.
+      double_free = if (chunk = chunk_for(pointer))
+                      !block_allocated?(chunk, header)
+                    else
+                      BlockHeader.free?(header)
+                    end
+      raise ArgumentError.new("double free") if double_free
 
       if BlockHeader.large?(header)
         payload = header.value.size.to_u64
@@ -2426,10 +2439,8 @@ module Gcry
         # Retract before the caller's munmap, for the same reason the sorted
         # index does: a reader that still sees the entry dereferences it.
         radix_remove(chunk)
-        # And drop any allocation cursor into it. A cursor holds a raw
-        # `ChunkHeader*`; left pointing at an unmapped chunk the next allocation
-        # faults in `occ_bitmap`.
-        bitmap_drop_pool_chunk(chunk) if @bitmap_alloc
+        # No cursor drop here. A chunk under a cursor is pinned live by the
+        # sweep and never reaches this path — see `bitmap_cursor_on?`.
         # Range test AND base identity: the hook exists because the entry
         # vanishes, and a defect that has already rewritten `mapped_bytes`
         # would blind a range-only test while the base still names the chunk.

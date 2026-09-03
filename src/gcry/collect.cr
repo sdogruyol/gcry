@@ -188,6 +188,11 @@ module Gcry
     # size-class chunk is a mutator frozen mid-`refill_size_class`. The sweep
     # treats the chunk as live instead of reclaiming blocks that never lived.
     getter sweep_small_uninitialised : UInt64 = 0_u64
+    # Chunks the bitmap sweep left untouched because an allocation cursor was
+    # on them — the cursor analogue of `sweep_small_uninitialised`. Nonzero is
+    # normal (one per class per cycle at most); it is here so a silence is
+    # readable rather than assumed.
+    getter sweep_cursor_pinned : UInt64 = 0_u64
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.

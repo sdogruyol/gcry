@@ -338,29 +338,45 @@ module Gcry
         LLVM::AtomicOrdering::Monotonic, false)
     end
 
-    # Drop any cursor pointing into `chunk`. Called before a chunk is made
-    # dormant or unmapped: a cursor left pointing at released memory would hand
-    # out blocks from a chunk the heap no longer owns.
-    # NOTE: there is deliberately no `bitmap_reset_pools`.
+    # Is a size-class cursor currently on `chunk`?
     #
-    # A blanket reset at the top of `sweep` looked like the cheap way to avoid
-    # reasoning about which cursors survive. It is a data race: `sweep` holds no
-    # size-class lock there, while `bitmap_alloc_locked` reads `@pool_free_mask`
-    # and only then reads and dereferences `@pool_chunk`. Nulling the chunk
-    # between those two reads leaves a non-zero mask with a null chunk, and the
-    # next allocation faults in `occ_bitmap` — `signal 11 at address 0x1c`,
-    # 4 of 4 children in `find-block-race`, deterministically.
+    # The sweep asks this and, if the chunk is otherwise empty, keeps it mapped
+    # for the cycle rather than reclaiming it — a cursor holds a raw
+    # `ChunkHeader*` a mutator may be suspended mid-use of.
     #
-    # Cursors are dropped per chunk instead, inside the section where `sweep`
-    # already holds that chunk's size-class lock (or the world is stopped).
-
-    protected def bitmap_drop_pool_chunk(chunk : ChunkHeader*) : Nil
-      SIZE_CLASS_COUNT.times do |i|
-        next unless @pool_chunk[i] == chunk
-        @pool_chunk[i] = Pointer(ChunkHeader).null
-        @pool_free_mask[i] = 0_u64
-        @pool_word[i] = 0
+    # That replaces an earlier design that *dropped* cursors from the sweep, and
+    # the reason it had to go is the codebase's oldest recurring bug shape: a
+    # mutator can be suspended by STW mid-`bitmap_alloc_locked`, holding the
+    # class lock, having read the cached mask but not yet the chunk. The in-STW
+    # sweep cannot take that lock (a frozen peer holds it — the 0.21.1
+    # `@chunk_list_lock` hang, one lock over), so it nulled the cursor unlocked,
+    # and the mutator resumed into `occ_bitmap(null)`: `signal 11 at 0x1c`,
+    # `0x1c` being exactly the `bitmap_words` field offset. Proved by
+    # instrumentation — every drop that matched a live cursor came from the
+    # stopped-world sweep, none from `index_remove`.
+    #
+    # Pinning closes a second window the drop could not: a mutator frozen
+    # *after* its `occ` store but before the block's address exists in any
+    # register the root scan can see. That block is `occ=1, mark=0`,
+    # unreachable, and `occ &= mark` would free it under the mutator — which
+    # then returns a dangling pointer. Under the pin the word is not swept.
+    #
+    # The header path's answer to the same situation is
+    # `uninitialised_small_block?`: a chunk a frozen mutator is mid-writing is
+    # called live and the tripwire counts it. This is that rule for cursors.
+    #
+    # Reading `@pool_chunk` here needs no lock. Under STW the writer is frozen
+    # and a single pointer cannot tear; in the after-world sweep this thread
+    # already holds the class lock. Cost when it fires: one chunk per class
+    # carries its garbage one cycle longer.
+    @[AlwaysInline]
+    protected def bitmap_cursor_on?(chunk : ChunkHeader*) : Bool
+      i = 0
+      while i < SIZE_CLASS_COUNT
+        return true if @pool_chunk[i] == chunk
+        i += 1
       end
+      false
     end
   end
 end

@@ -250,11 +250,12 @@ which takes `@chunk_list_lock` and not the class lock.
 
 ### Also owed
 
-- [ ] Free-page release is **not ported** and now explicitly declines on bitmap
+- [ ] Free-page release is **not ported** and explicitly declines on bitmap
       chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks.
-      `bitmap_page_live_mask` is the mask half, written and currently
-      unreachable; the unported half is `unlink_free_only_page_runs`, which
-      takes free blocks off a freelist that does not exist here.
+      `page-release-corruption`'s arms now pin `GCRY_BITMAP_ALLOC=0` so the gate
+      tests the header-representation walk it is about.
+- [ ] Dormant-flush overshoot fixed (`finish = base + mapped_bytes` overshot by
+      `data_offset`; now `chunk.address + mapped_bytes`).
 - [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
       chunk. Wants a per-class pool list, ascending address order.
 - [ ] Nursery chunks still header-based (Phase 8)

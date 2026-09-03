@@ -85,12 +85,6 @@ module Gcry
               fl_locked = true
             end
             begin
-              # Drop any allocation cursor into this chunk while its size-class
-              # lock is held (or the world is stopped): the sweep below may make
-              # it dormant, unlink it or unmap it, and a cursor is a raw
-              # `ChunkHeader*` plus a precomputed block address.
-              bitmap_drop_pool_chunk(chunk) if @bitmap_alloc
-
               counts = sweep_small_blocks(chunk, class_index, major)
               any_live = counts.any_live
               live_payload = counts.live_payload
@@ -547,7 +541,13 @@ module Gcry
       each_chunk do |chunk|
         next unless ChunkHeader.dormant?(chunk)
         base = ChunkHeader.data_start(chunk).address
-        finish = base + chunk.value.mapped_bytes
+        # `chunk.address + mapped_bytes`, not `base + mapped_bytes`: the chunk
+        # ends where its mapping ends, and `base` is `data_offset` bytes past
+        # the chunk start. The old expression overshot by exactly that much and
+        # was correct only because `end_page` rounded back down over a
+        # sub-page offset — an accident a larger metadata region would not
+        # survive. Flagged in 2026-09-03-large-freelist-header-madvise.
+        finish = chunk.address + chunk.value.mapped_bytes
         start_page = (base + page - 1) & ~(page - 1)
         end_page = finish & ~(page - 1)
         if start_page < end_page
@@ -915,7 +915,18 @@ module Gcry
         @bytes_reclaimed_since_gc += freed * payload
       end
 
-      SmallSweepCounts.new(live > 0,
+      # The garbage above is reclaimed regardless. But if an allocation cursor
+      # is on this chunk it must not reach the empty-chunk path: a cursor is a
+      # raw `ChunkHeader*` a mutator may be suspended mid-use of, and unmapping
+      # or DONTNEED'ing it out from under that mutator is the `signal 11 at
+      # 0x1c` (`occ_bitmap` of a freed chunk) the earlier unlocked cursor-drop
+      # caused. Forcing `any_live` keeps it mapped; its emptiness is noticed
+      # next cycle, once the cursor has moved on. Dropping the cursor here
+      # instead is unsafe — a frozen mutator resumes through the null.
+      pinned = live == 0 && bitmap_cursor_on?(chunk)
+      @sweep_cursor_pinned &+= 1 if pinned
+
+      SmallSweepCounts.new(live > 0 || pinned,
         live * payload,
         nblocks * payload,
         (nblocks - live) * payload)
