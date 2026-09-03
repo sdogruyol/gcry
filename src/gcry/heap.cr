@@ -110,6 +110,20 @@ module Gcry
     # (`GCRY_ALLOC_PFW`, default 2 KiB, 0 = off). simdgc measured 7.1 -> 4.2 ns
     # on fresh memory; the sweet spot is machine-dependent, so it is a knob.
     property alloc_pfw : UInt64 = 2048_u64
+    # Ask the kernel for transparent huge pages on GC chunks instead of the
+    # default MADV_NOHUGEPAGE (`GCRY_HUGEPAGES=1`).
+    #
+    # **This is a no-op today, and it was measured as one** (+0.5% mark, +0.2%
+    # alloc, RSS -4.3% at t=-1.01 — nothing on any axis). Chunks are 128 KiB
+    # *separate* mmaps, and THP can only back a >=2 MiB region within a single
+    # VMA, so a 128 KiB mapping can never be huge-backed no matter what it is
+    # advised. The plan's "reserved arena + MADV_HUGEPAGE" phrasing is therefore
+    # not two options but one prerequisite and one mechanism: without a large
+    # contiguous arena to carve chunks from, this advice cannot be honoured.
+    #
+    # Kept because it is the correct mechanism and the place the arena work
+    # lands, not because it currently does anything. Never defaulted.
+    property hugepages : Bool = false
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # Tight-grow: freelist nodes that live in the current grow chunk (newest
@@ -1734,7 +1748,8 @@ module Gcry
       # reclaim at 4 KiB granularity, keeping RSS proportional to the
       # live object set.
       {% if flag?(:linux) %}
-        LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_NOHUGEPAGE)
+        LibC.madvise(ptr, LibC::SizeT.new(bytes),
+          @hugepages ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
       {% end %}
 
       chunk = ptr.as(ChunkHeader*)

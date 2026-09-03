@@ -112,6 +112,7 @@ module Gcry
     end
 
     # madvise advice constants (Linux <asm/mman.h>).
+    MADV_HUGEPAGE   = 14
     MADV_NOHUGEPAGE = 15
     MADV_FREE       =  8
     MADV_COLD       = 20

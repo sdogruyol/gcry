@@ -382,4 +382,38 @@ Three candidates, materially different risk/reward:
       the win is EC4+ multi-mutator. Deferring keeps concurrency risk off the
       recently-hardened allocator. The shipping allocator win (−27.8% ns/alloc)
       is already banked from Phase 3. Design: thread-local per-class cursor,
-      refill hands out a whole 64-block word per lock (simdgc3 gc_tpool).
+      refill hands out a whole 64-block word per lock (simdgc3 gc_tpool).## Phase 8 — opt-in extras — partly done, one honest miss
+
+- [x] **AVX-512 variants where the IR shows `vpopcntq`** — done in Phase 0 and
+      re-verified: tier detected `avx512` on this host, sweep kernel
+      **176.8 GB/s L2** vs 64.4 AVX2 vs 11.7 scalar (2.7x over AVX2). Converges
+      at DRAM (30.3 vs 30.0), but chunk bitmaps are ~1 KiB and live in L1/L2,
+      which is where the win is.
+- [ ] **Hugepages — MISS, and structurally so.** `GCRY_HUGEPAGES=1` implemented
+      and measured: +0.5% mark, +0.2% alloc, RSS n.s. Nothing on any axis
+      against a predicted −20% mark. Cause: chunks are 128 KiB separate mmaps
+      and THP needs ≥2 MiB inside one VMA, so the advice can never be honoured.
+      "Reserved arena + MADV_HUGEPAGE" is one prerequisite plus one mechanism,
+      not two options. The arena is a chunk-allocator restructure — the real
+      work, still to do. Knob ships off, documented as a no-op.
+      FINDINGS: bench/log/linux/2026-09-03-simdgc-hugepages/
+- [ ] Nursery minors on bitmaps — deferred; needs the nursery moved onto the
+      bitmap representation (a Phase 3 extension), not just kernel reuse.
+
+## Phase 7 — headerless — NOT ATTEMPTED, and why
+
+Blast radius measured before starting, which is why it was not started:
+**207 BlockHeader field reads, 97 from_user/user_from, 154 header.value reads,
+36 BlockHeader::SIZE arithmetic sites, across 22 files** — plus porting six
+diagnostics (poison_holders, invariant, mark_audit, address_space_audit,
+heap_dump, segv_report) with their purpose-broken gates re-run and observed red.
+
+This is a multi-session epic in a *conservative* collector, where a missed site
+is not a failing test but a use-after-free that surfaces days later under load
+(the open `String#empty?` hunt is exactly that shape). Landing a partial
+headerless rewrite on a shared branch would be the single riskiest thing done to
+this codebase. It wants its own branch, its own staging, and its own soak — not
+the tail of a long session.
+
+It remains the right next big lever: 16 B/object is 50% of a class-0 block, and
+it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
