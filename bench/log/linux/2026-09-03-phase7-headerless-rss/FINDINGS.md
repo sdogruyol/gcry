@@ -340,3 +340,50 @@ purpose-built probes, and it delivers the **−44.6% RSS** the phase exists for.
 But "passes a lot of tests" is not "correct", and the remaining defect is real.
 
 The header build is unaffected and fully gated throughout.
+
+---
+
+## Update 5: a dependency enforced, and the bug still open
+
+Two more hypotheses tested and rejected, and one piece of hardening that should
+have been there from the start.
+
+**Enforced: headerless requires the bitmap representation.** The freelist
+allocator threads `next_free` *through the block header*, and a headerless small
+block has none — so every freelist push writes a link into the object's own first
+words. `Heap#initialize` now forces `bitmap_alloc` and `bitmap_marks` on under
+`-Dgcry_headerless`, and the `bitmap_alloc=` setter refuses to turn them off.
+Previously a heap constructed without the env var would corrupt silently.
+
+This was *not* the cause of the failure being chased — `Gcry::Heap.new` already
+reads `GCRY_BITMAP_ALLOC` from the environment, so the tests were running with it
+on. It is kept because the dependency is real and was undefended, and because a
+future caller constructing a heap directly would have hit it.
+
+**Rejected by measurement:** the nursery (off by default, and forcing it either
+way changes nothing), `MADV_DONTNEED` (`GCRY_DISABLE_MADVISE=1`), mostly-empty
+reclaim (`GCRY_MOSTLY_EMPTY=0`), and lazy sweep (both directions). None of them
+moves the failure.
+
+### Where the hunt stands
+
+The failure is stubbornly reproducible at 20 000 `property_test` iterations and
+absent at 11 000, which is deterministic enough to argue *against* a race and
+for a threshold — something that accumulates until it crosses a boundary. Chunk
+release widens the window (`GCRY_KEEP_CHUNKS=1` survives 15 000 but not 30 000)
+without being the cause.
+
+Everything cheap has now been eliminated. What remains is the expensive kind of
+work this needs and has not had: a bisect on the operation sequence itself
+(`property_test` writes an op log — replaying a failing seed and shrinking it is
+the obvious next move), or a poisoned-freed build that traps the first read of a
+reclaimed block rather than waiting for the damage to surface thousands of
+operations later.
+
+### Standing, unchanged in substance
+
+`-Dgcry_headerless` is **not correct**. It delivers **−44.6% RSS** and passes a
+wide battery — `property_test` to 11 000 iterations, `mt_property_test`,
+`stw_mt_property_test`, `gc_phases` at every size, object-graph survival,
+allocation overlap, allocation bounds, realloc/Array churn — and none of that
+makes it correct. The header build is unaffected and fully gated.

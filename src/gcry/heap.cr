@@ -250,8 +250,20 @@ module Gcry
       # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
       # SEGV (gc_override.cr:520).
       @simd_tier = Cpu.tier_from_env
-      @bitmap_alloc = Heap.bitmap_alloc_from_env
-      @bitmap_marks = @bitmap_alloc || Heap.bitmap_marks_from_env
+      # Headerless *requires* the bitmap representation, and is not optional
+      # about it. The freelist allocator threads `next_free` through the block
+      # header, and a headerless small block has none — so every freelist push
+      # writes a link into the object's own first words. A heap constructed
+      # without `bitmap_alloc` would corrupt silently and only surface after
+      # tens of thousands of operations, so the dependency is enforced here
+      # rather than documented.
+      {% if flag?(:gcry_headerless) %}
+        @bitmap_alloc = true
+        @bitmap_marks = true
+      {% else %}
+        @bitmap_alloc = Heap.bitmap_alloc_from_env
+        @bitmap_marks = @bitmap_alloc || Heap.bitmap_marks_from_env
+      {% end %}
       radix_init if Heap.chunk_radix_from_env
       bitmap_alloc_init
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -410,6 +422,9 @@ module Gcry
       if value != @bitmap_marks && !@chunks.null?
         raise ArgumentError.new("bitmap_marks cannot change once chunks are mapped")
       end
+      {% if flag?(:gcry_headerless) %}
+        return value # headerless cannot run on the header representation
+      {% end %}
       @bitmap_alloc = false unless value
       @bitmap_marks = value
     end
@@ -420,6 +435,12 @@ module Gcry
     # cursor replaces it outright. Enabling both would have two allocators
     # handing out the same blocks.
     def bitmap_alloc=(value : Bool) : Bool
+      {% if flag?(:gcry_headerless) %}
+        # Cannot be turned off: a headerless small block has no header for the
+        # freelist to thread `next_free` through, so the freelist allocator
+        # would write links into live objects.
+        return true
+      {% end %}
       if value != @bitmap_alloc && !@chunks.null?
         raise ArgumentError.new("bitmap_alloc cannot change once chunks are mapped")
       end
