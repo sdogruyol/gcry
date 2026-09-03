@@ -335,7 +335,7 @@ module Gcry
 
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
       header = ChunkHeader.large_header(chunk)
-      return if BlockHeader.free?(header)
+      return if BlockHeader.free_large?(header)
       # A chunk whose block header is still all zeroes is one `alloc_large`
       # published and has not filled in yet. `map_chunk` links the chunk and
       # inserts it into the index before `set_used` runs, and STW takes no part

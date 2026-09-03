@@ -215,3 +215,79 @@ The header build is unaffected throughout and fully green: spec 222/222 across
 default / `GCRY_BITMAP_ALLOC` / `GCRY_CHUNK_RADIX`, plus invariants, mark-audit,
 property, mt-property, stw-mt-property, parallel-mark-process,
 page-release-corruption, heap-counters, find-block-race, ameba and format.
+
+---
+
+## Update 3: the "accumulating corruption" was not corruption
+
+Chasing the failure that appeared between 10 000 and 15 000 `property_test`
+iterations. Running it under `GCRY_DEBUG_INVARIANTS=1` produced the line the
+release build had been unable to print:
+
+```
+property test ok seed=1 iterations=15000 collects=6404 verifies=6403
+                 freed=6271 peak_nodes=6469 warnings=0
+Unhandled exception: pthread_join: No such process (RuntimeError)
+  from src/gcry/parallel_mark.cr:102 in 'shutdown_mark_workers'
+  from src/gcry/heap.cr:331 in 'destroy'
+```
+
+**The test passes.** Every root verified, zero warnings, 6 404 collections. The
+process then dies in `Heap#destroy`, joining a mark-worker `Thread` whose handle
+is stale. Reproducible 3/3 headerless, 0/3 on the header build, and it still
+happens with `GCRY_PARALLEL_MARK=1`.
+
+The earlier reading — "accumulating heap corruption" — was wrong, and wrong for
+an avoidable reason: the release build's failure message is itself built by
+string interpolation, and the process was dying before flushing it, so the only
+evidence was a blank line and a SIGSEGV in teardown. Reaching for the diagnostic
+build first would have cost one run and saved several.
+
+### What was ruled out on the way, each by measurement
+
+- **Magic reciprocal.** Headerless changes every `block_bytes`, so the exactness
+  bounds the plan verified for `16 + payload` do not carry over. Recomputed for
+  all 40 classes at `payload`: tightest first divergence is **51 MiB**, against a
+  128 KiB chunk. Safe, with a 400x margin.
+- **Allocation bounds.** 120 000 allocations across six size classes, every one
+  inside its chunk's `data_start..data_end`. The doubled block count per chunk
+  does not overrun the tail mask.
+- **Object-graph survival.** An object holding an `Array` of objects — the exact
+  shape of `Heap#@mark_worker_threads` — through 200 000 allocations and repeated
+  collections: all 20 children intact, tags unchanged.
+- **Heap-object integrity.** A canary in a `Heap` field across 30 000
+  alloc/collect iterations: unclobbered.
+- **Chunk release** (`GCRY_KEEP_CHUNKS=1`) and **page release** (already stood
+  down on bitmap chunks): neither is involved.
+
+### One real bug found and fixed on the way
+
+`cache_large_chunk`'s double-insert guard is `if BlockHeader.free?(header)`,
+which answers `false` unconditionally under headerless — so the guard never
+fired. Its own comment says what that costs: one chunk in a bucket chain twice,
+and "`take_large_free` then hands the same memory to two owners while
+`trim_large_cache` is still free to unmap it under both". Fixed with
+`free_large?`, which reads the flag a large block genuinely has. It was not the
+cause of this failure, but it was a live double-free waiting for the right
+timing.
+
+### Standing
+
+Headerless correctness now has real evidence behind it rather than absence of
+crashes:
+
+| check | result |
+|---|---|
+| `property_test`, 15 000 iterations | **PASS**, warnings=0 |
+| `mt_property_test` | **PASS** |
+| `stw_mt_property_test` | **PASS** |
+| object-graph survival, 200 000 allocs | **PASS** |
+| allocation overlap, 20 000 allocs | **PASS** |
+| allocation bounds, 120 000 allocs | **PASS** |
+| `gc_phases`, every size | **PASS** |
+| `Heap#destroy` teardown | **FAIL** — stale mark-worker thread handle |
+
+The remaining defect is in **teardown**, not in the collector: the heap is
+correct for its whole life and dies while shutting its mark workers down. That
+is a much smaller and better-understood problem than the one this update
+started with.

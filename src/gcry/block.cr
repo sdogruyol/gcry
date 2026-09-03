@@ -289,6 +289,21 @@ module Gcry
       gen == @@mark_gen
     end
 
+    # FREE for a block that still has a header — large blocks, whose header is
+    # reserved in the chunk's metadata region and whose FREE flag
+    # `cache_large_chunk` writes directly.
+    #
+    # The unsuffixed `free?` answers `false` under headerless because a small
+    # block's occupancy lives in `occ` and cannot be read from the block. Using
+    # it on a large block disables `cache_large_chunk`'s double-insert guard,
+    # which puts one chunk in a bucket chain twice — and, in that function's own
+    # words, "take_large_free then hands the same memory to two owners while
+    # trim_large_cache is still free to unmap it under both". It accumulates
+    # silently and takes tens of thousands of cycles to surface.
+    def self.free_large?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::FREE) != 0
+    end
+
     def self.clear_mark_large(header : BlockHeader*) : Nil
       hl_check(header.address, "HL: clear_mark_large into guarded range\n")
       h = header.value

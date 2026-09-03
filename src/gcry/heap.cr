@@ -1460,7 +1460,7 @@ module Gcry
       # bucket chain twice, and `take_large_free` then hands the same memory to
       # two owners while `trim_large_cache` is still free to unmap it under
       # both. Counted rather than raised: this runs inside the sweep.
-      if BlockHeader.free?(header)
+      if BlockHeader.free_large?(header)
         @large_cached_twice &+= 1
         return
       end
@@ -1507,7 +1507,7 @@ module Gcry
           # A bucket chain should only ever hold FREE blocks. A USED one means
           # the block was handed out already and something put it back, or
           # never took it off.
-          @large_taken_used &+= 1 unless BlockHeader.free?(header)
+          @large_taken_used &+= 1 unless BlockHeader.free_large?(header)
           if prev.null?
             @large_freelists[b] = nxt
           else
@@ -2353,9 +2353,9 @@ module Gcry
     end
 
     protected def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
-      return !BlockHeader.free?(header) unless bitmap_alloc_chunk?(chunk)
+      return !BlockHeader.free_large?(header) unless bitmap_alloc_chunk?(chunk)
       occ = ChunkHeader.occ_bitmap(chunk)
-      return !BlockHeader.free?(header) if occ.null?
+      return !BlockHeader.free_large?(header) if occ.null?
       ordinal = chunk_block_ordinal(chunk, header.address)
       ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
     end
