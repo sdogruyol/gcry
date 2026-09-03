@@ -57,16 +57,32 @@ module Gcry
       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Precise)
     end
 
+    # No lock here.
+    #
+    # The per-word acceptance — `find_block_with_chunk`, the alignment and
+    # type_id gates, `block_marked_in?` — is read-only and safe under STW (the
+    # chunk index does not mutate while the world is stopped). Wrapping all of
+    # it in one global spinlock, as this used to, serialised every worker's
+    # marking and made `GCRY_PARALLEL_MARK=8` run 60x slower than serial. The
+    # only shared mutations are the mark bit (atomic on the bitmap path, and
+    # per-object with no shared word on the header path, so double-marking is
+    # idempotent) and the mark-stack push, which is the one thing that still
+    # takes the lock, plus the TLAB free-claim's freelist surgery.
+    @[AlwaysInline]
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
+      mark_impl_unlocked(pointer, gate_type_id, base_only, source)
+    end
+
+    # Push a header onto the shared mark stack. Locked only under parallel mark;
+    # the stack itself is not thread-safe.
+    @[AlwaysInline]
+    private def mark_stack_push(header : BlockHeader*) : Nil
       if @mark_parallel
         @mark_lock.lock
-        begin
-          mark_impl_unlocked(pointer, gate_type_id, base_only, source)
-        ensure
-          @mark_lock.unlock
-        end
+        @mark_stack.push(header)
+        @mark_lock.unlock
       else
-        mark_impl_unlocked(pointer, gate_type_id, base_only, source)
+        @mark_stack.push(header)
       end
     end
 
@@ -112,24 +128,9 @@ module Gcry
         if @minor_only && !BlockHeader.nursery?(header)
           return
         end
-        h = header.value
-        h.flags = h.flags & ~BlockHeader::Flags::FREE
-        header.value = h
-        # The TLAB claim is a freelist-era path: `bitmap_alloc` replaces the
-        # freelist with the pool cursor, so there are no on-stack freelist nodes
-        # to claim and this cannot fire there. Guarded rather than assumed.
-        return if @bitmap_alloc
-        set_block_mark_in(chunk, header) unless block_marked_in?(chunk, header)
-        walk = h.next_free
-        while walk
-          walk_found = find_block_with_chunk(walk)
-          break unless walk_found
-          _, walk_chunk = walk_found
-          wh = BlockHeader.from_user(walk)
-          break unless BlockHeader.free?(wh)
-          set_block_mark_in(walk_chunk, wh) unless block_marked_in?(walk_chunk, wh)
-          walk = wh.value.next_free
-        end
+        # Freelist surgery (clear FREE, walk next_free) mutates shared list
+        # state, so it stays under the lock when parallel.
+        claim_free_tlab_block(header, chunk)
         return
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
@@ -158,7 +159,35 @@ module Gcry
 
       set_block_mark_in(chunk, header)
       note_first_mark(header, source) if @live_attr_roots
-      @mark_stack.push(header)
+      mark_stack_push(header)
+    end
+
+    # The TLAB on-stack-freelist claim, isolated so it can hold the lock without
+    # putting one on the common mark path. See the long note at the call site.
+    private def claim_free_tlab_block(header : BlockHeader*, chunk : ChunkHeader*) : Nil
+      locked = @mark_parallel
+      @mark_lock.lock if locked
+      begin
+        h = header.value
+        h.flags = h.flags & ~BlockHeader::Flags::FREE
+        header.value = h
+        # bitmap_alloc replaces the freelist with the pool cursor — no on-stack
+        # freelist nodes to claim, so this cannot fire there.
+        return if @bitmap_alloc
+        set_block_mark_in(chunk, header) unless block_marked_in?(chunk, header)
+        walk = h.next_free
+        while walk
+          walk_found = find_block_with_chunk(walk)
+          break unless walk_found
+          _, walk_chunk = walk_found
+          wh = BlockHeader.from_user(walk)
+          break unless BlockHeader.free?(wh)
+          set_block_mark_in(walk_chunk, wh) unless block_marked_in?(walk_chunk, wh)
+          walk = wh.value.next_free
+        end
+      ensure
+        @mark_lock.unlock if locked
+      end
     end
 
     # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
