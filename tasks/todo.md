@@ -147,12 +147,27 @@ is under the noise floor. It licenses continuing; it is not a win.
 - [ ] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win?
 - [ ] Re-cut RSS at Kemal scale post-fix
 
-### The finding that outranks the phase
+### The finding that outranks the phase — ACTED ON
 
 Kemal's **GC duty cycle is 0.2–0.5% of wall time**. An infinitely fast mark buys
-**+0.15pp** on `/json`. The plan's +5–10pp (Phase 2+4) and +3–8pp (Phase 6)
-throughput expectations are unreachable by any mark-side work, at any sample
-size. Needs a decision before the next cut — see the Phase 2 FINDINGS.
+**+0.15pp** on `/json`. The plan's +5–10pp (Phase 2+4) throughput expectations
+are unreachable by any mark-side work, at any sample size.
+
+Resolved by doing both of the recommended options:
+
+- [x] **Gates restated on the axis each phase moves** (plan §Verification):
+      Phase 2/4 on `phase_mark` + pause; Phase 3 on `phase_sweep` *and* ns/alloc;
+      Phase 6 on ns/alloc. Kemal keeps the regression-guard and % of Boehm jobs
+      and loses the judging job for mark-side phases.
+- [x] **A GC-bound workload stood up**: `bench/micro/gc_phases.cr` /
+      `make bench-gc-phases`, 9–41% duty cycle depending on survival rate,
+      `phase_mark` 3.0–16.0 ms per collection against Kemal's ~230 µs.
+- [ ] Radix A/B on it — first end-to-end evidence the mark work pays (in flight)
+- [ ] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? (in flight)
+
+Phases 3 and 6 keep a real end-to-end throughput claim: they touch every
+allocation, which is where the mutator's time actually goes, and is why the
+2026-08-01 alloc-bitmap reject was a *throughput* reject.
 ## Phase 3 — occ + bitmap sweep + pool allocation (together)
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not
