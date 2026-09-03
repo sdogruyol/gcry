@@ -220,30 +220,15 @@ module Gcry
         return
       end
 
-      # Skip shared libraries — Crystal heap roots in class/global vars live in
-      # the main executable (+ adjacency BSS), not in libc/openssl/etc. data.
-      if includes_name?(line + path, len - path, ".so")
+      # Only the main executable's data is a root. Any other file-backed RW
+      # mapping is the program's own — a `.so`, or a data file it `mmap`ed —
+      # and caching one means scanning it after the program `mremap`s or
+      # `munmap`s it (issue #29: MAP_PRIVATE file grown past EOF → SIGBUS).
+      unless main_executable_path?(line + path, len - path)
         @@parse_prev_file_rw = false
         return
       end
 
-      if includes_name?(line + path, len - path, "libcrypto") ||
-         includes_name?(line + path, len - path, "libssl") ||
-         includes_name?(line + path, len - path, "libpcre") ||
-         includes_name?(line + path, len - path, "libxml") ||
-         includes_name?(line + path, len - path, "libyaml") ||
-         includes_name?(line + path, len - path, "libgmp") ||
-         includes_name?(line + path, len - path, "libicu") ||
-         includes_name?(line + path, len - path, "libsqlite") ||
-         includes_name?(line + path, len - path, "libpq") ||
-         includes_name?(line + path, len - path, "libmysql") ||
-         includes_name?(line + path, len - path, "libz.so") ||
-         includes_name?(line + path, len - path, "liblzma") ||
-         includes_name?(line + path, len - path, "libstdc++") ||
-         includes_name?(line + path, len - path, "libgcc_s")
-        @@parse_prev_file_rw = false
-        return
-      end
 
       writable = perms[1] == 'w'.ord.to_u8
       # Always scan rw-p (.data). Skip large RELRO r--p on fat Crystal binaries
@@ -307,6 +292,30 @@ module Gcry
     # 2026-08-22.
     def self.bss_size_cap=(value : Bool) : Bool
       @@bss_size_cap = value
+    end
+
+    # `/proc/self/exe` resolved once; the executable is never re-linked.
+    @@exe_path = uninitialized UInt8[4096]
+    @@exe_len = -1
+
+    private def self.main_executable_path?(path : UInt8*, len : Int32) : Bool
+      if @@exe_len < 0
+        n = LibC.readlink("/proc/self/exe", @@exe_path.to_unsafe.as(LibC::Char*), LibC::SizeT.new(@@exe_path.size))
+        @@exe_len = n < 0 ? 0 : n.to_i32
+      end
+      return false if @@exe_len == 0
+      # Trim the trailing newline and anything after " (deleted)".
+      e = len
+      while e > 0 && (path[e - 1] == 0x0a_u8 || path[e - 1] == 0x20_u8 || path[e - 1] == 0x0d_u8)
+        e -= 1
+      end
+      return false unless e == @@exe_len
+      i = 0
+      while i < e
+        return false if path[i] != @@exe_path.to_unsafe[i]
+        i += 1
+      end
+      true
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32
