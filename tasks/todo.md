@@ -312,3 +312,49 @@ null control:
 ## Review
 
 (filled in per phase; numbers go to `bench/log/linux/<date>-simdgc-phase-N/FINDINGS.md`)
+
+
+## Phase 3 — MEASURED, decisive win (bafc06c)
+
+- [x] phase_sweep **−99.6%** (8320µs → 32µs, t=−99, 20/20) — "sweep → ~0"
+- [x] ns_per_alloc **−27.8%** (t=−69, 20/20) — the metric 2026-08-01 *regressed*;
+      vindicates occ-replaces-freelist
+- [x] All Phase 3 correctness gates green under GCRY_BITMAP_ALLOC=1
+
+## Phase 4 — prefetch done, range_filter deferred
+
+- [x] Mark-loop prefetch ring + `clamped_scan_size` lookup removal:
+      phase_mark **−8% (header) / −11% (bitmap)**, both representations (778b956)
+- [ ] SIMD `range_filter` prefilter — DEFERRED. Low value on measurable
+      workloads: stack scan is <1% of mark time here, and the heap conservative
+      prefilter rarely skips a whole object (objects have live pointers). The
+      plan itself said "measure before wiring; does not pay on pointer-dense."
+
+## Phase 5 — foundation safe, sharding is the remaining lever
+
+- [x] Lock narrowed off the per-word acceptance path (daf0b58): 8-worker
+      phase_mark 503ms → 137ms, correctness-gated. Still net-worse than serial
+      (8ms) — the single shared stack's per-object push/pop lock is the residue.
+- [ ] **Per-worker sharded stacks** — the fix. Design settled: thread-local
+      worker id + per-worker mmap'd push buffers (raw storage in StaticArrays,
+      no managed alloc — the `-Dgc_none` constraint), batched flush/steal
+      against the shared stack, clean termination (flush before idle-check).
+      Measurable on this 24-thread box. RISK: a new concurrent-marking path is
+      a UAF class; validate hard against stw-mt-property-test.
+- [ ] Fix the two structural bugs while there: helpers busy-spin between
+      collections; a worker that finds the stack momentarily empty drops out.
+
+## Decision point for the next step
+
+Three candidates, materially different risk/reward:
+
+1. **Parallel-mark sharding** (Phase 5 finish): measurable here, dominant phase,
+   but a concurrent-marker rewrite = highest UAF risk, and the payoff is an
+   experimental off-by-default knob.
+2. **Kemal ns_per_alloc cut**: the −27.8% alloc win is the *one* axis that
+   touches the mutator hot path rather than the GC pause, so it is the only
+   thing here with a credible path to end-to-end Kemal throughput — the plan's
+   actual goal. Needs the bitmap allocator hardened for sustained HTTP
+   concurrency first (its bugs were fixed 4 commits ago).
+3. **Phase 7 headerless**: targets RSS × Boehm ≤ 1.0, the shipping bar. Biggest
+   strategic value, biggest effort (port every diagnostic behind -Dgcry_headerless).
