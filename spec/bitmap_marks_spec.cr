@@ -17,15 +17,23 @@ require "./spec_helper"
 # `data_offset` is baked into every chunk at map time, so flipping this later
 # would leave chunks whose blocks start somewhere the heap no longer believes
 # they do — which is what the setter refuses.
+# Both arms also disable the nursery, and that is not incidental. A library
+# heap enables it by default, and nursery chunks deliberately keep the header
+# representation — their allocation still runs through `alloc_nursery`'s
+# freelist, so `occ` is not maintained for them (nursery-on-bitmaps is Phase 8).
+# With the nursery on, the bitmap arm would allocate through the freelist and
+# these specs would exercise the header path under a bitmap name.
 private def bitmap_heap : Gcry::Heap
   heap = Gcry::Heap.new
-  heap.bitmap_marks = true
+  heap.bitmap_alloc = true # implies bitmap_marks; Phase 3 representation
+  heap.nursery_enabled = false
   heap
 end
 
 private def header_heap : Gcry::Heap
   heap = Gcry::Heap.new
   heap.bitmap_marks = false
+  heap.nursery_enabled = false
   heap
 end
 
@@ -119,18 +127,19 @@ describe "Gcry::Heap mark bitmaps" do
     end
   end
 
-  it "actually records the trace in the bitmap, not only in the header" do
+  it "publishes survivors into occ and leaves mark clear" do
+    # The sweep is `occ = mark; mark = 0` in one streaming pass, so after a
+    # collection a survivor is recorded in `occ` and the mark bitmap is empty.
+    # Asserting on `mark` here — as this spec did while the sweep still walked
+    # headers — now tests the wrong bitmap.
     heap = bitmap_heap
     begin
       keep = heap.malloc(64)
       heap.add_root(keep)
+      200.times { heap.malloc(64) }
       heap.collect(scan_stack: false)
       heap.live?(keep).should be_true
 
-      # Find the bit for `keep` and require it set. This is what distinguishes
-      # "the bitmap path ran" from "the env var was ignored and the header
-      # carried everything" — the union means the liveness assertions above
-      # would pass either way.
       header = Gcry::BlockHeader.from_user(keep)
       found = false
       heap.each_chunk do |chunk|
@@ -140,9 +149,17 @@ describe "Gcry::Heap mark bitmaps" do
         next unless header.address >= lo && header.address < hi
         block_bytes = Gcry::BlockHeader::SIZE.to_u64 + header.value.size.to_u64
         ordinal = (header.address - lo) // block_bytes
+        occ = Gcry::ChunkHeader.occ_bitmap(chunk)
         mark = Gcry::ChunkHeader.mark_bitmap(chunk)
-        mark.should_not eq(Pointer(UInt64).null)
-        ((mark[ordinal >> 6] >> (ordinal & 63)) & 1_u64).should eq(1_u64)
+        occ.should_not eq(Pointer(UInt64).null)
+        # The survivor is allocated...
+        ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64).should eq(1_u64)
+        # ...and the garbage around it is not: 201 allocated, 1 survives.
+        total = 0
+        chunk.value.bitmap_words.to_i32.times { |w| total += occ[w].popcount }
+        total.should eq(1)
+        # Marks were consumed by the same pass that published occ.
+        chunk.value.bitmap_words.to_i32.times { |w| mark[w].should eq(0_u64) }
         found = true
       end
       found.should be_true

@@ -53,6 +53,23 @@ module Gcry
       end
     end
 
+    # Non-raising twin of `index_of`.
+    #
+    # `index_of` raises, and `raise` allocates. Any collector path that might be
+    # handed a payload that is not a size class — a large object's size, a
+    # corrupted header — must use this instead: an exception thrown from inside
+    # a collection is the documented "5 of 5 children spinning at 100% CPU
+    # forever" deadlock (heap.cr, OOM notes).
+    def self.index_of?(payload : UInt32) : Int32
+      return -1 if payload == 0 || payload > THRESHOLD
+      index = 0
+      while index < COUNT
+        return index if payload(index) == payload
+        index += 1
+      end
+      -1
+    end
+
     def self.index_of(payload : UInt32) : Int32
       case payload
       when    16 then 0

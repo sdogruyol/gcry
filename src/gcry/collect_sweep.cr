@@ -801,11 +801,8 @@ module Gcry
     # experiment to 56.3% of Boehm.
     @[AlwaysInline]
     private def block_marked?(chunk : ChunkHeader*, header : BlockHeader*, ordinal : UInt64) : Bool
-      return BlockHeader.marked?(header) unless @bitmap_marks
-      # Union: the trace writes the bitmap, allocate-black writes the header
-      # generation. See the note on `block_marked_in?` in heap.cr — keeping
-      # allocate-black on the header is what keeps a chunk lookup off the
-      # mutator's allocation path in this phase.
+      return BlockHeader.marked?(header) unless bitmap_chunk?(chunk)
+      # Union while this walk exists at all — see `block_marked_in?`.
       chunk_marked?(chunk, ordinal) || BlockHeader.marked?(header)
     end
 
@@ -817,6 +814,55 @@ module Gcry
     @[AlwaysInline]
     private def clear_block_mark(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       BlockHeader.clear_mark(header) unless @bitmap_marks
+    end
+
+    # The bitmap arm of the size-class sweep.
+    #
+    # One streaming pass over the chunk's two bitmaps — `occ &= mark`, popcount
+    # both — and the four numbers the policy below needs fall out of it. No
+    # block header is read at all, which is the entire point: the header walk it
+    # replaces is O(blocks) and this is O(blocks/64), vectorised.
+    #
+    # The same pass clears `mark`, so there is no separate clear phase and no
+    # per-bit clear anywhere.
+    #
+    # **The Phase 1 union retires here.** While the sweep walked headers, an
+    # object could be marked either in the bitmap (by the trace) or in the
+    # header generation (by allocate-black), and readers took the union. This
+    # arm reads only the bitmap, so allocate-black must write the bitmap too —
+    # which it now can, because the pool cursor holds the chunk. A bitmap-only
+    # sweep with allocate-black still on the header would reclaim live objects.
+    private def sweep_small_bitmap(chunk : ChunkHeader*, class_index : Int32,
+                                   major : Bool) : SmallSweepCounts
+      occ = ChunkHeader.occ_bitmap(chunk)
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64) if occ.null? || mark.null?
+
+      payload = SizeClasses.payload(class_index).to_u64
+      nblocks = chunk_block_count(chunk)
+      return SmallSweepCounts.new(false, 0_u64, 0_u64, 0_u64) if nblocks == 0
+      words = ((nblocks + 63) >> 6).to_i32
+
+      freed, live = Kernels.sweep_words(occ, mark, words, @simd_tier)
+
+      # No tail correction, and getting that wrong cost an afternoon: the first
+      # version subtracted `(words * 64) - nblocks` from `freed` on the theory
+      # that the last word's unused bits inflate it. They cannot. `freed` is
+      # `popcount(occ & ~mark)`, and the allocator masks tail bits out of every
+      # free mask it hands out (`chunk_free_mask`), so a tail bit is never set
+      # in `occ` in the first place. Subtracting it under-counted the reclaim by
+      # exactly the tail width — 32 blocks per class-3 chunk, which presented as
+      # a live-object count stuck at 33 instead of 1.
+
+      if freed > 0
+        live_objects_sub(freed)
+        free_bytes_add(freed * payload)
+      end
+
+      SmallSweepCounts.new(live > 0,
+        live * payload,
+        nblocks * payload,
+        (nblocks - live) * payload)
     end
 
     # The header-walk arm of the size-class sweep.
@@ -834,6 +880,20 @@ module Gcry
       unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
         # A chunk whose class we cannot read is never reclaimed from.
         return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64)
+      end
+
+      # Old-generation chunks only. Nursery chunks keep the header
+      # representation: their allocation still runs through
+      # `alloc_nursery`'s freelist, so `occ` is not maintained for them — and a
+      # bitmap sweep of a chunk whose `occ` is all zero would compute
+      # `live == 0` and reclaim every live object in it.
+      #
+      # That is the plan's phasing, not an accident: nursery-on-bitmaps is
+      # Phase 8, behind the page barrier work. The dispatch is per *chunk* and
+      # not global precisely so the two representations can coexist while that
+      # is true.
+      if @bitmap_alloc && !ChunkHeader.nursery?(chunk)
+        return sweep_small_bitmap(chunk, class_index, major)
       end
 
       any_live = false

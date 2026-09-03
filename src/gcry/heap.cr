@@ -2,6 +2,7 @@ require "./block"
 require "./size_classes"
 require "./chunk_layout"
 require "./chunk_radix"
+require "./bitmap_alloc"
 require "crystal/spin_lock"
 require "c/pthread"
 
@@ -90,6 +91,16 @@ module Gcry
     # Kemal + acikturkiye cut says the bitmap wins, and it is also the fallback
     # on a CPU without the SIMD baseline.
     getter? bitmap_marks : Bool = false
+    # `GCRY_BITMAP_ALLOC=1` (Phase 3): `occ` bitmaps, bitmap sweep, and pool
+    # allocation. Implies `bitmap_marks`, and goes strictly further — it retires
+    # the Phase 1 union, because a bitmap-only sweep cannot see a mark that only
+    # exists in a header generation.
+    #
+    # A separate knob rather than an extension of `GCRY_BITMAP` so that the
+    # mark-only representation, which is gated and measured, stays exactly as it
+    # shipped while this is still being built out. Nursery chunks are excluded
+    # under both: their allocation is still `alloc_nursery`'s freelist, so `occ`
+    # is not maintained for them (Phase 8).
     # Instruction-set tier for the bitmap kernels; see `Gcry::Cpu`.
     getter simd_tier : UInt8 = Kernels::TIER_SCALAR
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
@@ -208,8 +219,10 @@ module Gcry
       # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
       # SEGV (gc_override.cr:520).
       @simd_tier = Cpu.tier_from_env
-      @bitmap_marks = Heap.bitmap_marks_from_env
+      @bitmap_alloc = Heap.bitmap_alloc_from_env
+      @bitmap_marks = @bitmap_alloc || Heap.bitmap_marks_from_env
       radix_init if Heap.chunk_radix_from_env
+      bitmap_alloc_init
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @prefer_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -334,6 +347,11 @@ module Gcry
       env_is_one?("GCRY_BITMAP")
     end
 
+    # `GCRY_BITMAP_ALLOC=1`. Implies `GCRY_BITMAP`.
+    def self.bitmap_alloc_from_env : Bool
+      env_is_one?("GCRY_BITMAP_ALLOC")
+    end
+
     # `GCRY_CHUNK_RADIX=1`.
     def self.chunk_radix_from_env : Bool
       env_is_one?("GCRY_CHUNK_RADIX")
@@ -358,7 +376,18 @@ module Gcry
       if value != @bitmap_marks && !@chunks.null?
         raise ArgumentError.new("bitmap_marks cannot change once chunks are mapped")
       end
+      @bitmap_alloc = false unless value
       @bitmap_marks = value
+    end
+
+    getter? bitmap_alloc : Bool = false
+
+    def bitmap_alloc=(value : Bool) : Bool
+      if value != @bitmap_alloc && !@chunks.null?
+        raise ArgumentError.new("bitmap_alloc cannot change once chunks are mapped")
+      end
+      @bitmap_marks = true if value
+      @bitmap_alloc = value
     end
 
     def malloc(size : Int) : Void*
@@ -484,6 +513,24 @@ module Gcry
       payload = SizeClasses.payload(class_index)
 
       @finalizers.notice_reclaim(pointer)
+
+      if @bitmap_alloc
+        # Clear the `occ` bit and mark the header FREE. No freelist link: the
+        # block becomes available the moment its bit is clear, and the pool
+        # cursor finds it from `~occ` without a chase through free memory.
+        nursery = BlockHeader.nursery?(header)
+        with_freelist_lock(class_index, nursery) do
+          BlockHeader.set_free(header, Pointer(Void).null)
+          bitmap_free_block(chunk, header)
+        end
+        free_bytes_add(payload.to_u64)
+        bytes_since_gc_sub(payload.to_u64)
+        note_explicit_free(payload.to_u64)
+        live_objects_dec
+        Invariant.after_free(self, pointer)
+        Trace.after_free(pointer)
+        return
+      end
 
       if @tlab_enabled
         # TLAB free is per-thread; counters are Atomic (no @alloc_lock).
@@ -823,6 +870,19 @@ module Gcry
 
     # Freelist lock held. Prefer-list first (tight_grow), then global, then map.
     private def alloc_old_small_locked(payload : UInt32, flags : UInt32, index : Int32) : Void*
+      # Bitmap representation: the pool cursor replaces the freelist outright.
+      # Not *beside* it — an `occ` bitmap maintained alongside a freelist is the
+      # 2026-08-01 design that went to 54k->44k on /json. See bitmap_alloc.cr.
+      #
+      # tight_grow, prefer_freelists and alloc_batch are freelist-shaped and are
+      # inert here by construction; the plan keeps their knobs as no-ops for one
+      # release rather than failing on them.
+      # Old generation only. `alloc_nursery` keeps the freelist because nursery
+      # chunks keep the header representation — see `sweep_small_blocks`.
+      if @bitmap_alloc
+        return bitmap_alloc_locked(index, payload, flags)
+      end
+
       u = Pointer(Void).null
       prefer_hit = false
       if @tight_grow
@@ -1969,18 +2029,53 @@ module Gcry
     @[AlwaysInline]
     private def heap_marked?(header : BlockHeader*) : Bool
       return BlockHeader.marked?(header) unless @bitmap_marks
-      return true if BlockHeader.marked?(header)
+      return true if !@bitmap_alloc && BlockHeader.marked?(header)
       chunk = chunk_containing(header.address)
-      return false if chunk.nil? || ChunkHeader.large?(chunk)
+      return BlockHeader.marked?(header) if chunk.nil? || !bitmap_chunk?(chunk)
       chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address))
     end
 
-    # Writes the header generation under **both** representations, so it costs
-    # no lookup on any path. This is what allocate-black calls; see the union
-    # note above for why that is deliberate rather than an oversight.
+    # Allocate-black's mark write.
+    #
+    # Phase 1 had this write only the header generation, with readers taking the
+    # union, because the caller held no chunk and a lookup here is the 56.3%
+    # shape. Phase 3's sweep reads **only** the bitmap, so the union is gone and
+    # this has to reach the bitmap — and it now can, because the pool cursor
+    # already resolved the chunk for the allocation this is marking.
+    #
+    # `@pool_chunk[class]` is that chunk, held under the same size-class lock
+    # the allocation took, so this is a cached read rather than a lookup. The
+    # containment check is what makes it safe to trust: a caller whose block is
+    # not in the cursor's chunk (a large object, a TLAB slot, a free-list
+    # residue) falls back to the header, which the header arm still reads.
     @[AlwaysInline]
     private def heap_set_mark(header : BlockHeader*) : Nil
-      BlockHeader.set_mark(header)
+      # Phase 1: the header generation, with readers taking the union, so no
+      # lookup lands on the mutator's allocation path. Phase 3's sweep reads
+      # only the bitmap, so the union is gone and this must reach it.
+      unless @bitmap_alloc
+        BlockHeader.set_mark(header)
+        return
+      end
+      # `index_of?`, not `index_of`: the raising twin allocates, and this runs
+      # inside a collection where that deadlocks.
+      class_index = SizeClasses.index_of?(header.value.size)
+      if class_index >= 0
+        chunk = @pool_chunk[class_index]
+        if !chunk.null? && ChunkHeader.contains?(chunk, header.address)
+          chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
+          return
+        end
+      end
+      # No cursor for this block: resolve it. Reached only by large objects and
+      # by blocks outside the current cursor's chunk, never by the steady-state
+      # allocation path.
+      chunk = chunk_containing(header.address)
+      if chunk.nil? || !bitmap_chunk?(chunk)
+        BlockHeader.set_mark(header)
+        return
+      end
+      chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
     end
 
     # Clears the header generation only. Bitmap marks are never cleared one bit
@@ -1992,19 +2087,31 @@ module Gcry
 
     # Mark read/write for a block whose chunk the caller already resolved: the
     # hot-path pair, reached from `mark_impl_unlocked`.
+    # Large chunks and nursery chunks stay on the header generation: the first
+    # because one object needs no bitmap, the second because its sweep is still
+    # a header walk (see `sweep_small_blocks`). Both must agree with whichever
+    # arm will read them.
+    @[AlwaysInline]
+    private def bitmap_chunk?(chunk : ChunkHeader*) : Bool
+      @bitmap_marks && !ChunkHeader.large?(chunk) && !ChunkHeader.nursery?(chunk)
+    end
+
     @[AlwaysInline]
     private def block_marked_in?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
-      return BlockHeader.marked?(header) unless @bitmap_marks
-      return BlockHeader.marked?(header) if ChunkHeader.large?(chunk)
-      chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address)) ||
-        BlockHeader.marked?(header)
+      return BlockHeader.marked?(header) unless bitmap_chunk?(chunk)
+      marked = chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address))
+      # The Phase 1 union, alive exactly while the sweep still reads headers.
+      # Under `bitmap_alloc` the sweep reads only the bitmap and allocate-black
+      # writes the bitmap, so the union is both unnecessary and wrong.
+      marked ||= BlockHeader.marked?(header) unless @bitmap_alloc
+      marked
     end
 
     # The trace's mark write: bitmap for size-class blocks, header generation
     # for large. No lookup — the caller resolved the chunk anyway.
     @[AlwaysInline]
     private def set_block_mark_in(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      if !@bitmap_marks || ChunkHeader.large?(chunk)
+      unless bitmap_chunk?(chunk)
         BlockHeader.set_mark(header)
         return
       end

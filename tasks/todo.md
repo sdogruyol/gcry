@@ -168,7 +168,38 @@ Resolved by doing both of the recommended options:
 Phases 3 and 6 keep a real end-to-end throughput claim: they touch every
 allocation, which is where the mutator's time actually goes, and is why the
 2026-08-01 alloc-bitmap reject was a *throughput* reject.
-## Phase 3 — occ + bitmap sweep + pool allocation (together)
+## Phase 3 — occ + bitmap sweep + pool allocation — CORE LANDED, INCOMPLETE
+
+Behind its own knob `GCRY_BITMAP_ALLOC=1` (implies `GCRY_BITMAP`), so the
+mark-only representation that Phase 1 gated and measured stays exactly as it
+shipped while this is built out.
+
+- [x] Pool cursor `{chunk, word, free_mask, word_base}` per size class;
+      fast path is tzcnt / blsr / one atomic occ store. **No chunk lookup.**
+- [x] `occ` set on alloc, cleared on free — both atomic (64 blocks share a word)
+- [x] Bitmap sweep: `Kernels.sweep_words` streams `occ &= mark`, popcounts give
+      all four numbers the policy needs, and clears `mark` in the same pass
+- [x] The Phase 1 union retires under this knob, and only under it
+- [x] `@freelist_clean` forced false on this path — a stale `true` would hand
+      out dirty memory that Crystal assumes is zeroed. Verified: 0 dirty bytes.
+- [x] Old generation only; nursery chunks keep headers (Phase 8)
+
+### Known gaps — this knob is NOT safe to enable generally
+
+- [ ] **The bitmap sweep never writes FREE into reclaimed headers.** So
+      `BlockHeader.free?` reads USED for reclaimed blocks, which
+      `find_object`, the invariants, poison and `@finalizers.notice_reclaim`
+      all consult. **Finalizers do not run for bitmap-reclaimed objects.**
+- [ ] `GCRY_BITMAP_ALLOC=1` crashes the full spec suite (heaps default the
+      nursery on, plus the gap above). Only the dedicated spec configuration —
+      `bitmap_alloc = true`, `nursery_enabled = false` — is supported.
+- [ ] Blacklisted and MADV_DONTNEED'd pages are not yet masked out of the free
+      mask; `chunk_free_mask` applies the tail mask only
+- [ ] `bitmap_take_pool_chunk` walks the chunk list to find capacity — O(chunks)
+      per exhausted chunk. Fine at 466 chunks, wants a per-class pool list
+      (ascending address order — the descending list cost simdgc3 25%)
+- [ ] Dormant/unmap must call `bitmap_drop_pool_chunk` (written, not wired)
+- [ ] No measurement yet: the sweep and alloc claims are both unmeasured
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not
       be handed out — refaults pages just released, regresses RSS)
