@@ -387,3 +387,86 @@ wide battery — `property_test` to 11 000 iterations, `mt_property_test`,
 `stw_mt_property_test`, `gc_phases` at every size, object-graph survival,
 allocation overlap, allocation bounds, realloc/Array churn — and none of that
 makes it correct. The header build is unaffected and fully gated.
+
+---
+
+## Update 6: root cause — one containment predicate
+
+The "accumulating, layout-sensitive, seed-independent" failure was a single
+line, and it had been in front of the whole hunt:
+
+```crystal
+def self.contains?(chunk, addr)
+  start = data_start(chunk).address      # <- here
+  addr >= start && addr < finish
+end
+```
+
+`scan_object` looks a large object's chunk up **by its header address**. Under
+headerless a large block's header is reserved *before* `data_start`
+(`chunk+32` versus `chunk+48`), so `contains?` said no, `chunk_containing`
+returned nil, and `scan_object` took its `return unless chunk` exit — **large
+objects were never scanned at all**. Everything a large object referenced was
+reclaimed on the next cycle. With headers in front the header *is*
+`data_start`, so the header build never saw it.
+
+That one predicate explains every symptom of the last several rounds:
+
+| symptom | mechanism |
+|---|---|
+| `pthread_join: No such process` in `Heap#destroy` | `Gcry::Heap` is a 518 KB large object; its `@mark_worker_threads` Array (offset 529 920) was reclaimed and reused |
+| `@mark_stack.push` writing to address 0 | its `MarkStack` (offset 530 152) was reclaimed, `finalize` munmapped and nulled `@base` |
+| "accumulating", >11 000 iterations | it took that long for `property_test`'s live set to need a large `Array` copy whose loss mattered |
+| seed-independent | every seed reaches that point at about the same iteration |
+| release vs debug fail differently | which reclaimed block got reused first |
+| `KEEP_CHUNKS` delays but does not cure | fewer reuses of freed blocks, same unscanned parents |
+
+### How it was found
+
+Not by reading — the arithmetic had accused three innocent functions. It fell
+out of narrowing the reproducer until the shape was undeniable:
+
+1. `Gcry::Heap.new` held across default-heap churn dies within 4 collections.
+2. `instance_sizeof(Gcry::Heap)` is **530 312** — a large object — and every
+   reference field sits in its last 400 bytes.
+3. A synthetic 64 KB parent loses a finalizer-bearing child (a finalizer run on
+   a live object is unambiguous), while a **small** parent with the same child
+   does not. Large parents are not scanned.
+4. `scan_object`'s first act on a large header is `chunk_containing`; its
+   predicate starts at `data_start`; under headerless the header is below it.
+
+Two earlier "survivals" were artefacts worth naming: children whose pointers
+the compiler kept in registers across `GC.collect` were stack roots in
+disguise, and a probe that held all children in a Crystal `Array` rooted them
+through the array. Both made a fully-unscanned parent look partially scanned,
+which is what sent the hunt toward type- and position-based hypotheses. The
+finalizer-run detector was the first that could not be fooled that way.
+
+### Fix
+
+`contains?` starts at the block header for a large chunk and at `data_start`
+for a small one — identical to before with headers in front, and correct under
+headerless. Small-chunk metadata still does not resolve, which
+`spec/large_contains_spec.cr` pins alongside the large case.
+
+### Result
+
+| check | before | after |
+|---|---|---|
+| `property_test` 100 000 iterations | dies ~12 000, every seed | **PASS, warnings=0** |
+| `mt_property_test` / `stw_mt_property_test` | pass | pass |
+| `gc_phases`, every size, with and without radix | pass | pass |
+| eight targeted reproducers from this hunt | 5 fail | **all pass** |
+| RSS, 1 M × 16 B, chain walked | — | **−44.5%** (32 B −31.2%, 64 B −19.2%, 128 B −10.8%) |
+
+`mark_audit` still fails under headerless: it is a **diagnostic** with twelve
+direct header reads of its own, and porting the six diagnostics is Phase 7.8,
+not a collector defect.
+
+### Standing
+
+`-Dgcry_headerless` now passes every collector correctness check this project
+has, at full length, plus eight reproducers built during the hunt. The header
+build is unaffected and fully green. What remains of Phase 7 is 7.8 — port the
+six diagnostics with their purpose-broken gates observed red — and 7.9, the
+soak.

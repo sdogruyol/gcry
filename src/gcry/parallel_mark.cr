@@ -37,6 +37,12 @@ module Gcry
     # Diagnostic: what `shutdown_mark_workers` will actually try to join.
     # A non-zero count with `parallel_mark_workers == 1` means this bookkeeping
     # has been corrupted, not that workers exist.
+    # Diagnostic: the mark stack as a raw pointer, so a test can ask another
+    # heap whether it still considers this object live.
+    def mark_stack_object : Void*
+      @mark_stack.as(Void*)
+    end
+
     def mark_worker_pool_state : {Int32, Int32, Bool}
       {@mark_worker_threads.size, @mark_pthread_count, @mark_pthread_mode}
     end

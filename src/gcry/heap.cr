@@ -1984,6 +1984,11 @@ module Gcry
       !chunk_containing(addr).nil?
     end
 
+    # Spec accessor: does the chunk lookup resolve this address?
+    def chunk_containing_public?(addr : UInt64) : Bool
+      !chunk_containing(addr).nil?
+    end
+
     protected def chunk_containing(addr : UInt64) : ChunkHeader*?
       if @world_stopped
         # See `@stw_owner_pthread`: whether that skip is safe depends on nobody

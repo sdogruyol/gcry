@@ -408,7 +408,21 @@ module Gcry
     end
 
     def self.contains?(chunk : ChunkHeader*, addr : UInt64) : Bool
-      start = data_start(chunk).address
+      # A large chunk's containment starts at its block header, not at
+      # `data_start`. With headers in front the two coincide; under headerless
+      # the header is reserved *before* `data_start`, and `scan_object` looks
+      # its chunk up by that header address. Starting at `data_start` made
+      # that lookup return nil for every large object, so `scan_object`
+      # silently returned without scanning it and everything a large object
+      # referenced was reclaimed — the Heap's own MarkStack, worker-thread
+      # Array and finalizer registry among them. Small chunks are unchanged:
+      # their blocks begin at `data_start` and a pointer into the metadata
+      # region must still not resolve.
+      start = if large?(chunk)
+                large_header(chunk).address
+              else
+                data_start(chunk).address
+              end
       finish = chunk.address + chunk.value.mapped_bytes
       addr >= start && addr < finish
     end
