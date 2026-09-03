@@ -229,7 +229,6 @@ module Gcry
         return
       end
 
-
       writable = perms[1] == 'w'.ord.to_u8
       # Always scan rw-p (.data). Skip large RELRO r--p on fat Crystal binaries
       # (multi‑MiB word scans); class vars that hold heap refs are writable.
