@@ -155,7 +155,7 @@ module Gcry
         return if addr != BlockHeader.user_from(header).address
       end
 
-      if gate_type_id && !type_id_plausible?(header)
+      if gate_type_id && !type_id_plausible?(chunk, header)
         @type_id_root_rejects += 1
         case source
         when RootSource::Stack, RootSource::Parked
@@ -292,9 +292,20 @@ module Gcry
 
     # Crystal Reference payloads start with type_id (Int32). Reject if that
     # 32-bit word looks like the high half of a pointer / absurd id.
+    # Diagnostic callers with no chunk in hand. Resolves it, then delegates.
     private def type_id_plausible?(header : BlockHeader*) : Bool
-      return true if BlockHeader.atomic?(header)
-      size = header.value.size.to_u64
+      chunk = chunk_containing(header.address)
+      return false unless chunk
+      type_id_plausible?(chunk, header)
+    end
+
+    private def type_id_plausible?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      return true if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+      # Size from the chunk (7.6). Reading it from the block under headerless
+      # returns the object's own first word — its type_id — so the gate compared
+      # the type_id against itself and rejected live objects, which were then
+      # swept and their memory handed out twice.
+      size = block_payload(chunk, header).to_u64
       return true if size < 4
 
       tid = BlockHeader.user_from(header).as(Int32*).value
@@ -370,10 +381,16 @@ module Gcry
     end
 
     private def scan_object(header : BlockHeader*) : Nil
-      return if BlockHeader.atomic?(header)
+      # One chunk lookup for the whole scan. Under headerless the chunk is the
+      # source of *everything* this method used to read from the block —
+      # atomicity (7.2), size (7.6) and the type_id gate's length — so resolving
+      # it once and reusing it beats three separate derivations.
+      chunk = chunk_containing(header.address)
+      return unless chunk
+      return if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
 
       user = BlockHeader.user_from(header).as(UInt8*)
-      size = clamped_scan_size(header, user)
+      size = block_payload(chunk, header).to_u64
       return if size == 0
 
       if @layout_precise && size >= 4
@@ -449,7 +466,7 @@ module Gcry
       # from here. @allow_interior_pointers (GCRY_INTERIOR / GCRY_SOUND) now
       # switches both off together, which is what makes `root_soundness=sound`
       # a true statement. See docs/SOUND-DEFAULTS.md.
-      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(header)
+      base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
@@ -670,7 +687,7 @@ module Gcry
 
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           next if BlockHeader.free?(header)
           next if BlockHeader.nursery?(header)
           scan_object_for_nursery(header)
@@ -864,7 +881,7 @@ module Gcry
 
     private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
       if ChunkHeader.large?(chunk)
-        yield ChunkHeader.data_start(chunk).as(BlockHeader*)
+        yield ChunkHeader.large_header(chunk)
       else
         each_block(chunk) { |h| yield h }
       end

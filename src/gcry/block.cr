@@ -20,7 +20,22 @@ module Gcry
   # Layout (64-bit): size(4) + flags(4) + next_free(8) = 16 bytes.
   # `next_free` is only meaningful while the block is on a freelist.
   struct BlockHeader
-    SIZE = 16
+    # Phase 7.7. At 0 the per-block header disappears: `from_user` and
+    # `user_from` become identity, and every `@block_bytes` derivation
+    # (`SIZE + payload`) collapses to the payload alone, so blocks are carved
+    # back-to-back with nothing between them. That is the whole 16-bytes-per-
+    # object saving, and it falls out of this constant.
+    #
+    # It also means a `BlockHeader*` now points at **user data**. Any read of a
+    # field through it returns whatever the program stored; any write corrupts
+    # the object — its `type_id` lives in the first word. Every accessor below
+    # is therefore conditioned on the flag, and the ones that cannot be answered
+    # without a chunk are removed rather than left to return garbage.
+    {% if flag?(:gcry_headerless) %}
+      SIZE = 0
+    {% else %}
+      SIZE = 16
+    {% end %}
 
     property size : UInt32
     property flags : UInt32
@@ -72,28 +87,72 @@ module Gcry
       (header.as(UInt8*) + SIZE).as(Void*)
     end
 
+    # Occupancy lives in `occ`, not here. A headerless block has no flags word,
+    # so this can only be answered with a chunk in hand — `Heap#block_allocated?`
+    # is the authority and every live path already prefers it. Answering
+    # "not free" is the safe direction for a marker (it never skips a live
+    # object); sweep does not consult this at all on a bitmap chunk.
     def self.free?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::FREE) != 0
+      {% if flag?(:gcry_headerless) %}
+        false
+      {% else %}
+        (header.value.flags & Flags::FREE) != 0
+      {% end %}
     end
 
+    # Moved to the chunk in 7.2 (`ChunkHeader.atomic?`). Callers that still ask
+    # the block get `false` under headerless — the conservative answer, since it
+    # means "scan it", which is safe if wasteful. Live scan paths take the chunk.
     def self.atomic?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::ATOMIC) != 0
+      {% if flag?(:gcry_headerless) %}
+        false
+      {% else %}
+        (header.value.flags & Flags::ATOMIC) != 0
+      {% end %}
     end
 
+    # LARGE is a property of the chunk (`ChunkHeader.large?`), and under
+    # headerless that is the only place it can be read. Answering from a
+    # headerless block would read user data, and a false positive here routes a
+    # small object into the large-object free path — `cache_large_chunk` on a
+    # size-class chunk, which corrupts the heap.
     def self.large?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::LARGE) != 0
+      {% if flag?(:gcry_headerless) %}
+        false
+      {% else %}
+        (header.value.flags & Flags::LARGE) != 0
+      {% end %}
     end
 
     def self.nursery?(header : BlockHeader*) : Bool
-      (header.value.flags & Flags::NURSERY) != 0
+      {% if flag?(:gcry_headerless) %}
+        # Nursery chunks are excluded from bitmap chunks, and headerless
+        # requires bitmap_alloc, so no headerless block is ever nursery.
+        false
+      {% else %}
+        (header.value.flags & Flags::NURSERY) != 0
+      {% end %}
     end
 
     def self.marked?(header : BlockHeader*) : Bool
-      gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
-      gen == @@mark_gen
+      {% if flag?(:gcry_headerless) %}
+        # Unanswerable without a chunk; `Heap#heap_marked?` reads the bitmap.
+        # False means "not yet marked", which at worst re-marks — never skips.
+        false
+      {% else %}
+        gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
+        gen == @@mark_gen
+      {% end %}
     end
 
     def self.set_mark(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # The mark lives in the chunk's mark bitmap. Writing here would land on
+        # the object's own bytes. `Heap#heap_set_mark` / `heap_marked?` are the
+        # only correct entry points; R3 in the plan is exactly this hazard, and
+        # under headerless it is fatal rather than merely wrong.
+        return
+      {% end %}
       h = header.value
       h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
                 (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
@@ -101,6 +160,13 @@ module Gcry
     end
 
     def self.clear_mark(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # The mark lives in the chunk's mark bitmap. Writing here would land on
+        # the object's own bytes. `Heap#heap_set_mark` / `heap_marked?` are the
+        # only correct entry points; R3 in the plan is exactly this hazard, and
+        # under headerless it is fatal rather than merely wrong.
+        return
+      {% end %}
       h = header.value
       h.flags &= ~Flags::MARK_GEN_MASK
       h.flags &= ~Flags::MARK
@@ -146,6 +212,11 @@ module Gcry
     end
 
     def self.set_free(header : BlockHeader*, next_free : Void*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # Freelist-shaped, and the freelist is gone under bitmap_alloc (which
+        # headerless requires). Reaching here would corrupt an object.
+        return
+      {% end %}
       Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ header.value.size, Gcry::ThreadListWatch::SITE_SET_FREE, header.value.flags)
       h = header.value
       h.flags |= Flags::FREE
@@ -153,7 +224,21 @@ module Gcry
       header.value = h
     end
 
+    # Large blocks keep their header (reserved in the chunk's metadata region),
+    # so this always writes. `set_used` is a no-op under headerless because a
+    # *small* block has nowhere to write; using it for a large block silently
+    # dropped its size and LARGE flag.
+    def self.set_used_large(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
+      header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
+    end
+
     def self.set_used(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # Nothing to write. Occupancy is `occ`, size is the chunk's size class,
+        # ATOMIC is the chunk kind (7.2), and the mark bit is the mark bitmap.
+        # Writing here would land on the object's own first 16 bytes.
+        return
+      {% end %}
       if Gcry::ThreadListWatch.check(header.address, SIZE.to_u64 &+ size, Gcry::ThreadListWatch::SITE_SET_USED, header.value.flags)
         # The one caller identity that matters, taken at the corrupting
         # hand-out itself rather than at the crash that follows it. The crash
@@ -255,6 +340,39 @@ module Gcry
     # Chunk kind (Phase 7): every block here is atomic/unscanned.
     def self.atomic?(chunk : ChunkHeader*) : Bool
       (chunk.value.flags & Flags::ATOMIC) != 0
+    end
+
+    # The single block header of a large chunk.
+    #
+    # With headers in front of the object this is just `data_start`. Under
+    # headerless the object starts at `data_start` and its header is reserved
+    # before it, inside the metadata region — so the two differ and every large
+    # path must ask for it by name rather than assume `data_start` is a header.
+    # Bytes from a large chunk's base to its object. Single definition so
+    # sizing, carving and the header slot cannot drift apart.
+    def self.large_data_offset : Int32
+      {% if flag?(:gcry_headerless) %}
+        ChunkHeader::SIZE + 16
+      {% else %}
+        ChunkHeader::SIZE + BlockHeader::SIZE
+      {% end %}
+    end
+
+    def self.large_header(chunk : ChunkHeader*) : BlockHeader*
+      {% if flag?(:gcry_headerless) %}
+        (chunk.as(UInt8*) + ChunkHeader::SIZE).as(BlockHeader*)
+      {% else %}
+        data_start(chunk).as(BlockHeader*)
+      {% end %}
+    end
+
+    # The user pointer of a large chunk's single object.
+    def self.large_user(chunk : ChunkHeader*) : Void*
+      {% if flag?(:gcry_headerless) %}
+        data_start(chunk)
+      {% else %}
+        (data_start(chunk).as(UInt8*) + BlockHeader::SIZE).as(Void*)
+      {% end %}
     end
 
     def self.nursery?(chunk : ChunkHeader*) : Bool

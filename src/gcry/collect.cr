@@ -1410,7 +1410,7 @@ module Gcry
       return nil unless chunk
 
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        header = ChunkHeader.large_header(chunk)
         finish = BlockHeader.user_from(header).address + header.value.size
         return {header, chunk} if addr >= header.address && addr < finish
         return nil

@@ -23,7 +23,7 @@ module Gcry
     count = 0_u64
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        header = ChunkHeader.large_header(chunk)
         next if BlockHeader.free?(header)
         write_dump_line(io, header, heap)
         count += 1
@@ -52,7 +52,7 @@ module Gcry
     addrs = Set(UInt64).new
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        header = ChunkHeader.large_header(chunk)
         next if BlockHeader.free?(header)
         addrs << BlockHeader.user_from(header).address
       else

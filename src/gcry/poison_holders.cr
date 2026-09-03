@@ -190,7 +190,7 @@ module Gcry
         next if ChunkHeader.dormant?(chunk)
 
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           scanned &+= 1
           next if BlockHeader.free?(header)
           h = scan_block(header, user, finish, tag, reported) { |r| reported = r }

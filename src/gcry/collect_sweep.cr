@@ -334,7 +334,7 @@ module Gcry
     end
 
     private def sweep_large_one(chunk : ChunkHeader*, major : Bool, after_world : Bool) : Nil
-      header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+      header = ChunkHeader.large_header(chunk)
       return if BlockHeader.free?(header)
       # A chunk whose block header is still all zeroes is one `alloc_large`
       # published and has not filled in yet. `map_chunk` links the chunk and
@@ -379,7 +379,7 @@ module Gcry
           hv = header.value
           hv.next_free = @pending_large_cache
           header.value = hv
-          @pending_large_cache = BlockHeader.user_from(header)
+          @pending_large_cache = ChunkHeader.large_user(chunk)
         end
         @bytes_reclaimed_since_gc += mapped
         live_objects_dec
@@ -1464,7 +1464,7 @@ module Gcry
       total = 0_u64
       each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           total += header.value.size.to_u64 if BlockHeader.free?(header)
         else
           each_block(chunk) do |header|

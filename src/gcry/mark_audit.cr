@@ -170,7 +170,7 @@ module Gcry
           # only class of block that dies in the acikturkiye crash: every one
           # of those is a 69632-byte large chunk
           # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`).
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           reported = audit_dying_block(header, pointerof(checked), pointerof(hits), reported)
           next
         end
@@ -280,7 +280,7 @@ module Gcry
       each_chunk do |chunk|
         next if ChunkHeader.dormant?(chunk)
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           next if BlockHeader.free?(header)
           next unless heap_marked?(header) || @mark_audit_all_parents
           reported = audit_block(header, pointerof(edges), pointerof(misses), reported)

@@ -549,7 +549,15 @@ module Gcry
                     end
       raise ArgumentError.new("double free") if double_free
 
-      if BlockHeader.large?(header)
+      # The chunk is the authority on largeness; the block's flag is unreadable
+      # under headerless and a false positive routes a small object into the
+      # large free path.
+      large = if (lc = chunk_for(pointer))
+                ChunkHeader.large?(lc)
+              else
+                BlockHeader.large?(header)
+              end
+      if large
         payload = header.value.size.to_u64
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
@@ -1388,13 +1396,17 @@ module Gcry
     # Mapped size is host-page aligned (16 KiB on Apple Silicon) so Darwin
     # free-page reclaim and munmap stay page-correct.
     private def alloc_large(payload : UInt64, flags : UInt32) : {Void*, Bool}
-      need = ChunkHeader::SIZE.to_u64 + BlockHeader::SIZE.to_u64 + payload
+      # The large chunk's data offset, not ChunkHeader::SIZE + BlockHeader::SIZE.
+      # Under headerless the block header is reserved *inside* the metadata
+      # region, so the object starts 16 bytes later than that sum suggests and
+      # sizing by it leaves the object's tail outside the mapping.
+      need = ChunkHeader.large_data_offset.to_u64 + payload
       mapped = align_up(need, Platform.host_page_size)
 
       if user = take_large_free(mapped)
         header = BlockHeader.from_user(user)
         ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
-        BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+        BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
         heap_set_mark(header) if @incremental_marking || @collecting
         return {user, true}
       end
@@ -1404,10 +1416,10 @@ module Gcry
       chunk = map_chunk(mapped, UInt32::MAX, 0_u32)
       return {Pointer(Void).null, false} if chunk.null?
       trace_large_map(chunk, mapped, payload) if @trace_large
-      header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-      BlockHeader.set_used(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
+      header = ChunkHeader.large_header(chunk)
+      BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
       heap_set_mark(header) if @incremental_marking || @collecting
-      {BlockHeader.user_from(header), false}
+      {ChunkHeader.large_user(chunk), false}
     end
 
     # Bucket index for a mapped large-object size (powers of two from 8 KiB).
@@ -2542,7 +2554,7 @@ module Gcry
       return false unless chunk
 
       if ChunkHeader.large?(chunk)
-        expected_header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+        expected_header = ChunkHeader.large_header(chunk)
         return header == expected_header && BlockHeader.user_from(header) == user
       end
 

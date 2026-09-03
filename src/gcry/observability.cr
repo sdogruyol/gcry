@@ -306,7 +306,7 @@ module Gcry
 
       heap.each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           next if BlockHeader.free?(header)
           size = header.value.size.to_u64
           large_count += 1

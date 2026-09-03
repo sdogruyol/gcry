@@ -303,7 +303,7 @@ module Gcry
       heap.each_chunk do |chunk|
         next if ChunkHeader.dormant?(chunk)
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           count += 1 if counts_live?(header)
         else
           class_index = chunk.value.size_class.to_i32
