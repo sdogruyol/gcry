@@ -137,11 +137,11 @@ module Gcry
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
           cursor += block_bytes
-          next if BlockHeader.free?(header)
+          next if !diag_allocated?(header)
           # Same test the sweep applies per block.
           next unless major || @dying_audit_all_collections || BlockHeader.nursery?(header)
           @dying_type_walked &+= 1
-          user = BlockHeader.user_from(header)
+          user = diag_user(header)
           # Unsigned: a `type_id` read as Int32 out of a payload that is not one
           # sign-extends, and the comparison then depends on the garbage's top
           # bit rather than on the id.
@@ -154,11 +154,11 @@ module Gcry
           addr = user.address
           if reported < THREAD_BLOCK_REPORT_LIMIT
             reported += 1
-            report_dying_type_block(addr, header.value.size.to_u64, watched)
+            report_dying_type_block(addr, diag_payload(header), watched)
           end
           # Every place gcry looks is about to say no. Ask the kernel where the
           # value is (src/gcry/address_space_audit.cr).
-          audit_address_space_for_type(addr, header.value.size.to_u64)
+          audit_address_space_for_type(addr, diag_payload(header))
         end
       end
     end

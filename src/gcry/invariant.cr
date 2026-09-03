@@ -159,7 +159,7 @@ module Gcry
         end
 
         header = BlockHeader.from_user(user)
-        unless BlockHeader.free?(header)
+        unless !heap.diag_allocated?(header)
           fail("freelist node at #{user} is not marked FREE (class=#{class_index})")
           return
         end
@@ -215,7 +215,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          if BlockHeader.free?(header)
+          if !heap.diag_allocated?(header)
             free_ranges << {header.address, header.address + block_bytes}
           end
           cursor += block_bytes
@@ -234,7 +234,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          if counts_live?(header)
+          if counts_live?(heap, header)
             addr = header.address
             free_ranges.each do |free_lo, free_hi|
               if addr >= free_lo && addr < free_hi
@@ -294,8 +294,8 @@ module Gcry
     # counted live, never hide a live block the counter forgot: that direction
     # still fails as `actual < reported`.
     @[AlwaysInline]
-    private def self.counts_live?(header : BlockHeader*) : Bool
-      !BlockHeader.free?(header) && header.value.size != 0
+    private def self.counts_live?(heap : Heap, header : BlockHeader*) : Bool
+      heap.diag_allocated?(header) && heap.diag_payload(header) != 0
     end
 
     private def self.count_live_blocks(heap : Heap) : UInt64
@@ -304,7 +304,7 @@ module Gcry
         next if ChunkHeader.dormant?(chunk)
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.large_header(chunk)
-          count += 1 if counts_live?(header)
+          count += 1 if counts_live?(heap, header)
         else
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -322,7 +322,7 @@ module Gcry
             limit = ChunkHeader.data_end(chunk).as(UInt8*)
             while (cursor + block_bytes) <= limit
               header = cursor.as(BlockHeader*)
-              count += 1 if counts_live?(header)
+              count += 1 if counts_live?(heap, header)
               cursor += block_bytes
             end
           end

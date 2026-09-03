@@ -2348,6 +2348,82 @@ module Gcry
     # address while holding the chunk must come through here — using
     # `user_from` on a large block scans from 16 bytes early and 16 bytes past
     # the mapping, which is a SIGSEGV in the mark phase.
+    # ----- Diagnostic accessors (Phase 7.8) -----
+    #
+    # The six diagnostics (mark_audit, invariant, poison_holders,
+    # address_space_audit, heap_dump, segv_report) read block metadata straight
+    # from the header, which under headerless is the object's own bytes. They
+    # run in the stopped world and are not hot, so each of these does the one
+    # chunk lookup a bare `BlockHeader*` needs and delegates to the same
+    # chunk-derived accessors the collector uses. A diagnostic that answers from
+    # a different source than the collector is worse than none — it argues with
+    # the sweep about what is live.
+    #
+    # Chunk-in-hand callers should use `block_payload` / `user_of` /
+    # `block_allocated?` / `atomic_of` directly; these are for the leaf helpers
+    # that were only ever handed a header.
+
+    def diag_chunk(header : BlockHeader*) : ChunkHeader*?
+      chunk_containing(header.address)
+    end
+
+    def diag_payload(header : BlockHeader*) : UInt64
+      block_payload(header).to_u64
+    end
+
+    def diag_user(header : BlockHeader*) : Void*
+      if (chunk = diag_chunk(header))
+        user_of(chunk, header)
+      else
+        BlockHeader.user_from(header)
+      end
+    end
+
+    def diag_allocated?(header : BlockHeader*) : Bool
+      if (chunk = diag_chunk(header))
+        block_allocated?(chunk, header)
+      else
+        !BlockHeader.free?(header)
+      end
+    end
+
+    def diag_atomic?(header : BlockHeader*) : Bool
+      if (chunk = diag_chunk(header))
+        atomic_of(chunk, header)
+      else
+        BlockHeader.atomic?(header)
+      end
+    end
+
+    # Flags word for display. A large block has a real one; a headerless small
+    # block has none, so its known bits are synthesized from the same sources
+    # the collector reads, and unknown bits read as zero rather than as the
+    # object's data.
+    def diag_flags(header : BlockHeader*) : UInt64
+      chunk = diag_chunk(header)
+      return header.value.flags.to_u64 if chunk.nil? || ChunkHeader.large?(chunk)
+      {% if flag?(:gcry_headerless) %}
+        f = 0_u64
+        f |= BlockHeader::Flags::FREE.to_u64 unless block_allocated?(chunk, header)
+        f |= BlockHeader::Flags::ATOMIC.to_u64 if atomic_of(chunk, header)
+        f
+      {% else %}
+        header.value.flags.to_u64
+      {% end %}
+    end
+
+    # Is this block atomic (unscanned)? Representation-neutral: a large block
+    # carries the flag in its header in both builds; a small block's kind is
+    # its chunk's (7.2), with the header flag as the header build's answer.
+    @[AlwaysInline]
+    def atomic_of(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      if ChunkHeader.large?(chunk)
+        BlockHeader.atomic_large?(header)
+      else
+        ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+      end
+    end
+
     @[AlwaysInline]
     def user_of(chunk : ChunkHeader*, header : BlockHeader*) : Void*
       if ChunkHeader.large?(chunk)

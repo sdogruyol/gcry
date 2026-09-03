@@ -357,7 +357,8 @@ module GC
     if env_flag_one?("GCRY_DISABLE_NURSERY")
       heap.nursery_enabled = false
       heap.nursery_threshold = UInt64::MAX
-    elsif nursery = env_u64("GCRY_NURSERY")
+    elsif (nursery = env_u64("GCRY_NURSERY")) && {% if flag?(:gcry_headerless) %} false {% else %} true {% end %}
+      # (headerless: GCRY_NURSERY is ignored — see Heap#nursery_enabled=)
       # Opt-in: nursery without barriers is expensive (old→young full scan).
       heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0

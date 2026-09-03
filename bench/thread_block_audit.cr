@@ -158,7 +158,18 @@ puts "mode: #{control ? "control (GCRY_THREAD_BLOCK_AUDIT unset; nothing may be 
 exe = Process.executable_path.not_nil!
 failures = [] of String
 
-["dies", "lives", "lives-minor", "lives-minor-all", "thread", "staged", "staged-nowait"].each do |arm|
+arms = ["dies", "lives", "lives-minor", "lives-minor-all", "thread", "staged", "staged-nowait"]
+{% if flag?(:gcry_headerless) %}
+  # The two minor-collection arms assert on nursery behaviour — "on a minor an
+  # old live object reads unmarked and is *not* dying". Headerless has no
+  # nursery: nursery chunks are header-based and excluded from bitmap chunks,
+  # so `Heap#nursery_enabled=` is a no-op there (Phase 7.3) and a minor can
+  # never happen. The arms are not failing, they are inapplicable — and saying
+  # so beats a "0 minor collections" that reads like a defect.
+  arms.reject! { |a| a.starts_with?("lives-minor") }
+  puts "headerless: skipping lives-minor and lives-minor-all — no nursery, so no minor collections to hold the audit to"
+{% end %}
+arms.each do |arm|
   env = {"GCRY_THREAD_BLOCK_AUDIT" => control ? "0" : "1"}
   # A small nursery threshold, so the churn in the child produces minor
   # collections rather than one major at the end. On a minor the sweep reclaims

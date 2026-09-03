@@ -315,8 +315,8 @@ module Gcry
 
       if holder = find_block(Pointer(Void).new(at))
         len = RawOut.append(buf, len, "gcry heap block 0x")
-        len = RawOut.append_hex(buf, len, BlockHeader.user_from(holder).address)
-        len = RawOut.append(buf, len, BlockHeader.free?(holder) ? " (FREE" : " (used")
+        len = RawOut.append_hex(buf, len, diag_user(holder).address)
+        len = RawOut.append(buf, len, !diag_allocated?(holder) ? " (FREE" : " (used")
         len = RawOut.append(buf, len, heap_marked?(holder) ? ", marked" : ", unmarked")
         # Size, ATOMIC and the payload's first Int32, because "a marked heap
         # block holds it" is not yet an answer. The mark audit skips ATOMIC
@@ -325,12 +325,12 @@ module Gcry
         # stored a heap pointer in an allocation Crystal declared pointer-free,
         # and no walk will ever follow it.
         len = RawOut.append(buf, len, ", ")
-        len = RawOut.append_u64(buf, len, holder.value.size.to_u64)
-        len = RawOut.append(buf, len, BlockHeader.atomic?(holder) ? " bytes, ATOMIC" : " bytes, scanned")
-        if holder.value.size >= 4
+        len = RawOut.append_u64(buf, len, diag_payload(holder))
+        len = RawOut.append(buf, len, diag_atomic?(holder) ? " bytes, ATOMIC" : " bytes, scanned")
+        if diag_payload(holder) >= 4
           len = RawOut.append(buf, len, ", first Int32 ")
           len = RawOut.append_u64(buf, len,
-            BlockHeader.user_from(holder).as(UInt32*).value.to_u64)
+            diag_user(holder).as(UInt32*).value.to_u64)
         end
         len = RawOut.append(buf, len, ")")
         return len

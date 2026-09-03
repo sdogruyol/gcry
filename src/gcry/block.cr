@@ -210,12 +210,24 @@ module Gcry
     end
 
     def self.set_finalizer(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # Nothing reads this flag since 7.4 replaced it with the finalizer
+        # registry's index, and under headerless a small block has no header —
+        # this write would land in the object's own first words.
+        return
+      {% end %}
       h = header.value
       h.flags |= Flags::FINALIZER
       header.value = h
     end
 
     def self.set_disappearing(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        # Nothing reads this flag since 7.4 replaced it with the finalizer
+        # registry's index, and under headerless a small block has no header —
+        # this write would land in the object's own first words.
+        return
+      {% end %}
       h = header.value
       h.flags |= Flags::DISAPPEARING
       header.value = h
@@ -302,6 +314,13 @@ module Gcry
     # silently and takes tens of thousands of cycles to surface.
     def self.free_large?(header : BlockHeader*) : Bool
       (header.value.flags & Flags::FREE) != 0
+    end
+
+    # ATOMIC for a block that still has a header (large). `set_used_large`
+    # writes the flag; the unsuffixed `atomic?` answers false under headerless
+    # because a small block's kind lives on its chunk.
+    def self.atomic_large?(header : BlockHeader*) : Bool
+      (header.value.flags & Flags::ATOMIC) != 0
     end
 
     def self.clear_mark_large(header : BlockHeader*) : Nil

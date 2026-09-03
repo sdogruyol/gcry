@@ -264,7 +264,27 @@ module Gcry
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
-    property nursery_enabled : Bool = true
+    # Default `true`, except under headerless, where the setter below explains
+    # why a nursery cannot exist and the initial value must agree with it.
+    {% if flag?(:gcry_headerless) %}
+      getter nursery_enabled : Bool = false
+    {% else %}
+      getter nursery_enabled : Bool = true
+    {% end %}
+
+    def nursery_enabled=(value : Bool) : Bool
+      {% if flag?(:gcry_headerless) %}
+        # Phase 7.3: nursery chunks are header-based and excluded from bitmap
+        # chunks, so a headerless heap cannot run one. Enabling it put a
+        # freelist-era allocator under objects with no header — the
+        # thread_block_audit `lives-minor` arm hung inside its address-space
+        # audit for exactly this reason. Silently off, never on.
+        @nursery_enabled = false
+      {% else %}
+        @nursery_enabled = value
+      {% end %}
+    end
+
     # Adaptive nursery threshold: adjusted after each minor based on the
     # survival rate of the last N minors. When survival is below the target
     # (50%), the threshold shrinks to collect earlier; above, it grows to
@@ -1171,8 +1191,11 @@ module Gcry
       end
       return if referent.null?
 
-      if header = find_object(referent)
-        referent = BlockHeader.user_from(header)
+      if (found = find_object_with_chunk(referent))
+        header, chunk = found
+        # The chunk-aware user pointer: `user_from` is identity under headerless
+        # and would hand back a large object's header slot as its referent.
+        referent = user_of(chunk, header)
         BlockHeader.set_disappearing(header)
       end
       @finalizers.register_disappearing_link(link, referent)
@@ -1180,9 +1203,13 @@ module Gcry
 
     def live?(pointer : Void*) : Bool
       return false if pointer.null?
-      header = find_object(pointer)
-      return false unless header
-      !BlockHeader.free?(header)
+      found = find_object_with_chunk(pointer)
+      return false unless found
+      header, chunk = found
+      # `find_object` already required occupancy; this re-asks the same
+      # authority rather than the header flag, which is stale on a bitmap chunk
+      # and absent under headerless.
+      block_allocated?(chunk, header)
     end
 
     # ExecutionContext Monitor must not run process STW — it would signal-suspend
@@ -1383,14 +1410,14 @@ module Gcry
         return {found: false, free: false, size: 0_u32, flags: 0_u32,
                 first_word: 0_u64, offset: 0_u64}
       end
-      user = BlockHeader.user_from(header)
+      user = diag_user(header)
       addr = pointer.address
       offset = addr >= user.address ? addr - user.address : 0_u64
-      first = header.value.size >= 8 ? user.as(UInt64*).value : 0_u64
+      first = diag_payload(header) >= 8 ? user.as(UInt64*).value : 0_u64
       {found:      true,
-       free:       BlockHeader.free?(header),
-       size:       header.value.size,
-       flags:      header.value.flags,
+       free:       !diag_allocated?(header),
+       size:       diag_payload(header),
+       flags:      diag_flags(header),
        first_word: first,
        offset:     offset}
     end

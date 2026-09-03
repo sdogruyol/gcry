@@ -44,7 +44,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major (Linux default **32 MiB**; Darwin process **16 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** |
+| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** **Ignored under `-Dgcry_headerless`**: nursery chunks are header-based and excluded from bitmap chunks, so a headerless heap has no nursery and `Heap#nursery_enabled=` is a no-op there (Phase 7.3) |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
 | `GCRY_DISABLE_ADAPTIVE_NURSERY=1` | Use fixed nursery threshold (no auto-tuning) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty/total % cap for soft-dirty scan (default **25**) |

@@ -470,3 +470,71 @@ has, at full length, plus eight reproducers built during the hunt. The header
 build is unaffected and fully green. What remains of Phase 7 is 7.8 — port the
 six diagnostics with their purpose-broken gates observed red — and 7.9, the
 soak.
+
+---
+
+## Update 7 (2026-09-04): Phase 7.8 — the six diagnostics, ported
+
+Every diagnostic now answers from the same sources the collector reads. Six
+representation-neutral accessors on `Heap` (`diag_chunk` / `diag_payload` /
+`diag_user` / `diag_allocated?` / `diag_atomic?` / `diag_flags`) do the one
+chunk lookup a bare `BlockHeader*` needs and delegate to `block_payload`,
+`user_of`, `block_allocated?` and a new `atomic_of`. A diagnostic that answers
+from a different source than the sweep is worse than none — it argues with the
+collector about what is live — and under headerless "the header" is the
+object's own bytes, so the old reads were reporting whatever the program had
+stored there.
+
+Ported: `mark_audit` (20 sites), `invariant` (7, with `counts_live?` gaining a
+heap), `heap_dump` (9), `poison_holders` (9, with `scan_block` gaining a heap),
+`address_space_audit` (6), `thread_block_audit` (4), `thread_list_tripwire`
+(3), and `collect.cr`'s `debug_block_info`, which feeds `segv_report`.
+
+### The bar: purpose-broken gates, both arms, both builds
+
+| gate | header build | `-Dgcry_headerless` |
+|---|---|---|
+| `mark-audit` | PASS | **PASS** (was: planted arm FAIL) |
+| `poison-holders` | PASS | **PASS** (was: planted FAIL, control reported phantom holders) |
+| `poison-freed` | PASS | PASS |
+| `segv-report` | PASS | **PASS** (was: FAIL both arms — "USED block, size 0" for a FREE one) |
+| `thread-block-audit` | PASS | **PASS** (was: hang) |
+| `invariants` | PASS | — (spec-driven, header build) |
+
+Each planted arm names what it planted and each control shows the search adds
+lines and removes none — "observed red, then green", not "the specs pass".
+
+### Two live bugs found by the port, not by the audits
+
+- **`set_finalizer` / `set_disappearing` wrote into objects.** Both set a flag
+  bit through the block header; since 7.4 nothing reads those bits (the
+  registry index replaced them), so under headerless every `add_finalizer` and
+  every weak-link registration was writing a bit into the object's own first
+  words. Both are now no-ops under the flag. `register_disappearing_link` also
+  derived its referent with the identity `user_from`, which hands back a large
+  object's header slot as the referent; it now uses `user_of`.
+- **The nursery was never actually disabled.** Phase 7.3 recorded "headerless
+  implies nursery off" as a constraint and then enforced nothing: the
+  `property` defaulted to `true` and `GCRY_NURSERY=<n>` switched it on. The
+  `thread_block_audit` `lives-minor` arm sets `GCRY_NURSERY=65536` and hung
+  inside its own address-space audit for exactly that reason. The default,
+  the setter and the env are now all forced off under the flag, and the
+  bench's two nursery arms are skipped there with a printed reason — they are
+  inapplicable, not failing.
+
+Also caught on the way: one regex over-reach that turned a *chunk* header's
+flags into a block accessor (`thread_list_tripwire.cr:335`) — the compiler
+refused it, which is the right way for that to fail.
+
+### Standing after 7.8
+
+| | header build | headerless |
+|---|---|---|
+| spec, 3 configs | 224/224 | — |
+| 9 collector gates | all PASS | — |
+| 5 diagnostic gates, both arms | all PASS | **all PASS** |
+| `property_test` 20 000 / 100 000 | — | PASS / PASS |
+| `mt` / `stw_mt` property | PASS | PASS |
+| 6 reproducers from the 7.7 hunt | — | all PASS |
+
+What remains of Phase 7 is **7.9, the soak**: both flag arms for a release.

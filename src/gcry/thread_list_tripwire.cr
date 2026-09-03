@@ -261,7 +261,7 @@ module Gcry
       # generation printed below is bookkeeping, and the bitmap is the answer.
       len = RawOut.append(buf.to_unsafe, len, heap_marked?(header) ? "yes" : "no")
       len = RawOut.append(buf.to_unsafe, len, ", header gen ")
-      gen = ((header.value.flags & BlockHeader::Flags::MARK_GEN_MASK) >> BlockHeader::Flags::MARK_GEN_SHIFT).to_u64
+      gen = ((diag_flags(header) & BlockHeader::Flags::MARK_GEN_MASK.to_u64) >> BlockHeader::Flags::MARK_GEN_SHIFT).to_u64
       len = RawOut.append_u64(buf.to_unsafe, len, gen)
       len = RawOut.append(buf.to_unsafe, len, " current gen ")
       len = RawOut.append_u64(buf.to_unsafe, len, BlockHeader.mark_gen.to_u64)
@@ -388,7 +388,7 @@ module Gcry
                  "outside the heap span"
                elsif (header = find_block(pointer)).nil?
                  "find_block returned nothing"
-               elsif BlockHeader.free?(header)
+               elsif !diag_allocated?(header)
                  "the header reads FREE"
                elsif gate && !type_id_plausible?(header)
                  "the type-id gate rejected it"

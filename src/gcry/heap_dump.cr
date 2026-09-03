@@ -24,7 +24,7 @@ module Gcry
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.large_header(chunk)
-        next if BlockHeader.free?(header)
+        next if !heap.diag_allocated?(header)
         write_dump_line(io, header, heap)
         count += 1
       else
@@ -36,7 +36,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
+          unless !heap.diag_allocated?(header)
             write_dump_line(io, header, heap)
             count += 1
           end
@@ -53,8 +53,8 @@ module Gcry
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.large_header(chunk)
-        next if BlockHeader.free?(header)
-        addrs << BlockHeader.user_from(header).address
+        next if !heap.diag_allocated?(header)
+        addrs << heap.diag_user(header).address
       else
         class_index = chunk.value.size_class.to_i32
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -64,8 +64,8 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
-            addrs << BlockHeader.user_from(header).address
+          unless !heap.diag_allocated?(header)
+            addrs << heap.diag_user(header).address
           end
           cursor += block_bytes
         end
@@ -85,8 +85,8 @@ module Gcry
   end
 
   private def self.write_dump_line(io : IO, header : BlockHeader*, heap : Heap) : Nil
-    user = BlockHeader.user_from(header)
-    size = header.value.size.to_u64
+    user = heap.diag_user(header)
+    size = heap.diag_payload(header)
     type_id = 0_i32
     # Crystal objects store type_id as Int32 at the start of the payload when
     # the block is large enough; raw buffers may contain garbage — still report.
@@ -97,7 +97,7 @@ module Gcry
     # what the sweep reads, and a dump that says "marked" about an object
     # the collector considers garbage is a wrong answer, not a missing one.
     marked = heap.marked_for_report?(header)
-    atomic = BlockHeader.atomic?(header)
+    atomic = heap.diag_atomic?(header)
     nursery = BlockHeader.nursery?(header)
     io << "{\"addr\":\"0x" << user.address.to_s(16)
     io << "\",\"size\":" << size
