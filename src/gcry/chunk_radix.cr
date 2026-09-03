@@ -48,13 +48,32 @@ module Gcry
     # reason: `Platform.host_page_size` returns a constant initialised at
     # runtime, which Crystal implements with `once`, and `once` needs a Fiber.
     #
-    # ## Cost
+    # ## Cost, and the estimate that was wrong
     #
     # L1 is 64 Ki entries = 512 KiB of reservation. L2 is one entry per page of
     # a 4 GiB region — 8 MiB reserved at 4 KiB pages, 2 MiB at 16 KiB. Both are
-    # `mmap`ed and lazily faulted, so resident cost is ~8 bytes per page of live
-    # heap: **0.2% of the heap at 4 KiB pages, less above**. Nothing is touched
-    # for a region that holds no chunk.
+    # `mmap`ed and lazily faulted.
+    #
+    # That used to read "resident cost ~8 bytes per page of live heap, 0.2% of
+    # the heap". The arithmetic was right and the assumption was not. Measured
+    # (`bench/log/linux/2026-09-03-simdgc-chunk-radix-ab/`), post-GC RSS rose
+    # **+16-21%** on Kemal, and smaps named the cause:
+    #
+    #   7fd07f993000-7fd080193000  Size: 8192 kB  Rss: 2048 kB  AnonHugePages: 2048 kB
+    #
+    # With THP in `always`, a single touched entry faults a **2 MiB** huge page,
+    # so resident cost stops tracking the live heap and becomes ~2 MiB per 4 GiB
+    # region holding any chunk. On a 13 MB heap that is 160x the old estimate.
+    # It is bounded — five successive loads plateaued at 2172 KiB — but it is a
+    # fixed tax paid by every process, which is exactly the wrong shape for a
+    # collector judged on RSS x Boehm.
+    #
+    # So the tables are `MADV_NOHUGEPAGE`d, the same policy and the same reason
+    # as `map_chunk` (heap.cr): base pages keep RSS proportional to what is
+    # actually touched. `GCRY_RADIX_THP=1` opts back in, because the huge page
+    # also gives the whole table one TLB entry and some of the mark win may be
+    # paid for by exactly the pages this gives up — that A/B is the knob's
+    # reason to exist.
     #
     # ## Lifetime, which is the whole safety argument
     #
@@ -91,6 +110,9 @@ module Gcry
     # the right price.
     RADIX_MAX_GRANULES = 1024
 
+    # `GCRY_RADIX_THP=1`: leave the tables eligible for transparent huge pages.
+    # Off by default — see the cost note above.
+    @radix_thp : Bool = false
     @radix_l1 : Pointer(Pointer(ChunkHeader*)) = Pointer(Pointer(ChunkHeader*)).null
     @radix_granule_shift : Int32 = 0
     @radix_l2_mask : UInt64 = 0_u64
@@ -119,6 +141,7 @@ module Gcry
 
     protected def radix_init : Nil
       return unless @radix_l1.null?
+      @radix_thp = Heap.radix_thp_from_env
       # Direct sysconf: `Platform.host_page_size` is a `once`-initialised
       # constant and this can run inside GC.init. See the note above.
       raw = LibC.sysconf(LibC::SC_PAGESIZE)
@@ -234,6 +257,13 @@ module Gcry
         LibC::PROT_READ | LibC::PROT_WRITE,
         LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
+      # See the cost note above: one touched entry otherwise faults a whole
+      # 2 MiB huge page and the table's RSS stops tracking the live heap.
+      {% if flag?(:linux) %}
+        unless @radix_thp
+          LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_NOHUGEPAGE)
+        end
+      {% end %}
       ptr
     end
   end

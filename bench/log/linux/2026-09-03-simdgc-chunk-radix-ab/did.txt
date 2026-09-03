@@ -1,0 +1,23 @@
+Difference-in-differences: treatment contrast minus null contrast.
+Cancels the position-in-round artifact that my schedule confounded with arm.
+
+### /json
+  throughput   raw= +1086.10 rps ( +2.69%)  null=  -505.06 rps ( -1.25%)
+               DiD= +1591.15 rps ( +3.93%)  95% CI [-3.36%, +11.23%]  t=+1.08  p=0.2852  -> SPANS ZERO
+  phase_mark   raw=   -15.13 us ( -6.63%)  null=    +7.91 us ( +3.47%)
+               DiD=   -23.05 us (-10.10%)  95% CI [-18.92%, -1.29%]  t=-2.30  p=0.02541  -> EXCLUDES ZERO
+  pause p50    raw=   -31.72 us ( -3.98%)  null=   -10.28 us ( -1.29%)
+               DiD=   -21.44 us ( -2.69%)  95% CI [-5.81%, +0.43%]  t=-1.75  p=0.08932  -> SPANS ZERO
+  post-GC RSS  raw= +2881.62 KiB (+21.38%)  null=   -21.00 KiB ( -0.16%)
+               DiD= +2902.62 KiB (+21.54%)  95% CI [+17.80%, +25.27%]  t=+11.72  p=1.883e-13  -> EXCLUDES ZERO
+
+### /
+  throughput   raw=  -800.76 rps ( -1.37%)  null=  -312.30 rps ( -0.54%)
+               DiD=  -488.46 rps ( -0.84%)  95% CI [-6.35%, +4.67%]  t=-0.30  p=0.762  -> SPANS ZERO
+  phase_mark   raw=   -43.60 us (-17.72%)  null=    +1.17 us ( +0.47%)
+               DiD=   -44.77 us (-18.19%)  95% CI [-29.02%, -7.37%]  t=-3.36  p=0.001339  -> EXCLUDES ZERO
+  pause p50    raw=   -33.87 us ( -3.96%)  null=    +7.03 us ( +0.82%)
+               DiD=   -40.90 us ( -4.78%)  95% CI [-9.33%, -0.22%]  t=-2.11  p=0.04025  -> EXCLUDES ZERO
+  post-GC RSS  raw= +2163.50 KiB (+16.39%)  null=   +33.00 KiB ( +0.25%)
+               DiD= +2130.50 KiB (+16.14%)  95% CI [+12.23%, +20.06%]  t=+8.39  p=1.255e-09  -> EXCLUDES ZERO
+

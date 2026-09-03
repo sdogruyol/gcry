@@ -1,0 +1,28 @@
+
+--- RADIX /json  n=32
+  phase_mark_ns            mean%=  -6.63  median%=  -9.69  faster/lower in B: 25/32  sign p=0.002102  wilcoxon p=0.002227
+  rps                      mean%=  +2.69  median%=  +1.32  faster/lower in B: 16/32  sign p=1  wilcoxon p=0.4883
+  heap_size                mean%= -20.95  median%= -27.16  faster/lower in B: 24/32  sign p=0.007  wilcoxon p=0.02801
+  live_objects             mean%= -29.98  median%= -37.47  faster/lower in B: 24/32  sign p=0.007  wilcoxon p=0.02279
+  size_class_live_bytes    mean%=  -0.00  median%=  -0.00  faster/lower in B: 17/31  sign p=0.7201  wilcoxon p=0.3001
+
+--- NULL  /json  n=32
+  phase_mark_ns            mean%=  +3.58  median%=  +0.95  faster/lower in B: 14/32  sign p=0.5966  wilcoxon p=0.4653
+  rps                      mean%=  -1.19  median%=  -0.50  faster/lower in B: 16/32  sign p=1  wilcoxon p=0.5
+  heap_size                mean%= -10.13  median%= -15.20  faster/lower in B: 20/31  sign p=0.1496  wilcoxon p=0.2811
+  live_objects             mean%= -15.26  median%= -24.29  faster/lower in B: 21/32  sign p=0.1102  wilcoxon p=0.2462
+  size_class_live_bytes    mean%=  -0.00  median%=  +0.00  faster/lower in B: 15/25  sign p=0.4244  wilcoxon p=0.1724
+
+--- RADIX /  n=32
+  phase_mark_ns            mean%= -17.72  median%= -11.43  faster/lower in B: 29/32  sign p=2.556e-06  wilcoxon p=1.288e-06
+  rps                      mean%=  -1.37  median%=  -0.64  faster/lower in B: 17/32  sign p=0.8601  wilcoxon p=0.4768
+  heap_size                mean%=  -3.62  median%= -15.19  faster/lower in B: 18/32  sign p=0.5966  wilcoxon p=0.586
+  live_objects             mean%=  -5.01  median%= -22.63  faster/lower in B: 18/32  sign p=0.5966  wilcoxon p=0.586
+  size_class_live_bytes    mean%=  +0.00  median%=  +0.00  faster/lower in B: 12/30  sign p=0.3616  wilcoxon p=0.1555
+
+--- NULL  /  n=32
+  phase_mark_ns            mean%=  +0.50  median%=  +1.60  faster/lower in B: 14/32  sign p=0.5966  wilcoxon p=0.8177
+  rps                      mean%=  -0.52  median%=  +0.70  faster/lower in B: 15/32  sign p=0.8601  wilcoxon p=0.9485
+  heap_size                mean%= -15.54  median%= -12.55  faster/lower in B: 19/32  sign p=0.3771  wilcoxon p=0.09605
+  live_objects             mean%= -21.79  median%= -17.71  faster/lower in B: 19/32  sign p=0.3771  wilcoxon p=0.09454
+  size_class_live_bytes    mean%=  -0.00  median%=  -0.00  faster/lower in B: 17/28  sign p=0.3449  wilcoxon p=0.4866

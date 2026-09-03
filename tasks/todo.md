@@ -129,11 +129,30 @@ worth: the bitmap arm does strictly *more* work (union reads, allocate-black
 still on the header, sweep still walking headers), so flat means the added cost
 is under the noise floor. It licenses continuing; it is not a win.
 
-## Phase 2 — O(1) chunk lookup
+## Phase 2 — O(1) chunk lookup — MECHANISM PROVEN, DEFAULT STAYS OFF
 
-- [ ] Radix lock-free iff `@world_stopped`, `@index_lock` otherwise (today's rule)
-- [ ] Granule = `Platform.host_page_size` (64 KiB straddles → ~25% fallback)
-- [ ] Large chunk spanning > 1024 granules: not inserted, falls back to binary search
+- [x] Two-level page-granular table; granules are **exact** (chunks are
+      page-aligned AND page-multiple), so the `contains?` verify is defence in
+      depth rather than part of the resolution
+- [x] Entries live/die inside the same `@index_lock` sections as the sorted
+      index; `chunk_containing`'s locking discipline unchanged
+- [x] Chunks > 1024 granules not published; binary-search fallback
+- [x] `find_block`'s 64-bit division gone (delegates to the reciprocal)
+- [x] 13 targets x 3 configs all green
+- [x] **phase_mark −6.6% / −17.7%**, p=0.016 / 0.0001, surviving sign test,
+      Wilcoxon, ANCOVA and DiD. Pause −3–4%.
+- [x] RSS +16–21% found, diagnosed as THP (2 MiB fault granularity, 160x the
+      documented estimate), fixed with `MADV_NOHUGEPAGE` → +1.6%.
+      `GCRY_RADIX_THP=1` kept for the TLB A/B.
+- [ ] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win?
+- [ ] Re-cut RSS at Kemal scale post-fix
+
+### The finding that outranks the phase
+
+Kemal's **GC duty cycle is 0.2–0.5% of wall time**. An infinitely fast mark buys
+**+0.15pp** on `/json`. The plan's +5–10pp (Phase 2+4) and +3–8pp (Phase 6)
+throughput expectations are unreachable by any mark-side work, at any sample
+size. Needs a decision before the next cut — see the Phase 2 FINDINGS.
 ## Phase 3 — occ + bitmap sweep + pool allocation (together)
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not

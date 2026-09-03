@@ -66,6 +66,13 @@ So the protocol for every later phase is fixed here, not improvised then:
 
 1. **Paired and interleaved**, alternating which arm runs first within each
    pair. Never all of A then all of B.
+   *(Amended 2026-09-03 by `../2026-09-03-simdgc-chunk-radix-ab/`: that is
+   necessary and NOT sufficient. Balance each arm across **absolute position in
+   the round** too, or rotate arms through all positions. That batch had `wrk`
+   socket timeouts determined purely by position — slots 3, 6, 8 afflicted, the
+   rest never — so on one path the treatment arm drew an afflicted slot in both
+   parities and the control never did. Alternating fixed which arm ran first; it
+   did not fix which arm ran third.)*
 2. **Report a paired t-statistic and a 95% CI**, not a ratio of medians. A
    difference whose CI spans zero is not a result.
 3. **Carry a null control** — same-GC vs same-GC — in any batch whose headline
