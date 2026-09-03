@@ -366,4 +366,20 @@ Three candidates, materially different risk/reward:
    actual goal. Needs the bitmap allocator hardened for sustained HTTP
    concurrency first (its bugs were fixed 4 commits ago).
 3. **Phase 7 headerless**: targets RSS × Boehm ≤ 1.0, the shipping bar. Biggest
-   strategic value, biggest effort (port every diagnostic behind -Dgcry_headerless).
+   strategic value, biggest effort (port every diagnostic behind -Dgcry_headerless).## Phase 6 — allocation tuning — SHIPPING CONTENT DONE
+
+- [x] `prefetchw` ahead of the bitmap alloc cursor (`GCRY_ALLOC_PFW`, default
+      2 KiB): −2.3% ns_per_alloc (t=−3.86, 14/16). Modest here (steady-state
+      reuse, not fresh memory); helps the fresh-chunk case simdgc measured at
+      7.1→4.2 ns.
+- [x] Pool lists already ascending-address order (bitmap_take_pool_chunk takes
+      the lowest-address chunk with capacity).
+- [x] alloc_batch closed under bitmap_alloc; tight_grow/prefer_freelists are
+      freelist-shaped and unreachable — the no-op-knob retirement the plan asks.
+- [x] live_objects/free_bytes already come from sweep popcounts (Phase 3).
+- [ ] **Per-thread TLAB cursors — deferred, EC4-only.** On EC1 (what Kemal
+      ships) the size-class lock is uncontended, so per-thread cursors give ~0;
+      the win is EC4+ multi-mutator. Deferring keeps concurrency risk off the
+      recently-hardened allocator. The shipping allocator win (−27.8% ns/alloc)
+      is already banked from Phase 3. Design: thread-local per-class cursor,
+      refill hands out a whole 64-block word per lock (simdgc3 gc_tpool).

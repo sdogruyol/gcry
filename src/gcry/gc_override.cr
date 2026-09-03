@@ -813,6 +813,9 @@ module GC
     heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
     heap.large_release_from_base = true if env_flag_one?("GCRY_LARGE_RELEASE_FROM_BASE")
     heap.mark_prefetch = false if env_flag_zero?("GCRY_PREFETCH")
+    if pfw = env_u64("GCRY_ALLOC_PFW")
+      heap.alloc_pfw = pfw
+    end
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")

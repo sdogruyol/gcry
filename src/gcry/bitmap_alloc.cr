@@ -174,6 +174,15 @@ module Gcry
 
       header_addr = @pool_word_base[index] &+ bit.to_u64 &* @block_bytes[index]
       header = Pointer(BlockHeader).new(header_addr)
+
+      # Prefetch-for-write ahead of the cursor. Fresh-chunk allocation is bound
+      # by the write bandwidth of touching new cache lines, and pulling the line
+      # in for write before `set_used` + the caller's zeroing store overlaps
+      # that miss. Distance is machine-dependent (`GCRY_ALLOC_PFW`); 0 disables.
+      if (pfw = @alloc_pfw) > 0
+        Kernels.prefetch_write(Pointer(Void).new(header_addr &+ pfw))
+      end
+
       BlockHeader.set_used(header, payload, flags)
 
       # Allocate-black, and it is not optional here.

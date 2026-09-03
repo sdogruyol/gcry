@@ -106,6 +106,10 @@ module Gcry
     # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
     # `serial_mark_drain`.
     property mark_prefetch : Bool = true
+    # Bytes ahead of the allocation cursor to prefetch-for-write
+    # (`GCRY_ALLOC_PFW`, default 2 KiB, 0 = off). simdgc measured 7.1 -> 4.2 ns
+    # on fresh memory; the sweet spot is machine-dependent, so it is a knob.
+    property alloc_pfw : UInt64 = 2048_u64
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # Tight-grow: freelist nodes that live in the current grow chunk (newest
