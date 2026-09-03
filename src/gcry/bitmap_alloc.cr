@@ -266,6 +266,52 @@ module Gcry
 
     # Release one block back to `occ`. The bit is shared with 63 others, so the
     # clear is atomic for the same reason the set is.
+    # Page-run live mask built from `occ` rather than from block headers.
+    #
+    # The header walk this replaces asks "is this block FREE?" of every block in
+    # the chunk. On a bitmap chunk that question has no answer in the header —
+    # the streaming sweep never writes FREE into what it reclaims — so every
+    # block reads USED, every page looks live, and **nothing is ever released**.
+    # Measured: `page-release-corruption` reporting `released 0 B` against
+    # 8.8 MB and 64.5 MB on the default arm, with the harness itself saying a
+    # clean result at 0 B proves nothing.
+    #
+    # Iterating set bits rather than pages, because the loop cost then scales
+    # with *live* blocks: a chunk that is mostly garbage — the case where
+    # releasing pages is worth anything — walks almost nothing, and a chunk with
+    # no free pages to release exits on the first popcount.
+    protected def bitmap_page_live_mask(chunk : ChunkHeader*, page : UInt64,
+                                        first_page : UInt64) : UInt64
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return UInt64::MAX if occ.null?
+      class_index = chunk.value.size_class.to_i32
+      return UInt64::MAX if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+
+      block_bytes = @block_bytes[class_index]
+      data_start = ChunkHeader.data_start(chunk).address
+      words = chunk.value.bitmap_words.to_i32
+      mask = 0_u64
+      w = 0
+      while w < words
+        bits = occ[w]
+        while bits != 0_u64
+          bit = bits.trailing_zeros_count
+          bits &= bits &- 1
+          ordinal = (w.to_u64 << 6) &+ bit.to_u64
+          b0 = data_start &+ ordinal &* block_bytes
+          b1 = b0 &+ block_bytes
+          pg = b0 & ~(page - 1)
+          while pg < b1
+            idx = ((pg &- first_page) // page).to_i32
+            mask |= 1_u64 << idx if idx >= 0 && idx < 64
+            pg &+= page
+          end
+        end
+        w += 1
+      end
+      mask
+    end
+
     # Release one block back to `occ` **and** clear its mark.
     #
     # Both, and the mark is the subtle half. An object allocated, marked by the

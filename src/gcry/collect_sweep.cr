@@ -188,7 +188,28 @@ module Gcry
                   ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
                   # Free-page physical release: detect free pages in STW, set HOLED
                   # flag; actual madvise runs post-STW in flush_pending_page_release.
-                  if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                  # `!bitmap_alloc_chunk?`: free-page release is not ported to
+                  # the bitmap representation and must not be half-engaged.
+                  #
+                  # Its machinery is freelist-shaped end to end — HOLED triggers
+                  # `rebuild_size_class_freelist`, and
+                  # `unlink_free_only_page_runs` takes free blocks *off the
+                  # freelist* before the syscall so nothing hands them out
+                  # mid-release. Under bitmap allocation there is no freelist to
+                  # unlink from, and the pool cursor can hand out a block in a
+                  # run the walk is discarding.
+                  #
+                  # Measured: with an `occ`-built live mask the walk engages
+                  # (0 B -> 1.97 MB) and corrupts — HOLED faulted 1 of 4 under
+                  # `GCRY_PAGE_DONTNEED=1` where the default arm is clean 3 of 3.
+                  # Declining only the madvise made it *worse* (3 of 4), because
+                  # the freelist unlink still ran. So the whole path stands down.
+                  #
+                  # Cost: bitmap chunks do not return free pages to the OS —
+                  # an RSS regression, tracked, and strictly better than
+                  # reclaiming live objects.
+                  if @madvise_free_pages && !bitmap_alloc_chunk?(chunk) &&
+                     class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                      usable_payload > 0 && live_payload < usable_payload
                     ChunkHeader.set_holed(chunk, true)
                     ChunkHeader.set_sparse(chunk, false)
@@ -204,6 +225,7 @@ module Gcry
                     # Post-STW MADV_FREE by default — freelist stays valid (no rebuild).
                     # Exclusive with HOLED / madvise_free_pages.
                     if @mostly_empty_release && !@madvise_free_pages &&
+                       !bitmap_alloc_chunk?(chunk) &&
                        class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                        usable_payload > 0 &&
                        live_payload * 100 <= usable_payload * @mostly_empty_max_live_pct.to_u64
@@ -687,23 +709,47 @@ module Gcry
       n_pages = ((last_page - first_page) // page) + 1
       return if n_pages == 0 || n_pages > 64
 
-      live_mask = 0_u64
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-      limit = ChunkHeader.data_end(chunk).as(UInt8*)
-      while (cursor + block_bytes) <= limit
-        header = cursor.as(BlockHeader*)
-        unless BlockHeader.free?(header)
-          b0 = cursor.address
-          b1 = cursor.address + block_bytes
-          p = b0 & ~(page - 1)
-          while p < b1
-            idx = ((p - first_page) // page).to_i32
-            live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
-            p += page
+      if bitmap_alloc_chunk?(chunk)
+        # Free-page release is NOT yet ported to the bitmap representation, and
+        # this returns rather than guessing.
+        #
+        # An `occ`-built live mask makes the walk engage — 0 B became 1.97 MB —
+        # and it also corrupted: `page-release-corruption`'s HOLED arm faulted
+        # 1 of 4 under `GCRY_PAGE_DONTNEED=1` where the default arm is clean
+        # 3 of 3 (8.6-8.9 MB released, 0 faults). So the fault is this
+        # representation's, not the arm's documented flakiness.
+        #
+        # The unported half is the surrounding machinery, not the mask:
+        # `unlink_free_only_page_runs` takes free blocks *off the freelist*
+        # before the syscall so nothing hands them out mid-release, and under
+        # bitmap allocation there is no freelist to unlink from — the pool
+        # cursor can hand out a block in a run this walk is about to discard.
+        # A correct port needs the cursor excluded from the run under the
+        # size-class lock, which is Phase 3 work that is not done.
+        #
+        # Declining costs RSS on bitmap chunks and nothing else. Shipping the
+        # mask alone costs live objects.
+        @page_release_skipped_runs &+= 1
+        return false
+      else
+        live_mask = 0_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            b0 = cursor.address
+            b1 = cursor.address + block_bytes
+            p = b0 & ~(page - 1)
+            while p < b1
+              idx = ((p - first_page) // page).to_i32
+              live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+              p += page
+            end
           end
+          cursor += block_bytes
         end
-        cursor += block_bytes
       end
 
       idx = 0
@@ -1249,17 +1295,33 @@ module Gcry
                                     run_start : UInt64, run_end : UInt64) : UInt32
       live = 0_u32
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      # This re-read is the last moment the answer is current, so it has to ask
+      # the same authority the run selection asked. On a bitmap chunk the block
+      # headers are stale by design — the streaming sweep never writes FREE —
+      # so a header walk here disagrees with the `occ`-built mask that chose the
+      # run, and the two disagreeing is worse than either being wrong alone.
+      bitmap = bitmap_alloc_chunk?(chunk)
+      occ = bitmap ? ChunkHeader.occ_bitmap(chunk) : Pointer(UInt64).null
+      bitmap = false if occ.null?
+
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      ordinal = 0_u64
       while (cursor + block_bytes) <= limit
         b0 = cursor.address
         if b0 + block_bytes > run_start && b0 < run_end
-          unless BlockHeader.free?(cursor.as(BlockHeader*))
+          allocated = if bitmap
+                        ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
+                      else
+                        !BlockHeader.free?(cursor.as(BlockHeader*))
+                      end
+          if allocated
             live &+= 1
             @page_release_live_blocks &+= 1
           end
         end
         cursor += block_bytes
+        ordinal &+= 1
       end
       live
     end

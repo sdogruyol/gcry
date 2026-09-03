@@ -220,15 +220,45 @@ Control arm now pins `GCRY_BITMAP_ALLOC=0`; loses 1967 again.
 
 (Previously: the radix disarmed `find-block-race`'s control.)
 
-### Still open
+### OPEN: an unresolved corruption under concurrent stress
 
-- [ ] **`mt-property-test-short` fails**: `live_objects mismatch reported=98
-      walked=233`, consistent ~135 gap under concurrent mutators. Real,
-      reproducible, unexplained — several candidate causes ruled out (mark on
-      free, counter atomicity). Not speculatively "fixed".
-- [ ] **`page-release-corruption` releases 0 B** under this knob: the page-run
-      walks build their live mask from headers, which are stale. Needs the
-      plan's `occ`-based page-run release. Gate is neutralised, not failing.
+Two symptoms, almost certainly one root cause, and **this is the blocker for
+Phase 3**:
+
+1. `mt-property-test-short`: `live_objects mismatch reported=98 walked=233`,
+   a consistent ~135 gap under concurrent mutators.
+2. `page-release-corruption`: the HOLED arm faults **1-3 of 4** where the
+   default arm is clean **3 of 3** (8.6-8.9 MB released, 0 faults). So it is
+   this representation's, not that arm's documented flakiness.
+
+Ruled out so far, each by a measurement rather than by reasoning:
+
+- Mark left set on explicit free (fixed; symptom persists)
+- Counter atomicity (forced atomic; symptom persists)
+- Free-page release: the entire path was stood down for bitmap chunks —
+  `unlinked 0`, no madvise — and the fault **persisted at 1-3 of 4**. An
+  `occ`-built live mask made the walk engage (0 B -> 1.97 MB) and corrupt;
+  declining only the madvise made it *worse* (3 of 4) because the freelist
+  unlink still ran. Page release is not the cause.
+
+What that leaves: something in the allocator/sweep pair that only shows with
+concurrent mutators. The streaming sweep read-modify-writes a whole `occ` word
+while other threads allocate into it; the size-class lock is supposed to
+serialise that, and the next step is to verify it actually does on every path
+into `bitmap_alloc_locked` — including `bitmap_take_pool_chunk`'s `map_chunk`,
+which takes `@chunk_list_lock` and not the class lock.
+
+### Also owed
+
+- [ ] Free-page release is **not ported** and now explicitly declines on bitmap
+      chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks.
+      `bitmap_page_live_mask` is the mask half, written and currently
+      unreachable; the unported half is `unlink_free_only_page_runs`, which
+      takes free blocks off a freelist that does not exist here.
+- [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
+      chunk. Wants a per-class pool list, ascending address order.
+- [ ] Nursery chunks still header-based (Phase 8)
+- [ ] No measurement yet: sweep and alloc claims both unmeasured
 - [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
       chunk. Wants a per-class pool list, ascending address order.
 - [ ] Nursery chunks still header-based (Phase 8)
