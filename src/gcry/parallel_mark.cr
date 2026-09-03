@@ -34,6 +34,13 @@ module Gcry
       @parallel_mark_workers = value.clamp(1, 16)
     end
 
+    # Diagnostic: what `shutdown_mark_workers` will actually try to join.
+    # A non-zero count with `parallel_mark_workers == 1` means this bookkeeping
+    # has been corrupted, not that workers exist.
+    def mark_worker_pool_state : {Int32, Int32, Bool}
+      {@mark_worker_threads.size, @mark_pthread_count, @mark_pthread_mode}
+    end
+
     def parallel_mark_runs : UInt64
       @parallel_mark_runs
     end

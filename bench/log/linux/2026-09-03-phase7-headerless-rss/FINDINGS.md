@@ -291,3 +291,52 @@ The remaining defect is in **teardown**, not in the collector: the heap is
 correct for its whole life and dies while shutting its mark workers down. That
 is a much smaller and better-understood problem than the one this update
 started with.
+
+---
+
+## Update 4: the residual bug, narrowed but not closed
+
+The `pthread_join` failure was a symptom, not the defect. Instrumenting what
+`shutdown_mark_workers` actually sees (`Heap#mark_worker_pool_state`, added as a
+permanent diagnostic) shows `threads=0 pthreads=0 workers=1` at 5 000, 8 000 and
+11 000 iterations — the bookkeeping is **correct**, so the join error at 15 000
+was corruption reaching that field, not a worker-lifecycle bug.
+
+Release and debug builds fail differently — release segfaults mid-run on a
+corrupted call target, debug completes the test and dies in teardown — which is
+the signature of layout-sensitive memory corruption rather than a logic error.
+
+### Ruled out this round, each by a dedicated probe
+
+| hypothesis | probe | result |
+|---|---|---|
+| magic reciprocal wrong for headerless `block_bytes` | all 40 classes recomputed | safe to **51 MiB** vs a 128 KiB chunk |
+| allocations overrun the chunk | 120 000 allocs, six classes | all in bounds |
+| object graphs not traced | `Array`-of-objects through 200 000 allocs | all intact |
+| `Heap` object clobbered | canary field, 30 000 iterations | intact |
+| `realloc` / Array churn | 200 000 grow+dup+verify rounds | clean |
+| mark-worker lifecycle | pool state at 5/8/11 k iterations | correct |
+| page release | already stood down on bitmap chunks | not involved |
+
+### What is left, and the one real lead
+
+`GCRY_KEEP_CHUNKS=1` (empty-chunk release off) makes 15 000 iterations pass
+where the default fails — but it still fails at 30 000. So **chunk release
+aggravates the defect without being its cause**; it widens a window rather than
+opening it.
+
+The failure needs >11 000 property_test iterations to appear, survives every
+targeted probe above, and is sensitive to build layout. That profile points at a
+rare interleaving in chunk lifecycle — reclaim, revive, or release — rather than
+at any of the pointer-arithmetic changes this phase made, all of which would
+fail immediately and deterministically.
+
+### Honest standing
+
+`-Dgcry_headerless` is **not correct** and must not be used. It is much closer
+than it was: it now passes `property_test` to 11 000 iterations,
+`mt_property_test`, `stw_mt_property_test`, `gc_phases` at every size, and four
+purpose-built probes, and it delivers the **−44.6% RSS** the phase exists for.
+But "passes a lot of tests" is not "correct", and the remaining defect is real.
+
+The header build is unaffected and fully gated throughout.
