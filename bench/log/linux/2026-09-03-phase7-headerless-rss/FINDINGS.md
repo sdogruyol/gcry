@@ -133,3 +133,85 @@ and `bench/micro/gc_phases` still cannot run under it.
 large-object work. The header build stays fully gated: spec 222/222 across
 default / `GCRY_BITMAP_ALLOC` / `GCRY_CHUNK_RADIX`, invariants, mark-audit,
 property, mt-property, stw-mt-property, parallel-mark-process, ameba, format.
+
+---
+
+## Update 2: the large-object path works, and the root cause was one line
+
+The 2-byte corruption at `user+4` is fixed, and the cause was not any of the
+places the reasoning kept pointing at.
+
+`map_chunk` **hardcoded** `data_offset = ChunkHeader::SIZE` for large chunks and
+only called `chunk_geometry` for size-class chunks:
+
+```
+bitmap_words = 0_u32
+data_offset  = ChunkHeader::SIZE.to_u32
+if @bitmap_marks && size_class != UInt32::MAX && ...
+```
+
+So the reserved-header-slot geometry added in the previous commit never applied
+to a single large chunk. The header slot and the object were therefore at the
+*same address*, and the first `set_mark_large` wrote the mark generation into the
+object's second word — two bytes at `user+4`, exactly the observed damage.
+
+It was found with an in-code watchpoint rather than by reading: an address range
+a test declares off-limits (`BlockHeader.hl_guard`, compiled in under
+`-Dgcry_hl_assert`), checked by every large-mark write, which printed the
+offending backtrace on the first hit. No debugger is available on this host and
+the arithmetic alone had pointed at three innocent functions.
+
+A second conflation fell out of the fix and was caught by
+`spec/bitmap_marks_spec.cr`: `large_data_offset` is the chunk-to-**object**
+distance (48 in both builds, and what sizes the mapping), while the chunk's
+`data_offset` **field** is where its *data* begins — 32 with headers in front
+(where `data_start` *is* the header) and 48 under headerless. Using one for the
+other broke the header build, which is precisely what that spec exists to catch.
+
+Also fixed: three more large-chain walkers (`release_large_chain`,
+`queue_large_release`, one in `collect.cr`) still converting with the generic
+`from_user`, and `realloc`, which read `old_size` and atomicity from the block —
+garbage under headerless, and the length of a `memcpy`. `realloc` now takes size
+from the chunk for small blocks and from the header for large, because a large
+block's header holds the size actually requested while `block_payload` gives the
+mapping extent, an upper bound that would copy past the object.
+
+## Where the headerless build now stands
+
+| test | result |
+|---|---|
+| `property_test` (to 10 000 iterations) | **PASS** |
+| `mt_property_test` | **PASS** |
+| `stw_mt_property_test` | **PASS** |
+| `bench/micro/gc_phases`, every size | **PASS** |
+| allocation overlap probe | **PASS** |
+| `property_test` at 30 000+ iterations | **FAIL** — accumulating |
+
+RSS, controlled (fixed 1 000 000 live objects, whole chain walked to prove every
+link survived in both builds):
+
+| object | header | headerless | measured | theory `16/(16+n)` |
+|---|---|---|---|---|
+| **16 B** | 34 888 kB | **19 320 kB** | **−44.6%** | 50% |
+| 32 B | 50 660 kB | 35 032 kB | −30.8% | 33% |
+| 64 B | 81 716 kB | 66 180 kB | −19.0% | 20% |
+| 128 B | 144 492 kB | 128 724 kB | −10.9% | 11% |
+
+Every size within ~5% of theory, the gap being the doubled bitmaps.
+
+**Do not measure this on `gc_phases`.** It allocates for a fixed *wall time*, so
+the two builds do different amounts of work and settle at different heap sizes;
+it reported −73.7% for 128 B objects, where removing a 16-byte header can save
+at most 11%. The controlled probe is the honest instrument.
+
+## What is left
+
+One accumulating bug: `property_test` survives 10 000 iterations and fails
+somewhere before 30 000. Rare or cumulative rather than systematic — the shape of
+a slow leak or a cache that drifts, not a wrong pointer computation, which would
+fail immediately.
+
+The header build is unaffected throughout and fully green: spec 222/222 across
+default / `GCRY_BITMAP_ALLOC` / `GCRY_CHUNK_RADIX`, plus invariants, mark-audit,
+property, mt-property, stw-mt-property, parallel-mark-process,
+page-release-corruption, heap-counters, find-block-race, ameba and format.

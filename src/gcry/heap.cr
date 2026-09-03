@@ -459,8 +459,22 @@ module Gcry
       header = BlockHeader.from_user(pointer)
       raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
 
-      old_size = header.value.size.to_u64
-      atomic = BlockHeader.atomic?(header)
+      # Size and atomicity from the chunk (7.2 / 7.6). Reading them from the
+      # block returns the object's own first words under headerless — a garbage
+      # `old_size` here becomes the length of the copy into the new block.
+      rchunk = chunk_for(pointer)
+      raise ArgumentError.new("pointer is not a gcry allocation") unless rchunk
+      old_size = if ChunkHeader.large?(rchunk)
+                   # A large block keeps its header in *both* builds, and its
+                   # header holds the size actually requested. `block_payload`
+                   # would give the mapping extent instead — an upper bound, and
+                   # copying that many bytes reads past the object.
+                   header = ChunkHeader.large_header(rchunk)
+                   header.value.size.to_u64
+                 else
+                   block_payload(rchunk, header).to_u64
+                 end
+      atomic = ChunkHeader.atomic?(rchunk) || BlockHeader.atomic?(header)
 
       if new_size == 0
         # Do **not** free `pointer` here, for the same reason the grow path
@@ -1521,7 +1535,7 @@ module Gcry
     protected def release_large_chain(chain : Void*) : Nil
       user = chain
       while user
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
@@ -1558,7 +1572,7 @@ module Gcry
     private def queue_large_release(chain : Void*) : Nil
       user = chain
       while user
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
@@ -1779,7 +1793,35 @@ module Gcry
       # break the twelve sites that recover a large chunk as
       # `header - ChunkHeader::SIZE`.
       bitmap_words = 0_u32
-      data_offset = ChunkHeader::SIZE.to_u32
+      # Large chunks: `ChunkHeader.large_data_offset`, not bare `ChunkHeader::SIZE`.
+      #
+      # Under headerless the large block's header is reserved *between* the
+      # ChunkHeader and the object, so `data_start` sits 16 bytes further on.
+      # Hardcoding `ChunkHeader::SIZE` here put the header slot and the object at
+      # the same address, and the first `set_mark_large` wrote the mark
+      # generation straight into the object's second word — two bytes at
+      # `user+4`, which is exactly the corruption this chased.
+      #
+      # The header stays at `chunk + ChunkHeader::SIZE`, so the twelve sites that
+      # recover a chunk as `header - ChunkHeader::SIZE` are untouched — it is
+      # `data_start` that moves, not the header.
+      data_offset = if size_class == UInt32::MAX
+                      # Where the chunk's *data* begins, which is not the same
+                      # as where its object begins. With headers in front,
+                      # `data_start` IS the block header (offset 32) and the
+                      # object follows it. Under headerless the header is
+                      # reserved between them, so data_start is the object at
+                      # offset 48. `large_data_offset` is the chunk-to-object
+                      # distance — 48 in both builds — and is what sizes the
+                      # mapping; this is the field, and it differs.
+                      {% if flag?(:gcry_headerless) %}
+                        (ChunkHeader::SIZE + 16).to_u32
+                      {% else %}
+                        ChunkHeader::SIZE.to_u32
+                      {% end %}
+                    else
+                      ChunkHeader::SIZE.to_u32
+                    end
       if @bitmap_marks && size_class != UInt32::MAX &&
          size_class < SIZE_CLASS_COUNT.to_u32
         bitmap_words, data_offset =

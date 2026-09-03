@@ -1013,7 +1013,7 @@ module Gcry
       user = chain
       steps = 0
       while user && steps < 1_000_000
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         base = chunk.as(Void*).address
         return base if addr >= base && addr < base &+ chunk.value.mapped_bytes

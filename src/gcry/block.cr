@@ -245,6 +245,7 @@ module Gcry
     # *small* block has nowhere to write; using it for a large block silently
     # dropped its size and LARGE flag.
     def self.set_used_large(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
+      hl_check(header.address, "HL: set_used_large into guarded range\n")
       header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
     end
 
@@ -253,7 +254,30 @@ module Gcry
     # `set_mark` / `marked?` are no-ops under headerless because a *small* block
     # has nowhere to keep a mark; routing a large block through them left it
     # permanently unmarked, so every collection swept it while it was live.
+    # Debug watchpoint (`-Dgcry_hl_assert`): a range a test declares off-limits.
+    # Any large-mark write landing inside it prints a backtrace and exits, which
+    # is how a stray writer is identified without a debugger.
+    @@hl_guard_lo = 0_u64
+    @@hl_guard_hi = 0_u64
+
+    def self.hl_guard(lo : UInt64, hi : UInt64) : Nil
+      @@hl_guard_lo = lo
+      @@hl_guard_hi = hi
+    end
+
+    @[AlwaysInline]
+    private def self.hl_check(addr : UInt64, what : String) : Nil
+      {% if flag?(:gcry_hl_assert) %}
+        if @@hl_guard_hi > 0 && addr >= @@hl_guard_lo && addr < @@hl_guard_hi
+          LibC.write(2, what.to_unsafe.as(Void*), LibC::SizeT.new(what.bytesize))
+          Exception::CallStack.print_backtrace
+          LibC.exit(9)
+        end
+      {% end %}
+    end
+
     def self.set_mark_large(header : BlockHeader*) : Nil
+      hl_check(header.address, "HL: set_mark_large into guarded range\n")
       h = header.value
       h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
                 (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
@@ -266,6 +290,7 @@ module Gcry
     end
 
     def self.clear_mark_large(header : BlockHeader*) : Nil
+      hl_check(header.address, "HL: clear_mark_large into guarded range\n")
       h = header.value
       h.flags &= ~Flags::MARK_GEN_MASK
       h.flags &= ~Flags::MARK
