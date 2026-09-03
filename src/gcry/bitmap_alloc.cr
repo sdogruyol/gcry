@@ -49,27 +49,33 @@ module Gcry
     # So the mask is `~occ & tail_mask & usable_mask`, where `usable_mask` is
     # built once per chunk when the chunk enters the pool rather than per word.
 
-    # Pool cursor, one per size class. `@pool_free_mask` is the live one: a set
-    # bit is a free block in `@pool_word` of `@pool_chunk`.
-    @pool_chunk = uninitialized StaticArray(ChunkHeader*, SIZE_CLASS_COUNT)
-    @pool_word = uninitialized StaticArray(Int32, SIZE_CLASS_COUNT)
-    @pool_free_mask = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
-    @pool_word_base = uninitialized StaticArray(UInt64, SIZE_CLASS_COUNT)
+    # Pool cursor, two per size class (see POOL_SLOTS): pointerful at `class`,
+    # atomic at `class + SIZE_CLASS_COUNT`. `@pool_free_mask` is the live one: a
+    # set bit is a free block in `@pool_word` of `@pool_chunk`.
+    @pool_chunk = uninitialized StaticArray(ChunkHeader*, POOL_SLOTS)
+    @pool_word = uninitialized StaticArray(Int32, POOL_SLOTS)
+    @pool_free_mask = uninitialized StaticArray(UInt64, POOL_SLOTS)
+    @pool_word_base = uninitialized StaticArray(UInt64, POOL_SLOTS)
 
     getter bitmap_alloc_fast : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
 
     protected def bitmap_alloc_init : Nil
-      @pool_chunk = StaticArray(ChunkHeader*, SIZE_CLASS_COUNT).new(Pointer(ChunkHeader).null)
-      @pool_word = StaticArray(Int32, SIZE_CLASS_COUNT).new(0)
-      @pool_free_mask = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
-      @pool_word_base = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
+      @pool_chunk = StaticArray(ChunkHeader*, POOL_SLOTS).new(Pointer(ChunkHeader).null)
+      @pool_word = StaticArray(Int32, POOL_SLOTS).new(0)
+      @pool_free_mask = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
+      @pool_word_base = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
     end
 
     # Public reads for the diagnostics, which live outside `Heap` and must not
     # be allowed to disagree with the collector about what is allocated. The
     # header's FREE flag is not that answer on a bitmap chunk.
+    # Occupancy for one block, for specs and diagnostics that walk a chunk.
+    def block_allocated_public?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      block_allocated?(chunk, header)
+    end
+
     def bitmap_alloc_chunk_public?(chunk : ChunkHeader*) : Bool
       bitmap_alloc_chunk?(chunk)
     end
@@ -141,10 +147,15 @@ module Gcry
     # This is the hot path and it is deliberately short: mask test, `tzcnt`,
     # `blsr`, one `occ` store, one address computation.
     protected def bitmap_alloc_locked(index : Int32, payload : UInt32, flags : UInt32) : Void*
-      mask = @pool_free_mask[index]
+      # Kind comes from the request's own flags, so callers are unchanged. The
+      # cursor is per (class, kind) because atomic and pointerful blocks live in
+      # different chunks now; `@block_bytes` stays class-indexed.
+      atomic = (flags & BlockHeader::Flags::ATOMIC) != 0
+      slot = atomic ? index + SIZE_CLASS_COUNT : index
+      mask = @pool_free_mask[slot]
       if mask == 0_u64
-        return Pointer(Void).null unless bitmap_refill_pool(index, payload)
-        mask = @pool_free_mask[index]
+        return Pointer(Void).null unless bitmap_refill_pool(slot, index, payload, atomic)
+        mask = @pool_free_mask[slot]
         return Pointer(Void).null if mask == 0_u64
       end
 
@@ -152,11 +163,11 @@ module Gcry
       # `blsr`: clear the lowest set bit. The cached mask is thread-private
       # under the size-class lock, so this needs no atomic — unlike the `occ`
       # store below, which shares a word with 63 other blocks.
-      @pool_free_mask[index] = mask & (mask &- 1)
+      @pool_free_mask[slot] = mask & (mask &- 1)
 
-      chunk = @pool_chunk[index]
+      chunk = @pool_chunk[slot]
       occ = ChunkHeader.occ_bitmap(chunk)
-      word = @pool_word[index]
+      word = @pool_word[slot]
       bit_mask = 1_u64 << bit
       # Atomic: a concurrent `free` or a mutator allocating from another size
       # class in the same chunk can touch this word. Same hazard as the mark
@@ -172,7 +183,7 @@ module Gcry
       # Always false on this path until the cursor tracks cleanliness per chunk.
       @freelist_clean[index] = false
 
-      header_addr = @pool_word_base[index] &+ bit.to_u64 &* @block_bytes[index]
+      header_addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
       header = Pointer(BlockHeader).new(header_addr)
 
       # Prefetch-for-write ahead of the cursor. Fresh-chunk allocation is bound
@@ -208,27 +219,28 @@ module Gcry
 
     # Advance the cursor to the next word with a free block, taking another
     # chunk from the class's pool list when the current one is exhausted.
-    protected def bitmap_refill_pool(index : Int32, payload : UInt32) : Bool
+    protected def bitmap_refill_pool(slot : Int32, index : Int32, payload : UInt32,
+                                     atomic : Bool) : Bool
       loop do
-        chunk = @pool_chunk[index]
+        chunk = @pool_chunk[slot]
         if chunk.null?
-          chunk = bitmap_take_pool_chunk(index, payload)
+          chunk = bitmap_take_pool_chunk(index, payload, atomic)
           return false if chunk.null?
-          @pool_chunk[index] = chunk
-          @pool_word[index] = 0
+          @pool_chunk[slot] = chunk
+          @pool_word[slot] = 0
           @bitmap_alloc_chunk_advances &+= 1
         end
 
         nblocks = chunk_block_count(chunk)
         words = ((nblocks + 63) >> 6).to_i32
-        word = @pool_word[index]
+        word = @pool_word[slot]
         while word < words
           mask = chunk_free_mask(chunk, word, nblocks)
           if mask != 0_u64
-            @pool_word[index] = word
-            @pool_free_mask[index] = mask
-            @pool_word_base[index] = ChunkHeader.data_start(chunk).address &+
-                                     (word.to_u64 << 6) &* @block_bytes[index]
+            @pool_word[slot] = word
+            @pool_free_mask[slot] = mask
+            @pool_word_base[slot] = ChunkHeader.data_start(chunk).address &+
+                                    (word.to_u64 << 6) &* @block_bytes[index]
             @bitmap_alloc_refills &+= 1
             return true
           end
@@ -240,13 +252,14 @@ module Gcry
         # descending list cost `simdgc3.c` 25%, because refill then walked
         # memory backwards and defeated both the hardware prefetcher and the
         # allocation cursor's own locality.
-        @pool_chunk[index] = Pointer(ChunkHeader).null
-        @pool_free_mask[index] = 0_u64
+        @pool_chunk[slot] = Pointer(ChunkHeader).null
+        @pool_free_mask[slot] = 0_u64
       end
     end
 
     # Next chunk of this class with any free block, or a freshly mapped one.
-    protected def bitmap_take_pool_chunk(index : Int32, payload : UInt32) : ChunkHeader*
+    protected def bitmap_take_pool_chunk(index : Int32, payload : UInt32,
+                                         atomic : Bool) : ChunkHeader*
       # Walk the chunk list in address order looking for capacity. This is the
       # slow path — once per exhausted chunk, not once per allocation — so a
       # walk is affordable where a lookup on the fast path would not be.
@@ -254,6 +267,9 @@ module Gcry
       each_chunk do |chunk|
         next if ChunkHeader.large?(chunk)
         next unless chunk.value.size_class == index.to_u32
+        # A chunk serves exactly one kind; mixing would put an unscanned block
+        # in a scanned chunk and lose its pointers.
+        next unless ChunkHeader.atomic?(chunk) == atomic
         next if ChunkHeader.dormant?(chunk)
         next if ChunkHeader.nursery?(chunk)
         nblocks = chunk_block_count(chunk)
@@ -270,7 +286,8 @@ module Gcry
       end
       return best unless best.null?
 
-      map_chunk(@small_chunk_bytes, index.to_u32, 0_u32)
+      map_chunk(@small_chunk_bytes, index.to_u32,
+        atomic ? ChunkHeader::Flags::ATOMIC : 0_u32)
     end
 
     # Release one block back to `occ`. The bit is shared with 63 others, so the
@@ -381,7 +398,7 @@ module Gcry
     @[AlwaysInline]
     protected def bitmap_cursor_on?(chunk : ChunkHeader*) : Bool
       i = 0
-      while i < SIZE_CLASS_COUNT
+      while i < POOL_SLOTS
         return true if @pool_chunk[i] == chunk
         i += 1
       end

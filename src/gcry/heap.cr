@@ -2194,7 +2194,7 @@ module Gcry
     # a block nothing owns into the allocated set, permanently. A slow leak
     # driven by conservative false pointers, invisible in every counter.
     @[AlwaysInline]
-    private def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+    protected def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
       return !BlockHeader.free?(header) unless bitmap_alloc_chunk?(chunk)
       occ = ChunkHeader.occ_bitmap(chunk)
       return !BlockHeader.free?(header) if occ.null?

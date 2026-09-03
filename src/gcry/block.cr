@@ -200,6 +200,14 @@ module Gcry
       # Mostly-empty: queued for post-STW free-page release without HOLED rebuild.
       # Default advice is MADV_FREE (content preserved; freelist stays valid).
       SPARSE = 8_u32
+      # Chunk kind: every block in this chunk is atomic (unscanned). Phase 7
+      # moves `BlockHeader::Flags::ATOMIC` here, because the header is going
+      # away and a *per-block* atomic bitmap would need a store on every
+      # allocation to clear the bit a previous occupant set — exactly the
+      # "accounting that enables skip is not free on the HTTP alloc path"
+      # failure that rejected 2026-08-01-ec4-alloc-bits. A chunk kind is fixed
+      # at map time and costs the mutator nothing.
+      ATOMIC = 16_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -242,6 +250,11 @@ module Gcry
 
     def self.large?(chunk : ChunkHeader*) : Bool
       chunk.value.size_class == UInt32::MAX
+    end
+
+    # Chunk kind (Phase 7): every block here is atomic/unscanned.
+    def self.atomic?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::ATOMIC) != 0
     end
 
     def self.nursery?(chunk : ChunkHeader*) : Bool

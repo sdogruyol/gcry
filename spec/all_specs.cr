@@ -32,6 +32,7 @@ require "./stack_bounds_snapshot_spec"
 require "./segv_report_spec"
 require "./kernels_spec"
 require "./chunk_layout_spec"
+require "./chunk_kind_spec"
 require "./bitmap_marks_spec"
 require "./chunk_radix_spec"
 # The regression specs moved to `process_spec/regression/` on 2026-08-15. They
