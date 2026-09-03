@@ -538,3 +538,40 @@ refused it, which is the right way for that to fail.
 | 6 reproducers from the 7.7 hunt | — | all PASS |
 
 What remains of Phase 7 is **7.9, the soak**: both flag arms for a release.
+
+---
+
+## Update 8 (2026-09-04): Phase 7.9 — the soak, in progress
+
+Both arms of `bench/soak.cr` launched detached at 00:29, `--duration=18000`
+(5 h), `--rss-limit-kb=4096`, `GCRY_BITMAP_ALLOC=1` on both. Due ~05:30.
+
+Before committing five hours, each arm ran the repo's smoke and a 60 s run:
+
+| | header | headerless |
+|---|---|---|
+| 10 s smoke | PASS, RSS +1.85 MB / 4 MB ceiling | PASS, RSS +1.35 MB |
+| 60 s | PASS, finalized 5935/5935, RSS +1.84 MB, errors=0 | PASS, finalized 5936/5936, RSS +1.86 MB, errors=0 |
+
+The 10 s smoke had shown `finalized=982` of `finalizable=984` on headerless;
+at 60 s both arms drain to exactly equal, so that was drain timing at a short
+window, not a missed finalizer.
+
+### A number that is not a result
+
+At t≈205 s the soak telemetry showed `pause_p50` 1.79 ms headerless against
+13.9 ms header — a 7.8× gap. It is an artefact. The soak reports
+`Gcry.pause_stats` p50, which is process-cumulative, and the two arms' early
+collections differ enough to skew it for the whole run. The delta'd
+per-collection instrument (`gc_phases --live=5000 --survival=0.5`, paired
+n=8, both binaries rebuilt from the same source) says:
+
+| | headerless vs header | t |
+|---|---|---|
+| `pause_per_gc_us` | −0.5% | −1.12 (n.s.) |
+| `phase_mark_us` | −1.8% | −0.58 (n.s.) |
+| `phase_sweep_us` | **−56.8%** | −8.15 |
+| `rss_kb` | −13.1% | −0.51 (n.s. at n=8) |
+
+Pause is identical between builds. The soak's pause columns will not be
+compared across arms; its job is the RSS bound and `errors=0` over five hours.

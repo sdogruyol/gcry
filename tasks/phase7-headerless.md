@@ -135,3 +135,17 @@ Restart conditions, not a schedule:
 
 Steps 7.2 and 7.4 are complete, gated and specced on this branch, so a restart
 resumes at 7.5 rather than from scratch.
+
+---
+
+# RESTARTED 2026-09-03 (user decision) — status as of 2026-09-04 00:30
+
+- [x] 7.2 chunk kinds · [x] 7.3 nursery off (now *enforced*) · [x] 7.4 finalizer index
+- [x] 7.5 SWEPT/poison → folded into `diag_flags` (7.8) · [x] 7.6 size from chunk
+- [x] 7.7 header removed — **−44.5% RSS at 16 B**, root cause of the last defect
+      was `ChunkHeader.contains?` starting at `data_start` (large objects never
+      scanned); `property_test` passes 100 000 iterations
+- [x] 7.8 six diagnostics ported; all five diagnostic gates pass both arms,
+      both builds; two live bugs found on the way (flag setters writing into
+      objects; nursery never actually disabled)
+- [ ] 7.9 soak — both arms running, 5 h, due ~05:30 2026-09-04
