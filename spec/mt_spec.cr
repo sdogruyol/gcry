@@ -4,6 +4,11 @@ describe "Gcry TLAB" do
   it "allocates and frees through TLAB without losing objects" do
     heap = Gcry::Heap.new
     begin
+      # TLAB is a freelist mechanism — per-thread freelist heads — and
+      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+      # this spec keeps testing TLAB when the suite is swept under
+      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+      heap.bitmap_alloc = false
       heap.tlab_enabled = true
       heap.gc_threshold = UInt64::MAX
       heap.nursery_threshold = UInt64::MAX
@@ -27,6 +32,11 @@ describe "Gcry TLAB" do
   it "flushes TLAB before collect so sweep sees freelist" do
     heap = Gcry::Heap.new
     begin
+      # TLAB is a freelist mechanism — per-thread freelist heads — and
+      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+      # this spec keeps testing TLAB when the suite is swept under
+      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+      heap.bitmap_alloc = false
       heap.tlab_enabled = true
       heap.gc_threshold = UInt64::MAX
       heap.nursery_enabled = false
@@ -44,6 +54,11 @@ describe "Gcry TLAB" do
   it "nursery + TLAB keeps old→young edges" do
     heap = Gcry::Heap.new
     begin
+      # TLAB is a freelist mechanism — per-thread freelist heads — and
+      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+      # this spec keeps testing TLAB when the suite is swept under
+      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+      heap.bitmap_alloc = false
       heap.tlab_enabled = true
       heap.nursery_enabled = true
       heap.gc_threshold = UInt64::MAX
@@ -118,6 +133,11 @@ describe "Gcry MT alloc storm (TLAB)" do
   it "survives concurrent alloc from multiple threads" do
     heap = Gcry::Heap.new
     begin
+      # TLAB is a freelist mechanism — per-thread freelist heads — and
+      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+      # this spec keeps testing TLAB when the suite is swept under
+      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+      heap.bitmap_alloc = false
       heap.tlab_enabled = true
       heap.gc_threshold = UInt64::MAX
       heap.nursery_enabled = false

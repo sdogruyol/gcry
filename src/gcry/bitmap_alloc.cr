@@ -67,6 +67,21 @@ module Gcry
       @pool_word_base = StaticArray(UInt64, SIZE_CLASS_COUNT).new(0_u64)
     end
 
+    # Public reads for the diagnostics, which live outside `Heap` and must not
+    # be allowed to disagree with the collector about what is allocated. The
+    # header's FREE flag is not that answer on a bitmap chunk.
+    def bitmap_alloc_chunk_public?(chunk : ChunkHeader*) : Bool
+      bitmap_alloc_chunk?(chunk)
+    end
+
+    # Allocated blocks in a chunk, straight from `occ` — one popcount pass
+    # instead of a header walk.
+    def chunk_occupied_count(chunk : ChunkHeader*) : UInt64
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return 0_u64 if occ.null?
+      Kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32, @simd_tier)
+    end
+
     # Blocks this chunk actually holds.
     @[AlwaysInline]
     protected def chunk_block_count(chunk : ChunkHeader*) : UInt64
@@ -85,7 +100,39 @@ module Gcry
       mask = ~occ[word]
       last_word = ((nblocks - 1) >> 6).to_i32
       mask &= Heap.tail_mask(nblocks) if word == last_word
+      mask &= blacklist_free_mask(chunk, word, mask) if @blacklist_enabled && mask != 0_u64
       mask
+    end
+
+    # Drop blocks sitting on blacklisted pages.
+    #
+    # The blacklist records pages a false root pointed into; handing one out
+    # again re-creates the false retention the blacklist exists to break. The
+    # freelist path enforces this with `take_non_blacklisted`, walking past
+    # candidates one at a time; on the bitmap path it is a mask, applied once
+    # per word rather than once per block.
+    #
+    # Only consulted when the blacklist is armed *and* the word has free blocks,
+    # so the common case pays one predictable branch.
+    @[AlwaysInline]
+    protected def blacklist_free_mask(chunk : ChunkHeader*, word : Int32, mask : UInt64) : UInt64
+      base = ChunkHeader.data_start(chunk).address
+      block_bytes = @block_bytes[chunk.value.size_class.to_i32]
+      out = mask
+      m = mask
+      while m != 0_u64
+        bit = m.trailing_zeros_count
+        m &= m &- 1
+        ordinal = (word.to_u64 << 6) &+ bit.to_u64
+        if blacklisted_page?(base &+ ordinal &* block_bytes)
+          out &= ~(1_u64 << bit)
+          # Same counter the freelist path bumps in `take_non_blacklisted`, so
+          # `/gc-stats` and the blacklist gate read one number across both
+          # representations rather than silently reporting zero on this one.
+          @blacklist_skips += 1
+        end
+      end
+      out
     end
 
     # Allocate one block from the size-class pool. Caller holds the size-class
@@ -128,6 +175,24 @@ module Gcry
       header_addr = @pool_word_base[index] &+ bit.to_u64 &* @block_bytes[index]
       header = Pointer(BlockHeader).new(header_addr)
       BlockHeader.set_used(header, payload, flags)
+
+      # Allocate-black, and it is not optional here.
+      #
+      # `alloc_old_small_locked` ends with this and the bitmap path returns
+      # before reaching it, so omitting it silently dropped the mark for every
+      # block allocated while `@collecting` — which is the whole post-STW window
+      # under lazy sweep. Those blocks then carried `occ=1, mark=0` into
+      # `occ &= mark` and were reclaimed **while live**: measured as
+      # `after collect #3: root 9 DEAD` in `stw-mt-property-test`, and it went
+      # away entirely under `GCRY_DISABLE_LAZY_SWEEP=1`, which is what named it.
+      #
+      # The cursor's chunk is already in hand, so this is the cheap form — a
+      # bit set in a word this thread just touched, no lookup.
+      if @incremental_marking || @collecting
+        ordinal = (word.to_u64 << 6) &+ bit.to_u64
+        chunk_set_mark(chunk, ordinal)
+      end
+
       @bitmap_alloc_fast &+= 1
       BlockHeader.user_from(header)
     end
@@ -201,18 +266,48 @@ module Gcry
 
     # Release one block back to `occ`. The bit is shared with 63 others, so the
     # clear is atomic for the same reason the set is.
+    # Release one block back to `occ` **and** clear its mark.
+    #
+    # Both, and the mark is the subtle half. An object allocated, marked by the
+    # trace, then explicitly freed has `occ=0, mark=1` — and the sweep's
+    # `occ = mark` puts it straight back into the allocated set, owned by
+    # nothing, while `live_objects` was already decremented by the free.
+    # Presented as `live_objects mismatch reported=0 walked=91` in
+    # `mt-property-test`, the counter saturating at zero while the bitmap
+    # accumulated resurrected blocks.
+    #
+    # Both clears are atomic for the usual reason: 64 blocks share each word.
     @[AlwaysInline]
     protected def bitmap_free_block(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       occ = ChunkHeader.occ_bitmap(chunk)
       return if occ.null?
       ordinal = chunk_block_ordinal(chunk, header.address)
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + (ordinal >> 6),
-        ~(1_u64 << (ordinal & 63)), LLVM::AtomicOrdering::Monotonic, false)
+      word = ordinal >> 6
+      clear = ~(1_u64 << (ordinal & 63))
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, occ + word, clear,
+        LLVM::AtomicOrdering::Monotonic, false)
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return if mark.null?
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, mark + word, clear,
+        LLVM::AtomicOrdering::Monotonic, false)
     end
 
     # Drop any cursor pointing into `chunk`. Called before a chunk is made
     # dormant or unmapped: a cursor left pointing at released memory would hand
     # out blocks from a chunk the heap no longer owns.
+    # NOTE: there is deliberately no `bitmap_reset_pools`.
+    #
+    # A blanket reset at the top of `sweep` looked like the cheap way to avoid
+    # reasoning about which cursors survive. It is a data race: `sweep` holds no
+    # size-class lock there, while `bitmap_alloc_locked` reads `@pool_free_mask`
+    # and only then reads and dereferences `@pool_chunk`. Nulling the chunk
+    # between those two reads leaves a non-zero mask with a null chunk, and the
+    # next allocation faults in `occ_bitmap` — `signal 11 at address 0x1c`,
+    # 4 of 4 children in `find-block-race`, deterministically.
+    #
+    # Cursors are dropped per chunk instead, inside the section where `sweep`
+    # already holds that chunk's size-class lock (or the world is stopped).
+
     protected def bitmap_drop_pool_chunk(chunk : ChunkHeader*) : Nil
       SIZE_CLASS_COUNT.times do |i|
         next unless @pool_chunk[i] == chunk

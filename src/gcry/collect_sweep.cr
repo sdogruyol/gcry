@@ -85,6 +85,12 @@ module Gcry
               fl_locked = true
             end
             begin
+              # Drop any allocation cursor into this chunk while its size-class
+              # lock is held (or the world is stopped): the sweep below may make
+              # it dormant, unlink it or unmap it, and a cursor is a raw
+              # `ChunkHeader*` plus a precomputed block address.
+              bitmap_drop_pool_chunk(chunk) if @bitmap_alloc
+
               counts = sweep_small_blocks(chunk, class_index, major)
               any_live = counts.any_live
               live_payload = counts.live_payload
@@ -857,6 +863,10 @@ module Gcry
       if freed > 0
         live_objects_sub(freed)
         free_bytes_add(freed * payload)
+        # The header arm accounts this per block in `reclaim_small`; the
+        # streaming arm has to do it from the popcount or `prof_stats` reports
+        # zero bytes reclaimed for every bitmap chunk.
+        @bytes_reclaimed_since_gc += freed * payload
       end
 
       SmallSweepCounts.new(live > 0,
@@ -892,7 +902,14 @@ module Gcry
       # Phase 8, behind the page barrier work. The dispatch is per *chunk* and
       # not global precisely so the two representations can coexist while that
       # is true.
-      if @bitmap_alloc && !ChunkHeader.nursery?(chunk)
+      # `!@poison_freed`: poisoning is per-block work by definition — it writes a
+      # pattern into every reclaimed payload — and the streaming sweep touches
+      # no payload at all. Rather than let `GCRY_POISON_FREED=1` be armed and do
+      # nothing (measured: 0 of 5 freed payloads poisoned, and a stale read
+      # still returning live-looking data), the bitmap arm stands down and the
+      # header walk runs. A diagnostic that is silently inert is worse than one
+      # that costs a walk.
+      if @bitmap_alloc && !ChunkHeader.nursery?(chunk) && !@poison_freed
         return sweep_small_bitmap(chunk, class_index, major)
       end
 

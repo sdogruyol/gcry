@@ -184,22 +184,55 @@ shipped while this is built out.
       out dirty memory that Crystal assumes is zeroed. Verified: 0 dirty bytes.
 - [x] Old generation only; nursery chunks keep headers (Phase 8)
 
-### Known gaps — this knob is NOT safe to enable generally
+### Defects found by the gates and fixed (all verified red -> green)
 
-- [ ] **The bitmap sweep never writes FREE into reclaimed headers.** So
-      `BlockHeader.free?` reads USED for reclaimed blocks, which
-      `find_object`, the invariants, poison and `@finalizers.notice_reclaim`
-      all consult. **Finalizers do not run for bitmap-reclaimed objects.**
-- [ ] `GCRY_BITMAP_ALLOC=1` crashes the full spec suite (heaps default the
-      nursery on, plus the gap above). Only the dedicated spec configuration —
-      `bitmap_alloc = true`, `nursery_enabled = false` — is supported.
-- [ ] Blacklisted and MADV_DONTNEED'd pages are not yet masked out of the free
-      mask; `chunk_free_mask` applies the tail mask only
-- [ ] `bitmap_take_pool_chunk` walks the chunk list to find capacity — O(chunks)
-      per exhausted chunk. Fine at 466 chunks, wants a per-class pool list
-      (ascending address order — the descending list cost simdgc3 25%)
-- [ ] Dormant/unmap must call `bitmap_drop_pool_chunk` (written, not wired)
-- [ ] No measurement yet: the sweep and alloc claims are both unmeasured
+- [x] **Allocate-black was skipped**, so every block allocated in the post-STW
+      window had `occ=1, mark=0` and `occ &= mark` reclaimed it *while live*.
+      `GCRY_DISABLE_LAZY_SWEEP=1` flipped it 3/3, which named it.
+- [x] **`bitmap_reset_pools` raced mutators** — nulled `@pool_chunk` between
+      the mask read and the chunk read, `signal 11 at 0x1c`, 4/4 deterministic.
+      Removed; cursors drop per chunk under the lock sweep already holds.
+- [x] **`GCRY_POISON_FREED` was armed and inert** for small blocks. The bitmap
+      free path now poisons, and the sweep stands down to the header walk when
+      the knob is on — per-block work needs a per-block pass.
+- [x] **Stale USED headers resurrected reclaimed blocks into `occ`** via
+      `find_object` -> mark -> `occ = mark`. `occ` is now the authority
+      (`block_allocated?`), in `find_object`, `mark_impl` and the invariant.
+- [x] **TLAB bypassed the allocator entirely** (`allocate` dispatches to it
+      first), so `occ` was never set and the sweep reclaimed everything live.
+- [x] **Blacklisted pages were handed out**; now masked per word, same counter.
+- [x] **`alloc_batch` was NOT inert by construction** — `bitmap_alloc=` forces
+      tlab off, which *opens* that gate. Closed explicitly.
+- [x] **Explicit free left `mark` set**, so `occ = mark` resurrected freed
+      blocks. Free clears both bits.
+- [x] Atomic counters implied by `bitmap_alloc` (batched `live_objects_sub`
+      loses a whole chunk's worth on the non-atomic path)
+- [x] Two bench walkers (`property_test`, `mt_property_test`) had the same
+      stale-header bug `invariant.cr` was already fixed for
+- [x] `mt_property_test`'s `(reported - walked).to_i64` underflowed on UInt64
+
+### Third instance of a new mechanism disarming an existing gate
+
+`heap-counters`' control sets `GCRY_HEAP_COUNTERS_ATOMIC=0` to show the plain
+path loses increments — but `bitmap_alloc` implies atomic, so the plain path
+never ran and `lost 0` where a loss is required. The gate refused to certify.
+Control arm now pins `GCRY_BITMAP_ALLOC=0`; loses 1967 again.
+
+(Previously: the radix disarmed `find-block-race`'s control.)
+
+### Still open
+
+- [ ] **`mt-property-test-short` fails**: `live_objects mismatch reported=98
+      walked=233`, consistent ~135 gap under concurrent mutators. Real,
+      reproducible, unexplained — several candidate causes ruled out (mark on
+      free, counter atomicity). Not speculatively "fixed".
+- [ ] **`page-release-corruption` releases 0 B** under this knob: the page-run
+      walks build their live mask from headers, which are stale. Needs the
+      plan's `occ`-based page-run release. Gate is neutralised, not failing.
+- [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
+      chunk. Wants a per-class pool list, ascending address order.
+- [ ] Nursery chunks still header-based (Phase 8)
+- [ ] No measurement yet: sweep and alloc claims both unmeasured
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not
       be handed out — refaults pages just released, regresses RSS)

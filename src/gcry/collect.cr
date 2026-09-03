@@ -1441,9 +1441,13 @@ module Gcry
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
-      header = find_block(pointer)
-      return nil unless header
-      return nil if BlockHeader.free?(header)
+      found = find_block_with_chunk(pointer)
+      return nil unless found
+      header, chunk = found
+      # `block_allocated?`, not `BlockHeader.free?`: on a bitmap chunk the
+      # header's FREE flag is stale for every block the streaming sweep
+      # reclaimed, and trusting it here resurrects reclaimed blocks into `occ`.
+      return nil unless block_allocated?(chunk, header)
       header
     end
 

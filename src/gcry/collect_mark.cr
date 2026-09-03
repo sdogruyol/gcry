@@ -99,7 +99,10 @@ module Gcry
       # Minor × old: never claim. Minor does not munmap old chunks, and clearing
       # FREE on an old freelist node (then skipping mark) leaves USED-on-freelist
       # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
-      if BlockHeader.free?(header)
+      # `block_allocated?`, not the header flag: on a bitmap chunk the sweep
+      # leaves FREE stale on every block it reclaimed, and marking one would
+      # resurrect it into `occ` on the next `occ = mark`.
+      if !block_allocated?(chunk, header)
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread ||
                       source == RootSource::Parked
@@ -112,6 +115,10 @@ module Gcry
         h = header.value
         h.flags = h.flags & ~BlockHeader::Flags::FREE
         header.value = h
+        # The TLAB claim is a freelist-era path: `bitmap_alloc` replaces the
+        # freelist with the pool cursor, so there are no on-stack freelist nodes
+        # to claim and this cannot fire there. Guarded rather than assumed.
+        return if @bitmap_alloc
         set_block_mark_in(chunk, header) unless block_marked_in?(chunk, header)
         walk = h.next_free
         while walk

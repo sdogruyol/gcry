@@ -164,6 +164,13 @@ class MTPropertyTest
       if Gcry::ChunkHeader.large?(chunk)
         header = Gcry::ChunkHeader.data_start(chunk).as(Gcry::BlockHeader*)
         count += 1 unless Gcry::BlockHeader.free?(header)
+      elsif @heap.bitmap_alloc_chunk_public?(chunk)
+        # `occ`, not the header's FREE flag: the streaming sweep never writes
+        # FREE into the blocks it reclaims, so a header walk counts every
+        # reclaimed block as live. That over-count then underflows the
+        # `(reported - walked).to_i64` below and surfaces as "Arithmetic
+        # overflow" rather than as a mismatch, which is how it was found.
+        count += @heap.chunk_occupied_count(chunk)
       else
         payload = Gcry::SizeClasses.payload(class_index)
         block_bytes = Gcry::BlockHeader::SIZE.to_u64 + payload.to_u64
@@ -233,7 +240,11 @@ class MTPropertyTest
         walked = walk_live_blocks
         reported = @heap.live_objects
         if reported != walked
-          diff = (reported - walked).to_i64
+          # Both are UInt64 and `walked` can legitimately exceed `reported`, so
+          # `(reported - walked)` underflows to ~1.8e19 and `.to_i64` raises
+          # "Arithmetic overflow" — a crash that reports nothing about the
+          # mismatch it was trying to describe. Widen first, subtract second.
+          diff = reported.to_i64 - walked.to_i64
           if diff.abs > 2
             record_error("iter #{iteration}: live_objects mismatch reported=#{reported} walked=#{walked} diff=#{diff}")
             fail_count += 1

@@ -13,6 +13,14 @@
 #
 #   atomic    two threads allocate a known number of objects; the counter must
 #             account for **every one** of them.
+# The plain arm also pins `GCRY_BITMAP_ALLOC=0`. The bitmap allocator *implies*
+# atomic counters — its streaming sweep settles a chunk's reclaim with one
+# batched `live_objects_sub`, which a non-atomic get/set loses wholesale — so an
+# inherited `GCRY_BITMAP_ALLOC=1` keeps the plain path from ever running and the
+# control cannot lose the increments it exists to lose. Measured: `lost 0` where
+# the arm requires a loss, and the gate correctly refused to certify the other
+# arm on the strength of it.
+#
 #   plain     `GCRY_HEAP_COUNTERS_ATOMIC=0` puts the old path back, and the same
 #             workload must **lose** some. Without this arm the first one is
 #             just a run that happened not to race.

@@ -382,11 +382,25 @@ module Gcry
 
     getter? bitmap_alloc : Bool = false
 
+    # TLAB is a freelist mechanism — per-thread freelist heads — and the pool
+    # cursor replaces it outright. Enabling both would have two allocators
+    # handing out the same blocks.
     def bitmap_alloc=(value : Bool) : Bool
       if value != @bitmap_alloc && !@chunks.null?
         raise ArgumentError.new("bitmap_alloc cannot change once chunks are mapped")
       end
-      @bitmap_marks = true if value
+      if value
+        @bitmap_marks = true
+        @tlab_enabled = false
+        # The streaming sweep settles a whole chunk's reclaim with one
+        # `live_objects_sub(freed)`, where `freed` is a popcount over a bitmap
+        # other threads are allocating into. The default counter path is a
+        # non-atomic get/set — chosen deliberately to keep a LOCK off the EC1
+        # alloc hot path — and a lost update there costs *one* object when the
+        # header arm decrements per block, but the whole batch here. Measured as
+        # `reported=0 walked=117`, the counter saturating at zero.
+        @heap_counters_atomic = true
+      end
       @bitmap_alloc = value
     end
 
@@ -520,6 +534,9 @@ module Gcry
         # cursor finds it from `~occ` without a chase through free memory.
         nursery = BlockHeader.nursery?(header)
         with_freelist_lock(class_index, nursery) do
+          # `push_size_class_free` poisons on the freelist path and this path
+          # does not go through it, so the knob would be armed and inert.
+          poison_payload(pointer, payload) if @poison_freed
           BlockHeader.set_free(header, Pointer(Void).null)
           bitmap_free_block(chunk, header)
         end
@@ -694,7 +711,11 @@ module Gcry
                end
         needs_clear = clear && !@nursery_freelist_clean[class_index]
       else
-        user = if @tlab_enabled
+        # `&& !@bitmap_alloc`: TLAB is a freelist mechanism and the pool cursor
+        # replaces it. Dispatching to it here would bypass the bitmap allocator
+        # entirely, so `occ` would never be set and the streaming sweep — which
+        # trusts `occ` completely — would reclaim every live object.
+        user = if @tlab_enabled && !@bitmap_alloc
                  tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded)
                else
                  alloc_old_small(rounded.to_u32, flags, class_index, rounded)
@@ -718,9 +739,30 @@ module Gcry
       user
     end
 
+    # Atomic counters are *implied* by the bitmap allocator, expressed here as a
+    # read rather than as an assignment in `initialize`.
+    #
+    # Two attempts to set the flag there both failed, and both only under
+    # `-Dgc_none`: an ivar write before the declared default makes Crystal infer
+    # `Bool | Nil` and breaks `@@default_heap ||= Heap.new`, and the property
+    # setter trips "self was used before initializing @freelists". Neither is
+    # visible to `crystal spec`, which runs under Boehm and never reaches that
+    # line — the same blind spot that hid the radix boot crash.
+    #
+    # Why it is implied at all: the streaming sweep settles a whole chunk's
+    # reclaim with one `live_objects_sub(freed)` over a bitmap other threads are
+    # allocating into. The default non-atomic get/set is chosen deliberately to
+    # keep a LOCK off the EC1 alloc path, and a lost update there costs one
+    # object when the header arm decrements per block — but the entire batch
+    # here.
+    @[AlwaysInline]
+    private def counters_atomic? : Bool
+      @heap_counters_atomic || @bitmap_alloc
+    end
+
     # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
     private def note_alloc_bytes(rounded : UInt64) : Nil
-      if @heap_counters_atomic
+      if counters_atomic?
         @total_bytes.add(rounded)
         @bytes_since_gc.add(rounded)
         @live_objects.add(1_u64)
@@ -732,7 +774,7 @@ module Gcry
     end
 
     private def free_bytes_sub(n : UInt64) : Nil
-      if @heap_counters_atomic
+      if counters_atomic?
         loop do
           cur = @free_bytes.get
           nxt = cur >= n ? cur - n : 0_u64
@@ -745,7 +787,7 @@ module Gcry
     end
 
     private def bytes_since_gc_sub(n : UInt64) : Nil
-      if @heap_counters_atomic
+      if counters_atomic?
         loop do
           cur = @bytes_since_gc.get
           nxt = cur > n ? cur - n : 0_u64
@@ -832,7 +874,12 @@ module Gcry
     end
 
     private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      if @alloc_batch > 0 && !@tlab_enabled
+      # `&& !@bitmap_alloc`: the batched path builds and drains a freelist run,
+      # so it would bypass `occ` entirely. The comment below used to claim
+      # alloc_batch was "inert by construction" under the bitmap representation;
+      # it is not — `bitmap_alloc=` forces `@tlab_enabled = false`, which *opens*
+      # this gate rather than closing it.
+      if @alloc_batch > 0 && !@tlab_enabled && !@bitmap_alloc
         return alloc_old_small_batched(payload, flags, index, rounded)
       end
 
@@ -874,9 +921,9 @@ module Gcry
       # Not *beside* it — an `occ` bitmap maintained alongside a freelist is the
       # 2026-08-01 design that went to 54k->44k on /json. See bitmap_alloc.cr.
       #
-      # tight_grow, prefer_freelists and alloc_batch are freelist-shaped and are
-      # inert here by construction; the plan keeps their knobs as no-ops for one
-      # release rather than failing on them.
+      # tight_grow and prefer_freelists are freelist-shaped and unreachable from
+      # here; alloc_batch is excluded explicitly at the entry point above,
+      # because it is *not* inert by construction.
       # Old generation only. `alloc_nursery` keeps the freelist because nursery
       # chunks keep the header representation — see `sweep_small_blocks`.
       if @bitmap_alloc
@@ -2085,6 +2132,35 @@ module Gcry
       BlockHeader.clear_mark(header)
     end
 
+    # Is this block allocated?
+    #
+    # On a bitmap chunk `occ` is the authority, **not** `BlockHeader.free?`. The
+    # streaming sweep publishes `occ = mark` and never writes FREE into the
+    # headers of the blocks it reclaims — writing them would reintroduce the
+    # O(blocks) walk the bitmap exists to remove, and the plan's answer is that
+    # the flag becomes lazy and then goes away entirely (Phase 7).
+    #
+    # Consulting the stale header instead is not merely untidy. `find_object`
+    # would hand a reclaimed block back as live, the mark phase would mark it,
+    # and the next sweep's `occ = mark` would set its `occ` bit — resurrecting
+    # a block nothing owns into the allocated set, permanently. A slow leak
+    # driven by conservative false pointers, invisible in every counter.
+    @[AlwaysInline]
+    private def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      return !BlockHeader.free?(header) unless bitmap_alloc_chunk?(chunk)
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return !BlockHeader.free?(header) if occ.null?
+      ordinal = chunk_block_ordinal(chunk, header.address)
+      ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
+    end
+
+    # Chunks whose *allocation* is bitmap-driven, i.e. whose `occ` is
+    # maintained. Narrower than `bitmap_chunk?`, which only asks about marks.
+    @[AlwaysInline]
+    private def bitmap_alloc_chunk?(chunk : ChunkHeader*) : Bool
+      @bitmap_alloc && !ChunkHeader.large?(chunk) && !ChunkHeader.nursery?(chunk)
+    end
+
     # Mark read/write for a block whose chunk the caller already resolved: the
     # hot-path pair, reached from `mark_impl_unlocked`.
     # Large chunks and nursery chunks stay on the header generation: the first
@@ -2350,6 +2426,10 @@ module Gcry
         # Retract before the caller's munmap, for the same reason the sorted
         # index does: a reader that still sees the entry dereferences it.
         radix_remove(chunk)
+        # And drop any allocation cursor into it. A cursor holds a raw
+        # `ChunkHeader*`; left pointing at an unmapped chunk the next allocation
+        # faults in `occ_bitmap`.
+        bitmap_drop_pool_chunk(chunk) if @bitmap_alloc
         # Range test AND base identity: the hook exists because the entry
         # vanishes, and a defect that has already rewritten `mapped_bytes`
         # would blind a range-only test while the base still names the chunk.

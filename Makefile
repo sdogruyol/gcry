@@ -451,7 +451,7 @@ mark-audit: $(BIN)
 heap-counters: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/heap_counters.cr -o $(BIN)/heap_counters --error-trace
 	$(BIN)/heap_counters
-	GCRY_HEAP_COUNTERS_ATOMIC=0 $(BIN)/heap_counters --plain
+	GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 $(BIN)/heap_counters --plain
 
 # The fix for the `Thread` use-after-free, and the window it closes.
 #
