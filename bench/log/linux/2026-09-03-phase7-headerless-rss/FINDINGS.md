@@ -575,3 +575,59 @@ n=8, both binaries rebuilt from the same source) says:
 
 Pause is identical between builds. The soak's pause columns will not be
 compared across arms; its job is the RSS bound and `errors=0` over five hours.
+
+---
+
+## Update 9 (2026-09-04): Kemal end to end — headerless gives the bitmap
+## allocator its throughput back
+
+The shipping-bar measurement. Kemal `/json`, `wrk -t4 -c100 -d10s`, paired and
+interleaved, both binaries built from the same source, both representations
+under `GCRY_BITMAP_ALLOC=1`. **Headerless survived HTTP concurrency**: 0 server
+deaths across every run below.
+
+### Headerless vs header, both bitmap
+
+| run | `/json` rps | t | wins |
+|---|---|---|---|
+| A/B #1, n=9 | **+9.3%** | 2.77 | 8/9 |
+| A/B #2, n=9 (independent) | **+6.6%** | 2.24 | 6/9 |
+
+Post-GC RSS: +0.7% (t=0.57) — flat, exactly as the payoff-ceiling analysis
+predicted for a heap of ~1 000 live objects, where 16 B per object is 16 KB.
+
+### The placement that matters: three arms, n=7 each
+
+| arm | `/json` rps median | post-GC RSS median |
+|---|---|---|
+| **headerless (bitmap)** | **39 085** | **13 700 kB** |
+| header (default freelist) | 39 024 | 14 328 kB |
+| header (bitmap) | 35 869 | 13 636 kB |
+
+Pinned by a direct paired run, headerless vs default, n=9: **+6.8% rps
+(t=1.96, borderline)** and **−3.6% RSS (t=−5.11)**.
+
+### What that means
+
+`2026-09-03-simdgc-kemal-e2e` recorded the bitmap allocator as an RSS lever
+that **cost 8.3% throughput** on Kemal, and by the plan's own Phase 3 gate did
+not clear the bar. With the header removed, that cost is gone: headerless sits
+at the default path's throughput (three runs, all positive, t 2.0–2.8 —
+"parity or slightly better", not a claimed win) while keeping the bitmap's
+RSS advantage. The bitmap allocator's Kemal penalty was, in the end, a
+*header-build* penalty.
+
+The plausible mechanism, unmeasured: a 32-byte Crystal object occupies a
+32-byte block instead of 48, so the allocation, scan and sweep paths touch
+fewer cache lines per object — consistent with `phase_sweep` −57% in the
+delta'd instrument.
+
+### The control soak
+
+A 10-minute soak of the `simdgc` PR branch's header build (no Phase 7):
+PASS, RSS +2.7 MB, plateau from t≈285 s. Our header arm plateaus too (a step
+function from chunk granularity, not a leak) but higher, +6.2 MB against a
+4 MB post-drain bound — consistent with 7.2's chunk kinds costing RSS on a
+workload that mixes atomic and pointerful allocation, which the soak does.
+Headerless does not pay it: +2.0 MB, flat. Whether the header arm's end-of-run
+drain recovers enough is what the 5 h run decides.
