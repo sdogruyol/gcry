@@ -87,6 +87,22 @@ module Gcry
       (header.as(UInt8*) + SIZE).as(Void*)
     end
 
+    # A large object always sits exactly 16 bytes after its header, in **both**
+    # builds: with headers in front, that is `BlockHeader::SIZE`; under
+    # headerless, the slot reserved in the chunk's metadata region ends where
+    # `data_start` begins. Small blocks are the ones whose header disappears, so
+    # the generic `from_user`/`user_from` become identity there and must not be
+    # used on a large block.
+    LARGE_HEADER_BYTES = 16
+
+    def self.large_header_from_user(user : Void*) : BlockHeader*
+      (user.as(UInt8*) - LARGE_HEADER_BYTES).as(BlockHeader*)
+    end
+
+    def self.large_user_from_header(header : BlockHeader*) : Void*
+      (header.as(UInt8*) + LARGE_HEADER_BYTES).as(Void*)
+    end
+
     # Occupancy lives in `occ`, not here. A headerless block has no flags word,
     # so this can only be answered with a chunk in hand — `Heap#block_allocated?`
     # is the authority and every live path already prefers it. Answering
@@ -230,6 +246,30 @@ module Gcry
     # dropped its size and LARGE flag.
     def self.set_used_large(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
       header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
+    end
+
+    # Mark accessors for a block that still has a header — i.e. a large block,
+    # whose header is reserved in its chunk's metadata region. The unsuffixed
+    # `set_mark` / `marked?` are no-ops under headerless because a *small* block
+    # has nowhere to keep a mark; routing a large block through them left it
+    # permanently unmarked, so every collection swept it while it was live.
+    def self.set_mark_large(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
+                (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
+      header.value = h
+    end
+
+    def self.marked_large?(header : BlockHeader*) : Bool
+      gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
+      gen == @@mark_gen
+    end
+
+    def self.clear_mark_large(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags &= ~Flags::MARK_GEN_MASK
+      h.flags &= ~Flags::MARK
+      header.value = h
     end
 
     def self.set_used(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil

@@ -404,7 +404,7 @@ module Gcry
         user = @pending_large_cache
         @pending_large_cache = Pointer(Void).null
         while user
-          header = BlockHeader.from_user(user)
+          header = BlockHeader.large_header_from_user(user)
           chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
           nxt = header.value.next_free
           cache_large_chunk(chunk, header)
@@ -799,7 +799,7 @@ module Gcry
         LARGE_FREE_BUCKETS.times do |b|
           user = @large_freelists[b]
           while user
-            header = BlockHeader.from_user(user)
+            header = BlockHeader.large_header_from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             next_user = header.value.next_free
             # Round up from `data_start`, not from the chunk base. The base is

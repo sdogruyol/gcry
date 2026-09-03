@@ -139,7 +139,7 @@ module Gcry
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread ||
                       source == RootSource::Parked
-        if base_only && addr != BlockHeader.user_from(header).address
+        if base_only && addr != user_of(chunk, header).address
           return
         end
         if @minor_only && !BlockHeader.nursery?(header)
@@ -152,7 +152,7 @@ module Gcry
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
         # inflate false retention. Heap marks must allow interiors (shift).
-        return if addr != BlockHeader.user_from(header).address
+        return if addr != user_of(chunk, header).address
       end
 
       if gate_type_id && !type_id_plausible?(chunk, header)
@@ -308,7 +308,7 @@ module Gcry
       size = block_payload(chunk, header).to_u64
       return true if size < 4
 
-      tid = BlockHeader.user_from(header).as(Int32*).value
+      tid = user_of(chunk, header).as(Int32*).value
       # Crystal type ids are dense positive integers (0 is not a real instance id;
       # a leading zero word is typical of Pointer(T) buffers / empty slots).
       return false if tid <= 0
@@ -389,7 +389,7 @@ module Gcry
       return unless chunk
       return if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
 
-      user = BlockHeader.user_from(header).as(UInt8*)
+      user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
       return if size == 0
 
@@ -739,8 +739,10 @@ module Gcry
 
     private def scan_object_for_nursery(header : BlockHeader*) : Nil
       return if BlockHeader.atomic?(header)
-      user = BlockHeader.user_from(header).as(UInt8*)
-      size = clamped_scan_size(header, user)
+      chunk = chunk_containing(header.address)
+      return unless chunk
+      user = user_of(chunk, header).as(UInt8*)
+      size = block_payload(chunk, header).to_u64
       return if size == 0
 
       # Old Hash objects store keys/values in a separate @entries blob. Word-scanning
@@ -801,8 +803,10 @@ module Gcry
       mark_candidate(pointer) if BlockHeader.nursery?(header)
       return if BlockHeader.atomic?(header)
 
-      user = BlockHeader.user_from(header).as(UInt8*)
-      size = clamped_scan_size(header, user)
+      chunk = chunk_containing(header.address)
+      return unless chunk
+      user = user_of(chunk, header).as(UInt8*)
+      size = block_payload(chunk, header).to_u64
       return if size == 0
 
       word = sizeof(Void*).to_u64

@@ -558,9 +558,13 @@ module Gcry
                 BlockHeader.large?(header)
               end
       if large
-        payload = header.value.size.to_u64
         chunk = chunk_for(pointer)
         raise ArgumentError.new("large object chunk missing") unless chunk
+        # A large block keeps its header, but it is 16 bytes before the object
+        # rather than coincident with it, so the generic `from_user` above
+        # (identity under headerless) does not name it.
+        header = ChunkHeader.large_header(chunk)
+        payload = header.value.size.to_u64
 
         bytes_since_gc_sub(payload)
         note_explicit_free(payload)
@@ -1404,7 +1408,7 @@ module Gcry
       mapped = align_up(need, Platform.host_page_size)
 
       if user = take_large_free(mapped)
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
         BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
         heap_set_mark(header) if @incremental_marking || @collecting
@@ -1450,11 +1454,11 @@ module Gcry
       ThreadListWatch.check(chunk.as(Void*).address, mapped, ThreadListWatch::SITE_CACHE_IN)
       payload = header.value.size
       bucket = self.class.large_bucket(mapped)
-      user = BlockHeader.user_from(header)
+      user = BlockHeader.large_user_from_header(header)
       # Find tail of bucket freelist.
       tail = @large_freelists[bucket]
       while tail
-        th = BlockHeader.from_user(tail)
+        th = BlockHeader.large_header_from_user(tail)
         tnxt = th.value.next_free
         break if tnxt.null?
         tail = tnxt
@@ -1465,8 +1469,8 @@ module Gcry
       if tail.null?
         @large_freelists[bucket] = user
       else
-        ThreadListWatch.check(BlockHeader.from_user(tail).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
-        th = BlockHeader.from_user(tail)
+        ThreadListWatch.check(BlockHeader.large_header_from_user(tail).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
+        th = BlockHeader.large_header_from_user(tail)
         tv = th.value
         tv.next_free = user
         th.value = tv
@@ -1482,7 +1486,7 @@ module Gcry
       prev = Pointer(Void).null
       user = @large_freelists[b]
       while user
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         if chunk.value.mapped_bytes == mapped_need
@@ -1493,8 +1497,8 @@ module Gcry
           if prev.null?
             @large_freelists[b] = nxt
           else
-            ThreadListWatch.check(BlockHeader.from_user(prev).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
-            ph = BlockHeader.from_user(prev)
+            ThreadListWatch.check(BlockHeader.large_header_from_user(prev).address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_LINK_WRITE)
+            ph = BlockHeader.large_header_from_user(prev)
             pv = ph.value
             pv.next_free = nxt
             ph.value = pv
@@ -1600,7 +1604,7 @@ module Gcry
         while b >= 0 && @large_free_bytes > effective
           user = @large_freelists[b]
           while user && @large_free_bytes > effective
-            header = BlockHeader.from_user(user)
+            header = BlockHeader.large_header_from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             nxt = header.value.next_free
             @large_freelists[b] = nxt
@@ -1632,7 +1636,7 @@ module Gcry
         while b >= 0 && @large_free_bytes > effective
           user = @large_freelists[b]
           while user && @large_free_bytes > effective
-            header = BlockHeader.from_user(user)
+            header = BlockHeader.large_header_from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             nxt = header.value.next_free
             @large_freelists[b] = nxt
@@ -1695,7 +1699,7 @@ module Gcry
       # Nothing can hand these out now.
       user = detached
       while user
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         nxt = header.value.next_free
         mapped = chunk.value.mapped_bytes
@@ -2134,11 +2138,42 @@ module Gcry
     # hot path uses it — `sweep_small_blocks` counts ordinals, and
     # `mark_impl_unlocked` gets its chunk from `find_block_with_chunk`.
     @[AlwaysInline]
+    # Mark accessors for a block that still *has* a header — large blocks, whose
+    # header is reserved in the chunk metadata region. Under headerless the
+    # unsuffixed `BlockHeader.set_mark` / `marked?` are no-ops (a small block has
+    # nowhere to keep a mark), so routing a large block through them left it
+    # permanently unmarked and it was swept while live.
+    @[AlwaysInline]
+    private def hdr_set_mark(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        {% if flag?(:gcry_hl_assert) %}
+          c = chunk_containing(header.address)
+          if c && ChunkHeader.large?(c) && header != ChunkHeader.large_header(c)
+            LibC.write(2, "HL: set_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(34))
+            Exception::CallStack.print_backtrace
+            LibC.exit(9)
+          end
+        {% end %}
+        BlockHeader.set_mark_large(header)
+      {% else %}
+        BlockHeader.set_mark(header)
+      {% end %}
+    end
+
+    @[AlwaysInline]
+    private def hdr_marked?(header : BlockHeader*) : Bool
+      {% if flag?(:gcry_headerless) %}
+        BlockHeader.marked_large?(header)
+      {% else %}
+        BlockHeader.marked?(header)
+      {% end %}
+    end
+
     private def heap_marked?(header : BlockHeader*) : Bool
-      return BlockHeader.marked?(header) unless @bitmap_marks
-      return true if !@bitmap_alloc && BlockHeader.marked?(header)
+      return hdr_marked?(header) unless @bitmap_marks
+      return true if !@bitmap_alloc && hdr_marked?(header)
       chunk = chunk_containing(header.address)
-      return BlockHeader.marked?(header) if chunk.nil? || !bitmap_chunk?(chunk)
+      return hdr_marked?(header) if chunk.nil? || !bitmap_chunk?(chunk)
       chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address))
     end
 
@@ -2161,7 +2196,7 @@ module Gcry
       # lookup lands on the mutator's allocation path. Phase 3's sweep reads
       # only the bitmap, so the union is gone and this must reach it.
       unless @bitmap_alloc
-        BlockHeader.set_mark(header)
+        hdr_set_mark(header)
         return
       end
       # `index_of?`, not `index_of`: the raising twin allocates, and this runs
@@ -2179,7 +2214,7 @@ module Gcry
       # allocation path.
       chunk = chunk_containing(header.address)
       if chunk.nil? || !bitmap_chunk?(chunk)
-        BlockHeader.set_mark(header)
+        hdr_set_mark(header)
         return
       end
       chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
@@ -2189,7 +2224,24 @@ module Gcry
     # at a time — see `chunk_clear_marks`.
     @[AlwaysInline]
     private def heap_clear_mark(header : BlockHeader*) : Nil
-      BlockHeader.clear_mark(header)
+      {% if flag?(:gcry_headerless) %}
+        # Only a block that has a header can have its generation cleared, and
+        # under headerless that means large. Writing to a small block here would
+        # land on the object; its marks live in the bitmap and are cleared
+        # wholesale by `chunk_clear_marks` anyway.
+        chunk = chunk_containing(header.address)
+        return if chunk.nil? || !ChunkHeader.large?(chunk)
+        {% if flag?(:gcry_hl_assert) %}
+          if header != ChunkHeader.large_header(chunk)
+            LibC.write(2, "HL: clear_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(36))
+            Exception::CallStack.print_backtrace
+            LibC.exit(9)
+          end
+        {% end %}
+        BlockHeader.clear_mark_large(header)
+      {% else %}
+        BlockHeader.clear_mark(header)
+      {% end %}
     end
 
     # Is this block allocated?
@@ -2220,9 +2272,26 @@ module Gcry
     # and `spec/block_payload_spec.cr` pins that the two sources agree for every
     # allocated block, which is the whole correctness argument for removing the
     # header.
+    # The user pointer of a block, given its chunk.
+    #
+    # `BlockHeader.user_from` is identity under headerless, which is right for a
+    # small block (its header is gone) and wrong for a large one (whose header
+    # is reserved 16 bytes before the object). Anything that needs the object's
+    # address while holding the chunk must come through here — using
+    # `user_from` on a large block scans from 16 bytes early and 16 bytes past
+    # the mapping, which is a SIGSEGV in the mark phase.
+    @[AlwaysInline]
+    def user_of(chunk : ChunkHeader*, header : BlockHeader*) : Void*
+      if ChunkHeader.large?(chunk)
+        ChunkHeader.large_user(chunk)
+      else
+        BlockHeader.user_from(header)
+      end
+    end
+
     def block_payload(chunk : ChunkHeader*, header : BlockHeader*) : UInt32
       if ChunkHeader.large?(chunk)
-        user = BlockHeader.user_from(header).address
+        user = user_of(chunk, header).address
         finish = ChunkHeader.data_end(chunk).address
         return 0_u32 if finish <= user
         return (finish - user).to_u32
@@ -2269,12 +2338,12 @@ module Gcry
 
     @[AlwaysInline]
     private def block_marked_in?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
-      return BlockHeader.marked?(header) unless bitmap_chunk?(chunk)
+      return hdr_marked?(header) unless bitmap_chunk?(chunk)
       marked = chunk_marked?(chunk, chunk_block_ordinal(chunk, header.address))
       # The Phase 1 union, alive exactly while the sweep still reads headers.
       # Under `bitmap_alloc` the sweep reads only the bitmap and allocate-black
       # writes the bitmap, so the union is both unnecessary and wrong.
-      marked ||= BlockHeader.marked?(header) unless @bitmap_alloc
+      marked ||= hdr_marked?(header) unless @bitmap_alloc
       marked
     end
 
@@ -2283,7 +2352,7 @@ module Gcry
     @[AlwaysInline]
     private def set_block_mark_in(chunk : ChunkHeader*, header : BlockHeader*) : Nil
       unless bitmap_chunk?(chunk)
-        BlockHeader.set_mark(header)
+        hdr_set_mark(header)
         return
       end
       chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
@@ -2554,8 +2623,11 @@ module Gcry
       return false unless chunk
 
       if ChunkHeader.large?(chunk)
-        expected_header = ChunkHeader.large_header(chunk)
-        return header == expected_header && BlockHeader.user_from(header) == user
+        # `header` here came from the generic `from_user`, which is identity
+        # under headerless — so on a large block it is the *user* pointer, not
+        # the header. Compare against the chunk's own answers instead of
+        # round-tripping through the small-block accessors.
+        return ChunkHeader.large_user(chunk) == user
       end
 
       class_index = chunk.value.size_class.to_i32

@@ -68,3 +68,68 @@ stw-mt-property, ameba, format all green).
 Remaining to finish the phase: relocate large-object metadata into the chunk
 (the ~40 sites), then port the six diagnostics with their purpose-broken gates
 observed red.
+
+---
+
+## Update: the large-object path, eight bugs later
+
+Continuing 7.7 into the large-object path. Large objects keep a real header —
+reserved inside the chunk's metadata region — because they need somewhere for
+the freelist and pending-cache links. Small blocks are the ones that lose theirs.
+
+Fixed this round, each found by tracing a specific corruption rather than by
+inspection:
+
+1. `alloc_large` sized the mapping by `ChunkHeader::SIZE + BlockHeader::SIZE`,
+   16 bytes short of the new data offset — the object's tail fell outside the
+   mapping. Now `ChunkHeader.large_data_offset`, one definition for sizing,
+   carving and the header slot.
+2. `set_used` is a no-op under headerless (a small block has nowhere to write),
+   which silently dropped every large block's size and LARGE flag →
+   `set_used_large`.
+3. `BlockHeader.large?` answered from the block, so a small object could be
+   routed into the large free path and `cache_large_chunk`'d onto a size-class
+   chunk. `free` now asks the chunk.
+4. `free` derived the header via the generic `from_user` (identity under
+   headerless), so it cached the *user* pointer as a header.
+5. `owns_user_pointer?` round-tripped through `user_from`, so `GC.free` on a
+   large object reported "not a live gcry allocation".
+6. The large freelist walkers (`cache_large_chunk`, `take_large_free`,
+   `trim_large_cache`, `flush_pending_large_cache`,
+   `release_large_freelist_pages_locked`) chain blocks through
+   `from_user`/`user_from` → `large_header_from_user` / `large_user_from_header`.
+7. `scan_object` and `block_payload` derived the object address with
+   `user_from`, so a large object was scanned from 16 bytes early and 16 bytes
+   past its mapping — a SIGSEGV in mark. Now `Heap#user_of(chunk, header)`.
+8. **The one that mattered most:** large chunks are not bitmap chunks, so every
+   mark accessor fell back to `BlockHeader.set_mark` / `marked?` — which are
+   no-ops under headerless. Large objects could therefore *never be marked*, and
+   were swept while live on the first collection. Fixed with `set_mark_large` /
+   `marked_large?` / `clear_mark_large`, routed through `hdr_set_mark` /
+   `hdr_marked?`.
+
+After all eight, a rooted large object survives collection, is found by
+`is_heap_ptr` and reports `live?` — where before it was unmapped and read back
+as a SIGSEGV.
+
+### What is still wrong
+
+**Two bytes at `user+4` are overwritten during collection**, with `0x0001`. The
+data is verified intact immediately before `GC.collect` and corrupt immediately
+after, so the collector writes it. It is *not* a mark write: an assertion built
+into `hdr_set_mark` / `heap_clear_mark` (`-Dgcry_hl_assert`) that fires when
+either is handed an address other than the chunk's header slot never triggers.
+A 2-byte write of 1 at `+4` has the shape of a `flags` field being set to FREE,
+but every full-struct writer would have disturbed the surrounding bytes and
+those are intact.
+
+So `-Dgcry_headerless` remains **experimental and unsafe for large objects**,
+and `bench/micro/gc_phases` still cannot run under it.
+
+### The small-object result is unaffected and reconfirmed
+
+1 000 000 × 16 B, all 1 000 000 chain links intact, **rss 19 320 kB against
+35 008 kB** for the header build — **−44.8%**, the same number as before the
+large-object work. The header build stays fully gated: spec 222/222 across
+default / `GCRY_BITMAP_ALLOC` / `GCRY_CHUNK_RADIX`, invariants, mark-audit,
+property, mt-property, stw-mt-property, parallel-mark-process, ameba, format.
