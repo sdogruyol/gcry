@@ -2194,6 +2194,41 @@ module Gcry
     # a block nothing owns into the allocated set, permanently. A slow leak
     # driven by conservative false pointers, invisible in every counter.
     @[AlwaysInline]
+    # Payload bytes of a block, derived from its **chunk** rather than its
+    # header (Phase 7.6).
+    #
+    # `header.value.size` is the last field with no alternative source, and it
+    # is what keeps the 16-byte header alive. For a small block the chunk's size
+    # class already carries the answer; for a large block the object occupies
+    # the whole mapping, so the size is the data extent.
+    #
+    # This derives from the chunk **in the header build too**, deliberately.
+    # Every call site converted to it is behaviour-preserving today, so the
+    # conversion is testable as it happens rather than only after the flip —
+    # and `spec/block_payload_spec.cr` pins that the two sources agree for every
+    # allocated block, which is the whole correctness argument for removing the
+    # header.
+    def block_payload(chunk : ChunkHeader*, header : BlockHeader*) : UInt32
+      if ChunkHeader.large?(chunk)
+        user = BlockHeader.user_from(header).address
+        finish = ChunkHeader.data_end(chunk).address
+        return 0_u32 if finish <= user
+        return (finish - user).to_u32
+      end
+      class_index = chunk.value.size_class.to_i32
+      return 0_u32 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      SizeClasses.payload(class_index)
+    end
+
+    # Same, without a chunk in hand. O(1) under GCRY_CHUNK_RADIX, a binary
+    # search otherwise — which is why hot paths should pass the chunk they
+    # already have.
+    def block_payload(header : BlockHeader*) : UInt32
+      chunk = chunk_containing(header.address)
+      return 0_u32 unless chunk
+      block_payload(chunk, header)
+    end
+
     protected def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
       return !BlockHeader.free?(header) unless bitmap_alloc_chunk?(chunk)
       occ = ChunkHeader.occ_bitmap(chunk)

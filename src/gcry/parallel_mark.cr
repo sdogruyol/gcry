@@ -132,6 +132,10 @@ module Gcry
     # made parallel mark 60x slower than serial.
     MARK_PUSHBUF_CAP = 512
     MARK_POP_BATCH   = 256
+    # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
+    # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
+    # before Fiber is up during GC.init (see size_classes.cr).
+    MARK_POP_BATCH_WORDS = 512
 
     # Which shard the current OS thread owns. -1 until claimed; the master sets
     # 0 explicitly. Survives across collections, so a pthread keeps its slot.

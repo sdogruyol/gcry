@@ -34,6 +34,7 @@ require "./kernels_spec"
 require "./chunk_layout_spec"
 require "./chunk_kind_spec"
 require "./finalizer_index_spec"
+require "./block_payload_spec"
 require "./bitmap_marks_spec"
 require "./chunk_radix_spec"
 # The regression specs moved to `process_spec/regression/` on 2026-08-15. They

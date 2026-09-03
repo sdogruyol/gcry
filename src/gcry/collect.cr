@@ -1446,6 +1446,15 @@ module Gcry
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
+      found = find_object_with_chunk(pointer)
+      return nil unless found
+      found[0]
+    end
+
+    # Same, keeping the chunk `find_block_with_chunk` already resolved. Callers
+    # that go on to push onto the mark stack need it (Phase 7.6) and would
+    # otherwise re-resolve it.
+    def find_object_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
       found = find_block_with_chunk(pointer)
       return nil unless found
       header, chunk = found
@@ -1453,7 +1462,7 @@ module Gcry
       # header's FREE flag is stale for every block the streaming sweep
       # reclaimed, and trusting it here resurrects reclaimed blocks into `occ`.
       return nil unless block_allocated?(chunk, header)
-      header
+      {header, chunk}
     end
 
     protected def maybe_collect : Nil

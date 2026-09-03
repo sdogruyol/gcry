@@ -307,8 +307,7 @@ module Gcry
 
     private def mark_loop : Nil
       until @mark_stack.empty?
-        header = @mark_stack.pop
-        scan_object(header)
+        scan_object(@mark_stack.pop)
       end
     end
 
@@ -365,8 +364,7 @@ module Gcry
     private def mark_loop_budget(work_units : Int32) : Nil
       units = 0
       while units < work_units && !@mark_stack.empty?
-        header = @mark_stack.pop
-        scan_object(header)
+        scan_object(@mark_stack.pop)
         units += 1
       end
     end
@@ -647,31 +645,21 @@ module Gcry
       end
     end
 
-    # Corrupted header.size must not walk past the mapped chunk (SIGSEGV).
+    # Scan length for one object, derived from its **chunk** (Phase 7.6).
+    #
+    # This used to read `header.value.size` and clamp it against the chunk, then
+    # (778b956) skip the lookup entirely for small blocks by trusting the header.
+    # Both forms needed the header. The chunk now arrives on the mark stack
+    # beside the object, so the size comes from the size class directly — no
+    # header read and no lookup, which is what lets the header go while keeping
+    # the -7.7% that removing the per-object `chunk_containing` bought.
+    #
+    # `block_payload` is the single definition of "how big is this block",
+    # pinned against the header by `spec/block_payload_spec.cr`. For a large
+    # object it is already the mapping extent, so the old clamp is inherent
+    # rather than applied.
     private def clamped_scan_size(header : BlockHeader*, user : UInt8*) : UInt64
-      size = header.value.size.to_u64
-
-      # Small blocks skip the chunk lookup — the common case, and the one that
-      # dominates a mark-bound phase.
-      #
-      # `header.value.size` is the block's class payload: the allocator writes
-      # it, it sits in the 16-byte header *before* the user pointer, and a user
-      # buffer overflow reaching it would already be undefined. A block that
-      # reaches here is marked and allocated (find_object rejected FREE), so its
-      # size field is the payload and scanning `size` bytes stays in-block. The
-      # clamp that a `chunk_containing` used to provide was defending against a
-      # value that cannot occur on this path.
-      #
-      # Large objects keep the lookup: their `size` is the exact object size and
-      # is clamped to the mapping end, and they are rare enough that the lookup
-      # does not show up.
-      return size unless BlockHeader.large?(header)
-
-      chunk = chunk_containing(header.address)
-      return 0_u64 unless chunk
-      end_addr = ChunkHeader.data_end(chunk).address
-      max = end_addr > user.address ? (end_addr - user.address) : 0_u64
-      size > max ? max : size
+      block_payload(header).to_u64
     end
 
     private def scan_old_for_nursery_pointers : Nil
