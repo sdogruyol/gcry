@@ -58,6 +58,17 @@ seconds = 3.0
 live_slots = 200_000
 obj_words = 8
 survivals = [0.05, 0.25, 0.75]
+shuffle = false
+# Scatter the ring so consecutive marked objects land in different chunks.
+#
+# This is not a cosmetic knob. In allocation order the ring's pointers are
+# chunk-sequential, so `chunk_containing`'s one-slot cache answers nearly every
+# lookup and the binary search it exists to avoid barely runs — a workload that
+# looks GC-bound but exercises no chunk *lookup* pressure at all. Real mark
+# graphs (Kemal's JSON, `exp.c`'s shuffled shapes) are scattered, and
+# `simdgc-perf-notes.md` measured graph shape dominating everything else in the
+# mark phase. Without this the benchmark silently answers a different question
+# from the one a chunk-lookup change is asking.
 
 ARGV.each do |arg|
   case arg
@@ -65,6 +76,7 @@ ARGV.each do |arg|
   when .starts_with?("--live=")     then live_slots = arg.split("=", 2)[1].to_i
   when .starts_with?("--size=")     then obj_words = arg.split("=", 2)[1].to_i
   when .starts_with?("--survival=") then survivals = arg.split("=", 2)[1].split(",").map(&.to_f)
+  when "--shuffle"                  then shuffle = true
   end
 end
 
@@ -79,6 +91,7 @@ json_line({
   "live_slots"  => live_slots.to_s,
   "obj_words"   => obj_words.to_s,
   "seconds"     => seconds.to_s,
+  "shuffle"     => shuffle.to_s,
   "bitmap"      => heap.bitmap_marks?.to_s,
   "chunk_radix" => heap.chunk_radix?.to_s,
 })
@@ -94,6 +107,20 @@ survivals.each do |survival|
   # Fill the ring first so the measured window is steady state, not warm-up.
   live_slots.times do |i|
     ring[i] = GC.malloc(bytes)
+  end
+  # Fisher-Yates with the same xorshift, so the scatter is reproducible and the
+  # shuffle itself allocates nothing.
+  if shuffle
+    srng = 0xD1B54A32D192ED03_u64
+    i = live_slots - 1
+    while i > 0
+      srng ^= srng << 13
+      srng ^= srng >> 7
+      srng ^= srng << 17
+      j = (srng % (i + 1).to_u64).to_i
+      ring[i], ring[j] = ring[j], ring[i]
+      i -= 1
+    end
   end
   GC.collect
 
@@ -123,7 +150,6 @@ survivals.each do |survival|
 
   collections = heap.collections - before_collections
   pause_total = Gcry.pause_stats.total_ns - before_pause
-  stats = Gcry.pause_stats
 
   # The headline. Everything a mark-side optimisation can win lives inside this
   # fraction of wall time; nothing outside it is addressable by making the
@@ -131,15 +157,18 @@ survivals.each do |survival|
   duty = pause_total.to_f / wall.to_f
 
   json_line({
-    "survival"        => survival.to_s,
-    "wall_ms"         => (wall / 1_000_000.0).round(1).to_s,
-    "allocs"          => allocs.to_s,
-    "ns_per_alloc"    => (wall.to_f / allocs.to_f).round(2).to_s,
-    "collections"     => collections.to_s,
-    "pause_total_ms"  => (pause_total / 1_000_000.0).round(2).to_s,
-    "gc_duty_cycle"   => (duty * 100).round(3).to_s,
-    "pause_p50_us"    => (stats.p50_ns / 1000.0).round(1).to_s,
-    "pause_p99_us"    => (stats.p99_ns / 1000.0).round(1).to_s,
+    "survival"       => survival.to_s,
+    "wall_ms"        => (wall / 1_000_000.0).round(1).to_s,
+    "allocs"         => allocs.to_s,
+    "ns_per_alloc"   => (wall.to_f / allocs.to_f).round(2).to_s,
+    "collections"    => collections.to_s,
+    "pause_total_ms" => (pause_total / 1_000_000.0).round(2).to_s,
+    "gc_duty_cycle"  => (duty * 100).round(3).to_s,
+    # Mean pause across every collection in this window. `phase_mark_us` below
+    # is `last_phase_mark_ns` — a **single last-collection sample**, so its
+    # variance is roughly double this one's and it is the weaker instrument for
+    # a mark-side change. Prefer this.
+    "pause_per_gc_us" => (collections == 0 ? 0.0 : (pause_total.to_f / collections.to_f / 1000.0)).round(2).to_s,
     "phase_mark_us"   => (heap.last_phase_mark_ns / 1000.0).round(1).to_s,
     "phase_sweep_us"  => (heap.last_phase_sweep_ns / 1000.0).round(1).to_s,
     "phase_roots_us"  => (heap.last_phase_roots_ns / 1000.0).round(1).to_s,
@@ -151,6 +180,12 @@ survivals.each do |survival|
     "radix_fast"      => heap.radix_fast_hits.to_s,
     "radix_slow"      => heap.radix_slow_lookups.to_s,
   })
+
+  # `Gcry.pause_stats` p50/p99 are deliberately NOT reported. They are
+  # process-cumulative, so on the second and later survival rates they are
+  # contaminated by the earlier ones — a reader comparing them across rows would
+  # be comparing overlapping populations. `pause_total_ns` is delta'd above,
+  # which is why the derived mean is safe and the percentiles are not.
 
   # Drop the ring before the next survival rate so heaps do not compound.
   ring.clear
