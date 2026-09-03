@@ -335,14 +335,23 @@ null control:
 - [x] Lock narrowed off the per-word acceptance path (daf0b58): 8-worker
       phase_mark 503ms → 137ms, correctness-gated. Still net-worse than serial
       (8ms) — the single shared stack's per-object push/pop lock is the residue.
-- [ ] **Per-worker sharded stacks** — the fix. Design settled: thread-local
-      worker id + per-worker mmap'd push buffers (raw storage in StaticArrays,
-      no managed alloc — the `-Dgc_none` constraint), batched flush/steal
-      against the shared stack, clean termination (flush before idle-check).
-      Measurable on this 24-thread box. RISK: a new concurrent-marking path is
-      a UAF class; validate hard against stw-mt-property-test.
-- [ ] Fix the two structural bugs while there: helpers busy-spin between
-      collections; a worker that finds the stack momentarily empty drops out.
+- [x] **Per-worker sharded stacks** — thread-local worker slot, per-worker
+      mmap'd push buffers (raw StaticArray storage, no managed alloc), batched
+      flush/pop against the shared stack, termination proven safe (a worker only
+      goes busy by popping a non-empty batch, so busy==0 && empty is stable).
+      Validated: stw-mt-property-test 3/3, mark-audit, parallel-mark-process,
+      mt-property all green.
+- [x] Worker drop-out bug fixed: workers stay in the cycle on `@mark_parallel`
+      and treat a transient empty as a pause, not an exit.
+- [x] Result: **2 workers −14.8% vs serial** (t=−13.98, 14/14), a real win
+      where it was 60x-worse before.
+- [ ] **Scales only to 2 workers**; 4+ regresses. Not lock contention (~2000
+      batch-lock ops) and not the chunk cache (radix on doesn't change it) —
+      it is the per-object **shared statistics counters** in scan_object /
+      mark_impl (`@layout_conservative_scans`, `@type_id_*_rejects`), which every
+      worker increments on the same Heap fields → false sharing. Needs
+      per-worker counters summed at end. That is the ceiling to break next.
+- [ ] Helpers still busy-spin between collections (separate, pre-existing).
 
 ## Decision point for the next step
 

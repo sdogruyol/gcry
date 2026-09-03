@@ -75,15 +75,32 @@ module Gcry
 
     # Push a header onto the shared mark stack. Locked only under parallel mark;
     # the stack itself is not thread-safe.
+    # Push a discovered child. Serial: straight to the shared stack. Parallel:
+    # into this worker's shard buffer, unlocked (single-writer per slot),
+    # flushed to the shared stack in batches by `flush_pushbuf`. That batching
+    # is what takes the lock off the per-object path.
     @[AlwaysInline]
     private def mark_stack_push(header : BlockHeader*) : Nil
-      if @mark_parallel
+      unless @mark_parallel
+        @mark_stack.push(header)
+        return
+      end
+      slot = Heap.mark_worker
+      # A thread with no claimed slot (should not happen on a mark worker) falls
+      # back to the locked shared push rather than corrupting slot -1.
+      if slot < 0 || @mark_pushbuf[slot] == 0_u64
         @mark_lock.lock
         @mark_stack.push(header)
         @mark_lock.unlock
-      else
-        @mark_stack.push(header)
+        return
       end
+      n = @mark_pushbuf_n[slot]
+      if n >= MARK_PUSHBUF_CAP
+        flush_pushbuf(slot)
+        n = 0
+      end
+      Pointer(Void*).new(@mark_pushbuf[slot])[n] = header.as(Void*)
+      @mark_pushbuf_n[slot] = n + 1
     end
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil

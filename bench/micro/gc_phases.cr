@@ -59,6 +59,7 @@ live_slots = 200_000
 obj_words = 8
 survivals = [0.05, 0.25, 0.75]
 shuffle = false
+fanout = 0
 # Scatter the ring so consecutive marked objects land in different chunks.
 #
 # This is not a cosmetic knob. In allocation order the ring's pointers are
@@ -77,6 +78,7 @@ ARGV.each do |arg|
   when .starts_with?("--size=")     then obj_words = arg.split("=", 2)[1].to_i
   when .starts_with?("--survival=") then survivals = arg.split("=", 2)[1].split(",").map(&.to_f)
   when "--shuffle"                  then shuffle = true
+  when .starts_with?("--fanout=")   then fanout = arg.split("=", 2)[1].to_i
   end
 end
 
@@ -92,6 +94,7 @@ json_line({
   "obj_words"   => obj_words.to_s,
   "seconds"     => seconds.to_s,
   "shuffle"     => shuffle.to_s,
+  "fanout"      => fanout.to_s,
   "bitmap"      => heap.bitmap_marks?.to_s,
   "chunk_radix" => heap.chunk_radix?.to_s,
 })
@@ -108,6 +111,20 @@ survivals.each do |survival|
   live_slots.times do |i|
     ring[i] = GC.malloc(bytes)
   end
+  if fanout > 0
+    frng = 0x2545F4914F6CDD1D_u64
+    live_slots.times do |i|
+      slot = ring[i]
+      k = 0
+      while k < fanout && k < obj_words
+        frng ^= frng << 13; frng ^= frng >> 7; frng ^= frng << 17
+        target = i == 0 ? 0 : (frng % i.to_u64).to_i
+        (slot.as(Void**) + k).value = ring[target]
+        k += 1
+      end
+    end
+  end
+
   # Fisher-Yates with the same xorshift, so the scatter is reproducible and the
   # shuffle itself allocates nothing.
   if shuffle

@@ -118,11 +118,95 @@ module Gcry
       @mark_workers_busy.set(0)
       @mark_lock = Crystal::SpinLock.new
       @mark_epoch = Atomic(UInt64).new(0_u64)
+      # The forking thread keeps its slot (it becomes the sole thread), but the
+      # claim counter resets so a rebuilt pool re-numbers from 1. Shard buffers
+      # survive — they are mmap, inherited across fork, and reused.
+      @mark_slot_claim = Atomic(Int32).new(1)
+      Heap.mark_worker = 0
     end
 
     # Helper loop (Crystal::Thread or raw pthread). No managed-heap alloc.
+    # Per-worker shard: how much a worker accumulates before publishing to the
+    # shared stack, and how much it takes back per lock. Both amortise the lock
+    # to once per few hundred objects instead of once per object, which is what
+    # made parallel mark 60x slower than serial.
+    MARK_PUSHBUF_CAP = 512
+    MARK_POP_BATCH   = 256
+
+    # Which shard the current OS thread owns. -1 until claimed; the master sets
+    # 0 explicitly. Survives across collections, so a pthread keeps its slot.
+    @[ThreadLocal]
+    @@mark_worker : Int32 = -1
+
+    protected def self.mark_worker : Int32
+      @@mark_worker
+    end
+
+    protected def self.mark_worker=(v : Int32) : Int32
+      @@mark_worker = v
+    end
+
+    # Lazily mmap a shard's push buffer. Called by a worker before it drains, and
+    # by the master; mmap during a collection is fine (it is what MarkStack#grow
+    # does), a managed allocation would not be.
+    protected def ensure_pushbuf(slot : Int32) : Nil
+      return if @mark_pushbuf[slot] != 0_u64
+      bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
+      ptr = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+        LibC::PROT_READ | LibC::PROT_WRITE,
+        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
+      return if Gcry.mmap_failed?(ptr)
+      @mark_pushbuf[slot] = ptr.address
+      @mark_pushbuf_n[slot] = 0
+    end
+
+    # Publish one shard's accumulated children to the shared stack under one
+    # lock. Single-writer per slot, so the buffer itself needs no lock.
+    protected def flush_pushbuf(slot : Int32) : Nil
+      n = @mark_pushbuf_n[slot]
+      return if n == 0
+      buf = Pointer(Void*).new(@mark_pushbuf[slot])
+      @mark_lock.lock
+      i = 0
+      while i < n
+        @mark_stack.push(buf[i].as(BlockHeader*))
+        i += 1
+      end
+      @mark_lock.unlock
+      @mark_pushbuf_n[slot] = 0
+    end
+
+    # Take up to `cap` headers from the shared stack under one lock.
+    protected def pop_mark_batch(into : Pointer(Void*), cap : Int32) : Int32
+      @mark_lock.lock
+      n = 0
+      while n < cap && !@mark_stack.empty?
+        into[n] = @mark_stack.pop.as(Void*)
+        n += 1
+      end
+      @mark_lock.unlock
+      n
+    end
+
+    private def mark_stack_empty_locked? : Bool
+      @mark_lock.lock
+      e = @mark_stack.empty?
+      @mark_lock.unlock
+      e
+    end
+
     protected def mark_worker_loop : Nil
+      # Claim a shard slot once, on first wake, and keep it.
+      if Heap.mark_worker < 0
+        slot = @mark_slot_claim.add(1)
+        slot = 15 if slot > 15
+        Heap.mark_worker = slot
+        ensure_pushbuf(slot)
+      end
+      slot = Heap.mark_worker
+
       local_epoch = 0_u64
+      batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
       while @mark_shutdown.get == 0
         epoch = @mark_epoch.get
         if epoch == local_epoch
@@ -131,29 +215,35 @@ module Gcry
         end
         local_epoch = epoch
         next if @mark_shutdown.get != 0
+        ensure_pushbuf(slot)
 
-        @mark_workers_busy.add(1)
-        begin
-          while @mark_parallel && @mark_shutdown.get == 0
-            header = pop_mark_header(steal: true)
-            break unless header
-            scan_object(header)
+        # Stay in the cycle as long as the master says marking is live. A
+        # transient empty is a pause, not an exit — the earlier bug was a worker
+        # dropping out on the first empty and never re-entering while other
+        # workers still had work. The master ends the cycle by clearing
+        # `@mark_parallel`.
+        while @mark_parallel && @mark_shutdown.get == 0
+          m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
+          if m == 0
+            Intrinsics.pause
+            next
           end
-        ensure
-          @mark_workers_busy.add(-1)
+          # Busy spans holding a batch AND its unflushed children, so a worker
+          # is never counted idle while it might still push. That is the
+          # invariant the master's termination check rests on.
+          @mark_workers_busy.add(1)
+          begin
+            @parallel_mark_stolen &+= m.to_u64
+            i = 0
+            while i < m
+              scan_object(batch.to_unsafe[i].as(BlockHeader*))
+              i += 1
+            end
+            flush_pushbuf(slot)
+          ensure
+            @mark_workers_busy.add(-1)
+          end
         end
-      end
-    end
-
-    private def pop_mark_header(*, steal : Bool) : BlockHeader*?
-      @mark_lock.lock
-      begin
-        return nil if @mark_stack.empty?
-        header = @mark_stack.pop
-        @parallel_mark_stolen += 1 if steal
-        header
-      ensure
-        @mark_lock.unlock
       end
     end
 
@@ -175,26 +265,31 @@ module Gcry
         return
       end
 
+      Heap.mark_worker = 0
+      ensure_pushbuf(0)
       @mark_parallel = true
       @mark_epoch.add(1)
+      batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
       begin
         loop do
-          progressed = false
-          while (header = pop_mark_header(steal: false))
-            progressed = true
-            scan_object(header)
-          end
-          busy = @mark_workers_busy.get
-          empty = begin
-            @mark_lock.lock
-            begin
-              @mark_stack.empty?
-            ensure
-              @mark_lock.unlock
+          m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
+          if m > 0
+            i = 0
+            while i < m
+              scan_object(batch.to_unsafe[i].as(BlockHeader*))
+              i += 1
             end
+            flush_pushbuf(0)
+            next
           end
-          break if empty && busy == 0 && !progressed
-          Intrinsics.pause unless progressed
+          # Master found nothing. Safe to stop only when no worker is mid-scan
+          # (so none can push) AND the stack is freshly observed empty. A worker
+          # can only become busy by popping a non-empty batch, so it cannot
+          # transition to busy while the stack is empty — busy==0 && empty is
+          # therefore stable. `mark_stack_empty_locked?` re-reads under the lock
+          # in case a worker flushed after this master pop.
+          break if @mark_workers_busy.get == 0 && mark_stack_empty_locked?
+          Intrinsics.pause
         end
       ensure
         @mark_parallel = false

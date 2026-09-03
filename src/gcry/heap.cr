@@ -198,6 +198,16 @@ module Gcry
     @mark_pthreads = uninitialized StaticArray(LibC::PthreadT, 15)
     @mark_pthread_count = 0
     @mark_pthread_mode = false
+    # Per-worker mark-stack shards. `@mark_pushbuf[slot]` is a raw mmap'd buffer
+    # of up to `MARK_PUSHBUF_CAP` `Void*`; `@mark_pushbuf_n[slot]` its count.
+    # 16 slots: slot 0 the collecting (master) thread, 1..15 the pthread helpers.
+    # Raw mmap, not a MarkStack per slot, because these are created lazily during
+    # a collection and a managed allocation there is forbidden under -Dgc_none.
+    @mark_pushbuf = uninitialized StaticArray(UInt64, 16)
+    @mark_pushbuf_n = uninitialized StaticArray(Int32, 16)
+    # Workers claim a slot once (thread-local `@@mark_worker` survives across
+    # collections, so the same pthread keeps its slot).
+    @mark_slot_claim = Atomic(Int32).new(1)
     @mark_epoch = Atomic(UInt64).new(0_u64)
     @mark_shutdown = Atomic(Int32).new(0)
     @mark_workers_busy = Atomic(Int32).new(0)
@@ -270,6 +280,9 @@ module Gcry
       @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(zero_tid)
       @mark_pthread_count = 0
       @mark_pthread_mode = false
+      @mark_pushbuf = StaticArray(UInt64, 16).new(0_u64)
+      @mark_pushbuf_n = StaticArray(Int32, 16).new(0)
+      @mark_slot_claim = Atomic(Int32).new(1)
       @mark_epoch = Atomic(UInt64).new(0_u64)
       @header_mark_gen = 1_u8
       @header_mark_gen_full_clears = 0_u64
