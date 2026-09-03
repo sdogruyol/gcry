@@ -266,6 +266,56 @@ module Gcry
       end
     end
 
+    # Depth of the mark-loop prefetch ring. simdgc measured 16-32 as the knee
+    # (mark 23 -> 13 ms); past ~64 the line-fill buffers oversubscribe.
+    MARK_PREFETCH_DEPTH = 16
+
+    # Serial mark drain with a fixed-depth software prefetch pipeline.
+    #
+    # A plain LIFO drain pops an object and scans it immediately, so its cache
+    # line — random on a real graph, and mark is latency-bound not
+    # compute-bound (`simdgc-perf-notes.md`: 147 ns per dependent miss) — is
+    # loaded on the critical path every time.
+    #
+    # The ring decouples pop from scan by `MARK_PREFETCH_DEPTH`: an object is
+    # prefetched when it enters, scanned when it leaves, and the K objects
+    # between hide the miss. The stack underneath stays strict LIFO, so depth is
+    # still bounded by graph depth — no BFS blow-up, no `MarkStack#grow` raising
+    # `OutOfMemoryError` (which allocates, the -Dgc_none deadlock). The ring is a
+    # fixed reorder buffer in front of scan, not a second work list.
+    #
+    # `GCRY_PREFETCH=0` selects the plain drain for A/B.
+    @[AlwaysInline]
+    private def serial_mark_drain : Nil
+      unless @mark_prefetch
+        until @mark_stack.empty?
+          scan_object(@mark_stack.pop)
+        end
+        return
+      end
+
+      ring = uninitialized StaticArray(BlockHeader*, MARK_PREFETCH_DEPTH)
+      head = 0
+      count = 0
+      stack = @mark_stack
+      loop do
+        while count < MARK_PREFETCH_DEPTH && !stack.empty?
+          h = stack.pop
+          # Header line and the payload's first line — the type_id gate and the
+          # first scanned word both live there.
+          Kernels.prefetch_read(h.as(Void*))
+          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          ring[(head + count) % MARK_PREFETCH_DEPTH] = h
+          count += 1
+        end
+        break if count == 0
+        h = ring[head]
+        head = (head + 1) % MARK_PREFETCH_DEPTH
+        count -= 1
+        scan_object(h)
+      end
+    end
+
     private def mark_loop_budget(work_units : Int32) : Nil
       units = 0
       while units < work_units && !@mark_stack.empty?
@@ -554,17 +604,27 @@ module Gcry
     # Corrupted header.size must not walk past the mapped chunk (SIGSEGV).
     private def clamped_scan_size(header : BlockHeader*, user : UInt8*) : UInt64
       size = header.value.size.to_u64
+
+      # Small blocks skip the chunk lookup — the common case, and the one that
+      # dominates a mark-bound phase.
+      #
+      # `header.value.size` is the block's class payload: the allocator writes
+      # it, it sits in the 16-byte header *before* the user pointer, and a user
+      # buffer overflow reaching it would already be undefined. A block that
+      # reaches here is marked and allocated (find_object rejected FREE), so its
+      # size field is the payload and scanning `size` bytes stays in-block. The
+      # clamp that a `chunk_containing` used to provide was defending against a
+      # value that cannot occur on this path.
+      #
+      # Large objects keep the lookup: their `size` is the exact object size and
+      # is clamped to the mapping end, and they are rare enough that the lookup
+      # does not show up.
+      return size unless BlockHeader.large?(header)
+
       chunk = chunk_containing(header.address)
       return 0_u64 unless chunk
-
-      max = if ChunkHeader.large?(chunk)
-              end_addr = ChunkHeader.data_end(chunk).address
-              end_addr > user.address ? (end_addr - user.address) : 0_u64
-            else
-              class_index = chunk.value.size_class.to_i32
-              return 0_u64 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-              SizeClasses.payload(class_index).to_u64
-            end
+      end_addr = ChunkHeader.data_end(chunk).address
+      max = end_addr > user.address ? (end_addr - user.address) : 0_u64
       size > max ? max : size
     end
 

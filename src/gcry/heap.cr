@@ -103,6 +103,9 @@ module Gcry
     # is not maintained for them (Phase 8).
     # Instruction-set tier for the bitmap kernels; see `Gcry::Cpu`.
     getter simd_tier : UInt8 = Kernels::TIER_SCALAR
+    # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
+    # `serial_mark_drain`.
+    property mark_prefetch : Bool = true
     @freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     @nursery_freelists = uninitialized StaticArray(Void*, SIZE_CLASS_COUNT)
     # Tight-grow: freelist nodes that live in the current grow chunk (newest

@@ -163,10 +163,7 @@ module Gcry
       end
 
       if @parallel_mark_workers <= 1
-        until @mark_stack.empty?
-          header = @mark_stack.pop
-          scan_object(header)
-        end
+        serial_mark_drain
         return
       end
 
@@ -174,10 +171,7 @@ module Gcry
       # No helpers available (pthread_create failed) → serial.
       helpers = @mark_pthread_mode ? @mark_pthread_count : @mark_worker_threads.size
       if helpers == 0
-        until @mark_stack.empty?
-          header = @mark_stack.pop
-          scan_object(header)
-        end
+        serial_mark_drain
         return
       end
 

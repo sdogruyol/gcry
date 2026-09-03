@@ -260,10 +260,42 @@ which takes `@chunk_list_lock` and not the class lock.
       chunk. Wants a per-class pool list, ascending address order.
 - [ ] Nursery chunks still header-based (Phase 8)
 - [ ] No measurement yet: sweep and alloc claims both unmeasured
+
+### phase_mark win (both representations, not gated)
+
+Two changes in the shared mark path, additive, verified paired n=24 with a flat
+null control:
+- **`clamped_scan_size` skips the per-object `chunk_containing` for small
+  blocks** — `header.value.size` is the allocator-set class payload and a
+  block reaching scan is marked+allocated, so the lookup's defensive clamp
+  guarded a value that cannot occur. Carries most of it: −7.7% (bitmap), −5.5%
+  (header).
+- **Mark-loop prefetch ring** (`GCRY_PREFETCH`, default on): fixed-depth
+  software pipeline, LIFO stack underneath so depth stays bounded. Adds ~2.7pp.
+- Combined: **phase_mark −11.1%** (t=−4.92, CI [−1624,−685]) on the bitmap
+  path, **−8.2%** on the default header path. null: −0.70%, flat.
+- mark-audit / property / mt-property / stw-mt / invariants all green — the
+  size-trust change does not under-scan.
 - [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
       chunk. Wants a per-class pool list, ascending address order.
 - [ ] Nursery chunks still header-based (Phase 8)
 - [ ] No measurement yet: sweep and alloc claims both unmeasured
+
+### phase_mark win (both representations, not gated)
+
+Two changes in the shared mark path, additive, verified paired n=24 with a flat
+null control:
+- **`clamped_scan_size` skips the per-object `chunk_containing` for small
+  blocks** — `header.value.size` is the allocator-set class payload and a
+  block reaching scan is marked+allocated, so the lookup's defensive clamp
+  guarded a value that cannot occur. Carries most of it: −7.7% (bitmap), −5.5%
+  (header).
+- **Mark-loop prefetch ring** (`GCRY_PREFETCH`, default on): fixed-depth
+  software pipeline, LIFO stack underneath so depth stays bounded. Adds ~2.7pp.
+- Combined: **phase_mark −11.1%** (t=−4.92, CI [−1624,−685]) on the bitmap
+  path, **−8.2%** on the default header path. null: −0.70%, flat.
+- mark-audit / property / mt-property / stw-mt / invariants all green — the
+  size-trust change does not under-scan.
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not
       be handed out — refaults pages just released, regresses RSS)
