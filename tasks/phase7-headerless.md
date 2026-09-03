@@ -148,4 +148,9 @@ resumes at 7.5 rather than from scratch.
 - [x] 7.8 six diagnostics ported; all five diagnostic gates pass both arms,
       both builds; two live bugs found on the way (flag setters writing into
       objects; nursery never actually disabled)
-- [ ] 7.9 soak — both arms running, 5 h, due ~05:30 2026-09-04
+- [x] 7.9 soak — headerless **PASSED** 5 h (+3.2 MB / 4 MB, errors=0);
+      this branch's header+bitmap arm failed its RSS bound by 8% (no leak,
+      errors=0). 5 h control of the PR branch's header build running, due ~11:51.
+- [ ] open: headerless scans ~25% more objects on gc_phases fan-out 6
+      (mark 2.6x slower there); reproduces in that benchmark only, not in
+      five controlled probes. Not a marking hole. Unattributed.

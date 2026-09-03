@@ -631,3 +631,103 @@ function from chunk granularity, not a leak) but higher, +6.2 MB against a
 workload that mixes atomic and pointerful allocation, which the soak does.
 Headerless does not pay it: +2.0 MB, flat. Whether the header arm's end-of-run
 drain recovers enough is what the 5 h run decides.
+
+---
+
+## Update 10 (2026-09-04): the four modes, measured where they differ
+
+### The modes
+
+| mode | how | valid? |
+|---|---|---|
+| header + freelist | default | yes — the shipping path |
+| header + bitmap marks | `GCRY_BITMAP=1` | yes |
+| header + bitmap alloc | `GCRY_BITMAP_ALLOC=1` (implies bitmap marks) | yes |
+| headerless + bitmap alloc | `-Dgcry_headerless` (compile-time) | yes — forces bitmap alloc on |
+| headerless + freelist | — | **impossible by construction**: the freelist threads `next_free` through a header that does not exist; the setter refuses it |
+
+Header/headerless is a compile flag (two binaries); bitmap/freelist is a
+runtime knob. Three runtime modes under one binary, one more under the other.
+
+### `bench/micro/gc_phases`, median of 5 (GC duty cycle 22–56% — the instrument that separates them)
+
+**mark-heavy** (300 k live, survival 0.9, shuffled, fan-out 6):
+
+| mode | mark µs | sweep µs | ns/alloc | pause/gc µs | duty % | RSS kB |
+|---|---|---|---|---|---|---|
+| header + freelist | 9 540 | 3 473 | 77.2 | 9 846 | 24.1 | 50 792 |
+| header + bitmap marks | 10 054 | 3 714 | 78.9 | 10 248 | 24.8 | 49 880 |
+| header + bitmap alloc | 9 849 | **660** | 86.7 | 10 093 | 22.3 | **36 504** |
+| headerless | **25 524** | **155** | 98.8 | **25 870** | **49.8** | 46 528 |
+
+**garbage-heavy** (400 k live, survival 0.05):
+
+| mode | mark µs | sweep µs | ns/alloc | pause/gc µs | duty % | RSS kB |
+|---|---|---|---|---|---|---|
+| header + freelist | 40 429 | 9 946 | 120.2 | 35 161 | 55.9 | 84 216 |
+| header + bitmap marks | 42 532 | 11 078 | 124.2 | 36 312 | 55.7 | 84 084 |
+| header + bitmap alloc | 18 276 | 35.7 | 80.1 | 17 833 | 42.2 | 82 788 |
+| headerless | 19 325 | **23.2** | **75.3** | 19 054 | 48.1 | **68 188** |
+
+On garbage-heavy, headerless is the best mode on every axis but duty cycle.
+On mark-heavy with fan-out 6 it is the worst on mark by 2.6×, and that needed
+chasing (below).
+
+### Controlled RSS, 1 000 000 live objects, chain walked in every mode
+
+| mode | 16 B | 64 B |
+|---|---|---|
+| header + freelist | 36 024 kB | 82 752 kB |
+| header + bitmap marks | 36 276 kB | 83 024 kB |
+| header + bitmap alloc | 34 996 kB | 81 912 kB |
+| **headerless** | **19 184 kB (−46.7%)** | **66 052 kB (−20.2%)** |
+
+The three header modes are within 3% of each other; the header itself is the
+whole RSS story.
+
+### The mark-heavy gap: real, reproduced, not yet explained
+
+Headerless scans ~24.7% more objects per collection on that workload (374 019
+vs 300 044), constant across survival 0.2–1.0, independent of shuffle, scaling
+with the live count. Five controlled probes then failed to reproduce any
+difference between modes:
+
+| probe | result |
+|---|---|
+| fully live graph, 6 random edges each | all modes scan exactly N — **no double-scanning** |
+| objects reachable only via raw-buffer edges | all modes keep 100 000/100 000 — **edges followed** |
+| stale-edge web, half the roots overwritten, quiescent census | all modes retain exactly 80 729 |
+| the same with 300 k / 1 M dropped allocations of churn | still identical |
+| `live_objects` counter vs occupancy walk | consistent in both builds |
+
+Two of my own readings were retracted on the way: `occ_live` at census time is
+dominated by garbage allocated since the last collection and says nothing about
+reclamation (an early "header build fails to reclaim" was wrong), and a probe
+whose `old` array was `Pointer.malloc` — GC-managed, hence a root — retained
+everything in every mode until rebuilt on `LibC.malloc`.
+
+So the gap is specific to `gc_phases`' multi-cycle dynamics — threshold-
+triggered collections mid-allocation, continuous slot overwrite — and does not
+appear in any quiescent measurement. It is real for that benchmark and
+unattributed. It is not a marking hole in either build.
+
+### Kemal, restated against the matrix
+
+Kemal cannot see any of the mark/sweep columns (duty cycle 0.2–0.5%). What it
+does see is allocation and cache density, and there headerless sits at the
+default path's throughput (three runs, +6.6 to +9.3% vs header-bitmap, +6.8%
+vs default at t=1.96) with −3.6% RSS.
+
+### The 5 h soaks
+
+| arm | verdict | RSS | errors | finalizers |
+|---|---|---|---|---|
+| **headerless** | **PASSED** | 4 988 → 8 208 kB (+3.2 MB, ceiling +4 MB), flat from ~1 h | 0 | 1 772 781 drained |
+| header + bitmap (this branch) | **FAILED the bound** | 5 980 → 10 404 kB (+4.4 MB vs +4.1 ceiling; max 12 428) | 0 | 1 764 609 drained |
+
+The header arm is a step function that plateaued at 12.4 MB and drained to
+10.4 — no leak, no errors, 8% over the bound. Whether that overshoot is Phase
+7.2's chunk kinds (the soak mixes atomic and pointerful allocation) or already
+present on the PR branch is what a 5 h control soak of the `simdgc` branch's
+header build, launched at 06:51 and due ~11:51, will decide. Its 10-minute
+run plateaued at +2.7 MB.
