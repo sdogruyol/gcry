@@ -310,12 +310,21 @@ module Gcry
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
           payload = SizeClasses.payload(class_index)
           block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-          limit = ChunkHeader.data_end(chunk).as(UInt8*)
-          while (cursor + block_bytes) <= limit
-            header = cursor.as(BlockHeader*)
-            count += 1 if counts_live?(header)
-            cursor += block_bytes
+          # On a chunk whose allocation is bitmap-driven, `occ` is the
+          # authority and the header's FREE flag is stale for every block the
+          # streaming sweep reclaimed — it never writes them, by design. Reading
+          # headers here reports every reclaimed block as live: measured
+          # `actual=1632 reported=1` on a chunk holding one live object.
+          if heap.bitmap_alloc_chunk_public?(chunk)
+            count += heap.chunk_occupied_count(chunk)
+          else
+            cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+            limit = ChunkHeader.data_end(chunk).as(UInt8*)
+            while (cursor + block_bytes) <= limit
+              header = cursor.as(BlockHeader*)
+              count += 1 if counts_live?(header)
+              cursor += block_bytes
+            end
           end
         end
       end

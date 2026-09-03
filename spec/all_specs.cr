@@ -30,6 +30,10 @@ require "./trace_dump_spec"
 require "./stack_low_water_spec"
 require "./stack_bounds_snapshot_spec"
 require "./segv_report_spec"
+require "./kernels_spec"
+require "./chunk_layout_spec"
+require "./bitmap_marks_spec"
+require "./chunk_radix_spec"
 # The regression specs moved to `process_spec/regression/` on 2026-08-15. They
 # call `GC.malloc` / `GC.collect`, and gcry only takes over `GC` under
 # `-Dgc_none` — measured: without the flag, three `GC.collect` calls move gcry's

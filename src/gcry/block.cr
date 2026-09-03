@@ -33,8 +33,7 @@ module Gcry
       FREE   = 1_u32
       ATOMIC = 2_u32
       # Legacy single-bit MARK (pre mark-gen). Cleared on set/clear; unused for
-      # marked? after mark-gen. Side bitmap path (`-Dgcry_side_bitmap`) ignores
-      # header mark bits entirely.
+      # marked? after mark-gen.
       MARK         =  4_u32
       LARGE        =  8_u32
       NURSERY      = 16_u32 # young generation (Phase 6)
@@ -89,75 +88,36 @@ module Gcry
       (header.value.flags & Flags::NURSERY) != 0
     end
 
-    {% unless flag?(:gcry_side_bitmap) %}
-      def self.marked?(header : BlockHeader*) : Bool
-        gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
-        gen == @@mark_gen
-      end
+    def self.marked?(header : BlockHeader*) : Bool
+      gen = ((header.value.flags & Flags::MARK_GEN_MASK) >> Flags::MARK_GEN_SHIFT).to_u8
+      gen == @@mark_gen
+    end
 
-      def self.set_mark(header : BlockHeader*) : Nil
-        h = header.value
-        h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
-                  (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
-        header.value = h
-      end
+    def self.set_mark(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags = (h.flags & ~Flags::MARK_GEN_MASK & ~Flags::MARK) |
+                (@@mark_gen.to_u32 << Flags::MARK_GEN_SHIFT)
+      header.value = h
+    end
 
-      def self.clear_mark(header : BlockHeader*) : Nil
-        h = header.value
-        h.flags &= ~Flags::MARK_GEN_MASK
-        h.flags &= ~Flags::MARK
-        header.value = h
-      end
+    def self.clear_mark(header : BlockHeader*) : Nil
+      h = header.value
+      h.flags &= ~Flags::MARK_GEN_MASK
+      h.flags &= ~Flags::MARK
+      header.value = h
+    end
 
-      def self.marked_user?(user : Void*) : Bool
-        marked?(from_user(user))
-      end
+    def self.marked_user?(user : Void*) : Bool
+      marked?(from_user(user))
+    end
 
-      def self.set_mark_user(user : Void*) : Nil
-        set_mark(from_user(user))
-      end
+    def self.set_mark_user(user : Void*) : Nil
+      set_mark(from_user(user))
+    end
 
-      def self.clear_mark_user(user : Void*) : Nil
-        clear_mark(from_user(user))
-      end
-    {% else %}
-      # Side MarkBitmap is authoritative (`-Dgcry_side_bitmap`; see mark_bitmap.cr).
-      def self.marked?(header : BlockHeader*) : Bool
-        bm = Gcry.current_mark_bitmap
-        return false unless bm
-        bm.marked?(user_from(header).address)
-      end
-
-      def self.set_mark(header : BlockHeader*) : Nil
-        bm = Gcry.current_mark_bitmap
-        return unless bm
-        bm.set(user_from(header).address)
-      end
-
-      def self.clear_mark(header : BlockHeader*) : Nil
-        bm = Gcry.current_mark_bitmap
-        return unless bm
-        bm.clear(user_from(header).address)
-      end
-
-      def self.marked_user?(user : Void*) : Bool
-        bm = Gcry.current_mark_bitmap
-        return false unless bm
-        bm.marked?(user.address)
-      end
-
-      def self.set_mark_user(user : Void*) : Nil
-        bm = Gcry.current_mark_bitmap
-        return unless bm
-        bm.set(user.address)
-      end
-
-      def self.clear_mark_user(user : Void*) : Nil
-        bm = Gcry.current_mark_bitmap
-        return unless bm
-        bm.clear(user.address)
-      end
-    {% end %}
+    def self.clear_mark_user(user : Void*) : Nil
+      clear_mark(from_user(user))
+    end
 
     def self.finalizer?(header : BlockHeader*) : Bool
       (header.value.flags & Flags::FINALIZER) != 0
@@ -207,12 +167,29 @@ module Gcry
 
   # Header at the start of every mmap'd region (small chunk or large object).
   struct ChunkHeader
-    SIZE = 24
+    # 24 -> 32 for `data_offset` and `bitmap_words`.
+    #
+    # Every site that recovers a large chunk from its block does
+    # `header - ChunkHeader::SIZE` (heap.cr:1299 and five siblings,
+    # collect.cr:1017, collect_sweep.cr:478, :843), and every site that sizes a
+    # large mapping does `ChunkHeader::SIZE + BlockHeader::SIZE + payload`
+    # (heap.cr:1216). Those stay correct *by construction* because large chunks
+    # keep `data_offset == SIZE`: they hold one object and need no bitmap, so
+    # their single mark bit lives in `flags`. Only size-class chunks move their
+    # data start, and they are never reached by pointer arithmetic on this
+    # constant.
+    SIZE = 32
 
-    property next : ChunkHeader*
-    property mapped_bytes : UInt64
-    property size_class : UInt32 # index into SIZE_CLASSES, or UInt32::MAX for large
-    property flags : UInt32
+    property next : ChunkHeader*   # 0
+    property mapped_bytes : UInt64 # 8
+    property size_class : UInt32   # 16 — index into SIZE_CLASSES, or UInt32::MAX for large
+    property flags : UInt32        # 20
+    # Bytes from the chunk base to the first block. `SIZE` for large chunks and
+    # for every chunk when the bitmap representation is off; otherwise it also
+    # covers the two bitmaps that sit between this header and the first block.
+    property data_offset : UInt32 # 24
+    # Words in EACH of the `occ` and `mark` bitmaps. Zero when there are none.
+    property bitmap_words : UInt32 # 28
 
     module Flags
       NURSERY = 1_u32
@@ -225,7 +202,9 @@ module Gcry
       SPARSE = 8_u32
     end
 
-    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32, @flags : UInt32 = 0_u32)
+    def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
+                   @flags : UInt32 = 0_u32, @data_offset : UInt32 = SIZE.to_u32,
+                   @bitmap_words : UInt32 = 0_u32)
     end
 
     def self.base(chunk : ChunkHeader*) : Void*
@@ -233,7 +212,22 @@ module Gcry
     end
 
     def self.data_start(chunk : ChunkHeader*) : Void*
-      (chunk.as(UInt8*) + SIZE).as(Void*)
+      (chunk.as(UInt8*) + chunk.value.data_offset).as(Void*)
+    end
+
+    # `occ` — allocated blocks. Null until Phase 3 gives it a consumer.
+    def self.occ_bitmap(chunk : ChunkHeader*) : UInt64*
+      return Pointer(UInt64).null if chunk.value.bitmap_words == 0
+      (chunk.as(UInt8*) + SIZE).as(UInt64*)
+    end
+
+    # `mark` — reachable blocks, authoritative when the bitmap representation
+    # is on. Sits immediately after `occ`, so one chunk's metadata is one
+    # contiguous run and the sweep streams both together.
+    def self.mark_bitmap(chunk : ChunkHeader*) : UInt64*
+      words = chunk.value.bitmap_words
+      return Pointer(UInt64).null if words == 0
+      (chunk.as(UInt8*) + SIZE).as(UInt64*) + words
     end
 
     def self.data_end(chunk : ChunkHeader*) : Void*
@@ -304,27 +298,5 @@ module Gcry
   # needs Fiber, but `GC.init` (and thus our first mmap) runs before Fiber.init.
   def self.mmap_failed?(ptr : Void*) : Bool
     ptr.null? || ptr.address == UInt64::MAX
-  end
-
-  # The currently active side MarkBitmap. There is at most one bitmap per
-  # process; library heaps that pre-date `@@mark_bitmap` initialization will
-  # see `nil` here and the mark helpers degrade to no-ops (the legacy in-header
-  # MARK flag path is gone; the bitmap is the sole authority).
-  #
-  # Note: not Atomic. Crystal reference types are always read through a GC-managed
-  # pointer; without one (we are not on the GC heap here), tearing isn't the
-  # issue — the issue is concurrent destroy. The MarkBitmap#destroy path now
-  # nulls `@base` BEFORE the unmap, so any reader that already observed a
-  # non-nil base continues to dereference a still-mapped page (until the unmap
-  # completes). Together with the `current_mark_bitmap = nil` clear in
-  # Heap#destroy, this closes the use-after-free window for library heaps.
-  @@mark_bitmap : MarkBitmap? = nil
-
-  def self.current_mark_bitmap : MarkBitmap?
-    @@mark_bitmap
-  end
-
-  def self.current_mark_bitmap=(bitmap : MarkBitmap?) : MarkBitmap?
-    @@mark_bitmap = bitmap
   end
 end

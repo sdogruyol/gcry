@@ -590,9 +590,14 @@ module GC
     end
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
-    # Must be ≥64 KiB and page-aligned.
+    # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
+    # ordinal's magic reciprocal is exact to — past that a block address would
+    # resolve to the wrong ordinal, silently, on the collector's hottest path.
+    # The tightest size class first disagrees at 86.3 MiB; the bound is 64 MiB.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
-      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
+      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES &&
+         chunk_bytes <= Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES &&
+         (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
       end
     end
@@ -806,11 +811,16 @@ module GC
     heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     heap.trim_immediate = true if env_flag_one?("GCRY_TRIM_IMMEDIATE")
     heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
+    heap.large_release_from_base = true if env_flag_one?("GCRY_LARGE_RELEASE_FROM_BASE")
+    heap.mark_prefetch = false if env_flag_zero?("GCRY_PREFETCH")
+    if pfw = env_u64("GCRY_ALLOC_PFW")
+      heap.alloc_pfw = pfw
+    end
+    heap.hugepages = true if env_flag_one?("GCRY_HUGEPAGES")
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
     heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
-    Gcry::MarkBitmap.retain_old = true if env_flag_one?("GCRY_BITMAP_RETAIN_OLD")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: restore the last-chunk cache read that crashed

@@ -72,116 +72,24 @@ module Gcry
               sweep_large_one(chunk, major, after_world: false)
             end
           else
-            # Inline size-class sweep — avoid each_block yield overhead on
-            # multi-million block heaps (dominated phase_sweep under HTTP).
+            # Size-class sweep. The block walk itself is `sweep_small_blocks`;
+            # everything below it is the policy that consumes the four numbers
+            # it returns — live accounting, warm/DORMANT/munmap selection,
+            # HOLED/SPARSE classification, freelist rebuild bits. Keeping that
+            # policy in one place is what lets a second representation supply
+            # the same four numbers without restating any of it.
             class_index = chunk.value.size_class.to_i32
-            any_live = false
-            live_payload = 0_u64
-            usable_payload = 0_u64
-            # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
-            free_payload = 0_u64
             fl_locked = false
             if after_world && class_index >= 0 && class_index < SIZE_CLASS_COUNT
               freelist_lock_ptr(class_index, ChunkHeader.nursery?(chunk)).value.lock
               fl_locked = true
             end
             begin
-              if class_index >= 0 && class_index < SIZE_CLASS_COUNT
-                payload = SizeClasses.payload(class_index)
-                block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-                cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                limit = ChunkHeader.data_end(chunk).as(UInt8*)
-                # When releasing empties: discover live first so fully-dead chunks
-                # skip freelist link (unlink-only for pre-existing free blocks).
-                defer_reclaim = major && release_empty_chunks_this_collect?
-                if defer_reclaim
-                  # Count unmarked USED + FREE payload in the discover pass so
-                  # fully-dead chunks skip a second O(blocks) walk.
-                  dead = 0_u64
-                  while (cursor + block_bytes) <= limit
-                    usable_payload += payload.to_u64
-                    header = cursor.as(BlockHeader*)
-                    if BlockHeader.free?(header)
-                      free_payload &+= payload.to_u64
-                      # FREE + marked: mid-alloc claimed from a stack root.
-                      if heap_marked?(header)
-                        any_live = true
-                        live_payload += payload.to_u64
-                      end
-                    else
-                      if uninitialised_small_block?(header)
-                        # Mid-`refill_size_class`: a mutator frozen inside the
-                        # header-init loop leaves mmap-zeroed headers — neither
-                        # FREE nor marked, which is exactly what the sweep
-                        # reclaims. The large path has had this tripwire since
-                        # 2026-08-24 (`sweep_large_one`); the small path could
-                        # reclaim the blocks AND classify the chunk fully-dead
-                        # into the warm/DORMANT/munmap paths under a mutator
-                        # still writing it. Count it, call the chunk live.
-                        @sweep_small_uninitialised &+= 1
-                        any_live = true
-                      elsif heap_marked?(header)
-                        any_live = true
-                        live_payload += payload.to_u64
-                      else
-                        dead &+= 1
-                      end
-                    end
-                    cursor += block_bytes
-                  end
-                  if any_live
-                    cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-                    while (cursor + block_bytes) <= limit
-                      header = cursor.as(BlockHeader*)
-                      unless BlockHeader.free?(header)
-                        if uninitialised_small_block?(header)
-                          # Counted in the discover pass; never reclaim.
-                        elsif heap_marked?(header)
-                          heap_clear_mark(header)
-                        else
-                          reclaim_small(chunk, header, payload)
-                        end
-                      end
-                      cursor += block_bytes
-                    end
-                  else
-                    # Fully-dead chunk: batch the live_objects accounting (one
-                    # store under STW) instead of a CAS per block.
-                    live_objects_sub(dead)
-                  end
-                else
-                  while (cursor + block_bytes) <= limit
-                    usable_payload += payload.to_u64 if major
-                    header = cursor.as(BlockHeader*)
-                    unless BlockHeader.free?(header)
-                      if uninitialised_small_block?(header)
-                        # See the discover-pass comment above: a mutator frozen
-                        # mid-refill leaves zeroed headers; never reclaim them.
-                        @sweep_small_uninitialised &+= 1
-                        any_live = true
-                      elsif major || BlockHeader.nursery?(header)
-                        if heap_marked?(header)
-                          heap_clear_mark(header)
-                          BlockHeader.promote(header) unless major
-                          unless major
-                            @nursery_survival_bytes += payload.to_u64
-                          end
-                          any_live = true
-                          live_payload += payload.to_u64 if major
-                        else
-                          reclaim_small(chunk, header, payload)
-                        end
-                      else
-                        any_live = true
-                        live_payload += payload.to_u64 if major
-                      end
-                    end
-                    cursor += block_bytes
-                  end
-                end
-              else
-                any_live = true
-              end
+              counts = sweep_small_blocks(chunk, class_index, major)
+              any_live = counts.any_live
+              live_payload = counts.live_payload
+              usable_payload = counts.usable_payload
+              free_payload = counts.free_payload
 
               if major
                 @size_class_live_bytes += live_payload
@@ -274,7 +182,28 @@ module Gcry
                   ChunkHeader.set_dormant(chunk, false) if ChunkHeader.dormant?(chunk)
                   # Free-page physical release: detect free pages in STW, set HOLED
                   # flag; actual madvise runs post-STW in flush_pending_page_release.
-                  if @madvise_free_pages && class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
+                  # `!bitmap_alloc_chunk?`: free-page release is not ported to
+                  # the bitmap representation and must not be half-engaged.
+                  #
+                  # Its machinery is freelist-shaped end to end — HOLED triggers
+                  # `rebuild_size_class_freelist`, and
+                  # `unlink_free_only_page_runs` takes free blocks *off the
+                  # freelist* before the syscall so nothing hands them out
+                  # mid-release. Under bitmap allocation there is no freelist to
+                  # unlink from, and the pool cursor can hand out a block in a
+                  # run the walk is discarding.
+                  #
+                  # Measured: with an `occ`-built live mask the walk engages
+                  # (0 B -> 1.97 MB) and corrupts — HOLED faulted 1 of 4 under
+                  # `GCRY_PAGE_DONTNEED=1` where the default arm is clean 3 of 3.
+                  # Declining only the madvise made it *worse* (3 of 4), because
+                  # the freelist unlink still ran. So the whole path stands down.
+                  #
+                  # Cost: bitmap chunks do not return free pages to the OS —
+                  # an RSS regression, tracked, and strictly better than
+                  # reclaiming live objects.
+                  if @madvise_free_pages && !bitmap_alloc_chunk?(chunk) &&
+                     class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                      usable_payload > 0 && live_payload < usable_payload
                     ChunkHeader.set_holed(chunk, true)
                     ChunkHeader.set_sparse(chunk, false)
@@ -290,6 +219,7 @@ module Gcry
                     # Post-STW MADV_FREE by default — freelist stays valid (no rebuild).
                     # Exclusive with HOLED / madvise_free_pages.
                     if @mostly_empty_release && !@madvise_free_pages &&
+                       !bitmap_alloc_chunk?(chunk) &&
                        class_index >= 0 && class_index < SIZE_CLASS_COUNT &&
                        usable_payload > 0 &&
                        live_payload * 100 <= usable_payload * @mostly_empty_max_live_pct.to_u64
@@ -611,7 +541,13 @@ module Gcry
       each_chunk do |chunk|
         next unless ChunkHeader.dormant?(chunk)
         base = ChunkHeader.data_start(chunk).address
-        finish = base + chunk.value.mapped_bytes
+        # `chunk.address + mapped_bytes`, not `base + mapped_bytes`: the chunk
+        # ends where its mapping ends, and `base` is `data_offset` bytes past
+        # the chunk start. The old expression overshot by exactly that much and
+        # was correct only because `end_page` rounded back down over a
+        # sub-page offset — an accident a larger metadata region would not
+        # survive. Flagged in 2026-09-03-large-freelist-header-madvise.
+        finish = chunk.address + chunk.value.mapped_bytes
         start_page = (base + page - 1) & ~(page - 1)
         end_page = finish & ~(page - 1)
         if start_page < end_page
@@ -773,23 +709,47 @@ module Gcry
       n_pages = ((last_page - first_page) // page) + 1
       return if n_pages == 0 || n_pages > 64
 
-      live_mask = 0_u64
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-      limit = ChunkHeader.data_end(chunk).as(UInt8*)
-      while (cursor + block_bytes) <= limit
-        header = cursor.as(BlockHeader*)
-        unless BlockHeader.free?(header)
-          b0 = cursor.address
-          b1 = cursor.address + block_bytes
-          p = b0 & ~(page - 1)
-          while p < b1
-            idx = ((p - first_page) // page).to_i32
-            live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
-            p += page
+      if bitmap_alloc_chunk?(chunk)
+        # Free-page release is NOT yet ported to the bitmap representation, and
+        # this returns rather than guessing.
+        #
+        # An `occ`-built live mask makes the walk engage — 0 B became 1.97 MB —
+        # and it also corrupted: `page-release-corruption`'s HOLED arm faulted
+        # 1 of 4 under `GCRY_PAGE_DONTNEED=1` where the default arm is clean
+        # 3 of 3 (8.6-8.9 MB released, 0 faults). So the fault is this
+        # representation's, not the arm's documented flakiness.
+        #
+        # The unported half is the surrounding machinery, not the mask:
+        # `unlink_free_only_page_runs` takes free blocks *off the freelist*
+        # before the syscall so nothing hands them out mid-release, and under
+        # bitmap allocation there is no freelist to unlink from — the pool
+        # cursor can hand out a block in a run this walk is about to discard.
+        # A correct port needs the cursor excluded from the run under the
+        # size-class lock, which is Phase 3 work that is not done.
+        #
+        # Declining costs RSS on bitmap chunks and nothing else. Shipping the
+        # mask alone costs live objects.
+        @page_release_skipped_runs &+= 1
+        return false
+      else
+        live_mask = 0_u64
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            b0 = cursor.address
+            b1 = cursor.address + block_bytes
+            p = b0 & ~(page - 1)
+            while p < b1
+              idx = ((p - first_page) // page).to_i32
+              live_mask |= 1_u64 << idx if idx >= 0 && idx < 64
+              p += page
+            end
           end
+          cursor += block_bytes
         end
-        cursor += block_bytes
       end
 
       idx = 0
@@ -842,11 +802,17 @@ module Gcry
             header = BlockHeader.from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             next_user = header.value.next_free
-            data_lo = chunk.address
-            data_hi = data_lo + chunk.value.mapped_bytes
+            # Round up from `data_start`, not from the chunk base. The base is
+            # already page-aligned, so rounding up from it is a no-op and the
+            # range began at page 0 — the page holding this chunk's own
+            # `ChunkHeader` and the `BlockHeader` whose `next_free` threads this
+            # very bucket chain. Every sibling release site rounds up from
+            # `data_start` for this reason (:615, :1059).
+            data_lo = @large_release_from_base ? chunk.address : ChunkHeader.data_start(chunk).address
+            data_hi = chunk.address + chunk.value.mapped_bytes
             start = (data_lo + page - 1) & ~(page - 1)
             finish = data_hi & ~(page - 1)
-            if start < finish
+            if start < finish && madvise_range_ok?(chunk, start, finish)
               ok = {% if flag?(:darwin) %}
                      Platform.release_physical_pages(start, finish - start)
                    {% else %}
@@ -860,6 +826,261 @@ module Gcry
           end
         end
       {% end %}
+    end
+
+    # What one chunk's block walk found. Extracted so the bitmap representation
+    # can supply the same four numbers from a streaming `occ &= mark` popcount
+    # instead of a header walk, without either arm having to restate the
+    # warm/DORMANT/munmap/HOLED/SPARSE policy that consumes them — that policy is
+    # the delicate part of `sweep` and it stays in exactly one place.
+    private struct SmallSweepCounts
+      getter any_live : Bool
+      getter live_payload : UInt64
+      getter usable_payload : UInt64
+      getter free_payload : UInt64
+
+      def initialize(@any_live : Bool, @live_payload : UInt64,
+                     @usable_payload : UInt64, @free_payload : UInt64)
+      end
+    end
+
+    # Mark read for a block the sweep already has in hand.
+    #
+    # The ordinal is a counter, not a computation: the walk visits blocks in
+    # address order, so it increments by one per block and the bitmap index
+    # costs nothing. That is the whole reason `heap_marked?`'s chunk lookup must
+    # not appear in this loop — a lookup per block is what took a 2026-08-01
+    # experiment to 56.3% of Boehm.
+    @[AlwaysInline]
+    private def block_marked?(chunk : ChunkHeader*, header : BlockHeader*, ordinal : UInt64) : Bool
+      return BlockHeader.marked?(header) unless bitmap_chunk?(chunk)
+      # Union while this walk exists at all — see `block_marked_in?`.
+      chunk_marked?(chunk, ordinal) || BlockHeader.marked?(header)
+    end
+
+    # Clearing one block's mark is a header write on the header path and
+    # **nothing at all** on the bitmap path: 64 blocks share a word, so a
+    # per-bit clear is a read-modify-write over 63 other blocks' marks, and this
+    # walk runs with mutators live under lazy sweep. The bitmap is zeroed
+    # wholesale by `clear_all_marks` at the start of the next cycle.
+    @[AlwaysInline]
+    private def clear_block_mark(chunk : ChunkHeader*, header : BlockHeader*) : Nil
+      BlockHeader.clear_mark(header) unless @bitmap_marks
+    end
+
+    # The bitmap arm of the size-class sweep.
+    #
+    # One streaming pass over the chunk's two bitmaps — `occ &= mark`, popcount
+    # both — and the four numbers the policy below needs fall out of it. No
+    # block header is read at all, which is the entire point: the header walk it
+    # replaces is O(blocks) and this is O(blocks/64), vectorised.
+    #
+    # The same pass clears `mark`, so there is no separate clear phase and no
+    # per-bit clear anywhere.
+    #
+    # **The Phase 1 union retires here.** While the sweep walked headers, an
+    # object could be marked either in the bitmap (by the trace) or in the
+    # header generation (by allocate-black), and readers took the union. This
+    # arm reads only the bitmap, so allocate-black must write the bitmap too —
+    # which it now can, because the pool cursor holds the chunk. A bitmap-only
+    # sweep with allocate-black still on the header would reclaim live objects.
+    private def sweep_small_bitmap(chunk : ChunkHeader*, class_index : Int32,
+                                   major : Bool) : SmallSweepCounts
+      occ = ChunkHeader.occ_bitmap(chunk)
+      mark = ChunkHeader.mark_bitmap(chunk)
+      return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64) if occ.null? || mark.null?
+
+      payload = SizeClasses.payload(class_index).to_u64
+      nblocks = chunk_block_count(chunk)
+      return SmallSweepCounts.new(false, 0_u64, 0_u64, 0_u64) if nblocks == 0
+      words = ((nblocks + 63) >> 6).to_i32
+
+      freed, live = Kernels.sweep_words(occ, mark, words, @simd_tier)
+
+      # No tail correction, and getting that wrong cost an afternoon: the first
+      # version subtracted `(words * 64) - nblocks` from `freed` on the theory
+      # that the last word's unused bits inflate it. They cannot. `freed` is
+      # `popcount(occ & ~mark)`, and the allocator masks tail bits out of every
+      # free mask it hands out (`chunk_free_mask`), so a tail bit is never set
+      # in `occ` in the first place. Subtracting it under-counted the reclaim by
+      # exactly the tail width — 32 blocks per class-3 chunk, which presented as
+      # a live-object count stuck at 33 instead of 1.
+
+      if freed > 0
+        live_objects_sub(freed)
+        free_bytes_add(freed * payload)
+        # The header arm accounts this per block in `reclaim_small`; the
+        # streaming arm has to do it from the popcount or `prof_stats` reports
+        # zero bytes reclaimed for every bitmap chunk.
+        @bytes_reclaimed_since_gc += freed * payload
+      end
+
+      # The garbage above is reclaimed regardless. But if an allocation cursor
+      # is on this chunk it must not reach the empty-chunk path: a cursor is a
+      # raw `ChunkHeader*` a mutator may be suspended mid-use of, and unmapping
+      # or DONTNEED'ing it out from under that mutator is the `signal 11 at
+      # 0x1c` (`occ_bitmap` of a freed chunk) the earlier unlocked cursor-drop
+      # caused. Forcing `any_live` keeps it mapped; its emptiness is noticed
+      # next cycle, once the cursor has moved on. Dropping the cursor here
+      # instead is unsafe — a frozen mutator resumes through the null.
+      pinned = live == 0 && bitmap_cursor_on?(chunk)
+      @sweep_cursor_pinned &+= 1 if pinned
+
+      SmallSweepCounts.new(live > 0 || pinned,
+        live * payload,
+        nblocks * payload,
+        (nblocks - live) * payload)
+    end
+
+    # The header-walk arm of the size-class sweep.
+    #
+    # Still inline loops rather than `each_block`: the yield overhead per block
+    # dominated `phase_sweep` on multi-million-block HTTP heaps, and moving the
+    # walk behind one call per *chunk* does not reintroduce it.
+    #
+    # Two modes, unchanged. When empties are being released, a discover pass
+    # counts live/dead first so a fully-dead chunk skips the second O(blocks)
+    # walk entirely and settles `live_objects` with one store instead of a CAS
+    # per block. Otherwise a single pass reclaims as it goes.
+    private def sweep_small_blocks(chunk : ChunkHeader*, class_index : Int32,
+                                   major : Bool) : SmallSweepCounts
+      unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
+        # A chunk whose class we cannot read is never reclaimed from.
+        return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64)
+      end
+
+      # Old-generation chunks only. Nursery chunks keep the header
+      # representation: their allocation still runs through
+      # `alloc_nursery`'s freelist, so `occ` is not maintained for them — and a
+      # bitmap sweep of a chunk whose `occ` is all zero would compute
+      # `live == 0` and reclaim every live object in it.
+      #
+      # That is the plan's phasing, not an accident: nursery-on-bitmaps is
+      # Phase 8, behind the page barrier work. The dispatch is per *chunk* and
+      # not global precisely so the two representations can coexist while that
+      # is true.
+      # `!@poison_freed`: poisoning is per-block work by definition — it writes a
+      # pattern into every reclaimed payload — and the streaming sweep touches
+      # no payload at all. Rather than let `GCRY_POISON_FREED=1` be armed and do
+      # nothing (measured: 0 of 5 freed payloads poisoned, and a stale read
+      # still returning live-looking data), the bitmap arm stands down and the
+      # header walk runs. A diagnostic that is silently inert is worse than one
+      # that costs a walk.
+      if @bitmap_alloc && !ChunkHeader.nursery?(chunk) && !@poison_freed
+        return sweep_small_bitmap(chunk, class_index, major)
+      end
+
+      any_live = false
+      live_payload = 0_u64
+      usable_payload = 0_u64
+      # FREE payload on a fully-dead chunk (munmap free_bytes_sub).
+      free_payload = 0_u64
+
+      payload = SizeClasses.payload(class_index)
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+
+      # When releasing empties: discover live first so fully-dead chunks
+      # skip freelist link (unlink-only for pre-existing free blocks).
+      if major && release_empty_chunks_this_collect?
+        # Count unmarked USED + FREE payload in the discover pass so
+        # fully-dead chunks skip a second O(blocks) walk.
+        dead = 0_u64
+        ordinal = 0_u64
+        while (cursor + block_bytes) <= limit
+          usable_payload += payload.to_u64
+          header = cursor.as(BlockHeader*)
+          if BlockHeader.free?(header)
+            free_payload &+= payload.to_u64
+            # FREE + marked: mid-alloc claimed from a stack root.
+            if block_marked?(chunk, header, ordinal)
+              any_live = true
+              live_payload += payload.to_u64
+            end
+          else
+            if uninitialised_small_block?(header)
+              # Mid-`refill_size_class`: a mutator frozen inside the
+              # header-init loop leaves mmap-zeroed headers — neither
+              # FREE nor marked, which is exactly what the sweep
+              # reclaims. The large path has had this tripwire since
+              # 2026-08-24 (`sweep_large_one`); the small path could
+              # reclaim the blocks AND classify the chunk fully-dead
+              # into the warm/DORMANT/munmap paths under a mutator
+              # still writing it. Count it, call the chunk live.
+              @sweep_small_uninitialised &+= 1
+              any_live = true
+            elsif block_marked?(chunk, header, ordinal)
+              any_live = true
+              live_payload += payload.to_u64
+            else
+              dead &+= 1
+            end
+          end
+          cursor += block_bytes
+          ordinal &+= 1
+        end
+        if any_live
+          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+          ordinal = 0_u64
+          while (cursor + block_bytes) <= limit
+            header = cursor.as(BlockHeader*)
+            unless BlockHeader.free?(header)
+              if uninitialised_small_block?(header)
+                # Counted in the discover pass; never reclaim.
+              elsif block_marked?(chunk, header, ordinal)
+                # No per-block clear on the bitmap path — `clear_all_marks`
+                # zeroes the whole bitmap at the start of the next cycle,
+                # because clearing one bit is a read-modify-write over the 63
+                # other blocks sharing its word and this walk runs with
+                # mutators live under lazy sweep.
+                clear_block_mark(chunk, header)
+              else
+                reclaim_small(chunk, header, payload)
+              end
+            end
+            cursor += block_bytes
+            ordinal &+= 1
+          end
+        else
+          # Fully-dead chunk: batch the live_objects accounting (one
+          # store under STW) instead of a CAS per block.
+          live_objects_sub(dead)
+        end
+      else
+        ordinal = 0_u64
+        while (cursor + block_bytes) <= limit
+          usable_payload += payload.to_u64 if major
+          header = cursor.as(BlockHeader*)
+          unless BlockHeader.free?(header)
+            if uninitialised_small_block?(header)
+              # See the discover-pass comment above: a mutator frozen
+              # mid-refill leaves zeroed headers; never reclaim them.
+              @sweep_small_uninitialised &+= 1
+              any_live = true
+            elsif major || BlockHeader.nursery?(header)
+              if block_marked?(chunk, header, ordinal)
+                clear_block_mark(chunk, header)
+                BlockHeader.promote(header) unless major
+                unless major
+                  @nursery_survival_bytes += payload.to_u64
+                end
+                any_live = true
+                live_payload += payload.to_u64 if major
+              else
+                reclaim_small(chunk, header, payload)
+              end
+            else
+              any_live = true
+              live_payload += payload.to_u64 if major
+            end
+          end
+          cursor += block_bytes
+          ordinal &+= 1
+        end
+      end
+
+      SmallSweepCounts.new(any_live, live_payload, usable_payload, free_payload)
     end
 
     # Classify a kept size-class chunk by live_payload / usable_payload.
@@ -1085,26 +1306,57 @@ module Gcry
                                     run_start : UInt64, run_end : UInt64) : UInt32
       live = 0_u32
       block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      # This re-read is the last moment the answer is current, so it has to ask
+      # the same authority the run selection asked. On a bitmap chunk the block
+      # headers are stale by design — the streaming sweep never writes FREE —
+      # so a header walk here disagrees with the `occ`-built mask that chose the
+      # run, and the two disagreeing is worse than either being wrong alone.
+      bitmap = bitmap_alloc_chunk?(chunk)
+      occ = bitmap ? ChunkHeader.occ_bitmap(chunk) : Pointer(UInt64).null
+      bitmap = false if occ.null?
+
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      ordinal = 0_u64
       while (cursor + block_bytes) <= limit
         b0 = cursor.address
         if b0 + block_bytes > run_start && b0 < run_end
-          unless BlockHeader.free?(cursor.as(BlockHeader*))
+          allocated = if bitmap
+                        ((occ[ordinal >> 6] >> (ordinal & 63)) & 1_u64) != 0
+                      else
+                        !BlockHeader.free?(cursor.as(BlockHeader*))
+                      end
+          if allocated
             live &+= 1
             @page_release_live_blocks &+= 1
           end
         end
         cursor += block_bytes
+        ordinal &+= 1
       end
       live
     end
 
+    # A release range must lie inside the chunk **and above its own metadata**.
+    #
+    # The lower bound is `data_start`, not `base`. A chunk's `ChunkHeader` — and
+    # for a large chunk the object's `BlockHeader` with the `next_free` link the
+    # large freelist is threaded through — live below `data_start`, so a range
+    # that reaches page 0 hands the kernel permission to discard the bookkeeping
+    # that finds the chunk again. `release_large_freelist_pages_locked` did
+    # exactly that until 2026-09-03, and it did it on the default post-STW path.
+    #
+    # Bounding here rather than only at that one call site is deliberate: every
+    # other release site already rounds up from `data_start` (:615, :1059) or
+    # filters on `run_start >= data0` (:803, :1175), so tightening this costs
+    # them nothing and turns "remembered to start above the header" from a
+    # convention into a checked property.
     private def madvise_range_ok?(chunk : ChunkHeader*, run_start : UInt64, run_end : UInt64) : Bool
       return true if @madvise_unchecked
       base = chunk.as(Void*).address
       limit = base &+ chunk.value.mapped_bytes
-      ok = run_start >= base && run_end <= limit &&
+      data_start = ChunkHeader.data_start(chunk).address
+      ok = run_start >= data_start && run_end <= limit &&
            base >= @heap_span_lo && limit <= @heap_span_hi
       @madvise_range_rejects &+= 1 unless ok
       ok

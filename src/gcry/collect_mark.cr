@@ -57,17 +57,50 @@ module Gcry
       mark_impl(pointer, gate_type_id: false, base_only: !@allow_interior_pointers, source: RootSource::Precise)
     end
 
+    # No lock here.
+    #
+    # The per-word acceptance — `find_block_with_chunk`, the alignment and
+    # type_id gates, `block_marked_in?` — is read-only and safe under STW (the
+    # chunk index does not mutate while the world is stopped). Wrapping all of
+    # it in one global spinlock, as this used to, serialised every worker's
+    # marking and made `GCRY_PARALLEL_MARK=8` run 60x slower than serial. The
+    # only shared mutations are the mark bit (atomic on the bitmap path, and
+    # per-object with no shared word on the header path, so double-marking is
+    # idempotent) and the mark-stack push, which is the one thing that still
+    # takes the lock, plus the TLAB free-claim's freelist surgery.
+    @[AlwaysInline]
     private def mark_impl(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
-      if @mark_parallel
-        @mark_lock.lock
-        begin
-          mark_impl_unlocked(pointer, gate_type_id, base_only, source)
-        ensure
-          @mark_lock.unlock
-        end
-      else
-        mark_impl_unlocked(pointer, gate_type_id, base_only, source)
+      mark_impl_unlocked(pointer, gate_type_id, base_only, source)
+    end
+
+    # Push a header onto the shared mark stack. Locked only under parallel mark;
+    # the stack itself is not thread-safe.
+    # Push a discovered child. Serial: straight to the shared stack. Parallel:
+    # into this worker's shard buffer, unlocked (single-writer per slot),
+    # flushed to the shared stack in batches by `flush_pushbuf`. That batching
+    # is what takes the lock off the per-object path.
+    @[AlwaysInline]
+    private def mark_stack_push(header : BlockHeader*) : Nil
+      unless @mark_parallel
+        @mark_stack.push(header)
+        return
       end
+      slot = Heap.mark_worker
+      # A thread with no claimed slot (should not happen on a mark worker) falls
+      # back to the locked shared push rather than corrupting slot -1.
+      if slot < 0 || @mark_pushbuf[slot] == 0_u64
+        @mark_lock.lock
+        @mark_stack.push(header)
+        @mark_lock.unlock
+        return
+      end
+      n = @mark_pushbuf_n[slot]
+      if n >= MARK_PUSHBUF_CAP
+        flush_pushbuf(slot)
+        n = 0
+      end
+      Pointer(Void*).new(@mark_pushbuf[slot])[n] = header.as(Void*)
+      @mark_pushbuf_n[slot] = n + 1
     end
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil
@@ -81,8 +114,9 @@ module Gcry
       # into a byte buffer is a root bdwgc would resolve via GC_base.
       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
-      header = find_block(pointer)
-      return unless header
+      found = find_block_with_chunk(pointer)
+      return unless found
+      header, chunk = found
 
       # Mid-`tlab_alloc_small` STW: mutator holds FREE freelist nodes on-stack.
       # find_object ignores FREE → empty-chunk munmap risk. Clear FREE but keep
@@ -98,7 +132,10 @@ module Gcry
       # Minor × old: never claim. Minor does not munmap old chunks, and clearing
       # FREE on an old freelist node (then skipping mark) leaves USED-on-freelist
       # for scrub to drop — silent old-freelist corruption under nursery+TLAB.
-      if BlockHeader.free?(header)
+      # `block_allocated?`, not the header flag: on a bitmap chunk the sweep
+      # leaves FREE stale on every block it reclaimed, and marking one would
+      # resurrect it into `occ` on the next `occ = mark`.
+      if !block_allocated?(chunk, header)
         return unless @tlab_enabled && @stop_the_world
         return unless source == RootSource::Stack || source == RootSource::Thread ||
                       source == RootSource::Parked
@@ -108,18 +145,9 @@ module Gcry
         if @minor_only && !BlockHeader.nursery?(header)
           return
         end
-        h = header.value
-        h.flags = h.flags & ~BlockHeader::Flags::FREE
-        header.value = h
-        heap_set_mark(header) unless heap_marked?(header)
-        walk = h.next_free
-        while walk
-          break unless find_block(walk)
-          wh = BlockHeader.from_user(walk)
-          break unless BlockHeader.free?(wh)
-          heap_set_mark(wh) unless heap_marked?(wh)
-          walk = wh.value.next_free
-        end
+        # Freelist surgery (clear FREE, walk next_free) mutates shared list
+        # state, so it stays under the lock when parallel.
+        claim_free_tlab_block(header, chunk)
         return
       elsif base_only
         # Object-base only on ambient roots: interiors into String/Array buffers
@@ -141,14 +169,42 @@ module Gcry
         return
       end
 
-      return if heap_marked?(header)
+      return if block_marked_in?(chunk, header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      heap_set_mark(header)
+      set_block_mark_in(chunk, header)
       note_first_mark(header, source) if @live_attr_roots
-      @mark_stack.push(header)
+      mark_stack_push(header)
+    end
+
+    # The TLAB on-stack-freelist claim, isolated so it can hold the lock without
+    # putting one on the common mark path. See the long note at the call site.
+    private def claim_free_tlab_block(header : BlockHeader*, chunk : ChunkHeader*) : Nil
+      locked = @mark_parallel
+      @mark_lock.lock if locked
+      begin
+        h = header.value
+        h.flags = h.flags & ~BlockHeader::Flags::FREE
+        header.value = h
+        # bitmap_alloc replaces the freelist with the pool cursor — no on-stack
+        # freelist nodes to claim, so this cannot fire there.
+        return if @bitmap_alloc
+        set_block_mark_in(chunk, header) unless block_marked_in?(chunk, header)
+        walk = h.next_free
+        while walk
+          walk_found = find_block_with_chunk(walk)
+          break unless walk_found
+          _, walk_chunk = walk_found
+          wh = BlockHeader.from_user(walk)
+          break unless BlockHeader.free?(wh)
+          set_block_mark_in(walk_chunk, wh) unless block_marked_in?(walk_chunk, wh)
+          walk = wh.value.next_free
+        end
+      ensure
+        @mark_lock.unlock if locked
+      end
     end
 
     # First-mark source attribution (GCRY_LIVE_ATTR=1). Counts objects/bytes by
@@ -253,6 +309,56 @@ module Gcry
       until @mark_stack.empty?
         header = @mark_stack.pop
         scan_object(header)
+      end
+    end
+
+    # Depth of the mark-loop prefetch ring. simdgc measured 16-32 as the knee
+    # (mark 23 -> 13 ms); past ~64 the line-fill buffers oversubscribe.
+    MARK_PREFETCH_DEPTH = 16
+
+    # Serial mark drain with a fixed-depth software prefetch pipeline.
+    #
+    # A plain LIFO drain pops an object and scans it immediately, so its cache
+    # line — random on a real graph, and mark is latency-bound not
+    # compute-bound (`simdgc-perf-notes.md`: 147 ns per dependent miss) — is
+    # loaded on the critical path every time.
+    #
+    # The ring decouples pop from scan by `MARK_PREFETCH_DEPTH`: an object is
+    # prefetched when it enters, scanned when it leaves, and the K objects
+    # between hide the miss. The stack underneath stays strict LIFO, so depth is
+    # still bounded by graph depth — no BFS blow-up, no `MarkStack#grow` raising
+    # `OutOfMemoryError` (which allocates, the -Dgc_none deadlock). The ring is a
+    # fixed reorder buffer in front of scan, not a second work list.
+    #
+    # `GCRY_PREFETCH=0` selects the plain drain for A/B.
+    @[AlwaysInline]
+    private def serial_mark_drain : Nil
+      unless @mark_prefetch
+        until @mark_stack.empty?
+          scan_object(@mark_stack.pop)
+        end
+        return
+      end
+
+      ring = uninitialized StaticArray(BlockHeader*, MARK_PREFETCH_DEPTH)
+      head = 0
+      count = 0
+      stack = @mark_stack
+      loop do
+        while count < MARK_PREFETCH_DEPTH && !stack.empty?
+          h = stack.pop
+          # Header line and the payload's first line — the type_id gate and the
+          # first scanned word both live there.
+          Kernels.prefetch_read(h.as(Void*))
+          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+          ring[(head + count) % MARK_PREFETCH_DEPTH] = h
+          count += 1
+        end
+        break if count == 0
+        h = ring[head]
+        head = (head + 1) % MARK_PREFETCH_DEPTH
+        count -= 1
+        scan_object(h)
       end
     end
 
@@ -544,17 +650,27 @@ module Gcry
     # Corrupted header.size must not walk past the mapped chunk (SIGSEGV).
     private def clamped_scan_size(header : BlockHeader*, user : UInt8*) : UInt64
       size = header.value.size.to_u64
+
+      # Small blocks skip the chunk lookup — the common case, and the one that
+      # dominates a mark-bound phase.
+      #
+      # `header.value.size` is the block's class payload: the allocator writes
+      # it, it sits in the 16-byte header *before* the user pointer, and a user
+      # buffer overflow reaching it would already be undefined. A block that
+      # reaches here is marked and allocated (find_object rejected FREE), so its
+      # size field is the payload and scanning `size` bytes stays in-block. The
+      # clamp that a `chunk_containing` used to provide was defending against a
+      # value that cannot occur on this path.
+      #
+      # Large objects keep the lookup: their `size` is the exact object size and
+      # is clamped to the mapping end, and they are rare enough that the lookup
+      # does not show up.
+      return size unless BlockHeader.large?(header)
+
       chunk = chunk_containing(header.address)
       return 0_u64 unless chunk
-
-      max = if ChunkHeader.large?(chunk)
-              end_addr = ChunkHeader.data_end(chunk).address
-              end_addr > user.address ? (end_addr - user.address) : 0_u64
-            else
-              class_index = chunk.value.size_class.to_i32
-              return 0_u64 if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-              SizeClasses.payload(class_index).to_u64
-            end
+      end_addr = ChunkHeader.data_end(chunk).address
+      max = end_addr > user.address ? (end_addr - user.address) : 0_u64
       size > max ? max : size
     end
 
@@ -696,63 +812,66 @@ module Gcry
     end
 
     private def clear_all_marks : Nil
-      {% unless flag?(:gcry_side_bitmap) %}
-        # Mark generation: bump O(1) so prior marks fail marked? without a heap
-        # walk. Was ~3ms phase_clear under Parallel reclaim-off (FREE-dominated).
-        # Wrap at 255 → full clear of gen bits (and legacy MARK) then gen=1.
-        if @header_mark_gen >= 255_u8
-          each_chunk do |chunk|
-            each_block_or_large(chunk) do |header|
-              next if BlockHeader.free?(header)
-              BlockHeader.clear_mark(header)
-            end
-          end
-          @header_mark_gen = 1_u8
-          @header_mark_gen_full_clears &+= 1_u64
-        else
-          @header_mark_gen &+= 1_u8
-        end
-        BlockHeader.mark_gen = @header_mark_gen
-      {% else %}
-        # Side mark bitmap: single bitmap zero is O(bitmap_bytes) — proportional
-        # to managed heap, not to the live-object count. Replaces the legacy
-        # per-object header write that dominated clear_all_marks under HTTP.
-        # Use @mark_bitmap directly (not Gcry.current_mark_bitmap) so that under
-        # -Dgc_none a test heap does not clobber the process GC's bitmap.
-        if bm = @mark_bitmap
-          if @heap_max > @heap_min && @heap_min != UInt64::MAX
-            bm.reset(@heap_min, @heap_max)
-          else
-            bm.zero_all
+      # Header generation: bump O(1) so prior marks fail `marked?` without a
+      # heap walk. Was ~3ms phase_clear under Parallel reclaim-off
+      # (FREE-dominated). Wrap at 255 -> full clear of gen bits (and legacy
+      # MARK) then gen=1. Large chunks use this under both representations, so
+      # it runs either way.
+      if @header_mark_gen >= 255_u8
+        each_chunk do |chunk|
+          each_block_or_large(chunk) do |header|
+            next if BlockHeader.free?(header)
+            BlockHeader.clear_mark(header)
           end
         end
-      {% end %}
+        @header_mark_gen = 1_u8
+        @header_mark_gen_full_clears &+= 1_u64
+      else
+        @header_mark_gen &+= 1_u8
+      end
+      BlockHeader.mark_gen = @header_mark_gen
+
+      # Size-class chunks on the bitmap path have no generation to bump, so
+      # their marks are zeroed wholesale, one chunk at a time. Never per bit:
+      # 64 blocks share a word, so clearing one block's bit is a
+      # read-modify-write over 63 other blocks' marks.
+      #
+      # This runs at the *start* of a cycle, before mark, so the marks the
+      # previous cycle's sweep read are still intact when it reads them.
+      #
+      # O(bitmap bytes) rather than O(1) — 1/512th of the heap, so ~2 MiB of
+      # memset per GiB, against a mark phase measured in milliseconds. It could
+      # be made a no-op in the common case (the sweep visits every non-dormant
+      # chunk anyway, so it could clear as it goes, leaving this needed only
+      # after a minor), but that is an optimisation with a correctness edge —
+      # dormant chunks the sweep skips, chunks mapped mid-cycle — and it is not
+      # worth taking before the cost shows up in a measurement.
+      if @bitmap_marks
+        each_chunk do |chunk|
+          next if ChunkHeader.large?(chunk)
+          chunk_clear_marks(chunk)
+        end
+      end
     end
 
     # Minor GC: reset nursery mark bits only.
+    #
+    # Old-generation marks are retained on purpose — a minor bumps no
+    # generation, and `mark_impl`'s `@minor_only` gate skips non-nursery blocks,
+    # so the old generation's marks stay valid from the prior major. The bitmap
+    # arm has to preserve exactly that asymmetry.
     private def clear_nursery_marks : Nil
-      {% unless flag?(:gcry_side_bitmap) %}
-        each_chunk do |chunk|
-          next unless ChunkHeader.nursery?(chunk)
+      each_chunk do |chunk|
+        next unless ChunkHeader.nursery?(chunk)
+        if @bitmap_marks && !ChunkHeader.large?(chunk)
+          chunk_clear_marks(chunk)
+        else
           each_block(chunk) do |header|
             next if BlockHeader.free?(header)
             BlockHeader.clear_mark(header)
           end
         end
-      {% else %}
-        # Side mark bitmap: zero only the address ranges that correspond to
-        # nursery chunks. Chunks are page-aligned at multiples of the chunk size
-        # so we can issue narrow resets without touching the old generation's
-        # bits (which carry over from the prior major and remain valid).
-        bm = @mark_bitmap
-        return unless bm
-        each_chunk do |chunk|
-          next unless ChunkHeader.nursery?(chunk)
-          lo = ChunkHeader.data_start(chunk).address
-          hi = chunk.address + chunk.value.mapped_bytes
-          bm.reset(lo, hi) if hi > lo
-        end
-      {% end %}
+      end
     end
 
     private def each_block_or_large(chunk : ChunkHeader*, & : BlockHeader* ->) : Nil
@@ -804,9 +923,9 @@ module Gcry
       # During generational minor, old objects are intentionally unmarked.
       # Only nursery deaths may enqueue finalizers / clear WeakRef links.
       return false if @minor_only && !BlockHeader.nursery?(header)
-      # Use heap-local mark check (not BlockHeader.marked? which reads the
-      # global Gcry.current_mark_bitmap) — under -Dgc_none a test heap may
-      # have swapped the global bitmap, causing cross-heap false negatives.
+      # Use the heap-local mark check, not the static `BlockHeader.marked?`:
+      # under `GCRY_BITMAP=1` the header generation is not where the marks are,
+      # and the static reader would answer for the wrong representation.
       if heap_marked?(header)
         return false
       end

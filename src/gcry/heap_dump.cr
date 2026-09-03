@@ -25,7 +25,7 @@ module Gcry
       if ChunkHeader.large?(chunk)
         header = ChunkHeader.data_start(chunk).as(BlockHeader*)
         next if BlockHeader.free?(header)
-        write_dump_line(io, header)
+        write_dump_line(io, header, heap)
         count += 1
       else
         class_index = chunk.value.size_class.to_i32
@@ -37,7 +37,7 @@ module Gcry
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
           unless BlockHeader.free?(header)
-            write_dump_line(io, header)
+            write_dump_line(io, header, heap)
             count += 1
           end
           cursor += block_bytes
@@ -84,7 +84,7 @@ module Gcry
     before - after
   end
 
-  private def self.write_dump_line(io : IO, header : BlockHeader*) : Nil
+  private def self.write_dump_line(io : IO, header : BlockHeader*, heap : Heap) : Nil
     user = BlockHeader.user_from(header)
     size = header.value.size.to_u64
     type_id = 0_i32
@@ -93,7 +93,10 @@ module Gcry
     if size >= 4
       type_id = user.as(Int32*).value
     end
-    marked = BlockHeader.marked?(header)
+    # Through the heap: under GCRY_BITMAP=1 the header generation is not
+    # what the sweep reads, and a dump that says "marked" about an object
+    # the collector considers garbage is a wrong answer, not a missing one.
+    marked = heap.marked_for_report?(header)
     atomic = BlockHeader.atomic?(header)
     nursery = BlockHeader.nursery?(header)
     io << "{\"addr\":\"0x" << user.address.to_s(16)

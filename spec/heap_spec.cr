@@ -29,6 +29,11 @@ describe Gcry::Heap do
 
   it "malloc re-zeros freelist reuse after free" do
     heap = Gcry::Heap.new
+    # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
+    # pool cursor has neither by design — it hands out the lowest free bit in
+    # the current word and never claims a block is pre-zeroed. Pinned so this
+    # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
+    heap.bitmap_alloc = false
     begin
       ptr = heap.malloc(64)
       64.times { |i| ptr.as(UInt8*)[i] = 0xCD_u8 }
@@ -58,6 +63,11 @@ describe Gcry::Heap do
 
   it "malloc_atomic does not clear memory" do
     heap = Gcry::Heap.new
+    # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
+    # pool cursor has neither by design — it hands out the lowest free bit in
+    # the current word and never claims a block is pre-zeroed. Pinned so this
+    # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
+    heap.bitmap_alloc = false
     begin
       ptr = heap.malloc_atomic(64)
       bytes = ptr.as(UInt8*)
@@ -76,6 +86,11 @@ describe Gcry::Heap do
 
   it "free returns small blocks to the freelist" do
     heap = Gcry::Heap.new
+    # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
+    # pool cursor has neither by design — it hands out the lowest free bit in
+    # the current word and never claims a block is pre-zeroed. Pinned so this
+    # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
+    heap.bitmap_alloc = false
     begin
       a = heap.malloc(16)
       b = heap.malloc(16)

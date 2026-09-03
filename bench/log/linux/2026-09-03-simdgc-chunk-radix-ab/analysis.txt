@@ -1,0 +1,427 @@
+
+==============================================================================
+### PATH /json  —  RADIX vs DEFAULT
+==============================================================================
+
+rps  /json   (n=32 pairs)
+  mean default: 40,448.308 rps    mean radix: 41,534.404 rps
+  paired mean diff (radix - default): +1,086.097 rps  (+2.69%)
+  t = +1.026   p = 0.3126   sd(d) = 5,985.831 rps
+  95% CI: [-1,072.026, +3,244.219] rps  = [-2.65%, +8.02%]
+  wins: 16/32   CI half-width: +/-5.34%   MDE@80% = 7.57%
+  -> SPANS ZERO: unmeasurable
+
+phase_mark (in-load, last collection under wrk)  /json   (n=32 pairs)
+  mean default: 228.104 us    mean radix: 212.970 us
+  paired mean diff (radix - default): -15.134 us  (-6.63%)
+  t = -2.551   p = 0.0159   sd(d) = 33.561 us
+  95% CI: [-27.234, -3.034] us  = [-11.94%, -1.33%]
+  wins: 7/32   CI half-width: +/-5.30%   MDE@80% = 7.52%
+  -> EXCLUDES ZERO: measurable effect
+
+phase_mark (idle, mean of 5 forced collects)  /json   (n=32 pairs)
+  mean default: 170.992 us    mean radix: 178.791 us
+  paired mean diff (radix - default): +7.799 us  (+4.56%)
+  t = +1.250   p = 0.2207   sd(d) = 35.301 us
+  95% CI: [-4.928, +20.526] us  = [-2.88%, +12.00%]
+  wins: 20/32   CI half-width: +/-7.44%   MDE@80% = 10.56%
+  -> SPANS ZERO: unmeasurable
+
+phase_sweep (in-load)  /json   (n=32 pairs)
+  mean default: 1,877.886 us    mean radix: 1,936.731 us
+  paired mean diff (radix - default): +58.845 us  (+3.13%)
+  t = +1.549   p = 0.1315   sd(d) = 214.854 us
+  95% CI: [-18.618, +136.308] us  = [-0.99%, +7.26%]
+  wins: 19/32   CI half-width: +/-4.13%   MDE@80% = 5.85%
+  -> SPANS ZERO: unmeasurable
+
+phase_sweep (idle, mean of 5)  /json   (n=32 pairs)
+  mean default: 423.790 us    mean radix: 370.083 us
+  paired mean diff (radix - default): -53.707 us  (-12.67%)
+  t = -2.086   p = 0.0453   sd(d) = 145.642 us
+  95% CI: [-106.216, -1.197] us  = [-25.06%, -0.28%]
+  wins: 13/32   CI half-width: +/-12.39%   MDE@80% = 17.57%
+  -> EXCLUDES ZERO: measurable effect
+
+phase_stacks (in-load)  /json   (n=32 pairs)
+  mean default: 24.544 us    mean radix: 25.301 us
+  paired mean diff (radix - default): +0.757 us  (+3.09%)
+  t = +0.873   p = 0.3892   sd(d) = 4.904 us
+  95% CI: [-1.011, +2.525] us  = [-4.12%, +10.29%]
+  wins: 14/32   CI half-width: +/-7.20%   MDE@80% = 10.22%
+  -> SPANS ZERO: unmeasurable
+
+phase_roots (in-load)  /json   (n=32 pairs)
+  mean default: 150.342 us    mean radix: 149.227 us
+  paired mean diff (radix - default): -1.115 us  (-0.74%)
+  t = -0.112   p = 0.9115   sd(d) = 56.276 us
+  95% CI: [-21.404, +19.175] us  = [-14.24%, +12.75%]
+  wins: 10/32   CI half-width: +/-13.50%   MDE@80% = 19.14%
+  -> SPANS ZERO: unmeasurable
+
+phase_clear (in-load)  /json   (n=32 pairs)
+  mean default: 0.205 us    mean radix: 0.242 us
+  paired mean diff (radix - default): +0.038 us  (+18.38%)
+  t = +2.063   p = 0.0476   sd(d) = 0.103 us
+  95% CI: [+0.000, +0.075] us  = [+0.21%, +36.55%]
+  wins: 18/32   CI half-width: +/-18.17%   MDE@80% = 25.78%
+  -> EXCLUDES ZERO: measurable effect
+
+mean pause over the load (pause_total/pause_count)  /json   (n=32 pairs)
+  mean default: 812.899 us    mean radix: 784.144 us
+  paired mean diff (radix - default): -28.755 us  (-3.54%)
+  t = -4.161   p = 0.0002   sd(d) = 39.092 us
+  95% CI: [-42.849, -14.661] us  = [-5.27%, -1.80%]
+  wins: 3/32   CI half-width: +/-1.73%   MDE@80% = 2.46%
+  -> EXCLUDES ZERO: measurable effect
+
+pause p50 (post-GC snapshot)  /json   (n=32 pairs)
+  mean default: 797.444 us    mean radix: 765.725 us
+  paired mean diff (radix - default): -31.720 us  (-3.98%)
+  t = -8.944   p = 0.0000   sd(d) = 20.062 us
+  95% CI: [-38.952, -24.487] us  = [-4.88%, -3.07%]
+  wins: 1/32   CI half-width: +/-0.91%   MDE@80% = 1.29%
+  -> EXCLUDES ZERO: measurable effect
+
+post-GC VmRSS  /json   (n=32 pairs)
+  mean default: 13,477.250 KiB    mean radix: 16,358.875 KiB
+  paired mean diff (radix - default): +2,881.625 KiB  (+21.38%)
+  t = +11.894   p = 0.0000   sd(d) = 1,370.463 KiB
+  95% CI: [+2,387.520, +3,375.730] KiB  = [+17.72%, +25.05%]
+  wins: 31/32   CI half-width: +/-3.67%   MDE@80% = 5.20%
+  -> EXCLUDES ZERO: measurable effect
+
+collections during load  /json   (n=32 pairs)
+  mean default: 67.250    mean radix: 69.438
+  paired mean diff (radix - default): +2.188  (+3.25%)
+  t = +1.239   p = 0.2245   sd(d) = 9.985
+  95% CI: [-1.413, +5.788]  = [-2.10%, +8.61%]
+  wins: 17/32   CI half-width: +/-5.35%   MDE@80% = 7.59%
+  -> SPANS ZERO: unmeasurable
+
+==============================================================================
+### PATH /  —  RADIX vs DEFAULT
+==============================================================================
+
+rps  /   (n=32 pairs)
+  mean default: 58,300.106 rps    mean radix: 57,499.343 rps
+  paired mean diff (radix - default): -800.762 rps  (-1.37%)
+  t = -0.637   p = 0.5290   sd(d) = 7,115.050 rps
+  95% CI: [-3,366.012, +1,764.487] rps  = [-5.77%, +3.03%]
+  wins: 15/32   CI half-width: +/-4.40%   MDE@80% = 6.24%
+  -> SPANS ZERO: unmeasurable
+
+phase_mark (in-load, last collection under wrk)  /   (n=32 pairs)
+  mean default: 246.069 us    mean radix: 202.465 us
+  paired mean diff (radix - default): -43.603 us  (-17.72%)
+  t = -4.373   p = 0.0001   sd(d) = 56.405 us
+  95% CI: [-63.939, -23.267] us  = [-25.98%, -9.46%]
+  wins: 3/32   CI half-width: +/-8.26%   MDE@80% = 11.72%
+  -> EXCLUDES ZERO: measurable effect
+
+phase_mark (idle, mean of 5 forced collects)  /   (n=32 pairs)
+  mean default: 171.462 us    mean radix: 166.039 us
+  paired mean diff (radix - default): -5.423 us  (-3.16%)
+  t = -1.235   p = 0.2262   sd(d) = 24.847 us
+  95% CI: [-14.381, +3.535] us  = [-8.39%, +2.06%]
+  wins: 18/32   CI half-width: +/-5.22%   MDE@80% = 7.41%
+  -> SPANS ZERO: unmeasurable
+
+phase_sweep (in-load)  /   (n=32 pairs)
+  mean default: 2,145.302 us    mean radix: 2,060.910 us
+  paired mean diff (radix - default): -84.392 us  (-3.93%)
+  t = -1.049   p = 0.3021   sd(d) = 454.933 us
+  95% CI: [-248.413, +79.629] us  = [-11.58%, +3.71%]
+  wins: 16/32   CI half-width: +/-7.65%   MDE@80% = 10.84%
+  -> SPANS ZERO: unmeasurable
+
+phase_sweep (idle, mean of 5)  /   (n=32 pairs)
+  mean default: 365.825 us    mean radix: 382.543 us
+  paired mean diff (radix - default): +16.717 us  (+4.57%)
+  t = +0.547   p = 0.5885   sd(d) = 172.993 us
+  95% CI: [-45.653, +79.088] us  = [-12.48%, +21.62%]
+  wins: 16/32   CI half-width: +/-17.05%   MDE@80% = 24.18%
+  -> SPANS ZERO: unmeasurable
+
+phase_stacks (in-load)  /   (n=32 pairs)
+  mean default: 24.301 us    mean radix: 23.697 us
+  paired mean diff (radix - default): -0.604 us  (-2.49%)
+  t = -0.577   p = 0.5682   sd(d) = 5.924 us
+  95% CI: [-2.740, +1.532] us  = [-11.27%, +6.30%]
+  wins: 11/32   CI half-width: +/-8.79%   MDE@80% = 12.47%
+  -> SPANS ZERO: unmeasurable
+
+phase_roots (in-load)  /   (n=32 pairs)
+  mean default: 181.678 us    mean radix: 156.087 us
+  paired mean diff (radix - default): -25.591 us  (-14.09%)
+  t = -2.376   p = 0.0239   sd(d) = 60.922 us
+  95% CI: [-47.556, -3.626] us  = [-26.18%, -2.00%]
+  wins: 12/32   CI half-width: +/-12.09%   MDE@80% = 17.15%
+  -> EXCLUDES ZERO: measurable effect
+
+phase_clear (in-load)  /   (n=32 pairs)
+  mean default: 0.226 us    mean radix: 0.215 us
+  paired mean diff (radix - default): -0.011 us  (-4.87%)
+  t = -0.532   p = 0.5987   sd(d) = 0.117 us
+  95% CI: [-0.053, +0.031] us  = [-23.57%, +13.82%]
+  wins: 20/32   CI half-width: +/-18.69%   MDE@80% = 26.51%
+  -> SPANS ZERO: unmeasurable
+
+mean pause over the load (pause_total/pause_count)  /   (n=32 pairs)
+  mean default: 884.821 us    mean radix: 855.590 us
+  paired mean diff (radix - default): -29.232 us  (-3.30%)
+  t = -1.615   p = 0.1163   sd(d) = 102.360 us
+  95% CI: [-66.136, +7.673] us  = [-7.47%, +0.87%]
+  wins: 7/32   CI half-width: +/-4.17%   MDE@80% = 5.92%
+  -> SPANS ZERO: unmeasurable
+
+pause p50 (post-GC snapshot)  /   (n=32 pairs)
+  mean default: 856.088 us    mean radix: 822.214 us
+  paired mean diff (radix - default): -33.874 us  (-3.96%)
+  t = -1.971   p = 0.0577   sd(d) = 97.213 us
+  95% CI: [-68.923, +1.175] us  = [-8.05%, +0.14%]
+  wins: 7/32   CI half-width: +/-4.09%   MDE@80% = 5.81%
+  -> SPANS ZERO: unmeasurable
+
+post-GC VmRSS  /   (n=32 pairs)
+  mean default: 13,197.250 KiB    mean radix: 15,360.750 KiB
+  paired mean diff (radix - default): +2,163.500 KiB  (+16.39%)
+  t = +8.616   p = 0.0000   sd(d) = 1,420.482 KiB
+  95% CI: [+1,651.362, +2,675.638] KiB  = [+12.51%, +20.27%]
+  wins: 31/32   CI half-width: +/-3.88%   MDE@80% = 5.50%
+  -> EXCLUDES ZERO: measurable effect
+
+collections during load  /   (n=32 pairs)
+  mean default: 25.469    mean radix: 25.000
+  paired mean diff (radix - default): -0.469  (-1.84%)
+  t = -0.844   p = 0.4051   sd(d) = 3.142
+  95% CI: [-1.601, +0.664]  = [-6.29%, +2.61%]
+  wins: 10/32   CI half-width: +/-4.45%   MDE@80% = 6.31%
+  -> SPANS ZERO: unmeasurable
+
+==============================================================================
+### PATH /json  —  NULL CONTROL (default vs default, same binary, same env)
+==============================================================================
+
+NULL rps  /json   (n=32 pairs)
+  mean nullA: 42,383.228 rps    mean nullB: 41,878.172 rps
+  paired mean diff (nullB - nullA): -505.056 rps  (-1.19%)
+  t = -0.491   p = 0.6270   sd(d) = 5,820.809 rps
+  95% CI: [-2,603.681, +1,593.570] rps  = [-6.14%, +3.76%]
+  wins: 16/32   CI half-width: +/-4.95%   MDE@80% = 7.02%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_mark (in-load, last collection under wrk)  /json   (n=32 pairs)
+  mean nullA: 221.135 us    mean nullB: 229.047 us
+  paired mean diff (nullB - nullA): +7.912 us  (+3.58%)
+  t = +0.977   p = 0.3361   sd(d) = 45.809 us
+  95% CI: [-8.604, +24.428] us  = [-3.89%, +11.05%]
+  wins: 18/32   CI half-width: +/-7.47%   MDE@80% = 10.59%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_mark (idle, mean of 5 forced collects)  /json   (n=32 pairs)
+  mean nullA: 151.511 us    mean nullB: 158.752 us
+  paired mean diff (nullB - nullA): +7.241 us  (+4.78%)
+  t = +1.420   p = 0.1656   sd(d) = 28.844 us
+  95% CI: [-3.158, +17.641] us  = [-2.08%, +11.64%]
+  wins: 22/32   CI half-width: +/-6.86%   MDE@80% = 9.74%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_sweep (in-load)  /json   (n=32 pairs)
+  mean nullA: 1,859.058 us    mean nullB: 1,957.243 us
+  paired mean diff (nullB - nullA): +98.186 us  (+5.28%)
+  t = +1.548   p = 0.1319   sd(d) = 358.915 us
+  95% CI: [-31.217, +227.588] us  = [-1.68%, +12.24%]
+  wins: 17/32   CI half-width: +/-6.96%   MDE@80% = 9.87%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_sweep (idle, mean of 5)  /json   (n=32 pairs)
+  mean nullA: 361.793 us    mean nullB: 357.115 us
+  paired mean diff (nullB - nullA): -4.678 us  (-1.29%)
+  t = -0.133   p = 0.8954   sd(d) = 199.617 us
+  95% CI: [-76.648, +67.291] us  = [-21.19%, +18.60%]
+  wins: 15/32   CI half-width: +/-19.89%   MDE@80% = 28.22%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_stacks (in-load)  /json   (n=32 pairs)
+  mean nullA: 24.469 us    mean nullB: 24.752 us
+  paired mean diff (nullB - nullA): +0.283 us  (+1.16%)
+  t = +0.370   p = 0.7136   sd(d) = 4.318 us
+  95% CI: [-1.274, +1.839] us  = [-5.21%, +7.52%]
+  wins: 18/32   CI half-width: +/-6.36%   MDE@80% = 9.02%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_roots (in-load)  /json   (n=32 pairs)
+  mean nullA: 142.165 us    mean nullB: 144.475 us
+  paired mean diff (nullB - nullA): +2.310 us  (+1.63%)
+  t = +0.337   p = 0.7384   sd(d) = 38.776 us
+  95% CI: [-11.670, +16.290] us  = [-8.21%, +11.46%]
+  wins: 18/32   CI half-width: +/-9.83%   MDE@80% = 13.95%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_clear (in-load)  /json   (n=32 pairs)
+  mean nullA: 0.192 us    mean nullB: 0.201 us
+  paired mean diff (nullB - nullA): +0.009 us  (+4.42%)
+  t = +0.617   p = 0.5416   sd(d) = 0.078 us
+  95% CI: [-0.020, +0.037] us  = [-10.18%, +19.01%]
+  wins: 15/32   CI half-width: +/-14.59%   MDE@80% = 20.70%
+  -> SPANS ZERO: unmeasurable
+
+NULL mean pause over the load (pause_total/pause_count)  /json   (n=32 pairs)
+  mean nullA: 783.165 us    mean nullB: 774.988 us
+  paired mean diff (nullB - nullA): -8.177 us  (-1.04%)
+  t = -0.746   p = 0.4611   sd(d) = 61.975 us
+  95% CI: [-30.521, +14.168] us  = [-3.90%, +1.81%]
+  wins: 14/32   CI half-width: +/-2.85%   MDE@80% = 4.05%
+  -> SPANS ZERO: unmeasurable
+
+NULL pause p50 (post-GC snapshot)  /json   (n=32 pairs)
+  mean nullA: 769.117 us    mean nullB: 758.837 us
+  paired mean diff (nullB - nullA): -10.280 us  (-1.34%)
+  t = -0.874   p = 0.3888   sd(d) = 66.531 us
+  95% CI: [-34.267, +13.707] us  = [-4.46%, +1.78%]
+  wins: 10/32   CI half-width: +/-3.12%   MDE@80% = 4.42%
+  -> SPANS ZERO: unmeasurable
+
+NULL post-GC VmRSS  /json   (n=32 pairs)
+  mean nullA: 13,504.625 KiB    mean nullB: 13,483.625 KiB
+  paired mean diff (nullB - nullA): -21.000 KiB  (-0.16%)
+  t = -0.408   p = 0.6862   sd(d) = 291.307 KiB
+  95% CI: [-126.027, +84.027] KiB  = [-0.93%, +0.62%]
+  wins: 14/32   CI half-width: +/-0.78%   MDE@80% = 1.10%
+  -> SPANS ZERO: unmeasurable
+
+NULL collections during load  /json   (n=32 pairs)
+  mean nullA: 70.688    mean nullB: 69.844
+  paired mean diff (nullB - nullA): -0.844  (-1.19%)
+  t = -0.491   p = 0.6267   sd(d) = 9.716
+  95% CI: [-4.347, +2.659]  = [-6.15%, +3.76%]
+  wins: 15/32   CI half-width: +/-4.96%   MDE@80% = 7.03%
+  -> SPANS ZERO: unmeasurable
+
+==============================================================================
+### PATH /  —  NULL CONTROL (default vs default, same binary, same env)
+==============================================================================
+
+NULL rps  /   (n=32 pairs)
+  mean nullA: 60,383.932 rps    mean nullB: 60,071.628 rps
+  paired mean diff (nullB - nullA): -312.304 rps  (-0.52%)
+  t = -0.313   p = 0.7564   sd(d) = 5,645.366 rps
+  95% CI: [-2,347.676, +1,723.068] rps  = [-3.89%, +2.85%]
+  wins: 17/32   CI half-width: +/-3.37%   MDE@80% = 4.78%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_mark (in-load, last collection under wrk)  /   (n=32 pairs)
+  mean nullA: 234.696 us    mean nullB: 235.863 us
+  paired mean diff (nullB - nullA): +1.167 us  (+0.50%)
+  t = +0.132   p = 0.8957   sd(d) = 49.931 us
+  95% CI: [-16.835, +19.169] us  = [-7.17%, +8.17%]
+  wins: 18/32   CI half-width: +/-7.67%   MDE@80% = 10.88%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_mark (idle, mean of 5 forced collects)  /   (n=32 pairs)
+  mean nullA: 166.116 us    mean nullB: 172.226 us
+  paired mean diff (nullB - nullA): +6.110 us  (+3.68%)
+  t = +0.990   p = 0.3299   sd(d) = 34.914 us
+  95% CI: [-6.478, +18.698] us  = [-3.90%, +11.26%]
+  wins: 17/32   CI half-width: +/-7.58%   MDE@80% = 10.75%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_sweep (in-load)  /   (n=32 pairs)
+  mean nullA: 2,013.808 us    mean nullB: 2,070.670 us
+  paired mean diff (nullB - nullA): +56.862 us  (+2.82%)
+  t = +0.751   p = 0.4586   sd(d) = 428.558 us
+  95% CI: [-97.650, +211.373] us  = [-4.85%, +10.50%]
+  wins: 15/32   CI half-width: +/-7.67%   MDE@80% = 10.88%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_sweep (idle, mean of 5)  /   (n=32 pairs)
+  mean nullA: 436.017 us    mean nullB: 380.781 us
+  paired mean diff (nullB - nullA): -55.236 us  (-12.67%)
+  t = -1.999   p = 0.0544   sd(d) = 156.314 us
+  95% CI: [-111.594, +1.121] us  = [-25.59%, +0.26%]
+  wins: 8/32   CI half-width: +/-12.93%   MDE@80% = 18.33%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_stacks (in-load)  /   (n=32 pairs)
+  mean nullA: 25.438 us    mean nullB: 23.964 us
+  paired mean diff (nullB - nullA): -1.473 us  (-5.79%)
+  t = -0.547   p = 0.5886   sd(d) = 15.247 us
+  95% CI: [-6.970, +4.024] us  = [-27.40%, +15.82%]
+  wins: 20/32   CI half-width: +/-21.61%   MDE@80% = 30.65%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_roots (in-load)  /   (n=32 pairs)
+  mean nullA: 180.404 us    mean nullB: 181.760 us
+  paired mean diff (nullB - nullA): +1.356 us  (+0.75%)
+  t = +0.125   p = 0.9016   sd(d) = 61.542 us
+  95% CI: [-20.832, +23.545] us  = [-11.55%, +13.05%]
+  wins: 19/32   CI half-width: +/-12.30%   MDE@80% = 17.45%
+  -> SPANS ZERO: unmeasurable
+
+NULL phase_clear (in-load)  /   (n=32 pairs)
+  mean nullA: 0.205 us    mean nullB: 0.191 us
+  paired mean diff (nullB - nullA): -0.014 us  (-6.92%)
+  t = -1.279   p = 0.2103   sd(d) = 0.063 us
+  95% CI: [-0.037, +0.008] us  = [-17.94%, +4.11%]
+  wins: 13/32   CI half-width: +/-11.03%   MDE@80% = 15.64%
+  -> SPANS ZERO: unmeasurable
+
+NULL mean pause over the load (pause_total/pause_count)  /   (n=32 pairs)
+  mean nullA: 855.222 us    mean nullB: 861.604 us
+  paired mean diff (nullB - nullA): +6.382 us  (+0.75%)
+  t = +0.601   p = 0.5525   sd(d) = 60.104 us
+  95% CI: [-15.288, +28.052] us  = [-1.79%, +3.28%]
+  wins: 23/32   CI half-width: +/-2.53%   MDE@80% = 3.59%
+  -> SPANS ZERO: unmeasurable
+
+NULL pause p50 (post-GC snapshot)  /   (n=32 pairs)
+  mean nullA: 831.958 us    mean nullB: 838.986 us
+  paired mean diff (nullB - nullA): +7.028 us  (+0.84%)
+  t = +0.783   p = 0.4394   sd(d) = 50.750 us
+  95% CI: [-11.269, +25.325] us  = [-1.35%, +3.04%]
+  wins: 21/32   CI half-width: +/-2.20%   MDE@80% = 3.12%
+  -> SPANS ZERO: unmeasurable
+
+NULL post-GC VmRSS  /   (n=32 pairs)
+  mean nullA: 13,208.500 KiB    mean nullB: 13,241.500 KiB
+  paired mean diff (nullB - nullA): +33.000 KiB  (+0.25%)
+  t = +0.894   p = 0.3780   sd(d) = 208.716 KiB
+  95% CI: [-42.250, +108.250] KiB  = [-0.32%, +0.82%]
+  wins: 18/32   CI half-width: +/-0.57%   MDE@80% = 0.81%
+  -> SPANS ZERO: unmeasurable
+
+NULL collections during load  /   (n=32 pairs)
+  mean nullA: 26.156    mean nullB: 26.281
+  paired mean diff (nullB - nullA): +0.125  (+0.48%)
+  t = +0.276   p = 0.7844   sd(d) = 2.562
+  95% CI: [-0.799, +1.049]  = [-3.05%, +4.01%]
+  wins: 14/32   CI half-width: +/-3.53%   MDE@80% = 5.01%
+  -> SPANS ZERO: unmeasurable
+
+==============================================================================
+### ORDERING DIAGNOSTICS
+==============================================================================
+  order effect (2nd - 1st) /json ('default', 'radix'): +2.66%  CI [-2.67%, +8.00%]
+  order effect (2nd - 1st) /json ('nullA', 'nullB'): +7.16%  CI [+2.70%, +11.63%]
+  naive unpaired mean ratio radix/default /json: 1.0269
+  naive unpaired mean ratio nullB/nullA /json: 0.9881
+  order effect (2nd - 1st) / ('default', 'radix'): +5.80%  CI [+1.73%, +9.87%]
+  order effect (2nd - 1st) / ('nullA', 'nullB'): -2.32%  CI [-5.56%, +0.91%]
+  naive unpaired mean ratio radix/default /: 0.9863
+  naive unpaired mean ratio nullB/nullA /: 0.9948
+
+==============================================================================
+### RAW PER-ARM SUMMARIES
+==============================================================================
+/json  default  n= 32  rps mean=   40,448 med=   42,582  RSS mean= 13,477 med= 13,490  idle_mark= 170.99us  inload_mark= 228.10us  p50=0.797ms
+/json  radix    n= 32  rps mean=   41,534 med=   42,106  RSS mean= 16,359 med= 15,810  idle_mark= 178.79us  inload_mark= 212.97us  p50=0.766ms
+/json  nullA    n= 32  rps mean=   42,383 med=   43,575  RSS mean= 13,505 med= 13,508  idle_mark= 151.51us  inload_mark= 221.14us  p50=0.769ms
+/json  nullB    n= 32  rps mean=   41,878 med=   42,044  RSS mean= 13,484 med= 13,442  idle_mark= 158.75us  inload_mark= 229.05us  p50=0.759ms
+/      default  n= 32  rps mean=   58,300 med=   59,971  RSS mean= 13,197 med= 13,184  idle_mark= 171.46us  inload_mark= 246.07us  p50=0.856ms
+/      radix    n= 32  rps mean=   57,499 med=   59,883  RSS mean= 15,361 med= 15,258  idle_mark= 166.04us  inload_mark= 202.47us  p50=0.822ms
+/      nullA    n= 32  rps mean=   60,384 med=   61,813  RSS mean= 13,208 med= 13,204  idle_mark= 166.12us  inload_mark= 234.70us  p50=0.832ms
+/      nullB    n= 32  rps mean=   60,072 med=   60,372  RSS mean= 13,242 med= 13,248  idle_mark= 172.23us  inload_mark= 235.86us  p50=0.839ms
+
+trials with wrk socket timeouts: 77/256
+Counter({('nullA', '/'): 27, ('radix', '/'): 24, ('nullB', '/json'): 13, ('default', '/json'): 13})

@@ -257,7 +257,9 @@ module Gcry
       buf = uninitialized UInt8[256]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry:   at the sweep: marked ")
-      len = RawOut.append(buf.to_unsafe, len, BlockHeader.marked?(header) ? "yes" : "no")
+      # `heap_marked?`, not the static reader: under GCRY_BITMAP=1 the header
+      # generation printed below is bookkeeping, and the bitmap is the answer.
+      len = RawOut.append(buf.to_unsafe, len, heap_marked?(header) ? "yes" : "no")
       len = RawOut.append(buf.to_unsafe, len, ", header gen ")
       gen = ((header.value.flags & BlockHeader::Flags::MARK_GEN_MASK) >> BlockHeader::Flags::MARK_GEN_SHIFT).to_u64
       len = RawOut.append_u64(buf.to_unsafe, len, gen)

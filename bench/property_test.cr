@@ -86,6 +86,19 @@ def walk_heap(heap)
       class_index = chunk.value.size_class.to_i32
       payload = Gcry::SizeClasses.payload(class_index)
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + payload.to_u64
+      # `occ`, not the header's FREE flag, on a chunk whose allocation is
+      # bitmap-driven: the streaming sweep never writes FREE into the blocks it
+      # reclaims (`occ` is the authority instead), so a header walk counts every
+      # reclaimed block as live. `src/gcry/invariant.cr` carries the same fix;
+      # this walker is its twin and was missed.
+      if heap.bitmap_alloc_chunk_public?(chunk)
+        occupied = heap.chunk_occupied_count(chunk)
+        total = (Gcry::ChunkHeader.data_end(chunk).address -
+                 Gcry::ChunkHeader.data_start(chunk).address) // block_bytes
+        live_count += occupied
+        free_count += total - occupied
+        next
+      end
       cursor = Gcry::ChunkHeader.data_start(chunk).as(UInt8*)
       limit = Gcry::ChunkHeader.data_end(chunk).as(UInt8*)
       while (cursor + block_bytes) <= limit

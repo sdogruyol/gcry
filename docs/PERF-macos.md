@@ -169,7 +169,7 @@ After the **side mark bitmap** + **`empty_chunk_retain = 64 MiB`** rework on top
 
 Latency dropped **−87% on `/json`** (18 ms → 2.3 ms) and **−95% on `/`** (14 ms → 1.7 ms); p99 latency is now within 2× of Boehm on both paths.
 
-**RSS regression:** the side mark bitmap itself allocates a separate mmap region covering the live heap (1 bit per word-aligned address). For the Kemal workload this adds ~200 MiB of mapped address space on top of the managed heap — hence the ~10× post-GC RSS. This is the explicit price paid for moving mark bits off the object headers; the throughput + latency win more than compensates on HTTP-shaped workloads. RSS recovery options: tighten `ensure_bitmap_covers` to track the actual used heap range (currently keeps headroom for one chunk of growth), or share bitmap pages with the kernel page cache.
+**RSS regression:** the side mark bitmap itself allocates a separate mmap region covering the live heap (1 bit per word-aligned address). For the Kemal workload this adds ~200 MiB of mapped address space on top of the managed heap — hence the ~10× post-GC RSS. This is the explicit price paid for moving mark bits off the object headers; the throughput + latency win more than compensates on HTTP-shaped workloads. That side mapping is gone: mark bitmaps now ride in each chunk's own header (`GCRY_BITMAP=1`, opt-in), so they are mapped and unmapped with the chunk and the RSS tail measured here no longer exists.
 
 ## History (macOS)
 

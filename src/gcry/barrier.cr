@@ -219,8 +219,16 @@ module Gcry
             mark_candidate(cand) if BlockHeader.nursery?(h)
           else
             # Incremental dirty re-scan: rematerialize edges into the mark stack.
-            unless BlockHeader.marked?(h) || BlockHeader.free?(h)
-              BlockHeader.set_mark(h)
+            #
+            # `heap_marked?` / `heap_set_mark`, not the static `BlockHeader`
+            # pair. This is a live mark path, not a diagnostic: under
+            # `GCRY_BITMAP=1` the static setter writes the header generation
+            # byte while the *bitmap* is what the sweep reads, so the object
+            # would be scanned, its children marked, and then the object itself
+            # reclaimed while live. `collect_mark.cr` carries the same warning
+            # for `unmarked_live_object?`; this site had not been given it.
+            unless heap_marked?(h) || BlockHeader.free?(h)
+              heap_set_mark(h)
               @mark_stack.push(h)
             end
           end
