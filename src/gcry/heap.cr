@@ -1,6 +1,7 @@
 require "./block"
 require "./size_classes"
 require "./chunk_layout"
+require "./chunk_radix"
 require "crystal/spin_lock"
 require "c/pthread"
 
@@ -208,6 +209,7 @@ module Gcry
       # SEGV (gc_override.cr:520).
       @simd_tier = Cpu.tier_from_env
       @bitmap_marks = Heap.bitmap_marks_from_env
+      radix_init if Heap.chunk_radix_from_env
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @prefer_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -324,11 +326,21 @@ module Gcry
       @chunk_index_cap = 0
       # No bitmap teardown: the mark bitmaps live inside the chunks and are
       # unmapped with them. That is the whole point of putting them there.
+      radix_destroy
     end
 
     # `GCRY_BITMAP=1`. Read with LibC.getenv, not ENV[] — see `initialize`.
     def self.bitmap_marks_from_env : Bool
-      raw = LibC.getenv("GCRY_BITMAP")
+      env_is_one?("GCRY_BITMAP")
+    end
+
+    # `GCRY_CHUNK_RADIX=1`.
+    def self.chunk_radix_from_env : Bool
+      env_is_one?("GCRY_CHUNK_RADIX")
+    end
+
+    private def self.env_is_one?(name : String) : Bool
+      raw = LibC.getenv(name)
       return false if raw.null?
       raw.value == '1'.ord.to_u8 && (raw + 1).value == 0
     end
@@ -1755,6 +1767,25 @@ module Gcry
     private def chunk_containing_unlocked(addr : UInt64) : ChunkHeader*?
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
 
+      # O(1) table, when it is on. Two dependent loads, then the same
+      # containment check the search path applies to its own result — an entry
+      # can legitimately name a neighbouring chunk for an address in the header
+      # region, and a miss simply falls through to the authority below.
+      #
+      # `contains?` dereferences the chunk, so this is only as safe as the
+      # caller's lock discipline — which is unchanged: `chunk_containing` still
+      # takes `@index_lock` unless `@world_stopped`, and radix entries live and
+      # die inside the same critical sections as the sorted index. See
+      # `chunk_radix.cr` for the full argument.
+      unless @radix_l1.null?
+        hit = radix_lookup(addr)
+        if !hit.null? && ChunkHeader.contains?(hit, addr)
+          radix_note_fast_hit
+          return hit
+        end
+        radix_note_slow
+      end
+
       # Last-chunk fast path: most lookups during mark hit the same chunk that
       # produced the previous result.
       #
@@ -2168,6 +2199,11 @@ module Gcry
     # with an entry hidden.
     private def index_insert_locked(chunk : ChunkHeader*) : Nil
       invalidate_chunk_cache
+      # Same critical section as the sorted index, deliberately. A reader that
+      # sees a radix entry will dereference the chunk to verify it, so the entry
+      # must not outlive the mapping — and matching the sorted index's lifetime
+      # exactly is cheaper to reason about than a second protocol.
+      radix_insert(chunk)
       index_ensure_cap(@chunk_index_count + 1)
       pos = index_lower_bound(chunk.address)
       count = @chunk_index_count
@@ -2199,6 +2235,9 @@ module Gcry
     private def index_remove_locked(chunk : ChunkHeader*) : Nil
       begin
         invalidate_chunk_cache
+        # Retract before the caller's munmap, for the same reason the sorted
+        # index does: a reader that still sees the entry dereferences it.
+        radix_remove(chunk)
         # Range test AND base identity: the hook exists because the entry
         # vanishes, and a defect that has already rewritten `mapped_bytes`
         # would blind a range-only test while the base still names the chunk.

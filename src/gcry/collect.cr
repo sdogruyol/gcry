@@ -1415,6 +1415,11 @@ module Gcry
       return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       block_bytes = @block_bytes[class_index]
+      # Not `chunk.address + ChunkHeader::SIZE`: a size-class chunk's blocks
+      # start after its bitmaps, and `owns_user_pointer?` (heap.cr) derives the
+      # same address the same way. If these two ever disagree, a valid pointer
+      # starts reporting "not a gcry allocation" through GC.free/realloc — see
+      # the spec that pins them together.
       data_start = ChunkHeader.data_start(chunk).address
       return nil if addr < data_start
 
@@ -1425,38 +1430,14 @@ module Gcry
       {Pointer(BlockHeader).new(header_addr), chunk}
     end
 
+    # Kept as the shape every existing caller expects. The division it used to
+    # carry — `offset // block_bytes`, once per accepted candidate word, the
+    # single most expensive arithmetic op on the mark hot path — is now a magic
+    # reciprocal inside `find_block_with_chunk`.
     def find_block(pointer : Void*) : BlockHeader*?
-      return nil if pointer.null?
-      addr = pointer.address
-      return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
-
-      chunk = chunk_containing(addr)
-      return nil unless chunk
-
-      if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        finish = BlockHeader.user_from(header).address + header.value.size
-        return header if addr >= header.address && addr < finish
-        return nil
-      end
-
-      class_index = chunk.value.size_class.to_i32
-      return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-
-      block_bytes = @block_bytes[class_index]
-      # Not `chunk.address + ChunkHeader::SIZE`: a size-class chunk's blocks
-      # start after its bitmaps, and `owns_user_pointer?` (heap.cr) derives the
-      # same address the same way. If these two ever disagree, a valid pointer
-      # starts reporting "not a gcry allocation" — see the spec that pins them
-      # together.
-      data_start = ChunkHeader.data_start(chunk).address
-      return nil if addr < data_start
-
-      offset = addr - data_start
-      header_addr = data_start + (offset // block_bytes) * block_bytes
-      return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
-
-      Pointer(BlockHeader).new(header_addr)
+      found = find_block_with_chunk(pointer)
+      return nil unless found
+      found[0]
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
