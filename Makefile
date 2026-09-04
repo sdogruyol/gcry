@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -774,6 +774,28 @@ darwin-static-root-sections: $(BIN)
 	$(BIN)/darwin_static_root_sections
 	$(CRYSTAL) build -Dgc_none --link-flags=-Wl,-no_data_const bench/darwin_static_root_sections.cr -o $(BIN)/darwin_static_root_sections_ndc --error-trace
 	$(BIN)/darwin_static_root_sections_ndc
+
+# What is the Darwin free-page walk's bitmap stand-down standing down from?
+#
+# It was written on Linux from a reading of the code — "the mask is built from
+# `BlockHeader.free?`, that flag is stale on a bitmap chunk, so the walk would
+# reclaim a live object" — and never run on Darwin. Running it says the
+# staleness is real and one-directional: `set_used` clears FREE and
+# `bitmap_free_block` never sets it, so the mask over-reports liveness and can
+# only fail to release. The `next` is a cost decision.
+#
+# Five arms, and the one that decides it is a counter rather than a checksum.
+# `--selfcheck` is why: `Platform.release_physical_pages` issues `MADV_FREE`
+# on Darwin, which leaves a still-referenced page intact, so a mis-released
+# page is latent here and no "graph intact" arm can see it.
+# `page_release_live_blocks` is binary and immediate; that is the gate.
+darwin-bitmap-page-release: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/darwin_bitmap_page_release.cr -o $(BIN)/darwin_bitmap_page_release --error-trace
+	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release
+	GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --headers
+	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/darwin_bitmap_page_release --walk
+	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 GCRY_PAGE_RELEASE_UNCHECKED=1 $(BIN)/darwin_bitmap_page_release --unchecked
+	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --selfcheck
 
 perf-baseline:
 	python3 bench/perf_compare.py --selftest

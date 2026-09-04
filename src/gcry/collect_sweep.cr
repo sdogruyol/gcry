@@ -630,13 +630,44 @@ module Gcry
         each_chunk do |chunk|
           next if ChunkHeader.large?(chunk)
           next if ChunkHeader.dormant?(chunk)
-          # Same stand-down the HOLED/SPARSE classification applies on the
-          # other arm. This walk visits every kept size-class chunk rather
-          # than only flagged ones, so without the test a bitmap chunk reaches
-          # `release_free_pages_in_chunk`, whose live mask is built by reading
-          # every block header — the one authority that is stale on a bitmap
-          # chunk, because the streaming sweep never writes FREE.
-          next if bitmap_alloc_chunk?(chunk)
+          # A bitmap chunk declines the free-page walk, and the reason written
+          # here until 2026-09-04 was wrong — wrong in the direction that
+          # matters, so it is worth replacing rather than deleting.
+          #
+          # It said: the mask comes from `BlockHeader.free?`, that flag is
+          # stale on a bitmap chunk, therefore the walk would compute the wrong
+          # liveness and release a page holding a live object. The staleness is
+          # real. Its direction is not what that says. `set_used` clears FREE
+          # when a block is handed out and `bitmap_free_block` clears only
+          # `occ`/`mark` and never touches the header, so on a bitmap chunk
+          # `BlockHeader.free?` is false for *every* block, forever. The mask
+          # is all-ones over every page that holds a whole block: it
+          # over-reports liveness and can only fail to release.
+          #
+          # Measured on Apple M2 Pro / Darwin 25.6.0 / Crystal 1.21.0 with
+          # `GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1` and the stand-down
+          # removed (`GCRY_PAGE_RELEASE_BITMAP_WALK=1`): 208 KiB released from
+          # bitmap chunks — the tail slack below the last whole block — and
+          # `page_release_live_blocks=0`, i.e. the `occ`-based re-read found no
+          # live block in any run the mask selected, 5 runs of 5. The header
+          # arm of the same gate releases 2.88 MiB, so the walk does work here.
+          #
+          # So this `next` is a cost decision, not a soundness one: it skips a
+          # full chunk walk per collection that would return ~208 KiB. The
+          # soundness of the bitmap representation rests on the *other*
+          # stand-down — `unlink_free_only_page_runs` below, which declines
+          # because under bitmap allocation there is no freelist to unlink and
+          # the pool cursor can hand out a block inside a run being released.
+          # That one is load-bearing and has its own measured record.
+          #
+          # The checksum cannot decide any of this on Darwin, which is why the
+          # evidence above is a counter: `Platform.release_physical_pages`
+          # issues `madvise(..., MADV_FREE)`, and measured on the same host
+          # both `MADV_FREE` and `MADV_FREE_REUSABLE` return 0 on a
+          # still-referenced range and leave every word intact through 2 GiB
+          # of pressure. A mis-released page here is latent.
+          # `make darwin-bitmap-page-release` holds all of it.
+          next if bitmap_alloc_chunk?(chunk) && !@page_release_bitmap_walk
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
           release_chunk_pages_excluded(chunk, class_index, preserve_content: false)

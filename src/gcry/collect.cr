@@ -582,6 +582,15 @@ module Gcry
     # is what it did before 2026-08-24.
     property page_release_unchecked : Bool = false
 
+    # Research only: let the Darwin free-page walk visit bitmap-allocated
+    # chunks, which is what it did before the stand-down in
+    # `flush_pending_page_release_chunks`. The walk builds its free-page mask
+    # from `BlockHeader.free?`, and on a bitmap chunk that flag is whatever
+    # the carve left there — the streaming sweep never writes it — so the mask
+    # bears no relation to occupancy. `make darwin-bitmap-page-release` uses
+    # this to show what the stand-down is standing down from.
+    property page_release_bitmap_walk : Bool = false
+
     # How many threads are inside `realloc`'s copy right now, and how many
     # collections have begun while at least one was. This measures the *window*
     # rather than its consequences: a crash-rate A/B cannot separate a 5 %

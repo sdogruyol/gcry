@@ -69,6 +69,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads `/proc/self/maps` and cannot run here — so the argument had no Darwin
   arm. It refuses a `__DATA*` section of 1 MiB or more now.
 
+- **The Darwin free-page walk's bitmap stand-down had a backwards reason.** It
+  was written on Linux and never run on Darwin, the only platform its arm
+  exists on. The comment said the mask is built from `BlockHeader.free?`, that
+  the flag is stale on a bitmap chunk, and that the walk would therefore
+  release a page holding a live object. The staleness is real and the
+  direction is not: `set_used` clears FREE when a block is handed out and
+  `bitmap_free_block` clears only `occ`/`mark`, so `BlockHeader.free?` is
+  false for *every* block on such a chunk and the mask can only fail to
+  release. Measured with the stand-down removed
+  (`GCRY_PAGE_RELEASE_BITMAP_WALK=1`): 208 KiB released — the tail slack below
+  the last whole block — with `page_release_live_blocks=0`, 5 of 5, and still 0
+  with the `occ` re-read also off; the header arm of the same gate releases
+  2.88 MiB, so the walk does work here. The `next` is kept as a cost decision
+  and says so. What keeps the representation sound is the *other* stand-down,
+  in `unlink_free_only_page_runs`, which declines because there is no freelist
+  to unlink and the pool cursor can hand out a block inside a run being
+  released. No checksum can decide this on Darwin: `release_physical_pages`
+  issues `MADV_FREE`, and both `MADV_FREE` and `MADV_FREE_REUSABLE` measured
+  on this host return 0 on a still-referenced range and leave every word
+  intact through 2 GiB of pressure, so a mis-released page is latent and the
+  gate reads the counter. `make darwin-bitmap-page-release`.
+  `bench/log/macos/2026-09-04-bitmap-page-release-standdown/`
+
 - **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
   mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
   because the nursery keeps the header representation — so a nursery block's

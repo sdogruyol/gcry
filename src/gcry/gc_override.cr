@@ -850,6 +850,10 @@ module GC
     heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
+    # Research only: let the Darwin free-page walk visit bitmap-allocated
+    # chunks, which is the stand-down in `flush_pending_page_release_chunks`
+    # turned off. `make darwin-bitmap-page-release` is the gate.
+    heap.page_release_bitmap_walk = true if env_flag_one?("GCRY_PAGE_RELEASE_BITMAP_WALK")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")
