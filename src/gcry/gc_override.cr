@@ -798,23 +798,26 @@ module GC
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
     # Resolve the static roots now, on the main thread and before any other
     # thread exists: Linux reads the executable's program headers, which takes
-    # the loader's lock, and that is not something to do first inside a stopped
-    # world holding whatever locks the suspended threads hold.
+    # the loader's lock, and Darwin walks dyld's image 0 and `realloc`s the
+    # range cache. Neither is something to do first inside a stopped world
+    # holding whatever locks the suspended threads hold.
     #
-    # Linux only, and deliberately. Darwin's cache is generation-based and
-    # populated lazily from `scan_static_roots`, which is where it has always
-    # been resolved; moving that into `GC.init` — before Crystal's runtime is
-    # up — took `crystal spec -Dgc_none process_spec` on the macOS runner to
-    # an invalid memory access (CI 33900305015) while Linux stayed green, and
-    # there is no Darwin host here to attribute it on. So Darwin keeps the
-    # behaviour it shipped with. The *method* is public on both sides either
-    # way, which is the part that matters for the next caller: it was private
-    # on Darwin and compiled only because this line carried a `flag?(:linux)`
-    # guard, the same asymmetry that broke the macOS build via `bss_size_cap=`
-    # on 2026-08-22.
-    {% if flag?(:linux) %}
+    # Both platforms as of 2026-09-04. Darwin was excluded because doing this
+    # crashed `crystal spec -Dgc_none process_spec` on the macOS runner (CI
+    # 33900305015) with no host to attribute it on. The host now exists and the
+    # mechanism was named: two of `darwin_roots.cr`'s class variables had
+    # initialisers the compiler wraps in `__crystal_once`, `GC.init` runs
+    # before `Crystal.main` reaches `init_runtime`, and `__crystal_once` there
+    # reaches `Fiber.current` -> `Thread.new` -> `Fiber.new` ->
+    # `Fiber.@@fibers.push` on a null class variable. Fixed at the
+    # declarations, not here (src/gcry/platform/darwin_roots.cr).
+    #
+    # Research only: `GCRY_STATIC_ROOT_LAZY=1` skips this, which puts the
+    # first walk back inside the first stopped world. It is the red arm of
+    # `make darwin-static-root-init`.
+    unless env_flag_one?("GCRY_STATIC_ROOT_LAZY")
       Gcry::Platform.ensure_static_root_cache
-    {% end %}
+    end
     # Research only: a full staging table refuses the birth being handed in
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).

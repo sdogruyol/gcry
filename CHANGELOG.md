@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`GC.init`'s eager static-root resolve crashed every `-Dgc_none` binary on
+  macOS, and the mechanism is now named.** The resolve was Linux-only because
+  enabling it on Darwin took `crystal spec -Dgc_none process_spec` to an
+  invalid memory access on the macOS runner (CI 33900305015) with no Darwin
+  host to attribute it on. It is `once`-guarded lazy class-variable
+  initialisation: `GC.init` runs before `Crystal.main` reaches `init_runtime`,
+  and `__crystal_once` there reads `Fiber.current` -> `Thread.new` ->
+  `Fiber.new` -> `Fiber.@@fibers.push` on a class variable `Fiber.init` has
+  not created yet. Null receiver, `EXC_BAD_ACCESS` at `0x18`, before `main`;
+  three lines of user code reproduce it. Two declarations in
+  `platform/darwin_roots.cr` were responsible — `@@ranges : RootRange* =
+  Pointer(RootRange).null` (a call) and `@@cached_generation = UInt32::MAX` (a
+  constant path) — while the simple-literal ones beside them were fine, which
+  is why `linux_roots.cr`, written with `uninitialized` and literals
+  throughout, never hit it. Neither guard was doing anything: the compiler had
+  already folded both values into the globals' own initialisers (`ptr null`,
+  `i32 -1`), so the guarded store wrote what was already there. Fixed at the
+  declarations; the resolve is eager on both platforms now, which takes
+  `LibC.realloc` and dyld's image walk out of the first stopped world.
+  `make darwin-static-root-init` walks the emitted LLVM call graph and fails if
+  `__crystal_once` is reachable from `ensure_static_root_cache` along any path
+  that can return; its red arm `-Dgcry_static_root_once` restores the
+  `@@cached_generation` initialiser — the accessor that was the resolve's
+  first instruction — and must reintroduce the edge *and* SEGV.
+  `GCRY_STATIC_ROOT_LAZY=1` is the effect arm.
+  `bench/log/macos/2026-09-04-static-root-init-once/`
+
 - **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
   mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
   because the nursery keeps the header representation — so a nursery block's

@@ -1418,10 +1418,14 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `queue_pending` — which really does call `LibC.malloc` once per unreachable
       finalizable object with the world stopped, measured at ~1999 in one
       collection — is 0 of 150, all against a control firing at 4–9%. So the
-      registry was **left alone**, as were `Platform.push_range`'s realloc inside
-      `scan_static_roots` and the blacklist / chunk-index growth. The rule that
-      survives is narrow — do not ask glibc about a suspended thread — and
-      `pthread_getattr_np` was its only instance in the collect path.
+      registry was **left alone**, as were the blacklist / chunk-index growth.
+      The rule that survives is narrow — do not ask glibc about a suspended
+      thread — and `pthread_getattr_np` was its only instance in the collect
+      path. `Platform.push_range`'s realloc inside `scan_static_roots` was
+      left alone here too, and is **gone** as of 2026-09-04: the resolve is
+      eager in `GC.init` on both platforms and the range table is a fixed
+      `StaticArray`, so nothing on that path allocates or raises at all
+      (`bench/log/macos/2026-09-04-static-root-init-once/`).
 - [x] **Make a hang under STW audible.** Done — `GCRY_STW_WATCHDOG_MS` arms a raw
       watcher thread (not a `Crystal::Thread`, or STW would suspend the one thread
       that has to keep running) which prints the stuck phase:

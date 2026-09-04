@@ -53,6 +53,16 @@ module Gcry
     @@static_root_overflow = 0_u64
     @@static_root_bss_lost = 0_u64
 
+    # Walks of the program headers that actually ran. Darwin counts its dyld
+    # walks the same way, and for the same reason: `GC.init` resolving the
+    # roots eagerly must leave this at 1, and a 0 there means the first walk
+    # is happening inside a stopped world.
+    @@resolves = 0_u64
+
+    def self.static_root_resolves : UInt64
+      @@resolves
+    end
+
     def self.static_root_bss_lost : UInt64
       @@static_root_bss_lost
     end
@@ -99,6 +109,7 @@ module Gcry
         @@range_count = 0
         @@relro_lo = 0_u64
         @@relro_hi = 0_u64
+        @@resolves &+= 1
         LibC.dl_iterate_phdr(->(info : LibC::DlPhdrInfo*, size : LibC::SizeT, data : Void*) {
           if Platform.holds_probe?(info)
             Platform.take_executable_segments(info)
