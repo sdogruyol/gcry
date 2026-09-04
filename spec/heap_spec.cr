@@ -27,27 +27,89 @@ describe Gcry::Heap do
     end
   end
 
-  {% unless flag?(:gcry_headerless) %}
-    # LIFO freelist reuse; headerless forces the bitmap pool allocator, which hands out the lowest free bit.
-    it "malloc re-zeros freelist reuse after free" do
+  # Reuse is representation-specific: the freelist hands a freed block straight
+  # back (LIFO); the bitmap pool hands out the lowest free bit, so the freed
+  # block comes back within one chunk's worth of allocations. Both are checked
+  # in the header build; headerless has only the bitmap path.
+  [false, true].each do |bitmap|
+    it "malloc re-zeros a reused block after free (bitmap_alloc=#{bitmap})" do
       heap = Gcry::Heap.new
-      # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
-      # pool cursor has neither by design — it hands out the lowest free bit in
-      # the current word and never claims a block is pre-zeroed. Pinned so this
-      # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
-      heap.bitmap_alloc = false
+      heap.bitmap_alloc = bitmap
+      heap.gc_threshold = UInt64::MAX
+      # A freed block in a nursery chunk comes back at the next minor, not to
+      # the cursor; reuse before any collection is a mature-chunk property.
+      heap.nursery_enabled = false
       begin
         ptr = heap.malloc(64)
         64.times { |i| ptr.as(UInt8*)[i] = 0xCD_u8 }
         heap.free(ptr)
-        again = heap.malloc(64)
+        again = Pointer(Void).null
+        4096.times do
+          p = heap.malloc(64)
+          if p == ptr
+            again = p
+            break
+          end
+        end
         again.should eq(ptr)
         64.times { |i| again.as(UInt8*)[i].should eq(0) }
       ensure
         heap.destroy
       end
     end
-  {% end %}
+
+    it "malloc_atomic does not clear a reused block (bitmap_alloc=#{bitmap})" do
+      heap = Gcry::Heap.new
+      heap.bitmap_alloc = bitmap
+      heap.gc_threshold = UInt64::MAX
+      # A freed block in a nursery chunk comes back at the next minor, not to
+      # the cursor; reuse before any collection is a mature-chunk property.
+      heap.nursery_enabled = false
+      begin
+        ptr = heap.malloc_atomic(64)
+        64.times { |i| ptr.as(UInt8*)[i] = 0xAB_u8 }
+        heap.free(ptr)
+        again = Pointer(Void).null
+        4096.times do
+          p = heap.malloc_atomic(64)
+          if p == ptr
+            again = p
+            break
+          end
+        end
+        again.should eq(ptr)
+        again.as(UInt8*)[0].should eq(0xAB_u8)
+      ensure
+        heap.destroy
+      end
+    end
+
+    it "free makes a small block available for reuse (bitmap_alloc=#{bitmap})" do
+      heap = Gcry::Heap.new
+      heap.bitmap_alloc = bitmap
+      heap.gc_threshold = UInt64::MAX
+      # A freed block in a nursery chunk comes back at the next minor, not to
+      # the cursor; reuse before any collection is a mature-chunk property.
+      heap.nursery_enabled = false
+      begin
+        a = heap.malloc(16)
+        b = heap.malloc(16)
+        heap.free(a)
+        heap.free(b)
+        heap.live_objects.should eq(0)
+        seen = [] of Void*
+        4096.times do
+          c = heap.malloc(16)
+          seen << c
+          break if seen.includes?(a) && seen.includes?(b)
+        end
+        seen.includes?(a).should be_true
+        seen.includes?(b).should be_true
+      ensure
+        heap.destroy
+      end
+    end
+  end
 
   it "malloc re-zeros large objects taken from the cache" do
     heap = Gcry::Heap.new
@@ -63,57 +125,6 @@ describe Gcry::Heap do
       heap.destroy
     end
   end
-
-  {% unless flag?(:gcry_headerless) %}
-    # LIFO freelist reuse; headerless forces the bitmap pool allocator, which hands out the lowest free bit.
-    it "malloc_atomic does not clear memory" do
-      heap = Gcry::Heap.new
-      # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
-      # pool cursor has neither by design — it hands out the lowest free bit in
-      # the current word and never claims a block is pre-zeroed. Pinned so this
-      # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
-      heap.bitmap_alloc = false
-      begin
-        ptr = heap.malloc_atomic(64)
-        bytes = ptr.as(UInt8*)
-        # Write then free then realloc from freelist — may see old data.
-        64.times { |i| bytes[i] = 0xAB_u8 }
-        heap.free(ptr)
-
-        again = heap.malloc_atomic(64)
-        # Same size class freelist reuse; contents need not be zero.
-        again.should eq(ptr)
-        again.as(UInt8*)[0].should eq(0xAB_u8)
-      ensure
-        heap.destroy
-      end
-    end
-  {% end %}
-
-  {% unless flag?(:gcry_headerless) %}
-    # LIFO freelist reuse; headerless forces the bitmap pool allocator, which hands out the lowest free bit.
-    it "free returns small blocks to the freelist" do
-      heap = Gcry::Heap.new
-      # Freelist semantics: LIFO reuse and the `@freelist_clean` memset skip. The
-      # pool cursor has neither by design — it hands out the lowest free bit in
-      # the current word and never claims a block is pre-zeroed. Pinned so this
-      # keeps testing the freelist under a GCRY_BITMAP_ALLOC=1 sweep.
-      heap.bitmap_alloc = false
-      begin
-        a = heap.malloc(16)
-        b = heap.malloc(16)
-        heap.free(a)
-        heap.free(b)
-        heap.live_objects.should eq(0)
-
-        c = heap.malloc(16)
-        # LIFO freelist
-        c.should eq(b)
-      ensure
-        heap.destroy
-      end
-    end
-  {% end %}
 
   it "detects double free" do
     heap = Gcry::Heap.new

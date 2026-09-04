@@ -464,11 +464,9 @@ module Gcry
     # Bytes from a large chunk's base to its object. Single definition so
     # sizing, carving and the header slot cannot drift apart.
     def self.large_data_offset : Int32
-      {% if flag?(:gcry_headerless) %}
-        ChunkHeader::SIZE + 16
-      {% else %}
-        ChunkHeader::SIZE + BlockHeader::SIZE
-      {% end %}
+      # The large header keeps its 16 bytes in both builds; only the small
+      # block loses its header.
+      ChunkHeader::SIZE + BlockHeader::LARGE_HEADER_BYTES
     end
 
     def self.large_header(chunk : ChunkHeader*) : BlockHeader*

@@ -39,3 +39,18 @@ Rules written after corrections, so the same mistake is not made twice.
   sequentially.
 - A probe's root array via `Pointer(T).malloc` is GC-managed and roots
   everything it holds; use `LibC.malloc` for probe bookkeeping.
+
+## Review fixes
+- **"Dead code" has branches.** `clamped_scan_size` looked replaceable by the
+  chunk-derived payload, and it was for small blocks; for large blocks it was
+  `min(header.size, extent)`, and dropping it made large scans walk the whole
+  mapping. Before deleting a helper, diff its result against the replacement
+  for every representation it serves (small/large, header/headerless,
+  freelist/bitmap), not just the one the review named.
+- **Guarded specs are debt.** A `{% unless %}` around a failing example is a
+  claim that the property does not exist in that build. Check whether the
+  property survives the representation (block reuse did; TLAB refills did
+  not) and assert it there before reaching for the guard.
+- **A reproduction can pass for the wrong reason.** The stale-tail example
+  passed with the fix reverted; the size example did not. Keep the example
+  whose failure you actually observed as the pin, and say which one that was.

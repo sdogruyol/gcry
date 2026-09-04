@@ -839,3 +839,51 @@ pairs of scrub on (default) vs `GCRY_COLLECT_SCRUB=0`: 41 265 vs 41 057 req/s
 median, paired difference +0.64% at t = 0.12 — flat, as two memsets per
 collection at a 0.2–0.5% duty cycle should be. Post-collect RSS 13.8 MB in
 both arms.
+
+## Update 12 (2026-09-04): the reviewer's pass
+
+Every remaining item on the plan's verification list ran green: invariants,
+spec-process, stw-index-race, poison-freed, oom-no-hang, stw-watchdog, asan,
+and soak-smoke in both builds (header +584 kB over the run, headerless
++1292 kB, ceiling +4096 kB). The one message asan printed mid-run,
+`live_objects mismatch: actual=1 reported=2`, is the invariants spec proving
+its own detector fires.
+
+### Found and fixed
+
+- **Large objects were scanned to the end of their mapping, not to their
+  size.** Removing `clamped_scan_size` for the review finding replaced
+  `min(header.size, extent)` with the extent for large blocks. The header
+  keeps the size in both builds, so `block_payload` now returns it, clamped
+  to the mapping. Effects that were real: `diag_payload` and live attribution
+  reported a large object's mapping size, and the precise-layout `size_match`
+  could never hit for a large object. The stale-tail retention I expected
+  from a cached mapping did *not* reproduce (the tail example passes with
+  the fix reverted, for a reason I did not run down); the spec keeps both
+  properties pinned.
+- **Live attribution under headerless counted zero bytes.** `json_live_attr`
+  and `note_first_mark` read sizes and the atomic flag from the header;
+  both now go through the chunk.
+- **The collect scrub was inflating `clear_stack_calls`**, a metric that
+  means the allocation-path wipe. It has its own counters
+  (`collect_scrub_runs`, `collect_scrub_bytes_total`, on `/metrics` and
+  `json_stats`), and the stack-scrub spec is back to its original meaning.
+
+### Specs
+
+The headerless guards were reviewed one by one. Where the property survives
+the representation it is now asserted in both builds, and in the header build
+on both allocators: block reuse after `free` (freelist LIFO vs bitmap
+lowest-free-bit, within one chunk of allocations), `malloc` re-zeroing a
+reused block, `malloc_atomic` not clearing one, the TLAB examples' allocation
+and free checks. What headerless refuses — the nursery, turning the bitmaps
+off — has its own headerless-only examples, together with the large-object
+layout (header behind the object, `contains?` from the header slot). The
+remaining guards are features that are off by design there: nursery, TLAB
+refill counters, the mprotect barrier, the geometry's bitmaps-off branch.
+
+One behaviour worth knowing, found by the rewritten reuse examples: under the
+bitmap allocator with the nursery on, an explicitly freed block in a nursery
+chunk is not handed out again until the next minor collection (the pool
+cursor skips nursery chunks). The freelist build reuses it immediately. The
+examples run with the nursery off and say why.

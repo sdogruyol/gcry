@@ -22,6 +22,7 @@ describe "Gcry.live_attr_json" do
       obj["live_attr_roots"].as_bool.should be_true
       # Explicit add_root uses Stack source → first-mark stack non-zero.
       obj["first_mark_stack_objects"].as_i.should be > 0
+      obj["first_mark_stack_bytes"].as_i.should be > 0
       obj["collision_bytes"]?.should_not be_nil
       obj["max_size_class"]?.should_not be_nil
 

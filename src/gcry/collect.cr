@@ -1802,11 +1802,11 @@ module Gcry
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector
       # residue. Zero it before this cycle's scan chain overlays and scans it.
-      clear_stack(@collect_scrub_bytes) if @collect_scrub_bytes > 0
+      collect_scrub
       run_collection_body(major, scan_stack, roots, coalesce)
       # The frames this cycle just used are dead below the SP again. Zero them
       # so nothing between now and the next entry scans them as live.
-      clear_stack(@collect_scrub_bytes) if @collect_scrub_bytes > 0
+      collect_scrub
     end
 
     @[NoInline]

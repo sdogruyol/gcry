@@ -123,9 +123,30 @@ module Gcry
     property collect_scrub_bytes : UInt64 = 16384_u64
 
     # Zero unused stack below the hardware SP (stack grows down).
+    # Accounted apart from `clear_stack_calls`, which means the allocation-path
+    # wipe (`GCRY_CLEAR_STACK`) and would otherwise count every collection.
+    getter collect_scrub_runs : UInt64 = 0_u64
+    getter collect_scrub_bytes_total : UInt64 = 0_u64
+
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
-      return if bytes == 0
-      return if @@clear_stack_active
+      len = clear_stack_guarded(bytes)
+      return if len == 0
+      @clear_stack_bytes_total += len
+      @clear_stack_calls += 1
+    end
+
+    # The collector's own entry/exit scrub; see `run_collection`.
+    protected def collect_scrub : Nil
+      len = clear_stack_guarded(@collect_scrub_bytes)
+      return if len == 0
+      @collect_scrub_bytes_total += len
+      @collect_scrub_runs += 1
+    end
+
+    # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
+    private def clear_stack_guarded(bytes : UInt64) : UInt64
+      return 0_u64 if bytes == 0
+      return 0_u64 if @@clear_stack_active
       @@clear_stack_active = true
       begin
         clear_stack_body(bytes)
@@ -134,16 +155,16 @@ module Gcry
       end
     end
 
-    private def clear_stack_body(bytes : UInt64) : Nil
+    private def clear_stack_body(bytes : UInt64) : UInt64
       # Must use hardware SP — Roots.stack_pointer is mid-frame and wiping
       # up to it corrupts the leaf (null-deref SEGV on aarch64 CI).
       sp_addr = Roots.hardware_stack_pointer.address
       skip = CLEAR_STACK_RED_ZONE + CLEAR_STACK_LEAF_MARGIN
-      return if sp_addr <= skip
+      return 0_u64 if sp_addr <= skip
 
       high = sp_addr - skip
       guard = 0_u64
-      on_thread_stack = false
+      bounds_known = false
 
       {% if flag?(:linux) || flag?(:freebsd) || flag?(:openbsd) || flag?(:dragonfly) %}
         attr = uninitialized LibC::PthreadAttrT
@@ -155,7 +176,7 @@ module Gcry
             lo = stackaddr.address
             hi = lo + stacksize.to_u64
             if sp_addr > lo && sp_addr <= hi
-              on_thread_stack = true
+              bounds_known = true
               guard = lo + Roots::PAGE_SIZE
             end
           end
@@ -166,45 +187,44 @@ module Gcry
           lo = bounds[0].address
           hi = bounds[1].address
           if sp_addr > lo && sp_addr <= hi
-            on_thread_stack = true
+            bounds_known = true
             guard = lo + Roots::PAGE_SIZE
           end
         end
       {% end %}
 
-      unless on_thread_stack
+      unless bounds_known
         # A Crystal fiber stack: the fiber knows its own bounds, so the wipe
         # can stop at its guard page like the pthread case above.
         stack = Fiber.current.@stack
         lo = stack.pointer.address
         hi = stack.bottom.address
         if lo < hi && sp_addr > lo && sp_addr <= hi
-          on_thread_stack = true
+          bounds_known = true
           guard = lo + Roots::PAGE_SIZE
         end
       end
 
       wipe = bytes
-      unless on_thread_stack
+      unless bounds_known
         # Unknown stack. Cap wipe so we do not walk into an unmapped/guard
         # page on a thinly grown stack.
         wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
         guard = high > wipe ? high - wipe : 0_u64
       end
 
-      return if high <= guard
-      return if sp_addr <= guard + skip
+      return 0_u64 if high <= guard
+      return 0_u64 if sp_addr <= guard + skip
 
       low = high > wipe ? high - wipe : guard
       low = guard if low < guard
-      return if low >= high
+      return 0_u64 if low >= high
 
       len = high - low
-      return if len == 0 || len > Roots::MAX_SCAN_BYTES
+      return 0_u64 if len == 0 || len > Roots::MAX_SCAN_BYTES
 
       Pointer(UInt8).new(low).clear(len)
-      @clear_stack_bytes_total += len
-      @clear_stack_calls += 1
+      len
     end
 
     # Zero a capped window below each parked fiber's saved SP — not the full

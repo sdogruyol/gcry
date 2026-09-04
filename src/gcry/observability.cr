@@ -234,6 +234,8 @@ module Gcry
         parallel_mark_stolen:                  heap.parallel_mark_stolen,
         clear_stack_calls:                     heap.clear_stack_calls,
         clear_stack_bytes_total:               heap.clear_stack_bytes_total,
+        collect_scrub_runs:                    heap.collect_scrub_runs,
+        collect_scrub_bytes_total:             heap.collect_scrub_bytes_total,
         fiber_scrub_bytes:                     heap.fiber_scrub_bytes,
         fiber_scrub_runs:                      heap.fiber_scrub_runs,
         fiber_scrub_bytes_total:               heap.fiber_scrub_bytes_total,

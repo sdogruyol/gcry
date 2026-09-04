@@ -422,3 +422,26 @@ the tail of a long session.
 
 It remains the right next big lever: 16 B/object is 50% of a class-0 block, and
 it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
+
+## Pre-review pass (2026-09-04): reviewer's shoes
+
+- [x] Run the rest of the plan's verification list: asan, invariants,
+      spec-process, stw-index-race, poison-freed, oom-no-hang, stw-watchdog,
+      soak-smoke (both builds). Fix what reproduces.
+- [x] Adversarial review of ddafb55 + the headerless core paths; every
+      reported bug must come with a reproduction.
+- [x] Smell: the collect scrub inflates `clear_stack_calls`, a metric that
+      meant the allocation-time wipe. Give it its own counters and put the
+      stack_scrub spec back to its original meaning.
+- [x] Smell: `on_thread_stack` in `clear_stack_body` now means "bounds known".
+- [x] Specs: turn guards into coverage where the property survives the
+      representation (freelist reuse -> block reuse; TLAB examples keep their
+      allocation checks; headerless-only examples for the refused switches:
+      nursery, bitmap_marks/alloc off).
+- [x] Re-run spec suite x3, gates touched, commit, push.
+- [x] Found on the way: large-object scan length was the mapping extent
+      (fixed, spec/large_scan_bounds_spec.cr); live attribution bytes were
+      zero under headerless (fixed).
+- [ ] Adversarial review subagent died on the session rate limit; the
+      review was done by hand instead. Re-run it when the limit resets if a
+      second pair of eyes is wanted before the PR.

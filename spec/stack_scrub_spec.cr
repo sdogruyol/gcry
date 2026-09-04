@@ -40,10 +40,6 @@ describe "Gcry stack scrub" do
     begin
       heap.gc_threshold = UInt64::MAX
       heap.scrub_fibers_enabled = false
-      # Every collection scrubs its own dead stack (`GCRY_COLLECT_SCRUB`)
-      # through the same primitive; this example is about the parked-fiber
-      # scrub alone, so silence that one too.
-      heap.collect_scrub_bytes = 0
       keep = heap.malloc(16)
       heap.add_root(keep)
       before_fiber = heap.fiber_scrub_runs
@@ -83,6 +79,40 @@ describe "Gcry stack scrub" do
       3.times { heap.malloc(16) }
       heap.clear_stack(512)
       heap.clear_stack_calls.should be > 0
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "scrubs its own dead stack at collection entry and exit, accounted apart" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      keep = heap.malloc(16)
+      heap.add_root(keep)
+      calls = heap.clear_stack_calls
+      runs = heap.collect_scrub_runs
+      heap.collect(scan_stack: true)
+      heap.collect_scrub_runs.should eq runs + 2
+      heap.collect_scrub_bytes_total.should be > 0
+      heap.clear_stack_calls.should eq calls
+      heap.live?(keep).should be_true
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "does not scrub when GCRY_COLLECT_SCRUB is 0" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.collect_scrub_bytes = 0
+      keep = heap.malloc(16)
+      heap.add_root(keep)
+      heap.collect(scan_stack: true)
+      heap.collect_scrub_runs.should eq 0
+      heap.collect_scrub_bytes_total.should eq 0
+      heap.live?(keep).should be_true
     ensure
       heap.destroy
     end

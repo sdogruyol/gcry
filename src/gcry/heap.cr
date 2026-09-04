@@ -2435,10 +2435,15 @@ module Gcry
 
     def block_payload(chunk : ChunkHeader*, header : BlockHeader*) : UInt32
       if ChunkHeader.large?(chunk)
+        # The large header keeps the allocated size in both builds; the
+        # mapping only bounds it. Scanning to the mapping's end would read a
+        # cached mapping's stale tail (spec/large_scan_bounds_spec.cr).
         user = user_of(chunk, header).address
         finish = ChunkHeader.data_end(chunk).address
         return 0_u32 if finish <= user
-        return (finish - user).to_u32
+        extent = finish - user
+        size = header.value.size.to_u64
+        return (size < extent ? size : extent).to_u32
       end
       class_index = chunk.value.size_class.to_i32
       return 0_u32 if class_index < 0 || class_index >= SIZE_CLASS_COUNT

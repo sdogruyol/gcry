@@ -282,8 +282,12 @@ module Gcry
     # *_atomic_bytes: malloc_atomic slabs first reached from that source (acik
     # 32 KiB IO buffers). Optional watch type_id → first_mark_watch_*.
     private def note_first_mark(header : BlockHeader*, source : RootSource) : Nil
-      bytes = header.value.size.to_u64
-      atomic = BlockHeader.atomic?(header)
+      # Diagnostic path (`GCRY_LIVE_ATTR=1`): the lookup is affordable, and the
+      # header alone has neither size nor kind for a small block under
+      # `-Dgcry_headerless`.
+      chunk = chunk_containing(header.address)
+      bytes = chunk ? block_payload(chunk, header).to_u64 : header.value.size.to_u64
+      atomic = chunk ? atomic_of(chunk, header) : BlockHeader.atomic?(header)
       case source
       when RootSource::Stack
         @first_mark_stack_objects += 1
