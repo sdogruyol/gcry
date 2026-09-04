@@ -40,18 +40,44 @@ module Gcry
     # `tail_mask` exists to mask off — `~occ` would otherwise offer blocks past
     # `data_end`.
 
-    # The largest chunk for which the shift-40 reciprocal below is exact.
+    RECIPROCAL_SHIFT = 40
+
+    # The largest chunk for which the shift-40 reciprocal below is exact — for
+    # every size class **of this build**.
     #
     # With `e = magic*d - 2^40`, the first offset where `(off*magic) >> 40`
-    # disagrees with `off // d` is `2^40 / e`. Across the 40 size classes the
-    # tightest is `block_bytes = 24592`, which first fails at 86.3 MiB. 64 MiB
-    # is that bound rounded down to something memorable, and it is 512x the
-    # 128 KiB default and 256x Darwin's 256 KiB. `GCRY_CHUNK_BYTES` is
-    # user-settable with no upper bound (gc_override.cr), which is why this is
-    # checked rather than trusted.
-    MAX_RECIPROCAL_CHUNK_BYTES = 64_u64 * 1024 * 1024
-
-    RECIPROCAL_SHIFT = 40
+    # disagrees with `off // d` is `2^40 / e`. Two things follow, and the
+    # hardcoded 64 MiB that used to sit here got both wrong.
+    #
+    # It depends on `BlockHeader::SIZE`. The header build's tightest class is
+    # `block_bytes = 24592`, first failing at 86.3 MiB — the number the old
+    # comment quoted. `-Dgcry_headerless` sets `SIZE` to 0, which makes the
+    # tightest class 28672 and moves the bound to **51.2 MiB**, *below* the
+    # 64 MiB the constant allowed. `GCRY_CHUNK_BYTES` is user-settable, so a
+    # headerless build with a chunk in (51.2, 64] MiB resolved the wrong block
+    # for some offsets in that class — wrong `occ` bit, wrong mark bit, wrong
+    # user pointer, no diagnostic. Measured at `d = 28672`: offset 53 702 655
+    # gives ordinal 1873 where 1872 is correct.
+    #
+    # And the failure is **not monotone** — past the first bad offset the two
+    # agree again at most offsets (67 108 863 does) — so a bound cannot be
+    # spot-checked at a ceiling, which is how the old spec passed. It has to be
+    # the minimum of the first-failure points over the whole table, which is
+    # what this is.
+    MAX_RECIPROCAL_CHUNK_BYTES = begin
+      limit = UInt64::MAX
+      i = 0
+      while i < SizeClasses::COUNT
+        d = BlockHeader::SIZE.to_u64 + SizeClasses.payload(i).to_u64
+        e = block_magic(d) &* d &- (1_u64 << RECIPROCAL_SHIFT)
+        if e > 0
+          first_bad = (1_u64 << RECIPROCAL_SHIFT) // e
+          limit = first_bad if first_bad < limit
+        end
+        i += 1
+      end
+      limit
+    end
 
     # `ceil(2^40 / block_bytes)`, so that `(offset * magic) >> 40` is exactly
     # `offset // block_bytes` for every offset within a chunk.

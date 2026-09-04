@@ -34,6 +34,15 @@ module Gcry
       @parallel_mark_workers = value.clamp(1, 16)
     end
 
+    # Research only — `GCRY_MARK_BUSY_UNLOCKED=1`: count a mark worker busy
+    # *after* releasing the lock that gave it the batch, as gcry did before
+    # 2026-09-04, and widen the window that opens. The master then reads
+    # `busy == 0` and an empty stack while a worker holds up to
+    # `MARK_POP_BATCH` unscanned objects, ends the cycle, and sweeps their
+    # unmarked children. `make parallel-mark-termination` uses it as the red
+    # arm. Never ship non-false: this reclaims live objects.
+    property mark_busy_unlocked : Bool = false
+
     # Diagnostic: what `shutdown_mark_workers` will actually try to join.
     # A non-zero count with `parallel_mark_workers == 1` means this bookkeeping
     # has been corrupted, not that workers exist.
@@ -193,7 +202,20 @@ module Gcry
       @mark_pushbuf_n[slot] = 0
     end
 
-    # Take up to `cap` headers from the shared stack under one lock.
+    # Take up to `cap` headers from the shared stack under one lock, and count
+    # the taker busy **inside that same critical section**.
+    #
+    # The two have to be one step. The master stops when it sees
+    # `busy == 0 && stack empty`, and the argument for that being stable is
+    # that a worker can only become busy by popping a non-empty batch. With
+    # the increment outside the lock the argument does not hold: a worker
+    # pops the last batch, is preempted before `add(1)`, and the master reads
+    # `busy == 0` and an empty stack in that window, ends the cycle and
+    # sweeps — while the worker still holds up to `MARK_POP_BATCH` unscanned
+    # objects whose children are unmarked and now unreachable from the mark.
+    # Live objects are reclaimed. Counting under the lock closes it: an
+    # observer holding the lock cannot see the stack lose entries without
+    # seeing the taker become busy.
     protected def pop_mark_batch(into : Pointer(Void*), cap : Int32) : Int32
       @mark_lock.lock
       n = 0
@@ -201,8 +223,37 @@ module Gcry
         into[n] = @mark_stack.pop.as(Void*)
         n += 1
       end
+      # Paired with the `add(-1)` every caller owes after its scan and flush.
+      @mark_workers_busy.add(1) if n > 0 && !@mark_busy_unlocked
       @mark_lock.unlock
+      if n > 0 && @mark_busy_unlocked
+        # Research only: the protocol as it was before 2026-09-04 — the
+        # increment outside the lock — with the window it left open widened
+        # so the gate does not depend on losing a scheduling coin toss.
+        i = 0
+        while i < MARK_BUSY_DELAY_SPINS
+          Intrinsics.pause
+          i += 1
+        end
+        @mark_workers_busy.add(1)
+      end
       n
+    end
+
+    MARK_BUSY_DELAY_SPINS = 4096
+
+    # Both halves of the termination condition, from one critical section.
+    # Read separately, an emptiness observed after a `busy` read describes two
+    # different instants and neither is the one being decided about — which is
+    # what the research arm restores.
+    private def mark_drain_finished? : Bool
+      if @mark_busy_unlocked
+        return @mark_workers_busy.get == 0 && mark_stack_empty_locked?
+      end
+      @mark_lock.lock
+      done = @mark_workers_busy.get == 0 && @mark_stack.empty?
+      @mark_lock.unlock
+      done
     end
 
     private def mark_stack_empty_locked? : Bool
@@ -245,10 +296,10 @@ module Gcry
             Intrinsics.pause
             next
           end
-          # Busy spans holding a batch AND its unflushed children, so a worker
-          # is never counted idle while it might still push. That is the
-          # invariant the master's termination check rests on.
-          @mark_workers_busy.add(1)
+          # `pop_mark_batch` already counted this worker busy, under the lock
+          # that took the batch. Busy therefore spans the batch AND its
+          # unflushed children — a worker is never counted idle while it might
+          # still push — which is the invariant the master's check rests on.
           begin
             @parallel_mark_stolen &+= m.to_u64
             i = 0
@@ -291,21 +342,27 @@ module Gcry
         loop do
           m = pop_mark_batch(batch.to_unsafe, MARK_POP_BATCH)
           if m > 0
-            i = 0
-            while i < m
-              scan_object(batch.to_unsafe[i].as(BlockHeader*))
-              i += 1
+            # The master takes a batch through the same door, so it owes the
+            # same decrement. It is never mid-batch at the termination check
+            # below — that branch is only reached when the pop came back
+            # empty and nothing was counted.
+            begin
+              i = 0
+              while i < m
+                scan_object(batch.to_unsafe[i].as(BlockHeader*))
+                i += 1
+              end
+              flush_pushbuf(0)
+            ensure
+              @mark_workers_busy.add(-1)
             end
-            flush_pushbuf(0)
             next
           end
-          # Master found nothing. Safe to stop only when no worker is mid-scan
-          # (so none can push) AND the stack is freshly observed empty. A worker
-          # can only become busy by popping a non-empty batch, so it cannot
-          # transition to busy while the stack is empty — busy==0 && empty is
-          # therefore stable. `mark_stack_empty_locked?` re-reads under the lock
-          # in case a worker flushed after this master pop.
-          break if @mark_workers_busy.get == 0 && mark_stack_empty_locked?
+          # Master found nothing. Safe to stop only when no worker holds a
+          # batch and the stack is empty, both read in one critical section:
+          # a worker becomes busy only by popping under that lock, so with the
+          # stack empty it cannot, and the pair is stable once observed.
+          break if mark_drain_finished?
           Intrinsics.pause
         end
       ensure

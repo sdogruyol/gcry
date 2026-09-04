@@ -50,7 +50,17 @@ module Gcry
       @tlab_enabled
     end
 
+    # Refused under the bitmap allocator, which is the other half of
+    # `bitmap_alloc=`'s exclusion. That setter clears `@tlab_enabled` because
+    # two allocators must not hand out the same blocks, but the env wiring
+    # applies `GCRY_TLAB=1` *after* the heap exists, so the pair was
+    # reachable — and the allocation paths' own `!@bitmap_alloc` guards do not
+    # cover what follows from it: `sweep_after_world?` returns false while
+    # TLAB is on, which silently moves a bitmap heap onto the in-STW sweep,
+    # and `mark_impl`'s `claim_free_tlab_block` becomes reachable for `occ=0`
+    # blocks whose `next_free` words are whatever the payload last held.
     def tlab_enabled=(value : Bool) : Bool
+      return false if value && @bitmap_alloc
       @tlab_enabled = value
     end
 

@@ -416,6 +416,8 @@ poison-freed: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_freed.cr -o $(BIN)/poison_freed --error-trace
 	GCRY_POISON_FREED=1 $(BIN)/poison_freed
 	$(BIN)/poison_freed --control
+	GCRY_BITMAP_ALLOC=1 GCRY_POISON_FREED=1 $(BIN)/poison_freed
+	GCRY_BITMAP_ALLOC=1 $(BIN)/poison_freed --control
 
 # After mark, before sweep: does any marked object point at a block the sweep is
 # about to free? The `hold` arm plants an edge the mark provably does not follow
@@ -628,6 +630,25 @@ static-bss-roots: $(BIN)
 static-roots-redeploy: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/static_roots_redeploy.cr -o $(BIN)/static_roots_redeploy --error-trace
 	$(BIN)/static_roots_redeploy
+
+# Does the default-on collector scrub ask libc where the stack is? On the
+# initial thread `pthread_getattr_np` is a `/proc/self/maps` parse, twice per
+# collection and outside the pause window, so it never reached `pause_p50`.
+# The bounds come from `Fiber#@stack` now; the red arm restores the libc
+# lookup so the counter that says so is read in both directions.
+collect-scrub-cost: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/collect_scrub_cost.cr -o $(BIN)/collect_scrub_cost --error-trace
+	$(BIN)/collect_scrub_cost
+	GCRY_SCRUB_LIBC_BOUNDS=1 $(BIN)/collect_scrub_cost --libc
+
+# Can the master end a parallel mark cycle while a worker still holds a batch?
+# It could until 2026-09-04: the batch left the shared stack under `@mark_lock`
+# and the worker counted itself busy after releasing it, so `busy == 0 && stack
+# empty` was observable with work in flight. The red arm restores that
+# protocol and loses a live object on the first collection.
+parallel-mark-termination: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/parallel_mark_termination.cr -o $(BIN)/parallel_mark_termination --error-trace
+	$(BIN)/parallel_mark_termination
 
 thread-birth-root: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_birth_root.cr -o $(BIN)/thread_birth_root --error-trace

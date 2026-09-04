@@ -894,7 +894,11 @@ module Gcry
       return SmallSweepCounts.new(false, 0_u64, 0_u64, 0_u64) if nblocks == 0
       words = ((nblocks + 63) >> 6).to_i32
 
-      freed, live = Kernels.sweep_words(occ, mark, words, @simd_tier)
+      freed, live = if @poison_freed
+                      sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
+                    else
+                      Kernels.sweep_words(occ, mark, words, @simd_tier)
+                    end
 
       # No tail correction, and getting that wrong cost an afternoon: the first
       # version subtracted `(words * 64) - nblocks` from `freed` on the theory
@@ -914,6 +918,16 @@ module Gcry
         @bytes_reclaimed_since_gc += freed * payload
       end
 
+      # `sweep_words` touches no payload, so the poison pattern is written by
+      # `sweep_words_poisoning` while it still has the dead bits — see there.
+      #
+      # Standing this whole arm down instead, which is what `@poison_freed`
+      # did until 2026-09-04, hands the chunk to the header walk, and that arm
+      # reclaims through the freelist without ever clearing `occ`. Under the
+      # bitmap allocator nothing reads that freelist, so every reclaimed block
+      # stayed occupied forever: measured 51.2 → 196.6 MB over four rounds of
+      # a churn holding 1 in 500, against 51.2 → 52.0 MB with the knob off.
+
       # The garbage above is reclaimed regardless. But if an allocation cursor
       # is on this chunk it must not reach the empty-chunk path: a cursor is a
       # raw `ChunkHeader*` a mutator may be suspended mid-use of, and unmapping
@@ -929,6 +943,47 @@ module Gcry
         live * payload,
         nblocks * payload,
         (nblocks - live) * payload)
+    end
+
+    # `Kernels.sweep_words` with the poison pattern written into every block it
+    # reclaims — identical arithmetic, word at a time.
+    #
+    # The pattern has to go in while the dead set still exists: the kernel
+    # publishes `occ[i] = mark[i]` and clears the mark in the same store, so
+    # afterwards there is nothing left that says which blocks were reclaimed,
+    # and a chunk's bitmap is too large to snapshot (a 64 MiB chunk of 16-byte
+    # blocks is 65 536 words). Only `GCRY_POISON_FREED=1` pays for this; the
+    # SIMD kernel is untouched and remains the shipping path.
+    #
+    # The whole-word store is kept, and it is not incidental: a per-bit clear
+    # would race a mutator setting a different bit in the same word.
+    private def sweep_words_poisoning(chunk : ChunkHeader*, class_index : Int32,
+                                      occ : UInt64*, mark : UInt64*, words : Int32,
+                                      payload : UInt64) : {UInt64, UInt64}
+      freed = 0_u64
+      live = 0_u64
+      data_start = ChunkHeader.data_start(chunk).address
+      block_bytes = @block_bytes[class_index]
+      pay = payload.to_u32!
+      i = 0
+      while i < words
+        o = occ[i]
+        m = mark[i]
+        dead = o & ~m
+        freed &+= dead.popcount.to_u64
+        live &+= m.popcount.to_u64
+        occ[i] = m
+        mark[i] = 0_u64
+        while dead != 0
+          bit = dead.trailing_zeros_count
+          dead &= dead &- 1
+          ordinal = (i.to_u64 << 6) &+ bit.to_u64
+          user = data_start &+ ordinal &* block_bytes &+ BlockHeader::SIZE
+          poison_payload(Pointer(Void).new(user), pay)
+        end
+        i += 1
+      end
+      {freed, live}
     end
 
     # The header-walk arm of the size-class sweep.
@@ -958,14 +1013,13 @@ module Gcry
       # Phase 8, behind the page barrier work. The dispatch is per *chunk* and
       # not global precisely so the two representations can coexist while that
       # is true.
-      # `!@poison_freed`: poisoning is per-block work by definition — it writes a
-      # pattern into every reclaimed payload — and the streaming sweep touches
-      # no payload at all. Rather than let `GCRY_POISON_FREED=1` be armed and do
-      # nothing (measured: 0 of 5 freed payloads poisoned, and a stale read
-      # still returning live-looking data), the bitmap arm stands down and the
-      # header walk runs. A diagnostic that is silently inert is worse than one
-      # that costs a walk.
-      if @bitmap_alloc && !ChunkHeader.nursery?(chunk) && !@poison_freed
+      # `GCRY_POISON_FREED=1` used to stand this arm down and let the header
+      # walk run, because the streaming sweep touches no payload and an armed
+      # diagnostic that does nothing is worse than one that costs a walk. But
+      # the header walk reclaims through the freelist and never clears `occ`,
+      # which under this allocator leaks the block permanently — so the
+      # poisoning belongs *in* the arm, and `sweep_words_poisoning` does it.
+      if @bitmap_alloc && !ChunkHeader.nursery?(chunk)
         return sweep_small_bitmap(chunk, class_index, major)
       end
 

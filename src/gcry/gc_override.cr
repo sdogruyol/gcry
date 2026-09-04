@@ -620,6 +620,9 @@ module GC
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
+    # Research only: the pre-2026-09-04 pop/busy protocol, which lets the
+    # master end a mark cycle while a worker still holds a batch.
+    heap.mark_busy_unlocked = true if env_flag_one?("GCRY_MARK_BUSY_UNLOCKED")
     # Multi-mutator parked-fiber scan depth below stack_top (bytes). Default
     # 256 KiB (was 512); 0 = full guard→bottom (thr regresses).
     if lag = env_u64("GCRY_STW_STACK_LAG")
@@ -649,6 +652,9 @@ module GC
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
+    # Research only: the collector scrub's bounds from libc, which is a
+    # `/proc/self/maps` parse per call on the initial thread.
+    heap.scrub_libc_bounds = true if env_flag_one?("GCRY_SCRUB_LIBC_BOUNDS")
     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
     end

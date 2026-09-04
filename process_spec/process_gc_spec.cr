@@ -320,16 +320,33 @@ describe "process GC free-path flag" do
     # Held chunks keep the freed blocks findable. The point is that every block
     # the sweep reclaimed still says so after the rebuild, not how many.
     freed.should be > 50
-    swept.should eq(freed)
-    Gcry::Roots.keep_alive(keep.as(Void*))
 
-    # And the other direction, which is what makes the flag a discriminator
-    # rather than a decoration.
-    ptr = GC.malloc(256)
-    GC.free(ptr)
-    info = heap.debug_block_info(ptr)
-    info[:free].should be_true
-    (info[:flags] & Gcry::BlockHeader::Flags::SWEPT).should eq(0)
+    # `SWEPT` is a *header* flag, and `-Dgcry_headerless` removes the header:
+    # occupancy comes from the chunk's `occ` bitmap and there is nowhere to
+    # record which path gave a block back. So the flag arm is asserted where
+    # the flag exists, and its absence is asserted where it does not — rather
+    # than the spec being skipped, which would leave the layout untested, or
+    # left as it was, which reported `swept=0 of freed=19899` and read as a
+    # collector defect.
+    {% if flag?(:gcry_headerless) %}
+      swept.should eq(0)
+
+      ptr = GC.malloc(256)
+      GC.free(ptr)
+      heap.debug_block_info(ptr)[:free].should be_true
+    {% else %}
+      swept.should eq(freed)
+      Gcry::Roots.keep_alive(keep.as(Void*))
+
+      # And the other direction, which is what makes the flag a discriminator
+      # rather than a decoration.
+      ptr = GC.malloc(256)
+      GC.free(ptr)
+      info = heap.debug_block_info(ptr)
+      info[:free].should be_true
+      (info[:flags] & Gcry::BlockHeader::Flags::SWEPT).should eq(0)
+    {% end %}
+    Gcry::Roots.keep_alive(keep.as(Void*))
   end
 end
 

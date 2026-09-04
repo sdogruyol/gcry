@@ -27,16 +27,43 @@ describe Gcry::Heap do
   end
 
   it "block_magic stays exact up to the chunk ceiling it asserts" do
-    # The tightest class first disagrees at 86.3 MiB; MAX_RECIPROCAL_CHUNK_BYTES
-    # is 64 MiB. Walk the last block of each class at the ceiling rather than
-    # every offset, which would be minutes of work to re-derive a bound the
-    # arithmetic already fixes.
+    # Not a sample. The reciprocal's failure is not monotone — past the first
+    # bad offset the two agree again at most offsets — so four offsets per
+    # class prove nothing, and that is exactly how a real bound violation
+    # passed this spec: under `-Dgcry_headerless` class 38 first disagrees at
+    # 51.2 MiB while the constant allowed 64 MiB, and `limit - 1` happened to
+    # land in an agreeing region.
+    #
+    # So check the boundary the arithmetic names: the first offset at which
+    # each class *would* disagree must be above the ceiling, and the offsets
+    # either side of it must resolve correctly while they are below it.
     limit = Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES
+    shift = Gcry::Heap::RECIPROCAL_SHIFT
     Gcry::SizeClasses::COUNT.times do |i|
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
       magic = Gcry::Heap.block_magic(block_bytes)
+      error = magic &* block_bytes &- (1_u64 << shift)
+      if error > 0
+        first_bad = (1_u64 << shift) // error
+        first_bad.should be >= limit
+      end
       [limit - 1, limit - block_bytes, limit // 2, limit // 3].each do |offset|
         Gcry::Heap.block_ordinal(offset, magic).should eq(offset // block_bytes)
+      end
+    end
+  end
+
+  it "the reciprocal is exact at every offset of a default-sized chunk" do
+    # The ceiling above is arithmetic; this is the configuration that ships.
+    # Every offset, every class, no sampling.
+    bytes = Gcry::Heap::SMALL_CHUNK_BYTES
+    Gcry::SizeClasses::COUNT.times do |i|
+      block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
+      magic = Gcry::Heap.block_magic(block_bytes)
+      offset = 0_u64
+      while offset < bytes
+        Gcry::Heap.block_ordinal(offset, magic).should eq(offset // block_bytes)
+        offset += 1
       end
     end
   end

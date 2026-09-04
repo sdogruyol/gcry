@@ -129,6 +129,15 @@ module Gcry
     # wipe (`GCRY_CLEAR_STACK`) and would otherwise count every collection.
     getter collect_scrub_runs : UInt64 = 0_u64
     getter collect_scrub_bytes_total : UInt64 = 0_u64
+    # Collector scrubs whose bounds the running fiber could not supply, so
+    # libc was asked. Reads zero on every shape measured; a non-zero is the
+    # `/proc/self/maps` parse back on the collection path.
+    getter clear_stack_libc_bounds : UInt64 = 0_u64
+    # Research only — `GCRY_SCRUB_LIBC_BOUNDS=1`: take the collector scrub's
+    # stack bounds from libc instead of the running fiber, as gcry did before
+    # 2026-09-04. That is a `/proc/self/maps` parse per call on the initial
+    # thread; `make collect-scrub-cost` uses it as the red arm.
+    property scrub_libc_bounds : Bool = false
 
     # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
@@ -169,37 +178,26 @@ module Gcry
       guard = 0_u64
       bounds_known = false
 
-      {% if flag?(:linux) || flag?(:freebsd) || flag?(:openbsd) || flag?(:dragonfly) %}
-        attr = uninitialized LibC::PthreadAttrT
-        if LibC.pthread_getattr_np(LibC.pthread_self, pointerof(attr)) == 0
-          stackaddr = Pointer(Void).null
-          stacksize = LibC::SizeT.new(0)
-          if LibC.pthread_attr_getstack(pointerof(attr), pointerof(stackaddr), pointerof(stacksize)) == 0 &&
-             !stackaddr.null? && stacksize > 0
-            lo = stackaddr.address
-            hi = lo + stacksize.to_u64
-            if sp_addr > lo && sp_addr <= hi
-              bounds_known = true
-              guard = lo + Roots::PAGE_SIZE
-            end
-          end
-          LibC.pthread_attr_destroy(pointerof(attr))
-        end
-      {% elsif flag?(:darwin) %}
-        if bounds = Platform.current_pthread_stack_bounds
-          lo = bounds[0].address
-          hi = bounds[1].address
-          if sp_addr > lo && sp_addr <= hi
-            bounds_known = true
-            guard = lo + Roots::PAGE_SIZE
-          end
-        end
-      {% end %}
-
-      if !bounds_known && fiber_bounds
-        # A Crystal fiber stack: the fiber knows its own bounds, so the wipe
-        # can stop at its guard page like the pthread case above. Only the
-        # collector's scrub asks (see the file comment).
+      # The running fiber's own bounds, first, because they are free.
+      #
+      # `Fiber#@stack` holds the real pthread bounds for a thread's main fiber
+      # — Crystal fills them in at thread start from one `pthread_getattr_np`
+      # (`fiber.cr`: `@stack = Stack.new(stack, stack_bottom)`) — and the
+      # mapped span for a spawned fiber. Asking libc again per call is not
+      # free on the thread that matters: for the *initial* thread glibc
+      # answers `pthread_getattr_np` by parsing `/proc/self/maps`, which
+      # `linux_stack.cr` already documents and snapshots its way around to
+      # keep out of the pause. The collector's scrub runs twice per collection
+      # and outside the pause, so the cost was real and invisible to
+      # `pause_p50`/`p99`: measured on this box, 15.7 µs a call at 48 maps
+      # lines, **2.1 ms** at 4 000 parked fibers (8 049 lines) and **24.7 ms**
+      # at 20 000 (40 047 lines) — per call, twice a collection, on exactly
+      # the fiber-heavy server the default is for.
+      #
+      # Only the collector asks (`fiber_bounds`). The allocation-path wipe
+      # must not touch Fiber/Thread APIs: they malloc during early Thread TLS
+      # publish and recurse into `allocate` (see the file comment).
+      if fiber_bounds && !@scrub_libc_bounds
         stack = Fiber.current.@stack
         lo = stack.pointer.address
         hi = stack.bottom.address
@@ -207,6 +205,36 @@ module Gcry
           bounds_known = true
           guard = lo + Platform.host_page_size
         end
+      end
+
+      unless bounds_known
+        {% if flag?(:linux) || flag?(:freebsd) || flag?(:openbsd) || flag?(:dragonfly) %}
+          attr = uninitialized LibC::PthreadAttrT
+          if LibC.pthread_getattr_np(LibC.pthread_self, pointerof(attr)) == 0
+            stackaddr = Pointer(Void).null
+            stacksize = LibC::SizeT.new(0)
+            if LibC.pthread_attr_getstack(pointerof(attr), pointerof(stackaddr), pointerof(stacksize)) == 0 &&
+               !stackaddr.null? && stacksize > 0
+              lo = stackaddr.address
+              hi = lo + stacksize.to_u64
+              if sp_addr > lo && sp_addr <= hi
+                bounds_known = true
+                guard = lo + Roots::PAGE_SIZE
+              end
+            end
+            LibC.pthread_attr_destroy(pointerof(attr))
+          end
+        {% elsif flag?(:darwin) %}
+          if bounds = Platform.current_pthread_stack_bounds
+            lo = bounds[0].address
+            hi = bounds[1].address
+            if sp_addr > lo && sp_addr <= hi
+              bounds_known = true
+              guard = lo + Roots::PAGE_SIZE
+            end
+          end
+        {% end %}
+        @clear_stack_libc_bounds += 1 if bounds_known && fiber_bounds
       end
 
       wipe = bytes

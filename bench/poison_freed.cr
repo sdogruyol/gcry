@@ -139,6 +139,51 @@ def run(control : Bool) : Int32
     end
   end
 
+  # ── Arm 4: the knob does not stop the sweep reclaiming ──────────────────────
+  #
+  # Poisoning is a payload write, and the streaming bitmap sweep touches no
+  # payload — so until 2026-09-04 an armed knob stood that whole arm down and
+  # let the header walk run instead. That walk reclaims through a freelist and
+  # never clears `occ`, which under `GCRY_BITMAP_ALLOC=1` is the only thing
+  # the allocator reads: every reclaimed block stayed occupied for the rest of
+  # the process. Measured before the fix, 200k objects a round holding 1 in
+  # 500: **18.1 → 64.7 MB** over four rounds, +15.5 MB each, against a
+  # plateau at 16.8 MB with the knob off.
+  #
+  # So the arm is about reclaim, not about the pattern: churn, and require the
+  # heap to stop growing. It runs in both arms because the plateau must hold
+  # with the knob off too, or the number it is compared against means nothing.
+  keep = [] of String
+  sizes = [] of Float64
+  poisoned_before = HEAP.poisoned_blocks
+  4.times do
+    200_000.times do |i|
+      # Allocated on every iteration — the churn *is* the experiment. Putting
+      # the allocation inside the `if` (which an earlier version did) leaves
+      # 400 objects a round and the leak has nothing to leak.
+      s = "poison-arm4-#{i}-#{"p" * 24}"
+      keep << s if i % 500 == 0
+    end
+    GC.collect
+    sizes << HEAP.heap_size / 1_048_576.0
+  end
+  churned = HEAP.poisoned_blocks - poisoned_before
+  puts "heap MB per round: #{sizes.map(&.round(1)).join(" -> ")} " \
+       "(#{keep.size} kept, #{churned} poisoned)"
+  growth = sizes.last - sizes.first
+  # ~1 600 strings stay live, so the heap has nothing to grow for. Before the
+  # fix this arm went 18.1 → 64.7 MB.
+  if growth > 4.0
+    failures << "the heap grew #{growth.round(1)} MB over four churn rounds " \
+                "(#{sizes.map(&.round(1)).join(" -> ")}) — reclaimed blocks are " \
+                "not being handed out again"
+  end
+  if on && churned == 0
+    failures << "the knob is on and no block was poisoned during the churn, so " \
+                "this arm never exercised the sweep it is about"
+  end
+  raise "the live set was collected" unless keep.all?(&.starts_with?("poison-arm4-"))
+
   puts "poisoned blocks: #{HEAP.poisoned_blocks}"
 
   if failures.empty?

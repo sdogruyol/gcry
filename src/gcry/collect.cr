@@ -1187,6 +1187,18 @@ module Gcry
       @finalizers.link_count
     end
 
+    # Research/spec only: make the registration index give up its table, the
+    # way a refused `malloc` inside `index_grow` does. The fallback it leaves
+    # behind is load-bearing — `notice_reclaim` has to scan instead — and it
+    # cannot be reached from a spec any other way.
+    def debug_finalizer_index_give_up : Nil
+      @finalizers.debug_index_give_up
+    end
+
+    def debug_finalizer_index_cap : Int32
+      @finalizers.index_cap
+    end
+
     def register_disappearing_link(link : Void**, object : Void* = Pointer(Void).null) : Nil
       referent = object
       if referent.null?
@@ -1890,6 +1902,7 @@ module Gcry
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           mark_large_alloc_in_flight
+          mark_bitmap_alloc_in_flight
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
@@ -2309,6 +2322,7 @@ module Gcry
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight
+        mark_bitmap_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack

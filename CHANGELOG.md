@@ -9,6 +9,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The default-on collector scrub asked libc where the stack was, twice per
+  collection.** `GCRY_COLLECT_SCRUB` runs at `run_collection`'s entry and
+  exit, and `clear_stack_body` opened with `pthread_getattr_np(pthread_self)`
+  — which glibc answers for the **initial** thread by parsing
+  `/proc/self/maps`, the cost `platform/linux_stack.cr` already snapshots its
+  way around to keep out of the pause. A Crystal program collects on the main
+  pthread, so every collection paid two parses whose cost grows with the
+  mapping count, and both landed *outside* the pause window where no
+  `pause_p50`/`pause_p99` could show them. Measured: 15.7 µs a call at 48
+  maps lines, **2.5 ms** at 4 000 parked fibers (8 047 lines), **24.7 ms** at
+  20 000 (40 047) — two per collection, on exactly the fiber-heavy server the
+  default is for. `Fiber#@stack` already holds the bounds (for a thread's main
+  fiber they are the real pthread bounds, filled in once at thread start), so
+  the collector reads two words: 0.005 µs, flat in the mapping count. The
+  allocation-path wipe still asks libc — it must not touch Fiber/Thread APIs.
+  `clear_stack_libc_bounds` counts any fallback and is on `/gc-stats`; gated
+  by `make collect-scrub-cost` with `GCRY_SCRUB_LIBC_BOUNDS=1` as the red arm.
+
+- **A parallel-mark cycle could end while a worker still held a batch, and
+  live objects were reclaimed.** The master stops on
+  `busy == 0 && stack empty`, which is stable only if a worker cannot hold
+  work while counted idle — and the batch left the shared stack under
+  `@mark_lock` while `@mark_workers_busy.add(1)` happened *after* the unlock.
+  In that gap the master reads zero, sees the stack it just emptied, breaks,
+  and its `ensure` waits on a counter already at zero; the worker then scans
+  up to `MARK_POP_BATCH` objects and flushes their children onto a stack
+  nothing will drain, so everything reachable only through them is unmarked
+  at sweep time. The counter is incremented inside the critical section that
+  removes the entries, and both halves of the condition are read from one.
+  `make parallel-mark-termination`: the red arm
+  (`GCRY_MARK_BUSY_UNLOCKED=1`) loses a live object on the **first**
+  collection — 64 chains × 400 nodes, node 397 reading node 340's tag — and
+  the fixed arm runs 60 collections and 2.19 M stolen objects clean.
+  Introduced by the sharded marker in this cycle; reachable only with
+  `GCRY_PARALLEL_MARK >= 2`.
+
+- **`bitmap_alloc_locked` had the window `alloc_large` just closed.** The
+  `occ` bit is set before the caller has the pointer, and in between the only
+  reference this thread holds is the *header* address, which `mark_impl`'s
+  `base_only` policy rejects. A mutator frozen there leaves a block that is
+  occupied, unmarked and referenced by nothing the scan accepts, so
+  `occ &= mark` clears the bit under a caller about to be handed the block and
+  `~occ` hands the same memory out again. Fixed the way the large path is
+  (`@large_alloc_in_flight`): a per-pool-slot `@pool_in_flight` published
+  before the `occ` store, rooted from both root phases, cleared once the
+  caller's frame holds the pointer. Needs `GCRY_BITMAP_ALLOC=1` and more than
+  one mutator thread; the default path never reaches it.
+
+- **`GCRY_POISON_FREED=1` leaked the whole heap under the bitmap allocator.**
+  Poisoning is a payload write and the streaming sweep touches no payload, so
+  an armed knob stood that arm down and let the header walk run — and that
+  walk reclaims through a freelist without ever clearing `occ`, which under
+  this allocator is the only thing the allocator reads. Every reclaimed block
+  stayed occupied for the life of the process: measured 21.8 → 77.3 MB over
+  four churn rounds holding 1 in 500, against a plateau at 18.8 MB. The
+  pattern is written inside the arm now (`sweep_words_poisoning`, same
+  arithmetic as the kernel, whole-word stores kept), so `occ` stays
+  authoritative and the diagnostic actually fires — 2.4 M blocks poisoned
+  where it previously reported 0 on bitmap chunks. `make poison-freed` gained
+  a reclaim-plateau arm and now runs under `GCRY_BITMAP_ALLOC=1` too.
+
+- **`MAX_RECIPROCAL_CHUNK_BYTES` was wrong for `-Dgcry_headerless`.** The
+  64 MiB ceiling was derived with `block_bytes = 16 + payload`; headerless
+  makes `BlockHeader::SIZE` 0, which moves the tightest class to 28 672 and
+  the bound to **51.2 MiB** — under the ceiling, so a headerless build with
+  `GCRY_CHUNK_BYTES` in (51.2, 64] MiB resolved the wrong block for some
+  offsets in that class: wrong `occ` bit, wrong mark bit, wrong user pointer,
+  silently. Verified at `d = 28672`, offset 53 702 655 → ordinal 1873 where
+  1872 is correct. The bound is computed from the build's own class table now
+  (86.35 MiB header, 51.2 MiB headerless). The old spec missed it because the
+  failure is **not monotone** — 67 108 863 agrees again — so its four samples
+  per class could not see it; it checks each class's analytic first-failure
+  point against the ceiling, plus every offset of a default-sized chunk.
+
+- **The finalizer index's out-of-memory fallback was neither safe nor
+  correct.** `index_grow` frees the table and sets `@index_cap = 0` so
+  `notice_reclaim` scans instead, but `index_add` carried on to probe a null
+  table (`mask` = `UInt64::MAX`), and the growth was retried on the next
+  registration — so a later success produced a *partial* index that
+  `notice_reclaim` then trusted, leaving everything registered before the
+  failure reading unregistered and its disappearing links uncleared on
+  `free`/`realloc` (a dangling `WeakRef`). The give-up is sticky now, and
+  `spec/finalizer_index_spec.cr` pins both halves through
+  `debug_finalizer_index_give_up`.
+
+- **`GCRY_TLAB=1` could re-enable TLAB after the bitmap allocator disabled
+  it.** `bitmap_alloc=` clears `@tlab_enabled` because two allocators must not
+  hand out the same blocks, but the env wiring applies `GCRY_TLAB` after the
+  heap exists. The allocation paths guard on `!@bitmap_alloc`; what does not
+  is `sweep_after_world?`, which returns false while TLAB is on and so moved a
+  bitmap heap onto the in-STW sweep, and `mark_impl`'s `claim_free_tlab_block`,
+  which became reachable for `occ=0` blocks whose `next_free` words are stale
+  payload. The setter refuses under `@bitmap_alloc`.
+
 - **Linux static roots come from the ELF program headers, not from
   `/proc/self/maps`.** The roots are the executable's writable `PT_LOAD`s —
   `.data` and `.bss` together, `p_memsz` covering the zero-fill — minus the
@@ -44,6 +138,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BSS was a root only if the maps parse kept `.data`'s line; the mechanism
   that dropped it there is not established, and the counters above plus the
   journal's `gcry:` lines are what would establish it.
+
+### Added
+
+- **CI builds the representations it ships.** Neither was exercised when they
+  landed: `GCRY_BITMAP_ALLOC` had unit coverage only under the Boehm library
+  heap, and every line of `spec/headerless_switches_spec.cr` sits inside
+  `{% if flag?(:gcry_headerless) %}`, so it was compiled out of the whole
+  matrix. Added `GCRY_BITMAP_ALLOC=1` unit specs, `-Dgcry_headerless` unit and
+  process specs plus a `-Dgc_none` sample, a knob smoke covering
+  `GCRY_BITMAP`, `GCRY_BITMAP_ALLOC`, `GCRY_CHUNK_RADIX`, `GCRY_SIMD`,
+  `GCRY_PREFETCH`, `GCRY_COLLECT_SCRUB`, `GCRY_PARALLEL_MARK` and the
+  TLAB×bitmap pair, and the kernel equivalence fuzz **under `--release`** —
+  without it LLVM does not vectorise and the AVX2/AVX-512 clones being
+  compared are scalar code carrying feature flags, so the gate passed without
+  executing the loops that ship. `make kernels-broken` is the positive
+  control and refuses to run on a scalar-only host.
+  The headerless process-spec arm found a stale assertion on its first run:
+  `SWEPT` is a header flag and there is no header, so the spec asserted the
+  layout's own property instead of reporting `swept=0 of freed=19899` as a
+  collector defect.
 
 ### Corrected
 

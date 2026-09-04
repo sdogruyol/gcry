@@ -128,6 +128,25 @@ jobs:
           done
           test "$ok" = 1
 
+      # The two representations the collector now ships. Neither was built by
+      # any CI job when they landed: `GCRY_BITMAP_ALLOC` had unit coverage
+      # only under the Boehm library heap, and `spec/headerless_switches_spec.cr`
+      # is entirely inside `{% if flag?(:gcry_headerless) %}`, so it was
+      # compiled out of every job in the matrix.
+      - name: Unit specs (bitmap allocator)
+        run: GCRY_BITMAP_ALLOC=1 crystal spec --error-trace
+
+      - name: Unit specs (header-less layout)
+        run: crystal spec -Dgcry_headerless --error-trace
+
+      - name: Process GC specs (header-less layout)
+        run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
+
+      - name: Sample hello (header-less layout)
+        run: |
+          crystal build -Dgc_none -Dgcry_headerless samples/hello.cr -o bin/hello_hl
+          ./bin/hello_hl
+
       - name: Sample hello (-Dgc_none)
         run: |
           crystal build -Dgc_none samples/hello.cr -o bin/hello
@@ -165,6 +184,26 @@ jobs:
           timeout 60 env GCRY_STRESS=1 GCRY_STRESS_EVERY=8 ./bin/hello_env
           GCRY_MPROTECT_BARRIER=1 ./bin/hello_env
           GCRY_INCREMENTAL=1 ./bin/hello_env
+          GCRY_BITMAP=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=1 GCRY_CHUNK_RADIX=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=1 GCRY_TLAB=1 ./bin/hello_env
+          GCRY_SIMD=off ./bin/hello_env
+          GCRY_SIMD=scalar GCRY_BITMAP_ALLOC=1 ./bin/hello_env
+          GCRY_PREFETCH=0 ./bin/hello_env
+          GCRY_COLLECT_SCRUB=0 ./bin/hello_env
+          GCRY_PARALLEL_MARK=4 ./bin/hello_env
+
+      # The SIMD kernels' scalar-vs-vector equivalence fuzz, in release mode.
+      # Without `--release` LLVM does not vectorise, so the AVX2/AVX-512
+      # clones the fuzz compares are scalar code carrying feature flags — the
+      # gate passes without ever executing the loops that ship. The broken-
+      # clone positive control refuses to run on a scalar-only host rather
+      # than passing vacuously.
+      - name: SIMD kernel equivalence (release)
+        run: |
+          crystal spec --release spec/kernels_spec.cr --error-trace
+          make kernels-broken
 
       - name: Sample stress under GCRY_STRESS
         run: |
@@ -401,6 +440,21 @@ jobs:
       - name: Static roots across a redeploy
         run: |
           make static-roots-redeploy
+
+      # The default-on collector scrub asked libc for the stack bounds, which
+      # on the initial thread is a /proc/self/maps parse — twice a collection,
+      # outside the pause window, so no pause metric could show it. Bounds
+      # come from Fiber#@stack now; the red arm restores the libc lookup.
+      - name: Collector scrub bounds cost
+        run: |
+          make collect-scrub-cost
+
+      # The parallel-mark master must not end a cycle while a worker holds a
+      # batch. The red arm restores the pre-2026-09-04 pop/busy protocol and
+      # reclaims a live object on the first collection.
+      - name: Parallel mark termination
+        run: |
+          make parallel-mark-termination
 
       - name: Suspended-thread register roots
         run: |

@@ -70,4 +70,38 @@ describe "finalizer registration index" do
       heap.destroy
     end
   end
+
+  it "keeps working after the index gives up on its C allocation" do
+    # `index_grow` frees the table and sets `@index_cap = 0` when `malloc`
+    # refuses, so `notice_reclaim` falls back to the linear scan. Two things
+    # had to be true for that to be the "slow but never wrong" path its
+    # comment claims, and neither was: `index_add` carried on to probe a null
+    # table (mask `UInt64::MAX`), and a later successful grow produced a
+    # *partial* index that `notice_reclaim` then trusted — so anything
+    # registered before the failure read unregistered and its disappearing
+    # link was never cleared.
+    heap = Gcry::Heap.new
+    begin
+      obj = heap.malloc(32)
+      slot = Pointer(Void*).malloc(1)
+      slot.value = obj
+      heap.register_disappearing_link(slot.as(Void**), obj)
+      heap.debug_finalizer_index_give_up
+
+      # Registrations after the give-up must not crash, and must not resurrect
+      # a half-built index.
+      200.times do
+        o = heap.malloc(32)
+        heap.add_finalizer(o) { }
+      end
+      heap.debug_finalizer_index_cap.should eq(0)
+
+      # The link registered *before* the give-up is still honoured, which is
+      # the property the partial index broke.
+      heap.free(obj)
+      slot.value.should eq(Pointer(Void).null)
+    ensure
+      heap.destroy
+    end
+  end
 end

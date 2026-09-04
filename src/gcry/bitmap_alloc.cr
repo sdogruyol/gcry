@@ -57,6 +57,25 @@ module Gcry
     @pool_free_mask = uninitialized StaticArray(UInt64, POOL_SLOTS)
     @pool_word_base = uninitialized StaticArray(UInt64, POOL_SLOTS)
 
+    # The user pointer of the block each pool slot is handing out right now,
+    # rooted by the collector (`mark_bitmap_alloc_in_flight`).
+    #
+    # The `occ` bit is set well before the caller has the pointer: the store is
+    # one instruction, but between it and `BlockHeader.user_from(header)` the
+    # only thing this thread holds is the *header* address, and `mark_impl`'s
+    # default `base_only` policy rejects a header (`addr != user_of(...)`). So
+    # a mutator frozen by the STW signal inside that span leaves a block that
+    # is `occ=1, mark=0` and referenced by nothing the scan accepts, and
+    # `occ &= mark` clears the bit under a caller that is about to be handed
+    # the block — the same memory then goes out again from `~occ`.
+    #
+    # This is the shape `@large_alloc_in_flight` closes on the large path
+    # (`dormant-flush-race`, 2026-09-04). One slot per pool slot rather than
+    # one for the heap, because small allocation is serialised per size class,
+    # not globally: two mutators can be in `bitmap_alloc_locked` at once for
+    # different classes.
+    @pool_in_flight = uninitialized StaticArray(Void*, POOL_SLOTS)
+
     getter bitmap_alloc_fast : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
@@ -67,6 +86,27 @@ module Gcry
       @pool_word = StaticArray(Int32, POOL_SLOTS).new(0)
       @pool_free_mask = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
       @pool_word_base = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
+      @pool_in_flight = StaticArray(Void*, POOL_SLOTS).new(Pointer(Void).null)
+    end
+
+    # Root every block a pool slot is mid-handover on. Called from the root
+    # phase, like `mark_large_alloc_in_flight`. A null slot is the common case
+    # — the window is a handful of instructions wide — so this is 96 loads of
+    # a static array against losing a live block.
+    protected def mark_bitmap_alloc_in_flight : Nil
+      return unless @bitmap_alloc
+      i = 0
+      while i < POOL_SLOTS
+        u = @pool_in_flight[i]
+        mark_explicit_root(u) unless u.null?
+        i += 1
+      end
+    end
+
+    # Drop the slot's copy once the caller's frame holds the pointer.
+    protected def clear_bitmap_alloc_in_flight(index : Int32, flags : UInt32) : Nil
+      slot = (flags & BlockHeader::Flags::ATOMIC) != 0 ? index + SIZE_CLASS_COUNT : index
+      @pool_in_flight[slot] = Pointer(Void).null
     end
 
     # Public reads for the diagnostics, which live outside `Heap` and must not
@@ -175,6 +215,16 @@ module Gcry
       occ = ChunkHeader.occ_bitmap(chunk)
       word = @pool_word[slot]
       bit_mask = 1_u64 << bit
+
+      # Publish the block as a root **before** the `occ` store makes it
+      # allocated. Everything from that store until the caller holds the
+      # pointer is a window in which the block is occupied, unmarked, and
+      # referenced only by a header address the root scan refuses — see
+      # `@pool_in_flight`. Two stores of a static-array slot, on the hot path,
+      # against handing the same memory to two owners.
+      header_addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
+      @pool_in_flight[slot] = Pointer(Void).new(header_addr &+ BlockHeader::SIZE)
+
       # Atomic: a concurrent `free` or a mutator allocating from another size
       # class in the same chunk can touch this word. Same hazard as the mark
       # bit, same reasoning — see `chunk_set_mark`.
@@ -189,7 +239,6 @@ module Gcry
       # Always false on this path until the cursor tracks cleanliness per chunk.
       @freelist_clean[index] = false
 
-      header_addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
       header = Pointer(BlockHeader).new(header_addr)
 
       # Prefetch-for-write ahead of the cursor. Fresh-chunk allocation is bound

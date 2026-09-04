@@ -293,12 +293,48 @@ module Gcry
         (object.address >> 4) &* 0x9E3779B97F4A7C15_u64
       end
 
+      # Once the index's C allocation has failed, it stays off for the process.
+      #
+      # Without this the fallback is neither safe nor correct. `index_grow`
+      # frees the old table and sets `@index_cap = 0` so `notice_reclaim`
+      # scans instead, but the growth attempt is retried on the next
+      # registration — and if *that* one succeeds the table is live again with
+      # only the rows added since, while `notice_reclaim` starts trusting it
+      # (`@index_cap > 0`). Every object registered before the failure then
+      # reads unregistered, so its disappearing links are never cleared on
+      # `free`/`realloc`: a dangling `WeakRef`. Sticky keeps the answer the
+      # comment promises — slow, never wrong.
+      @index_disabled = false
+
+      # Spec/research: the state a refused `index_grow` allocation leaves.
+      def debug_index_give_up : Nil
+        @lock.lock
+        begin
+          LibC.free(@index.as(Void*)) unless @index.null?
+          @index = Pointer(IndexSlot).null
+          @index_cap = 0
+          @index_used = 0
+          @index_disabled = true
+        ensure
+          @lock.unlock
+        end
+      end
+
+      def index_cap : Int32
+        @index_cap
+      end
+
       # Bump the registration count for *object*, inserting it if absent.
       private def index_add(object : Void*) : Nil
         return if object.null?
+        return if @index_disabled
         # Grow at 1/2 load. Tombstones count toward `@index_used`, so a table
         # churned by add/remove rehashes rather than degrading into a full probe.
         index_grow if @index_cap == 0 || (@index_used + 1) * 2 >= @index_cap
+        # The grow can have given up (out of C memory), in which case there is
+        # no table to probe: `mask` would be `UInt64::MAX` and `@index[i]` a
+        # null dereference.
+        return if @index_cap == 0
         mask = (@index_cap - 1).to_u64
         i = index_hash(object) & mask
         first_free = -1
@@ -358,14 +394,16 @@ module Gcry
         new_cap = old_cap == 0 ? 64 : old_cap * 2
         bytes = (new_cap * sizeof(IndexSlot)).to_u64
         fresh = LibC.malloc(LibC::SizeT.new(bytes)).as(IndexSlot*)
-        # Out of C memory: drop the index entirely rather than half-fill it. A
-        # null index makes `notice_reclaim` fall back to the linear scan, which
-        # is slow but correct — never wrong.
+        # Out of C memory: drop the index entirely rather than half-fill it,
+        # and do not try again — see `@index_disabled`. A null index makes
+        # `notice_reclaim` fall back to the linear scan, which is slow but
+        # correct; a *partial* index is neither.
         if fresh.null?
           LibC.free(old_table.as(Void*)) unless old_table.null?
           @index = Pointer(IndexSlot).null
           @index_cap = 0
           @index_used = 0
+          @index_disabled = true
           return
         end
         i = 0

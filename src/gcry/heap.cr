@@ -1004,6 +1004,11 @@ module Gcry
         user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
         oom!("failed to refill size class #{payload}") if user.null?
       end
+      # `user` is in this frame now, which the scan accepts, so the pool slot's
+      # copy has done its job (see `@pool_in_flight`). Clearing it here rather
+      # than inside the lock keeps the publish → hand-over span covered for the
+      # whole of `alloc_old_small_locked`, including its refill.
+      clear_bitmap_alloc_in_flight(index, flags) if @bitmap_alloc
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
       user
