@@ -1790,6 +1790,15 @@ module Gcry
     # instrument that scans the stack has to be able to exclude itself.
     getter collect_entry_sp : UInt64 = 0_u64
 
+    # See `Heap#alloc_large`: the block a stopped mutator is mid-way through
+    # allocating. Marked like any explicit root; `mark_impl` ignores it while
+    # the header is still FREE (the cache path before `set_used_large`).
+    private def mark_large_alloc_in_flight : Nil
+      user = @large_alloc_in_flight
+      return if user.null?
+      mark_explicit_root(user)
+    end
+
     # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
     property post_mark_spin : UInt64 = 0_u64
 
@@ -1880,6 +1889,7 @@ module Gcry
           # realloc pin / add_root); still respect allow_interior_pointers.
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
+          mark_large_alloc_in_flight
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
@@ -2298,6 +2308,7 @@ module Gcry
         clear_all_marks
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
+        mark_large_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack

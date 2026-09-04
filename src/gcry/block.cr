@@ -175,6 +175,39 @@ module Gcry
       header.value = h
     end
 
+    # The allocate-black mark a *mutator* writes when it allocates during a
+    # collection. `set_mark` is a plain read-modify-write of the flags word,
+    # and the stop-the-world suspends by signal, so a mutator can be stopped
+    # between its read and its write; the collector then marks the same word
+    # from a root, the mutator resumes and stores its stale copy, and the
+    # post-STW sweep frees a live block (the `dormant-flush-race` lost root,
+    # about one child in ninety, 2026-09-04). A compare-and-swap that re-reads
+    # the generation until the stored one is current cannot lose that write.
+    def self.set_mark_allocating(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        return
+      {% else %}
+        cas_mark_gen(pointerof(header.value.@flags))
+      {% end %}
+    end
+
+    def self.set_mark_large_allocating(header : BlockHeader*) : Nil
+      hl_check(header.address, "HL: set_mark_large into guarded range\n")
+      cas_mark_gen(pointerof(header.value.@flags))
+    end
+
+    private def self.cas_mark_gen(flags : UInt32*) : Nil
+      loop do
+        gen = @@mark_gen
+        old = Atomic::Ops.load(flags, :monotonic, false)
+        new = (old & ~Flags::MARK_GEN_MASK & ~Flags::MARK) | (gen.to_u32 << Flags::MARK_GEN_SHIFT)
+        _, swapped = Atomic::Ops.cmpxchg(flags, old, new, :sequentially_consistent, :monotonic)
+        # A collection between the generation read and the swap bumps the
+        # generation; the swap may still have succeeded with the old one.
+        return if swapped && gen == @@mark_gen
+      end
+    end
+
     def self.clear_mark(header : BlockHeader*) : Nil
       {% if flag?(:gcry_headerless) %}
         # The mark lives in the chunk's mark bitmap. Writing here would land on

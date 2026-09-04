@@ -991,3 +991,74 @@ inside it. Only the opt-in walks pay; the default path is unchanged.
 
 The knob's warning is rewritten: opt-in for throughput and RSS, not for
 soundness. It stays opt-in.
+
+## Update 14 (2026-09-04): the `dormant-flush-race` lost root, found
+
+### How it was cornered
+
+A subagent tagged every large block with the collection number at
+allocation and kept a ring of every USED-but-unmarked large block the sweep
+freed. Every refusal had the same shape: freed by the post-STW lazy sweep,
+mid-run, with the block's mark generation exactly one behind the sweeper's —
+marked in collection N, not re-marked in N+1, freed by N+1.
+
+Then a sequence of controls, each of which ruled something out:
+
+- Holding the block from a heap object as well changed nothing (4 of 24 with
+  it, 1 of 24 without): the loss was not the stack scan finding the slot.
+- A compare-and-swap for the mutator's allocate-black write alone changed
+  nothing (6 of 72): the header write race was real but not the whole story.
+- Recording the range the collector scanned for the worker's thread showed
+  the worker's `p` slot *inside* it: the slot was scanned.
+- A per-candidate trace of why `mark_impl` stopped, keyed by the refused
+  chunk, showed the freeing collection receiving only *base-only rejections*
+  for that chunk — interior candidates, never the user pointer — where every
+  earlier collection showed one "marked" entry.
+- A probe of lookup misses against the chunk list recorded none.
+
+### The mechanism
+
+The worker was stopped by the suspend signal inside `alloc_large`, after the
+block had become USED and before its user pointer was anywhere the scan
+accepts: at that point the allocator holds `header` and `chunk`, both
+interior addresses under the default `base_only` policy. The collection
+marks nothing for the block, and its post-STW lazy sweep frees it; the worker
+resumes, returns the pointer, fills and verifies the memory (still mapped,
+only cached), and its `free` is refused. A few instructions wide, so about
+one child in ninety on master and four times that on a branch that collects
+twice as often. The header's "one behind" generation was allocate-black's
+mark from the previous cycle, when the allocation straddled it.
+
+Why the first in-flight-root experiment failed: without the compare-and-swap,
+a worker stopped inside `set_mark`'s read-modify-write resumed and stored
+its stale flags over the collector's mark. Both halves were needed.
+
+### The fix
+
+- `Heap#alloc_large` publishes the user pointer of the block it is handing
+  out in `@large_alloc_in_flight` before `set_used_large` (both the cache and
+  the fresh-mapping path), and `alloc_large_counted` clears it once the
+  pointer is back in the caller's registers. The root phase marks it like an
+  explicit root; `mark_impl` ignores it while the header is still FREE.
+- `BlockHeader.set_mark_allocating`: the mutator's allocate-black mark is a
+  compare-and-swap that re-reads the generation until the stored one is
+  current. Every mutator-side site goes through `heap_set_mark_allocating`;
+  the bitmap path was already an atomic OR; the collector's own `set_mark`
+  is unchanged. `spec/allocate_black_spec.cr` pins the contract.
+
+Small blocks do not have the window: their paths hold the user pointer from
+the freelist pop onward.
+
+| run, 8 workers | refused children |
+|---|---|
+| before | 3 of 36, 5 of 48, 8 of 48, 6 of 72 |
+| compare-and-swap only | 6 of 72 |
+| in-flight root + compare-and-swap | 0 of 72 |
+
+The gate itself (`make dormant-flush-race`, 4 workers, 6 children per arm)
+follows below.
+
+`make dormant-flush-race`, five runs in a row on the committed tree: queued
+arm 0 of 6 every time, immediate arm 6 of 6 every time (its purpose-broken
+control still goes red). With that, every gate on the plan's verification
+list is green on this branch, in both builds, twice over today.

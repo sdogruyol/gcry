@@ -753,9 +753,16 @@ module Gcry
     # `alloc_large` plus its byte accounting, under `@alloc_lock`. A separate
     # method only so the entry point can call it twice — once, then again after
     # an emergency collection — without repeating the block.
+    # The large block being handed out right now, rooted by the collector; see
+    # `alloc_large`. One slot suffices: large allocation is under `@alloc_lock`.
+    @large_alloc_in_flight = Pointer(Void).null
+
     private def alloc_large_counted(rounded : UInt64, flags : UInt32) : {Void*, Bool}
       with_alloc_lock do
         u, fc = alloc_large(rounded, flags)
+        # From here `u` is in the caller's registers or frame, which the scan
+        # accepts; the collector's copy is no longer needed.
+        @large_alloc_in_flight = Pointer(Void).null
         note_alloc_bytes(rounded) unless u.null?
         {u, fc}
       end
@@ -1077,7 +1084,7 @@ module Gcry
 
       header = BlockHeader.from_user(u)
       BlockHeader.set_used(header, payload, flags)
-      heap_set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark_allocating(header) if @incremental_marking || @collecting
       u
     end
 
@@ -1448,9 +1455,14 @@ module Gcry
 
       if user = take_large_free(mapped)
         header = BlockHeader.large_header_from_user(user)
+        # Root the block until the caller holds its user pointer: a mutator
+        # stopped by signal between `set_used_large` and its return holds only
+        # `header`/`chunk`, which `base_only` rejects, and the sweep would take
+        # the USED, unmarked block for dead (`dormant-flush-race`, 2026-09-04).
+        @large_alloc_in_flight = user
         ThreadListWatch.check(header.address, BlockHeader::SIZE.to_u64, ThreadListWatch::SITE_HDR_WRITE)
         BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-        heap_set_mark(header) if @incremental_marking || @collecting
+        heap_set_mark_allocating(header) if @incremental_marking || @collecting
         return {user, true}
       end
 
@@ -1460,8 +1472,9 @@ module Gcry
       return {Pointer(Void).null, false} if chunk.null?
       trace_large_map(chunk, mapped, payload) if @trace_large
       header = ChunkHeader.large_header(chunk)
+      @large_alloc_in_flight = ChunkHeader.large_user(chunk)
       BlockHeader.set_used_large(header, payload.to_u32!, flags | BlockHeader::Flags::LARGE)
-      heap_set_mark(header) if @incremental_marking || @collecting
+      heap_set_mark_allocating(header) if @incremental_marking || @collecting
       {ChunkHeader.large_user(chunk), false}
     end
 
@@ -2263,6 +2276,29 @@ module Gcry
     # not in the cursor's chunk (a large object, a TLAB slot, a free-list
     # residue) falls back to the header, which the header arm still reads.
     @[AlwaysInline]
+    # `heap_set_mark` for the mutator's allocate-black write; see
+    # `BlockHeader.set_mark_allocating`. The bitmap path is atomic already.
+    private def heap_set_mark_allocating(header : BlockHeader*) : Nil
+      unless @bitmap_alloc
+        hdr_set_mark_allocating(header)
+        return
+      end
+      chunk = chunk_containing(header.address)
+      if chunk.nil? || !bitmap_chunk?(chunk)
+        hdr_set_mark_allocating(header)
+        return
+      end
+      chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
+    end
+
+    private def hdr_set_mark_allocating(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_headerless) %}
+        BlockHeader.set_mark_large_allocating(header)
+      {% else %}
+        BlockHeader.set_mark_allocating(header)
+      {% end %}
+    end
+
     private def heap_set_mark(header : BlockHeader*) : Nil
       # Phase 1: the header generation, with readers taking the union, so no
       # lookup lands on the mutator's allocation path. Phase 3's sweep reads

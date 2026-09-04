@@ -63,3 +63,21 @@ Rules written after corrections, so the same mistake is not made twice.
 - **Reproduction probes store pointers word-aligned.** A conservative scan
   reads 8-byte words; a pointer at a non-multiple-of-8 offset is invisible
   to it, and the probe then "passes" for the wrong reason.
+
+## Concurrency
+- **A read-modify-write on a word the collector also writes is a race even
+  with the world stopped**, because "stopped" is a signal that can land
+  between the read and the write. Any mutator-side write to a header word the
+  collector marks (allocate-black, flags) must be a CAS that re-reads its
+  inputs after a failed swap. Found via allocation tags + a "mark generation
+  one behind" signature; a static-root control that changed nothing is what
+  turned the hunt from the scan to the write.
+- **Controls that change nothing are the most valuable instrument.** The
+  static-root control (no change) ruled out the scan; the CAS-only run (no
+  change) ruled out the header race as the whole story; the scan-range
+  record (slot inside) ruled out the range. Each "no change" removed a
+  candidate faster than any theory did. Write the control before the fix.
+- **A conservative root scan with `base_only` rejects what an allocator
+  holds mid-allocation** (`header`, `chunk`): any allocation path must keep
+  the user pointer visible, or publish it, from the moment the block reads
+  USED until the caller holds it.

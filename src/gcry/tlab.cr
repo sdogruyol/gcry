@@ -404,7 +404,7 @@ module Gcry
                 tlab.value.freelists[class_index] = next_free
               end
               BlockHeader.set_used(header, payload, flags)
-              heap_set_mark(header) if @incremental_marking || @collecting
+              heap_set_mark_allocating(header) if @incremental_marking || @collecting
               @tlab_hits.add(1_u64)
             else
               user = Pointer(Void).null
@@ -639,7 +639,7 @@ module Gcry
           else
             ab.value.freelists[index] = header.value.next_free
             BlockHeader.set_used(header, payload, flags)
-            heap_set_mark(header) if @incremental_marking || @collecting
+            heap_set_mark_allocating(header) if @incremental_marking || @collecting
             @alloc_batch_hits.add(1_u64)
           end
         end
@@ -710,7 +710,7 @@ module Gcry
             nxt = header.value.next_free
             @freelists[class_index] = nxt
             BlockHeader.set_used(header, payload, flags)
-            heap_set_mark(header) if @incremental_marking || @collecting
+            heap_set_mark_allocating(header) if @incremental_marking || @collecting
             if first.null?
               first = src
               # next_free unused for the returned object

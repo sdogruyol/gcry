@@ -447,7 +447,7 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
       atomicity, bitmap chunks freelist-linked from the bounded-excess
       branch) and one argued race (revive during the dormant flush), all
       fixed and pinned. FINDINGS Update 12.
-- [ ] OPEN, pre-existing on master: `make dormant-flush-race` queued arm loses a
+- [x] (resolved above) pre-existing on master: `make dormant-flush-race` queued arm loses a
       live large block about once per 6-18 children (sweep frees it; header
       FREE; chunk queued for release). ~4x more frequent on this branch
       because collections are 2x faster. FINDINGS Update 12 has the numbers
@@ -461,7 +461,9 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
       real race (TLAB-held blocks zeroed after hand-out); fixed by running the
       walks under every small-allocation lock. Green 5 of 5; corruption gate
       3 of 3. FINDINGS Update 13.
-- [ ] `make dormant-flush-race`: find the lost root. Instrument: tag each
+- [x] `make dormant-flush-race`: found the lost root (worker stopped inside
+      alloc_large holding only interior pointers); in-flight root + CAS mark.
+      0 of 72 children at 8 workers. FINDINGS Update 14. Original plan: Instrument: tag each
       large block with the collection number at allocation; on refusal print
       the worker's round, the tag, and the sweep path that freed it (STW
       sweep vs after-world lazy sweep; which thread). Candidate windows:
