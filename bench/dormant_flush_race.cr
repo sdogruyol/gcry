@@ -294,7 +294,7 @@ if ARGV.includes?("--child")
        "lg_twice #{heap.large_cached_twice}, lg_taken_used #{heap.large_taken_used}, " \
        "lg_by_sweep #{heap.large_cached_by_sweep}, " \
        "tlw_hits #{Gcry::ThreadListWatch.hits}, " \
-       "root_shrinks #{Gcry::Platform.static_root_shrinks}, bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
+       "bss_lost #{Gcry::Platform.static_root_bss_lost}, " \
        "stash_damaged #{stash_damaged}, ballast_seen #{ballast_seen}, " \
        "greg_candidates #{heap.thread_greg_candidates}, greg_total #{heap.thread_greg_words_total}, " \
        "handler_calls #{Gcry::Platform.stw_handler_calls}, sp_zero #{Gcry::Platform.stw_sp_zero}, " \

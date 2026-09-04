@@ -99,9 +99,9 @@ module Gcry
         end
       end
 
-      # Darwin reads the Mach-O `__DATA` sections directly, so there is no
-      # parse to lose a line and nothing to re-read; the counters exist so
-      # `/gc-stats` has the same shape on both platforms.
+      # Counters `/gc-stats` reports on both platforms; the Linux side reads
+      # the ELF program headers, this side the Mach-O sections, and neither
+      # has anything to lose.
       def self.static_root_bytes : UInt64
         total = 0_u64
         i = 0
@@ -117,11 +117,7 @@ module Gcry
         0_u64
       end
 
-      def self.static_root_reparses : UInt64
-        0_u64
-      end
-
-      def self.static_root_shrinks : UInt64
+      def self.static_root_overflow : UInt64
         0_u64
       end
 
@@ -229,9 +225,8 @@ module Gcry
       end
     {% end %}
 
-    # Linux finds the executable's `.data` and BSS in `/proc/self/maps` by
-    # anchor address and used to refuse the BSS above 1 MiB
-    # (src/gcry/platform/linux_roots.cr). Darwin reads the
+    # Linux reads the executable's writable `PT_LOAD`s and used to refuse a
+    # BSS above 1 MiB (src/gcry/platform/linux_roots.cr). Darwin reads the
     # Mach-O `__DATA` sections directly, so there is no adjacency guess and
     # nothing to cap — but the knob is wired unconditionally in `GC.init`, and a
     # caller that gates on a platform must not have to ask which one it is on.

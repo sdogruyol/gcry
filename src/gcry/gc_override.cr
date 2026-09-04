@@ -786,6 +786,12 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
+    # Read the executable's program headers now, on the main thread and before
+    # any other thread exists: `dl_iterate_phdr` takes the loader's lock, and
+    # a collection stops the world with whatever locks its threads hold.
+    {% if flag?(:linux) %}
+      Gcry::Platform.ensure_static_root_cache
+    {% end %}
     # Research only: a full staging table refuses the birth being handed in
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).

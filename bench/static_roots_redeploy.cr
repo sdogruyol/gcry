@@ -10,10 +10,10 @@
 # BSS adjacency test had nothing to be adjacent to, the root set collapsed to
 # zero bytes, and everything held only by a class variable was swept.
 #
-# The parser now identifies the executable's mappings by address — the ones
-# holding `Gcry::Platform`'s own `.data` and `.bss` anchor words — and never
-# reads the pathname. This harness does the redeploy to itself: it deletes its
-# own binary, forces the refresh, and asks whether an array held only by a
+# The roots now come from the executable's program headers via
+# `dl_iterate_phdr`, read once at `GC.init`; nothing about them changes when
+# the file is replaced. This harness does the redeploy to itself: it deletes
+# its own binary, runs collections, and asks whether an array held only by a
 # class variable is still whole.
 #
 # The child arm runs from a copy of the binary, so the file it deletes is its
@@ -99,14 +99,12 @@ ROUNDS.times do |round|
     File.delete(exe)
     deleted = !File.exists?(exe)
   end
-  # The periodic refresh, without waiting 64 majors for it.
-  Gcry::Platform.invalidate_static_root_cache
   GC.collect
   damage ||= Registry.first_damage
 end
 
 puts "child deleted=#{deleted} bss_lost=#{Gcry::Platform.static_root_bss_lost} " \
-     "reparses=#{Gcry::Platform.static_root_reparses} root_bytes=#{Gcry::Platform.static_root_bytes}" \
+     "root_bytes=#{Gcry::Platform.static_root_bytes}" \
      "#{damage ? " damage=#{damage}" : ""}"
 puts(damage ? "child FAIL" : "child ok")
 exit(damage ? 1 : 0)

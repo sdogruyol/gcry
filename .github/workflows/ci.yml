@@ -393,11 +393,11 @@ jobs:
         run: |
           make static-bss-roots
 
-      # The executable's mappings are identified by address, not pathname: a
-      # redeploy renames every maps line of the running image to "(deleted)",
-      # and a parser that compared against /proc/self/exe lost .data and the
-      # BSS at the next refresh. The child deletes its own binary and checks a
-      # class-variable array survives the refresh.
+      # Static roots come from the executable's ELF program headers, read once
+      # at GC.init — not from /proc/self/maps, where a redeploy renames every
+      # line of the running image to "(deleted)" and a pathname-matching
+      # parser lost .data and the BSS at the next refresh. The child deletes
+      # its own binary and checks a class-variable array survives.
       - name: Static roots across a redeploy
         run: |
           make static-roots-redeploy

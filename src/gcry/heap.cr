@@ -516,9 +516,8 @@ module Gcry
     # `map_chunk`. Returns whether a retry is worth making at all.
     #
     # **Not reentrant, and the guard is its own flag rather than `@collecting`.**
-    # A collection allocates — `ensure_static_root_cache` parses
-    # `/proc/self/maps` — and at the edge of the address space those
-    # allocations fail too. Guarded only by `@collecting`, which is not set for
+    # A collection can allocate — the audits and reports do — and at the edge
+    # of the address space those allocations fail too. Guarded only by `@collecting`, which is not set for
     # the whole of `collect`, the second failure asks for a third collection
     # and the process dies of stack overflow inside `run_collection` (measured,
     # 3 of 3). One emergency collection at a time, process-wide: a thread that

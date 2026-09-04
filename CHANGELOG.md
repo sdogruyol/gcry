@@ -9,32 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The executable's `.data` and BSS are found by address, not by name.** The
-  `/proc/self/maps` parser accepted any file-backed RW mapping that was not a
-  `.so` as a static root, so a program that `mmap`ed its own data files had
-  them cached as roots and scanned after it `mremap`ed or `munmap`ed them —
-  a `MAP_PRIVATE` file grown past EOF is SIGBUS (#29). The first fix compared
-  the pathname to `/proc/self/exe`, resolved once, which opened the opposite
-  hole: a redeploy that replaces the binary renames every maps line of the
-  running image to `… (deleted)`, the comparison fails at the next refresh,
-  `.data` is rejected, the BSS has nothing to be adjacent to, and the root set
-  collapses to zero bytes — `bench/static_roots_redeploy.cr` dies of it on that
-  tree in three collections. Now two class variables in `Gcry::Platform` — one
-  with a non-zero initialiser, which the linker puts in `.data`, one zeroed,
-  which goes to `.bss` — name the two mappings by containment, and no pathname
-  is read at all. A parse that comes back without either anchor dropped a line
-  to a mapping changing under the read, and is run again (up to four times)
-  instead of proceeding with no class variable rooted; `static_root_reparses`
-  counts it. Gated by `make static-roots-redeploy` beside `static-bss-roots`.
+- **Linux static roots come from the ELF program headers, not from
+  `/proc/self/maps`.** The roots are the executable's writable `PT_LOAD`s —
+  `.data` and `.bss` together, `p_memsz` covering the zero-fill — minus the
+  `PT_GNU_RELRO` window the loader makes read-only before `main`, read once
+  at `GC.init` through `dl_iterate_phdr` (the object whose segments hold
+  gcry's own statics, not "the first one visited") and never refreshed,
+  because they never change. This is what Darwin already did with the Mach-O
+  `__DATA` sections, and what Boehm does.
+  It replaces a maps parser whose every failure was a collection with no
+  class variable rooted. It named `.data` by pathname: first "not a `.so`",
+  which admitted any file the program `mmap`ed and scanned it after
+  `munmap` — a `MAP_PRIVATE` file grown past EOF is SIGBUS (#29); then
+  "equals `/proc/self/exe`" (#31), which lost the executable the moment a
+  redeploy renamed its maps lines to `… (deleted)` — root set **0 bytes**,
+  `bench/static_roots_redeploy.cr` dies of it on that tree in three
+  collections. It found the BSS by adjacency to that line, so losing `.data`
+  lost the BSS. And the file is not a snapshot: a mapping changing between
+  two `read`s can drop a line. A program header can do none of these.
+  Ranges checked against `readelf -l` (RELRO segment dropped, `.data`+`.bss`
+  exact to the byte); PIE, non-PIE and static-pie; `-Dpreview_mt`; release.
+  Gated by `make static-roots-redeploy` beside `static-bss-roots`, whose
+  `GCRY_STATIC_BSS_CAP=1` red arm now refuses the segment instead of the
+  mapping. The cache is a `StaticArray`, so a collection no longer calls
+  `realloc` to find its roots.
 
 - **`/gc-stats` reports the static-root counters.** `static_scanned_last` /
   `min` / `max` / `drops`, `static_root_bytes`, `static_root_bss_lost`,
-  `static_root_reparses`, `static_root_shrinks`. A fifth acikturkiye sighting
-  on 2026-09-04 (287404d) faulted in `Radix::Tree#find` on a node reached only
-  through Kemal's `@@only_routes_tree` — a class variable, held by nothing but
-  the BSS — which is the "globals were not roots this collection" shape and
-  not the stack-rooted per-request shape of the four before it. These are the
-  counters that settle it without a restart.
+  `static_root_overflow`. A fifth acikturkiye sighting on 2026-09-04
+  (287404d) faulted in `Radix::Tree#find` on a node reached only through
+  Kemal's `@@only_routes_tree` — a class variable, held by nothing but the
+  BSS — which is the "globals were not roots this collection" shape and not
+  the stack-rooted per-request shape of the four before it. On 287404d the
+  BSS was a root only if the maps parse kept `.data`'s line; the mechanism
+  that dropped it there is not established, and the counters above plus the
+  journal's `gcry:` lines are what would establish it.
 
 ### Corrected
 
