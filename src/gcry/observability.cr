@@ -96,6 +96,18 @@ module Gcry
         large_taken_used:            heap.large_taken_used,
         release_double:              heap.release_double,
         release_remapped:            heap.release_remapped,
+        # Static roots: what the mark received, and whether the parse found the
+        # executable's own mappings. `static_scanned_drops` and
+        # `static_root_bss_lost` are the two counters a "globals were not roots"
+        # sighting is settled by.
+        static_scanned_last:         heap.static_scanned_last,
+        static_scanned_min:          heap.static_scanned_min,
+        static_scanned_max:          heap.static_scanned_max,
+        static_scanned_drops:        heap.static_scanned_drops,
+        static_root_bytes:           Platform.static_root_bytes,
+        static_root_bss_lost:        Platform.static_root_bss_lost,
+        static_root_reparses:        Platform.static_root_reparses,
+        static_root_shrinks:         Platform.static_root_shrinks,
         index_audit_runs:            heap.index_audit_runs,
         index_overlaps:              heap.index_overlaps,
         index_count_mismatch:        heap.index_count_mismatch,

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The executable's `.data` and BSS are found by address, not by name.** The
+  `/proc/self/maps` parser accepted any file-backed RW mapping that was not a
+  `.so` as a static root, so a program that `mmap`ed its own data files had
+  them cached as roots and scanned after it `mremap`ed or `munmap`ed them —
+  a `MAP_PRIVATE` file grown past EOF is SIGBUS (#29). The first fix compared
+  the pathname to `/proc/self/exe`, resolved once, which opened the opposite
+  hole: a redeploy that replaces the binary renames every maps line of the
+  running image to `… (deleted)`, the comparison fails at the next refresh,
+  `.data` is rejected, the BSS has nothing to be adjacent to, and the root set
+  collapses to zero bytes — `bench/static_roots_redeploy.cr` dies of it on that
+  tree in three collections. Now two class variables in `Gcry::Platform` — one
+  with a non-zero initialiser, which the linker puts in `.data`, one zeroed,
+  which goes to `.bss` — name the two mappings by containment, and no pathname
+  is read at all. A parse that comes back without either anchor dropped a line
+  to a mapping changing under the read, and is run again (up to four times)
+  instead of proceeding with no class variable rooted; `static_root_reparses`
+  counts it. Gated by `make static-roots-redeploy` beside `static-bss-roots`.
+
+- **`/gc-stats` reports the static-root counters.** `static_scanned_last` /
+  `min` / `max` / `drops`, `static_root_bytes`, `static_root_bss_lost`,
+  `static_root_reparses`, `static_root_shrinks`. A fifth acikturkiye sighting
+  on 2026-09-04 (287404d) faulted in `Radix::Tree#find` on a node reached only
+  through Kemal's `@@only_routes_tree` — a class variable, held by nothing but
+  the BSS — which is the "globals were not roots this collection" shape and
+  not the stack-rooted per-request shape of the four before it. These are the
+  counters that settle it without a restart.
+
 ### Corrected
 
 - **0.21.2's field claim is refuted.** Its notes said of the chunk-index insert
