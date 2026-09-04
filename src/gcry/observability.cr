@@ -73,6 +73,7 @@ module Gcry
         dormant_chunk_bytes:         heap.dormant_chunk_bytes,
         sweep_dormant_skips:         heap.sweep_dormant_skips,
         dontneed_bytes:              heap.dontneed_bytes,
+        page_release_bytes:          heap.page_release_bytes,
         mostly_empty_release:        heap.mostly_empty_release,
         mostly_empty_dontneed:       heap.mostly_empty_dontneed,
         mostly_empty_max_live_pct:   heap.mostly_empty_max_live_pct,

@@ -951,3 +951,43 @@ lock that the after-world sweep also takes per large chunk; the suspend
 handler copies the ucontext registers into a table the scan reads, so a
 pointer held only in a callee-saved register is covered. Not attributed here.
 Open, and older than the branch.
+
+## Update 13 (2026-09-04): both release walks made sound; `live-graph-audit` green
+
+### The gate was measuring the wrong thing, and then it found a real bug
+
+`make live-graph-audit` demanded that each walk arm release at least 4x the
+no-walk control, by the aggregate `dontneed` counter. The control still runs
+the dormant flush, which grew on master until the ratio was 3.1x, so the gate
+was red for a reason unrelated to the walks. It now reads each walk's own
+counter (`page_release_bytes`, new, for the HOLED walk; `mostly_empty_bytes`
+for the sparse walk), requires it above 8 MiB per arm, and requires the
+control's to be 0 — direct evidence the walk ran and the control did not.
+
+With that fixed, the third run failed a HOLED child for real. The knob had
+said so all along: `GCRY_PAGE_DONTNEED=1` was documented as "known to zero
+live objects, research only" (`make page-release-corruption`: 4 of 28).
+
+### The mechanism, and the fix
+
+The post-STW walk unlinks a chunk's free-only page runs from the class
+freelist under the freelist lock, then computes the live mask from block
+headers and issues `madvise` *without* the lock. TLAB batches hold blocks
+that are FREE-headed and off the global freelist, so the unlink cannot reach
+them and the mask calls their pages free; a block handed out and written
+between the mask and the syscall is zeroed afterwards.
+
+Fix: `with_small_allocation_excluded` (tlab.cr) holds every TLAB slot lock
+and allocation-batch slot lock, then the class freelist lock — every lock a
+small allocation of the class can take, in the order the TLAB refill path
+already establishes — and the unlink, the mask, and the syscall now all sit
+inside it. Only the opt-in walks pay; the default path is unchanged.
+
+| gate | before | after |
+|---|---|---|
+| `live-graph-audit`, HOLED arm | 1 of 18 children | 0 of 30 (5 runs) |
+| `live-graph-audit`, sparse arm | 0 of 18 | 0 of 30 |
+| `page-release-corruption`, DONTNEED arm | 4 of 28 (recorded) | 0 of 12 (3 runs) |
+
+The knob's warning is rewritten: opt-in for throughput and RSS, not for
+soundness. It stays opt-in.

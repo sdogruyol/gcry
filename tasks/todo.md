@@ -453,3 +453,18 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
       because collections are 2x faster. FINDINGS Update 12 has the numbers
       and what was excluded.
 
+
+## Fully green before the PR (2026-09-04)
+
+- [x] `make live-graph-audit`: the 4x floor measured the dormant flush; the
+      gate now reads each walk's own counter. That exposed the HOLED walk's
+      real race (TLAB-held blocks zeroed after hand-out); fixed by running the
+      walks under every small-allocation lock. Green 5 of 5; corruption gate
+      3 of 3. FINDINGS Update 13.
+- [ ] `make dormant-flush-race`: find the lost root. Instrument: tag each
+      large block with the collection number at allocation; on refusal print
+      the worker's round, the tag, and the sweep path that freed it (STW
+      sweep vs after-world lazy sweep; which thread). Candidate windows:
+      thread-birth registration (worker not yet in the STW list while its
+      block is live), after-world sweep vs allocation, register capture.
+      Green 5 runs in a row at 8 workers.

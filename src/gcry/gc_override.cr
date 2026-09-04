@@ -444,17 +444,14 @@ module GC
     elsif env_flag_one?("GCRY_PAGE_DONTNEED")
       # Sparse-chunk free-page release (HOLED + post-STW madvise).
       heap.madvise_free_pages = true
-      # Known unsound, and the docs used to price it as a throughput choice.
-      # The post-STW walk computes a run of free pages from a live mask and
-      # then syscalls with the world running, so a mutator can allocate into a
-      # page the mask called free before the call lands; `MADV_DONTNEED` then
-      # zeroes a live object. `make page-release-corruption` faults **4 of 28**
-      # attempts on this arm across six gate runs, while `GCRY_MOSTLY_EMPTY=1`
-      # and `GCRY_DISABLE_MADVISE=1` are 0 throughout.
-      warn_unsupported_env(
-        "gcry: GCRY_PAGE_DONTNEED=1 is known to zero live objects — the post-STW " \
-        "free-page walk madvises a run a mutator may have allocated into " \
-        "(`make page-release-corruption`: 4 of 28). Research only.\n")
+      # Opt-in for throughput and RSS reasons, not soundness. It used to be
+      # unsound: the post-STW walk computed a run of free pages from block
+      # headers and then syscalled with the world running, so a block handed
+      # out from a TLAB in between was zeroed after the mutator wrote it
+      # (`make page-release-corruption` faulted 4 of 28). The walk now runs
+      # under every lock a small allocation of the class can take
+      # (`with_small_allocation_excluded`); the same gate and
+      # `make live-graph-audit` are clean since (2026-09-04).
     end
 
     {% if flag?(:darwin) %}
@@ -463,19 +460,14 @@ module GC
       # enabled, and where it visits every kept size-class chunk rather than
       # only the HOLED ones.
       #
-      # It is opt-in now, matching Linux, because the walk is unsound and the
-      # defect is still open: it computes a free-page run from a live mask and
-      # then syscalls with the world running, so a mutator can allocate into a
-      # page the mask called free before the call lands. `make
-      # page-release-corruption` faults 4 of 28 attempts on that arm across six
-      # gate runs, against 0 throughout for the other two. `MADV_FREE_REUSABLE`
-      # zero-fills a reclaimed page, so the same window is reachable here under
-      # memory pressure — read from the code rather than measured, since the
-      # gate has no Darwin runner.
-      #
-      # The cost is macOS RSS, which is a smaller thing to be wrong about than
-      # zeroing a live object. `GCRY_PAGE_DONTNEED=1` turns it back on and
-      # warns, and the escape hatches keep working for anyone who does.
+      # It is opt-in now, matching Linux. The walk was unsound until
+      # 2026-09-04 (a free-page run computed from headers, then a syscall with
+      # the world running, so a TLAB could hand a block out in between); it now
+      # runs under every lock a small allocation of the class can take, on
+      # both platforms. It stays off here because the gate has no Darwin
+      # runner: the Linux fix is measured, the Darwin one is read from the
+      # code. `GCRY_PAGE_DONTNEED=1` turns it on; the escape hatches keep
+      # working for anyone who does.
       if env_flag_one?("GCRY_PAGE_DONTNEED") &&
          !(env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE"))
         heap.madvise_free_pages = true

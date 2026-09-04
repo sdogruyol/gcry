@@ -596,16 +596,20 @@ module Gcry
     # The machinery already existed for `@mostly_empty_dontneed` and was simply
     # never applied to the HOLED walk, which is the one `GCRY_PAGE_DONTNEED=1`
     # turns on.
-    private def unlink_before_release(chunk : ChunkHeader*, payload : UInt32,
-                                      preserve_content : Bool) : Nil
-      return if preserve_content
-      class_index = chunk.value.size_class.to_i32
-      return if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+    # Unlink a chunk's free-only page runs and release them in one critical
+    # section that excludes every small allocation of the class — see
+    # `with_small_allocation_excluded` for why the syscall must sit inside it.
+    private def release_chunk_pages_excluded(chunk : ChunkHeader*, class_index : Int32, *,
+                                             preserve_content : Bool, unlink : Bool = true) : Bool
+      payload = SizeClasses.payload(class_index)
       nursery = ChunkHeader.nursery?(chunk)
-      with_freelist_lock(class_index, nursery) do
-        unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+      with_small_allocation_excluded(class_index, nursery) do
+        if unlink
+          unlink_free_only_page_runs(chunk, class_index, nursery, payload)
+          @page_release_unlinked_chunks &+= 1 unless preserve_content
+        end
+        release_free_pages_in_chunk(chunk, payload, preserve_content: preserve_content)
       end
-      @page_release_unlinked_chunks &+= 1
     end
 
     private def flush_pending_page_release_chunks : Nil
@@ -628,8 +632,7 @@ module Gcry
           next if ChunkHeader.dormant?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          unlink_before_release(chunk, SizeClasses.payload(class_index), false)
-          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
+          release_chunk_pages_excluded(chunk, class_index, preserve_content: false)
         end
       {% else %}
         each_chunk do |chunk|
@@ -637,8 +640,7 @@ module Gcry
           next if ChunkHeader.large?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
-          unlink_before_release(chunk, SizeClasses.payload(class_index), false)
-          release_free_pages_in_chunk(chunk, SizeClasses.payload(class_index), preserve_content: false)
+          release_chunk_pages_excluded(chunk, class_index, preserve_content: false)
         end
       {% end %}
     end
@@ -676,12 +678,8 @@ module Gcry
         # rebuild, and the SPARSE path deliberately does not ask for one — the
         # whole point of the mode is to avoid it. If this arm turns out to be
         # the fix, the rebuild is the price and that is a separate decision.
-        if @mostly_empty_dontneed || @mostly_empty_unlink
-          with_freelist_lock(class_index, nursery) do
-            unlink_free_only_page_runs(chunk, class_index, nursery, payload)
-          end
-        end
-        if release_free_pages_in_chunk(chunk, payload, preserve_content: preserve)
+        if release_chunk_pages_excluded(chunk, class_index, preserve_content: preserve,
+             unlink: @mostly_empty_dontneed || @mostly_empty_unlink)
           gained = @dontneed_bytes - before
           if gained > budget_left
             # Counters already include full run; budget is best-effort cap on
@@ -1448,6 +1446,7 @@ module Gcry
                    end
               if ok
                 @dontneed_bytes += len
+                @page_release_bytes += len
                 any = true
               end
             end

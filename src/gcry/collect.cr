@@ -103,6 +103,9 @@ module Gcry
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
+    # Bytes the HOLED free-page walk alone released (`GCRY_PAGE_DONTNEED=1`);
+    # `dontneed_bytes` also counts the dormant flush every configuration runs.
+    getter page_release_bytes : UInt64 = 0_u64
     # Page-release ranges that did not lie inside the chunk they were computed
     # from. `release_free_pages_in_chunk` only ever checked the range against
     # the chunk's own `data_start`/`data_end`, which is a self-consistency check
