@@ -75,6 +75,9 @@ module Gcry
     # not globally: two mutators can be in `bitmap_alloc_locked` at once for
     # different classes.
     @pool_in_flight = uninitialized StaticArray(Void*, POOL_SLOTS)
+    # The cursor's current `occ` word, so the hit path sets its bit with one
+    # store and no chunk-header load (see `Heap#fast_alloc`).
+    @pool_occ_word = uninitialized StaticArray(UInt64*, POOL_SLOTS)
 
     getter bitmap_alloc_fast : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
@@ -87,6 +90,7 @@ module Gcry
       @pool_free_mask = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
       @pool_word_base = StaticArray(UInt64, POOL_SLOTS).new(0_u64)
       @pool_in_flight = StaticArray(Void*, POOL_SLOTS).new(Pointer(Void).null)
+      @pool_occ_word = StaticArray(UInt64*, POOL_SLOTS).new(Pointer(UInt64).null)
     end
 
     # Root every block a pool slot is mid-handover on. Called from the root
@@ -244,11 +248,16 @@ module Gcry
       header_addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
       @pool_in_flight[slot] = Pointer(Void).new(header_addr &+ BlockHeader::SIZE)
 
-      # Atomic: a concurrent `free` or a mutator allocating from another size
-      # class in the same chunk can touch this word. Same hazard as the mark
-      # bit, same reasoning — see `chunk_set_mark`.
-      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word, bit_mask,
-        LLVM::AtomicOrdering::Monotonic, false)
+      if Gcry.single_mutator?
+        # The cursor owns this word and the sweep runs on this thread.
+        (occ + word).value |= bit_mask
+      else
+        # Atomic: a concurrent `free` on another thread can clear a bit in this
+        # word. Same hazard as the mark bit, same reasoning — see
+        # `chunk_set_mark`.
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, occ + word, bit_mask,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
 
       # `@freelist_clean` is a freelist-shaped claim — "this class's next block
       # comes straight off a fresh chunk, so `allocate` may skip the memset".
@@ -315,6 +324,8 @@ module Gcry
             @pool_free_mask[slot] = mask
             @pool_word_base[slot] = ChunkHeader.data_start(chunk).address &+
                                     (word.to_u64 << 6) &* @block_bytes[index]
+
+            @pool_occ_word[slot] = ChunkHeader.occ_bitmap(chunk) + word
             @bitmap_alloc_refills &+= 1
             return true
           end
@@ -563,6 +574,7 @@ module Gcry
           @pool_free_mask[slot] = 0_u64
           @pool_word[slot] = 0
           @pool_word_base[slot] = 0_u64
+          @pool_occ_word[slot] = Pointer(UInt64).null
         end
         slot += SIZE_CLASS_COUNT
       end

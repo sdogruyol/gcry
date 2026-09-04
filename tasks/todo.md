@@ -470,3 +470,22 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
       thread-birth registration (worker not yet in the STW list while its
       block is live), after-world sweep vs allocation, register capture.
       Green 5 runs in a row at 8 workers.
+
+## Close the gap to Boehm (2026-09-04)
+
+Headerless Kemal /json is 92.3% of Boehm; the collector is 0.2-0.5% of wall
+time, so the gap is the mutator's allocation path.
+- [x] Profile the headerless Kemal server under wrk (perf if the kernel has
+      it; otherwise an allocation microbenchmark per mode vs Boehm).
+- [x] Remove per-allocation atomics from the bitmap fast path: per-thread pool
+      cursor (lock only at refill), batched bytes_since_gc.
+- [x] Trim the GC.malloc entry (dedicated hit path) (checks, hooks, rounding) to what a hit needs.
+- [ ] Paired Kemal n>=7 per change; keep only measurable wins; gates; update
+      the PR table.
+- [x] The real gap: page faults from releasing emptied chunks every cycle;
+      warm retention up to the threshold by default. 112.7% of Boehm.
+- [x] RSS under load (44.5 MB vs Boehm 22 MB): the fixed 32 MiB threshold and
+      warm budget. Adaptive threshold = live × factor (clamped 8–64 MiB),
+      warm budget follows; `GCRY_THRESHOLD_FACTOR`; spec
+      `spec/adaptive_threshold_spec.cr`. Measure k = 50/100/200 vs Boehm.
+- [ ] Gates on the final tree, squash, push, open the PR.

@@ -362,7 +362,7 @@ Defaults tuned for process GC. Change after you measure:
 |----------|--------|
 | `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved; **large pause cost where the root scan is big** — EC4 or a big heap) |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
-| `GCRY_THRESHOLD` | Bytes before auto-major (default 32 MiB) |
+| `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), clamped 8–64 MiB |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |
 | `GCRY_PARALLEL_MARK=N` | Experimental parallel mark workers (default 1) |

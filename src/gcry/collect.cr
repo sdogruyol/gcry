@@ -24,8 +24,31 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_GC_THRESHOLD = 4194304_u64 # 4 MiB — library / conservative
+    # Boehm-shaped sizing for the process heap: after each collection the next
+    # threshold is the live bytes the sweep just measured, times a factor,
+    # clamped. Allocation between collections then scales with the live set,
+    # so a small live set collects often and cheaply and a large one does not
+    # thrash; the warm-retention budget follows it, so what one cycle
+    # allocates is what the sweep keeps. `GCRY_THRESHOLD` pins a fixed
+    # threshold and disables this; `GCRY_THRESHOLD_FACTOR` is the factor in
+    # percent (default 100).
+    ADAPTIVE_THRESHOLD_MIN =  8388608_u64 # 8 MiB
+    ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
+    property adaptive_threshold : Bool = false
+    property adaptive_threshold_pct : UInt64 = 100_u64
+    property warm_retain_follows_threshold : Bool = false
+
+    private def adapt_threshold_after_sweep : Nil
+      return unless @adaptive_threshold
+      live = @size_class_live_bytes &+ (@large_mapped_bytes > @large_free_bytes ? @large_mapped_bytes - @large_free_bytes : 0_u64)
+      want = live &* @adaptive_threshold_pct // 100_u64
+      want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
+      want = ADAPTIVE_THRESHOLD_MAX if want > ADAPTIVE_THRESHOLD_MAX
+      @gc_threshold = want
+      @empty_chunk_warm_retain = want if @warm_retain_follows_threshold
+    end
+
     # EC_PARALLELISM>1: 32 MiB majors storm under HTTP (~150+/20s). 64 MiB
     # cut Kemal EC4 /json ~47k→~53k (d=20); 128 MiB no further win.
     PROCESS_GC_THRESHOLD_PARALLEL  = 67108864_u64 # 64 MiB
@@ -291,6 +314,8 @@ module Gcry
       {% else %}
         @nursery_enabled = value
       {% end %}
+      refresh_fast_path
+      @nursery_enabled
     end
 
     # Adaptive nursery threshold: adjusted after each minor based on the
@@ -2175,6 +2200,7 @@ module Gcry
         unlock_post_stw
       end
 
+      adapt_threshold_after_sweep if major
       @running_finalizers = true
       begin
         @finalizers.run_pending

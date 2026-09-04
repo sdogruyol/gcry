@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Small allocation runs lock-free and atomic-free while the process has one
+  mutator thread, through a dedicated hit path.** `Gcry.single_mutator?` holds
+  until the first non-runtime thread is created (the runtime's SYSMON thread
+  never allocates and no longer ends it); while it holds, `malloc` and
+  `malloc_atomic` take `Heap#fast_alloc` — table-driven size fit, pool-cursor
+  pop, a plain `occ` OR through the cursor's cached word pointer, plain
+  counter stores, the collection-threshold check, and unrolled clears for
+  16–64-byte blocks — and fall to the existing path for refills, collections in
+  progress, the nursery, debug hooks, or a second thread. `realloc` skips its
+  root-list registration on the same condition. `GCRY_SINGLE_MUTATOR=0` pins
+  the multi-thread path. Headerless 48-byte `malloc` 50.5 → 21.6 ns,
+  `malloc_atomic` 34.0 → 8.8 ns (Boehm's pure path: 15–17 / ~10 ns).
+- **Emptied bitmap chunks are kept warm up to the collection threshold instead
+  of released.** Under the bitmap allocator an emptied chunk is reusable in
+  place, and releasing it made every 8 KiB block the next cycle handed out
+  arrive on a fresh page — 1 256 minor faults per 1 000 Kemal requests against
+  Boehm's 2. `GCRY_EMPTY_CHUNK_WARM_RETAIN` defaults to the threshold there;
+  `0` restores release-everything. Kemal `/json`, headerless, quiet box,
+  15 interleaved rounds: 112.7% of Boehm (t = 5.25); RSS under load is higher
+  than Boehm's and is documented in
+  `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
+- **The process heap sizes its collection threshold from the live set, the
+  way Boehm's `GC_free_space_divisor` does.** After each major collection the
+  next threshold is the live bytes the sweep measured, times
+  `GCRY_THRESHOLD_FACTOR` percent (default 100), clamped to 8–64 MiB, and the
+  warm-retention budget follows it. A 10 MB live set therefore collects every
+  10 MB and keeps 10 MB of emptied chunks, instead of the fixed 32 MiB each;
+  `GCRY_THRESHOLD` still pins a fixed threshold and turns this off. Numbers
+  in the same FINDINGS file.
+
 ### Fixed
 
 - **`GC.init`'s eager static-root resolve crashed every `-Dgc_none` binary on

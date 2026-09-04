@@ -18,7 +18,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
 ## Defaults that matter (process GC)
 
 - Marks live in the **BlockHeader** (mark generation byte). Per-chunk mark bitmaps are **opt-in** (`GCRY_BITMAP=1`) — the bits ride in each chunk's own header, so there is no side mmap and no RSS tail
-- Majors: Linux **32 MiB**, Darwin **16 MiB**; **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
+- Majors: adaptive — live bytes after each major × 100 %, clamped **8–64 MiB** (EC4: fixed 64 MiB); **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
 - Base-pointer-only ambient roots; root **type_id** gate **on**; layout scan **on**; **SP clamp** **on**; page **blacklist** **on** (Linux + Darwin; `GCRY_DISABLE_BLACKLIST=1` to opt out)
@@ -42,7 +42,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_THRESHOLD` | Bytes since last major (Linux default **32 MiB**; Darwin process **16 MiB**) |
+| `GCRY_THRESHOLD` | Fixed bytes since last major. Unset, the threshold adapts to the live set (see `GCRY_THRESHOLD_FACTOR`); EC4 keeps a fixed **64 MiB** |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
 | `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off**, and **off because it is unsound, not because it is slow**: liveness then depends on the old→young remembered set, and soft-dirty has measured false negatives — a checksummed-graph churn reproduces a SIGSEGV in 3 of 3 runs at `GCRY_NURSERY=262144` on a default build, and the shape is the documented `Hash` key UAF at `0x0`..`0x11` ([SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) "the third axis"). Do not turn it on outside a measurement. **Ignored under `-Dgcry_headerless`**: nursery chunks are header-based and excluded from bitmap chunks, so a headerless heap has no nursery and `Heap#nursery_enabled=` is a no-op there (Phase 7.3) |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
@@ -67,7 +67,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
 | `GCRY_EMPTY_CHUNK_RETAIN` | Dormant empty-byte budget (process: Linux **0**, Darwin **512 KiB**; library **0**) |
-| `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Mapped warm empty-byte budget before dormant/munmap (research; not default) |
+| `GCRY_EMPTY_CHUNK_WARM_RETAIN` | Mapped warm empty-byte budget before dormant/munmap. Default **0** on the freelist allocator; under `GCRY_BITMAP_ALLOC=1` (and so under `-Dgcry_headerless`) it defaults to the collection threshold, because an emptied bitmap chunk is reusable in place and releasing it refaulted every page the next cycle allocated. `0` restores release-everything |
 | `GCRY_TIGHT_GROW=1` | Sticky newest-chunk freelist + sparse GC-before-grow (fat-app RSS; Kemal thr soft — not default) |
 | `GCRY_DISABLE_TIGHT_GROW=1` | Force tight-grow off |
 | `GCRY_DISABLE_TIGHT_GROW_GC=1` | Prefer-freelist only (no GC-before-grow) |
@@ -184,6 +184,8 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
+| `GCRY_SINGLE_MUTATOR=0` | Keep the class locks and atomic counters on the small-allocation path even while the process has one mutator thread. By default that path runs lock-free with plain stores until the first non-runtime thread is created (the runtime's SYSMON thread does not count); this pins the multi-thread path for A/B and diagnosis |
+| `GCRY_THRESHOLD_FACTOR` | Percent of the live bytes the sweep measured that the next collection threshold is set to (default **100**; clamped to 8–64 MiB), when no fixed `GCRY_THRESHOLD` is given. The warm-retention budget follows it under the bitmap allocator |
 | `GCRY_COLLECT_SCRUB` | Dead-stack bytes zeroed at every collection entry and exit so last cycle's mark frames are not scanned as roots (default **16384**; 0 disables). On a fiber stack the wipe uses the fiber's bounds, so a fiber that triggers a collection may fault in up to this many bytes below its SP once |
 | `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |

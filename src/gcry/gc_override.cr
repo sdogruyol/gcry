@@ -324,18 +324,21 @@ module GC
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
     else
-      # Lower major threshold (16 MiB) halves the dense-live growth window
-      # under fat apps on Darwin. Linux stays at 32 MiB (PROCESS_GC_THRESHOLD)
-      # — 16 MiB regressed acikturkiye thr by ~20pp via excessive major cycling.
-      {% if flag?(:darwin) %}
-        heap.gc_threshold = 16_u64 * 1024_u64 * 1024_u64
-      {% else %}
-        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD
-      {% end %}
+      # No fixed threshold asked for: start at the floor and size the heap
+      # from the live set after each major (`adapt_threshold_after_sweep`).
+      # A fixed 16 MiB regressed acikturkiye by ~20pp through major cycling;
+      # the adaptive threshold grows with that live set instead, and a small
+      # one (Kemal: ~10 MB) no longer pays for a 32 MiB budget in RSS.
+      heap.gc_threshold = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
+      heap.adaptive_threshold = true
+      if pct = env_u64("GCRY_THRESHOLD_FACTOR")
+        heap.adaptive_threshold_pct = pct if pct > 0
+      end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
         heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
+        heap.adaptive_threshold = false # unmeasured under EC4; keep the fixed 64 MiB
         # Contended alloc/free counters need Atomic RMW.
         heap.heap_counters_atomic = true
       end
@@ -437,6 +440,15 @@ module GC
     end
     if warm = env_u64("GCRY_EMPTY_CHUNK_WARM_RETAIN")
       heap.empty_chunk_warm_retain = warm
+    elsif heap.bitmap_alloc? && heap.gc_threshold != UInt64::MAX
+      heap.warm_retain_follows_threshold = true
+      # A bitmap chunk emptied by the sweep costs nothing to keep: its pages
+      # are resident and its `occ` is zero, so the pool cursor reuses it in
+      # place. Releasing it instead meant every 8 KiB block the next cycle
+      # handed out arrived on a fresh page — two minor faults per allocation,
+      # 1 256 per 1 000 Kemal requests against Boehm's 2 — for a mapping the
+      # mutator was about to need again. Keep what one cycle allocates.
+      heap.empty_chunk_warm_retain = heap.gc_threshold
     end
 
     if env_flag_one?("GCRY_DISABLE_MADVISE")
@@ -651,6 +663,11 @@ module GC
     end
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
+    end
+    # `GCRY_SINGLE_MUTATOR=0`: keep every lock and atomic on the allocation
+    # path even while one mutator thread exists (diagnosis and A/B only).
+    if (v = LibC.getenv("GCRY_SINGLE_MUTATOR")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
+      Gcry.single_mutator = false
     end
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
@@ -1253,8 +1270,15 @@ module GC
         #           retry loop (baseline codegen, no LSE). There the atomic path
         #           is genuinely more work, which is why this flips on a second
         #           thread rather than shipping on.
-        if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
-          h.heap_counters_atomic = true
+        # The runtime's SYSMON thread never touches the heap (it is exempt
+        # from the stop-the-world by name), so it does not end the
+        # single-mutator regime that the allocation fast path relies on.
+        sysmon = !arg.null? && arg.as(::Thread).@name == "SYSMON"
+        unless sysmon
+          Gcry.single_mutator = false
+          if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
+            h.heap_counters_atomic = true
+          end
         end
       {% end %}
       ret = LibC.pthread_create(thread, attr, start, arg)

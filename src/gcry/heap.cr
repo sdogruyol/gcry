@@ -7,6 +7,23 @@ require "crystal/spin_lock"
 require "c/pthread"
 
 module Gcry
+  # True until the first mutator thread beyond the main one is created (the
+  # runtime's SYSMON thread does not count: it never allocates). While true,
+  # every heap's small-allocation fast path runs without its class lock, with
+  # plain counter stores and a plain `occ` bit set — the mutator and the
+  # collector are the same thread, so there is nothing to exclude. Cleared
+  # process-wide by the `pthread_create` wrapper, before the second thread
+  # exists, and never set again.
+  @@single_mutator = true
+
+  def self.single_mutator? : Bool
+    @@single_mutator
+  end
+
+  def self.single_mutator=(value : Bool) : Bool
+    @@single_mutator = value
+  end
+
   # mmap-backed allocator with size classes and conservative mark–sweep.
   #
   # The Heap *object* may live on Crystal's GC during unit tests. Mapped
@@ -328,6 +345,7 @@ module Gcry
       @clear_stack_bytes_total = 0_u64
       @fiber_scrub_bytes_total = 0_u64
       @clear_stack_calls = 0_u64
+      init_fast_path_tables
       @fiber_scrub_runs = 0_u64
       @clear_stack_ops = 0_u64
     end
@@ -338,6 +356,7 @@ module Gcry
 
     # Release all mapped memory. Safe to call multiple times.
     def destroy : Nil
+      @fast_path = false
       return if @destroyed
       @destroyed = true
       shutdown_mark_workers
@@ -460,6 +479,8 @@ module Gcry
     end
 
     def malloc(size : Int) : Void*
+      u = fast_alloc(size.to_u64, false)
+      return u unless u.null?
       ptr = allocate(size.to_u64, atomic: false, clear: true)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: false)
@@ -467,6 +488,8 @@ module Gcry
     end
 
     def malloc_atomic(size : Int) : Void*
+      u = fast_alloc(size.to_u64, true)
+      return u unless u.null?
       ptr = allocate(size.to_u64, atomic: true, clear: false)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: true)
@@ -545,7 +568,13 @@ module Gcry
       # reuse the block (e.g. as a String) while Hash.@indices still points at
       # it → Headers#[]? / keep_alive? SEGV with ASCII garbage @indices (GDB
       # EC4). Leave the old block for the next sweep once the caller drops it.
-      add_root(pointer)
+      # With one mutator there is no peer to collect during the allocation
+      # (`@suppress_collect` forbids a self-triggered one), and `pointer` is in
+      # this frame for the conservative scan; the root list costs a malloc, a
+      # free and a walk per call, on a path JSON building takes several times
+      # per request. Captured once so a flip mid-call cannot unbalance it.
+      rooted = !Gcry.single_mutator?
+      add_root(pointer) if rooted
       begin
         @suppress_collect.add(1)
         begin
@@ -564,7 +593,7 @@ module Gcry
         end
         fresh
       ensure
-        delete_root(pointer)
+        delete_root(pointer) if rooted
       end
     end
 
@@ -772,7 +801,84 @@ module Gcry
       end
     end
 
+    # A `memset` call for a 16-64 byte block costs more than the block; the
+    # common classes get unrolled stores the optimiser can keep in registers.
+    @[AlwaysInline]
+    private def clear_block(user : Void*, rounded : UInt64) : Nil
+      w = user.as(UInt64*)
+      case rounded
+      when 16_u64 then w[0] = 0_u64; w[1] = 0_u64
+      when 32_u64 then w[0] = 0_u64; w[1] = 0_u64; w[2] = 0_u64; w[3] = 0_u64
+      when 48_u64 then 6.times { |i| w[i] = 0_u64 }
+      when 64_u64 then 8.times { |i| w[i] = 0_u64 }
+      else             user.as(UInt8*).clear(rounded)
+      end
+    end
+
+    # The hit path. Everything a small allocation needs when one mutator
+    # thread owns the heap, the bitmap allocator is on, and no debug hook,
+    # nursery or collection is in play — and nothing else: no lock, no
+    # atomic, no call layers. Any other case returns null and the caller
+    # takes `allocate`, which also recomputes `@fast_path` from the current
+    # configuration on every slow call, so the first allocation after any
+    # change goes the slow way and the flag is never stale.
+    #
+    # Accounting parity with the slow path: bytes are the class payload
+    # rather than the 8-byte-aligned size, which brings a collection forward
+    # by at most the per-class slack.
+    @[AlwaysInline]
+    private def fast_alloc(size : UInt64, atomic : Bool) : Void*
+      return Pointer(Void).null unless @fast_path && Gcry.single_mutator?
+      return Pointer(Void).null if @collecting || @incremental_marking || size > FAST_PATH_MAX
+      i = ((size &+ 7) >> 3).to_i32
+      index = @fit_index[i].to_i32
+      payload = @fit_payload[i]
+      slot = atomic ? index + SIZE_CLASS_COUNT : index
+      mask = @pool_free_mask[slot]
+      return Pointer(Void).null if mask == 0_u64
+      bsg = @bytes_since_gc.lazy_get &+ payload
+      return Pointer(Void).null if bsg >= @gc_threshold
+      bit = mask.trailing_zeros_count
+      @pool_free_mask[slot] = mask & (mask &- 1)
+      addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
+      @pool_occ_word[slot].value |= 1_u64 << bit
+      @bytes_since_gc.lazy_set(bsg)
+      @total_bytes.lazy_set(@total_bytes.lazy_get &+ payload)
+      @live_objects.lazy_set(@live_objects.lazy_get &+ 1_u64)
+      fb = @free_bytes.lazy_get
+      @free_bytes.lazy_set(fb >= payload ? fb - payload : 0_u64)
+      if (pfw = @alloc_pfw) > 0
+        Kernels.prefetch_write(Pointer(Void).new(addr &+ pfw))
+      end
+      BlockHeader.set_used(Pointer(BlockHeader).new(addr), payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
+      user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
+      clear_block(user, payload.to_u64) unless atomic
+      user
+    end
+
+    FAST_PATH_MAX = 2048_u64
+    @fast_path = false
+    @fit_index = uninitialized StaticArray(UInt8, 257)
+    @fit_payload = uninitialized StaticArray(UInt32, 257)
+
+    private def refresh_fast_path : Nil
+      @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
+                   !Invariant.enabled? && !Trace.enabled? && !@birth_grace && !@always_clear &&
+                   !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc)
+    end
+
+    private def init_fast_path_tables : Nil
+      i = 0
+      while i <= 256
+        _, index = SizeClasses.fit(i.to_u64 &* 8)
+        @fit_index[i] = index.to_u8
+        @fit_payload[i] = SizeClasses.payload(index)
+        i += 1
+      end
+    end
+
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
       # Cooperative STW for signal-exempt threads (SYSMON): do not mutate the
@@ -831,7 +937,7 @@ module Gcry
       # acikturkiye crash — nothing referenced the block when it died, and the
       # mutator writes into it afterwards through a field it never set.
       needs_clear = true if @always_clear && !user.null?
-      user.as(UInt8*).clear(rounded) if needs_clear
+      clear_block(user, rounded) if needs_clear
       # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
       # unreachable to the collector between here and the caller's store.
       note_birth(user) if @birth_grace
@@ -856,7 +962,10 @@ module Gcry
     # here.
     @[AlwaysInline]
     private def counters_atomic? : Bool
-      @heap_counters_atomic || @bitmap_alloc
+      # The bitmap sweep settles a chunk with one batched subtraction, which
+      # needs atomics against other mutators — not against itself: with one
+      # mutator the sweep runs on that thread.
+      @heap_counters_atomic || (@bitmap_alloc && !Gcry.single_mutator?)
     end
 
     # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
@@ -866,9 +975,11 @@ module Gcry
         @bytes_since_gc.add(rounded)
         @live_objects.add(1_u64)
       else
-        @total_bytes.set(@total_bytes.get &+ rounded)
-        @bytes_since_gc.set(@bytes_since_gc.get &+ rounded)
-        @live_objects.set(@live_objects.get &+ 1_u64)
+        # `lazy_*`: plain loads and stores. `set` is an `xchg`, locked whether
+        # asked or not, which is why this branch never used to be cheaper.
+        @total_bytes.lazy_set(@total_bytes.lazy_get &+ rounded)
+        @bytes_since_gc.lazy_set(@bytes_since_gc.lazy_get &+ rounded)
+        @live_objects.lazy_set(@live_objects.lazy_get &+ 1_u64)
       end
     end
 
@@ -880,8 +991,8 @@ module Gcry
           break if @free_bytes.compare_and_set(cur, nxt)[1]
         end
       else
-        cur = @free_bytes.get
-        @free_bytes.set(cur >= n ? cur - n : 0_u64)
+        cur = @free_bytes.lazy_get
+        @free_bytes.lazy_set(cur >= n ? cur - n : 0_u64)
       end
     end
 

@@ -81,3 +81,27 @@ Rules written after corrections, so the same mistake is not made twice.
   holds mid-allocation** (`header`, `chunk`): any allocation path must keep
   the user pointer visible, or publish it, from the moment the block reads
   USED until the caller holds it.
+
+## Measurement (2026-09-05)
+- **`bench/kemal/lib/gcry` is an absolute symlink to this checkout.** Every
+  Kemal built from a git worktree compiled *this tree's* gcry, so a
+  "master" or "old" arm built that way measured the working tree. Re-point
+  the link (`ln -sfn ../../.. lib/gcry`) in the worktree before building, and
+  check `readlink -f` in the run log. The PR #33 table's "gcry master" row
+  was this branch's default mode because of this.
+- A benchmark's `require` with an absolute path has the same problem; give
+  worktree builds their own copy with a relative require.
+- A run that waits on a server must bound every probe (`curl -m`, `timeout`
+  around `wrk`) and kill with `-9`; a crashed server wedged a job for seven
+  hours.
+- **A runner that passes a comma-joined environment must quote it.**
+  `run $2 $3 ${4//,/ }` split the expansion into extra positional arguments
+  and every arm after the first variable ran the *default* configuration:
+  three "tuning" runs measured nothing but noise, and the spread between
+  identical arms (±5% at n=9) is the noise floor to remember. Verify an arm's
+  configuration from the server's own stats before trusting its number.
+- **A gate calibrated against a default is a gate that fails when the default
+  moves.** `live-graph-audit`'s 8 MiB walk floor assumed the 32 MiB major
+  threshold; the adaptive threshold halved what the sparse walk had to release
+  and the gate called itself inconclusive. A harness that measures one
+  mechanism pins every other knob it depends on.
