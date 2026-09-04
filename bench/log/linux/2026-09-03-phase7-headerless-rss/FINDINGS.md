@@ -831,3 +831,11 @@ one error, all examples asserting header-build facts. Guarded with reasons or
 rewritten against the chunk-aware accessors; `json_live_attr` was reading block
 sizes from the header (zero under headerless) and is ported.
 
+
+### Kemal, the regression guard
+
+Headerless `/json`, `GCRY_BITMAP_ALLOC=1`, same binary, seven interleaved
+pairs of scrub on (default) vs `GCRY_COLLECT_SCRUB=0`: 41 265 vs 41 057 req/s
+median, paired difference +0.64% at t = 0.12 — flat, as two memsets per
+collection at a 0.2–0.5% duty cycle should be. Post-collect RSS 13.8 MB in
+both arms.
