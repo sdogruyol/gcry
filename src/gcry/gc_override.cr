@@ -797,12 +797,24 @@ module GC
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
     # Resolve the static roots now, on the main thread and before any other
-    # thread exists. Linux reads the executable's program headers, which takes
-    # the loader's lock; Darwin walks its Mach-O sections and grows a
-    # `realloc`ed cache. Neither is something to do first inside a stopped
-    # world, holding whatever locks the suspended threads hold. Both platforms
-    # expose the same method, so this does not gate on which one it is.
-    Gcry::Platform.ensure_static_root_cache
+    # thread exists: Linux reads the executable's program headers, which takes
+    # the loader's lock, and that is not something to do first inside a stopped
+    # world holding whatever locks the suspended threads hold.
+    #
+    # Linux only, and deliberately. Darwin's cache is generation-based and
+    # populated lazily from `scan_static_roots`, which is where it has always
+    # been resolved; moving that into `GC.init` — before Crystal's runtime is
+    # up — took `crystal spec -Dgc_none process_spec` on the macOS runner to
+    # an invalid memory access (CI 33900305015) while Linux stayed green, and
+    # there is no Darwin host here to attribute it on. So Darwin keeps the
+    # behaviour it shipped with. The *method* is public on both sides either
+    # way, which is the part that matters for the next caller: it was private
+    # on Darwin and compiled only because this line carried a `flag?(:linux)`
+    # guard, the same asymmetry that broke the macOS build via `bss_size_cap=`
+    # on 2026-08-22.
+    {% if flag?(:linux) %}
+      Gcry::Platform.ensure_static_root_cache
+    {% end %}
     # Research only: a full staging table refuses the birth being handed in
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).

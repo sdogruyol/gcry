@@ -97,8 +97,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Platform.ensure_static_root_cache` is public on both platforms.** It was
   private on the Darwin half and compiled only because the `GC.init` call site
   carried a `flag?(:linux)` guard — the same asymmetry that broke the macOS
-  build on 2026-08-22 via `bss_size_cap=`. The guard is gone and Darwin now
-  resolves its roots at init too, rather than inside the first stopped world.
+  build on 2026-08-22 via `bss_size_cap=`. The eager resolve stays Linux-only:
+  moving Darwin's lazy dyld walk into `GC.init` took `process_spec` on the
+  macOS runner to an invalid memory access while Linux stayed green, and there
+  is no Darwin host here to attribute it on, so that side keeps the behaviour
+  it shipped with.
   Also: the Darwin free-page walk visits every kept size-class chunk rather
   than only flagged ones, so it needed the bitmap stand-down the HOLED/SPARSE
   classification already applies — its live mask is built from block headers,
