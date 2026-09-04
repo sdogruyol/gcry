@@ -92,6 +92,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate reads the counter. `make darwin-bitmap-page-release`.
   `bench/log/macos/2026-09-04-bitmap-page-release-standdown/`
 
+- **`GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec` had never been
+  run, on either platform, and was red.** `Flags::SWEPT` records which path
+  gave a block back, and it is written only by `push_size_class_free` — the
+  header freelist reclaim. Under `bitmap_alloc` the sweep is
+  `sweep_small_bitmap`, which reclaims by `occ &= mark` and writes no block
+  header, because removing that per-block write is the point of the
+  representation. The spec asserted `swept == freed` and read `swept=0 of
+  freed=19899`, which looks like a collector defect and is a representation
+  with nowhere to keep the bit. Its guard was a compile-time
+  `flag?(:gcry_headerless)` test; it is a runtime `heap.bitmap_alloc?` test
+  now, which covers both — headerless forces `bitmap_alloc` on — and asserts
+  the flag's absence where it cannot exist rather than skipping the example.
+  The same reading made `Gcry::SegvReport` report **every** swept block as
+  "freed by an explicit free, not by the sweep" on those heaps; it says the
+  path cannot be recorded under that allocator now, on the same grounds the
+  reissue case already used — a verdict that is wrong is worse than none.
+
 - **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
   mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
   because the nursery keeps the header representation — so a nursery block's

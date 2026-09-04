@@ -320,23 +320,37 @@ describe "process GC free-path flag" do
     # Held chunks keep the freed blocks findable. The point is that every block
     # the sweep reclaimed still says so after the rebuild, not how many.
     freed.should be > 50
+    Gcry::Roots.keep_alive(keep.as(Void*))
 
-    # `SWEPT` is a *header* flag, and `-Dgcry_headerless` removes the header:
-    # occupancy comes from the chunk's `occ` bitmap and there is nowhere to
-    # record which path gave a block back. So the flag arm is asserted where
-    # the flag exists, and its absence is asserted where it does not — rather
-    # than the spec being skipped, which would leave the layout untested, or
-    # left as it was, which reported `swept=0 of freed=19899` and read as a
-    # collector defect.
-    {% if flag?(:gcry_headerless) %}
+    # `SWEPT` is written by `push_size_class_free`, i.e. by the header
+    # freelist reclaim, and two representations do not have that path:
+    #
+    #   * `GCRY_BITMAP_ALLOC=1` reclaims through `sweep_small_bitmap`
+    #     (`occ &= mark`) and writes no block header at all — removing that
+    #     per-block write is the whole point of the representation, so
+    #     recording the flag there would cost exactly what it bought;
+    #   * `-Dgcry_headerless` has no header to write, and forces
+    #     `bitmap_alloc` on for unrelated reasons (`Heap#initialize`).
+    #
+    # So the condition is `bitmap_alloc?`, which covers both, and it is a
+    # *runtime* test because `GCRY_BITMAP_ALLOC` is an env knob rather than a
+    # compile flag. Asserting the flag's absence where it cannot exist keeps
+    # the representation covered; skipping the example would leave it
+    # untested, and asserting `swept == freed` regardless reported
+    # `swept=0 of freed=19899` and read as a collector defect — which is what
+    # `GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec` did until
+    # 2026-09-04, the first time that arm was run.
+    if heap.bitmap_alloc?
       swept.should eq(0)
 
+      # The explicit-free direction still works here: `Heap#free` calls
+      # `BlockHeader.set_free` *and* `bitmap_free_block`, so the block reads
+      # free through the bitmap authority.
       ptr = GC.malloc(256)
       GC.free(ptr)
       heap.debug_block_info(ptr)[:free].should be_true
-    {% else %}
+    else
       swept.should eq(freed)
-      Gcry::Roots.keep_alive(keep.as(Void*))
 
       # And the other direction, which is what makes the flag a discriminator
       # rather than a decoration.
@@ -345,8 +359,7 @@ describe "process GC free-path flag" do
       info = heap.debug_block_info(ptr)
       info[:free].should be_true
       (info[:flags] & Gcry::BlockHeader::Flags::SWEPT).should eq(0)
-    {% end %}
-    Gcry::Roots.keep_alive(keep.as(Void*))
+    end
   end
 end
 

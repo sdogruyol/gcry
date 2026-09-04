@@ -242,9 +242,27 @@ module Gcry
       # earlier (`bench/log/linux/2026-08-20-dying-thread-holder/`). A verdict
       # that contradicts a direct observation of the death is worse than no
       # verdict.
+      #
+      # And only where the bit can exist at all. `SWEPT` is written by
+      # `push_size_class_free`, the header-freelist reclaim; under
+      # `bitmap_alloc` the sweep is `sweep_small_bitmap`, which reclaims by
+      # `occ &= mark` and writes no header — that is the point of the
+      # representation — and under `-Dgcry_headerless` there is no header to
+      # write. Reading the bit there returns 0 for every block the sweep
+      # condemned, so the old two-way branch reported "freed by an explicit
+      # free" about every swept block on those heaps. Same reasoning as the
+      # reissue case above: a verdict that is wrong is worse than none.
       len = if info[:free]
-              RawOut.append(buf.to_unsafe, len,
-                (info[:flags] & BlockHeader::Flags::SWEPT) != 0 ? " — freed by the SWEEP, so the collector decided it was garbage" : " — freed by an explicit free, not by the sweep")
+              if heap.bitmap_alloc?
+                RawOut.append(buf.to_unsafe, len,
+                  " — which path freed it cannot be recorded under the bitmap allocator: the sweep writes no header")
+              elsif (info[:flags] & BlockHeader::Flags::SWEPT) != 0
+                RawOut.append(buf.to_unsafe, len,
+                  " — freed by the SWEEP, so the collector decided it was garbage")
+              else
+                RawOut.append(buf.to_unsafe, len,
+                  " — freed by an explicit free, not by the sweep")
+              end
             else
               RawOut.append(buf.to_unsafe, len,
                 " — which path freed it cannot be read from these flags: they describe the reissue, not the free")
