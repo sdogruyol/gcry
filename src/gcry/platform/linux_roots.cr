@@ -4,6 +4,13 @@ require "c/unistd"
 module Gcry
   # Non-allocating static root discovery for Linux.
   #
+  # The root ranges are the executable's own RW mappings — its file-backed
+  # `.data` and the anonymous BSS after it — found in `/proc/self/maps` by
+  # address: each is the mapping that holds one of two anchor words placed in
+  # those sections by the linker. No pathname is compared, so a `.so`, a data
+  # file the program `mmap`ed (issue #29) and the executable itself renamed to
+  # `… (deleted)` by a redeploy are all rejected the same way.
+  #
   # Ranges are cached in LibC memory after the first scan. Refresh is cheap to
   # skip when maps are stable (typical for long-running servers).
   module Platform
@@ -51,20 +58,47 @@ module Gcry
     # the kernel regenerates it as it is read, so a mapping that changes
     # between two `read`s can shift entries under the reader and drop a line.
     # Every mutator in a program under gcry maps and unmaps constantly, and the
-    # entry that matters most is the executable's file-backed RW mapping —
-    # lose that one line and `try_yield_adjacent_bss` refuses the BSS that
-    # follows it, so for that collection **every class variable stops being a
-    # root**. That is not a degraded scan, it is a missed root, and what it
-    # collects is whatever is held only in a global.
+    # entries that matter most are the executable's two — lose either and for
+    # that collection **every class variable stops being a root**. That is not
+    # a degraded scan, it is a missed root, and what it collects is whatever is
+    # held only in a global. So a parse that comes back without both anchors
+    # is read again (`PARSE_ATTEMPTS`) before the collection proceeds.
     #
     # A parse that comes back smaller than one that came before is the signal.
     @@max_range_bytes = 0_u64
     @@static_root_shrinks = 0_u64
-    # The adjacency-BSS range the first parse found. The executable is never
-    # unmapped, so a later parse that does not produce this range again has
-    # lost it to the read, not to the program.
+
+    # Two words whose addresses name the executable's own RW mappings.
+    #
+    # A class variable with a non-zero literal initialiser is emitted as an
+    # initialised global and the linker puts it in `.data`, which the kernel
+    # maps file-backed from the executable; a zero-initialised one goes to
+    # `.bss`, which is the anonymous zero-fill mapping after it. So the mapping
+    # holding `@@cached_generation` (`UInt32::MAX`) *is* the executable's
+    # `.data` and the one holding `@@range_count` (`0`) *is* its BSS — by
+    # address, with no pathname to compare, no `/proc/self/exe` to resolve and
+    # no line order to trust.
+    #
+    # These two and not dedicated words, because both are loaded and stored on
+    # every refresh: a global that is never written is one LLVM may mark
+    # constant and move to `.rodata`, and one that is never read it may drop
+    # the stores to. Neither can happen to the cache's own state. Verified on
+    # Crystal 1.21 / LLVM 22 with `nm`, debug and `--release`: `d` and `b`.
+    private def self.data_anchor : UInt64
+      pointerof(@@cached_generation).address
+    end
+
+    private def self.bss_anchor : UInt64
+      pointerof(@@range_count).address
+    end
+
+    # The BSS range the first parse found, for `static_root_coverage`.
     @@bss_lo = 0_u64
     @@bss_hi = 0_u64
+    # Whether the parse in progress has yielded the mapping holding each
+    # anchor. Both are in the executable, which is never unmapped, so a parse
+    # that misses either one dropped a line.
+    @@data_seen_this_parse = false
     @@bss_seen_this_parse = false
     @@static_root_bss_lost = 0_u64
 
@@ -87,28 +121,53 @@ module Gcry
       total
     end
 
+    # How many parses in a row may come back without both anchors before the
+    # collection proceeds with what it has.
+    PARSE_ATTEMPTS = 4
+
+    # Parses that came back without an anchor and were run again.
+    @@static_root_reparses = 0_u64
+
+    def self.static_root_reparses : UInt64
+      @@static_root_reparses
+    end
+
     private def self.ensure_static_root_cache : Nil
       return if @@cached_generation == @@maps_generation && @@range_count > 0
 
-      @@range_count = 0
-      @@parse_prev_hi = 0_u64
-      @@parse_prev_file_rw = false
-      @@bss_seen_this_parse = false
-      scan_proc_maps do |low, high|
-        push_range(low.address, high.address)
+      attempt = 0
+      loop do
+        @@range_count = 0
+        @@parse_prev_hi = 0_u64
+        @@parse_prev_file_rw = false
+        @@data_seen_this_parse = false
+        @@bss_seen_this_parse = false
+        scan_proc_maps do |low, high|
+          push_range(low.address, high.address)
+        end
+        attempt += 1
+        break if (@@data_seen_this_parse && @@bss_seen_this_parse) || attempt >= PARSE_ATTEMPTS
+        # The anchors are in the executable and the executable is never
+        # unmapped, so a parse without one dropped a line — the file is not a
+        # snapshot and a mapping changing under the read shifts entries. Read
+        # it again rather than run a collection with no class variable rooted.
+        @@static_root_reparses &+= 1
       end
       @@cached_generation = @@maps_generation
 
-      if @@bss_lo != 0 && !@@bss_seen_this_parse
+      unless @@data_seen_this_parse && @@bss_seen_this_parse
         @@static_root_bss_lost &+= 1
         if @@static_root_bss_lost == 1
           buf = uninitialized UInt8[224]
           len = 0
           len = RawOut.append(buf.to_unsafe, len,
-            "gcry: the static-root parse lost the executable's BSS range 0x")
-          len = RawOut.append_hex(buf.to_unsafe, len, @@bss_lo)
+            "gcry: the static-root parse found no mapping holding the executable's ")
+          len = RawOut.append(buf.to_unsafe, len, @@data_seen_this_parse ? "BSS" : "data")
           len = RawOut.append(buf.to_unsafe, len,
-            " — for this collection no class variable is a root\n")
+            " after ")
+          len = RawOut.append_u64(buf.to_unsafe, len, attempt.to_u64)
+          len = RawOut.append(buf.to_unsafe, len,
+            " reads — for this collection no class variable is a root\n")
           RawOut.flush(buf.to_unsafe, len)
         end
       end
@@ -193,58 +252,53 @@ module Gcry
 
       return if space_abs + 4 >= len
       perms = line + space_abs + 1
-      # Need readable private data. Writable BSS holds class vars; RELRO .data.rel.ro
-      # is r-- after relocation and may still hold heap pointers.
+      # Readable, non-code. The mark wants only memory a mutator can write a
+      # heap pointer into; anything r-- cannot hold one.
       return unless perms[0] == 'r'.ord.to_u8
-      return if perms[2] == 'x'.ord.to_u8 # skip code
+      return if perms[2] == 'x'.ord.to_u8
 
       path = pathname_start(line, len)
       size = hi - lo
 
-      if path < 0
-        # ELF BSS zero-fill: anonymous RW pages contiguous with the previous
-        # file-backed RW mapping (typically after .data). Do NOT treat every
-        # anonymous VMA as a root — gcry's own large objects are anonymous too,
-        # and caching one and scanning it after `munmap` is a SIGSEGV. What
-        # separates them is adjacency to the executable's `.data`, not size;
-        # see `try_yield_adjacent_bss`.
-        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
+      # Anonymous, or kernel-named ([heap], [stack], [anon:…] — Linux 6.x
+      # labels many anon regions). The BSS is one of these; the harness, the
+      # thread stacks and gcry's own chunks are the rest, and caching one of
+      # those and scanning it after `munmap` is a SIGSEGV.
+      if path < 0 || line[path] == '['.ord.to_u8
+        try_yield_static_anon(lo, hi, perms, size) { |a, b| yield a, b }
         return
       end
 
-      # Kernel-named VMAs ([stack], [anon:...], [heap], …). Linux 6.x labels
-      # many anon regions; treating them as file-backed scanned whole arenas /
-      # stacks (SIGBUS on guard holes). Same path as pathname-less anon.
-      if line[path] == '['.ord.to_u8
-        try_yield_adjacent_bss(lo, hi, perms, size) { |a, b| yield a, b }
-        return
-      end
-
-      # Only the main executable's data is a root. Any other file-backed RW
-      # mapping is the program's own — a `.so`, or a data file it `mmap`ed —
-      # and caching one means scanning it after the program `mremap`s or
-      # `munmap`s it (issue #29: MAP_PRIVATE file grown past EOF → SIGBUS).
-      unless main_executable_path?(line + path, len - path)
+      # File-backed. Only the executable's own RW segment is a root, and it is
+      # identified by address: it is the one mapping that holds `data_anchor`.
+      # Nothing here reads the pathname — a `.so`, a data file the program
+      # `mmap`ed (issue #29), or the executable itself renamed to
+      # `… (deleted)` by a redeploy all look the same to the parser, which is
+      # the point.
+      unless lo <= data_anchor && data_anchor < hi
         @@parse_prev_file_rw = false
         return
       end
 
-      writable = perms[1] == 'w'.ord.to_u8
-      # Always scan rw-p (.data). Skip large RELRO r--p on fat Crystal binaries
-      # (multi‑MiB word scans); class vars that hold heap refs are writable.
-      unless writable
-        if size >= 64_u64 * 1024
-          @@parse_prev_file_rw = false
-          return
-        end
-      end
-
+      @@data_seen_this_parse = true
+      # `.bss` starts mid-page, so its first words share the last page of the
+      # file mapping; the anchor is covered either way.
+      @@bss_seen_this_parse = true if lo <= bss_anchor && bss_anchor < hi
       yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       @@parse_prev_hi = hi
-      @@parse_prev_file_rw = writable
+      @@parse_prev_file_rw = perms[1] == 'w'.ord.to_u8
     end
 
-    # Contiguous RW anon after a file-backed RW .data (ELF BSS).
+    # The executable's anonymous RW pages: the BSS, and whatever the kernel has
+    # merged with it.
+    #
+    # Two independent tests, either one accepts. The region holds
+    # `bss_anchor`, which the linker put in `.bss` — that is the BSS by
+    # definition, whatever it is named and wherever it sits. Or it begins
+    # exactly where the executable's file-backed RW `.data` ended, which is the
+    # ELF zero-fill and covers the case where the anchor's page is still inside
+    # the file mapping. Both are what the old adjacency-only rule was guessing
+    # at from line order.
     #
     # There used to be a `size < 1 MiB` condition here and it was a silent
     # correctness hole: a Crystal program whose BSS is larger than that had its
@@ -252,69 +306,36 @@ module Gcry
     # constant slot holding a heap reference became invisible to the mark and
     # was swept. Reproduced in 20 lines on 2026-08-22 — an 8 MiB static class
     # variable, one `GC.malloc`, two collections, and the process dies in
-    # `IO#encoder` because `STDERR` itself was collected. The threshold sat
-    # between a 400 KiB and an 800 KiB array, which is the BSS crossing 1 MiB
-    # with Crystal's own statics in it.
+    # `IO#encoder` because `STDERR` itself was collected.
     #
-    # The condition was also inverted with respect to its own stated reason.
-    # The comment it was written under says gcry's large objects are anonymous
-    # and **under** 1 MiB, and that caching one and scanning it after `munmap`
-    # is a SIGSEGV — but `< 1 MiB` *accepts* exactly that size band and rejects
-    # the sizes a gcry large object cannot have.
-    #
-    # What actually keeps gcry's own mappings out is the adjacency test, and it
-    # is strict: the region must begin exactly where a file-backed RW mapping of
-    # the main executable ended (shared libraries are filtered out before this
-    # point). An `mmap` with no hint does not land there. The second line of
-    # defence is `each_static_range_excluding_heap`, which subtracts gcry's
-    # chunks from every range this yields, and which exists for precisely the
-    # case the size cap was aimed at.
+    # What keeps gcry's own mappings out is that neither test admits them: an
+    # `mmap` with no hint neither holds the anchor nor lands at `.data`'s end.
+    # The second line of defence is `each_static_range_excluding_heap`, which
+    # subtracts gcry's chunks from every range this yields — the kernel merges
+    # adjacent anonymous VMAs with equal flags, so a BSS line can legitimately
+    # extend over memory that is not the BSS.
     #
     # `GCRY_STATIC_BSS_CAP=1` restores the cap, which is how the gate shows the
     # collected object.
-    private def self.try_yield_adjacent_bss(lo : UInt64, hi : UInt64, perms : UInt8*, size : UInt64, & : Void*, Void* ->) : Nil
-      if @@parse_prev_file_rw &&
-         lo == @@parse_prev_hi &&
-         perms[1] == 'w'.ord.to_u8 &&
-         (!@@bss_size_cap || size < 1_u64 * 1024 * 1024)
-        if @@bss_lo == 0
-          @@bss_lo = lo
-          @@bss_hi = hi
-        end
-        @@bss_seen_this_parse = true if lo == @@bss_lo
-        yield Pointer(Void).new(lo), Pointer(Void).new(hi)
-      end
+    private def self.try_yield_static_anon(lo : UInt64, hi : UInt64, perms : UInt8*, size : UInt64, & : Void*, Void* ->) : Nil
+      holds_anchor = lo <= bss_anchor && bss_anchor < hi
+      adjacent = @@parse_prev_file_rw && lo == @@parse_prev_hi
       @@parse_prev_file_rw = false
+      return unless perms[1] == 'w'.ord.to_u8
+      return unless holds_anchor || adjacent
+      return if @@bss_size_cap && size >= 1_u64 * 1024 * 1024
+      @@bss_seen_this_parse = true if holds_anchor
+      if @@bss_lo == 0
+        @@bss_lo = lo
+        @@bss_hi = hi
+      end
+      yield Pointer(Void).new(lo), Pointer(Void).new(hi)
     end
 
     # Research only: refuse a BSS larger than 1 MiB, as this parser did before
     # 2026-08-22.
     def self.bss_size_cap=(value : Bool) : Bool
       @@bss_size_cap = value
-    end
-
-    # `/proc/self/exe` resolved once; the executable is never re-linked.
-    @@exe_path = uninitialized UInt8[4096]
-    @@exe_len = -1
-
-    private def self.main_executable_path?(path : UInt8*, len : Int32) : Bool
-      if @@exe_len < 0
-        n = LibC.readlink("/proc/self/exe", @@exe_path.to_unsafe.as(LibC::Char*), LibC::SizeT.new(@@exe_path.size))
-        @@exe_len = n < 0 ? 0 : n.to_i32
-      end
-      return false if @@exe_len == 0
-      # Trim the trailing newline and anything after " (deleted)".
-      e = len
-      while e > 0 && (path[e - 1] == 0x0a_u8 || path[e - 1] == 0x20_u8 || path[e - 1] == 0x0d_u8)
-        e -= 1
-      end
-      return false unless e == @@exe_len
-      i = 0
-      while i < e
-        return false if path[i] != @@exe_path.to_unsafe[i]
-        i += 1
-      end
-      true
     end
 
     private def self.pathname_start(line : UInt8*, len : Int32) : Int32

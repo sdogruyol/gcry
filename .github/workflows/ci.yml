@@ -393,6 +393,15 @@ jobs:
         run: |
           make static-bss-roots
 
+      # The executable's mappings are identified by address, not pathname: a
+      # redeploy renames every maps line of the running image to "(deleted)",
+      # and a parser that compared against /proc/self/exe lost .data and the
+      # BSS at the next refresh. The child deletes its own binary and checks a
+      # class-variable array survives the refresh.
+      - name: Static roots across a redeploy
+        run: |
+          make static-roots-redeploy
+
       - name: Suspended-thread register roots
         run: |
           make greg-roots

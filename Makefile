@@ -535,6 +535,15 @@ static-bss-roots: $(BIN)
 	$(BIN)/static_bss_roots
 	$(BIN)/static_bss_roots_huge
 
+# Do the executable's `.data` and BSS stay root ranges after the binary is
+# replaced on disk? A redeploy renames every maps line of the running image to
+# `… (deleted)`; a parser that matched the pathname against `/proc/self/exe`
+# lost `.data` at the next refresh, and the BSS with it. The child deletes its
+# own (copied) binary, forces the refresh, and checks a class-variable array.
+static-roots-redeploy: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/static_roots_redeploy.cr -o $(BIN)/static_roots_redeploy --error-trace
+	$(BIN)/static_roots_redeploy
+
 thread-birth-root: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_birth_root.cr -o $(BIN)/thread_birth_root --error-trace
 	$(BIN)/thread_birth_root

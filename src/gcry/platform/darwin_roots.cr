@@ -99,6 +99,32 @@ module Gcry
         end
       end
 
+      # Darwin reads the Mach-O `__DATA` sections directly, so there is no
+      # parse to lose a line and nothing to re-read; the counters exist so
+      # `/gc-stats` has the same shape on both platforms.
+      def self.static_root_bytes : UInt64
+        total = 0_u64
+        i = 0
+        while i < @@range_count
+          r = (@@ranges + i).value
+          total += r.high - r.low
+          i += 1
+        end
+        total
+      end
+
+      def self.static_root_bss_lost : UInt64
+        0_u64
+      end
+
+      def self.static_root_reparses : UInt64
+        0_u64
+      end
+
+      def self.static_root_shrinks : UInt64
+        0_u64
+      end
+
       private def self.ensure_static_root_cache : Nil
         return if @@cached_generation == @@maps_generation && @@range_count > 0
 
@@ -203,8 +229,9 @@ module Gcry
       end
     {% end %}
 
-    # Linux finds the BSS in `/proc/self/maps` by adjacency and used to refuse
-    # it above 1 MiB (src/gcry/platform/linux_roots.cr). Darwin reads the
+    # Linux finds the executable's `.data` and BSS in `/proc/self/maps` by
+    # anchor address and used to refuse the BSS above 1 MiB
+    # (src/gcry/platform/linux_roots.cr). Darwin reads the
     # Mach-O `__DATA` sections directly, so there is no adjacency guess and
     # nothing to cap — but the knob is wired unconditionally in `GC.init`, and a
     # caller that gates on a platform must not have to ask which one it is on.
