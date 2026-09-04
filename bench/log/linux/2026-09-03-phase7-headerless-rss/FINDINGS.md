@@ -887,3 +887,67 @@ bitmap allocator with the nursery on, an explicitly freed block in a nursery
 chunk is not handed out again until the next minor collection (the pool
 cursor skips nursery chunks). The freelist build reuses it immediately. The
 examples run with the nursery off and say why.
+
+### The adversarial reviewer's findings (same day)
+
+A second reviewer (a subagent told to reproduce before reporting) found four
+bugs in the headerless paths, each with a probe, all fixed and pinned:
+
+1. **`free` read a large object's first bytes as its header** under
+   headerless (`from_user` is the object there), so a live large object
+   whose byte 4 was odd raised "double free" and a real double free went
+   undetected and decremented `live_objects` twice. `free` now resolves the
+   chunk first and takes `large_header` for a large chunk.
+   `spec/heap_spec.cr` "frees a large object whatever its first bytes hold".
+2. **Large atomic objects were scanned** under headerless: the mark path
+   tested the chunk's ATOMIC flag (never set for large chunks) or the
+   header's (compile-time false). Every large String and IO buffer was
+   conservatively scanned — the false-retention shape this file spent a day
+   on. `atomic_of` was already right and is now used. `spec/large_scan_bounds_spec.cr`
+   "does not scan a large atomic object".
+3. **`realloc` dropped atomicity** for the same reason; same fix, pinned.
+4. **`freelist_reserve_fully_dead` still ran on bitmap chunks** from the
+   sweep's second empty-chunk branch (bounded-excess path under Parallel),
+   double-booking free bytes past the heap's capacity and, under headerless,
+   writing headers into objects. The guard now lives in the function.
+
+And one race it could not reproduce but argued correctly: the post-STW
+dormant flush walks chunks and DONTNEEDs their pages without a lock, and a
+mutator could revive a chunk and allocate into it between the flag read and
+the madvise — silently zeroed objects on a bitmap chunk. Both revive paths
+now take the alloc lock to check the live-walk flag and flip dormant off, so
+a revive is ordered strictly before or after the whole walk; a refused
+revive maps a fresh chunk. `dormant_revive_during_flush` now counts refusals.
+
+It also answered why the stale-tail example passed with the fix reverted:
+the pointer was stored at offset 299 500, which is not word-aligned, so the
+word scan could never read it. The example now stores at 299 504 and fails
+without the clamp.
+
+### `make dormant-flush-race`: a pre-existing lost root, now easier to hit
+
+The gate went red after the reviewer's fixes, and the bisect says the fixes
+are not the cause. Its queued arm refuses a worker's `GC.free` of a 40 KiB
+block it allocated and verified moments earlier, with the header already
+FREE and the chunk on the release queue: the sweep took a live large block
+for dead. The harness's own note (master, 2026-08-29) records this at
+"about once in ninety children". Runs of the queued arm, six children each:
+
+| tree | failed children |
+|---|---|
+| `master`, 3 runs | 1 of 18 |
+| `efb48f1` (yesterday's tip), 2 runs | 2 of 12 |
+| `c578ca5`, 2 runs | 2 of 12 |
+| working tree (this update), 3 runs | 5 of 18 |
+
+The branch marks twice as fast, the harness's collector thread collects in a
+loop, and the race is per collection, so the exposure roughly doubles; the
+first two runs of the day were 0 of 6 and 0 of 6, which is why the morning
+gate battery was green.
+
+Excluded by reading: the allocation-time STW windows in `alloc_large`
+(`map_chunk`, `set_used_large`, allocate-black) all run under the allocation
+lock that the after-world sweep also takes per large chunk; the suspend
+handler copies the ucontext registers into a table the scan reads, so a
+pointer held only in a callee-saved register is covered. Not attributed here.
+Open, and older than the branch.

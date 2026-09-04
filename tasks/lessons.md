@@ -54,3 +54,12 @@ Rules written after corrections, so the same mistake is not made twice.
 - **A reproduction can pass for the wrong reason.** The stale-tail example
   passed with the fix reverted; the size example did not. Keep the example
   whose failure you actually observed as the pin, and say which one that was.
+- **`pgrep -f`/`pkill -f` match the shell running them whenever the pattern
+  text — or the *path* it would match — appears anywhere in that command
+  line.** The `[f]inal2` trick protects only the pattern string itself; a
+  `$S/final2.sh` elsewhere in the same command still matches. Three shells
+  were killed this way in one session. Use `ps -eo pid,args | grep "[f]..."`
+  in one command to get PIDs, and kill by number in another.
+- **Reproduction probes store pointers word-aligned.** A conservative scan
+  reads 8-byte words; a pointer at a non-multiple-of-8 offset is invisible
+  to it, and the probe then "passes" for the wrong reason.

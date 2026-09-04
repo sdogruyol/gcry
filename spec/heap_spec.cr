@@ -137,6 +137,23 @@ describe Gcry::Heap do
     end
   end
 
+  it "frees a large object whatever its first bytes hold, and detects its double free" do
+    heap = Gcry::Heap.new
+    begin
+      ptr = heap.malloc(200_000)
+      # Under headerless the object starts where a header would; these bytes
+      # must never be read as one.
+      ptr.as(UInt32*)[0] = 0xFFFF_FFFF_u32
+      ptr.as(UInt32*)[1] = 0xFFFF_FFFF_u32
+      heap.free(ptr)
+      heap.live_objects.should eq(0)
+      expect_raises(ArgumentError, /double free/) { heap.free(ptr) }
+      heap.live_objects.should eq(0)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "allocates and frees large objects" do
     heap = Gcry::Heap.new
     begin

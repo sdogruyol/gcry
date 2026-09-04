@@ -245,7 +245,7 @@ module Gcry
       end
 
       set_block_mark_in(chunk, header)
-      note_first_mark(header, source) if @live_attr_roots
+      note_first_mark(chunk, header, source) if @live_attr_roots
       mark_stack_push(header)
     end
 
@@ -281,13 +281,11 @@ module Gcry
     # the root path that *seeded* them; Heap = transitive closure via edges.
     # *_atomic_bytes: malloc_atomic slabs first reached from that source (acik
     # 32 KiB IO buffers). Optional watch type_id → first_mark_watch_*.
-    private def note_first_mark(header : BlockHeader*, source : RootSource) : Nil
-      # Diagnostic path (`GCRY_LIVE_ATTR=1`): the lookup is affordable, and the
-      # header alone has neither size nor kind for a small block under
-      # `-Dgcry_headerless`.
-      chunk = chunk_containing(header.address)
-      bytes = chunk ? block_payload(chunk, header).to_u64 : header.value.size.to_u64
-      atomic = chunk ? atomic_of(chunk, header) : BlockHeader.atomic?(header)
+    private def note_first_mark(chunk : ChunkHeader*, header : BlockHeader*, source : RootSource) : Nil
+      # Size and kind come from the chunk: the header alone has neither for a
+      # small block under `-Dgcry_headerless`.
+      bytes = block_payload(chunk, header).to_u64
+      atomic = atomic_of(chunk, header)
       case source
       when RootSource::Stack
         @first_mark_stack_objects += 1
@@ -374,7 +372,7 @@ module Gcry
     end
 
     private def type_id_plausible?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
-      return true if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+      return true if atomic_of(chunk, header)
       # Size from the chunk (7.6). Reading it from the block under headerless
       # returns the object's own first word — its type_id — so the gate compared
       # the type_id against itself and rejected live objects, which were then
@@ -461,7 +459,7 @@ module Gcry
       # it once and reusing it beats three separate derivations.
       chunk = chunk_containing(header.address)
       return unless chunk
-      return if ChunkHeader.atomic?(chunk) || BlockHeader.atomic?(header)
+      return if atomic_of(chunk, header)
 
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64

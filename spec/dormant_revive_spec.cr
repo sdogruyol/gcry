@@ -23,6 +23,8 @@ describe "bitmap pool revives dormant chunks" do
       dormant = 0
       heap.each_chunk { |c| dormant += 1 if Gcry::ChunkHeader.dormant?(c) }
       dormant.should be > 0
+      dormant_bytes = heap.dormant_chunk_bytes
+      dormant_bytes.should be > 0
 
       chunks_before = 0
       heap.each_chunk { |_| chunks_before += 1 }
@@ -34,6 +36,7 @@ describe "bitmap pool revives dormant chunks" do
       heap.each_chunk { |_| chunks_after += 1 }
 
       heap.bitmap_dormant_revives.should be > revives_before
+      heap.dormant_chunk_bytes.should be < dormant_bytes
       chunks_after.should eq(chunks_before)
       again.size.should eq(5_000)
       # And the revived chunk's memory is usable: write and read back.

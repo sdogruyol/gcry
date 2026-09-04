@@ -344,6 +344,14 @@ module Gcry
         end
         scan_exclusive_mutator_spill_window(bottom)
       else
+        {% if flag?(:gcry_hl_assert) %}
+          # The entry scrub must have covered every frame between the entry SP
+          # and this scan, or the residue it exists to remove is still in range.
+          depth = @collect_entry_sp &- Roots.hardware_stack_pointer.address
+          if @collect_scrub_bytes > 0 && depth > @collect_scrub_bytes
+            LibC.printf("HL: scan chain %llu bytes deep exceeds GCRY_COLLECT_SCRUB=%llu\n", depth, @collect_scrub_bytes)
+          end
+        {% end %}
         Roots.scan_mutator(bottom) do |candidate|
           note_mutator_candidate(candidate.address)
           mark_root_candidate(candidate, source: RootSource::Stack)

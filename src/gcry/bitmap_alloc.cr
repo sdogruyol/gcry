@@ -320,8 +320,22 @@ module Gcry
            !ChunkHeader.nursery?(chunk) &&
            chunk.value.size_class == index.to_u32 &&
            ChunkHeader.atomic?(chunk) == atomic
-          @dormant_revive_during_flush &+= 1 if @dormant_flush_active
-          ChunkHeader.set_dormant(chunk, false)
+          # The post-STW flush walks dormant chunks and DONTNEEDs their pages
+          # without a lock, so a chunk revived after it read the flag would
+          # have the objects allocated into it zeroed silently. The walk flag
+          # is set and cleared under the alloc lock; taking it here orders
+          # this revive strictly before or after the whole walk. Refused
+          # revives fall through to mapping a fresh chunk.
+          refused = false
+          with_alloc_lock do
+            if @live_chunk_walk
+              @dormant_revive_during_flush &+= 1
+              refused = true
+            else
+              ChunkHeader.set_dormant(chunk, false)
+            end
+          end
+          return nil if refused
           mapped = chunk.value.mapped_bytes
           @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
           words = chunk.value.bitmap_words.to_i32

@@ -442,6 +442,14 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
 - [x] Found on the way: large-object scan length was the mapping extent
       (fixed, spec/large_scan_bounds_spec.cr); live attribution bytes were
       zero under headerless (fixed).
-- [ ] Adversarial review subagent died on the session rate limit; the
-      review was done by hand instead. Re-run it when the limit resets if a
-      second pair of eyes is wanted before the PR.
+- [x] Adversarial review subagent re-run after the rate limit reset: four
+      reproduced bugs (large free/double free, large atomic scanned, realloc
+      atomicity, bitmap chunks freelist-linked from the bounded-excess
+      branch) and one argued race (revive during the dormant flush), all
+      fixed and pinned. FINDINGS Update 12.
+- [ ] OPEN, pre-existing on master: `make dormant-flush-race` queued arm loses a
+      live large block about once per 6-18 children (sweep frees it; header
+      FREE; chunk queued for release). ~4x more frequent on this branch
+      because collections are 2x faster. FINDINGS Update 12 has the numbers
+      and what was excluded.
+

@@ -7,14 +7,17 @@
 # GCRY_SCRUB_FIBERS=1 — it wipes below another fiber's *estimated* SP, which is
 # a correctness question nothing measured has closed (docs/SOUND-DEFAULTS.md).
 #
-# clear_stack must not call Fiber/Thread APIs — those malloc during early
-# Thread TLS publish and recurse into allocate. Bounds come from
-# pthread_getattr_np (thread stack) or a small capped wipe on fiber stacks.
+# The allocation-path wipe must not call Fiber/Thread APIs — those malloc
+# during early Thread TLS publish and recurse into allocate. Its bounds come
+# from pthread_getattr_np (thread stack) or a small capped wipe on fiber
+# stacks. The collector's own scrub runs where `Fiber.current` is already in
+# use (the stack scan), so it may take a fiber's real bounds.
 
 module Gcry
   class Heap
     DEFAULT_CLEAR_STACK_BYTES = 4096_u64
-    # Fiber stacks start thinly mapped; keep non-pthread wipes small.
+    # Cap for a wipe whose stack bounds are unknown (the allocation-path wipe
+    # on a fiber stack): fiber stacks start thinly mapped.
     # Parallel parked-fiber scrub default (override via GCRY_FIBER_SCRUB_BYTES).
     FIBER_CLEAR_STACK_CAP = 512_u64
 
@@ -122,14 +125,14 @@ module Gcry
     # Measured: 2.1k stale seeds retaining a 74k-object web on gc_phases.
     property collect_scrub_bytes : UInt64 = 16384_u64
 
-    # Zero unused stack below the hardware SP (stack grows down).
     # Accounted apart from `clear_stack_calls`, which means the allocation-path
     # wipe (`GCRY_CLEAR_STACK`) and would otherwise count every collection.
     getter collect_scrub_runs : UInt64 = 0_u64
     getter collect_scrub_bytes_total : UInt64 = 0_u64
 
+    # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
-      len = clear_stack_guarded(bytes)
+      len = clear_stack_guarded(bytes, fiber_bounds: false)
       return if len == 0
       @clear_stack_bytes_total += len
       @clear_stack_calls += 1
@@ -137,25 +140,25 @@ module Gcry
 
     # The collector's own entry/exit scrub; see `run_collection`.
     protected def collect_scrub : Nil
-      len = clear_stack_guarded(@collect_scrub_bytes)
+      len = clear_stack_guarded(@collect_scrub_bytes, fiber_bounds: true)
       return if len == 0
       @collect_scrub_bytes_total += len
       @collect_scrub_runs += 1
     end
 
     # Bytes zeroed, 0 when nothing was (disabled, re-entered, or no room).
-    private def clear_stack_guarded(bytes : UInt64) : UInt64
+    private def clear_stack_guarded(bytes : UInt64, fiber_bounds : Bool) : UInt64
       return 0_u64 if bytes == 0
       return 0_u64 if @@clear_stack_active
       @@clear_stack_active = true
       begin
-        clear_stack_body(bytes)
+        clear_stack_body(bytes, fiber_bounds)
       ensure
         @@clear_stack_active = false
       end
     end
 
-    private def clear_stack_body(bytes : UInt64) : UInt64
+    private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool) : UInt64
       # Must use hardware SP — Roots.stack_pointer is mid-frame and wiping
       # up to it corrupts the leaf (null-deref SEGV on aarch64 CI).
       sp_addr = Roots.hardware_stack_pointer.address
@@ -193,15 +196,16 @@ module Gcry
         end
       {% end %}
 
-      unless bounds_known
+      if !bounds_known && fiber_bounds
         # A Crystal fiber stack: the fiber knows its own bounds, so the wipe
-        # can stop at its guard page like the pthread case above.
+        # can stop at its guard page like the pthread case above. Only the
+        # collector's scrub asks (see the file comment).
         stack = Fiber.current.@stack
         lo = stack.pointer.address
         hi = stack.bottom.address
         if lo < hi && sp_addr > lo && sp_addr <= hi
           bounds_known = true
-          guard = lo + Roots::PAGE_SIZE
+          guard = lo + Platform.host_page_size
         end
       end
 

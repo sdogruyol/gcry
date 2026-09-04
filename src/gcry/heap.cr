@@ -495,7 +495,7 @@ module Gcry
                  else
                    block_payload(rchunk, header).to_u64
                  end
-      atomic = ChunkHeader.atomic?(rchunk) || BlockHeader.atomic?(header)
+      atomic = atomic_of(rchunk, header)
 
       if new_size == 0
         # Do **not** free `pointer` here, for the same reason the grow path
@@ -566,29 +566,23 @@ module Gcry
 
     def free(pointer : Void*) : Nil
       return if pointer.null?
-
       header = BlockHeader.from_user(pointer)
       raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
-
-      # The double-free check asks the same authority everything else does.
-      #
+      chunk = chunk_for(pointer)
+      # A large object's header sits behind the object in both builds; under
+      # headerless `from_user` is the object itself, and reading its first
+      # bytes as flags called live objects free and double frees allocated.
+      header = ChunkHeader.large_header(chunk) if chunk && ChunkHeader.large?(chunk)
       # `BlockHeader.free?` is stale on a bitmap chunk for every block the
-      # streaming sweep reclaimed, so freeing one of those passed this check,
-      # `bitmap_free_block` was a no-op on an already-clear bit, and
-      # `live_objects_dec` still ran. That over-decrement is the exact shape of
-      # `mt-property-test`'s `live_objects mismatch reported=98 walked=233`.
-      double_free = if (chunk = chunk_for(pointer))
+      # streaming sweep reclaimed, so occupancy is the chunk's to answer.
+      double_free = if chunk
                       !block_allocated?(chunk, header)
                     else
                       BlockHeader.free?(header)
                     end
       raise ArgumentError.new("double free") if double_free
-
-      # The chunk is the authority on largeness; the block's flag is unreadable
-      # under headerless and a false positive routes a small object into the
-      # large free path.
-      large = if (lc = chunk_for(pointer))
-                ChunkHeader.large?(lc)
+      large = if chunk
+                ChunkHeader.large?(chunk)
               else
                 BlockHeader.large?(header)
               end
@@ -1391,8 +1385,18 @@ module Gcry
           # A revival that lands inside the post-STW dormant pass is the shape
           # that would let that pass madvise a chunk this thread is about to
           # hand blocks out of. Counted here, where both facts are in hand.
-          @dormant_revive_during_flush &+= 1 if @dormant_flush_active
-          ChunkHeader.set_dormant(chunk, false)
+          # See `bitmap_revive_dormant`: never revive under a live chunk walk,
+          # or the flush's DONTNEED lands on blocks handed out meanwhile.
+          refused = false
+          with_alloc_lock do
+            if @live_chunk_walk
+              @dormant_revive_during_flush &+= 1
+              refused = true
+            else
+              ChunkHeader.set_dormant(chunk, false)
+            end
+          end
+          return false if refused
           mapped = chunk.value.mapped_bytes
           @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
 

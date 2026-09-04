@@ -94,7 +94,9 @@ describe "Gcry stack scrub" do
       runs = heap.collect_scrub_runs
       heap.collect(scan_stack: true)
       heap.collect_scrub_runs.should eq runs + 2
-      heap.collect_scrub_bytes_total.should be > 0
+      # On the main thread the pthread bounds are known, so both scrubs wipe
+      # the full budget; a capped wipe would show here.
+      heap.collect_scrub_bytes_total.should eq 2 * heap.collect_scrub_bytes
       heap.clear_stack_calls.should eq calls
       heap.live?(keep).should be_true
     ensure

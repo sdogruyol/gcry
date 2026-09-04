@@ -115,17 +115,12 @@ module Gcry
                     # empties) and dominated phase_sweep under HTTP churn.
                     bit = 1_u64 << class_index
                     if within_warm
-                      # Warm: keep pages mapped. A freelist chunk also needs its
-                      # dead blocks linked through their headers (the defer path
-                      # left them USED after live_objects_sub). A bitmap chunk
-                      # needs nothing — the pool cursor reads `occ`, which this
-                      # sweep just zeroed — and the links would double-book free
-                      # bytes and, under headerless, land inside the objects.
-                      unless bitmap_alloc_chunk?(chunk)
-                        p = SizeClasses.payload(class_index)
-                        bb = BlockHeader::SIZE.to_u64 + p.to_u64
-                        freelist_reserve_fully_dead(chunk, class_index, p, bb)
-                      end
+                      # Warm: keep pages mapped; freelist dead blocks (defer path
+                      # left them USED after live_objects_sub). No-op on a
+                      # bitmap chunk, which is warm by staying mapped.
+                      p = SizeClasses.payload(class_index)
+                      bb = BlockHeader::SIZE.to_u64 + p.to_u64
+                      freelist_reserve_fully_dead(chunk, class_index, p, bb)
                       warm_budget_used += mapped
                     elsif can_dormant
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
@@ -1503,6 +1498,12 @@ module Gcry
     # Freelist-link a USED block without live_objects_dec (caller already
     # batched the count, e.g. fully-dead defer path under Parallel bounded).
     private def freelist_reserve_fully_dead(chunk : ChunkHeader*, class_index : Int32, payload : UInt32, block_bytes : UInt64) : Nil
+      # A bitmap chunk has no freelist consumer: the pool cursor reads `occ`,
+      # which the sweep just zeroed. Linking its blocks would double-book free
+      # bytes, thread a stale freelist through the chunk, and under headerless
+      # write 16-byte headers into the objects. Both empty-chunk branches of
+      # the sweep call this, so the guard is here rather than at the callers.
+      return if bitmap_alloc_chunk?(chunk)
       cursor = ChunkHeader.data_start(chunk).as(UInt8*)
       limit = ChunkHeader.data_end(chunk).as(UInt8*)
       reclaimed = 0_u64
