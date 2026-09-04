@@ -586,10 +586,13 @@ module GC
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would
     # resolve to the wrong ordinal, silently, on the collector's hottest path.
-    # The tightest size class first disagrees at 86.3 MiB; the bound is 64 MiB.
+    # That bound depends on the layout (86.3 MiB with headers, 51.2 MiB under
+    # `-Dgcry_headerless`) and is a **method**: as a constant it would be
+    # `once`-initialised, and this code runs inside `GC.init`, before Crystal's
+    # runtime — where it read 0 and rejected every legal value.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
       if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES &&
-         chunk_bytes <= Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES &&
+         chunk_bytes <= Gcry::Heap.max_reciprocal_chunk_bytes &&
          (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
       end
@@ -793,12 +796,13 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
-    # Read the executable's program headers now, on the main thread and before
-    # any other thread exists: `dl_iterate_phdr` takes the loader's lock, and
-    # a collection stops the world with whatever locks its threads hold.
-    {% if flag?(:linux) %}
-      Gcry::Platform.ensure_static_root_cache
-    {% end %}
+    # Resolve the static roots now, on the main thread and before any other
+    # thread exists. Linux reads the executable's program headers, which takes
+    # the loader's lock; Darwin walks its Mach-O sections and grows a
+    # `realloc`ed cache. Neither is something to do first inside a stopped
+    # world, holding whatever locks the suspended threads hold. Both platforms
+    # expose the same method, so this does not gate on which one it is.
+    Gcry::Platform.ensure_static_root_cache
     # Research only: a full staging table refuses the birth being handed in
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).

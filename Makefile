@@ -658,6 +658,15 @@ thread-birth-root: $(BIN)
 	$(BIN)/thread_birth_root --burst
 	GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
 
+# The nursery keeps the header representation under every setting, so every
+# mark clear has to gate per *chunk* like the read side does. Gating on the
+# global `@bitmap_marks` left a nursery block's header mark set forever, and a
+# marked block is never scanned — so with `GCRY_BITMAP=1` and a nursery, one
+# minor reclaimed a live child and handed its address out again.
+nursery-bitmap-marks: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/nursery_bitmap_marks.cr -o $(BIN)/nursery_bitmap_marks --error-trace
+	$(BIN)/nursery_bitmap_marks
+
 # Buy samples of a defect that only happens on CI.
 #
 # The `Thread` use-after-free fires in roughly one aarch64 job in three and

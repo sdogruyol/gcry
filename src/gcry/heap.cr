@@ -478,13 +478,17 @@ module Gcry
       return malloc(new_size) if pointer.null?
 
       header = BlockHeader.from_user(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
+      # One lookup, shared by the ownership test and by the size/atomicity
+      # reads below — see `owns_user_pointer_in?`.
+      rchunk = chunk_for(pointer)
+      raise ArgumentError.new("pointer is not a gcry allocation") unless rchunk
+      unless owns_user_pointer_in?(pointer, header, rchunk)
+        raise ArgumentError.new("pointer is not a gcry allocation")
+      end
 
       # Size and atomicity from the chunk (7.2 / 7.6). Reading them from the
       # block returns the object's own first words under headerless — a garbage
       # `old_size` here becomes the length of the copy into the new block.
-      rchunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless rchunk
       old_size = if ChunkHeader.large?(rchunk)
                    # A large block keeps its header in *both* builds, and its
                    # header holds the size actually requested. `block_payload`
@@ -567,32 +571,27 @@ module Gcry
     def free(pointer : Void*) : Nil
       return if pointer.null?
       header = BlockHeader.from_user(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless owns_user_pointer?(pointer, header)
+      # One lookup for the whole call. It used to be three — inside
+      # `owns_user_pointer?`, again here, and a third in each arm below — and
+      # `chunk_containing` takes `@index_lock` with the world running, which
+      # cost +13% on `free` (measured against 287404d). See
+      # `owns_user_pointer_in?`.
       chunk = chunk_for(pointer)
+      raise ArgumentError.new("pointer is not a gcry allocation") unless chunk
+      unless owns_user_pointer_in?(pointer, header, chunk)
+        raise ArgumentError.new("pointer is not a gcry allocation")
+      end
+      large = ChunkHeader.large?(chunk)
       # A large object's header sits behind the object in both builds; under
       # headerless `from_user` is the object itself, and reading its first
       # bytes as flags called live objects free and double frees allocated.
-      header = ChunkHeader.large_header(chunk) if chunk && ChunkHeader.large?(chunk)
+      header = ChunkHeader.large_header(chunk) if large
       # `BlockHeader.free?` is stale on a bitmap chunk for every block the
       # streaming sweep reclaimed, so occupancy is the chunk's to answer.
-      double_free = if chunk
-                      !block_allocated?(chunk, header)
-                    else
-                      BlockHeader.free?(header)
-                    end
-      raise ArgumentError.new("double free") if double_free
-      large = if chunk
-                ChunkHeader.large?(chunk)
-              else
-                BlockHeader.large?(header)
-              end
+      raise ArgumentError.new("double free") unless block_allocated?(chunk, header)
       if large
-        chunk = chunk_for(pointer)
-        raise ArgumentError.new("large object chunk missing") unless chunk
-        # A large block keeps its header, but it is 16 bytes before the object
-        # rather than coincident with it, so the generic `from_user` above
-        # (identity under headerless) does not name it.
-        header = ChunkHeader.large_header(chunk)
+        # `header` is already the large header (resolved above), and its size
+        # is the size actually requested rather than the mapping extent.
         payload = header.value.size.to_u64
 
         bytes_since_gc_sub(payload)
@@ -607,16 +606,22 @@ module Gcry
         return
       end
 
-      chunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless chunk
-
       class_index = chunk.value.size_class.to_i32
       raise ArgumentError.new("bad size class on chunk") if class_index < 0 || class_index >= SIZE_CLASS_COUNT
       payload = SizeClasses.payload(class_index)
 
       @finalizers.notice_reclaim(pointer)
 
-      if @bitmap_alloc
+      # Per *chunk*, not on the heap-wide flag. A nursery chunk keeps the
+      # freelist representation — `bitmap_alloc_chunk?` excludes it, because
+      # `alloc_nursery` still allocates from `@nursery_freelists` and `occ` is
+      # not maintained there. Taking the bitmap arm for one cleared bits in a
+      # bitmap nothing reads and never linked the block onto the nursery
+      # freelist, so it was lost for the life of the chunk while
+      # `free_bytes_add` still counted it as available: measured, 2000 blocks
+      # freed and reallocated grew the heap by a whole 128 KiB chunk while
+      # reporting 208 896 bytes free.
+      if bitmap_alloc_chunk?(chunk)
         # Clear the `occ` bit and mark the header FREE. No freelist link: the
         # block becomes available the moment its bit is clear, and the pool
         # cursor finds it from `~occ` without a chase through free memory.
@@ -1008,7 +1013,7 @@ module Gcry
       # copy has done its job (see `@pool_in_flight`). Clearing it here rather
       # than inside the lock keeps the publish → hand-over span covered for the
       # whole of `alloc_old_small_locked`, including its refill.
-      clear_bitmap_alloc_in_flight(index, flags) if @bitmap_alloc
+      clear_bitmap_alloc_in_flight(index, flags, user) if @bitmap_alloc
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
       user
@@ -2814,7 +2819,19 @@ module Gcry
     private def owns_user_pointer?(user : Void*, header : BlockHeader*) : Bool
       chunk = chunk_for(user)
       return false unless chunk
+      owns_user_pointer_in?(user, header, chunk)
+    end
 
+    # The same test with the chunk already resolved.
+    #
+    # `chunk_containing` takes `@index_lock` and binary-searches the sorted
+    # index with the world running, so a caller that needs the chunk anyway
+    # must not pay for it twice: `realloc` and `free` both went from one
+    # lookup to two and three respectively when they started reading size and
+    # atomicity from the chunk, which cost **+36%** and **+13%** on those
+    # calls (measured against 287404d, 40 000 ballast chunks, 400 000 ops).
+    # `Pointer#realloc` is behind every Array/String/Hash growth.
+    private def owns_user_pointer_in?(user : Void*, header : BlockHeader*, chunk : ChunkHeader*) : Bool
       if ChunkHeader.large?(chunk)
         # `header` here came from the generic `from_user`, which is identity
         # under headerless — so on a large block it is the *user* pointer, not

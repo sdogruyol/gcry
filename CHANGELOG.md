@@ -9,6 +9,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
+  mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
+  because the nursery keeps the header representation — so a nursery block's
+  mark lives in the header generation. Both *clear* sites gated on the global
+  `@bitmap_marks` instead: `clear_nursery_marks` zeroed a nursery chunk's
+  bitmap, which nothing ever writes, and `clear_block_mark` skipped the header
+  clear. Nothing therefore cleared a nursery block's mark, a marked block is
+  never scanned, and anything reachable only through it was swept **while
+  live**. Reproduced in one minor: parent rooted, major, child allocated and
+  stored into the parent as its sole reference — the child was freed, its
+  address handed to a second owner, and its canary destroyed. Both sites use
+  the read side's own predicate now. `make nursery-bitmap-marks`, whose
+  bitmap arms are red without the fix. Off the process default path (the
+  nursery is off there, and forced off under `-Dgcry_headerless`); on the
+  library default path, where `Gcry::Heap.new` enables it.
+
+- **`GCRY_CHUNK_BYTES` was silently dead.** `MAX_RECIPROCAL_CHUNK_BYTES`
+  became a `begin ... end` constant in the previous commit, which Crystal
+  compiles to a `once`-guarded runtime initialiser — and its only reader is
+  `apply_env_config`, which runs inside `GC.init`, before `Crystal.main`
+  reaches `init_runtime`. There it read its zero-initialised storage, so
+  `chunk_bytes <= 0` rejected every legal value: `GCRY_CHUNK_BYTES=262144`
+  gave `small_chunk_bytes=131072`. It is a class method now, and the knob
+  works in both layouts. The same hazard is already documented for
+  `Platform.host_page_size` and for `ENV` in this exact context.
+
+- **`Heap#free` used the heap-wide flag where the representation is
+  per-chunk.** A block freed out of a *nursery* chunk took the bitmap arm,
+  which cleared bits in a bitmap nothing reads and never linked the block onto
+  `@nursery_freelists`, so it was lost for the life of the chunk while
+  `free_bytes_add` still counted it as available. Measured: 2 000 blocks
+  freed and reallocated grew the heap by a whole chunk while reporting
+  208 896 bytes free. Dispatches on `bitmap_alloc_chunk?` now, like every
+  other consumer.
+
+- **A cursor-pinned empty chunk was never released.** `sweep_small_bitmap`
+  forces `any_live` for a chunk an allocation cursor points at — correct, and
+  the fix for an earlier SIGSEGV — but the claim that its emptiness is
+  "noticed next cycle, once the cursor has moved on" was false: the cursor
+  advances only when a chunk runs *out* of free blocks, which an empty one
+  never does. So the pin was permanent, and a pinned chunk is also excluded
+  from the free-page release. Measured with every class touched and no
+  survivors: **80 chunks, 20 971 520 mapped bytes and RSS stuck at its
+  13.5 MB peak at `live_objects == 0`**, where the header arm returned to
+  6.3 MB. The after-world sweep already holds the class lock, so it retires
+  the cursor there instead; the in-STW arm still pins, because taking that
+  lock is the 0.21.1 hang. Now 0 chunks, 0 bytes, RSS 8.0 MB.
+  `sweep_cursor_retired` on `/gc-stats` is the twin `sweep_cursor_pinned`
+  needed to be readable.
+
+- **Two more holes in the small in-flight root.** `clear_bitmap_alloc_in_flight`
+  stored an unconditional null into a slot shared by every thread allocating
+  that (class, kind), and ran after the size-class lock was released — so one
+  thread's clear could erase another's live publication, re-opening the exact
+  window the slot exists to close. It is a compare-and-clear now. And
+  `collect_a_little` — the incremental slice, the third place a bitmap chunk
+  is swept — contributed no roots at all, so neither the small nor the large
+  in-flight block was offered there. Both are marked now. The fork child also
+  resets the slots, since the thread that owed the clear does not survive.
+
+- **Three default-path throughput regressions from the merge.** Each was a
+  chunk lookup added to compute a value the header already held, which
+  differs only under `-Dgcry_headerless`; `chunk_containing` takes
+  `@index_lock` and binary-searches the sorted index with the world running.
+  `GC.realloc` did two lookups where one was needed (**+36%**, measured
+  against 287404d with 40 000 ballast chunks); `GC.free` did three (**+13%**);
+  and `scan_object` resolved the chunk *before* the ATOMIC early-out that used
+  to precede it, which every `String` pays (**+19%** of `phase_mark` on an
+  atomic-heavy live set). `owns_user_pointer_in?` takes a resolved chunk, both
+  callers resolve once, and the header's ATOMIC test is back in front of the
+  lookup — sound in both layouts, since `BlockHeader.atomic?` is a literal
+  `false` under headerless. Re-measured after: `realloc` 15.1 ns against a
+  14.4 ns baseline, `free` 40.7 ns against 45.4 — free is now faster than it
+  was before the merge.
+
+- **Static roots: a failed resolution latched forever.** `@@resolved` was set
+  before the walk, so a process whose `dl_iterate_phdr` found no writable
+  segment warned once and then ran for its whole life with an empty root set,
+  sweeping everything held only by a class variable, while
+  `static_root_bss_lost` sat at 1 and could no longer tell one lost collection
+  from all of them. It latches on success only, so `scan_static_roots` retries
+  per collection and the counter means what `/gc-stats` says. Not reached in
+  any of eight link configurations (PIE, non-PIE, static, static-pie, norelro,
+  release, MT), so this is a failure-mode fix, not an observed bug.
+
+- **`Platform.ensure_static_root_cache` is public on both platforms.** It was
+  private on the Darwin half and compiled only because the `GC.init` call site
+  carried a `flag?(:linux)` guard — the same asymmetry that broke the macOS
+  build on 2026-08-22 via `bss_size_cap=`. The guard is gone and Darwin now
+  resolves its roots at init too, rather than inside the first stopped world.
+  Also: the Darwin free-page walk visits every kept size-class chunk rather
+  than only flagged ones, so it needed the bitmap stand-down the HOLED/SPARSE
+  classification already applies — its live mask is built from block headers,
+  which are stale on a bitmap chunk.
+
+- **`GCRY_POISON_FREED` on a bitmap heap now marks the freelist unclean
+  itself.** `sweep_words_poisoning` was the first poison site that did not,
+  and was safe only because `bitmap_alloc_locked` happens to store `false` on
+  every allocation — a store its own comment marks as temporary. The pairing
+  is stated where it is relied on.
+
 - **The default-on collector scrub asked libc where the stack was, twice per
   collection.** `GCRY_COLLECT_SCRUB` runs at `run_collection`'s entry and
   exit, and `clear_stack_body` opened with `pthread_getattr_np(pthread_self)`
@@ -126,7 +227,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gated by `make static-roots-redeploy` beside `static-bss-roots`, whose
   `GCRY_STATIC_BSS_CAP=1` red arm now refuses the segment instead of the
   mapping. The cache is a `StaticArray`, so a collection no longer calls
-  `realloc` to find its roots.
+  `realloc` to find its roots (Linux; the Darwin cache is still a `realloc`ed
+  `RootRange*`, resolved eagerly at `GC.init` now rather than inside the first
+  stopped world).
 
 - **`/gc-stats` reports the static-root counters.** `static_scanned_last` /
   `min` / `max` / `drops`, `static_root_bytes`, `static_root_bss_lost`,
@@ -138,6 +241,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   BSS was a root only if the maps parse kept `.data`'s line; the mechanism
   that dropped it there is not established, and the counters above plus the
   journal's `gcry:` lines are what would establish it.
+
+### Changed
+
+- **`clear_stack_libc_bounds` counts lookups *attempted*, not lookups that
+  succeeded.** The counter backs a structural claim — "the collector never
+  asks libc" — and a lookup that fails still pays the `/proc/self/maps` parse
+  while leaving a success-gated counter at zero.
+
+- **The reciprocal-ceiling spec finds the first bad offset by scanning**
+  instead of recomputing `2^40 / e`, which is the same expression the bound
+  itself uses: an error in the derivation appeared identically on both sides
+  and the assertion still passed. Independently confirmed by brute force —
+  true cliffs at 90 547 743 (header) and 53 702 655 (headerless) against
+  bounds of 90 539 495 and 53 687 091, so the bound is conservative by
+  8 248 and 15 564 bytes.
+
+- **`GCRY_NURSERY`'s knob row says it is unsound**, not merely off. The
+  soundness axis was documented in `SOUND-DEFAULTS.md` but not where anyone
+  reads before setting it: a checksummed-graph churn SIGSEGVs 3 of 3 runs at
+  `GCRY_NURSERY=262144` on a **default** build, and it does so identically at
+  287404d, so it is neither new nor bitmap-related.
 
 ### Added
 

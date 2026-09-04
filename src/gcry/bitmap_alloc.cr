@@ -103,10 +103,29 @@ module Gcry
       end
     end
 
-    # Drop the slot's copy once the caller's frame holds the pointer.
-    protected def clear_bitmap_alloc_in_flight(index : Int32, flags : UInt32) : Nil
+    # Drop the slot's copy once the caller's frame holds the pointer — but only
+    # if it is still *this* call's pointer.
+    #
+    # The slot is shared by every thread allocating that (class, kind) pair,
+    # and the clear happens after the size-class lock is released, so an
+    # unconditional store races: A publishes, returns, releases the lock; B
+    # takes the lock and publishes; A's clear then erases B's publication while
+    # B is still between its `occ` store and its caller receiving the pointer —
+    # which is precisely the unrooted window `@pool_in_flight` exists to close.
+    # The large twin has no such hole because `alloc_large_counted` clears
+    # inside `with_alloc_lock`.
+    protected def clear_bitmap_alloc_in_flight(index : Int32, flags : UInt32, user : Void*) : Nil
       slot = (flags & BlockHeader::Flags::ATOMIC) != 0 ? index + SIZE_CLASS_COUNT : index
-      @pool_in_flight[slot] = Pointer(Void).null
+      @pool_in_flight[slot] = Pointer(Void).null if @pool_in_flight[slot] == user
+    end
+
+    # Fork child: drop every publication, since only one thread survived.
+    protected def reset_bitmap_alloc_in_flight : Nil
+      i = 0
+      while i < POOL_SLOTS
+        @pool_in_flight[i] = Pointer(Void).null
+        i += 1
+      end
     end
 
     # Public reads for the diagnostics, which live outside `Heap` and must not
@@ -517,6 +536,37 @@ module Gcry
         i += 1
       end
       false
+    end
+
+    # Drop every pool cursor standing on `chunk`, so an empty chunk can reach
+    # the release path. Only legal with that class's freelist lock held — see
+    # the pin note above.
+    #
+    # Slots of *other* classes can also point here (a chunk carries one class,
+    # but the atomic and pointerful kinds are separate slots of it), and both
+    # are covered by the same lock only when they share it. So retire only the
+    # two slots of `class_index` and report whether any cursor is left; a
+    # foreign slot keeps the chunk pinned for this cycle, which is the old
+    # behaviour and still correct.
+    # Allocation-free, and that is load-bearing rather than tidy: this runs
+    # inside the sweep with the class's freelist lock held, and the spinlock is
+    # not reentrant. An `[a, b].each` here allocates an `Array(Int32)` on the
+    # managed heap, which re-enters `allocate` and deadlocks against the lock
+    # its own caller is holding — observed as `process_spec` hanging under
+    # `-Dgcry_headerless`.
+    protected def bitmap_retire_cursor_on(chunk : ChunkHeader*, class_index : Int32) : Bool
+      return false if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+      slot = class_index
+      2.times do
+        if @pool_chunk[slot] == chunk
+          @pool_chunk[slot] = Pointer(ChunkHeader).null
+          @pool_free_mask[slot] = 0_u64
+          @pool_word[slot] = 0
+          @pool_word_base[slot] = 0_u64
+        end
+        slot += SIZE_CLASS_COUNT
+      end
+      !bitmap_cursor_on?(chunk)
     end
   end
 end

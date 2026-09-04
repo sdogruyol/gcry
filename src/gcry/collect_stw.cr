@@ -407,6 +407,11 @@ module Gcry
       init_post_stw_mutex
       @tlabs_booted = false
       @alloc_batches_booted = false
+      # Only the forking thread survives, so any pool slot another thread had
+      # published into is owed a clear by a thread that no longer exists —
+      # and `mark_bitmap_alloc_in_flight` would root that block from every
+      # collection for the life of the child.
+      reset_bitmap_alloc_in_flight
       @soft_dirty_armed = false
       @soft_dirty_probed = false
       @soft_dirty_works = false

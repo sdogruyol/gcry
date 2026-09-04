@@ -44,7 +44,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major (Linux default **32 MiB**; Darwin process **16 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** **Ignored under `-Dgcry_headerless`**: nursery chunks are header-based and excluded from bitmap chunks, so a headerless heap has no nursery and `Heap#nursery_enabled=` is a no-op there (Phase 7.3) |
+| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off**, and **off because it is unsound, not because it is slow**: liveness then depends on the old→young remembered set, and soft-dirty has measured false negatives — a checksummed-graph churn reproduces a SIGSEGV in 3 of 3 runs at `GCRY_NURSERY=262144` on a default build, and the shape is the documented `Hash` key UAF at `0x0`..`0x11` ([SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) "the third axis"). Do not turn it on outside a measurement. **Ignored under `-Dgcry_headerless`**: nursery chunks are header-based and excluded from bitmap chunks, so a headerless heap has no nursery and `Heap#nursery_enabled=` is a no-op there (Phase 7.3) |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
 | `GCRY_DISABLE_ADAPTIVE_NURSERY=1` | Use fixed nursery threshold (no auto-tuning) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty/total % cap for soft-dirty scan (default **25**) |

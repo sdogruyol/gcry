@@ -453,8 +453,25 @@ module Gcry
     end
 
     private def scan_object(header : BlockHeader*) : Nil
-      # One chunk lookup for the whole scan. Under headerless the chunk is the
-      # source of *everything* this method used to read from the block —
+      # The header's ATOMIC flag first, because it can end the call.
+      #
+      # It is a load off a line the mark stack pop already pulled in;
+      # `chunk_containing` takes `@index_lock` and binary-searches the sorted
+      # index. Atomic blocks are the majority of a Crystal heap — every
+      # `String` and every pointer-free `Pointer(T).malloc` is one — and they
+      # reach here because `mark_impl_unlocked` pushes them before anything
+      # knows they are unscanned. Resolving the chunk first cost **+19%** of
+      # `phase_mark` on an atomic-heavy live set (400 000 Strings, measured
+      # against 287404d), which is why `scan_object_for_nursery` never stopped
+      # testing the header first.
+      #
+      # Sound in both builds: under headerless `BlockHeader.atomic?` is a
+      # literal `false`, so it never short-circuits there and the chunk's
+      # answer below is still the one that decides.
+      return if BlockHeader.atomic?(header)
+
+      # One chunk lookup for the rest of the scan. Under headerless the chunk
+      # is the source of *everything* this method used to read from the block —
       # atomicity (7.2), size (7.6) and the type_id gate's length — so resolving
       # it once and reusing it beats three separate derivations.
       chunk = chunk_containing(header.address)
@@ -935,10 +952,22 @@ module Gcry
     # generation, and `mark_impl`'s `@minor_only` gate skips non-nursery blocks,
     # so the old generation's marks stay valid from the prior major. The bitmap
     # arm has to preserve exactly that asymmetry.
+    #
+    # And it has to clear the representation the *read* side will consult.
+    # That is `bitmap_chunk?`, which excludes nursery chunks — they keep the
+    # header representation, because the nursery is still header-based
+    # (`sweep_small_blocks` dispatches per chunk for the same reason). Gating
+    # this on the global `@bitmap_marks` instead zeroed a nursery chunk's
+    # bitmap, which nothing ever writes, and left the header mark set: the
+    # block then read marked forever, `mark_impl` returned early without
+    # scanning it, and anything reachable only through it was reclaimed **while
+    # live**. Reproduced with `GCRY_BITMAP=1` and a nursery: parent rooted,
+    # major, child allocated and stored into the parent, one minor — the child
+    # was freed and its address handed out again.
     private def clear_nursery_marks : Nil
       each_chunk do |chunk|
         next unless ChunkHeader.nursery?(chunk)
-        if @bitmap_marks && !ChunkHeader.large?(chunk)
+        if bitmap_chunk?(chunk)
           chunk_clear_marks(chunk)
         else
           each_block(chunk) do |header|

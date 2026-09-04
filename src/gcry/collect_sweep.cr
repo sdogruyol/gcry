@@ -85,7 +85,7 @@ module Gcry
               fl_locked = true
             end
             begin
-              counts = sweep_small_blocks(chunk, class_index, major)
+              counts = sweep_small_blocks(chunk, class_index, major, fl_locked)
               any_live = counts.any_live
               live_payload = counts.live_payload
               usable_payload = counts.usable_payload
@@ -630,6 +630,13 @@ module Gcry
         each_chunk do |chunk|
           next if ChunkHeader.large?(chunk)
           next if ChunkHeader.dormant?(chunk)
+          # Same stand-down the HOLED/SPARSE classification applies on the
+          # other arm. This walk visits every kept size-class chunk rather
+          # than only flagged ones, so without the test a bitmap chunk reaches
+          # `release_free_pages_in_chunk`, whose live mask is built by reading
+          # every block header — the one authority that is stale on a bitmap
+          # chunk, because the streaming sweep never writes FREE.
+          next if bitmap_alloc_chunk?(chunk)
           class_index = chunk.value.size_class.to_i32
           next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
           release_chunk_pages_excluded(chunk, class_index, preserve_content: false)
@@ -862,9 +869,15 @@ module Gcry
     # per-bit clear is a read-modify-write over 63 other blocks' marks, and this
     # walk runs with mutators live under lazy sweep. The bitmap is zeroed
     # wholesale by `clear_all_marks` at the start of the next cycle.
+    #
+    # Per *chunk*, not on the global flag. A nursery chunk keeps the header
+    # representation (`bitmap_chunk?` excludes it), so skipping its header
+    # clear because some other chunk is a bitmap chunk leaves a mark nothing
+    # will ever clear — `clear_nursery_marks` carried the same confusion and
+    # the pair reclaimed live objects on the minor path.
     @[AlwaysInline]
     private def clear_block_mark(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      BlockHeader.clear_mark(header) unless @bitmap_marks
+      BlockHeader.clear_mark(header) unless bitmap_chunk?(chunk)
     end
 
     # The bitmap arm of the size-class sweep.
@@ -884,7 +897,7 @@ module Gcry
     # which it now can, because the pool cursor holds the chunk. A bitmap-only
     # sweep with allocate-black still on the header would reclaim live objects.
     private def sweep_small_bitmap(chunk : ChunkHeader*, class_index : Int32,
-                                   major : Bool) : SmallSweepCounts
+                                   major : Bool, class_locked : Bool) : SmallSweepCounts
       occ = ChunkHeader.occ_bitmap(chunk)
       mark = ChunkHeader.mark_bitmap(chunk)
       return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64) if occ.null? || mark.null?
@@ -933,11 +946,34 @@ module Gcry
       # raw `ChunkHeader*` a mutator may be suspended mid-use of, and unmapping
       # or DONTNEED'ing it out from under that mutator is the `signal 11 at
       # 0x1c` (`occ_bitmap` of a freed chunk) the earlier unlocked cursor-drop
-      # caused. Forcing `any_live` keeps it mapped; its emptiness is noticed
-      # next cycle, once the cursor has moved on. Dropping the cursor here
-      # instead is unsafe — a frozen mutator resumes through the null.
-      pinned = live == 0 && bitmap_cursor_on?(chunk)
-      @sweep_cursor_pinned &+= 1 if pinned
+      # caused. Forcing `any_live` keeps it mapped.
+      #
+      # It cannot be left at that, though, and the claim that its emptiness is
+      # "noticed next cycle, once the cursor has moved on" was wrong: nothing
+      # moves the cursor off an empty chunk. `bitmap_refill_pool` advances only
+      # when a chunk runs *out* of free blocks, which an empty one never does,
+      # so with no further allocation of that (class, kind) the pin is
+      # permanent — and a pinned chunk is also excluded from the HOLED/SPARSE
+      # release, so its pages never go back either. Measured: 80 chunks and
+      # 20 971 520 mapped bytes retained at `live_objects == 0`, RSS stuck at
+      # its 13.6 MB peak where the header arm returned to 6.3 MB.
+      #
+      # So retire the cursor when the class lock is held, which is exactly the
+      # after-world sweep — the arm that already takes
+      # `freelist_lock_ptr(class_index, …)` before this call. A mutator cannot
+      # be inside `bitmap_alloc_locked` for this class then, because it would
+      # need that same lock, so nulling the slot cannot strand anyone. The
+      # in-STW arm still pins: there the lock may be held by a frozen peer and
+      # taking it is the 0.21.1 hang.
+      pinned = false
+      if live == 0 && bitmap_cursor_on?(chunk)
+        if class_locked && bitmap_retire_cursor_on(chunk, class_index)
+          @sweep_cursor_retired &+= 1
+        else
+          pinned = true
+          @sweep_cursor_pinned &+= 1
+        end
+      end
 
       SmallSweepCounts.new(live > 0 || pinned,
         live * payload,
@@ -962,6 +998,15 @@ module Gcry
                                       payload : UInt64) : {UInt64, UInt64}
       freed = 0_u64
       live = 0_u64
+      # Every other poison site pairs the write with `@freelist_clean = false`,
+      # and `POISON_WORD`'s note calls that pairing "the whole safety
+      # argument": without it a later `malloc(clear: true)` can skip its memset
+      # and hand `0xdeadf2ee…` to a caller expecting zeros. On a bitmap heap
+      # `bitmap_alloc_locked` happens to store false on every allocation, but
+      # its own comment marks that as temporary ("until the cursor tracks
+      # cleanliness per chunk"), so the invariant is stated here rather than
+      # inherited from another file.
+      @freelist_clean[class_index] = false
       data_start = ChunkHeader.data_start(chunk).address
       block_bytes = @block_bytes[class_index]
       pay = payload.to_u32!
@@ -997,7 +1042,7 @@ module Gcry
     # walk entirely and settles `live_objects` with one store instead of a CAS
     # per block. Otherwise a single pass reclaims as it goes.
     private def sweep_small_blocks(chunk : ChunkHeader*, class_index : Int32,
-                                   major : Bool) : SmallSweepCounts
+                                   major : Bool, class_locked : Bool = false) : SmallSweepCounts
       unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
         # A chunk whose class we cannot read is never reclaimed from.
         return SmallSweepCounts.new(true, 0_u64, 0_u64, 0_u64)
@@ -1020,7 +1065,7 @@ module Gcry
       # which under this allocator leaks the block permanently — so the
       # poisoning belongs *in* the arm, and `sweep_words_poisoning` does it.
       if @bitmap_alloc && !ChunkHeader.nursery?(chunk)
-        return sweep_small_bitmap(chunk, class_index, major)
+        return sweep_small_bitmap(chunk, class_index, major, class_locked)
       end
 
       any_live = false

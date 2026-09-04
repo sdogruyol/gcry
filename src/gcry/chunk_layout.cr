@@ -17,12 +17,18 @@ module Gcry
     # it is inherited rather than designed. `release_free_pages_in_chunk`
     # (collect_sweep.cr) builds page runs from `data0 & ~(page-1)` — the chunk
     # base, since chunks are page-aligned — but releases a run only when
-    # `run_start >= data0` (collect_sweep.cr:1175, and the twin at :803). Since
-    # `data_start` is strictly inside page 0, a run starting at page 0 always
-    # fails that test, so **page 0 is never released**. That was already true of
-    # the 24-byte header; moving `data_start` forward keeps it true for free.
-    # The other two release sites round *up* from `data_start` (:615, :1059) and
-    # so cannot reach the bitmaps either.
+    # `run_start >= data0`; `unlink_free_only_page_runs` filters the same way.
+    # Since `data_start` is strictly inside page 0, a run starting at page 0
+    # always fails that test, so **page 0 is never released**. That was already
+    # true of the 24-byte header; moving `data_start` forward keeps it true for
+    # free. The remaining release sites — `flush_pending_dormant_chunks`,
+    # `release_large_freelist_pages_locked` and `dontneed_chunk_data` — round
+    # *up* from `data_start` and so cannot reach the bitmaps either.
+    #
+    # Cited by symbol on purpose: these references were line numbers until
+    # 2026-09-04 and every one of them was wrong, because the sweep grew ~310
+    # lines above them. A safety argument whose references cannot be followed
+    # cannot be re-checked.
     #
     # The invariant that rests on is asserted, not assumed:
     # `data_offset < Platform.host_page_size` — the whole metadata region lives
@@ -46,8 +52,8 @@ module Gcry
     # every size class **of this build**.
     #
     # With `e = magic*d - 2^40`, the first offset where `(off*magic) >> 40`
-    # disagrees with `off // d` is `2^40 / e`. Two things follow, and the
-    # hardcoded 64 MiB that used to sit here got both wrong.
+    # disagrees with `off // d` is `2^40 / e`. Three things follow, and the
+    # hardcoded 64 MiB constant that used to sit here got all three wrong.
     #
     # It depends on `BlockHeader::SIZE`. The header build's tightest class is
     # `block_bytes = 24592`, first failing at 86.3 MiB — the number the old
@@ -59,12 +65,21 @@ module Gcry
     # user pointer, no diagnostic. Measured at `d = 28672`: offset 53 702 655
     # gives ordinal 1873 where 1872 is correct.
     #
-    # And the failure is **not monotone** — past the first bad offset the two
-    # agree again at most offsets (67 108 863 does) — so a bound cannot be
+    # The failure is **not monotone** — past the first bad offset the two agree
+    # again at most offsets (67 108 863 does) — so a bound cannot be
     # spot-checked at a ceiling, which is how the old spec passed. It has to be
-    # the minimum of the first-failure points over the whole table, which is
-    # what this is.
-    MAX_RECIPROCAL_CHUNK_BYTES = begin
+    # the minimum of the first-failure points over the whole table.
+    #
+    # And it is a **method, not a constant**. A `begin ... end` constant
+    # initialiser compiles to a `once`-guarded runtime init, and its only
+    # reader is `apply_env_config`, which runs inside `GC.init` — before
+    # `Crystal.main` calls `init_runtime`. There it read its zero-initialised
+    # storage, so `chunk_bytes <= 0` rejected every legal value and
+    # `GCRY_CHUNK_BYTES` was silently dead for the whole process (measured:
+    # `GCRY_CHUNK_BYTES=262144` gave `small_chunk_bytes=131072`). The same
+    # hazard is documented at `chunk_radix.cr` for `Platform.host_page_size`
+    # and at `gc_override.cr` for `ENV`.
+    def self.max_reciprocal_chunk_bytes : UInt64
       limit = UInt64::MAX
       i = 0
       while i < SizeClasses::COUNT

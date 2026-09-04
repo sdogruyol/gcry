@@ -249,6 +249,8 @@ module Gcry
         collect_scrub_runs:                    heap.collect_scrub_runs,
         collect_scrub_bytes_total:             heap.collect_scrub_bytes_total,
         clear_stack_libc_bounds:               heap.clear_stack_libc_bounds,
+        sweep_cursor_pinned:                   heap.sweep_cursor_pinned,
+        sweep_cursor_retired:                  heap.sweep_cursor_retired,
         fiber_scrub_bytes:                     heap.fiber_scrub_bytes,
         fiber_scrub_runs:                      heap.fiber_scrub_runs,
         fiber_scrub_bytes_total:               heap.fiber_scrub_bytes_total,

@@ -208,6 +208,12 @@ module Gcry
       end
 
       unless bounds_known
+        # Counted on *asking*, not on the answer. The counter's whole job is
+        # the structural claim "the collector never asks libc" — which
+        # `make collect-scrub-cost` gates on — and a lookup that fails, or
+        # returns a range the SP is outside, costs the same `/proc/self/maps`
+        # parse while leaving a success-gated counter at zero.
+        @clear_stack_libc_bounds += 1 if fiber_bounds
         {% if flag?(:linux) || flag?(:freebsd) || flag?(:openbsd) || flag?(:dragonfly) %}
           attr = uninitialized LibC::PthreadAttrT
           if LibC.pthread_getattr_np(LibC.pthread_self, pointerof(attr)) == 0
@@ -234,7 +240,6 @@ module Gcry
             end
           end
         {% end %}
-        @clear_stack_libc_bounds += 1 if bounds_known && fiber_bounds
       end
 
       wipe = bytes

@@ -121,7 +121,15 @@ module Gcry
         0_u64
       end
 
-      private def self.ensure_static_root_cache : Nil
+      # Public for the same reason `bss_size_cap=` is: `GC.init` resolves the
+      # static roots eagerly, and a caller that gates on a platform must not
+      # have to ask which one it is on. Private here compiled only because the
+      # call site carried a `flag?(:linux)` macro guard — the asymmetry that
+      # broke the macOS build on 2026-08-22 (Makefile, `darwin-typecheck`).
+      # (Written without macro delimiters on purpose: Crystal's lexer reads
+      # them inside comments too, and one here swallowed this file's own
+      # `end` and left the darwin guard unterminated.)
+      def self.ensure_static_root_cache : Nil
         return if @@cached_generation == @@maps_generation && @@range_count > 0
 
         @@range_count = 0

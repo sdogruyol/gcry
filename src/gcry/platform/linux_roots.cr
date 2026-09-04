@@ -96,7 +96,6 @@ module Gcry
     def self.ensure_static_root_cache : Nil
       {% if flag?(:linux) %}
         return if @@resolved
-        @@resolved = true
         @@range_count = 0
         @@relro_lo = 0_u64
         @@relro_hi = 0_u64
@@ -110,8 +109,21 @@ module Gcry
         }, Pointer(Void).null)
         apply_relro
 
-        if @@range_count == 0
-          @@static_root_bss_lost &+= 1
+        # Latch only on success. Setting this before the walk — which is what
+        # it did until 2026-09-04 — meant a resolution that came back with
+        # nothing was never retried: the process warned once and then ran for
+        # its whole life with an empty root set, sweeping everything held only
+        # by a class variable, while `static_root_bss_lost` sat at 1 and could
+        # no longer tell "one collection lost the roots" from "every
+        # collection since boot had none". `scan_static_roots` calls this per
+        # collection, so leaving it unlatched retries and keeps counting.
+        if @@range_count > 0
+          @@resolved = true
+          return
+        end
+
+        @@static_root_bss_lost &+= 1
+        if @@static_root_bss_lost == 1
           buf = uninitialized UInt8[160]
           len = RawOut.append(buf.to_unsafe, 0,
             "gcry: no object's writable PT_LOAD holds gcry's statics — no class variable is a root\n")

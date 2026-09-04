@@ -27,28 +27,58 @@ describe Gcry::Heap do
   end
 
   it "block_magic stays exact up to the chunk ceiling it asserts" do
-    # Not a sample. The reciprocal's failure is not monotone — past the first
-    # bad offset the two agree again at most offsets — so four offsets per
-    # class prove nothing, and that is exactly how a real bound violation
-    # passed this spec: under `-Dgcry_headerless` class 38 first disagrees at
-    # 51.2 MiB while the constant allowed 64 MiB, and `limit - 1` happened to
-    # land in an agreeing region.
+    # Not a sample, and not a re-derivation either.
     #
-    # So check the boundary the arithmetic names: the first offset at which
-    # each class *would* disagree must be above the ceiling, and the offsets
-    # either side of it must resolve correctly while they are below it.
-    limit = Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES
-    shift = Gcry::Heap::RECIPROCAL_SHIFT
+    # The reciprocal's failure is not monotone — past the first bad offset the
+    # two agree again at most offsets — so four offsets per class prove
+    # nothing, and that is exactly how a real bound violation passed this
+    # spec: under `-Dgcry_headerless` class 38 first disagrees at 51.2 MiB
+    # while the ceiling allowed 64 MiB, and `limit - 1` happened to land in an
+    # agreeing region.
+    #
+    # Recomputing `2^40 / e` here would not fix that: it is the same
+    # expression `max_reciprocal_chunk_bytes` uses, so an error in the
+    # derivation would appear identically on both sides and still pass. So the
+    # first disagreement is **found by scanning**, with the quotient carried
+    # incrementally rather than divided, and the ceiling has to sit at or
+    # below it. That is an independent witness: it would catch a wrong shift,
+    # a wrong `e`, or a class missing from the walk.
+    limit = Gcry::Heap.max_reciprocal_chunk_bytes
     Gcry::SizeClasses::COUNT.times do |i|
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
       magic = Gcry::Heap.block_magic(block_bytes)
-      error = magic &* block_bytes &- (1_u64 << shift)
-      if error > 0
-        first_bad = (1_u64 << shift) // error
-        first_bad.should be >= limit
+
+      # Walk from the ceiling upward until the two disagree. Exactness below
+      # the ceiling is what the next example proves exhaustively; this one
+      # only has to show the ceiling is not past the cliff.
+      offset = limit
+      quotient = limit // block_bytes
+      remainder = limit % block_bytes
+      first_bad = nil.as(UInt64?)
+      scanned = 0
+      while scanned < 2_000_000
+        if Gcry::Heap.block_ordinal(offset, magic) != quotient
+          first_bad = offset
+          break
+        end
+        offset += 1
+        remainder += 1
+        if remainder == block_bytes
+          remainder = 0_u64
+          quotient += 1
+        end
+        scanned += 1
       end
-      [limit - 1, limit - block_bytes, limit // 2, limit // 3].each do |offset|
-        Gcry::Heap.block_ordinal(offset, magic).should eq(offset // block_bytes)
+
+      # A class whose reciprocal is exact (`e == 0`) never disagrees, and a
+      # class whose cliff is more than 2M bytes above the ceiling is equally
+      # fine — in both cases the scan finds nothing, which is a pass.
+      if bad = first_bad
+        bad.should be > limit
+      end
+
+      [limit - 1, limit - block_bytes, limit // 2, limit // 3].each do |off|
+        Gcry::Heap.block_ordinal(off, magic).should eq(off // block_bytes)
       end
     end
   end

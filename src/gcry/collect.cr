@@ -196,6 +196,11 @@ module Gcry
     # normal (one per class per cycle at most); it is here so a silence is
     # readable rather than assumed.
     getter sweep_cursor_pinned : UInt64 = 0_u64
+    # Cursor-held empty chunks the after-world sweep retired, so they could
+    # reach the release path. Its twin above must not be the only one that
+    # moves: a `pinned` that grows while this stays zero is a chunk nobody will
+    # ever release, which is what it meant until 2026-09-04.
+    getter sweep_cursor_retired : UInt64 = 0_u64
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.
@@ -1309,6 +1314,14 @@ module Gcry
         begin
           lock_write
           stop_world_quiescing_roots
+          # This slice is the third place a bitmap chunk gets swept — the
+          # `sweep(major: true)` below runs inside this same stopped world —
+          # so the two in-flight roots have to be offered here as well, or a
+          # mutator frozen between its `occ` store and the caller receiving
+          # the pointer has its block reclaimed under it. Cheap: one pointer
+          # and 96 static-array loads.
+          mark_large_alloc_in_flight
+          mark_bitmap_alloc_in_flight
           mark_loop_budget(work_units)
           if @mark_stack.empty?
             # Sound termination: rematerialize edges from dirty pages, then continue.

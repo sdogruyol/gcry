@@ -35,20 +35,15 @@ module Gcry
       @size == 0
     end
 
-    # Entries carry the chunk `find_block` already resolved.
-    #
-    # Without it, `scan_object` has to re-resolve the chunk to learn the
-    # object's size once that size comes from the chunk rather than the header
-    # (Phase 7.6) — which is exactly the per-object `chunk_containing` whose
-    # removal was measured at -7.7% on `phase_mark`. Carrying it costs a second
-    # word and keeps that win.
     # One word per entry, deliberately.
     #
     # Phase 7.6 first tried carrying the chunk beside the header, per the plan's
     # decision 5, so `scan_object` would not have to re-resolve it. Measured, that
     # was **+13.4% on phase_mark** (t=62.9) purely from doubling this stack —
     # more than the per-object `chunk_containing` it was meant to avoid. The
-    # stack is hot and its width matters more than the lookup does.
+    # stack is hot and its width matters more than the lookup does. So
+    # `scan_object` does resolve the chunk, once, behind the header's ATOMIC
+    # early-out.
     def push(header : BlockHeader*) : Nil
       if @size >= @capacity
         grow(@mapped_bytes * 2)
