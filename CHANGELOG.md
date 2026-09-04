@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path cannot be recorded under that allocator now, on the same grounds the
   reissue case already used — a verdict that is wrong is worse than none.
 
+- **The Darwin CI job never built either representation PR #33 shipped.**
+  `GCRY_BITMAP_ALLOC=1` and `-Dgcry_headerless` arms were added to the Linux
+  job when they landed and not to `test (darwin native)`, and the two are not
+  interchangeable: pages are 16 KiB here against 4 KiB there, and every bitmap
+  ordinal and free-page mask derives from that. Unit, process and sample arms
+  for both are in the job now, along with the three new Darwin gates, each
+  verified on an Apple M2 Pro host first.
+
 - **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
   mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
   because the nursery keeps the header representation — so a nursery block's

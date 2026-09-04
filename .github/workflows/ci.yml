@@ -1206,6 +1206,62 @@ jobs:
           make ec-queue-audit
           make perf-baseline
 
+      # The two representations PR #33 shipped, on the platform that was
+      # missing them. The Linux job gained these arms when they landed; this
+      # job did not, so `GCRY_BITMAP_ALLOC` and `-Dgcry_headerless` were never
+      # *built* on Darwin — and the two are not interchangeable with the Linux
+      # readings, because the page size is 16 KiB here against 4 KiB there and
+      # every bitmap ordinal and free-page mask is derived from it.
+      # All four verified on an Apple M2 Pro / Darwin 25.6.0 / Crystal 1.21.0
+      # host on 2026-09-04 before being added: 233, 219, 21 and 21 examples,
+      # 0 failures each.
+      - name: Unit specs (bitmap allocator) on Darwin
+        run: GCRY_BITMAP_ALLOC=1 crystal spec --error-trace
+
+      - name: Unit specs (header-less layout) on Darwin
+        run: crystal spec -Dgcry_headerless --error-trace
+
+      - name: Process GC specs (bitmap allocator) on Darwin
+        run: GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec --error-trace
+
+      - name: Process GC specs (header-less layout) on Darwin
+        run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
+
+      - name: Samples (header-less layout) on Darwin
+        run: |
+          mkdir -p bin
+          crystal build -Dgc_none -Dgcry_headerless samples/hello.cr -o bin/hello_hl
+          ./bin/hello_hl
+          crystal build -Dgc_none -Dgcry_headerless samples/stress.cr -o bin/stress_hl
+          ./bin/stress_hl 300
+          crystal build -Dgc_none -Dgcry_headerless samples/json_churn.cr -o bin/json_churn_hl
+          ./bin/json_churn_hl 800
+
+      # `GC.init` resolves the static roots eagerly on both platforms as of
+      # 2026-09-04. Darwin was excluded until then because doing it crashed
+      # before `main` on this runner (CI 33900305015) with no host to
+      # attribute it on; the mechanism is `__crystal_once` reached from a class
+      # variable initialiser, and the IR arm of this gate is what keeps the
+      # declarations from drifting back. Its red arm must SEGV, so a green run
+      # here means both halves were exercised.
+      - name: Static root resolve ordering
+        run: make darwin-static-root-init
+
+      # Which Mach-O sections the static roots are. The rule is derived now
+      # (writable `__DATA*` minus `SG_READ_ONLY` minus TLS) rather than a name
+      # allow-list, and only a Darwin host can say whether that loses a root
+      # class. Runs both links, because `-no_data_const` moves `__const` and
+      # `__got` into a writable `__DATA`.
+      - name: Static root section parity
+        run: make darwin-static-root-sections
+
+      # The Darwin free-page walk's bitmap stand-down, which was written blind
+      # on Linux. Its evidence is `page_release_live_blocks`, not a checksum:
+      # this platform releases with `MADV_FREE`, so a mis-released live page is
+      # latent and a "graph intact" arm cannot see it.
+      - name: Bitmap free-page stand-down
+        run: make darwin-bitmap-page-release
+
       # Two more of the ~40 gates the Linux job runs and this one did not. The
       # STW × TLAB property test is a correctness gate for a UAF class that was
       # real (process-STW × TLAB freelist), and it is platform code on both
