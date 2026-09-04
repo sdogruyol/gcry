@@ -30,6 +30,10 @@
 # `live` arm. It was firing thousands of times per run all along and only
 # occasionally landing on a value that killed the process.
 #
+# The control arm pins GCRY_CHUNK_RADIX=0: the O(1) chunk table bypasses the
+# cache read this gate certifies, so an inherited radix would make the
+# control unable to crash and the gate unable to fail.
+#
 #   GCRY_INDEX_CACHE_UNCHECKED=1 restores both halves — the two-load read and
 #   the unsynchronised invalidation — and takes `live` and `realloc` to **8 of
 #   8**. Without that arm, "it does not crash any more" is not a measurement.
@@ -99,7 +103,20 @@ def run_arm(exe : String, arm : String, runs : Int32, unchecked : Bool) : {Int32
   hung = 0
   first = nil
   env = {"GCRY_INDEX_AUDIT" => "1"}
-  env["GCRY_INDEX_CACHE_UNCHECKED"] = "1" if unchecked
+  if unchecked
+    env["GCRY_INDEX_CACHE_UNCHECKED"] = "1"
+    # The control arm must reach the one-slot cache read it is trying to break,
+    # so it runs with the radix off regardless of the ambient environment.
+    #
+    # `GCRY_CHUNK_RADIX=1` answers ~99.7% of lookups from the O(1) table and
+    # never consults the cache for those, so an inherited radix silently
+    # neutralises this arm: measured 0 crashes in 32 tries with the radix on,
+    # against 1-of-1 and 1-of-3 with it off. The live arms above would then be
+    # green for a reason that has nothing to do with the fix they exist to
+    # certify — the exact "a gate that can only report zero" failure this file
+    # was written to avoid.
+    env["GCRY_CHUNK_RADIX"] = "0"
+  end
   runs.times do
     result = BoundedChild.run(exe, ["--child", arm], env)
     if result.ok

@@ -1,0 +1,20 @@
+
+=== RADIX /json  n=32   corr(d_live, d_mark) = -0.428
+  unadjusted   d_mark =  -15.13 us ( -6.63%)  CI [-11.94%, -1.33%]
+  ANCOVA-adj   d_mark =  -21.30 us ( -9.34%)  CI [-14.66%, -4.01%]  t=-3.58 p=0.001188
+  per-live-obj d      = +365.77%  CI [-78.78%, +810.33%]  t=+1.68
+
+=== NULL /json  n=32   corr(d_live, d_mark) = -0.138
+  unadjusted   d_mark =   +7.91 us ( +3.58%)  CI [-3.89%, +11.05%]
+  ANCOVA-adj   d_mark =   +6.95 us ( +3.14%)  CI [-4.48%, +10.76%]  t=+0.84 p=0.4062
+  per-live-obj d      = +26.26%  CI [-67.03%, +119.54%]  t=+0.57
+
+=== RADIX /  n=32   corr(d_live, d_mark) = -0.573
+  unadjusted   d_mark =  -43.60 us (-17.72%)  CI [-25.98%, -9.46%]
+  ANCOVA-adj   d_mark =  -45.43 us (-18.46%)  CI [-25.37%, -11.56%]  t=-5.46 p=6.354e-06
+  per-live-obj d      = -59.71%  CI [-183.47%, +64.05%]  t=-0.98
+
+=== NULL /  n=32   corr(d_live, d_mark) = -0.069
+  unadjusted   d_mark =   +1.17 us ( +0.50%)  CI [-7.17%, +8.17%]
+  ANCOVA-adj   d_mark =   +0.14 us ( +0.06%)  CI [-8.08%, +8.20%]  t=+0.02 p=0.9881
+  per-live-obj d      = +49.19%  CI [-140.17%, +238.55%]  t=+0.53

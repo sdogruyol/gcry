@@ -504,7 +504,8 @@ if ARGV.includes?("--child")
   # Same reason as `page_release_corruption`: a run that never marks a chunk
   # HOLED releases nothing, and its silence is about nothing.
   heap = Gcry.default_heap
-  puts "child: #{Verdict.line} dontneed #{heap.dontneed_bytes} collections #{heap.collections} " \
+  puts "child: #{Verdict.line} dontneed #{heap.dontneed_bytes} page_release #{heap.page_release_bytes} " \
+       "mostly_empty #{heap.mostly_empty_bytes} collections #{heap.collections} " \
        "range_rejects #{heap.madvise_range_rejects} realloc_overlaps #{heap.realloc_collect_overlaps} " \
        "large_swept #{heap.large_cached_by_sweep} large_freed #{heap.large_cached_by_free} " \
        "live_in_run #{heap.page_release_live_blocks} skipped_runs #{heap.page_release_skipped_runs}"
@@ -529,11 +530,17 @@ ARMS = {
 failures = [] of String
 results = {} of String => Tuple(Int32, Int32, String?)
 releases = {} of String => UInt64
+# What each walk itself released, by its own counter: the HOLED walk's
+# `page_release_bytes`, the sparse walk's `mostly_empty_bytes`. `dontneed_bytes`
+# also counts the dormant flush every arm runs, so a ratio against the control
+# measured that flush as much as the walk.
+walked = {} of String => UInt64
 
 ARMS.each do |name, env|
   bad = 0
   hung = 0
   released = 0_u64
+  walk_bytes = 0_u64
   first = nil
   attempts.times do
     result = BoundedChild.run(exe, ["--child"], env.to_h, 300.seconds)
@@ -546,12 +553,17 @@ ARMS.each do |name, env|
     if m = result.output.match(/dontneed (\d+)/)
       released += m[1].to_u64
     end
+    counter = name == "mostly-empty" ? "mostly_empty" : "page_release"
+    if m = result.output.match(/#{counter} (\d+)/)
+      walk_bytes += m[1].to_u64
+    end
   end
   results[name] = {bad, hung, first}
   releases[name] = released
-  puts "  %-13s %d of %d, released %d B%s%s" % [name, bad, attempts, released,
-                                                hung > 0 ? " (#{hung} killed on the deadline)" : "",
-                                                first ? "\n     #{first.strip}" : ""]
+  walked[name] = walk_bytes
+  puts "  %-13s %d of %d, released %d B (walk %d B)%s%s" % [name, bad, attempts, released, walk_bytes,
+                                                            hung > 0 ? " (#{hung} killed on the deadline)" : "",
+                                                            first ? "\n     #{first.strip}" : ""]
 end
 
 puts ""
@@ -560,12 +572,17 @@ no_walk = results["no walk"][0]
 failures << "the no-walk arm failed #{no_walk} of #{attempts} — this harness breaks without either " \
             "release walk, so it is not measuring them" if no_walk > 0
 
-# An engaged walk releases orders of magnitude more than the dormant flush the
-# control arm still does, so the floor is the control and never zero.
-floor = {releases["no walk"] * 4, 8_u64 * 1024 * 1024}.max
+# Each walk has to have run for its clean result to mean anything, and the
+# control must have run neither; both read straight off the walks' own
+# counters. 8 MiB is the order of magnitude one child releases through either
+# walk on this workload; a walk that ran at all clears it several times over.
+floor = 8_u64 * 1024 * 1024
 ["HOLED", "mostly-empty"].each do |arm|
-  failures << "#{arm} released #{releases[arm]} B against a #{releases["no walk"]} B control — the " \
-              "walk did not run, so a clean result says nothing about it" if releases[arm] <= floor
+  failures << "#{arm} walk released #{walked[arm]} B across #{attempts} children — the walk did not " \
+              "run, so a clean result says nothing about it" if walked[arm] <= floor
+end
+if walked["no walk"] > 0
+  failures << "the no-walk control released #{walked["no walk"]} B through a walk it was told to disable"
 end
 
 if failures.empty? && results["HOLED"][0] == 0 && results["mostly-empty"][0] == 0

@@ -136,6 +136,37 @@ module Gcry
       end
     end
 
+    # Every lock a small allocation of `index` can take, held together: each
+    # TLAB slot and allocation-batch slot (their fast paths hand out blocks
+    # that are still FREE-headed and off the global freelist), then the class
+    # freelist. Slot locks first — the TLAB path holds its slot lock when it
+    # refills under the freelist lock, so that is the order it establishes.
+    #
+    # This is what makes a post-STW page release sound: a run of free pages is
+    # computed from block headers and then handed to `madvise` with the world
+    # running, and any block in it handed out in between would be zeroed
+    # after the mutator wrote it (`make page-release-corruption`, 4 of 28
+    # before this). Under these locks nothing can be handed out until the
+    # syscall has returned. Only the opt-in release walks pay for it.
+    protected def with_small_allocation_excluded(index : Int32, nursery : Bool, &)
+      i = 0
+      while i < MAX_TLABS
+        (@tlab_slot_locks.to_unsafe + i).value.lock
+        (@alloc_batch_slot_locks.to_unsafe + i).value.lock
+        i += 1
+      end
+      begin
+        with_freelist_lock(index, nursery) { yield }
+      ensure
+        i = MAX_TLABS - 1
+        while i >= 0
+          (@alloc_batch_slot_locks.to_unsafe + i).value.unlock
+          (@tlab_slot_locks.to_unsafe + i).value.unlock
+          i -= 1
+        end
+      end
+    end
+
     private def current_thread_key : UInt64
       {% if flag?(:win32) || flag?(:wasm32) %}
         1_u64
@@ -373,7 +404,7 @@ module Gcry
                 tlab.value.freelists[class_index] = next_free
               end
               BlockHeader.set_used(header, payload, flags)
-              heap_set_mark(header) if @incremental_marking || @collecting
+              heap_set_mark_allocating(header) if @incremental_marking || @collecting
               @tlab_hits.add(1_u64)
             else
               user = Pointer(Void).null
@@ -608,7 +639,7 @@ module Gcry
           else
             ab.value.freelists[index] = header.value.next_free
             BlockHeader.set_used(header, payload, flags)
-            heap_set_mark(header) if @incremental_marking || @collecting
+            heap_set_mark_allocating(header) if @incremental_marking || @collecting
             @alloc_batch_hits.add(1_u64)
           end
         end
@@ -679,7 +710,7 @@ module Gcry
             nxt = header.value.next_free
             @freelists[class_index] = nxt
             BlockHeader.set_used(header, payload, flags)
-            heap_set_mark(header) if @incremental_marking || @collecting
+            heap_set_mark_allocating(header) if @incremental_marking || @collecting
             if first.null?
               first = src
               # next_free unused for the returned object

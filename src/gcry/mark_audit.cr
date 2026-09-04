@@ -121,12 +121,12 @@ module Gcry
       return unless @dying_register_audit || @thread_block_audit
       header = find_block(Pointer(Void).new(addr))
       return unless header
-      return unless BlockHeader.user_from(header).address == addr
+      return unless diag_user(header).address == addr
       # The size band is the fiber family's (`Deque(Fiber::Stack)` capacities).
       # The dying-type audit's block is 192 bytes and would fall through it, and
       # then its "never offered" line would be reporting the band rather than
       # the scan (src/gcry/thread_block_audit.cr).
-      unless header.value.size >= DYING_AUDIT_MIN_SIZE || watched_type_block?(header)
+      unless diag_payload(header) >= DYING_AUDIT_MIN_SIZE || watched_type_block?(header)
         return
       end
       i = 0
@@ -145,8 +145,8 @@ module Gcry
 
     private def watched_type_block?(header : BlockHeader*) : Bool
       return false unless @thread_block_audit
-      return false if header.value.size < 4
-      BlockHeader.user_from(header).as(UInt32*).value == dying_type_id
+      return false if diag_payload(header) < 4
+      diag_user(header).as(UInt32*).value == dying_type_id
     end
 
     private def mutator_offered?(addr : UInt64) : Bool
@@ -170,7 +170,7 @@ module Gcry
           # only class of block that dies in the acikturkiye crash: every one
           # of those is a 69632-byte large chunk
           # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`).
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           reported = audit_dying_block(header, pointerof(checked), pointerof(hits), reported)
           next
         end
@@ -196,7 +196,7 @@ module Gcry
     # allocate a tuple to return them.
     private def audit_dying_block(header : BlockHeader*, checked : UInt64*, hits : UInt64*,
                                   reported : Int32) : Int32
-      return reported if BlockHeader.free?(header)
+      return reported if !diag_allocated?(header)
       return reported if heap_marked?(header)
       # The address-space walk fires **once per collection**, for the first
       # dying block that survives every other check — and left to itself it
@@ -205,10 +205,10 @@ module Gcry
       # bytes, and without this the audit spent 111 collections describing
       # other people's garbage.
       min = @dying_audit_min_bytes
-      return reported if min > 0 && header.value.size.to_u64 < min
+      return reported if min > 0 && diag_payload(header) < min
       # About to be freed.
       checked.value &+= 1
-      addr = BlockHeader.user_from(header).address
+      addr = diag_user(header).address
       found = false
       Thread.unsafe_each do |thread|
         Platform.each_thread_greg(thread.to_unsafe) do |value|
@@ -227,7 +227,7 @@ module Gcry
           l2 = RawOut.append(b2.to_unsafe, l2, "gcry: dying audit — block 0x")
           l2 = RawOut.append_hex(b2.to_unsafe, l2, addr)
           l2 = RawOut.append(b2.to_unsafe, l2, " size ")
-          l2 = RawOut.append_u64(b2.to_unsafe, l2, header.value.size.to_u64)
+          l2 = RawOut.append_u64(b2.to_unsafe, l2, diag_payload(header))
           l2 = RawOut.append(b2.to_unsafe, l2,
             " dies unreferenced: not in the heap, not in a suspended thread's registers, and " \
             "never offered by the mutator-stack scan. collection ")
@@ -247,7 +247,7 @@ module Gcry
         end
         # Every place gcry looks has now said no. Ask the kernel where the
         # value actually is (src/gcry/address_space_audit.cr).
-        audit_address_space_once(addr, header.value.size.to_u64)
+        audit_address_space_once(addr, diag_payload(header))
       end
       @dying_offered_by_mutator &+= 1 if offered
       return reported unless found
@@ -260,7 +260,7 @@ module Gcry
         "gcry: dying-register audit — block 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, addr)
       len = RawOut.append(buf.to_unsafe, len, " size ")
-      len = RawOut.append_u64(buf.to_unsafe, len, header.value.size.to_u64)
+      len = RawOut.append_u64(buf.to_unsafe, len, diag_payload(header))
       len = RawOut.append(buf.to_unsafe, len,
         " is about to be swept and its address is in a suspended thread's registers. collection ")
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
@@ -280,8 +280,8 @@ module Gcry
       each_chunk do |chunk|
         next if ChunkHeader.dormant?(chunk)
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-          next if BlockHeader.free?(header)
+          header = ChunkHeader.large_header(chunk)
+          next if !diag_allocated?(header)
           next unless heap_marked?(header) || @mark_audit_all_parents
           reported = audit_block(header, pointerof(edges), pointerof(misses), reported)
           next
@@ -295,7 +295,7 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          if !BlockHeader.free?(header) && (heap_marked?(header) || @mark_audit_all_parents)
+          if diag_allocated?(header) && (heap_marked?(header) || @mark_audit_all_parents)
             reported = audit_block(header, pointerof(edges), pointerof(misses), reported)
           end
           cursor += block_bytes
@@ -324,10 +324,10 @@ module Gcry
     # from a loop that must not allocate a tuple inside the stopped world.
     private def audit_block(header : BlockHeader*, edges : UInt64*, misses : UInt64*,
                             reported : Int32) : Int32
-      return reported if BlockHeader.atomic?(header)
-      size = header.value.size.to_u64
+      return reported if diag_atomic?(header)
+      size = diag_payload(header)
       return reported if size < sizeof(UInt64)
-      base = BlockHeader.user_from(header).address
+      base = diag_user(header).address
       words = size // sizeof(UInt64)
       i = 0_u64
       while i < words
@@ -339,8 +339,8 @@ module Gcry
         child = find_block(Pointer(Void).new(w))
         next unless child
         # Base pointers only — see the file header.
-        next unless BlockHeader.user_from(child).address == w
-        next if BlockHeader.free?(child)
+        next unless diag_user(child).address == w
+        next if !diag_allocated?(child)
         edges.value &+= 1
         next if heap_marked?(child)
         parent_marked = heap_marked?(header)
@@ -370,15 +370,15 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, " type_id ")
       len = RawOut.append_u64(buf.to_unsafe, len, Pointer(UInt32).new(parent_base).value.to_u64)
       len = RawOut.append(buf.to_unsafe, len, " size ")
-      len = RawOut.append_u64(buf.to_unsafe, len, parent.value.size.to_u64)
+      len = RawOut.append_u64(buf.to_unsafe, len, diag_payload(parent))
       len = RawOut.append(buf.to_unsafe, len, " points at +")
       len = RawOut.append_u64(buf.to_unsafe, len, offset)
       len = RawOut.append(buf.to_unsafe, len, " to UNMARKED block 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, child_addr)
       len = RawOut.append(buf.to_unsafe, len, " size ")
-      len = RawOut.append_u64(buf.to_unsafe, len, child.value.size.to_u64)
+      len = RawOut.append_u64(buf.to_unsafe, len, diag_payload(child))
       len = RawOut.append(buf.to_unsafe, len, " flags 0x")
-      len = RawOut.append_hex(buf.to_unsafe, len, child.value.flags.to_u64)
+      len = RawOut.append_hex(buf.to_unsafe, len, diag_flags(child))
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
     end

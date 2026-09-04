@@ -102,29 +102,32 @@ describe "Gcry mprotect barrier" do
     end
   end
 
-  it "can prefer mprotect on a process-like heap" do
-    pending! "Linux only" unless {{ flag?(:linux) }}
-    heap = Gcry::Heap.new
-    begin
-      heap.nursery_enabled = true
-      heap.scan_static_roots = true
-      heap.prefer_mprotect_barrier = true
-      heap.allow_mprotect_barrier = true
-      heap.gc_threshold = UInt64::MAX
-      heap.nursery_threshold = UInt64::MAX
-      heap.add_root(heap.malloc(64))
-      heap.minor_collect(scan_stack: false)
-      heap.barrier_backend_name.should eq("mprotect")
-      # Second minor should still keep rooted object.
-      child = heap.malloc(32)
-      heap.add_root(child)
-      heap.minor_collect(scan_stack: false)
-      heap.live?(child).should be_true
-    ensure
-      heap.destroy
-      Gcry::Platform.disable_mprotect_barrier
+  {% unless flag?(:gcry_headerless) %}
+    # The mprotect barrier serves the nursery, which is off under headerless.
+    it "can prefer mprotect on a process-like heap" do
+      pending! "Linux only" unless {{ flag?(:linux) }}
+      heap = Gcry::Heap.new
+      begin
+        heap.nursery_enabled = true
+        heap.scan_static_roots = true
+        heap.prefer_mprotect_barrier = true
+        heap.allow_mprotect_barrier = true
+        heap.gc_threshold = UInt64::MAX
+        heap.nursery_threshold = UInt64::MAX
+        heap.add_root(heap.malloc(64))
+        heap.minor_collect(scan_stack: false)
+        heap.barrier_backend_name.should eq("mprotect")
+        # Second minor should still keep rooted object.
+        child = heap.malloc(32)
+        heap.add_root(child)
+        heap.minor_collect(scan_stack: false)
+        heap.live?(child).should be_true
+      ensure
+        heap.destroy
+        Gcry::Platform.disable_mprotect_barrier
+      end
     end
-  end
+  {% end %}
 end
 
 describe "Gcry sound incremental (dirty re-scan)" do

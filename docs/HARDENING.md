@@ -12,12 +12,12 @@ Stress the collector. Tune process GC. Know where false retention comes from.
 ```sh
 crystal spec
 crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
-# optional: side mark bitmap (higher RSS on Linux HTTP) — crystal build -Dgc_none -Dgcry_side_bitmap …
+# optional: per-chunk mark bitmaps — GCRY_BITMAP=1 ./bin/stress 300
 ```
 
 ## Defaults that matter (process GC)
 
-- Marks live in the **BlockHeader** (`MARK` flag). Side `MarkBitmap` mmap is **opt-in** (`-Dgcry_side_bitmap`) — Linux HTTP A/B: ~9× Kemal RSS vs ~1× header marks
+- Marks live in the **BlockHeader** (mark generation byte). Per-chunk mark bitmaps are **opt-in** (`GCRY_BITMAP=1`) — the bits ride in each chunk's own header, so there is no side mmap and no RSS tail
 - Majors: Linux **32 MiB**, Darwin **16 MiB**; **full STW**; nursery / incremental **off** (opt in `GCRY_NURSERY=1` / `GCRY_INCREMENTAL=1`)
 - **Adaptive nursery threshold** when nursery is on (target survival 50%, clamped [64 KiB, 8 MiB]). Disable with `GCRY_DISABLE_ADAPTIVE_NURSERY=1`
 - Empty chunks **released** (`GCRY_KEEP_CHUNKS=1` to retain); dormant retain budget: Linux **0**, Darwin **512 KiB** (`GCRY_EMPTY_CHUNK_RETAIN`)
@@ -31,7 +31,7 @@ crystal build -Dgc_none samples/stress.cr -o bin/stress && ./bin/stress 300
   numbers belong in a correctness claim. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md)
 - Size-class chunk: library/Linux **128 KiB**; Darwin process **256 KiB** (`GCRY_CHUNK_BYTES` to override)
 - Large-object freelist retain: Linux process **0**, Darwin **1 MiB** (`GCRY_LARGE_CACHE`; adaptive grows only from a non-zero floor, up to 32 MiB)
-- Free-page physical release: **opt-in on both platforms** (`GCRY_PAGE_DONTNEED=1`). Linux HOLED was already opt-in (measured thr+RSS regression as default); Darwin shipped it **on** until 0.21.0 and it is off now, because the walk is unsound and the defect is open — see the knob table below. Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
+- Free-page physical release: **opt-in on both platforms** (`GCRY_PAGE_DONTNEED=1`). Linux HOLED was already opt-in (measured thr+RSS regression as default); Darwin shipped it **on** until 0.21.0 and is off now to match. The walk was unsound until 2026-09-04 and is sound now (it runs under every small-allocation lock) — see the knob table below. Escape: `GCRY_DISABLE_PAGE_RELEASE=1` / `GCRY_DISABLE_MADVISE=1`
 - Auto-collect suppressed while finalizers run
 
 Pauses: `Gcry.pause_stats`. HTTP: `GET /gc-stats`, `GET /gc-collect`, `GET /metrics` under `-Dgc_none`.
@@ -44,7 +44,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 |----------|--------|
 | `GCRY_THRESHOLD` | Bytes since last major (Linux default **32 MiB**; Darwin process **16 MiB**) |
 | `GCRY_DISABLE_AUTO=1` | No auto-collect |
-| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** |
+| `GCRY_NURSERY` | Opt-in nursery (bytes; default threshold **512 KiB** when enabled). Process GC default **off** **Ignored under `-Dgcry_headerless`**: nursery chunks are header-based and excluded from bitmap chunks, so a headerless heap has no nursery and `Heap#nursery_enabled=` is a no-op there (Phase 7.3) |
 | `GCRY_DISABLE_NURSERY=1` | Force nursery off |
 | `GCRY_DISABLE_ADAPTIVE_NURSERY=1` | Use fixed nursery threshold (no auto-tuning) |
 | `GCRY_SOFT_DIRTY_MAX` | Dirty/total % cap for soft-dirty scan (default **25**) |
@@ -54,6 +54,15 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INCREMENTAL=1` | Sliced majors (+ dirty re-scan if barrier armed) |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW (process default) |
 | `GCRY_INCREMENTAL_WORK` | Objects per slice (default **1024**) |
+| `GCRY_BITMAP=1` | Mark bits in a per-chunk bitmap (one bit per block, in the chunk's own header) instead of the mark-generation byte in each `BlockHeader`. Opt-in, **default off** — the header path stays the shipping representation until a Kemal + acikturkiye cut says otherwise, and it is also the fallback on a CPU without the SIMD baseline. Read once at heap `initialize`: a chunk's `data_offset` is baked in at `map_chunk`, so it cannot change under a live heap |
+| `GCRY_CHUNK_RADIX=1` | Address→chunk through a two-level page-granular table instead of a binary search over the address-sorted index. Opt-in, **default off**. The fast path is used only where `chunk_containing` already skips `@index_lock` (a stopped world), because the lookup's containment check dereferences the chunk and a stale entry read against an unmapped VMA would fault. ~8 bytes of resident table per page of heap. Counters `radix_fast_hits` / `radix_slow_lookups` / `radix_oversize_skips` |
+| `GCRY_RADIX_THP=1` | Leave the chunk-radix tables eligible for transparent huge pages. **Default off**: with THP in `always`, one touched entry faults a 2 MiB page and the table's RSS stops tracking the live heap — measured +16–21% post-GC RSS on Kemal, 160× the naive estimate. The huge page does give the table a single TLB entry, so this exists to A/B whether `MADV_NOHUGEPAGE` costs any of the mark-phase win |
+| `GCRY_BITMAP_ALLOC=1` | Implies `GCRY_BITMAP`, and goes further: `occ` bitmaps, a streaming `occ &= mark` sweep, and pool-cursor allocation instead of the freelist. Opt-in, **default off**, still being built out — nursery chunks are excluded (their allocation is still `alloc_nursery`'s freelist, so `occ` is not maintained for them). Retires the mark union, because a bitmap-only sweep cannot see a mark that exists only in a header generation |
+| `GCRY_PREFETCH=0` | Disable the mark-loop software prefetch pipeline (default **on**). The pipeline prefetches each object's cache line a fixed depth before it is scanned, hiding the random-access miss that dominates a latency-bound mark; `=0` selects the plain LIFO drain for A/B |
+| `GCRY_ALLOC_PFW` | Bytes ahead of the bitmap allocation cursor to prefetch-for-write (default **2048**, 0 disables). Overlaps the fresh-line write miss with `set_used` and the caller's zeroing; sweet spot is machine-dependent |
+| `GCRY_HUGEPAGES=1` | Ask for transparent huge pages on GC chunks (default **off** — chunks are `MADV_NOHUGEPAGE`). **Currently a no-op, and measurably so**: chunks are 128 KiB separate mmaps and THP can only back a ≥2 MiB region inside one VMA, so the advice cannot be honoured. It needs the reserved arena (plan Phase 8) to mean anything; the knob is the mechanism, kept so the arena work has somewhere to land |
+| `GCRY_SIMD` | SIMD tier for the bitmap kernels: `off`/`scalar`/`none`, `neon`, `avx2`, `avx512`. Clamps **down** only — naming a tier the CPU lacks would be a SIGILL, so an unsupported or unrecognised value falls back to what `cpuid` detected. Default: detected. `off` is the A/B arm that separates a vector-kernel bug from a representation bug |
+| `GCRY_LARGE_RELEASE_FROM_BASE=1` | Research/positive control only: restore the pre-0.21.4 lower bound in the large-freelist page release, which started the range at the chunk base and so covered the chunk's own header page. `madvise_range_ok?` refuses those ranges, so this is how `make large-freelist-madvise` proves its guard has teeth. Never set it in production |
 | `GCRY_STRESS=1` | Collect every N allocs (`GCRY_STRESS_EVERY`, default **16**) |
 | `GCRY_KEEP_CHUNKS=1` | Retain empty chunks (higher thr / RSS) |
 | `GCRY_RELEASE_CHUNKS=1` | Force empty release (already default-on) |
@@ -71,7 +80,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_INTERIOR=1` | Interior pointers on ambient roots |
 | `GCRY_UNALIGNED_CANDIDATES=1` | Follow misaligned candidate values (`str.to_unsafe + 3`); implied by `GCRY_SOUND` |
 | `GCRY_ALIGNED_CANDIDATES=1` | Force the cheap alignment filter back on (escape from `GCRY_SOUND`) |
-| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release, **opt-in on Linux and Darwin alike** (Darwin was default-on before 0.21.0). **Known unsound:** the post-STW walk madvises a free-page run computed from a live-mask taken in the pause, and a mutator can allocate into that run before the syscall — `MADV_DONTNEED` then zeroes a live object. `make page-release-corruption` faulted **4 of 28** attempts on this arm across six 0.21.x gate runs, against **0** throughout for `GCRY_MOSTLY_EMPTY=1` and `GCRY_DISABLE_MADVISE=1`. Re-measured after the 0.21.2 chunk-index fix: **1 of 40** in the gate plus **2 of 100** direct children — and every remaining failure is *checksum corruption* (`40 corrupt, 0 entirely zero`), no faults. The crash half of the old rate belonged to the hidden-index-entry defect; the zeroing half is this arm's own and remains. Warns at boot. On Darwin the walk visits **every** kept size-class chunk rather than only the HOLED ones, and `MADV_FREE_REUSABLE` zero-fills a reclaimed page, so the same window is reachable there — which is why the Darwin default was turned off rather than papered over. |
+| `GCRY_PAGE_DONTNEED=1` | Sparse free-page release, **opt-in on Linux and Darwin alike** (Darwin was default-on before 0.21.0). Sound since 2026-09-04: the unlink, the free-page mask, and the `madvise` run inside `with_small_allocation_excluded` (every TLAB and batch slot lock, then the class freelist lock), so no block in the run can be handed out until the syscall returns. Before that a TLAB-held block written in between was zeroed (`make page-release-corruption` faulted 4 of 28); after, 0 of 12 there and 0 of 30 on `make live-graph-audit`. Off by default for throughput and RSS, not soundness. |
 | `GCRY_DISABLE_PAGE_RELEASE=1` | Disable free-page reclaim. Now only meaningful alongside `GCRY_PAGE_DONTNEED=1`, since the release is off by default everywhere. |
 | `GCRY_LARGE_CACHE` | Large freelist retain (Linux process **0**; Darwin **1 MiB**; adaptive from non-zero) |
 | `GCRY_CHUNK_BYTES` | Chunk mmap size (library/Linux default **128 KiB**; Darwin process **256 KiB**) |
@@ -89,7 +98,6 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_RELEASE_QUARANTINE=N` | Hold a released range `PROT_NONE` for N collections before returning the address to the kernel. Pages are dropped as `munmap` would drop them, so the cost is address space, not RSS. `GCRY_UNMAP_GUARD=1` (never return it at all) removes the acikturkiye crash; this bounds how long the danger lasts. |
 | `GCRY_ALWAYS_CLEAR=1` | Research arm: zero every allocation, including the ones whose bytes are already believed zero (fresh `MAP_ANONYMOUS`, clean freelist). Crystal's `Reference.allocate` zeroes nothing itself, so an unassigned ivar reads whatever the previous occupant left. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying / address-space audit. That walk fires once per collection and left to itself always picks a small block; this aims the single shot at a size. |
-| `GCRY_BITMAP_RETAIN_OLD=1` | Research arm: keep the old mark-bitmap mapping alive across a resize instead of unmapping it. `update_heap_bounds_after_unmap` resizes the bitmap from two paths that do not agree about locking, and a mutator suspended mid-resize still holds a pointer into the old mapping. Measured 4 of 60 against 5 of 60 — no effect; the arm stays because the next question about that resize will want it. |
 | `GCRY_DYING_AUDIT_MIN_BYTES=N` | Ignore dying blocks smaller than N in the dying/address-space audit. The address-space walk fires once per collection and otherwise always picks a small block; this aims that single shot at a size. |
 | `GCRY_LAYOUT_DUMP=1` | Print every layout registration at boot: type name, type_id, and the scan/noscan offsets the macro emitted. A *missing* offset is otherwise invisible — the mark audit can name the type_id that lost an edge but not the type. |
 | `GCRY_SCAN_CAPS=1` | Register `instance_sizeof` scan caps for all References (clips size-class padding; fat-app live set often unchanged) |
@@ -172,6 +180,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
+| `GCRY_COLLECT_SCRUB` | Dead-stack bytes zeroed at every collection entry and exit so last cycle's mark frames are not scanned as roots (default **16384**; 0 disables). On a fiber stack the wipe uses the fiber's bounds, so a fiber that triggers a collection may fault in up to this many bytes below its SP once |
 | `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |

@@ -270,7 +270,7 @@ closed as accepted. **Unsupported** (stderr warn; not product):
 | `/` | 81846 | 66841 | **81.7%** | **0.79×** |
 | `/json` | 35780 | 31067 | **86.8%** | **0.80×** |
 
-`GCRY_KEEP_CHUNKS=1` re-measured in the 0.18 campaign (**95%** `/json` @ **3.07×** RSS) — see notes below; not a release headline. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: `-Dgcry_side_bitmap` (see escape table).
+`GCRY_KEEP_CHUNKS=1` re-measured in the 0.18 campaign (**95%** `/json` @ **3.07×** RSS) — see notes below; not a release headline. Soft-dirty nursery stays opt-in (HTTP too dirty for a win). Side bitmap: the `-Dgcry_side_bitmap` build flag of this era is **gone** — mark bitmaps are now per-chunk and runtime-selected (`GCRY_BITMAP=1`); the numbers in the escape table below stand as the record of the side-mmap arm.
 
 ### v0.18.0 campaign / confirm notes *(not the Kemal headline)*
 
@@ -344,7 +344,7 @@ Kemal `% of Boehm` on `/` and `/json`. Prefer `/json` when reading the arc. RSS 
 | 0.7-dev Phase 12 (pre-tag) | — | ~93% | ~0.93× | release default-on landed |
 | `GCRY_KEEP_CHUNKS=1` (0.18 campaign re-cut) | **~89%** | **~95%** | **~3.07×** | thr escape only — `2026-08-02-121411/` |
 | `GCRY_TIGHT_GROW=1` (0.18) | **~95%** | **~78%** | **~0.78×** | fat-app RSS win; Kemal thr soft — `2026-08-04-085740/` |
-| `-Dgcry_side_bitmap` (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt` |
+| side bitmap build flag (pre-0.12 A/B) | **~78%** | **~82%** | **~9.2×** | side mmap marks; see `bench/log/bitmap-ab/FINDINGS.txt`. The flag is removed — marks are header-generation by default, per-chunk bitmap under `GCRY_BITMAP=1` |
 
 Detail tables for 0.7–0.9 cuts lived in git history / CHANGELOG; headline numbers above are the ones to cite. Fat-app (Linux): [ACIKTURKIYE.md](ACIKTURKIYE.md).
 

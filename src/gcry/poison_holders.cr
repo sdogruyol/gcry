@@ -190,10 +190,10 @@ module Gcry
         next if ChunkHeader.dormant?(chunk)
 
         if ChunkHeader.large?(chunk)
-          header = ChunkHeader.data_start(chunk).as(BlockHeader*)
+          header = ChunkHeader.large_header(chunk)
           scanned &+= 1
-          next if BlockHeader.free?(header)
-          h = scan_block(header, user, finish, tag, reported) { |r| reported = r }
+          next if !heap.diag_allocated?(header)
+          h = scan_block(heap, header, user, finish, tag, reported) { |r| reported = r }
           if h > 0
             hits &+= h
             blocks_with_hits &+= 1
@@ -218,8 +218,8 @@ module Gcry
           end
           scanned &+= 1
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
-            h = scan_block(header, user, finish, tag, reported) { |r| reported = r }
+          unless !heap.diag_allocated?(header)
+            h = scan_block(heap, header, user, finish, tag, reported) { |r| reported = r }
             if h > 0
               hits &+= h
               blocks_with_hits &+= 1
@@ -260,11 +260,11 @@ module Gcry
 
     # Scan one live block's payload. Yields the updated report count so the
     # caller's cap survives across blocks without a class variable.
-    private def self.scan_block(header : BlockHeader*, user : UInt64, finish : UInt64, tag : String,
+    private def self.scan_block(heap : Heap, header : BlockHeader*, user : UInt64, finish : UInt64, tag : String,
                                 reported : Int32, &) : UInt64
-      size = header.value.size.to_u64
+      size = heap.diag_payload(header)
       return 0_u64 if size < sizeof(UInt64)
-      base = BlockHeader.user_from(header).address
+      base = heap.diag_user(header).address
       # Never report the block on itself: after the free its payload is poison,
       # not pointers, but a reissued block could legitimately contain its own
       # address and that is not a holder of the *old* object.
@@ -310,9 +310,9 @@ module Gcry
             # decode rather than asserting a liveness the header cannot carry
             # outside a collection.
             len = RawOut.append(buf.to_unsafe, len, " flags 0x")
-            len = RawOut.append_hex(buf.to_unsafe, len, header.value.flags.to_u64)
+            len = RawOut.append_hex(buf.to_unsafe, len, heap.diag_flags(header))
             len = RawOut.append(buf.to_unsafe, len,
-              (header.value.flags & BlockHeader::Flags::ATOMIC) != 0 ? " ATOMIC(unscanned)" : "")
+              heap.diag_atomic?(header) ? " ATOMIC(unscanned)" : "")
             len = RawOut.append(buf.to_unsafe, len, " holds it at +")
             len = RawOut.append_u64(buf.to_unsafe, len, i &* sizeof(UInt64))
             len = RawOut.append(buf.to_unsafe, len, " (block+")

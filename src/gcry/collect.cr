@@ -103,6 +103,9 @@ module Gcry
     # Fully-dormant size-class chunks skipped in sweep (no block walk).
     getter sweep_dormant_skips : UInt64 = 0_u64
     getter dontneed_bytes : UInt64 = 0_u64
+    # Bytes the HOLED free-page walk alone released (`GCRY_PAGE_DONTNEED=1`);
+    # `dontneed_bytes` also counts the dormant flush every configuration runs.
+    getter page_release_bytes : UInt64 = 0_u64
     # Page-release ranges that did not lie inside the chunk they were computed
     # from. `release_free_pages_in_chunk` only ever checked the range against
     # the chunk's own `data_start`/`data_end`, which is a self-consistency check
@@ -142,6 +145,12 @@ module Gcry
     # Research only: skip the check and issue the syscall anyway, which is what
     # it did before 2026-08-23.
     property madvise_unchecked : Bool = false
+    # Research only (`GCRY_LARGE_RELEASE_FROM_BASE=1`): restore the pre-2026-09-03
+    # lower bound in the large-freelist page release, which started the range at
+    # the chunk base and so covered the chunk's own header page. It exists so
+    # `make large-freelist-madvise` has a positive control — a guard that can
+    # only ever report zero proves nothing.
+    property large_release_from_base : Bool = false
     # When false (default for library heaps), only object-base pointers are marked.
     # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
     property allow_interior_pointers : Bool = false
@@ -182,6 +191,11 @@ module Gcry
     # size-class chunk is a mutator frozen mid-`refill_size_class`. The sweep
     # treats the chunk as live instead of reclaiming blocks that never lived.
     getter sweep_small_uninitialised : UInt64 = 0_u64
+    # Chunks the bitmap sweep left untouched because an allocation cursor was
+    # on them — the cursor analogue of `sweep_small_uninitialised`. Nonzero is
+    # normal (one per class per cycle at most); it is here so a silence is
+    # readable rather than assumed.
+    getter sweep_cursor_pinned : UInt64 = 0_u64
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.
@@ -253,18 +267,27 @@ module Gcry
     getter layout_conservative_scans : UInt64 = 0_u64
     # When true, scan writable process mappings as roots (needed as process GC).
     property scan_static_roots : Bool = false
-    # Ring buffer for heap range observations (raw bytes, not headroom-inflated).
-    # On each major we record the heap range in bitmap-bytes; the average × 25 %
-    # becomes the adaptive headroom for the next interval.
-    BITMAP_GROWTH_HISTORY_CAPACITY = 16
-    @bitmap_growth_history = StaticArray(UInt64, BITMAP_GROWTH_HISTORY_CAPACITY).new(0_u64)
-    @bitmap_growth_count : Int32 = 0
-    @bitmap_growth_pos : Int32 = 0
-    # Cached adaptive headroom (in bitmap-bytes), recomputed after each major.
-    # Read by `ensure_bitmap_covers` on the allocation hot path — must be O(1).
-    @bitmap_headroom_bytes : UInt64 = 0
+    # Default `true`, except under headerless, where the setter below explains
+    # why a nursery cannot exist and the initial value must agree with it.
+    {% if flag?(:gcry_headerless) %}
+      getter nursery_enabled : Bool = false
+    {% else %}
+      getter nursery_enabled : Bool = true
+    {% end %}
 
-    property nursery_enabled : Bool = true
+    def nursery_enabled=(value : Bool) : Bool
+      {% if flag?(:gcry_headerless) %}
+        # Phase 7.3: nursery chunks are header-based and excluded from bitmap
+        # chunks, so a headerless heap cannot run one. Enabling it put a
+        # freelist-era allocator under objects with no header — the
+        # thread_block_audit `lives-minor` arm hung inside its address-space
+        # audit for exactly this reason. Silently off, never on.
+        @nursery_enabled = false
+      {% else %}
+        @nursery_enabled = value
+      {% end %}
+    end
+
     # Adaptive nursery threshold: adjusted after each minor based on the
     # survival rate of the last N minors. When survival is below the target
     # (50%), the threshold shrinks to collect earlier; above, it grows to
@@ -1013,7 +1036,7 @@ module Gcry
       user = chain
       steps = 0
       while user && steps < 1_000_000
-        header = BlockHeader.from_user(user)
+        header = BlockHeader.large_header_from_user(user)
         chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
         base = chunk.as(Void*).address
         return base if addr >= base && addr < base &+ chunk.value.mapped_bytes
@@ -1171,8 +1194,11 @@ module Gcry
       end
       return if referent.null?
 
-      if header = find_object(referent)
-        referent = BlockHeader.user_from(header)
+      if (found = find_object_with_chunk(referent))
+        header, chunk = found
+        # The chunk-aware user pointer: `user_from` is identity under headerless
+        # and would hand back a large object's header slot as its referent.
+        referent = user_of(chunk, header)
         BlockHeader.set_disappearing(header)
       end
       @finalizers.register_disappearing_link(link, referent)
@@ -1180,9 +1206,13 @@ module Gcry
 
     def live?(pointer : Void*) : Bool
       return false if pointer.null?
-      header = find_object(pointer)
-      return false unless header
-      !BlockHeader.free?(header)
+      found = find_object_with_chunk(pointer)
+      return false unless found
+      header, chunk = found
+      # `find_object` already required occupancy; this re-asks the same
+      # authority rather than the header flag, which is stale on a bitmap chunk
+      # and absent under headerless.
+      block_allocated?(chunk, header)
     end
 
     # ExecutionContext Monitor must not run process STW — it would signal-suspend
@@ -1383,19 +1413,25 @@ module Gcry
         return {found: false, free: false, size: 0_u32, flags: 0_u32,
                 first_word: 0_u64, offset: 0_u64}
       end
-      user = BlockHeader.user_from(header)
+      user = diag_user(header)
       addr = pointer.address
       offset = addr >= user.address ? addr - user.address : 0_u64
-      first = header.value.size >= 8 ? user.as(UInt64*).value : 0_u64
+      first = diag_payload(header) >= 8 ? user.as(UInt64*).value : 0_u64
       {found:      true,
-       free:       BlockHeader.free?(header),
-       size:       header.value.size,
-       flags:      header.value.flags,
+       free:       !diag_allocated?(header),
+       size:       diag_payload(header),
+       flags:      diag_flags(header),
        first_word: first,
        offset:     offset}
     end
 
-    def find_block(pointer : Void*) : BlockHeader*?
+    # `find_block` plus the chunk it resolved through.
+    #
+    # The mark path needs both: the chunk is what indexes the mark bitmap, and
+    # re-deriving it with a second `chunk_containing` per candidate is the cost
+    # that took a 2026-08-01 experiment to 56.3% of Boehm. `find_block` is a
+    # thin wrapper so every existing caller is unaffected.
+    def find_block_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
       return nil if pointer.null?
       addr = pointer.address
       return nil if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
@@ -1404,9 +1440,12 @@ module Gcry
       return nil unless chunk
 
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        finish = BlockHeader.user_from(header).address + header.value.size
-        return header if addr >= header.address && addr < finish
+        header = ChunkHeader.large_header(chunk)
+        user = ChunkHeader.large_user(chunk).address
+        finish = user + header.value.size
+        # Accept the header slot too: interior scans and `find_object` hand back
+        # the header, and under headerless it sits outside [user, finish).
+        return {header, chunk} if addr >= header.address && addr < finish
         return nil
       end
 
@@ -1414,21 +1453,49 @@ module Gcry
       return nil if class_index < 0 || class_index >= SIZE_CLASS_COUNT
 
       block_bytes = @block_bytes[class_index]
-      data_start = chunk.address + ChunkHeader::SIZE
+      # Not `chunk.address + ChunkHeader::SIZE`: a size-class chunk's blocks
+      # start after its bitmaps, and `owns_user_pointer?` (heap.cr) derives the
+      # same address the same way. If these two ever disagree, a valid pointer
+      # starts reporting "not a gcry allocation" through GC.free/realloc — see
+      # the spec that pins them together.
+      data_start = ChunkHeader.data_start(chunk).address
       return nil if addr < data_start
 
       offset = addr - data_start
-      header_addr = data_start + (offset // block_bytes) * block_bytes
+      header_addr = data_start + Heap.block_ordinal(offset, @block_magic[class_index]) * block_bytes
       return nil if header_addr + block_bytes > chunk.address + chunk.value.mapped_bytes
 
-      Pointer(BlockHeader).new(header_addr)
+      {Pointer(BlockHeader).new(header_addr), chunk}
+    end
+
+    # Kept as the shape every existing caller expects. The division it used to
+    # carry — `offset // block_bytes`, once per accepted candidate word, the
+    # single most expensive arithmetic op on the mark hot path — is now a magic
+    # reciprocal inside `find_block_with_chunk`.
+    def find_block(pointer : Void*) : BlockHeader*?
+      found = find_block_with_chunk(pointer)
+      return nil unless found
+      found[0]
     end
 
     def find_object(pointer : Void*) : BlockHeader*?
-      header = find_block(pointer)
-      return nil unless header
-      return nil if BlockHeader.free?(header)
-      header
+      found = find_object_with_chunk(pointer)
+      return nil unless found
+      found[0]
+    end
+
+    # Same, keeping the chunk `find_block_with_chunk` already resolved. Callers
+    # that go on to push onto the mark stack need it (Phase 7.6) and would
+    # otherwise re-resolve it.
+    def find_object_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
+      found = find_block_with_chunk(pointer)
+      return nil unless found
+      header, chunk = found
+      # `block_allocated?`, not `BlockHeader.free?`: on a bitmap chunk the
+      # header's FREE flag is stale for every block the streaming sweep
+      # reclaimed, and trusting it here resurrects reclaimed blocks into `occ`.
+      return nil unless block_allocated?(chunk, header)
+      {header, chunk}
     end
 
     protected def maybe_collect : Nil
@@ -1542,53 +1609,13 @@ module Gcry
       # Under `@index_lock`, because `update_heap_bounds_after_unmap` reads the
       # index and assigns these under it: without the lock this widen can land
       # between that read and its store and be lost, which shuts a live chunk
-      # out of the heap bounds. `ensure_bitmap_covers` stays outside — it can
-      # mmap, and a spinlock is the wrong place for that.
+      # out of the heap bounds.
       @index_lock.sync do
         @heap_min = base if base < @heap_min
         @heap_max = finish if finish > @heap_max
         @heap_span_lo = base if base < @heap_span_lo
         @heap_span_hi = finish if finish > @heap_span_hi
       end
-      ensure_bitmap_covers(@heap_min, @heap_max)
-    end
-
-    protected def ensure_bitmap_covers(lo : UInt64, hi : UInt64) : Nil
-      return if lo >= hi || lo == UInt64::MAX
-      bm = @mark_bitmap
-      return unless bm
-      # 1 bit per word-aligned address → bytes_needed = (range / 8).
-      range_bytes = (hi - lo) >> 3
-      # Adaptive headroom: cached from last major (recomputed outside hot path).
-      headroom = @bitmap_headroom_bytes
-      headroom = @small_chunk_bytes >> 3 if headroom < (@small_chunk_bytes >> 3)
-      needed = range_bytes + headroom
-      if bm.base_addr != lo || !bm.covers?(lo, hi)
-        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
-          @mark_bitmap_base = base.address
-          @mark_bitmap_base_addr = base_addr
-          @mark_bitmap_cap_bits = cap_bits
-        end
-      elsif bm.capacity_bytes < needed
-        bm.relocate(lo, needed) do |base, base_addr, cap_bits|
-          @mark_bitmap_base = base.address
-          @mark_bitmap_base_addr = base_addr
-          @mark_bitmap_cap_bits = cap_bits
-        end
-      end
-    end
-
-    # Record a heap range observation (bytes, not headroom-inflated).
-    # Called after each major collect with the current `range_bytes`.
-    # Also recomputes the cached `@bitmap_headroom_bytes`.
-    private def note_bitmap_growth(actual_range_bytes : UInt64) : Nil
-      @bitmap_growth_history[@bitmap_growth_pos] = actual_range_bytes
-      @bitmap_growth_pos = (@bitmap_growth_pos + 1) % BITMAP_GROWTH_HISTORY_CAPACITY
-      @bitmap_growth_count += 1 if @bitmap_growth_count < BITMAP_GROWTH_HISTORY_CAPACITY
-      # Recompute cached headroom: 25 % of the running average of raw heap
-      # range observations. Done once per major — never on the allocation path.
-      avg_range = compute_bitmap_growth_avg
-      @bitmap_headroom_bytes = avg_range > 0 ? (avg_range >> 3) : (@small_chunk_bytes >> 3)
     end
 
     # Record nursery survival from the just-completed minor collection. Updates
@@ -1650,17 +1677,6 @@ module Gcry
       @nursery_threshold = thr
     end
 
-    # Average of recorded growth history entries (0 if none).
-    private def compute_bitmap_growth_avg : UInt64
-      return 0_u64 if @bitmap_growth_count == 0
-      sum = 0_u64
-      count = @bitmap_growth_count
-      BITMAP_GROWTH_HISTORY_CAPACITY.times do |i|
-        sum += @bitmap_growth_history[i] if i < count
-      end
-      sum // count.to_u64
-    end
-
     protected def update_heap_bounds_after_unmap : Nil
       @last_chunk_idx = -1
       @last_chunk_lo = 0_u64
@@ -1713,26 +1729,6 @@ module Gcry
         end
         @heap_min = lo
         @heap_max = hi
-      end
-      ensure_bitmap_covers(lo, hi)
-      # After bounds are tightened, check whether the bitmap has grown
-      # well beyond the current need and shrink it if so.  Threshold:
-      # capacity > 1.2 × needed  OR  capacity > needed + 1 MiB (absolute waste).
-      # This runs outside STW (called from flush_pending_empty_chunks,
-      # flush_pending_large_release and trim_large_cache) so the syscall cost
-      # is tolerable.
-      if hi > lo && lo != UInt64::MAX
-        bm = @mark_bitmap
-        if bm
-          needed = ((hi - lo) >> 3) + @bitmap_headroom_bytes
-          waste = bm.capacity_bytes > needed ? bm.capacity_bytes - needed : 0_u64
-          if waste > needed / 5 || waste > 1048576_u64 # 1.2× OR >1 MiB waste
-            bm.shrink_to_fit!(needed)
-            @mark_bitmap_base = bm.base.as(UInt64*).address
-            @mark_bitmap_base_addr = bm.base_addr
-            @mark_bitmap_cap_bits = bm.capacity_bytes * 8_u64
-          end
-        end
       end
     end
 
@@ -1794,11 +1790,39 @@ module Gcry
     # instrument that scans the stack has to be able to exclude itself.
     getter collect_entry_sp : UInt64 = 0_u64
 
+    # See `Heap#alloc_large`: the block a stopped mutator is mid-way through
+    # allocating. Marked like any explicit root; `mark_impl` ignores it while
+    # the header is still FREE (the cache path before `set_used_large`).
+    private def mark_large_alloc_in_flight : Nil
+      user = @large_alloc_in_flight
+      return if user.null?
+      mark_explicit_root(user)
+    end
+
     # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
     property post_mark_spin : UInt64 = 0_u64
 
+    # Thin on purpose, and the body is never inlined into it: every frame a
+    # collection pushes — the body's own large, heavily inlined frame included
+    # — then lies *below* the SP captured here, where the scrubs can reach it.
+    # With the body inlined, its frame sat above the captured SP, so the
+    # previous cycle's mark batches survived there, were re-established at the
+    # same address next cycle, and were scanned as mutator stack before this
+    # cycle overwrote them. Measured: 40 stale stack seeds retaining a 44k
+    # object web on gc_phases under `-Dgcry_headerless`.
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
+      # Everything below the SP is dead here, and it is last cycle's collector
+      # residue. Zero it before this cycle's scan chain overlays and scans it.
+      collect_scrub
+      run_collection_body(major, scan_stack, roots, coalesce)
+      # The frames this cycle just used are dead below the SP again. Zero them
+      # so nothing between now and the next entry scans them as live.
+      collect_scrub
+    end
+
+    @[NoInline]
+    private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool) : Nil
       cols_before = @collections
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
@@ -1865,6 +1889,7 @@ module Gcry
           # realloc pin / add_root); still respect allow_interior_pointers.
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
+          mark_large_alloc_in_flight
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
@@ -2087,14 +2112,7 @@ module Gcry
             end
           end
 
-          # After a major collect, record the heap range observation so the
-          # adaptive headroom in `ensure_bitmap_covers` stays tight.
-          # We record the raw range_bytes (not headroom-inflated) to avoid a
-          # positive-feedback loop where headroom drives up the running average.
           if major
-            range_bytes = @heap_max > @heap_min ? ((@heap_max - @heap_min) >> 3) : 0_u64
-            note_bitmap_growth(range_bytes)
-
             # Adaptive large-cache retain: grow when hit rate is high, shrink when low.
             # Resets counters each major so the policy tracks the current working set.
             total_large = @large_cache_hits + @large_cache_misses
@@ -2290,6 +2308,7 @@ module Gcry
         clear_all_marks
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
+        mark_large_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots
         scrub_parked_fiber_stacks if scan_stack

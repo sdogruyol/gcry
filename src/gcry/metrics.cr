@@ -48,6 +48,8 @@ module Gcry
     getter released_chunk_bytes : UInt64
     getter clear_stack_calls : UInt64
     getter clear_stack_bytes_total : UInt64
+    getter collect_scrub_runs : UInt64
+    getter collect_scrub_bytes_total : UInt64
     getter fiber_scrub_runs : UInt64
     getter fiber_scrub_bytes_total : UInt64
     getter nursery_survival_bytes : UInt64
@@ -74,6 +76,7 @@ module Gcry
       @barrier_backend : String, @barrier_dirty_rescans : UInt64,
       @size_class_live_bytes : UInt64, @small_mapped_bytes : UInt64, @released_chunk_bytes : UInt64,
       @clear_stack_calls : UInt64, @clear_stack_bytes_total : UInt64,
+      @collect_scrub_runs : UInt64, @collect_scrub_bytes_total : UInt64,
       @fiber_scrub_runs : UInt64, @fiber_scrub_bytes_total : UInt64,
       @nursery_survival_bytes : UInt64, @nursery_alloc_before_minor : UInt64,
       @nursery_survival_rate_pct : UInt64,
@@ -135,6 +138,8 @@ module Gcry
       heap.released_chunk_bytes,
       heap.clear_stack_calls,
       heap.clear_stack_bytes_total,
+      heap.collect_scrub_runs,
+      heap.collect_scrub_bytes_total,
       heap.fiber_scrub_runs,
       heap.fiber_scrub_bytes_total,
       heap.nursery_survival_bytes,
@@ -260,6 +265,12 @@ module Gcry
       io << "# HELP #{prefix}_clear_stack_bytes_total Bytes zeroed by clear_stack\n"
       io << "# TYPE #{prefix}_clear_stack_bytes_total counter\n"
       io << "#{prefix}_clear_stack_bytes_total #{m.clear_stack_bytes_total}\n"
+      io << "# HELP #{prefix}_collect_scrub_runs_total Dead-stack scrubs at collection entry and exit\n"
+      io << "# TYPE #{prefix}_collect_scrub_runs_total counter\n"
+      io << "#{prefix}_collect_scrub_runs_total #{m.collect_scrub_runs}\n"
+      io << "# HELP #{prefix}_collect_scrub_bytes_total Bytes zeroed by the collection scrub\n"
+      io << "# TYPE #{prefix}_collect_scrub_bytes_total counter\n"
+      io << "#{prefix}_collect_scrub_bytes_total #{m.collect_scrub_bytes_total}\n"
       io << "# HELP #{prefix}_fiber_scrub_runs_total Collections that scrubbed parked fibers\n"
       io << "# TYPE #{prefix}_fiber_scrub_runs_total counter\n"
       io << "#{prefix}_fiber_scrub_runs_total #{m.fiber_scrub_runs}\n"

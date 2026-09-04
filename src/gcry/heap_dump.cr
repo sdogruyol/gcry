@@ -23,9 +23,9 @@ module Gcry
     count = 0_u64
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        next if BlockHeader.free?(header)
-        write_dump_line(io, header)
+        header = ChunkHeader.large_header(chunk)
+        next if !heap.diag_allocated?(header)
+        write_dump_line(io, header, heap)
         count += 1
       else
         class_index = chunk.value.size_class.to_i32
@@ -36,8 +36,8 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
-            write_dump_line(io, header)
+          unless !heap.diag_allocated?(header)
+            write_dump_line(io, header, heap)
             count += 1
           end
           cursor += block_bytes
@@ -52,9 +52,9 @@ module Gcry
     addrs = Set(UInt64).new
     heap.each_chunk do |chunk|
       if ChunkHeader.large?(chunk)
-        header = ChunkHeader.data_start(chunk).as(BlockHeader*)
-        next if BlockHeader.free?(header)
-        addrs << BlockHeader.user_from(header).address
+        header = ChunkHeader.large_header(chunk)
+        next if !heap.diag_allocated?(header)
+        addrs << heap.diag_user(header).address
       else
         class_index = chunk.value.size_class.to_i32
         next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
@@ -64,8 +64,8 @@ module Gcry
         limit = ChunkHeader.data_end(chunk).as(UInt8*)
         while (cursor + block_bytes) <= limit
           header = cursor.as(BlockHeader*)
-          unless BlockHeader.free?(header)
-            addrs << BlockHeader.user_from(header).address
+          unless !heap.diag_allocated?(header)
+            addrs << heap.diag_user(header).address
           end
           cursor += block_bytes
         end
@@ -84,17 +84,20 @@ module Gcry
     before - after
   end
 
-  private def self.write_dump_line(io : IO, header : BlockHeader*) : Nil
-    user = BlockHeader.user_from(header)
-    size = header.value.size.to_u64
+  private def self.write_dump_line(io : IO, header : BlockHeader*, heap : Heap) : Nil
+    user = heap.diag_user(header)
+    size = heap.diag_payload(header)
     type_id = 0_i32
     # Crystal objects store type_id as Int32 at the start of the payload when
     # the block is large enough; raw buffers may contain garbage — still report.
     if size >= 4
       type_id = user.as(Int32*).value
     end
-    marked = BlockHeader.marked?(header)
-    atomic = BlockHeader.atomic?(header)
+    # Through the heap: under GCRY_BITMAP=1 the header generation is not
+    # what the sweep reads, and a dump that says "marked" about an object
+    # the collector considers garbage is a wrong answer, not a missing one.
+    marked = heap.marked_for_report?(header)
+    atomic = heap.diag_atomic?(header)
     nursery = BlockHeader.nursery?(header)
     io << "{\"addr\":\"0x" << user.address.to_s(16)
     io << "\",\"size\":" << size

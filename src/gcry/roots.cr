@@ -200,6 +200,11 @@ module Gcry
     class_getter last_mutator_low : UInt64 = 0_u64
     class_getter last_mutator_high : UInt64 = 0_u64
 
+    {% if flag?(:gcry_hl_assert) %}
+      # Address of the word most recently yielded by a scan loop (diagnostics).
+      class_property hl_slot : UInt64 = 0_u64
+    {% end %}
+
     def self.scan_range(low : Void*, high : Void*, safe : Bool = false, & : Void* ->) : Nil
       return if low.null? || high.null?
       lo = low.address
@@ -224,6 +229,7 @@ module Gcry
         cursor = Pointer(UInt64).new(lo)
         end_ptr = Pointer(UInt64).new(hi)
         while cursor < end_ptr
+          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
           yield Pointer(Void).new(cursor.value)
           cursor += 1
         end
@@ -278,6 +284,7 @@ module Gcry
         cursor = Pointer(UInt64).new(start)
         end_ptr = Pointer(UInt64).new(finish)
         while cursor < end_ptr
+          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
           yield Pointer(Void).new(cursor.value)
           cursor += 1
         end
@@ -306,6 +313,7 @@ module Gcry
         cursor = Pointer(UInt64).new(start)
         end_ptr = Pointer(UInt64).new(finish)
         while cursor < end_ptr
+          {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
           yield Pointer(Void).new(cursor.value)
           cursor += 1
         end

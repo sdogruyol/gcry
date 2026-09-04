@@ -357,7 +357,8 @@ module GC
     if env_flag_one?("GCRY_DISABLE_NURSERY")
       heap.nursery_enabled = false
       heap.nursery_threshold = UInt64::MAX
-    elsif nursery = env_u64("GCRY_NURSERY")
+    elsif (nursery = env_u64("GCRY_NURSERY")) && {% if flag?(:gcry_headerless) %} false {% else %} true {% end %}
+      # (headerless: GCRY_NURSERY is ignored — see Heap#nursery_enabled=)
       # Opt-in: nursery without barriers is expensive (old→young full scan).
       heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0
@@ -443,17 +444,14 @@ module GC
     elsif env_flag_one?("GCRY_PAGE_DONTNEED")
       # Sparse-chunk free-page release (HOLED + post-STW madvise).
       heap.madvise_free_pages = true
-      # Known unsound, and the docs used to price it as a throughput choice.
-      # The post-STW walk computes a run of free pages from a live mask and
-      # then syscalls with the world running, so a mutator can allocate into a
-      # page the mask called free before the call lands; `MADV_DONTNEED` then
-      # zeroes a live object. `make page-release-corruption` faults **4 of 28**
-      # attempts on this arm across six gate runs, while `GCRY_MOSTLY_EMPTY=1`
-      # and `GCRY_DISABLE_MADVISE=1` are 0 throughout.
-      warn_unsupported_env(
-        "gcry: GCRY_PAGE_DONTNEED=1 is known to zero live objects — the post-STW " \
-        "free-page walk madvises a run a mutator may have allocated into " \
-        "(`make page-release-corruption`: 4 of 28). Research only.\n")
+      # Opt-in for throughput and RSS reasons, not soundness. It used to be
+      # unsound: the post-STW walk computed a run of free pages from block
+      # headers and then syscalled with the world running, so a block handed
+      # out from a TLAB in between was zeroed after the mutator wrote it
+      # (`make page-release-corruption` faulted 4 of 28). The walk now runs
+      # under every lock a small allocation of the class can take
+      # (`with_small_allocation_excluded`); the same gate and
+      # `make live-graph-audit` are clean since (2026-09-04).
     end
 
     {% if flag?(:darwin) %}
@@ -462,19 +460,14 @@ module GC
       # enabled, and where it visits every kept size-class chunk rather than
       # only the HOLED ones.
       #
-      # It is opt-in now, matching Linux, because the walk is unsound and the
-      # defect is still open: it computes a free-page run from a live mask and
-      # then syscalls with the world running, so a mutator can allocate into a
-      # page the mask called free before the call lands. `make
-      # page-release-corruption` faults 4 of 28 attempts on that arm across six
-      # gate runs, against 0 throughout for the other two. `MADV_FREE_REUSABLE`
-      # zero-fills a reclaimed page, so the same window is reachable here under
-      # memory pressure — read from the code rather than measured, since the
-      # gate has no Darwin runner.
-      #
-      # The cost is macOS RSS, which is a smaller thing to be wrong about than
-      # zeroing a live object. `GCRY_PAGE_DONTNEED=1` turns it back on and
-      # warns, and the escape hatches keep working for anyone who does.
+      # It is opt-in now, matching Linux. The walk was unsound until
+      # 2026-09-04 (a free-page run computed from headers, then a syscall with
+      # the world running, so a TLAB could hand a block out in between); it now
+      # runs under every lock a small allocation of the class can take, on
+      # both platforms. It stays off here because the gate has no Darwin
+      # runner: the Linux fix is measured, the Darwin one is read from the
+      # code. `GCRY_PAGE_DONTNEED=1` turns it on; the escape hatches keep
+      # working for anyone who does.
       if env_flag_one?("GCRY_PAGE_DONTNEED") &&
          !(env_flag_one?("GCRY_DISABLE_MADVISE") || env_flag_one?("GCRY_DISABLE_PAGE_RELEASE"))
         heap.madvise_free_pages = true
@@ -590,9 +583,14 @@ module GC
     end
 
     # Size-class chunk mmap size (default 128 KiB; macOS process GC bumps to 256 KiB).
-    # Must be ≥64 KiB and page-aligned.
+    # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
+    # ordinal's magic reciprocal is exact to — past that a block address would
+    # resolve to the wrong ordinal, silently, on the collector's hottest path.
+    # The tightest size class first disagrees at 86.3 MiB; the bound is 64 MiB.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")
-      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES && (chunk_bytes % 4096_u64) == 0
+      if chunk_bytes >= Gcry::Heap::MIN_SMALL_CHUNK_BYTES &&
+         chunk_bytes <= Gcry::Heap::MAX_RECIPROCAL_CHUNK_BYTES &&
+         (chunk_bytes % 4096_u64) == 0
         heap.small_chunk_bytes = chunk_bytes
       end
     end
@@ -647,6 +645,9 @@ module GC
     end
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
+    end
+    if scrub = env_u64("GCRY_COLLECT_SCRUB")
+      heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
     end
     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
@@ -812,11 +813,16 @@ module GC
     heap.trim_unlocked = true if env_flag_one?("GCRY_TRIM_UNLOCKED")
     heap.trim_immediate = true if env_flag_one?("GCRY_TRIM_IMMEDIATE")
     heap.madvise_unchecked = true if env_flag_one?("GCRY_MADVISE_UNCHECKED")
+    heap.large_release_from_base = true if env_flag_one?("GCRY_LARGE_RELEASE_FROM_BASE")
+    heap.mark_prefetch = false if env_flag_zero?("GCRY_PREFETCH")
+    if pfw = env_u64("GCRY_ALLOC_PFW")
+      heap.alloc_pfw = pfw
+    end
+    heap.hugepages = true if env_flag_one?("GCRY_HUGEPAGES")
     heap.release_ledger = true if env_flag_one?("GCRY_RELEASE_LEDGER")
     heap.trace_large = true if env_flag_one?("GCRY_TRACE_LARGE")
     heap.monitor_gate_late_close = true if env_flag_one?("GCRY_MONITOR_GATE_LATE_CLOSE")
     heap.empty_flush_unlocked = true if env_flag_one?("GCRY_EMPTY_FLUSH_UNLOCKED")
-    Gcry::MarkBitmap.retain_old = true if env_flag_one?("GCRY_BITMAP_RETAIN_OLD")
     Gcry::MonitorGate.test_spawn = true if env_flag_one?("GCRY_MONITOR_GATE_TEST_SPAWN")
     heap.page_release_unchecked = true if env_flag_one?("GCRY_PAGE_RELEASE_UNCHECKED")
     # Research only: restore the last-chunk cache read that crashed
