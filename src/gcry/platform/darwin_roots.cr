@@ -1,7 +1,28 @@
 # Non-allocating static root discovery for Darwin (dyld image walk).
 #
-# Main executable `__DATA` / `__DATA_CONST` sections hold Crystal class/global
-# vars; system dylibs are skipped (same policy as Linux skipping `.so`).
+# The static roots are the executable's writable data: every section of a
+# `__DATA*` segment whose `initprot` carries `VM_PROT_WRITE`, minus the
+# segments dyld makes read-only once it has applied the fixups (`SG_READ_ONLY`),
+# minus thread-local storage. System dylibs are skipped, the same policy as
+# Linux skipping `.so`.
+#
+# That set is **derived**, not named, and the difference is the record of what
+# the previous version got wrong. It was a name allow-list — `__data`, `__bss`,
+# `__common`, with `__const` explicitly refused — so a linker that renamed a
+# section or added one dropped a root class silently, and a dropped root class
+# sweeps a live object. Linux has been derived-by-construction since v0.21.x
+# (`linux_roots.cr`: writable `PT_LOAD` minus `PT_GNU_RELRO`); this is the same
+# rule on Mach-O.
+#
+# `SG_READ_ONLY` is the term that had to be measured rather than assumed, and
+# `bench/darwin_static_root_sections.cr` is what measured it. `__DATA_CONST`
+# reports `initprot=0x3` (READ|WRITE) in the load command, so "writable
+# `initprot`" alone admits it — but its segment flags carry `SG_READ_ONLY` and
+# `mach_vm_region` reports the pages `r--` at runtime. Admitting it would
+# word-scan ~18 KiB of pointer-dense literal pool the mutator cannot write:
+# false retention, no roots. It is the Mach-O `PT_GNU_RELRO`, and subtracting
+# it is what makes the two platforms the same rule rather than two rules that
+# happen to agree.
 #
 # Ranges are cached in a fixed table. There is no `realloc` on this path on
 # purpose: `GC.init` resolves the cache eagerly, before `Crystal.main` reaches
@@ -66,8 +87,20 @@ module Gcry
       LC_SEGMENT_64 =       0x19_u32
       MH_MAGIC_64   = 0xfeedfacf_u32
 
+      # <mach/vm_prot.h>
+      VM_PROT_WRITE = 0x2
+
+      # <mach-o/loader.h>. dyld mprotects a segment carrying this read-only
+      # after applying fixups — the Mach-O `PT_GNU_RELRO`.
+      SG_READ_ONLY = 0x10_u32
+
       # SECTION_TYPE bits that mark thread-local storage — not process-global
-      # roots.
+      # roots. What these sections hold is the *initialisation template*: the
+      # per-thread blocks are allocated by `tlv_allocate_and_initialize` and
+      # live elsewhere, so scanning the template finds nothing a thread holds.
+      # Measured: `__thread_vars` 48 B, `__thread_data` 4 B, `__thread_bss` 8 B
+      # on a fat gcry binary, and no heap-owned word in any of them
+      # (`bench/darwin_static_root_sections.cr`).
       S_THREAD_LOCAL_REGULAR                = 0x11_u32
       S_THREAD_LOCAL_ZEROFILL               = 0x12_u32
       S_THREAD_LOCAL_VARIABLES              = 0x13_u32
@@ -75,8 +108,10 @@ module Gcry
       S_THREAD_LOCAL_INIT_FUNCTION_POINTERS = 0x15_u32
       SECTION_TYPE_MASK                     = 0xff_u32
 
-      # A Mach-O executable has a handful of `__DATA*` sections. 32 is well
-      # past any linker, and the same bound Linux uses.
+      # A Mach-O executable has a handful of writable `__DATA*` sections — two
+      # on a default link (`__data`, `__common`), four under `-no_data_const`
+      # (`__got` and `__const` join them). 32 is well past any linker, and the
+      # same bound Linux uses.
       MAX_RANGES = 32
 
       struct RootRange
@@ -135,6 +170,7 @@ module Gcry
       # than measuring it.
       @@overflow = 0_u64
       @@bss_lost = 0_u64
+      @@bss_size_cap = false
 
       def self.invalidate_static_root_cache : Nil
         @@maps_generation &+= 1
@@ -243,7 +279,7 @@ module Gcry
           lc = p.as(LibDyld::LoadCommand*)
           if lc.value.cmd == LC_SEGMENT_64
             seg = p.as(LibDyld::SegmentCommand64*)
-            if segment_is_data?(seg.value.segname)
+            if segment_holds_roots?(seg)
               sect = Pointer(LibDyld::Section64).new(p.address + sizeof(LibDyld::SegmentCommand64))
               j = 0_u32
               while j < seg.value.nsects
@@ -255,6 +291,14 @@ module Gcry
           p += lc.value.cmdsize
           cmd_i += 1
         end
+      end
+
+      # Writable, and not made read-only after the fixups. Linux's exact rule,
+      # spelled in Mach-O.
+      private def self.segment_holds_roots?(seg : LibDyld::SegmentCommand64*) : Bool
+        return false unless segment_is_data?(seg.value.segname)
+        return false if (seg.value.initprot & VM_PROT_WRITE) == 0
+        (seg.value.flags & SG_READ_ONLY) == 0
       end
 
       private def self.segment_is_data?(segname : StaticArray(UInt8, 16)) : Bool
@@ -279,42 +323,25 @@ module Gcry
           return
         end
 
-        return unless section_is_root_candidate?(sect.value.sectname)
-
-        # Never scan __DATA_CONST.__const — pointer-dense literal pools with
-        # almost no true GC roots; word-scanning it inflates false retention.
-        # Writable / zerofill (__data, __bss, __common) are the real class vars.
-        if section_name_eq?(sect.value.sectname, "__const")
-          return
-        end
+        # `GCRY_STATIC_BSS_CAP=1`: refuse a section of 1 MiB or more, which is
+        # what the Linux maps parser did to the whole BSS before 2026-08-22.
+        # Research only, and the point of it is to be able to *lose* a root
+        # class on purpose: `bench/darwin_static_root_sections.cr --control`
+        # uses it to show that its lost-root detector fires at all, which is
+        # what stops a green run from being vacuous. It was a no-op stub on
+        # this platform until 2026-09-04, so the Darwin arm of that argument
+        # did not exist.
+        return if @@bss_size_cap && size >= 1_u64 * 1024 * 1024
 
         lo = sect.value.addr &+ slide
         hi = lo &+ size
         yield Pointer(Void).new(lo), Pointer(Void).new(hi)
       end
 
-      private def self.section_is_root_candidate?(sectname : StaticArray(UInt8, 16)) : Bool
-        section_name_eq?(sectname, "__data") ||
-          section_name_eq?(sectname, "__bss") ||
-          section_name_eq?(sectname, "__common")
-      end
-
-      private def self.section_name_eq?(sectname : StaticArray(UInt8, 16), want : String) : Bool
-        i = 0
-        while i < want.bytesize
-          return false if sectname[i] != want.to_unsafe[i]
-          i += 1
-        end
-        # Section names are fixed 16-byte fields; accept exact or NUL-padded.
-        i == want.bytesize && (i == 16 || sectname[i] == 0)
-      end
-
-      # Linux reads the executable's writable `PT_LOAD`s and used to refuse a
-      # BSS above 1 MiB (`linux_roots.cr`). Darwin reads the Mach-O `__DATA`
-      # sections directly, so there is no adjacency guess and nothing to cap —
-      # but the knob is wired unconditionally in `GC.init`, and a caller that
-      # gates on a platform must not have to ask which one it is on.
+      # Research only: refuse a writable section of 1 MiB or more.
       def self.bss_size_cap=(value : Bool) : Bool
+        @@bss_size_cap = value
+        invalidate_static_root_cache
         value
       end
     {% end %}

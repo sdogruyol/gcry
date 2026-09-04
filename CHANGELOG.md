@@ -36,6 +36,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GCRY_STATIC_ROOT_LAZY=1` is the effect arm.
   `bench/log/macos/2026-09-04-static-root-init-once/`
 
+- **Darwin's static roots were a name allow-list; they are derived now — and
+  the obvious parity rule was wrong.** Linux takes every writable `PT_LOAD` of
+  the executable minus `PT_GNU_RELRO`, so a linker that renames or adds a
+  section stays covered. Darwin accepted `__data` / `__bss` / `__common` and
+  refused `__const` by name. The proposed fix — every `__DATA*` section whose
+  `initprot` carries `VM_PROT_WRITE`, minus TLS — does not work:
+  `__DATA_CONST` declares `initprot=0x3` and dyld mprotects it **read-only**
+  after applying fixups, which its `SG_READ_ONLY` segment flag marks and
+  `mach_vm_region` confirms as `r--`. That rule would have word-scanned 19456
+  bytes of pointer-dense literal pool the mutator cannot write. The rule that
+  matches Linux is writable **minus `SG_READ_ONLY`** minus TLS, and that is
+  what ships. Measured: identical byte-for-byte to the allow-list on a default
+  link (2081682 B, matching `static_root_bytes`), and +19456 B under
+  `-Wl,-no_data_const`, where `__const` and `__got` move into a plainly
+  writable `__DATA`. No refused section held a heap-owned word in either link,
+  so this is insurance against a linker change rather than a bug fix — and the
+  `--control` arm, which drops `__common` through `GCRY_STATIC_BSS_CAP=1`,
+  finds 38 heap-owned words there and does not survive its own collections,
+  which is what stops that "nothing lost" from being a statement about the
+  detector. There is no `__bss` in this linker's output at all; zerofill is
+  `__common`, so the allow-list's `__bss` entry never matched anything. The
+  range table is a fixed `StaticArray` of Linux's bound now, which makes
+  `static_root_overflow` and `static_root_bss_lost` real counters instead of
+  hardcoded `0` and removes a `realloc` and a `raise` from a path that runs
+  inside `GC.init`. `make darwin-static-root-sections`.
+  `bench/log/macos/2026-09-04-darwin-static-root-sections/`
+
+- **`GCRY_STATIC_BSS_CAP=1` was a no-op stub on Darwin.** The knob is
+  documented as refusing an oversize writable range so a root class can be
+  dropped on purpose, and the Linux gate for it (`bench/static_bss_roots.cr`)
+  reads `/proc/self/maps` and cannot run here — so the argument had no Darwin
+  arm. It refuses a `__DATA*` section of 1 MiB or more now.
+
 - **A minor collection reclaimed a live object under `GCRY_BITMAP=1`.** The
   mark *read* side gates per chunk — `bitmap_chunk?` excludes nursery chunks,
   because the nursery keeps the header representation — so a nursery block's
