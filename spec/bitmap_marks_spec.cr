@@ -81,7 +81,10 @@ describe "Gcry::Heap mark bitmaps" do
           # Large chunks keep the constant offset that twelve
           # `header - ChunkHeader::SIZE` back-references depend on.
           chunk.value.bitmap_words.should eq(0_u32)
-          chunk.value.data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
+          # The field points at the block header (header build) or at the object
+          # itself (headerless, where the large header sits behind the object).
+          large_offset = {% if flag?(:gcry_headerless) %} Gcry::ChunkHeader.large_data_offset {% else %} Gcry::ChunkHeader::SIZE {% end %}
+          chunk.value.data_offset.should eq(large_offset.to_u32)
           Gcry::ChunkHeader.mark_bitmap(chunk).should eq(Pointer(UInt64).null)
         else
           small_seen += 1
@@ -98,34 +101,40 @@ describe "Gcry::Heap mark bitmaps" do
     end
   end
 
-  it "leaves chunks bare when the representation is off" do
-    heap = header_heap
-    begin
-      heap.bitmap_marks?.should be_false
-      heap.malloc(64)
-      heap.each_chunk do |chunk|
-        chunk.value.bitmap_words.should eq(0_u32)
-        chunk.value.data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
+  {% unless flag?(:gcry_headerless) %}
+    # Headerless has no header to fall back to; the representation cannot be off.
+    it "leaves chunks bare when the representation is off" do
+      heap = header_heap
+      begin
+        heap.bitmap_marks?.should be_false
+        heap.malloc(64)
+        heap.each_chunk do |chunk|
+          chunk.value.bitmap_words.should eq(0_u32)
+          chunk.value.data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
+        end
+      ensure
+        heap.destroy
       end
-    ensure
-      heap.destroy
     end
-  end
+  {% end %}
 
-  it "refuses to change representation once chunks exist" do
-    heap = header_heap
-    begin
-      heap.malloc(64) # carves a chunk at the old geometry
-      expect_raises(ArgumentError, /cannot change once chunks are mapped/) do
-        heap.bitmap_marks = true
+  {% unless flag?(:gcry_headerless) %}
+    # Headerless has no header to fall back to; the representation cannot be off.
+    it "refuses to change representation once chunks exist" do
+      heap = header_heap
+      begin
+        heap.malloc(64) # carves a chunk at the old geometry
+        expect_raises(ArgumentError, /cannot change once chunks are mapped/) do
+          heap.bitmap_marks = true
+        end
+        # Setting it to the value it already holds is not a change.
+        heap.bitmap_marks = false
+        heap.bitmap_marks?.should be_false
+      ensure
+        heap.destroy
       end
-      # Setting it to the value it already holds is not a change.
-      heap.bitmap_marks = false
-      heap.bitmap_marks?.should be_false
-    ensure
-      heap.destroy
     end
-  end
+  {% end %}
 
   it "publishes survivors into occ and leaves mark clear" do
     # The sweep is `occ = mark; mark = 0` in one streaming pass, so after a
@@ -147,7 +156,7 @@ describe "Gcry::Heap mark bitmaps" do
         lo = Gcry::ChunkHeader.data_start(chunk).address
         hi = chunk.address + chunk.value.mapped_bytes
         next unless header.address >= lo && header.address < hi
-        block_bytes = Gcry::BlockHeader::SIZE.to_u64 + header.value.size.to_u64
+        block_bytes = Gcry::BlockHeader::SIZE.to_u64 + heap.block_payload(chunk, header).to_u64
         ordinal = (header.address - lo) // block_bytes
         occ = Gcry::ChunkHeader.occ_bitmap(chunk)
         mark = Gcry::ChunkHeader.mark_bitmap(chunk)

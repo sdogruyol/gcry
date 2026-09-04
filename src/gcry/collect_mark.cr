@@ -37,8 +37,34 @@ module Gcry
     # (no gate). Opt back into stack gating with GCRY_TYPE_ID_GATE=1.
     private def mark_root_candidate(pointer : Void*, source : RootSource = RootSource::Stack) : Nil
       gate = @type_id_gate && (source == RootSource::Static || @type_id_gate_stacks)
+      {% if flag?(:gcry_hl_assert) %}
+        # Stack-seed dump: which stack words become first marks, and what they
+        # point at. Printed only when the candidate is accepted and was not
+        # already marked — i.e. the stack alone is what keeps it alive.
+        if source == RootSource::Stack && (found = find_block_with_chunk(pointer))
+          h, c = found
+          if block_allocated?(c, h) && !block_marked_in?(c, h) && @hl_stack_seed_dump < 60
+            @hl_stack_seed_dump += 1
+            u = user_of(c, h)
+            w0 = u.as(UInt64*).value
+            w1 = (u.as(UInt64*) + 1).value
+            slot = Roots.hl_slot
+            LibC.printf("STACKSEED cand=%p user=%p base=%d size=%u w0=%llx w1=%llx slot=%p off_entry=%lld off_bottom=%lld\n",
+              pointer, u, pointer.address == u.address ? 1 : 0, block_payload(c, h), w0, w1,
+              Pointer(Void).new(slot), slot.to_i64 - @collect_entry_sp.to_i64, @stack_bottom.address.to_i64 - slot.to_i64)
+          end
+        end
+      {% end %}
       mark_impl(pointer, gate_type_id: gate, base_only: !@allow_interior_pointers, source: source)
     end
+
+    {% if flag?(:gcry_hl_assert) %}
+      @hl_stack_seed_dump = 0
+
+      def hl_stack_seed_reset : Nil
+        @hl_stack_seed_dump = 0
+      end
+    {% end %}
 
     # add_root / collect(roots:) / realloc pin — never type_id_gate (raw Hash
     # @entries / Array @buffer have no Crystal type_id). Interior policy matches
@@ -80,7 +106,51 @@ module Gcry
     # flushed to the shared stack in batches by `flush_pushbuf`. That batching
     # is what takes the lock off the per-object path.
     @[AlwaysInline]
+
+    {% if flag?(:gcry_hl_assert) %}
+      # Double-push catcher: one bit per 16 bytes of the heap span, set on push,
+      # reset at the start of every cycle. A repeat push prints where it came
+      # from and what the mark bit reads at that instant, then exits.
+      @hl_pushed_base : UInt64* = Pointer(UInt64).null
+      @hl_pushed_words = 0_u64
+      @hl_pushed_lo = 0_u64
+
+      def hl_pushed_reset : Nil
+        lo = @heap_min
+        hi = @heap_max
+        span = hi > lo ? hi - lo : 0_u64
+        words = (span >> 4 >> 6) + 1
+        if @hl_pushed_base.null? || words > @hl_pushed_words || lo != @hl_pushed_lo
+          @hl_pushed_base = LibC.malloc(LibC::SizeT.new(words * 8)).as(UInt64*)
+          @hl_pushed_words = words
+          @hl_pushed_lo = lo
+        end
+        @hl_pushed_base.clear(@hl_pushed_words.to_i) unless @hl_pushed_base.null?
+      end
+
+      private def hl_note_push(header : BlockHeader*) : Nil
+        return if @hl_pushed_base.null?
+        return if header.address < @hl_pushed_lo
+        idx = (header.address - @hl_pushed_lo) >> 4
+        w = idx >> 6
+        return if w >= @hl_pushed_words
+        bit = 1_u64 << (idx & 63)
+        if (@hl_pushed_base[w] & bit) != 0
+          c = chunk_containing(header.address)
+          ord = c ? chunk_block_ordinal(c, header.address) : 0_u64
+          cls = c ? c.value.size_class : 0_u32
+          mk = c ? chunk_marked?(c, ord) : false
+          LibC.printf("HL DOUBLE PUSH header=%p class=%u ordinal=%llu marked_now=%d chunk=%p\n",
+            header.as(Void*), cls, ord, mk ? 1 : 0, c ? c.as(Void*) : Pointer(Void).null)
+          Exception::CallStack.print_backtrace
+          LibC.exit(9)
+        end
+        @hl_pushed_base[w] |= bit
+      end
+    {% end %}
+
     private def mark_stack_push(header : BlockHeader*) : Nil
+      {% if flag?(:gcry_hl_assert) %} hl_note_push(header) {% end %}
       unless @mark_parallel
         @mark_stack.push(header)
         return
@@ -671,13 +741,6 @@ module Gcry
     # header read and no lookup, which is what lets the header go while keeping
     # the -7.7% that removing the per-object `chunk_containing` bought.
     #
-    # `block_payload` is the single definition of "how big is this block",
-    # pinned against the header by `spec/block_payload_spec.cr`. For a large
-    # object it is already the mapping extent, so the old clamp is inherent
-    # rather than applied.
-    private def clamped_scan_size(header : BlockHeader*, user : UInt8*) : UInt64
-      block_payload(header).to_u64
-    end
 
     private def scan_old_for_nursery_pointers : Nil
       # Soft-dirty/mprotect can *help* mark from dirty pages, but must not
@@ -861,6 +924,7 @@ module Gcry
           chunk_clear_marks(chunk)
         end
       end
+      {% if flag?(:gcry_hl_assert) %} hl_pushed_reset; hl_stack_seed_reset {% end %}
     end
 
     # Minor GC: reset nursery mark bits only.

@@ -60,6 +60,7 @@ module Gcry
     getter bitmap_alloc_fast : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
+    getter bitmap_dormant_revives : UInt64 = 0_u64
 
     protected def bitmap_alloc_init : Nil
       @pool_chunk = StaticArray(ChunkHeader*, POOL_SLOTS).new(Pointer(ChunkHeader).null)
@@ -72,6 +73,11 @@ module Gcry
     # be allowed to disagree with the collector about what is allocated. The
     # header's FREE flag is not that answer on a bitmap chunk.
     # Occupancy for one block, for specs and diagnostics that walk a chunk.
+    # Spec/diagnostic read of the mark bit, through the collector's own accessor.
+    def block_marked_public?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
+      block_marked_in?(chunk, header)
+    end
+
     def block_allocated_public?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
       block_allocated?(chunk, header)
     end
@@ -286,8 +292,53 @@ module Gcry
       end
       return best unless best.null?
 
+      # Review finding (PR #1): dormant chunks never revived under
+      # BITMAP_ALLOC. The walk above skips them (rightly — their data pages
+      # are MADV_DONTNEED'd and their bitmaps stale), and the freelist-era
+      # `revive_dormant_chunk` rebuilds a freelist through block headers, which
+      # is the wrong shape for this allocator and fatal under headerless. So a
+      # class that had gone dormant mapped a *new* chunk on every refill while
+      # its dormant ones sat in the VMA for good. Revive one here instead:
+      # a dormant chunk is fully free, so zeroed bitmaps are exactly right,
+      # and page 0 (metadata) was never released.
+      if (revived = bitmap_revive_dormant(index, atomic))
+        return revived
+      end
+
       map_chunk(@small_chunk_bytes, index.to_u32,
         atomic ? ChunkHeader::Flags::ATOMIC : 0_u32)
+    end
+
+    # Bitmap-path counterpart of `revive_dormant_chunk`: no freelist, no header
+    # writes. Same flag flip and byte accounting as the header path; free bytes
+    # were never subtracted when the chunk went dormant, so none are added back.
+    private def bitmap_revive_dormant(index : Int32, atomic : Bool) : ChunkHeader*?
+      chunk = @chunks
+      while chunk
+        if !ChunkHeader.large?(chunk) &&
+           ChunkHeader.dormant?(chunk) &&
+           !ChunkHeader.nursery?(chunk) &&
+           chunk.value.size_class == index.to_u32 &&
+           ChunkHeader.atomic?(chunk) == atomic
+          @dormant_revive_during_flush &+= 1 if @dormant_flush_active
+          ChunkHeader.set_dormant(chunk, false)
+          mapped = chunk.value.mapped_bytes
+          @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
+          words = chunk.value.bitmap_words.to_i32
+          occ = ChunkHeader.occ_bitmap(chunk)
+          mark = ChunkHeader.mark_bitmap(chunk)
+          i = 0
+          while i < words
+            occ[i] = 0_u64
+            mark[i] = 0_u64
+            i += 1
+          end
+          @bitmap_dormant_revives &+= 1
+          return chunk
+        end
+        chunk = chunk.value.next
+      end
+      nil
     end
 
     # Release one block back to `occ`. The bit is shared with 63 others, so the

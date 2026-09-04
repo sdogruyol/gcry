@@ -1790,8 +1790,27 @@ module Gcry
     # `GCRY_POST_MARK_SPIN`. Research control only; see the spin site.
     property post_mark_spin : UInt64 = 0_u64
 
+    # Thin on purpose, and the body is never inlined into it: every frame a
+    # collection pushes — the body's own large, heavily inlined frame included
+    # — then lies *below* the SP captured here, where the scrubs can reach it.
+    # With the body inlined, its frame sat above the captured SP, so the
+    # previous cycle's mark batches survived there, were re-established at the
+    # same address next cycle, and were scanned as mutator stack before this
+    # cycle overwrote them. Measured: 40 stale stack seeds retaining a 44k
+    # object web on gc_phases under `-Dgcry_headerless`.
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
+      # Everything below the SP is dead here, and it is last cycle's collector
+      # residue. Zero it before this cycle's scan chain overlays and scans it.
+      clear_stack(@collect_scrub_bytes) if @collect_scrub_bytes > 0
+      run_collection_body(major, scan_stack, roots, coalesce)
+      # The frames this cycle just used are dead below the SP again. Zero them
+      # so nothing between now and the next entry scans them as live.
+      clear_stack(@collect_scrub_bytes) if @collect_scrub_bytes > 0
+    end
+
+    @[NoInline]
+    private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool) : Nil
       cols_before = @collections
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).

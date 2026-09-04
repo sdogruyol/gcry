@@ -307,13 +307,13 @@ module Gcry
       heap.each_chunk do |chunk|
         if ChunkHeader.large?(chunk)
           header = ChunkHeader.large_header(chunk)
-          next if BlockHeader.free?(header)
-          size = header.value.size.to_u64
+          next unless heap.diag_allocated?(header)
+          size = heap.diag_payload(header)
           large_count += 1
           large_bytes += size
           total_count += 1
           total_bytes += size
-          kind, tid = live_attr_kind(header, size)
+          kind, tid = live_attr_kind(heap.diag_user(header), size, heap.diag_atomic?(header))
           case kind
           when :typed
             typed_count += 1
@@ -343,13 +343,15 @@ module Gcry
           is_max = class_index == max_idx
           while (cursor + block_bytes) <= limit
             header = cursor.as(BlockHeader*)
-            unless BlockHeader.free?(header)
-              size = header.value.size.to_u64
+            if heap.block_allocated_public?(chunk, header)
+              # Size and kind come from the chunk, which is the only place they
+              # exist under `-Dgcry_headerless`; the header build agrees.
+              size = heap.block_payload(chunk, header).to_u64
               sc_count[class_index] += 1
               sc_bytes[class_index] += size
               total_count += 1
               total_bytes += size
-              kind, tid = live_attr_kind(header, size)
+              kind, tid = live_attr_kind(heap.user_of(chunk, header), size, heap.atomic_of(chunk, header))
               case kind
               when :typed
                 typed_count += 1
@@ -485,12 +487,12 @@ module Gcry
     end
 
     # Returns {kind, type_id?}.
-    private def self.live_attr_kind(header : BlockHeader*, size : UInt64) : Tuple(Symbol, Int32?)
+    private def self.live_attr_kind(user : Void*, size : UInt64, atomic : Bool) : Tuple(Symbol, Int32?)
       return {:raw, nil} if size < 4
-      tid = BlockHeader.user_from(header).as(Int32*).value
+      tid = user.as(Int32*).value
       return {:raw, nil} if tid <= 0 || tid > 1_000_000
 
-      if BlockHeader.atomic?(header) && live_attr_string_shaped?(header, size)
+      if atomic && live_attr_string_shaped?(user, size)
         return {:typed, tid}
       end
 
@@ -502,9 +504,9 @@ module Gcry
     end
 
     # Crystal String: type_id + bytesize + length + inline bytes (atomic).
-    private def self.live_attr_string_shaped?(header : BlockHeader*, size : UInt64) : Bool
+    private def self.live_attr_string_shaped?(user_ptr : Void*, size : UInt64) : Bool
       return false if size < 16
-      user = BlockHeader.user_from(header).as(Int32*)
+      user = user_ptr.as(Int32*)
       bytesize = user[1]
       length = user[2]
       return false if bytesize < 0 || length < 0

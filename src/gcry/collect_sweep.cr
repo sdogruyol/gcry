@@ -115,11 +115,17 @@ module Gcry
                     # empties) and dominated phase_sweep under HTTP churn.
                     bit = 1_u64 << class_index
                     if within_warm
-                      # Warm: keep pages mapped; freelist dead blocks (defer path
-                      # left them USED after live_objects_sub).
-                      p = SizeClasses.payload(class_index)
-                      bb = BlockHeader::SIZE.to_u64 + p.to_u64
-                      freelist_reserve_fully_dead(chunk, class_index, p, bb)
+                      # Warm: keep pages mapped. A freelist chunk also needs its
+                      # dead blocks linked through their headers (the defer path
+                      # left them USED after live_objects_sub). A bitmap chunk
+                      # needs nothing — the pool cursor reads `occ`, which this
+                      # sweep just zeroed — and the links would double-book free
+                      # bytes and, under headerless, land inside the objects.
+                      unless bitmap_alloc_chunk?(chunk)
+                        p = SizeClasses.payload(class_index)
+                        bb = BlockHeader::SIZE.to_u64 + p.to_u64
+                        freelist_reserve_fully_dead(chunk, class_index, p, bb)
+                      end
                       warm_budget_used += mapped
                     elsif can_dormant
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under

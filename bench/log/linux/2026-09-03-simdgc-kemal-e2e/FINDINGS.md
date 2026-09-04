@@ -13,8 +13,14 @@ on `/json`, 9 pairs per comparison.
 | post-GC RSS | 14468 kB | 14560 kB | −0.5% | −0.70 |
 
 Neither is significant. Every phase on this branch is behind a knob and the
-default path is untouched, which is what the plan requires of Kemal as
-regression guard. This is the PR's licence to merge.
+default path is untouched — with one correction from review: two
+prefetch levers ship **on by default**. The mark-loop prefetch ring
+(`GCRY_PREFETCH`, 778b956) runs on every representation, and `GCRY_PREFETCH=0`
+restores the plain LIFO drain; `GCRY_ALLOC_PFW` (default 2 KiB) applies only to
+the bitmap allocator. Everything else — bitmap marks, bitmap alloc, chunk radix,
+parallel mark, hugepages — is opt-in. "Untouched" means the flat Kemal number
+above was measured with the ring on, not that the default binary is
+byte-for-byte the old one. This is the PR's licence to merge.
 
 `perf_smoke` default arm on this host: **pct_json 101.4, pct_root 94.2,
 rss_x 1.004, pause_p50 0.73 ms**. The pct_json is far above the recorded

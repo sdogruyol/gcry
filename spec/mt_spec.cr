@@ -1,33 +1,36 @@
 require "./spec_helper"
 
 describe "Gcry TLAB" do
-  it "allocates and frees through TLAB without losing objects" do
-    heap = Gcry::Heap.new
-    begin
-      # TLAB is a freelist mechanism — per-thread freelist heads — and
-      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
-      # this spec keeps testing TLAB when the suite is swept under
-      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
-      heap.bitmap_alloc = false
-      heap.tlab_enabled = true
-      heap.gc_threshold = UInt64::MAX
-      heap.nursery_threshold = UInt64::MAX
-      heap.nursery_enabled = false
+  {% unless flag?(:gcry_headerless) %}
+    # TLAB refills are a freelist-allocator mechanism; headerless forces the bitmap pool allocator.
+    it "allocates and frees through TLAB without losing objects" do
+      heap = Gcry::Heap.new
+      begin
+        # TLAB is a freelist mechanism — per-thread freelist heads — and
+        # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+        # this spec keeps testing TLAB when the suite is swept under
+        # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+        heap.bitmap_alloc = false
+        heap.tlab_enabled = true
+        heap.gc_threshold = UInt64::MAX
+        heap.nursery_threshold = UInt64::MAX
+        heap.nursery_enabled = false
 
-      ptrs = [] of Void*
-      200.times { ptrs << heap.malloc(48) }
-      heap.tlab_refills.should be > 0
-      ptrs.each { |p| heap.is_heap_ptr(p).should be_true }
-      ptrs.each { |p| heap.free(p) }
-      heap.live_objects.should eq(0)
+        ptrs = [] of Void*
+        200.times { ptrs << heap.malloc(48) }
+        heap.tlab_refills.should be > 0
+        ptrs.each { |p| heap.is_heap_ptr(p).should be_true }
+        ptrs.each { |p| heap.free(p) }
+        heap.live_objects.should eq(0)
 
-      again = heap.malloc(48)
-      heap.is_heap_ptr(again).should be_true
-      heap.free(again)
-    ensure
-      heap.destroy
+        again = heap.malloc(48)
+        heap.is_heap_ptr(again).should be_true
+        heap.free(again)
+      ensure
+        heap.destroy
+      end
     end
-  end
+  {% end %}
 
   it "flushes TLAB before collect so sweep sees freelist" do
     heap = Gcry::Heap.new
@@ -130,37 +133,40 @@ describe "Gcry parallel mark knob" do
 end
 
 describe "Gcry MT alloc storm (TLAB)" do
-  it "survives concurrent alloc from multiple threads" do
-    heap = Gcry::Heap.new
-    begin
-      # TLAB is a freelist mechanism — per-thread freelist heads — and
-      # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
-      # this spec keeps testing TLAB when the suite is swept under
-      # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
-      heap.bitmap_alloc = false
-      heap.tlab_enabled = true
-      heap.gc_threshold = UInt64::MAX
-      heap.nursery_enabled = false
-      # No stop_the_world in library unit tests (see above).
-      # Join OS threads — Channel across Thread/Fiber can hang the scheduler.
+  {% unless flag?(:gcry_headerless) %}
+    # TLAB refills are a freelist-allocator mechanism; headerless forces the bitmap pool allocator.
+    it "survives concurrent alloc from multiple threads" do
+      heap = Gcry::Heap.new
+      begin
+        # TLAB is a freelist mechanism — per-thread freelist heads — and
+        # `bitmap_alloc` replaces it with the pool cursor, disabling it. Pinned so
+        # this spec keeps testing TLAB when the suite is swept under
+        # GCRY_BITMAP_ALLOC=1 rather than silently testing nothing.
+        heap.bitmap_alloc = false
+        heap.tlab_enabled = true
+        heap.gc_threshold = UInt64::MAX
+        heap.nursery_enabled = false
+        # No stop_the_world in library unit tests (see above).
+        # Join OS threads — Channel across Thread/Fiber can hang the scheduler.
 
-      threads = Array(Thread).new(4) do
-        Thread.new do
-          local = [] of Void*
-          100.times do
-            local << heap.malloc(64)
-            local.shift if local.size > 20
+        threads = Array(Thread).new(4) do
+          Thread.new do
+            local = [] of Void*
+            100.times do
+              local << heap.malloc(64)
+              local.shift if local.size > 20
+            end
+            local.each { |p| heap.free(p) if heap.is_heap_ptr(p) && heap.live?(p) }
           end
-          local.each { |p| heap.free(p) if heap.is_heap_ptr(p) && heap.live?(p) }
         end
-      end
-      threads.each(&.join)
+        threads.each(&.join)
 
-      # Collect from the main thread after workers finish.
-      heap.collect(scan_stack: false)
-      heap.tlab_refills.should be > 0
-    ensure
-      heap.destroy
+        # Collect from the main thread after workers finish.
+        heap.collect(scan_stack: false)
+        heap.tlab_refills.should be > 0
+      ensure
+        heap.destroy
+      end
     end
-  end
+  {% end %}
 end

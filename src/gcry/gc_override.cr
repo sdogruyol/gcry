@@ -654,6 +654,9 @@ module GC
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
     end
+    if scrub = env_u64("GCRY_COLLECT_SCRUB")
+      heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
+    end
     if cse = env_u64("GCRY_CLEAR_STACK_EVERY")
       heap.clear_stack_every = cse.to_i32 if cse >= 1 && cse <= Int32::MAX
     end

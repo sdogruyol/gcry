@@ -44,7 +44,7 @@ describe "chunk kind (atomic vs pointerful)" do
           header = cursor.as(Gcry::BlockHeader*)
           if heap.block_allocated_public?(chunk, header)
             checked += 1
-            Gcry::BlockHeader.atomic?(header).should eq(kind)
+            heap.atomic_of(chunk, header).should eq(kind)
           end
           cursor += block_bytes
         end
@@ -92,7 +92,7 @@ describe "chunk kind under reuse" do
         lim = Gcry::ChunkHeader.data_end(chunk).as(UInt8*)
         while (cur + bb) <= lim
           h = cur.as(Gcry::BlockHeader*)
-          Gcry::BlockHeader.atomic?(h).should eq(kind) if heap.block_allocated_public?(chunk, h)
+          heap.atomic_of(chunk, h).should eq(kind) if heap.block_allocated_public?(chunk, h)
           cur += bb
         end
       end

@@ -65,7 +65,17 @@ describe Gcry::Heap do
         Gcry::SizeClasses::COUNT.times do |i|
           block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
           _, data_offset = Gcry::Heap.chunk_geometry(block_bytes, chunk_bytes, true)
-          data_offset.to_u64.should be < page
+          {% if flag?(:gcry_headerless) %}
+            # Class 0 is a 16-byte block, so a 256 KiB chunk carries 2 x 2 KiB of
+            # bitmaps and the region ends at byte 4128 — into page 1 on a 4 KiB
+            # page host. That page is still never released: every page-release
+            # walk only takes runs with `run_start >= data_start`, and page 1
+            # starts before it. The invariant is "the page holding data_start is
+            # never released", which page 0 satisfied by the same rule.
+            data_offset.to_u64.should be < 2 * page
+          {% else %}
+            data_offset.to_u64.should be < page
+          {% end %}
         end
       end
     end
@@ -80,7 +90,9 @@ describe Gcry::Heap do
           nblocks = Gcry::Heap.chunk_block_count(block_bytes, chunk_bytes, data_offset)
           (words.to_u64 * 64).should be >= nblocks
           # And not wastefully large: never more than one word of slack.
-          (words.to_u64 * 64 - nblocks).should be < 64 + 64
+          # Slack: the words cover the whole chunk, so the blocks displaced by
+          # the metadata region plus one word of rounding.
+          (words.to_u64 * 64 - nblocks).should be < 64 + data_offset.to_u64 // block_bytes + 64
         end
       end
     end
@@ -88,19 +100,29 @@ describe Gcry::Heap do
     it "costs under 1% of a chunk even in the worst class" do
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(0).to_u64
       words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, true)
-      words.should eq(64)
-      data_offset.should eq(1056)
-      (data_offset.to_f / Gcry::Heap::SMALL_CHUNK_BYTES.to_f).should be < 0.01
+      {% if flag?(:gcry_headerless) %}
+        # 16-byte blocks: 8192 bits per bitmap, two bitmaps, 1.6% of the chunk.
+        words.should eq(128)
+        data_offset.should eq(2080)
+        (data_offset.to_f / Gcry::Heap::SMALL_CHUNK_BYTES.to_f).should be < 0.02
+      {% else %}
+        words.should eq(64)
+        data_offset.should eq(1056)
+        (data_offset.to_f / Gcry::Heap::SMALL_CHUNK_BYTES.to_f).should be < 0.01
+      {% end %}
     end
 
-    it "reports no bitmap and the bare header when bitmaps are off" do
-      Gcry::SizeClasses::COUNT.times do |i|
-        block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
-        words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, false)
-        words.should eq(0_u32)
-        data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
+    {% unless flag?(:gcry_headerless) %}
+      # Bitmaps cannot be off under headerless; the geometry's off-branch is unreachable there.
+      it "reports no bitmap and the bare header when bitmaps are off" do
+        Gcry::SizeClasses::COUNT.times do |i|
+          block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
+          words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, false)
+          words.should eq(0_u32)
+          data_offset.should eq(Gcry::ChunkHeader::SIZE.to_u32)
+        end
       end
-    end
+    {% end %}
 
     it "declines to carve a chunk too small to hold one block" do
       words, data_offset = Gcry::Heap.chunk_geometry(4096_u64, 64_u64, true)
@@ -124,9 +146,15 @@ describe Gcry::Heap do
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(0).to_u64
       words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, true)
       nblocks = Gcry::Heap.chunk_block_count(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, data_offset)
-      nblocks.should eq(4063_u64)
-      (words.to_u64 * 64 - nblocks).should eq(33_u64)
-      Gcry::Heap.tail_mask(nblocks).popcount.should eq(4063 & 63)
+      {% if flag?(:gcry_headerless) %}
+        nblocks.should eq(8062_u64)
+        (words.to_u64 * 64 - nblocks).should eq(130_u64)
+        Gcry::Heap.tail_mask(nblocks).popcount.should eq(8062 & 63)
+      {% else %}
+        nblocks.should eq(4063_u64)
+        (words.to_u64 * 64 - nblocks).should eq(33_u64)
+        Gcry::Heap.tail_mask(nblocks).popcount.should eq(4063 & 63)
+      {% end %}
     end
   end
 

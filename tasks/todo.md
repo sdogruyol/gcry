@@ -400,7 +400,12 @@ Three candidates, materially different risk/reward:
 - [ ] Nursery minors on bitmaps — deferred; needs the nursery moved onto the
       bitmap representation (a Phase 3 extension), not just kernel reuse.
 
-## Phase 7 — headerless — NOT ATTEMPTED, and why
+## Phase 7 — headerless — IMPLEMENTED on branch `simdgc-headerless`
+
+Tracked in `tasks/phase7-headerless.md` (7.1–7.8, review findings, soak).
+The blast-radius note below is kept as the record of why it got its own branch.
+
+## Phase 7 — original assessment (2026-09-03), superseded
 
 Blast radius measured before starting, which is why it was not started:
 **207 BlockHeader field reads, 97 from_user/user_from, 154 header.value reads,

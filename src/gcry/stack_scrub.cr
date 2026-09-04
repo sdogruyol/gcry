@@ -110,6 +110,18 @@ module Gcry
     # Extra skip below hardware SP so leaf spills / alignment never get wiped.
     CLEAR_STACK_LEAF_MARGIN = 64_u64
 
+    # Bytes of dead stack zeroed below the SP at every collection entry
+    # (`GCRY_COLLECT_SCRUB`, 0 disables). The previous collection's mark frames
+    # are still intact below the mutator's SP, and they are dense with block
+    # addresses: mark-stack batches, the prefetch ring, `find_block` results.
+    # The next collection's scan chain pushes frames over that region and then
+    # scans it, so every slot a frame does not write reads as last cycle's
+    # heap pointer and is accepted as a root. Under `-Dgcry_headerless` a
+    # block's address *is* its user pointer, so `base_only` accepts them; the
+    # header build only escaped because the same residue was header-valued.
+    # Measured: 2.1k stale seeds retaining a 74k-object web on gc_phases.
+    property collect_scrub_bytes : UInt64 = 16384_u64
+
     # Zero unused stack below the hardware SP (stack grows down).
     def clear_stack(bytes : UInt64 = @clear_stack_bytes) : Nil
       return if bytes == 0
@@ -160,10 +172,22 @@ module Gcry
         end
       {% end %}
 
+      unless on_thread_stack
+        # A Crystal fiber stack: the fiber knows its own bounds, so the wipe
+        # can stop at its guard page like the pthread case above.
+        stack = Fiber.current.@stack
+        lo = stack.pointer.address
+        hi = stack.bottom.address
+        if lo < hi && sp_addr > lo && sp_addr <= hi
+          on_thread_stack = true
+          guard = lo + Roots::PAGE_SIZE
+        end
+      end
+
       wipe = bytes
       unless on_thread_stack
-        # Likely a Crystal fiber stack (not the pthread mapping). Cap wipe so
-        # we do not walk into an unmapped/guard page on a thinly grown stack.
+        # Unknown stack. Cap wipe so we do not walk into an unmapped/guard
+        # page on a thinly grown stack.
         wipe = FIBER_CLEAR_STACK_CAP if wipe > FIBER_CLEAR_STACK_CAP
         guard = high > wipe ? high - wipe : 0_u64
       end

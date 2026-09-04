@@ -90,12 +90,15 @@ it "separates barrier soundness from root soundness" do
     Gcry.sound?(heap).should be_true
     Gcry.soundness(heap).should eq("sound")
 
-    heap.nursery_enabled = true
-    Gcry.sound_roots?(heap).should be_true # roots are still complete
-    Gcry.sound_barriers?(heap).should be_false
-    Gcry.sound?(heap).should be_false
-    Gcry.soundness(heap).should eq("sound-roots-only")
-    heap.nursery_enabled = false
+    {% unless flag?(:gcry_headerless) %}
+      # The nursery is off under headerless and its setter refuses to turn it on.
+      heap.nursery_enabled = true
+      Gcry.sound_roots?(heap).should be_true # roots are still complete
+      Gcry.sound_barriers?(heap).should be_false
+      Gcry.sound?(heap).should be_false
+      Gcry.soundness(heap).should eq("sound-roots-only")
+      heap.nursery_enabled = false
+    {% end %}
 
     heap.incremental_auto = true
     Gcry.sound_barriers?(heap).should be_false
@@ -277,12 +280,14 @@ it "json_stats reports the live field values, not the requested profile" do
     json.should contain(%("stw_multi_stack_lag":0))
     json.should contain(%("scrub_fibers_enabled":false))
 
-    heap.nursery_enabled = true
-    nursery_json = Gcry::Observability.json_stats(heap)
-    nursery_json.should contain(%("soundness":"sound-roots-only"))
-    nursery_json.should contain(%("root_soundness":"sound"))
-    nursery_json.should contain(%("barrier_soundness":"tuned"))
-    heap.nursery_enabled = false
+    {% unless flag?(:gcry_headerless) %}
+      heap.nursery_enabled = true
+      nursery_json = Gcry::Observability.json_stats(heap)
+      nursery_json.should contain(%("soundness":"sound-roots-only"))
+      nursery_json.should contain(%("root_soundness":"sound"))
+      nursery_json.should contain(%("barrier_soundness":"tuned"))
+      heap.nursery_enabled = false
+    {% end %}
 
     heap.type_id_gate = true
     tuned_json = Gcry::Observability.json_stats(heap)

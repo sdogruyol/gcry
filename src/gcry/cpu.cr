@@ -114,6 +114,18 @@ module Gcry
         avx2 = (ebx7 & (1_u32 << 5)) != 0
         return Kernels::TIER_SCALAR unless avx2
 
+        # The AVX2 clone is compiled `+avx2,+bmi,+bmi2,+popcnt` (kernels.cr), so
+        # LLVM is free to emit `popcnt`, `tzcnt`/`blsr` (BMI1) and `pdep`/`pext`
+        # (BMI2) anywhere in it. Granting the tier on AVX2 alone would run those
+        # on a part without them — SIGILL, not a slow path. Every CPU with
+        # AVX2 shipped since Haswell has all three, but the clone's contract is
+        # the feature string, not the era, so it is checked. The AVX-512 tier
+        # sits above this one and inherits the requirement.
+        popcnt = (ecx1 & (1_u32 << 23)) != 0
+        bmi1 = (ebx7 & (1_u32 << 3)) != 0
+        bmi2 = (ebx7 & (1_u32 << 8)) != 0
+        return Kernels::TIER_SCALAR unless popcnt && bmi1 && bmi2
+
         avx512f = (ebx7 & (1_u32 << 16)) != 0
         avx512bw = (ebx7 & (1_u32 << 30)) != 0
         avx512vl = (ebx7 & (1_u32 << 31)) != 0

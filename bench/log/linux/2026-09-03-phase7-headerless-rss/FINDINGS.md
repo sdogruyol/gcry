@@ -731,3 +731,103 @@ The header arm is a step function that plateaued at 12.4 MB and drained to
 present on the PR branch is what a 5 h control soak of the `simdgc` branch's
 header build, launched at 06:51 and due ~11:51, will decide. Its 10-minute
 run plateaued at +2.7 MB.
+
+## Update 11 (2026-09-04): the mark-heavy gap, attributed and closed
+
+The 24.7% extra objects per collection under headerless (Update 10) was never
+a marking difference. It was **the collector scanning its own previous cycle's
+frames as mutator stack**, and only the representation decided whether what it
+found there was accepted.
+
+### How it was found
+
+`gc_phases` copied into a census (`gcp_census2`) that pins the threshold after a
+collection, so the retained set can be attributed with `GCRY_LIVE_ATTR=1`
+first-mark counters. Same workload as Update 10 (`--shuffle --fanout=6
+--survival=0.25`, 200 k ring):
+
+| build | stack first-marks | heap first-marks | non-ring objects held by other non-ring objects |
+|---|---|---|---|
+| header | 11 | 200 024 | 0 |
+| headerless | 56 | 249 660 | 49 692 |
+| headerless, `GCRY_TYPE_ID_GATE=1` | 8 | 200 027 | 0 |
+
+Forty-five extra stack seeds, each a *dead ring object* (fanout words still
+pointing at other dead ring objects), retain a 50 k-object web. The type-id
+gate erases the gap because those seeds have no type id — but the gate is off
+by default because it rejects raw buffers, so it is a confirmation, not a fix.
+
+A `-Dgcry_hl_assert` dump that prints the **stack slot** of every accepted seed
+placed all of them in one region: 8.6–9.2 KB *above* the SP recorded at
+collection entry, and 0.6–1.3 KB *below* the SP at `GC.malloc` entry. That is
+inside gcry's own allocation-to-collection chain — eight frames spanning
+9.9 KB, because `run_collection` had the entire mark phase inlined into one
+~9 KB frame. The SP was captured *inside* that frame, so the frame itself sat
+above the captured SP; the previous cycle's mark batches survived in it, were
+re-established at the same address by the next cycle (same call path), and
+were scanned as mutator stack before that cycle overwrote them.
+
+The header build had exactly the same residue. Its values were block-start
+addresses, which under a header are `user − 16`, so `base_only` rejected every
+one. Headerless makes block start and user pointer the same address, and
+`base_only` accepted them. The regression was representation luck running out.
+
+### The fix
+
+- `run_collection` is now a thin wrapper that records the entry SP and calls a
+  `@[NoInline]` body, so every frame a collection pushes lies *below* the
+  recorded SP.
+- `GCRY_COLLECT_SCRUB` (default 16 384 bytes, 0 disables) zeroes the dead stack
+  below that SP at collection entry and again at exit, through the existing
+  `clear_stack` primitive (red zone and memset-callee margin respected; fiber
+  stacks now use their own bounds instead of a 512 B cap). Two memsets per
+  collection; not measurable against a millisecond mark.
+
+| build, after | stack first-marks | heap first-marks | web |
+|---|---|---|---|
+| headerless, scrub on (default) | 10 | 200 024 | 44 |
+| headerless, `GCRY_COLLECT_SCRUB=0` | 56 | 249 662 | 49 694 |
+| header, scrub on | 10 | 200 025 | 0 |
+| header, scrub off | 11 | 200 024 | 0 |
+
+The knob-off row reproduces the regression on demand; the header build is
+unchanged either way. Timing on `gc_phases` itself follows below.
+
+### `gc_phases` after the fix (`--shuffle --fanout=6 --survival=0.25`, 3 s, three interleaved runs per arm)
+
+| arm | `phase_mark` ms | pause per GC ms | ns/alloc | RSS MB |
+|---|---|---|---|---|
+| headerless, scrub on (default) | 10.1 / 10.8 / 10.9 | 11.4 | 59.3 | 52.6 |
+| headerless, `GCRY_COLLECT_SCRUB=0` | 21.3 / 21.0 / 21.5 | 22.0 | 80.1 | 58.7 |
+| header + `GCRY_BITMAP_ALLOC=1` | 9.8 / 9.7 / 9.5 | 10.4 | 61.6 | 64.0 |
+| header, default (freelist) | 19.7 / 20.4 / 19.7 | 20.8 | 89.1 | 68.7 |
+
+The knob-off arm reproduces the Update 10 gap on demand (2× mark, +35% per
+allocation, +12% RSS from the retained web). With the scrub on, headerless
+marks within ~10% of the header bitmap arm, allocates 4% cheaper, and holds
+18% less RSS. The remaining ~1 ms of mark is the per-object chunk-kind lookup
+headerless pays where the header build reads a flag it already loaded; it is
+not stack residue (the census is identical to the header build's).
+
+The header build's default freelist arm is 2× the bitmap arm on mark in both
+the before and after tables; that is the header walk, not this change.
+
+### Gates for this update
+
+knob-doc-check, lint, dormant-flush-race, page-release-corruption,
+heap-counters, find-block-race, parallel-mark-process, mark-audit: green.
+property_test (20 000 iterations), mt-property and stw-mt (short) green under
+headerless; the header build's short suites green.
+
+`make live-graph-audit` fails its own self-check ("HOLED released N B against a
+control — the walk did not run"): the HOLED arm must release at least 4x the
+no-walk control and does not. Built and run from this branch's tip and from
+`master` in clean worktrees, it fails identically (control 12.2 / 15.9 MB,
+HOLED 43.8 / 49.6 MB), and disabling the new scrub does not move it (17.3 /
+50.4 MB). Pre-existing; not attributed here.
+
+The spec suite had never been run under `-Dgcry_headerless`: 29 failures and
+one error, all examples asserting header-build facts. Guarded with reasons or
+rewritten against the chunk-aware accessors; `json_live_attr` was reading block
+sizes from the header (zero under headerless) and is ported.
+

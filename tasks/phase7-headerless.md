@@ -154,3 +154,38 @@ resumes at 7.5 rather than from scratch.
 - [ ] open: headerless scans ~25% more objects on gc_phases fan-out 6
       (mark 2.6x slower there); reproduces in that benchmark only, not in
       five controlled probes. Not a marking hole. Unattributed.
+
+---
+
+# Review findings on PR #1 (fixed here, 2026-09-04)
+
+1. **Bounded scan** — `clamped_scan_size` had stopped clamping small blocks on
+   the header path. On this branch every scan derives length from the chunk
+   (`block_payload`), so a corrupt header size cannot lengthen it; the dead
+   wrapper is removed and `spec/bounded_scan_spec.cr` pins it (that spec
+   walks 2³¹ bytes and SIGSEGVs on the PR branch).
+2. **CPUID gate** — the AVX2 clone is built `+bmi,+bmi2,+popcnt`; detection now
+   requires POPCNT, BMI1, BMI2 or clamps to scalar (`cpu.cr`).
+3. **Dormant revive** — the bitmap pool skipped dormant chunks and the only
+   revive was freelist-shaped, so a class that went dormant mapped a new chunk
+   on every refill. `bitmap_revive_dormant` flips the flag, returns the bytes,
+   zeroes both bitmaps; `spec/dormant_revive_spec.cr` pins it.
+4. **Docs** — the mark prefetch ring is on by default on every representation;
+   `GCRY_PREFETCH=0` restores the plain drain. Stated in the Kemal FINDINGS.
+5. *(found while fixing 3)* **Warm retain on bitmap chunks** —
+   `freelist_reserve_fully_dead` linked a fully-dead bitmap chunk's blocks into
+   a freelist nothing reads (double-booked free bytes; header writes into
+   objects under headerless). Guarded with `!bitmap_alloc_chunk?`. Default off,
+   so latent.
+
+## The mark-cost regression (2026-09-04): attributed and fixed
+
+Not a marking difference. `run_collection`'s inlined ~9 KB frame sat *above*
+the entry SP it recorded, so the previous cycle's mark batches were scanned as
+mutator roots; the header build rejected them as `user − 16`, headerless
+accepted them as base pointers. Fixed by outlining the body (`@[NoInline]`)
+and scrubbing the dead stack below the entry SP on entry and exit
+(`GCRY_COLLECT_SCRUB`, default 16 KB). Census after: identical to header.
+Details: `bench/log/linux/2026-09-03-phase7-headerless-rss/FINDINGS.md`
+Update 11.
+

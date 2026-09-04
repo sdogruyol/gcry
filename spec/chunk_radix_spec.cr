@@ -128,7 +128,7 @@ describe "Gcry::Heap chunk radix" do
 
       header = heap.find_block(big)
       header.should_not be_nil
-      Gcry::BlockHeader.user_from(header.not_nil!).should eq(big)
+      Gcry::BlockHeader.large_user_from_header(header.not_nil!).should eq(big)
 
       # And an interior pointer into it.
       interior = Pointer(Void).new(big.address + 4096)

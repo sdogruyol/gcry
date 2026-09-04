@@ -180,6 +180,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
+| `GCRY_COLLECT_SCRUB` | Dead-stack bytes zeroed at every collection entry so last cycle's mark frames are not scanned as roots (default **16384**; 0 disables) |
 | `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
