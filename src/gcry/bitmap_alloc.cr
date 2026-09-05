@@ -60,9 +60,6 @@ module Gcry
     STATE_EXITING = 2_u8 # the owner's thread-exit destructor ran; retired and freed at the next stop-the-world
 
     property owner : UInt64 = 0_u64
-    # The heap this set belongs to, as an address: the thread-local cache
-    # holds one set pointer and checks it against the heap asking.
-    property heap : UInt64 = 0_u64
     property state : UInt8 = 0_u8
     # Non-zero for sets that never take the hit path: the fallback shared by
     # threads past the table, and the runtime's monitor thread, which is
@@ -164,18 +161,16 @@ module Gcry
     getter cursor_sets_pinned : UInt64 = 0_u64
     getter cursor_sets_retired : UInt64 = 0_u64
 
-    # The calling thread's set for the heap it last allocated from; the set
-    # names its heap (`CursorSet#heap`), so one thread-local word answers
-    # both "which set" and "for which heap". It was two words, and every
-    # read of a thread-local class variable is an out-of-line call in the
-    # release build (`*Gcry::Heap::tls_cursor_set` in the disassembly), so
-    # the hit path paid two calls where it now pays one. An integer with a
-    # literal initialiser, not a pointer: a class variable whose initialiser
-    # is a call is initialised lazily through `__crystal_once`, which asks
-    # for `Thread.current`, which allocates, which reads the variable — a
-    # spin on the once-lock at boot, before the runtime's first thread exists.
+    # One TLS read carries both the heap address (high 64 bits) and the set
+    # address (low 64 bits). Check the heap identity before dereferencing the
+    # set: a peer can destroy a quiescent heap while this thread still caches
+    # its now-freed set, then this thread allocates from a different heap.
+    # Keeping the identity inside the set made that check a use-after-free.
+    # A literal integer initializer avoids __crystal_once and its boot-time
+    # Thread.current allocation recursion. UInt128 keeps the single TLS
+    # accessor introduced for the hit path without reading freed memory.
     @[ThreadLocal]
-    @@tls_cursor_set : UInt64 = 0_u64
+    @@tls_cursor_cache : UInt128 = 0_u128
     # Set by the thread-exit destructor: any allocation after it uses the
     # fallback set, so a retired set is never re-adopted by a dying thread.
     @[ThreadLocal]
@@ -238,9 +233,9 @@ module Gcry
 
     @[AlwaysInline]
     protected def cursor_set_cached : CursorSet*
-      set = Pointer(CursorSet).new(@@tls_cursor_set)
-      return set if set.null? || set.value.heap == self.as(Void*).address
-      Pointer(CursorSet).null
+      cached = @@tls_cursor_cache
+      return Pointer(CursorSet).null unless (cached >> 64) == self.as(Void*).address
+      Pointer(CursorSet).new(cached.to_u64!)
     end
 
     # Never raises and never allocates from the managed heap: it runs under
@@ -252,7 +247,7 @@ module Gcry
       key = current_thread_key
       exiting = @@tls_cursor_exiting != 0_u8
       set = @cursor_lock.sync { cursor_set_under_lock(key, exiting) }
-      @@tls_cursor_set = set.address
+      @@tls_cursor_cache = (self.as(Void*).address.to_u128 << 64) | set.address.to_u128
       set
     end
 
@@ -262,7 +257,7 @@ module Gcry
           # Thread exit. Plain stores: the collector reads them only with this
           # thread frozen or gone, and the fallback takes any later allocation.
           p.as(CursorSet*).value.state = CursorSet::STATE_EXITING
-          @@tls_cursor_set = 0_u64
+          @@tls_cursor_cache = 0_u128
           @@tls_cursor_exiting = 1_u8
         }) == 0
       end
@@ -298,10 +293,7 @@ module Gcry
 
     private def alloc_cursor_set : CursorSet*
       set = LibC.malloc(LibC::SizeT.new(sizeof(CursorSet))).as(CursorSet*)
-      unless set.null?
-        set.as(UInt8*).clear(sizeof(CursorSet))
-        set.value.heap = self.as(Void*).address
-      end
+      set.as(UInt8*).clear(sizeof(CursorSet)) unless set.null?
       set
     end
 
@@ -362,8 +354,8 @@ module Gcry
         end
         i += 1
       end
-      # This thread's cache first, while the set it names is still readable.
-      @@tls_cursor_set = 0_u64 unless cursor_set_cached.null?
+      # Drop this thread's cache before freeing its sets.
+      @@tls_cursor_cache = 0_u128 unless cursor_set_cached.null?
       each_cursor_set { |set| LibC.free(set.as(Void*)) }
       @cursor_set_count = 0
       @fallback_cursor_set = Pointer(CursorSet).null

@@ -57,3 +57,4 @@ require "./atomic_leaf_queue_spec"
 
 require "./header_dormant_spec"
 require "./header_clear_race_spec"
+require "./cursor_cache_lifetime_spec"
