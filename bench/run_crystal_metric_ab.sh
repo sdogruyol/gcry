@@ -66,6 +66,7 @@ fi
 
 cd "$CM"
 shards install --production 2>/dev/null || shards install
+"$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
 
 echo "Building crystal-metric-boehm..."
 crystal build --release main.cr -o "$BIN/crystal-metric-boehm"

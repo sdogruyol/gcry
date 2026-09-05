@@ -456,6 +456,14 @@ jobs:
         run: |
           make parallel-mark-termination
 
+      # Four workers must actually mark, not merely be configured. Only in the
+      # Makefile until now, which is why a ~50% flake in it never reached a
+      # CI run: the harness marked 72 objects, so the master drained the stack
+      # before a worker woke.
+      - name: Parallel mark workers steal
+        run: |
+          make parallel-mark-process
+
       - name: Suspended-thread register roots
         run: |
           make greg-roots

@@ -44,6 +44,7 @@ rm -f "$OUT/trials.tsv" "$OUT/summary.txt"
 
 cd "$KEMAL"
 shards install --production 2>/dev/null || shards install
+"$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
 echo "Building kemal-gcry (EC${EC} soft soak)..."
 crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-soft-soak"
 

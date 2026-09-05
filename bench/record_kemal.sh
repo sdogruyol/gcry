@@ -98,6 +98,7 @@ git worktree add --detach "$WORKTREE" "$PREV" >/dev/null
 (
   cd "$WORKTREE/bench/kemal"
   shards install >/dev/null
+  "$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$WORKTREE"
   crystal build -Dgc_none --release src/server.cr -o "$ROOT/bin/kemal-gcry-prev"
 )
 
@@ -105,6 +106,7 @@ echo "=== current $LABEL (working tree) ==="
 (
   cd bench/kemal
   shards install >/dev/null
+  "$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
   crystal build -Dgc_none --release src/server.cr -o ../../bin/kemal-gcry-curr
 )
 

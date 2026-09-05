@@ -96,6 +96,7 @@ if [ "${BENCH_SKIP_BUILD:-0}" = "1" ]; then
 else
   cd "$KEMAL"
   shards install --production 2>/dev/null || shards install
+  "$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
   echo "Building $BIN_NAME ${BUILD_FLAGS:+($BUILD_FLAGS)}..."
   # $BUILD_FLAGS unquoted on purpose: a list of flags, not one word.
   crystal build -Dgc_none $BUILD_FLAGS --release src/server.cr -o "$BIN/$BIN_NAME"

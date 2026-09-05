@@ -50,6 +50,7 @@ build_exclusive() {
   echo -n "  build exclusive → $outbin ... "
   (
     cd "$AT"
+    "$ROOT/bench/assert_gcry_lib.sh" "$AT/lib/gcry" "$ROOT" >/dev/null
     ACIKTURKIYE_ENV=demo \
       CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN=0 \
       "$CUS" build -Dgc_none --release "${EC_FLAGS[@]}" --frame-pointers=always \
@@ -68,6 +69,7 @@ build_base() {
   echo -n "  build base → $outbin ... "
   (
     cd "$AT"
+    "$ROOT/bench/assert_gcry_lib.sh" "$AT/lib/gcry" "$ROOT" >/dev/null
     ACIKTURKIYE_ENV=demo \
       "$cry" build -Dgc_none --release "${EC_FLAGS[@]}" \
       -o "$outbin" src/acikturkiye.cr
