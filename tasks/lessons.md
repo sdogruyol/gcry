@@ -137,3 +137,6 @@ Rules written after corrections, so the same mistake is not made twice.
   the reviewer's thread points at commits, and the record of what was
   wrong is part of the change. A "split" is new branches with new PRs, not
   a rewritten old one.
+- **One PR, updated in place.** The user wants review fixes to land on the
+  open PR as new commits, not as new PRs — even when a reviewer suggests a
+  split. Offer the split as commit structure and say so in the reply.
