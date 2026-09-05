@@ -86,3 +86,18 @@ checks of this source, separate from the existing 24-hour soak on another tree.
 Seven Python measurement tests pass. Final headerless HTTP confirmation has
 60 error-free trials and matching collector/server source hashes; its throughput
 interval remains inconclusive.
+
+## Native ARM follow-up
+
+The first native CI run exposed a pre-existing header stress defect: the
+reviewed baseline and performance head both fail an existing accounting
+assertion in 10/10 exact-command trials after the new pressure test. The
+baseline also reproduces a buffer failure. Both bitmap representations pass
+all ten trials each. See the [diagnosis and reproducer](../2026-09-06-native-arm/FINDINGS.md).
+
+The cursor-specific process test is now pending in header mode, with an
+explicit opt-in preserving the header reproducer. After this test-only scope
+change, the local header suite passes 32 examples with one pending; both bitmap
+suites pass 32 with none pending. Existing header assertions are unchanged.
+Native ARM CI now includes both bitmap process suites; Darwin already did.
+The header defect remains unresolved and blocks any header-default decision.

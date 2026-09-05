@@ -220,7 +220,10 @@ in [PERFORMANCE_PR34_PROVENANCE.md](PERFORMANCE_PR34_PROVENANCE.md).
 
 Next decisions are evidence-gated: longer application windows on an exclusive
 host, a second independent session and burst/drop/recovery tests for header
-retention, and native ARM/Darwin validation. The existing background soak is
+retention, and resolution of the baseline header stress defect found on native ARM.
+[Native diagnosis](../bench/log/linux/2026-09-06-native-arm/FINDINGS.md) records
+10/10 baseline header failures and 20/20 passing bitmap trials; native CI covers
+both bitmap representations. The existing background soak is
 not validation of this code. Root discovery stops at sub-timers; the simple
 live × factor controller, root coverage, and mark-stack representation remain
 unchanged. Conditional rewrites are deferred, not silently treated as completed.

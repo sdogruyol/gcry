@@ -23,6 +23,7 @@ rewritten to conceal their original build context.
 | `95b3010` | `2f7de39` | Stopped-world refill lookup correction |
 | `3a5cde1` | `22c133a` | Dependency/latency artifacts |
 | `a57a114` | `11c59f5` | Retiring cursor capacity / ordered publication |
+| `19d2799` | `3a65fda` | Final measurements, validation and documentation |
 
 Benchmarked source variants are described in each findings file. In particular,
 the stopped-world cost check uses the refill-only commit with that lookup fix,

@@ -591,6 +591,9 @@ All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
       60 error-free trials and exact collector/server source hash check.
 - [x] Record findings, update plan, and run applicable integration gates.
       Delivery uses new commits on the existing PR head without a force-push.
+- [x] Diagnose native ARM stress failure against the reviewed baseline; preserve
+      the header reproducer and gate cursor regressions in both bitmap layouts.
+- [ ] Resolve the pre-existing native ARM header stress/accounting defect.
 - [ ] Header default decision: independent exclusive-host confirmation,
       burst/drop/recovery and native platform gates still required.
 - [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.
