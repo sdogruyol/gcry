@@ -17,6 +17,8 @@
 
 {% if flag?(:gc_none) %}
   require "gcry"
+  require "../../performance/header_policy"
+  HeaderPolicyExperiment.apply(Gcry.default_heap)
 {% end %}
 
 require "kemal"

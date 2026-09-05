@@ -3,7 +3,9 @@
 `kemal_ab.py` builds each arm from its own checkout, checks its gcry shard,
 then rotates the order each round. Linux only (`/proc`); Python standard
 library, Crystal, shards, and wrk are required. Build sequentially and do not
-edit a source tree during the build/run. Use a quiet host.
+edit a source tree during the build/run. An existing shard lock is shared with
+new worktrees; mismatched existing locks are rejected. If no arm has a lock,
+the first arm resolves dependencies once and the others use that lock. Use a quiet host.
 
 Example `arms.json` (replace checkout paths):
 
@@ -97,3 +99,38 @@ commits alongside the binary hashes. The micro runner records each process's
 JSON, configuration and stdout; a failed process invalidates the run. Its ratios
 are **cost ratios** (candidate/base, lower is better), unlike HTTP throughput
 ratios. Graph trace-only runs use `--metric pause_per_gc_us` and one survival.
+
+
+## Header-policy factorial experiment
+
+The benchmark-only `BENCH_HEADER_POLICY=base|warm|adaptive|coupled` switch
+configures an existing header heap before the workload; it is not a collector
+configuration knob and rejects bitmap builds. `warm` retains a live-following
+budget under the fixed threshold; `adaptive` changes only the threshold;
+`coupled` enables both. Use each arm's `gc_threshold`, `adaptive_threshold`,
+and `empty_chunk_warm_retain` snapshot to verify it was applied.
+
+The same control is available in Kemal and `bench/micro/header_churn.cr`, a
+single-main-thread 8 KiB ring churn. The latter deliberately avoids creating a
+worker alongside main, which would select the multi-mutator release policy.
+Compile it with `--release -Dgc_none`. The micro runner accepts
+`--base-env BENCH_HEADER_POLICY=base --candidate-env BENCH_HEADER_POLICY=coupled`
+(and preserves the base environment in its null arm). No header default is changed by this
+experiment. In HTTP configs put this setting in each arm's `env` explicitly.
+
+
+## Refill availability index
+
+Available chunk addresses are indexed per size class and atomic kind, sorted
+once per capacity generation, and checked against the current chunk index before
+use. Explicit free, sweep reclamation, and retirement of a non-exhausted cursor
+invalidate the generation. Exhausted pools also cache the absence of dormant
+chunks, except when a revive was refused during a live flush walk. Cached
+addresses neither own nor pin chunks; optional metadata mmap failure falls back
+to the previous full search. This preserves lowest-address selection without
+changing chunk layout or the in-flight ownership protocol.
+
+Explicit frees currently invalidate the class index rather than incrementally
+inserting a single address. This favors ordinary GC churn; measure free-heavy
+workloads separately. Metadata is released when the heap is destroyed. Root
+coverage and the adaptive policy are unchanged.

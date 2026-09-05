@@ -23,6 +23,12 @@ class MeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(result["t"], 3.464101615)
         self.assertLess(result["ci_low"], 1)
 
+    def test_refuse_invalid_cost_pairs(self):
+        for xs, ys in [([1, 2], [1]), ([1], [1]), ([1, float("nan")], [1, 2]),
+                       ([1, 2], [0, 2]), ([1, float("inf")], [1, 2])]:
+            with self.subTest(xs=xs, ys=ys), self.assertRaises(ValueError):
+                paired_ratios(xs, ys)
+
     def test_refuse_bad_trials(self):
         original = self.rows()
         variants = [original[:-1], original + [original[0]]]

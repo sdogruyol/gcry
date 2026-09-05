@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 import signal
 from pathlib import Path
@@ -19,13 +20,25 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--metric", default="ns_per_alloc", help="positive cost metric; lower is better")
+    parser.add_argument("--base-env", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--candidate-env", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--args", nargs=argparse.REMAINDER, default=[])
     args = parser.parse_args()
     if args.rounds < 2:
         parser.error("at least two rounds required")
     args.output.mkdir(parents=True, exist_ok=False)
     arms = {"base": str(args.base.resolve()), "null": str(args.base.resolve()), "candidate": str(args.candidate.resolve())}
-    manifest = dict(arms=arms, arguments=args.args, rounds=args.rounds, metric=args.metric,
+    def overrides(items):
+        result = {}
+        for item in items:
+            key, sep, value = item.partition("=")
+            if not sep or not key:
+                parser.error("environment overrides must be KEY=VALUE")
+            result[key] = value
+        return result
+    arm_env = {"base": overrides(args.base_env), "null": overrides(args.base_env),
+               "candidate": overrides(args.candidate_env)}
+    manifest = dict(arms=arms, arm_environment=arm_env, arguments=args.args, rounds=args.rounds, metric=args.metric,
                     binary_sha256={name: hashlib.sha256(Path(path).read_bytes()).hexdigest() for name, path in arms.items()},
                     environment={k: v for k, v in os.environ.items() if k.startswith("GCRY_") or k in ("EC_PARALLELISM", "CRYSTAL_WORKERS")},
                     load_start=os.getloadavg())
@@ -39,7 +52,8 @@ def main():
                 row = dict(arm=name, round=round_id, position=position, load1=os.getloadavg()[0])
                 try:
                     process = subprocess.Popen([arms[name], *args.args], stdout=subprocess.PIPE,
-                                               stderr=subprocess.PIPE, text=True, start_new_session=True)
+                                               stderr=subprocess.PIPE, text=True, start_new_session=True,
+                                               env={**os.environ, **arm_env[name]})
                     try:
                         stdout, stderr = process.communicate(timeout=60)
                     finally:
@@ -53,7 +67,7 @@ def main():
                         raise ValueError(f"exit {process.returncode}")
                     samples = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                     samples = [sample for sample in samples if args.metric in sample]
-                    if len(samples) != 1 or samples[0][args.metric] <= 0:
+                    if len(samples) != 1 or not math.isfinite(samples[0][args.metric]) or samples[0][args.metric] <= 0:
                         raise ValueError("expected one positive measurement; run survival cases separately")
                     row["sample"] = samples[0]
                     values[name].append(samples[0][args.metric])

@@ -19,6 +19,10 @@ CRITICAL.update({40: 2.0211, 60: 2.0003, 120: 1.9799})
 
 
 def paired_ratios(xs, ys):
+    if len(xs) != len(ys) or len(xs) < 2:
+        raise ValueError("need at least two complete paired measurements")
+    if any(not math.isfinite(x) or x <= 0 for x in [*xs, *ys]):
+        raise ValueError("paired measurements must be finite and positive")
     ratios = [x / y for x, y in zip(xs, ys)]
     mean = stats.mean(ratios)
     se = stats.stdev(ratios) / math.sqrt(len(ratios))
