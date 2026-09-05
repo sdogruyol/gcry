@@ -815,10 +815,10 @@ module Gcry
       end
     end
 
-    # The hit path. Everything a small allocation needs when one mutator
-    # thread owns the heap, the bitmap allocator is on, and no debug hook,
-    # nursery or collection is in play — and nothing else: no lock, no
-    # atomic, no call layers. Any other case returns null and the caller
+    # The hit path for a thread-owned bitmap cursor, through the largest
+    # small size class. Ownership removes the class lock; the occupancy OR
+    # remains atomic against cross-thread free. Nursery/collection paths
+    # still use allocate. Any other case returns null and the caller
     # takes `allocate`, which also recomputes `@fast_path` from the current
     # configuration on every slow call, so the first allocation after any
     # change goes the slow way and the flag is never stale.
@@ -832,9 +832,12 @@ module Gcry
       return Pointer(Void).null if @collecting || @incremental_marking || @lazy_sweep_pending || size > FAST_PATH_MAX
       set = cursor_set_cached
       return Pointer(Void).null if set.null? || set.value.no_hit_path != 0_u8
-      i = ((size &+ 7) >> 3).to_i32
-      index = @fit_index[i].to_i32
-      payload = @fit_payload[i]
+      payload, index = if size <= 2048_u64
+                         i = ((size &+ 7) >> 3).to_i32
+                         {@fit_payload[i], @fit_index[i].to_i32}
+                       else
+                         SizeClasses.fit_medium(size)
+                       end
       s = CursorSet.slot(set, atomic ? index + SIZE_CLASS_COUNT : index)
       return Pointer(Void).null if s.value.free_mask == 0_u64
       local = set.value.bytes_local &+ payload
@@ -868,7 +871,7 @@ module Gcry
       user
     end
 
-    FAST_PATH_MAX = 2048_u64
+    FAST_PATH_MAX = 32768_u64
     @fast_path = false
     @fit_index = uninitialized StaticArray(UInt8, 257)
     @fit_payload = uninitialized StaticArray(UInt32, 257)

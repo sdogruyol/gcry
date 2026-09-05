@@ -578,7 +578,8 @@ All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
 
 - [x] Measurement infrastructure: maintained paired runner/analyzer, original alloc_ns benchmark,
       stable graph churn, counter names, root sub-timers; verify instruments.
-- [ ] Medium-buffer cursor dispatch and boundary/zeroing/process regressions.
+- [x] Medium-buffer cursor dispatch and boundary/zeroing/process regressions.
+      20-round atomic EC4 cost −22.5%; HTTP validation still pending.
 - [ ] Refill availability indexing, lifecycle/race coverage, scaling trials.
 - [ ] Header-retention factorial trial; change defaults only on measured evidence.
 - [ ] Atomic-leaf enqueue skip; graph correctness and paired phase measurements.
