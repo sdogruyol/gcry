@@ -43,6 +43,7 @@ export ACIKTURKIYE_ENV=demo
 
 if [ "$SKIP_BUILD" != "1" ]; then
   echo "=== build both arms (--release) ==="
+  "$ROOT/bench/assert_gcry_lib.sh" "$AT/lib/gcry" "$ROOT"
   crystal build -Dgc_none --release src/acikturkiye.cr -o bin/acikturkiye-gcry
   crystal build --release src/acikturkiye.cr -o bin/acikturkiye-boehm
 fi

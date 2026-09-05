@@ -222,6 +222,7 @@ build_kemal() {
   echo "  crystal build flags: ${CRYSTAL_BUILD_FLAGS[*]}"
   cd "$ROOT/bench/kemal"
   shards install --production 2>/dev/null || shards install
+  "$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
   mkdir -p "$ROOT/bin"
   # DEBUG / CRYSTAL_FLAGS always rebuild; default release may reuse cached boehm.
   if [[ "$FORCE_REBUILD" == "1" ]]; then

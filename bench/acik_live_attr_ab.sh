@@ -26,6 +26,7 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   echo "=== build exclusive → $BIN ==="
   (
     cd "$AT"
+    "$ROOT/bench/assert_gcry_lib.sh" "$AT/lib/gcry" "$ROOT" >/dev/null
     ACIKTURKIYE_ENV=demo \
       CRYSTAL_EMIT_STACKMAP=1 CRYSTAL_STACKMAP_PER_FUN=0 \
       "$CUS" build -Dgc_none --release -Dpreview_mt -Dexecution_context --frame-pointers=always \

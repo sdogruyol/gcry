@@ -66,6 +66,7 @@ build_one() {
   echo -n "  build $name ... "
   (
     cd "$AT"
+    "$ROOT/bench/assert_gcry_lib.sh" "$AT/lib/gcry" "$ROOT" >/dev/null
     ACIKTURKIYE_ENV=demo "$@" -o "$outbin" src/acikturkiye.cr
   ) >"$OUT/build-$name.log" 2>&1 || {
     echo "FAIL"

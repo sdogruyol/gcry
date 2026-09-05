@@ -26,6 +26,7 @@ mkdir -p "$BIN"
 
 cd "$KEMAL"
 shards install --production 2>/dev/null || shards install
+"$ROOT/bench/assert_gcry_lib.sh" lib/gcry "$ROOT"
 
 echo "Building kemal-gcry-e2e..."
 crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-e2e"

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Every benchmark harness refuses to build against the wrong gcry.** The
+  Kemal and acikturkiye benches take gcry as a `path: ../..` shard, and
+  `shards install` materialises that as an *absolute* symlink to whichever
+  checkout ran it. A copied `lib/`, a scratch tree seeded from the main
+  checkout, or an install that kept an existing `lib/` then compiles the main
+  checkout's collector and attributes the number to the branch the harness
+  thinks it is measuring. It has cost two published tables — the
+  `acikturkiye/lib/gcry` run ROADMAP records, and PR #33's Kemal table, which
+  PR #34's log retracts for exactly this. `bench/assert_gcry_lib.sh` resolves
+  the link after every `shards install` and fails hard, both paths printed,
+  unless it is the tree the harness runs from; every harness that builds a
+  bench binary calls it, and the line it prints on success names the commit
+  (`gcry lib: … (93bc3bb +dirty)`) so a log says what it measured.
+
 ## [0.22.0] - 2026-09-05
 
 Minor release, and the reason it is minor rather than patch: the collector
