@@ -877,9 +877,19 @@ module Gcry
     @[AlwaysInline]
     private def fast_alloc(size : UInt64, atomic : Bool) : Void*
       return Pointer(Void).null unless @fast_path
-      return Pointer(Void).null if @collecting || @incremental_marking || @lazy_sweep_pending || size > FAST_PATH_MAX
+      if @collecting || @incremental_marking || @lazy_sweep_pending
+        @fast_miss_collecting &+= 1
+        return Pointer(Void).null
+      end
+      if size > FAST_PATH_MAX
+        @fast_miss_size &+= 1
+        return Pointer(Void).null
+      end
       set = cursor_set_cached
-      return Pointer(Void).null if set.null? || set.value.no_hit_path != 0_u8
+      if set.null? || set.value.no_hit_path != 0_u8
+        @fast_miss_no_set &+= 1
+        return Pointer(Void).null
+      end
       payload, index = if size <= 2048_u64
                          i = ((size &+ 7) >> 3).to_i32
                          {@fit_payload[i], @fit_index[i].to_i32}
@@ -887,9 +897,16 @@ module Gcry
                          SizeClasses.fit_medium(size)
                        end
       s = CursorSet.slot(set, atomic ? index + SIZE_CLASS_COUNT : index)
-      return Pointer(Void).null if s.value.free_mask == 0_u64
+      if s.value.free_mask == 0_u64 && s.value.chunk.null?
+        # No chunk in hand: only the locked path takes one from the pool.
+        @fast_miss_refill &+= 1
+        return Pointer(Void).null
+      end
       local = set.value.bytes_local &+ payload
-      return Pointer(Void).null if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+      if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+        @fast_miss_threshold &+= 1
+        return Pointer(Void).null
+      end
       # Mid-allocation from here: a stop-the-world that finds the sentinel
       # pins this set rather than retiring it, so the slot is re-read after
       # the store — a suspension between the check above and here may have
@@ -898,8 +915,13 @@ module Gcry
       Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
       mask = s.value.free_mask
       if mask == 0_u64
-        s.value.in_flight = Pointer(Void).null
-        return Pointer(Void).null
+        # The word is used up; the next word of the held chunk needs no lock.
+        mask = cursor_advance_word(s, index)
+        if mask == 0_u64
+          s.value.in_flight = Pointer(Void).null
+          @fast_miss_refill &+= 1
+          return Pointer(Void).null
+        end
       end
       bit = mask.trailing_zeros_count
       addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]

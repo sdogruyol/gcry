@@ -178,6 +178,17 @@ module Gcry
 
     getter bitmap_locked_allocations : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
+    # Hit-path census. `cursor_word_advances` counts the cursor moving to the
+    # next word of the chunk it holds with no lock (`cursor_advance_word`);
+    # the `fast_miss_*` counters say why an allocation left the hit path for
+    # the locked one. Plain increments, best-effort across threads, exact for
+    # one mutator — the same standing as `bitmap_locked_allocations`.
+    getter cursor_word_advances : UInt64 = 0_u64
+    getter fast_miss_collecting : UInt64 = 0_u64
+    getter fast_miss_size : UInt64 = 0_u64
+    getter fast_miss_no_set : UInt64 = 0_u64
+    getter fast_miss_refill : UInt64 = 0_u64
+    getter fast_miss_threshold : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
     getter bitmap_dormant_revives : UInt64 = 0_u64
 
@@ -676,6 +687,46 @@ module Gcry
 
       @bitmap_locked_allocations &+= 1
       BlockHeader.user_from(header)
+    end
+
+    # Move a held cursor to the next word of its chunk that has free blocks,
+    # with no lock. The chunk is CURSOR-held: no other cursor takes it and a
+    # sweep with the world running leaves it alone (a set frozen
+    # mid-allocation keeps its chunks pinned across the stop, an idle one is
+    # retired there and never gets here). The one concurrent writer of its
+    # occupancy is a `free` clearing a bit, and the locked refill tolerates
+    # that the same way — a block freed behind the cursor is found on the
+    # chunk's next pass. The blacklist is written only while marking, when
+    # this thread is stopped. Runs inside the mid-allocation window, so a
+    # stop-the-world that lands during the scan pins the set rather than
+    # retiring the slot under it. Zero when the slot holds no chunk or the
+    # chunk is exhausted; the caller then takes the locked path, which
+    # retires the chunk and takes another from the pool.
+    #
+    # Measured before this: 96% of locked refills (`bitmap_alloc_refills`
+    # 705 k against `bitmap_alloc_chunk_advances` 29 k per 15 s of Kemal
+    # `/json`) were exactly this word advance, taken under the class lock.
+    @[AlwaysInline]
+    protected def cursor_advance_word(s : CursorSlot*, index : Int32) : UInt64
+      chunk = s.value.chunk
+      return 0_u64 if chunk.null?
+      nblocks = chunk_block_count(chunk)
+      words = ((nblocks + 63) >> 6).to_i32
+      word = s.value.word
+      while word < words
+        mask = chunk_free_mask(chunk, word, nblocks)
+        if mask != 0_u64
+          s.value.word = word
+          s.value.free_mask = mask
+          s.value.word_base = ChunkHeader.data_start(chunk).address &+
+                              (word.to_u64 << 6) &* @block_bytes[index]
+          s.value.occ_word = ChunkHeader.occ_bitmap(chunk) + word
+          @cursor_word_advances &+= 1
+          return mask
+        end
+        word += 1
+      end
+      0_u64
     end
 
     # Advance the cursor to the next word with a free block, taking another

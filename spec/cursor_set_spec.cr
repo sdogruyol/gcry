@@ -32,6 +32,27 @@ describe "per-thread cursor sets" do
     end
   end
 
+  it "moves to the next word of its chunk without the locked path" do
+    heap = Gcry::Heap.new
+    begin
+      heap.bitmap_alloc = true
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      # The first block of the class fills the cursor through the locked path.
+      heap.malloc(48)
+      locked = heap.bitmap_locked_allocations
+      hits = heap.cursor_hit_allocations
+      # A bitmap word covers 64 blocks; 300 more cross four word boundaries
+      # inside the same 128 KiB chunk, and every one of them is a hit.
+      300.times { heap.malloc(48) }
+      heap.cursor_hit_allocations.should eq(hits + 300)
+      heap.bitmap_locked_allocations.should eq(locked)
+      heap.cursor_word_advances.should be >= 4_u64
+    ensure
+      heap.destroy
+    end
+  end
+
   it "credits the hit path's bytes to the heap at a collection" do
     heap = Gcry::Heap.new
     begin
