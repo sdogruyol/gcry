@@ -1095,9 +1095,10 @@ module Gcry
       end
     end
 
-    # Mutator free / Parallel: CAS. STW sweep is single-threaded (world
-    # stopped) — plain set matches pre-atomic bebedae and avoids a CAS per
-    # dead object (was ~half of phase_sweep on Kemal EC1).
+    # Only a stopped world permits the collector's non-atomic updates.
+    # @collecting remains true through lazy sweep and post-STW flush, while
+    # mutators debit these same counters. Bitmap heaps imply atomicity even
+    # when the explicit heap_counters_atomic setting is false.
     private def live_objects_dec : Nil
       live_objects_sub(1_u64)
     end
@@ -1107,7 +1108,7 @@ module Gcry
       # A block allocated on a hit path and not yet credited would make this
       # saturate at zero and lose the decrement for good.
       credit_all_cursor_sets if @live_objects.get < n
-      if @collecting || !@heap_counters_atomic
+      if @world_stopped || !counters_atomic?
         cur = @live_objects.get
         @live_objects.set(cur > n ? cur - n : 0_u64)
         return
@@ -1120,7 +1121,7 @@ module Gcry
     end
 
     private def free_bytes_add(n : UInt64) : Nil
-      if @collecting || !@heap_counters_atomic
+      if @world_stopped || !counters_atomic?
         @free_bytes.set(@free_bytes.get &+ n)
       else
         @free_bytes.add(n)
