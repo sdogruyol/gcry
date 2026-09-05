@@ -980,7 +980,8 @@ module Gcry
 
       # Skip memset when memory is still MAP_ANONYMOUS-zeroed (fresh chunk /
       # fresh large mmap). Freelist reuse / large-cache hits still clear.
-      # Check clean *after* alloc — refill may have just marked the freelist clean.
+      # Freelist allocation returns its cleanliness while holding the class
+      # lock: a peer may refill the class before this caller clears its block.
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
@@ -995,24 +996,22 @@ module Gcry
         end
         needs_clear = clear && from_cache
       elsif @nursery_enabled
-        user = if @tlab_enabled
-                 # Counters Atomic inside tlab_alloc_small (no @alloc_lock on hit).
-                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded)
-               else
-                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
-               end
-        needs_clear = clear && !@nursery_freelist_clean[class_index]
+        user, clean = if @tlab_enabled
+                        # A thread-local list can contain recycled blocks even
+                        # when another thread has a fresh global freelist.
+                        {tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded), false}
+                      else
+                        alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
+                      end
+        needs_clear = clear && !clean
       else
-        # `&& !@bitmap_alloc`: TLAB is a freelist mechanism and the pool cursor
-        # replaces it. Dispatching to it here would bypass the bitmap allocator
-        # entirely, so `occ` would never be set and the streaming sweep — which
-        # trusts `occ` completely — would reclaim every live object.
-        user = if @tlab_enabled && !@bitmap_alloc
-                 tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded)
-               else
-                 alloc_old_small(rounded.to_u32, flags, class_index, rounded)
-               end
-        needs_clear = clear && !@freelist_clean[class_index]
+        # TLAB is a freelist mechanism; bitmap allocation must maintain occ.
+        user, clean = if @tlab_enabled && !@bitmap_alloc
+                        {tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded), false}
+                      else
+                        alloc_old_small(rounded.to_u32, flags, class_index, rounded)
+                      end
+        needs_clear = clear && !clean
       end
 
       # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
@@ -1128,27 +1127,27 @@ module Gcry
       end
     end
 
-    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      user = alloc_nursery_locked(payload, flags, index)
+    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : {Void*, Bool}
+      user, clean = alloc_nursery_locked(payload, flags, index)
       if user.null?
         oom!("failed to refill nursery size class #{payload}") unless retry_after_emergency_collect?
-        user = alloc_nursery_locked(payload, flags, index)
+        user, clean = alloc_nursery_locked(payload, flags, index)
         oom!("failed to refill nursery size class #{payload}") if user.null?
       end
       free_bytes_sub(payload.to_u64)
       @nursery_alloc_bytes.add(payload.to_u64)
       note_alloc_bytes(rounded)
-      user
+      {user, clean}
     end
 
-    private def alloc_nursery_locked(payload : UInt32, flags : UInt32, index : Int32) : Void*
+    private def alloc_nursery_locked(payload : UInt32, flags : UInt32, index : Int32) : {Void*, Bool}
       with_freelist_lock(index, true) do
         u = @nursery_freelists[index]
 
         if u.null?
           refill_size_class(index, payload, nursery: true)
           u = @nursery_freelists[index]
-          return Pointer(Void).null if u.null?
+          return {Pointer(Void).null, false} if u.null?
         end
 
         if @blacklist_enabled
@@ -1169,18 +1168,18 @@ module Gcry
         if @incremental_marking || @collecting
           heap_set_mark(header)
         end
-        u
+        {u, @nursery_freelist_clean[index]}
       end
     end
 
-    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : {Void*, Bool}
       # `&& !@bitmap_alloc`: the batched path builds and drains a freelist run,
       # so it would bypass `occ` entirely. The comment below used to claim
       # alloc_batch was "inert by construction" under the bitmap representation;
       # it is not — `bitmap_alloc=` forces `@tlab_enabled = false`, which *opens*
       # this gate rather than closing it.
       if @alloc_batch > 0 && !@tlab_enabled && !@bitmap_alloc
-        return alloc_old_small_batched(payload, flags, index, rounded)
+        return {alloc_old_small_batched(payload, flags, index, rounded), false}
       end
 
       # Tight-grow: never collect under the freelist lock (STW vs lock deadlock).
@@ -1205,12 +1204,18 @@ module Gcry
         end
       end
 
-      user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+      user, clean = with_freelist_lock(index, false) do
+        claimed = alloc_old_small_locked(payload, flags, index)
+        {claimed, @freelist_clean[index]}
+      end
       if user.null?
         # The freelist lock is gone by now, so both the collection and the
         # raise are legal here — neither was inside `map_chunk`.
         oom!("failed to refill size class #{payload}") unless retry_after_emergency_collect?
-        user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+        user, clean = with_freelist_lock(index, false) do
+          claimed = alloc_old_small_locked(payload, flags, index)
+          {claimed, @freelist_clean[index]}
+        end
         oom!("failed to refill size class #{payload}") if user.null?
       end
       # `user` is in this frame now, which the scan accepts, so the pool slot's
@@ -1220,7 +1225,7 @@ module Gcry
       clear_bitmap_alloc_in_flight(index, flags, user) if @bitmap_alloc
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
-      user
+      {user, clean}
     end
 
     # Freelist lock held. Prefer-list first (tight_grow), then global, then map.
@@ -1624,7 +1629,6 @@ module Gcry
           cursor = ChunkHeader.data_start(chunk).as(UInt8*)
           limit = ChunkHeader.data_end(chunk).as(UInt8*)
           free_head = Pointer(Void).null
-          added = 0_u64
           while (cursor + block_bytes) <= limit
             header = cursor.as(BlockHeader*)
             user = (cursor + BlockHeader::SIZE).as(Void*)
@@ -1632,22 +1636,23 @@ module Gcry
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, free_head)
             free_head = user
             cursor += block_bytes
-            added += payload
           end
+          # Physical release excludes the page containing chunk metadata,
+          # and Darwin's reusable pages need not lose their contents at all.
+          # Relinking headers therefore does not make these payloads zero.
           if nursery
             @nursery_freelists[index] = free_head
-            @nursery_freelist_clean[index] = true
+            @nursery_freelist_clean[index] = false
           elsif @tight_grow
             fold_prefer_into_global(index)
             @grow_lo[index] = ChunkHeader.data_start(chunk).address
             @grow_hi[index] = ChunkHeader.data_end(chunk).address
             @prefer_freelists[index] = free_head
-            @freelist_clean[index] = true
+            @freelist_clean[index] = false
           else
             @freelists[index] = free_head
-            @freelist_clean[index] = true
+            @freelist_clean[index] = false
           end
-          @free_bytes.add(added)
           return true
         end
         chunk = chunk.value.next

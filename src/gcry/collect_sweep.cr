@@ -149,6 +149,15 @@ module Gcry
                       ChunkHeader.set_idle(chunk, true)
                       @empty_chunk_grace_kept &+= 1
                     elsif can_dormant
+                      # Count dormant capacity once, just like bitmap chunks.
+                      # The header discover pass only retired live objects;
+                      # its previously FREE blocks are already in free_bytes.
+                      # Revival rebuilds headers but adds no capacity.
+                      unless bitmap_alloc_chunk?(chunk)
+                        newly_free = usable_payload - free_payload
+                        free_bytes_add(newly_free)
+                        @bytes_reclaimed_since_gc += newly_free
+                      end
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).
                       ChunkHeader.set_dormant(chunk, true)
