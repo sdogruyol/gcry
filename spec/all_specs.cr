@@ -50,6 +50,7 @@ require "./chunk_radix_spec"
 # they were exercising Boehm.
 
 require "./cursor_set_spec"
+require "./empty_chunk_grace_spec"
 require "./adaptive_threshold_spec"
 require "./bitmap_pool_search_spec"
 require "./atomic_leaf_queue_spec"

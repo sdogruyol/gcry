@@ -739,6 +739,9 @@ module Gcry
           chunk = bitmap_take_pool_chunk(index, payload, atomic)
           return false if chunk.null?
           ChunkHeader.set_cursor(chunk, true)
+          # In use again: a fully free chunk past the warm budget keeps its
+          # one cycle of grace only while nothing takes it.
+          ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
           s.value.chunk = chunk
           s.value.word = 0
           @bitmap_alloc_chunk_advances &+= 1

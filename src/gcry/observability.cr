@@ -47,6 +47,7 @@ module Gcry
         free_bytes:                  heap.free_bytes,
         bytes_since_gc:              heap.bytes_since_gc,
         unmapped_bytes:              heap.unmapped_bytes,
+        empty_chunk_grace_kept:      heap.empty_chunk_grace_kept,
         live_objects:                heap.live_objects,
         pause_count:                 p.count,
         pause_last_ns:               p.last_ns,

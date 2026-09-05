@@ -93,6 +93,8 @@ module Gcry
 
               if major
                 @size_class_live_bytes += live_payload
+                # Something survived: whatever grace the chunk had is over.
+                ChunkHeader.set_idle(chunk, false) if any_live && ChunkHeader.idle?(chunk)
                 unless any_live
                   mapped = chunk.value.mapped_bytes
                   @fully_free_chunk_bytes += mapped
@@ -109,6 +111,24 @@ module Gcry
                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
                     can_dormant = within_retain ||
                                   (!munmap_empty_chunks_this_collect? && @parallel_empty_chunk_dormant_all && @empty_chunk_retain > 0)
+                    # One cycle's grace before an unmap. The warm budget is
+                    # the threshold, and a cycle allocates the threshold, so
+                    # the two sit on a knife edge: a class that runs one chunk
+                    # short maps a fresh one, the next sweep finds one chunk
+                    # past the budget and unmaps it, and the cycle after maps
+                    # again. Measured on Kemal `/json`: two rounds in twenty
+                    # unmapped and re-mapped 74–125 MB in 15 s (about two
+                    # chunks per collection, `unmapped_bytes`) and each lost
+                    # ~8% of throughput to the mmap, munmap, page faults and
+                    # index churn. A chunk past the budget is now unmapped
+                    # only when it was already past it at the previous major
+                    # and no cursor took it in between — a chunk the cycle
+                    # actually reuses never accumulates the second strike, so
+                    # the resident set settles at what the cycle needs rather
+                    # than churning around it. Bitmap chunks only: the header
+                    # allocator has no hook that clears the flag on reuse.
+                    grace = !within_warm && !can_dormant && munmap_empty_chunks_this_collect? &&
+                            bitmap_alloc_chunk?(chunk) && !ChunkHeader.idle?(chunk)
                     # Drop freelist nodes via one rebuild_size_class_freelist per
                     # class at end of sweep (rebuild skips DORMANT / dropped
                     # chunks). Per-empty unlink_freelist_range was O(freelist ×
@@ -122,6 +142,12 @@ module Gcry
                       bb = BlockHeader::SIZE.to_u64 + p.to_u64
                       freelist_reserve_fully_dead(chunk, class_index, p, bb)
                       warm_budget_used += mapped
+                      ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
+                    elsif grace
+                      # Kept mapped outside the budget; the next major unmaps
+                      # it unless a cursor takes it first.
+                      ChunkHeader.set_idle(chunk, true)
+                      @empty_chunk_grace_kept &+= 1
                     elsif can_dormant
                       # Dormant: DONTNEED RSS, keep VA in chunk index (safe under
                       # Parallel — munmap was the soft-realloc amplifier).

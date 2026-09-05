@@ -477,6 +477,9 @@ module Gcry
     getter size_class_chunk_count : UInt64 = 0_u64
     getter fully_free_chunk_bytes : UInt64 = 0_u64
     getter released_chunk_bytes : UInt64 = 0_u64
+    # Fully free chunks past the warm budget kept mapped for one more cycle
+    # (`ChunkHeader::Flags::IDLE`).
+    getter empty_chunk_grace_kept : UInt64 = 0_u64
     getter size_class_live_bytes : UInt64 = 0_u64
     # Kept size-class chunk fill histogram (live_payload / usable_payload).
     getter chunk_fill_lt25 : UInt64 = 0_u64
