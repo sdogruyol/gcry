@@ -1,0 +1,118 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+/tmp/gcry-crystal-headerless build -Dgc_none bench/thread_birth_root.cr -o bin/thread_birth_root --error-trace
+bin/thread_birth_root
+=== thread-birth root ===
+mode: hold (root armed)
+victim 0x7fc54d6741e0: live?=true intact=true
+births armed=2 released=1 outstanding=1 overflows=0
+
+ok — the object a thread is being born with survives a collection it could not have survived
+GCRY_THREAD_BIRTH_NOROOT=1 bin/thread_birth_root --noroot
+=== thread-birth root ===
+mode: noroot (records births, roots nothing)
+victim 0x7fae53ca51e0: live?=false intact=true
+births armed=2 released=1 outstanding=1 overflows=0
+
+ok — the same births recorded, nothing rooted, and the block dies
+GCRY_THREAD_BIRTH_ROOT=0 bin/thread_birth_root --control
+=== thread-birth root ===
+mode: control (GCRY_THREAD_BIRTH_ROOT=0)
+victim 0x7fa0c58f51e0: live?=false intact=true
+births armed=0 released=0 outstanding=0 overflows=0
+
+ok — with the knob off nothing is armed and the block dies, so the hold arm's survival is the root's doing
+bin/thread_birth_root --burst
+=== thread-birth root ===
+mode: burst (table full, birth overflows)
+filled 64 birth(s) into a 64-slot table
+victim 0x7fb825d861e0: live?=true intact=true
+births armed=64 released=1 outstanding=65 overflows=2
+
+ok — the birth overflowed a full table and was rooted anyway
+GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 bin/thread_birth_root --burst-unrooted
+=== thread-birth root ===
+mode: burst-unrooted (GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1, table full)
+filled 64 birth(s) into a 64-slot table
+victim 0x7f6ac78b91e0: live?=false intact=true
+births armed=64 released=1 outstanding=63 overflows=2
+
+ok — with the table full and the overflow left unrooted, the block dies
+/tmp/gcry-crystal-headerless build -Dgc_none bench/stw_index_race.cr -o bin/stw_index_race --error-trace
+bin/stw_index_race
+=== STW chunk-index race ===
+4 allocating threads, 200 collections per arm
+  default     unlocked reads: collector 248280, other threads 0 (last 0x0)
+  late-clear  unlocked reads: collector 267377, other threads 12373 (last 0x7f7899fcc6c0)
+
+ok — with the flag cleared before the resume loop no mutator reads the index unlocked, and with it cleared after they do
+/tmp/gcry-crystal-headerless build -Dgc_none bench/scheduler_roots.cr -o bin/scheduler_roots --error-trace
+GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 bin/scheduler_roots
+=== Parallel execution-context root pins ===
+mode: hold (Parallel EC up; pins must be counted)
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 2 listed, 2 bounded, 1 staged. collection 0
+pins on a collection before any Parallel EC: 25
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 5 listed, 5 bounded, 3 staged. collection 2
+schedulers: 4 (asked for 4)
+pin slots per object: context 12, scheduler 7
+pins with the context up: 76 (delta 51, at least 45 expected)
+ivars too wide to pin: 0
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 6 listed, 6 bounded, 1 staged. collection 3
+Isolated: 18 further pins with it up (at least 15 expected for its own ivars)
+parked fibers still live: 16/16
+named structures live: 16/16
+
+ok — the Parallel block pinned its structures and nothing parked in the context was swept. See the header: the delta is the gate, not the survival.
+GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 bin/scheduler_roots --control
+=== Parallel execution-context root pins ===
+mode: control (no Parallel EC; the counter must not move)
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 2 listed, 2 bounded, 1 staged. collection 0
+pins on a collection before any Parallel EC: 25
+pins on a second such collection:            25
+delta: 0
+
+ok — the pin count is flat with no Parallel EC, so a non-zero delta in the other arm is attributable to the context

@@ -80,3 +80,13 @@ The initial application run in `/tmp/gcry-final-kemal` was interrupted for the
 fix and is not used for claims. Its replacement builds the corrected source
 from scratch. The growth-only mechanism is unchanged: an exhausted growing
 pool has no cached addresses to resolve.
+
+
+## Final retirement/publication correction
+
+A later two-thread regression found that a free behind an owned cursor can be
+hidden by a cached empty search until ownership ends. Final retirement checks
+that chunk for capacity before deciding whether to invalidate the generation;
+publication uses release/acquire ordering. The completed implementation and
+repeat trials are in [the final refill findings](../2026-09-06-refill-final/FINDINGS.md).
+Use those numbers for the delivered code.

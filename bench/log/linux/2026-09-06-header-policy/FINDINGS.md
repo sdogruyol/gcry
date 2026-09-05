@@ -42,3 +42,11 @@ Use the per-case manifests for arguments and binary hashes. Samples and analyses
 are committed; full stdout lives under `/tmp/gcry-performance-raw/2026-09-06-header-policy`.
 The existing background soak remained running; no new stress/build load ran
 during the paired measurements.
+
+
+## Application follow-through
+
+The [20-round Kemal factorial](../2026-09-06-kemal-policies/FINDINGS.md) confirms
+lower peak RSS (−40.2%) and request p99 (−25.4%) for the coupled policy, with
+far fewer refaults, but no established throughput change (CI −6.7 to +6.6%). Post-GC RSS rises 88.6%. Keep the production default decision deferred
+until burst/drop/recovery and an independent session resolve this tradeoff.

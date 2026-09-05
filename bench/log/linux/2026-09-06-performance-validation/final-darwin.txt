@@ -1,0 +1,3 @@
+crystal build --cross-compile --target aarch64-apple-darwin -Dgc_none samples/hello.cr -o bin/darwin_typecheck_arm64 >/dev/null
+crystal build --cross-compile --target x86_64-apple-darwin -Dgc_none samples/hello.cr -o bin/darwin_typecheck_x86 >/dev/null
+ok — the Darwin build type-checks on both targets

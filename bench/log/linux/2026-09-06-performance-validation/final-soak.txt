@@ -1,0 +1,22 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/soak.cr -o bin/soak
+# Same ceiling as the 24h soak, and that is the point: the ~0.5–1 MiB this
+# re-faults after drain is warm-up plus 256 KiB chunk granularity, not a
+# signal that scales with duration (4 h measured the same ~960 kB). A smoke
+# that passes under a looser bound than the real gate is not a smoke test.
+bin/soak --duration=10 --rss-limit-kb=${SOAK_RSS_LIMIT_KB:-4096} --telemetry=/tmp/gcry-soak-smoke.log
+Soak test duration=10s
+Start RSS: 5948 kB
+Config: monitor_gate=true stw_test_stall_ms=0 ec_queue_audit=false fiber_churn=0 collect_hz=1
+[hour 0.001388888888888889] elapsed=5s remaining=4s heap=4292.0kB live=4311 rss=6952kB finalized=393 errors=0
+[hour 0.002777777777777778] elapsed=10s remaining=0s heap=4420.0kB live=4225 rss=6952kB finalized=884 errors=0
+Duration reached (10s). Draining...
+Post-soak verification...
+Final: heap=4420.0kB live=128 rss=6952kB finalized=980
+Soak test PASSED
+  duration=10s
+  allocs=9830 collects=9 fibers=99 churn=0
+  queue slots seen: total=0 max_per_collect=0 non_empty=0/9 faults=0
+  finalizable=982 weakref=99
+  finalized=980
+  RSS: 5948kB → 6952kB (+1004kB, max 6952kB, ceiling +4096kB)
+  Telemetry: /tmp/gcry-soak-smoke.log

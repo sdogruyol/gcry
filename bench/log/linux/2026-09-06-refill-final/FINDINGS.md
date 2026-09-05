@@ -34,7 +34,7 @@ type-check pass on the final code.
 These results supersede the initial index prototype's numbers for the delivered
 implementation. The original trials remain under `2026-09-06-refill-index`.
 The final full headerless application comparison (including atomic enqueue
-skipping) is recorded in `kemal/` once complete; microbenchmarks alone do not
+skipping) is recorded in `kemal/`; microbenchmarks alone do not
 establish an HTTP throughput gain.
 
 An existing background soak remained active on another checkout. No new
@@ -42,3 +42,29 @@ compilation or stress ran during the paired timings. Binary hashes, arguments,
 environment and all samples are committed. Full stdout remains under
 `/tmp/gcry-performance-raw/2026-09-06-refill-final`. Use the PR commit mapping
 in `docs/PERFORMANCE_PR34_PROVENANCE.md` to resolve local measurement IDs.
+
+
+## Final application result
+
+20 paired rotated rounds, five seconds measured after one second warmup,
+fresh headerless Kemal process per trial; base is the medium-cursor allocator,
+null is its identical binary, candidate includes the completed refill index
+and atomic enqueue check. All **60 trials completed without request errors**.
+The recorded candidate collector/server source hashes match the final tree.
+
+| Arm | Mean req/s | Throughput/base, 95% CI | Peak RSS/base | Faults/1k | CPU ms/10k requests |
+|---|---:|---:|---:|---:|---:|
+| base | 49,282 | 100% | 1.00 | 7.1 | 204.4 |
+| null | 49,819 | 102.0% [95.3, 108.7] | 0.99 | 8.5 | 202.3 |
+| final | 51,676 | 105.5% [99.4, 111.6] | 1.01 | 7.9 | 195.2 |
+
+The final HTTP throughput result is **inconclusive**: +5.5%, CI −0.6 to +11.6.
+The null also has a wide interval. Do not call this parity or an established
+application throughput win. The strong allocation/graph improvements remain
+workload-specific results. Peak RSS and fault rates show no large observed
+shift in this session; this is not an equivalence test.
+
+`kemal/` contains the full trial set, source/build/environment manifest, exact
+dependency lock, runner snapshot, latency/GC supplement and analyzer output.
+Raw server/wrk/GC files and binaries remain in `/tmp/gcry-final-refill-kemal`.
+Use longer windows on an exclusive host for a narrower application conclusion.

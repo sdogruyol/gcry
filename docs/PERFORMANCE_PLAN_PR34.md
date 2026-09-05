@@ -174,7 +174,7 @@ Run gates in the affected header/bitmap/headerless configurations; do not assume
 
 ## Delivery sequence and stop conditions
 
-The user explicitly wants this performance work included in PR #34. Implement on the branch carrying #34, one item per reviewable commit with its own trials; update the existing PR in place. This is a delivery plan, not an instruction to merge or publish anything during this documentation review.
+The user explicitly wants this performance work included in PR #34. Implement on the branch carrying #34, one item per reviewable commit with its own trials; update the existing PR in place. The follow-through is authorized by the user’s instruction to continue; preserve the existing PR history.
 
 1. **Measurement commit:** maintained runners, committed `alloc_ns.cr`, stable graph cases, corrected counter names, root sub-timers, and a fixed baseline at the reviewed PR #34 head. No collector-policy change.
 2. **Medium-buffer cursor commit:** prioritize 8 KiB hits, checking size boundaries, zeroing, counters, and tiny-allocation regressions. This is the first collector optimization for Kemal.
@@ -200,3 +200,27 @@ python3 bench/log/linux/2026-09-04-alloc-fast-path/analyze_ab.py \
 ```
 
 These re-analyze existing samples; they do not reproduce the benchmark executions. New claims must use the improved measurement protocol above.
+
+
+## Implementation record
+
+The implementation and experiments remain in PR #34 as separate commits.
+Local measurement hashes map to the commits appended to the reviewed PR head
+in [PERFORMANCE_PR34_PROVENANCE.md](PERFORMANCE_PR34_PROVENANCE.md).
+
+| Work | Outcome | Evidence |
+|---|---|---|
+| Measurement infrastructure | Monotonic durations, error census, actual CPU tick rate, consistent ratio statistics, dependency/source/binary records, maintained allocation/graph benchmarks, counter names and opt-in root sub-timers | [Runner documentation](../bench/performance/README.md) |
+| Medium cursor dispatch | Hits through 32 KiB; 8 KiB atomic EC4 cost −22.5%. Initial HTTP comparison inconclusive | [Medium cursor findings](../bench/log/linux/2026-09-05-medium-cursors/FINDINGS.md) |
+| Refill indexing | Final 960 MB growth cost −87.8% [−89.6, −86.0]; 8 KiB atomic EC4 −73.2%; small-allocation guard −3.7%. Includes stopped-world locking, freed-behind-cursor reuse, and release/acquire publication fixes | [Final refill findings](../bench/log/linux/2026-09-06-refill-final/FINDINGS.md) |
+| Atomic-leaf enqueue skip | Atomic graph mean pause −34.2% [−34.6, −33.8]; pointerful graph result inconclusive | [Atomic findings](../bench/log/linux/2026-09-06-atomic-leaves/FINDINGS.md) |
+| Header-policy factorial | Coupled policy: micro cost −49.9%; HTTP peak RSS −40.2%, request p99 −25.4%, post-GC RSS **+88.6%**; throughput inconclusive. No header default change | [Micro experiment](../bench/log/linux/2026-09-06-header-policy/FINDINGS.md), [application experiment](../bench/log/linux/2026-09-06-kemal-policies/FINDINGS.md) |
+| Final headerless application comparison | +5.5% throughput, CI −0.6 to +11.6%, **inconclusive**. 60 error-free trials; measured collector/server hashes match final source | [Final application results](../bench/log/linux/2026-09-06-refill-final/FINDINGS.md#final-application-result) |
+| Correctness and portability checks | Unit/process/invariant/sanitizer suites and applicable race/root/fork/OOM gates; explicit harness limitations | [Validation record](../bench/log/linux/2026-09-06-performance-validation/FINDINGS.md) |
+
+Next decisions are evidence-gated: longer application windows on an exclusive
+host, a second independent session and burst/drop/recovery tests for header
+retention, and native ARM/Darwin validation. The existing background soak is
+not validation of this code. Root discovery stops at sub-timers; the simple
+live × factor controller, root coverage, and mark-stack representation remain
+unchanged. Conditional rewrites are deferred, not silently treated as completed.

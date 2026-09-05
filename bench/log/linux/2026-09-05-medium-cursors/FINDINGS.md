@@ -39,3 +39,10 @@ throughput improvement; retain the allocation findings as microbenchmark claims.
 Full server/wrk transcripts and binaries remain in `/tmp/gcry-medium-kemal-fixed`.
 The benchmark runner shares the exact shard lock across isolated worktrees and
 records its hash; the initial missing-lock build failed before any trial began.
+
+
+Host limitation: an existing 24-hour soak process was still running during this
+session (about 3% lifetime CPU when inspected). No deliberate build or stress
+load ran during the HTTP measurement window, but the host was not fully idle.
+The null arm and confidence intervals therefore matter; this session should
+not be described as an exclusive-host confirmation.

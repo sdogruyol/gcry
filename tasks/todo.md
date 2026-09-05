@@ -571,17 +571,26 @@ away:
 - [x] All 43 CI-job commands green on the final tree; reply posted.
 
 
-## PR #34 performance follow-through (2026-09-05)
+## PR #34 performance follow-through (2026-09-05–06)
 
 Plan: [PERFORMANCE_PLAN_PR34.md](../docs/PERFORMANCE_PLAN_PR34.md).
 All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
 
-- [x] Measurement infrastructure: maintained paired runner/analyzer, original alloc_ns benchmark,
-      stable graph churn, counter names, root sub-timers; verify instruments.
+- [x] Measurement infrastructure: maintained runners/analyzer, committed alloc_ns,
+      stable graph churn, counter names, root sub-timers; seven Python checks.
 - [x] Medium-buffer cursor dispatch and boundary/zeroing/process regressions.
-      20-round atomic EC4 cost −22.5%; HTTP validation still pending.
-- [ ] Refill availability indexing, lifecycle/race coverage, scaling trials.
-- [ ] Header-retention factorial trial; change defaults only on measured evidence.
-- [ ] Atomic-leaf enqueue skip; graph correctness and paired phase measurements.
-- [ ] Publish findings, update plan status, run applicable integration gates.
-- [ ] Conditional root/controller/mark-stack work only if workload gates open.
+      Atomic EC4 allocation cost −22.5%; HTTP result inconclusive.
+- [x] Refill availability indexing, lifecycle/race coverage, scaling trials.
+      Fixed STW index locking and capacity freed behind a retiring cursor;
+      release/acquire publication. Final 960 MB cost −87.8%, 8 KiB EC4 −73.2%.
+- [x] Header-retention factorial micro/application trials. Keep defaults unchanged:
+      coupled peak RSS −40.2%, post-GC RSS +88.6%, throughput inconclusive.
+- [x] Atomic-leaf enqueue skip; graph correctness and paired phase measurements.
+      Atomic pause −34.2%; pointerful graph inconclusive.
+- [x] Final application confirmation: +5.5% [−0.6, +11.6], inconclusive;
+      60 error-free trials and exact collector/server source hash check.
+- [x] Record findings, update plan, and run applicable integration gates.
+      Delivery uses new commits on the existing PR head without a force-push.
+- [ ] Header default decision: independent exclusive-host confirmation,
+      burst/drop/recovery and native platform gates still required.
+- [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.
