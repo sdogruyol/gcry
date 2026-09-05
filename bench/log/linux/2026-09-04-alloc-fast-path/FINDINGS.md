@@ -41,25 +41,114 @@ case:
   whether asked or not — which is why an earlier measurement found it "never
   cheaper". `lazy_get`/`lazy_set` are the plain loads and stores.
 
-## The single-mutator fast path
+## The single-mutator fast path, and why it was withdrawn
 
-`Gcry.single_mutator?` is true until the first non-runtime thread is created
-(cleared process-wide in the `pthread_create` wrapper, before the thread
-exists, never set again; `GCRY_SINGLE_MUTATOR=0` pins the multi-thread path
-for A/B). While it holds, the mutator is also the collector, so:
+The first version of the hit path was gated on a process-wide flag,
+`Gcry.single_mutator?`, true until the first thread was created, that
+skipped the class locks and the atomics outright. It measured well
+(headerless 48-byte `malloc` 50.5 → 21.6 ns, `malloc_atomic` 34.0 → 8.8 ns)
+and it was unsound: the runtime's monitor thread allocates its main `Fiber`
+at start-up, so the exemption that kept the flag true under execution
+contexts let two threads pop one freelist head. `make scheduler-roots` hung
+under load, 1 in 22 contended runs, with that fiber pushed twice onto
+`Fiber.fibers` and `next` pointing at itself; the Darwin hello sample crashed
+the same way at boot. `process_spec/regression/7_sysmon_alloc_race_spec.cr`
+drives the shape on purpose and found 4 892–8 518 shared blocks per 200 000
+before the fix.
 
-- `with_freelist_lock` yields without locking;
-- counters use plain loads and stores;
-- the `occ` bit is a plain OR (the cursor owns the word, the sweep runs on
-  this thread);
-- `realloc` skips the root-list registration around its allocation (a
-  `LibC.malloc`, a free and a list walk per call; the root existed for a
-  peer thread's collection, and `@suppress_collect` already forbids a
-  self-triggered one);
-- 16/32/48/64-byte blocks are cleared with unrolled stores instead of a
-  `memset` call.
+## Per-thread cursor sets
 
-Nothing changes once a second mutator thread exists.
+The replacement is ownership rather than a flag. Each thread that allocates
+from a bitmap heap owns a `Gcry::CursorSet` — one cursor per (class, kind),
+reached through a thread-local cache — and `Heap#fast_alloc` pops from that
+thread's own free mask with no lock, on any thread. A chunk under a cursor
+carries `ChunkHeader::Flags::CURSOR` so no other cursor takes it; the `occ`
+store is an atomic OR because a `free` on another thread shares the word;
+per-set counters are credited to the heap by compare-and-swap; a
+stop-the-world retires every idle set and pins the chunks of one frozen
+mid-allocation, which the after-world sweep then leaves alone. Sets are
+reclaimed at thread exit through a pthread key destructor, and a process
+past 64 threads shares a fallback set under the class lock. The commit
+message on `perf-single-mutator` carries the full argument.
+
+Two boot-time traps cost a build each and are worth recording: a
+thread-local class variable initialised by a call (`Pointer.null`) and a
+constant built by a call both go through `__crystal_once`, which asks for
+`Thread.current`, which allocates, which reads the variable — a spin on the
+once-lock before the first thread exists. Integers with literal initialisers
+and a method in place of the constant. And a `raise` under the class lock
+allocates its exception on the same lock: `cursor_set` must never raise,
+which is what the fallback set is for.
+
+48-byte `GC.malloc` in a 4 096-slot ring, 5 M per thread, headerless, this
+box (`ub/alloc_ns.cr`; the earlier 21.6 ns was a tighter loop without a
+ring):
+
+| build | 1 thread | 4 threads | collections (1 / 4) | pause total (1 / 4) |
+|---|---|---|---|---|
+| upstream `master` (fixed 32 MiB) | 171.4 ns | 1 422.8 ns | 7 / 28 | 64 ms / 401 ms |
+| per-thread cursors, locked path pinned (`GCRY_ALLOC_FAST_PATH=0`) | 227.6 ns | 1 489.0 ns | | |
+| per-thread cursors | **77.8 ns** | **801.4 ns** | 28 / 111 | 215 ms / 3 014 ms |
+
+(Those rows were taken under a load average of 25 from two processes a
+timed-out run had left behind; the retake on a quiet box is the table
+that follows this section.) Per allocation the hit path is 2.2× upstream
+at one thread and 1.8× at four, and the four-thread number is not the
+allocator's: 3.0 s of the 4.0 s
+run is stop-the-world pause, 27 ms per collection, of which mark and sweep
+are microseconds. That is the multi-mutator stop-the-world scanning whole
+thread stacks, on upstream too (14 ms per collection there), and the next
+thing to look at for execution-context throughput. With collections
+disabled the four-thread cost grows with the heap (292 ns at 96 MB, 1 125 ns
+at 960 MB) because `bitmap_take_pool_chunk` walks every chunk of the class
+to find capacity — a per-class pool list would make that O(1); also
+upstream's shape.
+
+Retake on the quiet box (load average 1.2 → 1.5), same benchmark:
+
+| build | 1 thread | 4 threads | pause total (1 / 4) |
+|---|---|---|---|
+| upstream `master` (fixed 32 MiB) | 47.6 ns | 977.8 ns | 20 ms / 114 ms |
+| per-thread cursors, locked path pinned | 53.2 ns | 973.1 ns | 74 ms / 429 ms |
+| withdrawn single-mutator version (a0ec7d7) | 51.8 ns | — | 75 ms / — |
+| per-thread cursors | **32.5 ns** | **156.8 ns** | 78 ms / 425 ms |
+
+The per-thread hit path is 1.5× upstream at one thread and 6.2× at four,
+and faster than the withdrawn version it replaced. The four-thread pause
+anatomy (45 collections, p50 3.7 ms): `phase_roots` 2.2 ms of it, stacks
+0.1 ms, static 0.14 ms, mark 0.16 ms, sweep 6 µs, stop/start 0.07/0.1 ms —
+the root phase under several mutators, and upstream's per-collection pause
+is the same size, so that is an upstream cost to look at next for
+execution-context throughput.
+
+Kemal `/json`, headerless with per-thread cursors, quiet box (load average
+2 at the end), Boehm interleaved, 9 rounds × 15 s:
+
+| arm | req/s | vs Boehm | t | peak RSS | CPU ms / 10k req | faults / 1k req |
+|---|---|---|---|---|---|---|
+| Boehm | 48 688 | 100% | | 19.3 MB | 227 | 2.5 |
+| headerless, per-thread cursors (defaults) | 49 570 | 101.8% | 0.77 | 22.6 MB | 201 | 5.0 |
+
+Then the attribution run — the withdrawn single-mutator binary (a0ec7d7),
+the per-thread cursors, and the per-thread cursors with `realloc` relying
+on the conservative frame scan instead of the root list, all interleaved
+with Boehm in the same rounds (9 × 15 s, load average 1.2 → 2.2):
+
+| arm | req/s | vs Boehm | t | peak RSS | CPU ms / 10k req | faults / 1k req |
+|---|---|---|---|---|---|---|
+| Boehm | 48 893 | 100% | | 20.3 MB | 225 | 2.4 |
+| headerless, per-thread cursors | 51 202 | **104.7%** | 1.63 | 22.5 MB | 196 | 4.9 |
+| headerless, per-thread cursors, realloc without the root list | 51 317 | 105.0% | 1.84 | 22.6 MB | 195 | 4.8 |
+| headerless, withdrawn single-mutator version | 51 040 | 104.4% | 1.99 | 22.6 MB | 196 | 4.9 |
+
+The three gcry arms are one number: ownership costs nothing against the
+flag it replaced, and the `realloc` change was noise (+0.3%), so it was
+reverted. The 111.8% recorded above was the same code on a faster day of
+this box (Boehm at 54 k then, 49 k now); the percentage a run reports is
+only comparable within that run, which is why every table here carries
+its own Boehm row. The honest headline for the branch is therefore
+**about 5% past Boehm on throughput at 13% less CPU per request, on every
+thread**, with peak RSS 2 MB above Boehm's.
 
 ## A correction to the PR #33 table
 

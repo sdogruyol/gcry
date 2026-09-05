@@ -125,3 +125,10 @@ Rules written after corrections, so the same mistake is not made twice.
   hunted with a contended loop that leaves the hung process alive —
   `/proc/<pid>/mem` plus `ptrace` from Python and `addr2line` gave the
   fiber list and the doubly-pushed node with no gdb on the box.
+- **Read the load average before and after every measurement, and kill
+  what a timed-out run leaves behind.** A `crystal spec` that hit its
+  timeout left its binary spinning on 19 cores for an hour; three Kemal
+  runs and a microbenchmark table were taken under load 25 and read as
+  regressions. `timeout` on the runner does not kill the child the runner
+  spawned; `pkill -f crystal-run-spec` after any timed-out spec, and the
+  harness prints `uptime` at both ends.

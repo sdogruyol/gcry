@@ -560,6 +560,9 @@ module Gcry
       # this frame for the conservative scan; the root list costs a malloc, a
       # free and a walk per call, on a path JSON building takes several times
       # per request. Captured once so a flip mid-call cannot unbalance it.
+      # Measured 2026-09-05: skipping this list for the conservative frame
+      # scan was worth +0.3% on Kemal `/json` (t = 0.2), so the registration
+      # stays as it was.
       rooted = true
       add_root(pointer)
       begin

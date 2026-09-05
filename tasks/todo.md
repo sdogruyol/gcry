@@ -529,6 +529,14 @@ away:
       65th thread).
 - [x] `with_freelist_lock` lock-skipping deleted; `single_mutator` gone;
       `GCRY_ALLOC_FAST_PATH=0` replaces `GCRY_SINGLE_MUTATOR=0`.
-- [ ] Gates green on the tree; scheduler-roots ×40 contended; Kemal vs
-      Boehm re-measured; FINDINGS + PR updated; then the full soak.
+- [x] Gates green on the tree (30 targets, 12 spec configurations);
+      scheduler-roots ×40 contended clean.
+- [ ] Kemal vs Boehm re-measured; FINDINGS + PR updated; then the full soak.
+- [ ] Execution-context throughput: the stop-the-world pause is 14–27 ms per
+      collection at 4 threads with mark and sweep in microseconds — whole
+      thread-stack scans. Measure `scan_other_thread_stacks` and the SP
+      snapshot on this box; low-water skip.
+- [ ] `bitmap_take_pool_chunk` walks every chunk of the class per refill:
+      O(chunks) at large heaps (1 125 ns/alloc at 960 MB). Per-class pool
+      list of chunks with capacity, ascending address order.
 - [ ] Full soak once the above is in.
