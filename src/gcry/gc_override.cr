@@ -323,16 +323,19 @@ module GC
       heap.gc_threshold = UInt64::MAX
     elsif thr = env_u64("GCRY_THRESHOLD")
       heap.gc_threshold = thr unless thr == 0
-    else
+    elsif heap.bitmap_alloc?
       # No fixed threshold asked for: start at the floor and size the heap
-      # from the live set after each major (`adapt_threshold_after_sweep`).
-      # A fixed 16 MiB regressed acikturkiye by ~20pp through major cycling;
-      # the adaptive threshold grows with that live set instead, and a small
-      # one (Kemal: ~10 MB) no longer pays for a 32 MiB budget in RSS.
+      # from the live set after each major (`adapt_after_sweep`). A fixed
+      # 16 MiB regressed acikturkiye by ~20pp through major cycling; the
+      # adaptive threshold grows with that live set instead, and a small one
+      # (Kemal: ~10 MB) no longer pays for a 32 MiB budget in RSS. Bitmap
+      # allocator only: it is paired with warm retention there, and the
+      # header build took 251 majors for 62 with the smaller threshold and
+      # none of the relief.
       heap.gc_threshold = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
       heap.adaptive_threshold = true
       if pct = env_u64("GCRY_THRESHOLD_FACTOR")
-        heap.adaptive_threshold_pct = pct if pct > 0
+        heap.adaptive_threshold_pct = pct.clamp(10_u64, 1000_u64)
       end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
@@ -340,6 +343,18 @@ module GC
         heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
         heap.adaptive_threshold = false # unmeasured under EC4; keep the fixed 64 MiB
         # Contended alloc/free counters need Atomic RMW.
+        heap.heap_counters_atomic = true
+      end
+    else
+      # Header allocator: the fixed defaults as before (Linux 32 MiB,
+      # Darwin 16 MiB), and 64 MiB under a Parallel execution context.
+      {% if flag?(:darwin) %}
+        heap.gc_threshold = 16_u64 * 1024_u64 * 1024_u64
+      {% else %}
+        heap.gc_threshold = 32_u64 * 1024_u64 * 1024_u64
+      {% end %}
+      if (ec = env_u64("EC_PARALLELISM")) && ec > 1
+        heap.gc_threshold = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
         heap.heap_counters_atomic = true
       end
     end
@@ -441,7 +456,7 @@ module GC
     if warm = env_u64("GCRY_EMPTY_CHUNK_WARM_RETAIN")
       heap.empty_chunk_warm_retain = warm
     elsif heap.bitmap_alloc? && heap.gc_threshold != UInt64::MAX
-      heap.warm_retain_follows_threshold = true
+      heap.warm_retain_follows_live = true
       # A bitmap chunk emptied by the sweep costs nothing to keep: its pages
       # are resident and its `occ` is zero, so the pool cursor reuses it in
       # place. Releasing it instead meant every 8 KiB block the next cycle

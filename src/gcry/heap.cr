@@ -467,7 +467,13 @@ module Gcry
 
     def malloc(size : Int) : Void*
       u = fast_alloc(size.to_u64, false)
-      return u unless u.null?
+      unless u.null?
+        # The same hooks the slow path runs, so `GCRY_DEBUG_INVARIANTS=1`
+        # and the trace cover the hit path rather than closing it.
+        Invariant.after_malloc(self, u, size.to_u64)
+        Trace.after_malloc(u, size.to_u64, atomic: false)
+        return u
+      end
       ptr = allocate(size.to_u64, atomic: false, clear: true)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: false)
@@ -476,7 +482,11 @@ module Gcry
 
     def malloc_atomic(size : Int) : Void*
       u = fast_alloc(size.to_u64, true)
-      return u unless u.null?
+      unless u.null?
+        Invariant.after_malloc(self, u, size.to_u64)
+        Trace.after_malloc(u, size.to_u64, atomic: true)
+        return u
+      end
       ptr = allocate(size.to_u64, atomic: true, clear: false)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: true)
@@ -821,7 +831,7 @@ module Gcry
       return Pointer(Void).null unless @fast_path
       return Pointer(Void).null if @collecting || @incremental_marking || @lazy_sweep_pending || size > FAST_PATH_MAX
       set = cursor_set_cached
-      return Pointer(Void).null if set.null? || set == @fallback_cursor_set
+      return Pointer(Void).null if set.null? || set.value.no_hit_path != 0_u8
       i = ((size &+ 7) >> 3).to_i32
       index = @fit_index[i].to_i32
       payload = @fit_payload[i]
@@ -867,7 +877,7 @@ module Gcry
 
     private def refresh_fast_path : Nil
       @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
-                   !Invariant.enabled? && !Trace.enabled? && !@birth_grace && !@always_clear &&
+                   !@birth_grace && !@always_clear &&
                    !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc)
     end
 
@@ -1108,8 +1118,11 @@ module Gcry
         end
         # Collect before grow only when the small heap is already sparse —
         # otherwise this becomes a thr-killing STW storm (seen: ~1k majors/30s).
+        # Floor at the 8 MiB this was calibrated at (a quarter of the old
+        # fixed 32 MiB); under the adaptive threshold a quarter can be 2 MiB,
+        # which opened the collect-before-grow far more often (11 → 38 majors).
         min_bsg = @gc_threshold >> 2
-        min_bsg = 1_048_576_u64 if min_bsg < 1_048_576_u64
+        min_bsg = 8_388_608_u64 if min_bsg < 8_388_608_u64
         sm = small_mapped_bytes
         sf = small_free_bytes
         sparse = sm > 0 && sf * 100 >= sm * @tight_grow_gc_pct.to_u64

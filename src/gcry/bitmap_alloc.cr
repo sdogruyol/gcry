@@ -47,6 +47,12 @@ module Gcry
 
     property owner : UInt64 = 0_u64
     property state : UInt8 = 0_u8
+    # Non-zero for sets that never take the hit path: the fallback shared by
+    # threads past the table, and the runtime's monitor thread, which is
+    # exempt from the stop-the-world signal and cooperates only through
+    # `wait_if_world_stopped_other_thread` at `allocate`. The settle neither
+    # retires nor credits such a set, since its owner may be running.
+    property no_hit_path : UInt8 = 0_u8
     # Allocated on the hit path, monotonic; the heap credits the delta over
     # `*_credited` (`Heap#credit_cursor_set`).
     property bytes_local : UInt64 = 0_u64
@@ -198,8 +204,10 @@ module Gcry
       if @fallback_cursor_set.null?
         @fallback_cursor_set = alloc_cursor_set
         return Pointer(CursorSet).null if @fallback_cursor_set.null? # out of C heap; the caller's malloc fails next
+        @fallback_cursor_set.value.no_hit_path = 1_u8
       end
       return @fallback_cursor_set if exiting || !@cursor_key_ok
+      sysmon = monitor_thread?
       free = Pointer(CursorSet).null
       i = 0
       while i < @cursor_set_count
@@ -218,6 +226,7 @@ module Gcry
       return @fallback_cursor_set if free.null?
       free.value.owner = key
       free.value.state = CursorSet::STATE_LIVE
+      free.value.no_hit_path = sysmon ? 1_u8 : 0_u8
       LibC.pthread_setspecific(@cursor_key, free.as(Void*))
       free
     end
@@ -364,7 +373,7 @@ module Gcry
         ChunkHeader.set_pinned(chunk, false)
       end
       each_cursor_set do |set|
-        if cursor_set_mid_allocation?(set)
+        if set.value.no_hit_path != 0_u8 || cursor_set_mid_allocation?(set)
           i = 0
           while i < POOL_SLOTS
             chunk = CursorSet.slot(set, i).value.chunk

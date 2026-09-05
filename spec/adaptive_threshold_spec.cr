@@ -1,10 +1,10 @@
 require "./spec_helper"
 
 # The process heap sizes itself from the live set after each major
-# collection (`Heap#adapt_threshold_after_sweep`): next threshold =
-# live × factor, clamped to [8 MiB, 64 MiB], with the warm-retention budget
-# following it under the bitmap allocator. A library heap keeps its fixed
-# threshold unless opted in.
+# collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
+# clamped to [8 MiB, 64 MiB] (Darwin floor 16 MiB), and the warm-retention
+# budget follows the same live × factor, capped by the threshold, fixed or
+# not. A library heap keeps its fixed threshold unless opted in.
 describe "adaptive collection threshold" do
   min = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
   max = Gcry::Heap::ADAPTIVE_THRESHOLD_MAX
@@ -86,7 +86,7 @@ describe "adaptive collection threshold" do
     end
   end
 
-  it "moves the warm-retention budget with the threshold only when asked" do
+  it "moves the warm-retention budget with the live set only when asked" do
     heap = Gcry::Heap.new
     begin
       heap.bitmap_alloc = true
@@ -95,9 +95,39 @@ describe "adaptive collection threshold" do
       heap.collect(scan_stack: false)
       heap.empty_chunk_warm_retain.should eq 0_u64
 
-      heap.warm_retain_follows_threshold = true
+      heap.warm_retain_follows_live = true
       heap.collect(scan_stack: false)
       heap.empty_chunk_warm_retain.should eq heap.gc_threshold
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "caps the warm budget by a fixed threshold and lets it fall with the live set" do
+    heap = Gcry::Heap.new
+    begin
+      heap.bitmap_alloc = true
+      heap.nursery_enabled = false
+      heap.warm_retain_follows_live = true
+      heap.gc_threshold = UInt64::MAX
+      roots = Array(Void*).new(3072)
+      3072.times { roots << heap.malloc(4096) } # ~12 MiB live
+      fixed = 128_u64 * 1024 * 1024
+      heap.gc_threshold = fixed
+      heap.collect(scan_stack: false, roots: roots)
+      heap.gc_threshold.should eq fixed
+      live = heap.size_class_live_bytes
+      heap.empty_chunk_warm_retain.should eq live # live × 100 %, under the cap
+      # The live set drops: the budget follows it down to the floor, while
+      # the fixed threshold stays.
+      roots.clear
+      heap.collect(scan_stack: false)
+      heap.empty_chunk_warm_retain.should eq min
+      heap.gc_threshold.should eq fixed
+      # A budget larger than the threshold is capped by it.
+      heap.gc_threshold = 4_u64 * 1024 * 1024
+      heap.collect(scan_stack: false)
+      heap.empty_chunk_warm_retain.should eq 4_u64 * 1024 * 1024
     ensure
       heap.destroy
     end

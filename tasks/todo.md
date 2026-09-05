@@ -531,7 +531,11 @@ away:
       `GCRY_ALLOC_FAST_PATH=0` replaces `GCRY_SINGLE_MUTATOR=0`.
 - [x] Gates green on the tree (30 targets, 12 spec configurations);
       scheduler-roots ×40 contended clean.
-- [ ] Kemal vs Boehm re-measured; FINDINGS + PR updated; then the full soak.
+- [x] Kemal vs Boehm re-measured on a quiet box (104.7%, t = 1.63; withdrawn
+      version 104.4%; realloc-without-roots 105.0% → reverted); FINDINGS +
+      PR #34 updated; `soak-smoke` and `soft-soak-ec4-smoke` green.
+- [ ] Full 24 h `make soak` started 2026-09-05 ~20:00 local; output in the
+      session scratchpad `soak_full.out`, telemetry `/tmp/gcry-soak.log`.
 - [ ] Execution-context throughput: the stop-the-world pause is 14–27 ms per
       collection at 4 threads with mark and sweep in microseconds — whole
       thread-stack scans. Measure `scan_other_thread_stacks` and the SP

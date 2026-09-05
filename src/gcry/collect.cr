@@ -33,20 +33,38 @@ module Gcry
     # allocates is what the sweep keeps. `GCRY_THRESHOLD` pins a fixed
     # threshold and disables this; `GCRY_THRESHOLD_FACTOR` is the factor in
     # percent (default 100).
-    ADAPTIVE_THRESHOLD_MIN =  8388608_u64 # 8 MiB
+    # Darwin's floor is the 16 MiB its fixed default used to be: the
+    # dense-live growth window under fat apps was measured there, not at 8.
+    {% if flag?(:darwin) %}
+      ADAPTIVE_THRESHOLD_MIN = 16777216_u64 # 16 MiB
+    {% else %}
+      ADAPTIVE_THRESHOLD_MIN = 8388608_u64 # 8 MiB
+    {% end %}
     ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
     property adaptive_threshold : Bool = false
     property adaptive_threshold_pct : UInt64 = 100_u64
-    property warm_retain_follows_threshold : Bool = false
+    # The warm-retention budget follows the live set after every major
+    # whether the threshold is fixed or adaptive: what one cycle allocates is
+    # what the sweep keeps, capped by the threshold so a fixed 128 MiB never
+    # holds 128 MiB of emptied chunks once the live set has dropped.
+    property warm_retain_follows_live : Bool = false
 
-    private def adapt_threshold_after_sweep : Nil
-      return unless @adaptive_threshold
-      live = @size_class_live_bytes &+ (@large_mapped_bytes > @large_free_bytes ? @large_mapped_bytes - @large_free_bytes : 0_u64)
-      want = live &* @adaptive_threshold_pct // 100_u64
+    # Live bytes the sweep just measured, small and large.
+    private def live_bytes_after_sweep : UInt64
+      large = @large_mapped_bytes > @large_free_bytes ? @large_mapped_bytes - @large_free_bytes : 0_u64
+      @size_class_live_bytes &+ large
+    end
+
+    private def adapt_after_sweep : Nil
+      return unless @adaptive_threshold || @warm_retain_follows_live
+      want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
-      want = ADAPTIVE_THRESHOLD_MAX if want > ADAPTIVE_THRESHOLD_MAX
-      @gc_threshold = want
-      @empty_chunk_warm_retain = want if @warm_retain_follows_threshold
+      if @adaptive_threshold
+        @gc_threshold = want < ADAPTIVE_THRESHOLD_MAX ? want : ADAPTIVE_THRESHOLD_MAX
+      end
+      if @warm_retain_follows_live
+        @empty_chunk_warm_retain = want < @gc_threshold ? want : @gc_threshold
+      end
     end
 
     # EC_PARALLELISM>1: 32 MiB majors storm under HTTP (~150+/20s). 64 MiB
@@ -1366,6 +1384,7 @@ module Gcry
           if @mark_stack.empty?
             enqueue_unreachable_finalizers
             sweep(major: true)
+            adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
             @expl_freed_bytes_since_gc = 0_u64
@@ -2201,7 +2220,7 @@ module Gcry
         unlock_post_stw
       end
 
-      adapt_threshold_after_sweep if major
+      adapt_after_sweep if major
       @running_finalizers = true
       begin
         @finalizers.run_pending
