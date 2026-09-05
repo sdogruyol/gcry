@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 
@@ -37,11 +38,20 @@ def main():
                 name = names[(position + round_id) % len(names)]
                 row = dict(arm=name, round=round_id, position=position, load1=os.getloadavg()[0])
                 try:
-                    result = subprocess.run([arms[name], *args.args], capture_output=True, text=True, timeout=60)
-                    (args.output / f"{round_id:03d}-{name}.txt").write_text(result.stdout + result.stderr)
-                    if result.returncode:
-                        raise ValueError(f"exit {result.returncode}")
-                    samples = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+                    process = subprocess.Popen([arms[name], *args.args], stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE, text=True, start_new_session=True)
+                    try:
+                        stdout, stderr = process.communicate(timeout=60)
+                    finally:
+                        # Graph benches launch a fresh child. Kill the entire
+                        # owned group on timeout/interruption, not just its driver.
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                            process.communicate()
+                    (args.output / f"{round_id:03d}-{name}.txt").write_text(stdout + stderr)
+                    if process.returncode:
+                        raise ValueError(f"exit {process.returncode}")
+                    samples = [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
                     samples = [sample for sample in samples if args.metric in sample]
                     if len(samples) != 1 or samples[0][args.metric] <= 0:
                         raise ValueError("expected one positive measurement; run survival cases separately")

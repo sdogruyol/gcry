@@ -81,7 +81,7 @@ def trial(args, arm, directory, port):
     env = os.environ.copy()
     # Do not inherit an unnoticed tuning variable into every arm.
     for key in list(env):
-        if key.startswith("GCRY_") or key in ("EC_PARALLELISM", "CRYSTAL_WORKERS"):
+        if key.startswith("GCRY_") or key in ("EC_PARALLELISM", "CRYSTAL_WORKERS", "BENCH_HEADER_POLICY"):
             del env[key]
     env.update(arm["env"], PORT=str(port))
     row = {"arm": arm["name"], "load1": os.getloadavg()[0], "clk_tck": os.sysconf("SC_CLK_TCK")}
@@ -134,6 +134,11 @@ def trial(args, arm, directory, port):
 def build_arms(config, output):
     arms = []
     names = set()
+    # Worktrees omit the ignored shard.lock. Share one dependency resolution
+    # across all arms without copying lib/ (which can point at another gcry).
+    shared_lock = next((lock.read_bytes() for entry in config if "root" in entry
+                        for lock in [Path(entry["root"]) / "bench/kemal/shard.lock"]
+                        if lock.exists()), None)
     for entry in config:
         name = entry["name"]
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", name) or name in names:
@@ -167,11 +172,22 @@ def build_arms(config, output):
                    source_sha256=source_hash.hexdigest(), build=build)
         print(f"Building {name}", flush=True)
         with (output / f"{name}-build.log").open("w") as log:
-            subprocess.run(["shards", "install", "--production"], cwd=app, stdout=log, stderr=log, check=True)
+            lock = app / "shard.lock"
+            if shared_lock is not None:
+                if lock.exists() and lock.read_bytes() != shared_lock:
+                    raise ValueError(f"dependency lock differs between arms: {lock}")
+                if not lock.exists():
+                    lock.write_bytes(shared_lock)
+            subprocess.run(["shards", "install", *(["--production"] if shared_lock is not None else [])],
+                           cwd=app, stdout=log, stderr=log, check=True)
+            if shared_lock is None:
+                shared_lock = lock.read_bytes()
             subprocess.run([str(root / "bench/assert_gcry_lib.sh"), "lib/gcry", str(root)],
                            cwd=app, stdout=log, stderr=log, check=True)
             subprocess.run(build, cwd=app, stdout=log, stderr=log, check=True)
         arm["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+        arm["shard_lock_sha256"] = hashlib.sha256(shared_lock).hexdigest()
+        arm["server_source_sha256"] = hashlib.sha256((app / "src/server.cr").read_bytes()).hexdigest()
         arm["gcry_lib"] = str((app / "lib/gcry").resolve())
         arms.append(arm)
     return arms

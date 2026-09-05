@@ -1,0 +1,164 @@
+{
+  "arms": [
+    {
+      "name": "base",
+      "root": "/tmp/gcry-perf-measurement-base",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-medium-kemal-fixed/base",
+      "gcry": true,
+      "commit": "0b73ebc22a296df2a6451253e7c01de98a1cea4b",
+      "tree": "c8607d1548dc8cc03c11f8201894a7a6a3da4277",
+      "dirty": "",
+      "source_sha256": "3215e300813a70320bd9782be927bacc243497bc5d042a18942c1d3000c0c326",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-medium-kemal-fixed/base"
+      ],
+      "binary_sha256": "4def6ce6d2d2b3e68c98a050deb51902d40eae087d710b101798a9ef45e4164b",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "/tmp/gcry-perf-measurement-base"
+    },
+    {
+      "name": "null",
+      "root": "/tmp/gcry-perf-measurement-base",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-medium-kemal-fixed/base",
+      "gcry": true,
+      "commit": "0b73ebc22a296df2a6451253e7c01de98a1cea4b",
+      "tree": "c8607d1548dc8cc03c11f8201894a7a6a3da4277",
+      "dirty": "",
+      "source_sha256": "3215e300813a70320bd9782be927bacc243497bc5d042a18942c1d3000c0c326",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-medium-kemal-fixed/base"
+      ],
+      "binary_sha256": "4def6ce6d2d2b3e68c98a050deb51902d40eae087d710b101798a9ef45e4164b",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "/tmp/gcry-perf-measurement-base",
+      "copy_of": "base"
+    },
+    {
+      "name": "medium",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-medium-kemal-fixed/medium",
+      "gcry": true,
+      "commit": "78f5ac77a74957f02e0f8985ed09f271b697ef14",
+      "tree": "e2e0750b15c4bf87c48662e8022ff5487ae2cba3",
+      "dirty": "M bench/performance/kemal_ab.py\n?? CLAUDE.md\n?? simd_plan/",
+      "source_sha256": "c2d9dbdc6177c78f0df4716257f998588ef7514a77caaf9b89b017132c2e966c",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-medium-kemal-fixed/medium"
+      ],
+      "binary_sha256": "b6991d42cda332c4b6230ca1fc6be56849ca5c4c96c72573a9cf6b5794866648",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    },
+    {
+      "name": "boehm",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-medium-kemal-fixed/boehm",
+      "gcry": false,
+      "commit": "78f5ac77a74957f02e0f8985ed09f271b697ef14",
+      "tree": "e2e0750b15c4bf87c48662e8022ff5487ae2cba3",
+      "dirty": "M bench/performance/kemal_ab.py\n?? CLAUDE.md\n?? simd_plan/",
+      "source_sha256": "c2d9dbdc6177c78f0df4716257f998588ef7514a77caaf9b89b017132c2e966c",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-medium-kemal-fixed/boehm"
+      ],
+      "binary_sha256": "e26a58ffa85937424ef74c726642f422316c694cad1bd6101ddb8bd9f4fc5d2e",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [57cf7da50] (2026-07-16)\n\nLLVM: 20.1.8\nDefault target: x86_64-unknown-linux-gnu",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+  "cpu": "processor\t: 0\nvendor_id\t: AuthenticAMD\ncpu family\t: 26\nmodel\t\t: 36\nmodel name\t: AMD Ryzen AI 9 HX 375 w/ Radeon 890M\nstepping\t: 0\nmicrocode\t: 0xffffffff\ncpu MHz\t\t: 1996.187\ncache size\t: 1024 KB\nphysical id\t: 0\nsiblings\t: 24\ncore id\t\t: 0\ncpu cores\t: 12\napicid\t\t: 0\ninitial apicid\t: 0\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: 13\nwp\t\t: yes\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core ssbd ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 clzero xsaveerptr arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nbugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass\nbogomips\t: 3992.37\nTLB size\t: 192 4K pages\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 48 bits physical, 48 bits virtual\npower management:",
+  "cpu_count": 24,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+  ],
+  "clk_tck": 100,
+  "config": {
+    "config": "/tmp/gcry-medium-kemal-arms.json",
+    "output": "/tmp/gcry-medium-kemal-fixed",
+    "rounds": 20,
+    "seconds": 15,
+    "warmup": 3,
+    "threads": 4,
+    "connections": 100,
+    "port": 4600,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}

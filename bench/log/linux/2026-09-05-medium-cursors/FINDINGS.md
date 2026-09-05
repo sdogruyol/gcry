@@ -22,4 +22,20 @@ crystal build --release -Dgc_none -Dgcry_headerless /tmp/gcry-perf-measurement-b
 crystal build --release -Dgc_none -Dgcry_headerless bench/micro/alloc_ns.cr -o bin/alloc_medium
 ```
 
-Each case manifest records binary hashes, exact arguments and tuning environment. Re-run with `bench/performance/micro_ab.py`; HTTP validation follows separately. No acceptance threshold is inferred from a GC-dominated microbenchmark alone.
+Each case manifest records binary hashes, exact arguments and tuning environment. Re-run with `bench/performance/micro_ab.py`; The HTTP comparison is recorded below. No acceptance threshold is inferred from a GC-dominated microbenchmark alone.
+
+## Kemal application result
+
+20 rotated paired rounds, fresh servers, 3 seconds warmup and 15 seconds measured
+per arm: measurement baseline `0b73ebc`, identical-binary null, medium cursor
+candidate `78f5ac7`, and Boehm. All 80 trials completed without request errors.
+`kemal/` contains the full measurement rows, manifest and analyzer output.
+
+Medium/base throughput is **101.3% [96.3, 106.4]**: inconclusive. The null is
+101.6% [96.4, 106.8], also inconclusive. Mean request rates are 56,320 for base,
+56,706 for medium and 53,463 for Boehm. Medium RSS/base is 0.98 and minor faults
+are 2.2 per 1,000 requests versus 2.6 for base. This run establishes no HTTP
+throughput improvement; retain the allocation findings as microbenchmark claims.
+Full server/wrk transcripts and binaries remain in `/tmp/gcry-medium-kemal-fixed`.
+The benchmark runner shares the exact shard lock across isolated worktrees and
+records its hash; the initial missing-lock build failed before any trial began.
