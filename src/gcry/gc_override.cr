@@ -1240,6 +1240,20 @@ module GC
       ret.as(LibC::HANDLE)
     end
   {% elsif !flag?(:wasm32) %}
+    # `arg` is whatever the caller handed `pthread_create`. Crystal's `Thread`
+    # passes itself, but a raw caller passes anything — the thread-birth gate
+    # passes an obfuscated integer — so it is read as a `Thread` only once it is
+    # a live heap object of that exact type. Reading it blind was a SIGSEGV at
+    # the first non-`Thread` argument (CI 33930621625).
+    private def self.sysmon_thread_arg?(arg : Void*) : Bool
+      return false if arg.null?
+      heap = Gcry.default_heap?
+      return false unless heap && heap.live?(arg)
+      return false unless arg.as(Int32*).value == ::Thread.crystal_instance_type_id
+      name = arg.as(::Thread).@name
+      !name.nil? && name == "SYSMON"
+    end
+
     # :nodoc:
     # Record the thread with gcry as soon as its handle exists. Crystal only
     # publishes a thread from inside its own `start`, so until then `stop_world`
@@ -1273,7 +1287,7 @@ module GC
         # The runtime's SYSMON thread never touches the heap (it is exempt
         # from the stop-the-world by name), so it does not end the
         # single-mutator regime that the allocation fast path relies on.
-        sysmon = !arg.null? && arg.as(::Thread).@name == "SYSMON"
+        sysmon = sysmon_thread_arg?(arg)
         unless sysmon
           Gcry.single_mutator = false
           if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned

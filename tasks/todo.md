@@ -488,4 +488,13 @@ time, so the gap is the mutator's allocation path.
       warm budget. Adaptive threshold = live × factor (clamped 8–64 MiB),
       warm budget follows; `GCRY_THRESHOLD_FACTOR`; spec
       `spec/adaptive_threshold_spec.cr`. Measure k = 50/100/200 vs Boehm.
-- [ ] Gates on the final tree, squash, push, open the PR.
+- [x] Gates on the final tree, squash, push, open the PR (#34).
+- [x] CI red on `thread-birth-root`: SYSMON check read `arg` as a Thread;
+      fixed with a live-block + type-id test; regression spec
+      `process_spec/regression/5_pthread_create_raw_arg_spec.cr`.
+- [x] Multi-mutator coverage through the process GC:
+      `process_spec/regression/6_multi_mutator_alloc_spec.cr`.
+- [ ] Run the full CI `test` job list locally (23 targets) before pushing.
+- [ ] Multi-thread performance: per-thread pool cursors so the fast path
+      survives a second mutator (today it hands over to the locked path).
+- [ ] Full soak once the above is in.

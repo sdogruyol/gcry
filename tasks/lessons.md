@@ -105,3 +105,14 @@ Rules written after corrections, so the same mistake is not made twice.
   threshold; the adaptive threshold halved what the sparse walk had to release
   and the gate called itself inconclusive. A harness that measures one
   mechanism pins every other knob it depends on.
+- **Run the CI job's own gate list before opening a PR, not a remembered
+  subset.** PR #34 went up after a battery of 30 gates and failed CI on
+  `make thread-birth-root`, which was not in the battery: the `test` job runs
+  23 targets, extracted with
+  `sed -n 54,655p .github/workflows/ci.yml | grep -oE "make [a-z0-9_-]+|crystal spec[^#]*"`.
+  Extract the list from the workflow every time; a gate that exists is a
+  gate CI runs.
+- **Never dereference `pthread_create`'s `arg` as a Crystal object.** Crystal's
+  `Thread` passes itself; any raw caller passes anything (the thread-birth
+  gate passes an obfuscated integer). Ask the heap whether it is a live block
+  of the expected type first.
