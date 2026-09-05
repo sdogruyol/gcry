@@ -37,15 +37,16 @@ describe "adaptive collection threshold" do
     heap = Gcry::Heap.new
     begin
       heap.adaptive_threshold = true
-      # ~12 MiB live in one size class, rooted explicitly so the stack is
-      # not needed. No auto-major while filling: the roots array lives in the
-      # spec's own heap, so an automatic collection would not see it.
+      # ~20 MiB live in one size class — above the floor on every platform
+      # (Darwin's is 16 MiB) — rooted explicitly so the stack is not needed.
+      # No auto-major while filling: the roots array lives in the spec's own
+      # heap, so an automatic collection would not see it.
       heap.gc_threshold = UInt64::MAX
-      roots = Array(Void*).new(3072)
-      3072.times { roots << heap.malloc(4096) }
+      roots = Array(Void*).new(5120)
+      5120.times { roots << heap.malloc(4096) }
       heap.collect(scan_stack: false, roots: roots)
       live = heap.size_class_live_bytes
-      live.should be >= 12_u64 * 1024 * 1024
+      live.should be >= 20_u64 * 1024 * 1024
       heap.gc_threshold.should eq live
 
       heap.adaptive_threshold_pct = 200_u64
@@ -54,8 +55,9 @@ describe "adaptive collection threshold" do
 
       heap.adaptive_threshold_pct = 50_u64
       heap.collect(scan_stack: false, roots: roots)
-      # 6 MiB is below the floor.
-      heap.gc_threshold.should eq min
+      # ~10 MiB: below Darwin's floor, above Linux's.
+      half = heap.size_class_live_bytes // 2
+      heap.gc_threshold.should eq(half < min ? min : half)
 
       heap.adaptive_threshold_pct = 100_000_u64
       heap.collect(scan_stack: false, roots: roots)
@@ -110,8 +112,8 @@ describe "adaptive collection threshold" do
       heap.nursery_enabled = false
       heap.warm_retain_follows_live = true
       heap.gc_threshold = UInt64::MAX
-      roots = Array(Void*).new(3072)
-      3072.times { roots << heap.malloc(4096) } # ~12 MiB live
+      roots = Array(Void*).new(5120)
+      5120.times { roots << heap.malloc(4096) } # ~20 MiB live, above every floor
       fixed = 128_u64 * 1024 * 1024
       heap.gc_threshold = fixed
       heap.collect(scan_stack: false, roots: roots)
@@ -124,7 +126,8 @@ describe "adaptive collection threshold" do
       heap.collect(scan_stack: false)
       heap.empty_chunk_warm_retain.should eq min
       heap.gc_threshold.should eq fixed
-      # A budget larger than the threshold is capped by it.
+      # A budget larger than the threshold is capped by it (4 MiB is below
+      # every floor, so the floor would otherwise win).
       heap.gc_threshold = 4_u64 * 1024 * 1024
       heap.collect(scan_stack: false)
       heap.empty_chunk_warm_retain.should eq 4_u64 * 1024 * 1024

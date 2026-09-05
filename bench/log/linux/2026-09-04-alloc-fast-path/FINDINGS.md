@@ -80,3 +80,25 @@ Darwin's floor is its old 16 MiB; `GCRY_THRESHOLD_FACTOR` is clamped to
 10–1000; `GCRY_TIGHT_GROW`'s collect-before-grow floor is 8 MiB. Only the
 warm-budget cap has a spec that drives it; the incremental and Darwin
 cases are argued, not measured here.
+
+## The header build (the arm the perf smoke runs)
+
+CI's `perf smoke` builds `-Dgc_none` without the bitmap allocator, and the
+review noted that no such arm was measured here. Same runner and analysis,
+10 rounds, `trials_header.jsonl` / `analysis_header.txt` (the 24 h soak was
+running on the box at about one core, under both arms alike):
+
+| arm | req/s | vs Boehm (paired) | 95% CI | peak RSS × Boehm | faults / 1k req |
+|---|---|---|---|---|---|
+| Boehm | 50 764 | 100% | | 1.00 | 2.8 |
+| upstream v0.22.0, header allocator | 43 759 | 86.6% | [81.7, 91.6] | 2.48 | 1 543 |
+| this branch, header allocator | 44 608 | 88.6% | [81.7, 95.5] | 2.48 | 1 548 |
+
+The header build is unchanged by this branch, as it should be: the
+adaptive threshold and the retention are gated on the bitmap allocator,
+and the cursor sets exist only there. Its fault rate is the headerless
+story before this branch, untreated; the retention could be extended to it
+once measured. CI's perf smoke scored the header build at 72.9, 70.4,
+73.3, 72.1 and 73.5% of Boehm on successive commits of this branch, then
+64.8% on ecc433e, which differs from the 73.5% commit only in
+`tasks/todo.md` — identical code, a different runner.
