@@ -315,6 +315,7 @@ module GC
 
   # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
+    heap.root_phase_timing = env_flag_one?("GCRY_ROOT_PHASE_TIMING")
     # First: whole-class root-completeness profile. Individual knobs below
     # override it, so this must run before them.
     apply_sound_profile(heap) if env_flag_one?("GCRY_SOUND")

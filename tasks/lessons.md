@@ -137,6 +137,14 @@ Rules written after corrections, so the same mistake is not made twice.
   the reviewer's thread points at commits, and the record of what was
   wrong is part of the change. A "split" is new branches with new PRs, not
   a rewritten old one.
-- **One PR, updated in place.** The user wants review fixes to land on the
-  open PR as new commits, not as new PRs — even when a reviewer suggests a
-  split. Offer the split as commit structure and say so in the reply.
+- **Keep performance work in PR #34.** The user's latest explicit direction
+  is to include the performance plan's work in the existing PR, superseding
+  the suggestion to merge #34 first and open follow-up PRs. Use separate
+  reviewable commits with their own trials on the branch carrying #34;
+  preserve its history and update its description as the scope evolves.
+- **Rank optimizations against the target workload.** A 2.2 ms root phase
+  in a four-thread microbenchmark does not justify a root rewrite for Kemal.
+  Instrument first and require real-application evidence before risky root
+  changes or a more complex heap controller. Prioritize the known 8 KiB
+  allocation path and header retention; keep atomic-leaf enqueue skipping
+  separate from profile-dependent mark-stack representation changes.

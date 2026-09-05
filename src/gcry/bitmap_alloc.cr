@@ -162,7 +162,7 @@ module Gcry
     @[ThreadLocal]
     @@tls_cursor_exiting : UInt8 = 0_u8
 
-    getter bitmap_alloc_fast : UInt64 = 0_u64
+    getter bitmap_locked_allocations : UInt64 = 0_u64
     getter bitmap_alloc_refills : UInt64 = 0_u64
     getter bitmap_alloc_chunk_advances : UInt64 = 0_u64
     getter bitmap_dormant_revives : UInt64 = 0_u64
@@ -245,10 +245,20 @@ module Gcry
 
     # Blocks handed out on the hit path since the sets were created, for the
     # specs and `/gc-stats`.
-    def fast_path_objects : UInt64
+    def cursor_hit_allocations : UInt64
       n = 0_u64
       each_cursor_set { |set| n &+= set.value.objects_local }
       n
+    end
+
+    # Compatibility aliases. These counters are cumulative diagnostics; the
+    # locked-path counter is best-effort under concurrent classes.
+    def bitmap_alloc_fast : UInt64
+      bitmap_locked_allocations
+    end
+
+    def fast_path_objects : UInt64
+      cursor_hit_allocations
     end
 
     # Whether the hit path is open at all (`refresh_fast_path`).
@@ -596,7 +606,7 @@ module Gcry
         chunk_set_mark(chunk, ordinal)
       end
 
-      @bitmap_alloc_fast &+= 1
+      @bitmap_locked_allocations &+= 1
       BlockHeader.user_from(header)
     end
 

@@ -569,3 +569,18 @@ away:
       (merge of v0.22.0, fixes, logs), never a force-push. The policy-only
       arm was measured on a local branch for the table.
 - [x] All 43 CI-job commands green on the final tree; reply posted.
+
+
+## PR #34 performance follow-through (2026-09-05)
+
+Plan: [PERFORMANCE_PLAN_PR34.md](../docs/PERFORMANCE_PLAN_PR34.md).
+All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
+
+- [x] Measurement infrastructure: maintained paired runner/analyzer, original alloc_ns benchmark,
+      stable graph churn, counter names, root sub-timers; verify instruments.
+- [ ] Medium-buffer cursor dispatch and boundary/zeroing/process regressions.
+- [ ] Refill availability indexing, lifecycle/race coverage, scaling trials.
+- [ ] Header-retention factorial trial; change defaults only on measured evidence.
+- [ ] Atomic-leaf enqueue skip; graph correctness and paired phase measurements.
+- [ ] Publish findings, update plan status, run applicable integration gates.
+- [ ] Conditional root/controller/mark-stack work only if workload gates open.

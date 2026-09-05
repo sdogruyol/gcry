@@ -262,3 +262,13 @@ native and `macos-latest` for STW/fork samples. `perf-smoke` gates Kemal
 `/json` same-host thr % (`MIN_PCT=70`), post-GC RSS × (`MAX_RSS_X=1.25`),
 and `pause_p50` (`MAX_PAUSE_P50_MS=2.5`) via `bench/perf_smoke.sh`.
 See `.github/workflows/ci.yml`.
+
+
+### Root-phase attribution
+
+`GCRY_ROOT_PHASE_TIMING=1` enables optional last-collection root sub-timers in
+`/gc-stats`: explicit roots/callbacks, cursor settling/publications, metadata,
+fibers (including their stack scanning/probes), and thread/unowned roots.
+Disabled by default; use separate profiling runs, not headline throughput runs.
+The fields are last full-collection samples, not cumulative or incremental-slice
+statistics. They do not change root coverage or scan policy.

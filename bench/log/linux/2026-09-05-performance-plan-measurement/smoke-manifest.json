@@ -1,0 +1,99 @@
+{
+  "arms": [
+    {
+      "name": "boehm",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-measurement-smoke-fixed/boehm",
+      "gcry": false,
+      "commit": "9c04dd68f4e0d6f6b1435f2645c68759ced17b23",
+      "tree": "a7d47c139f30b586df20a94b2d438478344f0256",
+      "dirty": "M bench/micro/gc_phases.cr\n M docs/HARDENING.md\n M spec/cursor_set_spec.cr\n M src/gcry/bitmap_alloc.cr\n M src/gcry/collect.cr\n M src/gcry/gc_override.cr\n M src/gcry/observability.cr\n M tasks/lessons.md\n M tasks/todo.md\n?? CLAUDE.md\n?? bench/micro/alloc_ns.cr\n?? bench/performance/\n?? docs/PERFORMANCE_PLAN_PR34.md\n?? simd_plan/",
+      "source_sha256": "3215e300813a70320bd9782be927bacc243497bc5d042a18942c1d3000c0c326",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-measurement-smoke-fixed/boehm"
+      ],
+      "binary_sha256": "e26a58ffa85937424ef74c726642f422316c694cad1bd6101ddb8bd9f4fc5d2e",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    },
+    {
+      "name": "null",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-measurement-smoke-fixed/boehm",
+      "gcry": false,
+      "commit": "9c04dd68f4e0d6f6b1435f2645c68759ced17b23",
+      "tree": "a7d47c139f30b586df20a94b2d438478344f0256",
+      "dirty": "M bench/micro/gc_phases.cr\n M docs/HARDENING.md\n M spec/cursor_set_spec.cr\n M src/gcry/bitmap_alloc.cr\n M src/gcry/collect.cr\n M src/gcry/gc_override.cr\n M src/gcry/observability.cr\n M tasks/lessons.md\n M tasks/todo.md\n?? CLAUDE.md\n?? bench/micro/alloc_ns.cr\n?? bench/performance/\n?? docs/PERFORMANCE_PLAN_PR34.md\n?? simd_plan/",
+      "source_sha256": "3215e300813a70320bd9782be927bacc243497bc5d042a18942c1d3000c0c326",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-measurement-smoke-fixed/boehm"
+      ],
+      "binary_sha256": "e26a58ffa85937424ef74c726642f422316c694cad1bd6101ddb8bd9f4fc5d2e",
+      "gcry_lib": "/home/steve/projects/scratch/gcry",
+      "copy_of": "boehm"
+    },
+    {
+      "name": "measurement",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {
+        "GCRY_ROOT_PHASE_TIMING": "1"
+      },
+      "binary": "/tmp/gcry-measurement-smoke-fixed/measurement",
+      "gcry": true,
+      "commit": "9c04dd68f4e0d6f6b1435f2645c68759ced17b23",
+      "tree": "a7d47c139f30b586df20a94b2d438478344f0256",
+      "dirty": "M bench/micro/gc_phases.cr\n M docs/HARDENING.md\n M spec/cursor_set_spec.cr\n M src/gcry/bitmap_alloc.cr\n M src/gcry/collect.cr\n M src/gcry/gc_override.cr\n M src/gcry/observability.cr\n M tasks/lessons.md\n M tasks/todo.md\n?? CLAUDE.md\n?? bench/micro/alloc_ns.cr\n?? bench/performance/\n?? docs/PERFORMANCE_PLAN_PR34.md\n?? simd_plan/",
+      "source_sha256": "3215e300813a70320bd9782be927bacc243497bc5d042a18942c1d3000c0c326",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-measurement-smoke-fixed/measurement"
+      ],
+      "binary_sha256": "4d581213f7ab724cb85fb5447e9c4586b0cbbe92b1db2ce645df1261865f6298",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [57cf7da50] (2026-07-16)\n\nLLVM: 20.1.8\nDefault target: x86_64-unknown-linux-gnu",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+  "cpu": "processor\t: 0\nvendor_id\t: AuthenticAMD\ncpu family\t: 26\nmodel\t\t: 36\nmodel name\t: AMD Ryzen AI 9 HX 375 w/ Radeon 890M\nstepping\t: 0\nmicrocode\t: 0xffffffff\ncpu MHz\t\t: 1996.187\ncache size\t: 1024 KB\nphysical id\t: 0\nsiblings\t: 24\ncore id\t\t: 0\ncpu cores\t: 12\napicid\t\t: 0\ninitial apicid\t: 0\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: 13\nwp\t\t: yes\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core ssbd ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 clzero xsaveerptr arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nbugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass\nbogomips\t: 3992.37\nTLB size\t: 192 4K pages\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 48 bits physical, 48 bits virtual\npower management:",
+  "clk_tck": 100,
+  "config": {
+    "config": "/tmp/gcry-measurement-smoke-arms.json",
+    "output": "/tmp/gcry-measurement-smoke-fixed",
+    "rounds": 2,
+    "seconds": 2,
+    "warmup": 1,
+    "threads": 4,
+    "connections": 100,
+    "port": 4500,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}

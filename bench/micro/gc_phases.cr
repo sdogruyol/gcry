@@ -31,7 +31,10 @@
 #   crystal build --release -Dgc_none bench/micro/gc_phases.cr -o bin/gc_phases
 #   ./bin/gc_phases [--seconds=N] [--live=N] [--survival=0.1,0.5,0.9] [--size=N]
 #
-# Output: JSON lines to stdout.
+# --size is in 8-byte words. --fanout uses a fixed target graph plus the
+# churn ring (2 * live objects). --trace-only collects that graph without
+# allocating in the timed loop; --atomic requires --fanout=0.
+# Output: JSON lines to stdout; each survival runs in a fresh process.
 
 require "../../src/gcry"
 
@@ -60,6 +63,9 @@ obj_words = 8
 survivals = [0.05, 0.25, 0.75]
 shuffle = false
 fanout = 0
+trace_only = false
+atomic = false
+child = false
 # Scatter the ring so consecutive marked objects land in different chunks.
 #
 # This is not a cosmetic knob. In allocation order the ring's pointers are
@@ -77,9 +83,28 @@ ARGV.each do |arg|
   when .starts_with?("--live=")     then live_slots = arg.split("=", 2)[1].to_i
   when .starts_with?("--size=")     then obj_words = arg.split("=", 2)[1].to_i
   when .starts_with?("--survival=") then survivals = arg.split("=", 2)[1].split(",").map(&.to_f)
+  when "--child"                    then child = true
+  when "--trace-only"               then trace_only = true
+  when "--atomic"                   then atomic = true
   when "--shuffle"                  then shuffle = true
   when .starts_with?("--fanout=")   then fanout = arg.split("=", 2)[1].to_i
   end
+end
+
+abort "invalid workload arguments" unless seconds > 0 && live_slots > 0 && obj_words > 0 &&
+                                          fanout >= 0 && fanout <= obj_words && survivals.all? { |v| v >= 0 && v <= 1 }
+abort "atomic objects cannot carry graph edges" if atomic && fanout > 0
+# Exec a new process per survival: no adaptive threshold or heap history leaks
+# between rows. --child is internal to this driver.
+unless child
+  survivals.each do |survival|
+    args = ARGV.reject { |arg| arg.starts_with?("--survival=") }
+    args << "--survival=#{survival}" << "--child"
+    status = Process.run(Process.executable_path.not_nil!, args,
+      output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
+    exit status.exit_code unless status.success?
+  end
+  exit
 end
 
 heap = Gcry.default_heap
@@ -95,6 +120,8 @@ json_line({
   "seconds"     => seconds.to_s,
   "shuffle"     => shuffle.to_s,
   "fanout"      => fanout.to_s,
+  "trace_only"  => trace_only.to_s,
+  "atomic"      => atomic.to_s,
   "bitmap"      => heap.bitmap_marks?.to_s,
   "chunk_radix" => heap.chunk_radix?.to_s,
 })
@@ -105,22 +132,25 @@ survivals.each do |survival|
   # xorshift rather than `Random`: it must not allocate inside the timed loop.
   rng = 0x9E3779B97F4A7C15_u64
   bytes = (obj_words * 8).to_u64
-  threshold = (survival * UInt32::MAX.to_f).to_u64
+  threshold = (survival * 4294967296.0).to_u64
+  # A fixed target graph bounds reachability. Pointing each new object at
+  # arbitrarily old churn survivors would retain an ever-growing history at
+  # fanout > 1. Both target and churn layers keep their requested fanout.
+  targets = Array(Void*).new(fanout > 0 ? live_slots : 0, Pointer(Void).null)
+  targets.size.times { |i| targets[i] = GC.malloc(bytes) }
+  frng = 0x2545F4914F6CDD1D_u64
 
   # Fill the ring first so the measured window is steady state, not warm-up.
   live_slots.times do |i|
-    ring[i] = GC.malloc(bytes)
+    ring[i] = atomic ? GC.malloc_atomic(bytes) : GC.malloc(bytes)
   end
   if fanout > 0
-    frng = 0x2545F4914F6CDD1D_u64
     live_slots.times do |i|
-      slot = ring[i]
-      k = 0
-      while k < fanout && k < obj_words
+      fanout.times do |k|
         frng ^= frng << 13; frng ^= frng >> 7; frng ^= frng << 17
-        target = i == 0 ? 0 : (frng % i.to_u64).to_i
-        (slot.as(Void**) + k).value = ring[target]
-        k += 1
+        target = targets[(frng % live_slots.to_u64).to_i]
+        (ring[i].as(Void**) + k).value = target
+        (targets[i].as(Void**) + k).value = target
       end
     end
   end
@@ -148,18 +178,26 @@ survivals.each do |survival|
   t0 = now_ns
   elapsed = 0_u64
   while elapsed < (seconds * 1_000_000_000.0).to_u64
-    2048.times do
-      rng ^= rng << 13
-      rng ^= rng >> 7
-      rng ^= rng << 17
-      ptr = GC.malloc(bytes)
-      # Survivors displace an older slot; the rest are dropped on the floor.
-      if (rng >> 32) < threshold
-        ring[cursor] = ptr
-        cursor += 1
-        cursor = 0 if cursor >= live_slots
+    if trace_only
+      GC.collect
+    else
+      2048.times do
+        rng ^= rng << 13
+        rng ^= rng >> 7
+        rng ^= rng << 17
+        ptr = atomic ? GC.malloc_atomic(bytes) : GC.malloc(bytes)
+        fanout.times do |k|
+          frng ^= frng << 13; frng ^= frng >> 7; frng ^= frng << 17
+          (ptr.as(Void**) + k).value = targets[(frng % live_slots.to_u64).to_i]
+        end
+        # Survivors displace an older slot; the rest are dropped on the floor.
+        if (rng >> 32) < threshold
+          ring[cursor] = ptr
+          cursor += 1
+          cursor = 0 if cursor >= live_slots
+        end
+        allocs &+= 1
       end
-      allocs &+= 1
     end
     elapsed = now_ns &- t0
   end
@@ -173,11 +211,28 @@ survivals.each do |survival|
   # collector faster.
   duty = pause_total.to_f / wall.to_f
 
+  # Outside the timed window, verify that the graph has not thinned. Every
+  # declared edge is non-null and every target is still a live allocation.
+  edges = 0_u64
+  {ring, targets}.each do |layer|
+    layer.each do |ptr|
+      abort "lost graph object" unless heap.live?(ptr)
+      fanout.times do |k|
+        target = (ptr.as(Void**) + k).value
+        abort "lost graph edge" if target.null? || !heap.live?(target)
+        edges += 1
+      end
+    end
+  end
+
   json_line({
+    "graph_objects"  => (ring.size + targets.size).to_s,
+    "graph_bytes"    => ((ring.size.to_u64 + targets.size.to_u64) * bytes).to_s,
+    "graph_edges"    => edges.to_s,
     "survival"       => survival.to_s,
     "wall_ms"        => (wall / 1_000_000.0).round(1).to_s,
     "allocs"         => allocs.to_s,
-    "ns_per_alloc"   => (wall.to_f / allocs.to_f).round(2).to_s,
+    "ns_per_alloc"   => (allocs == 0 ? 0.0 : wall.to_f / allocs.to_f).round(2).to_s,
     "collections"    => collections.to_s,
     "pause_total_ms" => (pause_total / 1_000_000.0).round(2).to_s,
     "gc_duty_cycle"  => (duty * 100).round(3).to_s,
@@ -225,5 +280,6 @@ survivals.each do |survival|
 
   # Drop the ring before the next survival rate so heaps do not compound.
   ring.clear
+  targets.clear
   GC.collect
 end

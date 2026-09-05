@@ -367,6 +367,13 @@ module Gcry
     # Parked-fiber stack scrub (inside STW roots window; split for Parallel A/B).
     getter last_phase_scrub_ns : UInt64 = 0_u64
     getter last_phase_roots_ns : UInt64 = 0_u64
+    # Optional root attribution: no extra clocks on the normal collection path.
+    property root_phase_timing : Bool = false
+    getter last_roots_explicit_ns : UInt64 = 0_u64
+    getter last_roots_cursors_ns : UInt64 = 0_u64
+    getter last_roots_metadata_ns : UInt64 = 0_u64
+    getter last_roots_fibers_ns : UInt64 = 0_u64
+    getter last_roots_threads_ns : UInt64 = 0_u64
     getter last_phase_static_ns : UInt64 = 0_u64
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
@@ -1962,27 +1969,51 @@ module Gcry
           StwWatchdog.enter(StwWatchdog::PHASE_ROOTS)
 
           t0 = monotonic_ns
+          @last_roots_explicit_ns = 0_u64
+          @last_roots_cursors_ns = 0_u64
+          @last_roots_metadata_ns = 0_u64
+          @last_roots_fibers_ns = 0_u64
+          @last_roots_threads_ns = 0_u64
+          root_part = @root_phase_timing ? monotonic_ns : 0_u64
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           mark_large_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_explicit_ns = now - root_part
+            root_part = now
+          end
           bitmap_settle_cursor_sets
           mark_bitmap_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_cursors_ns = now - root_part
+            root_part = now
+          end
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
+          @last_roots_metadata_ns = monotonic_ns - root_part if @root_phase_timing
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
           t_scrub = monotonic_ns
           scrub_parked_fiber_stacks if scan_stack
           scrub_ns = monotonic_ns - t_scrub
           @last_phase_scrub_ns = scrub_ns
           # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+          root_part = monotonic_ns if @root_phase_timing
           scan_all_fiber_roots if scan_stack
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_fibers_ns = now - root_part
+            root_part = now
+          end
           # Research arms: stacks `Fiber.unsafe_each` does not yield
           # (src/gcry/unowned_stack_roots.cr). Off by default.
           scan_unowned_stacks if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
+          @last_roots_threads_ns = monotonic_ns - root_part if @root_phase_timing
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
           StwWatchdog.enter(StwWatchdog::PHASE_STATIC)
 
