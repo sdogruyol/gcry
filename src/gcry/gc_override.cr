@@ -21,6 +21,7 @@ module GC
     end
 
     Gcry::Platform.init_staging
+    Gcry::Platform.note_main_thread
     Gcry::ThreadBirthRoot.init
 
     # Build the heap while still on LibC malloc (@@gcry_ready == false).
