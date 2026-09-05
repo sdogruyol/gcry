@@ -534,7 +534,7 @@ away:
 - [x] Kemal vs Boehm re-measured on a quiet box (104.7%, t = 1.63; withdrawn
       version 104.4%; realloc-without-roots 105.0% → reverted); FINDINGS +
       PR #34 updated; `soak-smoke` and `soft-soak-ec4-smoke` green.
-- [ ] Full 24 h `make soak` started 2026-09-05 ~20:00 local; output in the
+- [x] (superseded, stopped for the evidence run) 24 h `make soak` started 2026-09-05 ~20:00 local; output in the
       session scratchpad `soak_full.out`, telemetry `/tmp/gcry-soak.log`.
 - [ ] Execution-context throughput: the stop-the-world pause is 14–27 ms per
       collection at 4 threads with mark and sweep in microseconds — whole
@@ -543,4 +543,29 @@ away:
 - [ ] `bitmap_take_pool_chunk` walks every chunk of the class per refill:
       O(chunks) at large heaps (1 125 ns/alloc at 960 MB). Per-class pool
       list of chunks with capacity, ascending address order.
-- [ ] Full soak once the above is in.
+- [x] Full soak: 24 h `make soak` running on the pushed tree (eb77356) from 21:08 local 2026-09-05, output `soak_full2.out` in the session scratchpad, telemetry `/tmp/gcry-soak.log`.
+
+## Review of PR #34 (sdogruyol, 2026-09-05 07:35Z) — done
+
+- [x] Blockers 1 and 2 (type-punned `arg`; SYSMON exemption): gone with the
+      single-mutator regime; per-thread cursor sets instead.
+- [x] Blocker 3: SYSMON's set is created with `no_hit_path` — it always
+      takes `allocate` and its cooperative wait, and the settle never
+      retires or credits it. In-flight sentinel, atomic `occ`, CAS-credited
+      counters.
+- [x] Blocker 4: `Invariant.after_malloc` / `Trace.after_malloc` run on the
+      hit path; `refresh_fast_path` no longer closes it under invariants
+      (249 examples run it).
+- [x] Should-fixes: warm budget = min(threshold, max(live × factor, floor))
+      after every major; adaptive threshold gated on the bitmap allocator;
+      `collect_a_little` recomputes; Darwin floor 16 MiB; factor clamp
+      10–1000; tight-grow `min_bsg` floor 8 MiB. Spec for the warm cap.
+- [x] Evidence: `run_kemal_ab.sh` + `analyze_ab.py` + `trials.jsonl` in the
+      log; paired, 95% CI, Boehm null control, n = 20, base = v0.22.0
+      headerless under the guard. Upstream 89.5% [86.1, 92.9] at 1.88× RSS;
+      policy alone 100.9% [96.8, 105.1] at 0.97×; with cursor sets 106.7%
+      [102.2, 111.2].
+- [x] Split declined by the author: one PR, updated in place by new commits
+      (merge of v0.22.0, fixes, logs), never a force-push. The policy-only
+      arm was measured on a local branch for the table.
+- [x] All 43 CI-job commands green on the final tree; reply posted.
