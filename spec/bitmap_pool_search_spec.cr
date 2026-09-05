@@ -106,4 +106,32 @@ describe "bitmap pool capacity search" do
       heap.destroy
     end
   end
+
+  it "publishes a block freed behind a cursor when that cursor retires" do
+    heap = Gcry::Heap.new
+    begin
+      heap.bitmap_alloc = true
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      heap.blacklist_enabled = false
+      first = heap.malloc(48)
+      blocks = 0_u64
+      heap.each_chunk do |chunk|
+        if Gcry::ChunkHeader.contains?(chunk, first.address)
+          blocks = Gcry::Heap.chunk_block_count(
+            (Gcry::BlockHeader::SIZE + 48).to_u64,
+            chunk.value.mapped_bytes, chunk.value.data_offset)
+        end
+      end
+      blocks.should be > 64
+      (blocks - 1).times { heap.malloc(48) }
+      heap.free(first)
+      # This thread searches while the main cursor still owns the chunk,
+      # caching absence despite the free bit in an earlier bitmap word.
+      Thread.new { heap.malloc(48) }.join
+      heap.malloc(48).should eq(first)
+    ensure
+      heap.destroy
+    end
+  end
 end
