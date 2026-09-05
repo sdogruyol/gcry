@@ -597,3 +597,63 @@ All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
 - [ ] Header default decision: independent exclusive-host confirmation,
       burst/drop/recovery and native platform gates still required.
 - [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.
+
+## Throughput at flat RSS: stage 2 plan (2026-09-06)
+
+Evidence, this box, quiet (load 0.01), `bench/performance/kemal_ab.py`,
+5 arms × 20 rotated rounds, Boehm null control 102.8% [97.8, 107.9]:
+branch headerless 105.9% [101.2, 110.6] of Boehm at 1.03× peak RSS,
+CPU 209 vs 240 ms/10k; master 88.1% at 1.69×. Main-thread PC profile under
+wrk (5 000 samples, 2 ms): syscalls/libc ≈ 64–70% in both arms; gcry symbols
+9.5% of main-thread time (Boehm: 8.7% in `GC_*` plus ≈ 9% in its allocation
+lock/condvar symbols). So the GC is already about half of Boehm's cost and the
+hard ceiling for further GC work is ≈ +10%; a realistic target is +4–6%
+(≈ 110–112% of Boehm) with peak RSS unchanged. Where the 9.5% goes:
+
+| main-thread share | what | counter evidence |
+|---|---|---|
+| 3.7% | `GC::realloc` 1.7 + `chunk_search_unlocked` 1.1 + `chunk_containing` 0.9 | String::Builder growth in JSON building; `realloc` binary-searches the index and allocates through the locked `allocate` |
+| 3.0% | `alloc_old_small_locked` 1.8 + `allocate` 1.2 | 10% of allocations take the locked path (4.49 M of 44 M per 15 s); 705 k refills, only 29 k chunk advances |
+| 2.4% | `malloc` / `malloc_atomic` wrappers (fast path inlined) | 34.8 ns per 48 B alloc vs Boehm 131 ns |
+| ≈ 1% | mark, collection body, sweep | 17 majors/s, pause p50 1.18 ms: stop 0.28, roots 0.29, static 0.20, mark 0.40 |
+
+Two rounds of twenty lost ≈ 8% each to a dormant-release storm (74–125 MB
+`unmapped_bytes` in 15 s against 0–4 MB elsewhere): fully-free bytes sit at
+the warm budget's edge and oscillate across it.
+
+Every item is measured with the committed runner (20 rounds, null arm) and a
+re-sampled profile; peak RSS × Boehm must not move.
+
+- [ ] 1. `realloc` without the lock. Take `fresh` through `fast_alloc` before
+      `allocate` (it currently always uses the locked path); resolve the old
+      block's chunk O(1) — the argument that makes the radix safe here is that
+      a pointer being realloc'd or freed is owned and live, so its chunk cannot
+      be unmapped under the reader; verify containment from the table entry,
+      not the chunk. Re-measure the `add_root`/`delete_root` pair afterwards
+      (was noise at +0.3%). Gate: realloc+lookup share < 1%; realloc specs,
+      process specs 6–8, `stw-mt-property-test`, `find-block-race`. Expect +2–3%.
+- [ ] 2. Locked-path census, then fix the dominant cause. Per-reason counters
+      on the slow path (realloc, refill, size > 32 KiB, `@collecting`, empty
+      mask, no set) in `/gc-stats`. Word advances inside a CURSOR-held chunk
+      need no class lock (the chunk is exclusively held); today 96% of refills
+      are such advances. Expect +1–2%.
+- [ ] 3. Warm-retain hysteresis. Shrink the warm budget only after N
+      consecutive majors below it and revive warm chunks before dormant ones;
+      count `bitmap_dormant_revives` per trial. Gate: no trial with
+      `unmapped_bytes` > 8 MB in a 15 s window; p99 down. Expect +0.5–1% mean,
+      peak RSS unchanged (budget still capped by the threshold).
+- [ ] 4. Fast-path trims, each measured with `alloc_ns` first: plain store
+      for the occupancy bit while the chunk is CURSOR-held (cross-thread `free`
+      into a held chunk must then take the cursor's slot, not the word);
+      inline zeroing for payloads ≤ 64 B instead of memset; check the
+      `GC.malloc` → `Gcry.malloc` → `Heap#malloc` → `fast_alloc` chain inlines
+      to one frame. Expect +0.5–1.5%.
+- [ ] 5. Fixed cost per collection (0.8 ms of the 1.18 ms pause, 17/s):
+      static roots (495 KB every major) via soft-dirty skip of unchanged
+      pages, and the 0.28 ms suspend/ack. Lowest priority: ≤ +1% and the
+      static-root cache needs its own red arm.
+- [ ] Not in scope: the 64% of main-thread time in socket syscalls and the
+      20% in JSON/HTTP are Crystal's, identical in both arms.
+- [ ] Optional, RSS only: post-GC RSS is 27 MB (Boehm 26, master 15) because
+      warm chunks stay resident; a time-decay release from the monitor thread
+      would lower idle RSS without touching the loaded number.

@@ -1104,18 +1104,18 @@ module GC
   def self.realloc(pointer : Void*, size : LibC::SizeT) : Void*
     check_fork_poison!
     if @@gcry_ready
-      # Pointers from the LibC bootstrap era are not on the gcry heap.
-      if !pointer.null? && !Gcry.default_heap.is_heap_ptr(pointer)
-        # Emptied chunks are index-removed then munmapped post-STW. A mark miss
-        # (or racing flush) makes is_heap_ptr false while the address is still
-        # in the historic heap span — LibC.realloc aborts "invalid pointer".
-        if Gcry.default_heap.in_heap_span?(pointer)
-          raise ArgumentError.new("GC.realloc: not a live gcry allocation" +
-                                  Gcry.default_heap.release_note(pointer.address))
-        end
-        return bootstrap_realloc(pointer, size)
+      # One lookup for the whole call: the heap answers null for a pointer it
+      # does not own, which is the LibC bootstrap era's.
+      fresh = Gcry.default_heap.realloc_owned(pointer, size)
+      return fresh unless fresh.null?
+      # Emptied chunks are index-removed then munmapped post-STW. A mark miss
+      # (or racing flush) makes the pointer unowned while the address is still
+      # in the historic heap span — LibC.realloc aborts "invalid pointer".
+      if Gcry.default_heap.in_heap_span?(pointer)
+        raise ArgumentError.new("GC.realloc: not a live gcry allocation" +
+                                Gcry.default_heap.release_note(pointer.address))
       end
-      Gcry.default_heap.realloc(pointer, size)
+      bootstrap_realloc(pointer, size)
     else
       bootstrap_realloc(pointer, size)
     end
@@ -1151,8 +1151,8 @@ module GC
 
   def self.free(pointer : Void*) : Nil
     return if pointer.null?
-    if @@gcry_ready && Gcry.default_heap.is_heap_ptr(pointer)
-      Gcry.default_heap.free(pointer)
+    if @@gcry_ready && Gcry.default_heap.free_owned?(pointer)
+      # Freed, through one lookup.
     elsif @@gcry_ready && Gcry.default_heap.in_heap_span?(pointer)
       # Same class as realloc: emptied+munmapped gcry block is not a LibC ptr.
       raise ArgumentError.new("GC.free: not a live gcry allocation" +

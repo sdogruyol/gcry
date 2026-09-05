@@ -204,3 +204,52 @@ describe "Gcry::Heap chunk radix" do
     end
   end
 end
+
+# `realloc` and `free` resolve the pointer they are handed through the table
+# with no index lock (`Heap#chunk_for_owned`): the caller owns the block, so
+# its chunk cannot be unmapped under the lookup. The fresh block of a growing
+# `realloc` comes from the thread's own cursor when the hit path is open.
+describe "owned-pointer lookups through the chunk radix" do
+  it "realloc resolves the block through the table and keeps its contents" do
+    heap = Gcry::Heap.new
+    begin
+      heap.chunk_radix = true
+      heap.bitmap_alloc = true
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      ptr = heap.malloc(64)
+      64.times { |i| (ptr.as(UInt8*) + i).value = (i + 1).to_u8 }
+      # The first block of a class fills the cursor through the locked path;
+      # from then on the class is served by the cursor.
+      heap.malloc(4096)
+      owned_before = heap.radix_owned_hits
+      hits_before = heap.cursor_hit_allocations
+      grown = heap.realloc(ptr, 4096)
+      heap.radix_owned_hits.should eq(owned_before + 1)
+      64.times { |i| (grown.as(UInt8*) + i).value.should eq((i + 1).to_u8) }
+      (grown.as(UInt8*) + 64).value.should eq(0_u8)
+      heap.cursor_hit_allocations.should be > hits_before
+      heap.free(grown)
+      heap.radix_owned_hits.should eq(owned_before + 2)
+      heap.live?(grown).should be_false
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "answers null and false for a pointer the heap does not own" do
+    heap = Gcry::Heap.new
+    begin
+      heap.chunk_radix = true
+      heap.malloc(64)
+      foreign = LibC.malloc(64)
+      heap.realloc_owned(foreign, 128).null?.should be_true
+      heap.free_owned?(foreign).should be_false
+      expect_raises(ArgumentError, /not a gcry allocation/) { heap.realloc(foreign, 128) }
+      expect_raises(ArgumentError, /not a gcry allocation/) { heap.free(foreign) }
+      LibC.free(foreign)
+    ensure
+      heap.destroy
+    end
+  end
+end

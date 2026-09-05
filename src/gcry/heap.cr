@@ -267,7 +267,7 @@ module Gcry
         @bitmap_alloc = Heap.bitmap_alloc_from_env
         @bitmap_marks = @bitmap_alloc || Heap.bitmap_marks_from_env
       {% end %}
-      radix_init if Heap.chunk_radix_from_env
+      radix_init if Heap.chunk_radix_wanted?(@bitmap_alloc)
       bitmap_alloc_init
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -409,6 +409,15 @@ module Gcry
       env_is_one?("GCRY_CHUNK_RADIX")
     end
 
+    # The table is on by default under the bitmap allocator, because `realloc`
+    # and `free` resolve their pointer through it without the index lock
+    # (`chunk_for_owned`); `GCRY_CHUNK_RADIX=0` turns it off, `=1` turns it
+    # on for the header allocator too.
+    def self.chunk_radix_wanted?(bitmap_alloc : Bool) : Bool
+      return false if env_is_zero?("GCRY_CHUNK_RADIX")
+      bitmap_alloc || chunk_radix_from_env
+    end
+
     # `GCRY_RADIX_THP=1`. Research/A-B only; see `chunk_radix.cr`.
     def self.radix_thp_from_env : Bool
       env_is_one?("GCRY_RADIX_THP")
@@ -418,6 +427,12 @@ module Gcry
       raw = LibC.getenv(name)
       return false if raw.null?
       raw.value == '1'.ord.to_u8 && (raw + 1).value == 0
+    end
+
+    private def self.env_is_zero?(name : String) : Bool
+      raw = LibC.getenv(name)
+      return false if raw.null?
+      raw.value == '0'.ord.to_u8 && (raw + 1).value == 0
     end
 
     # Specs and `gc_override` may switch representation, but only before any
@@ -494,17 +509,24 @@ module Gcry
     end
 
     def realloc(pointer : Void*, size : Int) : Void*
+      fresh = realloc_owned(pointer, size)
+      raise ArgumentError.new("pointer is not a gcry allocation") if fresh.null?
+      fresh
+    end
+
+    # `realloc`, answering null instead of raising when `pointer` is not a
+    # gcry allocation, so `GC.realloc` can route a bootstrap-era pointer to
+    # LibC without a lookup of its own.
+    def realloc_owned(pointer : Void*, size : Int) : Void*
       new_size = size.to_u64
       return malloc(new_size) if pointer.null?
 
       header = BlockHeader.from_user(pointer)
       # One lookup, shared by the ownership test and by the size/atomicity
-      # reads below — see `owns_user_pointer_in?`.
-      rchunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless rchunk
-      unless owns_user_pointer_in?(pointer, header, rchunk)
-        raise ArgumentError.new("pointer is not a gcry allocation")
-      end
+      # reads below — see `owns_user_pointer_in?` and `chunk_for_owned`.
+      rchunk = chunk_for_owned(pointer)
+      return Pointer(Void).null unless rchunk
+      return Pointer(Void).null unless owns_user_pointer_in?(pointer, header, rchunk)
 
       # Size and atomicity from the chunk (7.2 / 7.6). Reading them from the
       # block returns the object's own first words under headerless — a garbage
@@ -573,6 +595,26 @@ module Gcry
       # Measured 2026-09-05: skipping this list for the conservative frame
       # scan was worth +0.3% on Kemal `/json` (t = 0.2), so the registration
       # stays as it was.
+      # The thread's own cursor first. A hit cannot start a collection (the
+      # hit path returns null at the threshold rather than collecting), so
+      # nothing above applies to it: there is no window for a peer to free
+      # `pointer` before the copy that this frame does not already cover, and
+      # the hit path is only open with the nursery off, so every collection is
+      # a major that scans this frame. Measured before this: `realloc` always
+      # took the locked `allocate`, which was 10% of all allocations on Kemal
+      # `/json` (`bitmap_locked_allocations`), and the root list's malloc,
+      # free and walk came with it.
+      fresh = fast_alloc(new_size, atomic)
+      unless fresh.null?
+        realloc_copy_enter
+        begin
+          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        ensure
+          realloc_copy_leave
+        end
+        return fresh
+      end
+
       rooted = true
       add_root(pointer)
       begin
@@ -599,17 +641,22 @@ module Gcry
 
     def free(pointer : Void*) : Nil
       return if pointer.null?
+      raise ArgumentError.new("pointer is not a gcry allocation") unless free_owned?(pointer)
+    end
+
+    # `free`, answering false instead of raising when `pointer` is not a gcry
+    # allocation — the `GC.free` counterpart of `realloc_owned`.
+    def free_owned?(pointer : Void*) : Bool
+      return true if pointer.null?
       header = BlockHeader.from_user(pointer)
       # One lookup for the whole call. It used to be three — inside
       # `owns_user_pointer?`, again here, and a third in each arm below — and
       # `chunk_containing` takes `@index_lock` with the world running, which
       # cost +13% on `free` (measured against 287404d). See
-      # `owns_user_pointer_in?`.
-      chunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless chunk
-      unless owns_user_pointer_in?(pointer, header, chunk)
-        raise ArgumentError.new("pointer is not a gcry allocation")
-      end
+      # `owns_user_pointer_in?` and `chunk_for_owned`.
+      chunk = chunk_for_owned(pointer)
+      return false unless chunk
+      return false unless owns_user_pointer_in?(pointer, header, chunk)
       large = ChunkHeader.large?(chunk)
       # A large object's header sits behind the object in both builds; under
       # headerless `from_user` is the object itself, and reading its first
@@ -632,7 +679,7 @@ module Gcry
         trim_large_cache
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return
+        return true
       end
 
       class_index = chunk.value.size_class.to_i32
@@ -668,7 +715,7 @@ module Gcry
         live_objects_dec
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return
+        return true
       end
 
       if @tlab_enabled
@@ -690,6 +737,7 @@ module Gcry
       end
       Invariant.after_free(self, pointer)
       Trace.after_free(pointer)
+      true
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -2949,6 +2997,37 @@ module Gcry
 
     private def chunk_for(user : Void*) : ChunkHeader*?
       chunk_containing(user.address)
+    end
+
+    # The lookup for a pointer the caller *owns* — `realloc` and `free`.
+    #
+    # `chunk_containing` takes `@index_lock` because its result is
+    # dereferenced and a chunk can be index-removed and unmapped under a
+    # lock-free reader. An owned pointer cannot be in such a chunk: the
+    # caller holds it in a frame or register, so the block is live at every
+    # stop-the-world, its chunk is never fully free, and a chunk that is not
+    # fully free is never unmapped. The radix entry for a page holding a live
+    # block was written before the chunk was published and is only cleared
+    # ahead of an unmap that cannot happen, so the two loads in
+    # `radix_lookup` name the right, mapped chunk and the containment check
+    # dereferences nothing that can go away. A pointer that is *not* owned —
+    # `GC.realloc` on a bootstrap-era LibC pointer — misses the table
+    # (address outside every chunk) and falls through to the locked lookup,
+    # whose answer is authoritative.
+    #
+    # Measured before this existed: `GC.realloc` on Kemal `/json` spent 2% of
+    # the main thread in `chunk_search_unlocked` + `chunk_containing`, two
+    # locked binary searches per call (`is_heap_ptr` then `realloc`).
+    private def chunk_for_owned(user : Void*) : ChunkHeader*?
+      addr = user.address
+      unless @radix_l1.null?
+        hit = radix_lookup(addr)
+        if !hit.null? && ChunkHeader.contains?(hit, addr)
+          @radix_owned_hits &+= 1
+          return hit
+        end
+      end
+      chunk_for(user)
     end
 
     private def owns_user_pointer?(user : Void*, header : BlockHeader*) : Bool

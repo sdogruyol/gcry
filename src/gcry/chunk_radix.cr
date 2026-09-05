@@ -122,6 +122,9 @@ module Gcry
     getter radix_slow_lookups : UInt64 = 0_u64
     # Chunks too large to be worth publishing, resolved by the binary search.
     getter radix_oversize_skips : UInt64 = 0_u64
+    # Owned-pointer lookups (`realloc`, `free`) answered by the table with
+    # no lock — see `chunk_for_owned`.
+    getter radix_owned_hits : UInt64 = 0_u64
 
     def chunk_radix? : Bool
       !@radix_l1.null?
