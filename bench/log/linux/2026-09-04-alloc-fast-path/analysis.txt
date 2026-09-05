@@ -1,0 +1,7 @@
+arm                           n    req/s  vs ref  paired t   95% CI of ratio  RSS×ref  flt/1k cpu ms/10k
+boehm                        20    49038  100.0%      0.00    [100.0, 100.0]     1.00     2.7        224
+boehm-null                   20    48349   99.0%     -0.76     [95.1, 103.0]     1.02     2.8        227
+base-v0.22.0-hl              20    43726   89.5%     -6.25      [86.1, 92.9]     1.88  1255.6        230
+policy-hl                    20    49283  100.9%      0.26     [96.8, 105.1]     0.97     5.0        204
+cursors-hl                   20    52083  106.7%      3.02    [102.2, 111.2]     0.97     4.8        193
+load average during trials: min 1.03 max 2.59

@@ -132,3 +132,8 @@ Rules written after corrections, so the same mistake is not made twice.
   regressions. `timeout` on the runner does not kill the child the runner
   spawned; `pkill -f crystal-run-spec` after any timed-out spec, and the
   harness prints `uptime` at both ends.
+- **Never force-push; history moves forward only.** A branch under review
+  gets a merge of upstream and new commits for the fixes, never a rewrite —
+  the reviewer's thread points at commits, and the record of what was
+  wrong is part of the change. A "split" is new branches with new PRs, not
+  a rewritten old one.
