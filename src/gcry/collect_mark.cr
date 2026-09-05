@@ -246,6 +246,9 @@ module Gcry
 
       set_block_mark_in(chunk, header)
       note_first_mark(chunk, header, source) if @live_attr_roots
+      # Atomic payloads have no edges. The chunk is already resolved here;
+      # preserve its mark and attribution without a queue round trip.
+      return if atomic_of(chunk, header)
       mark_stack_push(header)
     end
 
