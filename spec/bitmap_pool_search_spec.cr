@@ -1,6 +1,34 @@
 require "./spec_helper"
 
+class Gcry::Heap
+  def pool_index_at_stw_for_spec(address : UInt64) : UInt64
+    @index_lock.lock
+    @world_stopped = true
+    begin
+      bitmap_indexed_chunk(address).try(&.address) || 0_u64
+    ensure
+      @world_stopped = false
+      @index_lock.unlock
+    end
+  end
+end
+
 describe "bitmap pool capacity search" do
+  it "resolves mapping keys without waiting on a stopped mutator's index lock" do
+    heap = Gcry::Heap.new
+    begin
+      heap.bitmap_alloc = true
+      heap.nursery_enabled = false
+      heap.gc_threshold = UInt64::MAX
+      heap.malloc(8192)
+      address = 0_u64
+      heap.each_chunk { |chunk| address = chunk.address }
+      heap.pool_index_at_stw_for_spec(address).should eq(address)
+    ensure
+      heap.destroy
+    end
+  end
+
   it "does not repeat an empty search while growing an occupied class" do
     heap = Gcry::Heap.new
     begin

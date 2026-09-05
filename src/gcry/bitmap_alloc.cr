@@ -778,15 +778,24 @@ module Gcry
 
     # The public containment lookup deliberately excludes chunk metadata.
     # Cached entries are mapping bases, so resolve an exact index key instead.
+    # Match chunk_containing's stopped-world protocol: a suspended mutator
+    # may own the index lock; the collector must use the stable sorted index
+    # without waiting for that mutator to resume.
     private def bitmap_indexed_chunk(address : UInt64) : ChunkHeader*?
-      @index_lock.sync do
-        at = index_lower_bound(address)
-        if at < @chunk_index_count
-          chunk = @chunk_index[at]
-          return chunk if chunk.address == address
-        end
-        nil
+      if @world_stopped
+        bitmap_indexed_chunk_unlocked(address)
+      else
+        @index_lock.sync { bitmap_indexed_chunk_unlocked(address) }
       end
+    end
+
+    private def bitmap_indexed_chunk_unlocked(address : UInt64) : ChunkHeader*?
+      at = index_lower_bound(address)
+      if at < @chunk_index_count
+        chunk = @chunk_index[at]
+        return chunk if chunk.address == address
+      end
+      nil
     end
 
     private def bitmap_pool_candidate?(chunk : ChunkHeader*, index : Int32, atomic : Bool) : Bool

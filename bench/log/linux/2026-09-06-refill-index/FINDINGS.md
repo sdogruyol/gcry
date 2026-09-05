@@ -57,3 +57,26 @@ Manifest, complete per-process JSON and analysis are committed. Full stdout
 transcripts remain under `/tmp/gcry-performance-raw/2026-09-06-refill-index`.
 An existing long-running soak remained active on the host (about 3% lifetime
 CPU at inspection); no deliberate compilation/stress ran during these trials.
+
+
+## Stopped-world lookup correction
+
+The exact mapping-key lookup initially took the index lock unconditionally.
+A collector callback can reach allocation while a stopped mutator holds that
+lock. The new focused test reproduced the deadlock at a SIGKILL deadline.
+The correction follows `chunk_containing`: use the stable index unlocked while
+the world is stopped; take the lock otherwise. Both header and headerless
+regressions now pass, along with process and index/release-race checks.
+
+The following 20-round cost comparisons isolate this correction against the
+indexed allocator above (neither binary contains the atomic enqueue change):
+
+| Case | After/before correction, 95% CI | Null, 95% CI |
+|---|---:|---:|
+| stw-fix-8k | 100.13% [98.54, 101.72] | 99.53% [98.25, 100.81] |
+| stw-fix-small | 99.91% [99.42, 100.39] | 99.85% [99.44, 100.27] |
+
+The initial application run in `/tmp/gcry-final-kemal` was interrupted for the
+fix and is not used for claims. Its replacement builds the corrected source
+from scratch. The growth-only mechanism is unchanged: an exhausted growing
+pool has no cached addresses to resolve.
