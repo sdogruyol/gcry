@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Less collector on the Kemal main thread at the same RSS.** A main-thread
+  profile put gcry at 9.5% of the time under wrk; five changes take most of
+  the avoidable part. `realloc` and `free` resolve the pointer they own
+  through the chunk radix with no index lock (`Heap#chunk_for_owned`; the
+  table is now on by default under the bitmap allocator, `GCRY_CHUNK_RADIX=0`
+  turns it off) and a growing `realloc` takes its fresh block from the
+  thread's cursor. A held cursor moves to the next word of its chunk without
+  the class lock (`cursor_word_advances`; 96% of locked refills were that
+  step), with a `fast_miss_*` census of why an allocation leaves the hit
+  path. A fully free chunk past the warm budget gets one cycle of grace
+  before it is unmapped (`ChunkHeader::Flags::IDLE`,
+  `empty_chunk_grace_kept`), which ends the map/unmap churn that cost ~8% in
+  two rounds of twenty. The hit path reads one thread-local word and calls
+  no hook. The initial thread's stack bounds are taken once instead of
+  parsing `/proc/self/maps` at every stop (`stack_bounds_main_cached`).
+  Kemal `/json` CPU per 10 k requests 209 → ≈ 195 ms on the paired runs;
+  48-byte `malloc` 34.8 → 31 ns; peak RSS unchanged.
+  `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`.
 - **Every thread allocates small blocks lock-free through its own cursor
   set.** Under the bitmap allocator each thread owns a `Gcry::CursorSet` —
   one cursor per (class, kind), reached through a thread-local cache — and

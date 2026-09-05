@@ -1,0 +1,188 @@
+{
+  "arms": [
+    {
+      "name": "boehm",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_basic/boehm",
+      "gcry": false,
+      "commit": "9b4d4a0d20cf05306f474a9a6432a93d61605784",
+      "tree": "46167c9f693444914f7e884179f016c45348f1e4",
+      "dirty": "?? CLAUDE.md\n?? simd_plan/",
+      "source_sha256": "a567f7911ddb0020afe1594b112cef40491d24271b54249ac47544ebee358254",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_basic/boehm"
+      ],
+      "binary_sha256": "ae7be42a45291f2c34d7e7860662f3a6d5a07ab767df90d8628e3f8c085916e8",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    },
+    {
+      "name": "null",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_basic/boehm",
+      "gcry": false,
+      "commit": "9b4d4a0d20cf05306f474a9a6432a93d61605784",
+      "tree": "46167c9f693444914f7e884179f016c45348f1e4",
+      "dirty": "?? CLAUDE.md\n?? simd_plan/",
+      "source_sha256": "a567f7911ddb0020afe1594b112cef40491d24271b54249ac47544ebee358254",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_basic/boehm"
+      ],
+      "binary_sha256": "ae7be42a45291f2c34d7e7860662f3a6d5a07ab767df90d8628e3f8c085916e8",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/steve/projects/scratch/gcry",
+      "copy_of": "boehm"
+    },
+    {
+      "name": "master-hl",
+      "root": "<scratch>/wt_master",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_basic/master-hl",
+      "gcry": true,
+      "commit": "9bcd0e6f0ac2f3109f47ba7c6dcb0a38ef65afa9",
+      "tree": "eff877ba650f7297fafa2719c6be0c22a4207e21",
+      "dirty": "",
+      "source_sha256": "a83ca37005f844214527d1952aa5567d811a38202c831a93809134332fe75d3d",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_basic/master-hl"
+      ],
+      "binary_sha256": "b969a30ca24121bcb0c95a7a80517f3a157874848d0a2279093ab4773c14e1e6",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "<scratch>/wt_master"
+    },
+    {
+      "name": "master-hdr",
+      "root": "<scratch>/wt_master",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_basic/master-hdr",
+      "gcry": true,
+      "commit": "9bcd0e6f0ac2f3109f47ba7c6dcb0a38ef65afa9",
+      "tree": "eff877ba650f7297fafa2719c6be0c22a4207e21",
+      "dirty": "",
+      "source_sha256": "a83ca37005f844214527d1952aa5567d811a38202c831a93809134332fe75d3d",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_basic/master-hdr"
+      ],
+      "binary_sha256": "a688284e0a507ea870e4631dc79fcb28e67d53df7823aa323cec64cdccdd724a",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "6a05e2012b683f2092714f89f636cd12c32930e75566f1340d182bdda9270579",
+      "gcry_lib": "<scratch>/wt_master"
+    },
+    {
+      "name": "branch-hl",
+      "root": "/home/steve/projects/scratch/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_basic/branch-hl",
+      "gcry": true,
+      "commit": "9b4d4a0d20cf05306f474a9a6432a93d61605784",
+      "tree": "46167c9f693444914f7e884179f016c45348f1e4",
+      "dirty": "?? CLAUDE.md\n?? simd_plan/",
+      "source_sha256": "a567f7911ddb0020afe1594b112cef40491d24271b54249ac47544ebee358254",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_basic/branch-hl"
+      ],
+      "binary_sha256": "4a9da33b572ce211aaeb52545f098743b382e764f7059f1a2c03a8ae233c7826",
+      "shard_lock_sha256": "dbfd4878e9006cd329e6c8ce2e99f1fe4e9884e33f7b70e4b57b6dc63e5c4ac6",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/steve/projects/scratch/gcry"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [57cf7da50] (2026-07-16)\n\nLLVM: 20.1.8\nDefault target: x86_64-unknown-linux-gnu",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+  "cpu": "processor\t: 0\nvendor_id\t: AuthenticAMD\ncpu family\t: 26\nmodel\t\t: 36\nmodel name\t: AMD Ryzen AI 9 HX 375 w/ Radeon 890M\nstepping\t: 0\nmicrocode\t: 0xffffffff\ncpu MHz\t\t: 1996.187\ncache size\t: 1024 KB\nphysical id\t: 0\nsiblings\t: 24\ncore id\t\t: 0\ncpu cores\t: 12\napicid\t\t: 0\ninitial apicid\t: 0\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: 13\nwp\t\t: yes\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core ssbd ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 clzero xsaveerptr arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nbugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass\nbogomips\t: 3992.37\nTLB size\t: 192 4K pages\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 48 bits physical, 48 bits virtual\npower management:",
+  "cpu_count": 24,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+  ],
+  "clk_tck": 100,
+  "config": {
+    "config": "<scratch>/arms_basic.json",
+    "output": "<scratch>/ab_basic",
+    "rounds": 20,
+    "seconds": 15,
+    "warmup": 3,
+    "threads": 4,
+    "connections": 100,
+    "port": 4400,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}

@@ -148,3 +148,15 @@ Rules written after corrections, so the same mistake is not made twice.
   changes or a more complex heap controller. Prioritize the known 8 KiB
   allocation path and header retention; keep atomic-leaf enqueue skipping
   separate from profile-dependent mark-stack representation changes.
+
+## 2026-09-06: background waiters and benchmark hygiene
+
+- A shell that waits with `until ! pgrep -f '<pattern>'` matches **its own
+  command line** and never exits. Three such waiters sat idle for an hour
+  and their queued work never ran. Wait on a PID (`kill -0`), a marker file,
+  or run the follow-up in the foreground with a long timeout.
+- Never queue CPU-heavy work (spec compiles, microbenches) to overlap a
+  timed trial; sequence it behind the run in the same foreground command.
+- The author wants short per-item A/Bs (about a minute) to keep moving;
+  report CPU per request alongside the wide interval, and keep the long
+  paired run for the final headline only.

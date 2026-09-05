@@ -624,7 +624,7 @@ the warm budget's edge and oscillate across it.
 Every item is measured with the committed runner (20 rounds, null arm) and a
 re-sampled profile; peak RSS × Boehm must not move.
 
-- [ ] 1. `realloc` without the lock. Take `fresh` through `fast_alloc` before
+- [x] 1. `realloc` without the lock (`c41a5e5`: 105.0% [97.4, 112.5], CPU 202 → 192 ms/10k). Take `fresh` through `fast_alloc` before
       `allocate` (it currently always uses the locked path); resolve the old
       block's chunk O(1) — the argument that makes the radix safe here is that
       a pointer being realloc'd or freed is owned and live, so its chunk cannot
@@ -632,28 +632,30 @@ re-sampled profile; peak RSS × Boehm must not move.
       not the chunk. Re-measure the `add_root`/`delete_root` pair afterwards
       (was noise at +0.3%). Gate: realloc+lookup share < 1%; realloc specs,
       process specs 6–8, `stw-mt-property-test`, `find-block-race`. Expect +2–3%.
-- [ ] 2. Locked-path census, then fix the dominant cause. Per-reason counters
+- [x] 2. Locked-path census, then fix the dominant cause (`80a0cf3`: 106.4% [97.7, 115.1], CPU 207 → 195). Per-reason counters
       on the slow path (realloc, refill, size > 32 KiB, `@collecting`, empty
       mask, no set) in `/gc-stats`. Word advances inside a CURSOR-held chunk
       need no class lock (the chunk is exclusively held); today 96% of refills
       are such advances. Expect +1–2%.
-- [ ] 3. Warm-retain hysteresis. Shrink the warm budget only after N
+- [x] 3. Warm-retain hysteresis (`431b194`, one cycle of grace; measured with 4 and 5). Shrink the warm budget only after N
       consecutive majors below it and revive warm chunks before dormant ones;
       count `bitmap_dormant_revives` per trial. Gate: no trial with
       `unmapped_bytes` > 8 MB in a 15 s window; p99 down. Expect +0.5–1% mean,
       peak RSS unchanged (budget still capped by the threshold).
-- [ ] 4. Fast-path trims, each measured with `alloc_ns` first: plain store
+- [x] 4. Fast-path trims (`db81c73`: one TLS word, inlined hook shells; 34.8 → 31 ns). Plain occupancy store measured at 1–2 ns and declined: plain store
       for the occupancy bit while the chunk is CURSOR-held (cross-thread `free`
       into a held chunk must then take the cursor's slot, not the word);
       inline zeroing for payloads ≤ 64 B instead of memset; check the
       `GC.malloc` → `Gcry.malloc` → `Heap#malloc` → `fast_alloc` chain inlines
       to one frame. Expect +0.5–1.5%.
-- [ ] 5. Fixed cost per collection (0.8 ms of the 1.18 ms pause, 17/s):
+- [x] 5. Fixed cost per collection: the initial thread's `pthread_getattr_np` (106 µs, `/proc/self/maps`) cached (`8bdddb5`); the static-root skip declined at ≈ 0.3% of wall:
       static roots (495 KB every major) via soft-dirty skip of unchanged
       pages, and the 0.28 ms suspend/ack. Lowest priority: ≤ +1% and the
       static-root cache needs its own red arm.
-- [ ] Not in scope: the 64% of main-thread time in socket syscalls and the
+- [x] Not in scope: the 64% of main-thread time in socket syscalls and the
       20% in JSON/HTTP are Crystal's, identical in both arms.
 - [ ] Optional, RSS only: post-GC RSS is 27 MB (Boehm 26, master 15) because
       warm chunks stay resident; a time-decay release from the monitor thread
       would lower idle RSS without touching the loaded number.
+- [x] Items 3–5 together: 113.3% [88.5, 138.0] of item 2 at n = 3, CPU 224 → 199 ms/10k, RSS 1.01×.
+      Log: `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Branch `perf-stage2` on the PR head, unpushed.

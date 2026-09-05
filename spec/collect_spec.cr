@@ -188,6 +188,15 @@ it "munmaps fully free size-class chunks on major" do
     before.should be > Gcry::Heap::SMALL_CHUNK_BYTES
     heap.collect(scan_stack: false)
     heap.live?(keep).should be_true
+    if heap.bitmap_alloc?
+      # A fully free bitmap chunk past the budget gets one major of grace
+      # before the unmap (spec/empty_chunk_grace_spec.cr); the header
+      # allocator unmaps at the first.
+      heap.unmapped_bytes.should eq(0)
+      heap.heap_size.should eq(before)
+      heap.collect(scan_stack: false)
+      heap.live?(keep).should be_true
+    end
     heap.unmapped_bytes.should be > 0
     heap.released_chunk_bytes.should eq(heap.unmapped_bytes)
     heap.fully_free_chunk_bytes.should eq(heap.released_chunk_bytes)

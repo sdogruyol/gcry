@@ -1,0 +1,107 @@
+{
+  "arms": [
+    {
+      "name": "item2",
+      "root": "<scratch>/wt_item2",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_item5/item2",
+      "gcry": true,
+      "commit": "80a0cf3950fc87decef2f2ad579280e7dfa43843",
+      "tree": "516d6e999a626f2a743b23f0a2cc07101a126464",
+      "dirty": "",
+      "source_sha256": "d540b810749912cb442ef3c9e37524dda25554aae652cce71eb41010a8492178",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_item5/item2"
+      ],
+      "binary_sha256": "cdbf7b386cc391481f0a8dd8be9b13005b85ddb695a84f7e548ce8de28510496",
+      "shard_lock_sha256": "00f2ae9d0b0e803d7b692c8a0120c8c0086e193741715c7a5e8a667edaaac023",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "<scratch>/wt_item2"
+    },
+    {
+      "name": "item5",
+      "root": "<scratch>/wt_item5",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "<scratch>/ab_item5/item5",
+      "gcry": true,
+      "commit": "8bdddb5ae931b0ab19bdac3264969d67d469fac8",
+      "tree": "9d8e4c9e4f6d42936cf309217c371479119efbed",
+      "dirty": "",
+      "source_sha256": "144d8dfabddefdd3a11a4c735f545cc05576b0ea246d084840998bd02275e3ee",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "<scratch>/ab_item5/item5"
+      ],
+      "binary_sha256": "3530c0ae5bdb92fd682b0d6d3d607c4d532e8072d11fa6148e10e4c96ead61a3",
+      "shard_lock_sha256": "00f2ae9d0b0e803d7b692c8a0120c8c0086e193741715c7a5e8a667edaaac023",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "<scratch>/wt_item5"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [57cf7da50] (2026-07-16)\n\nLLVM: 20.1.8\nDefault target: x86_64-unknown-linux-gnu",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.41",
+  "cpu": "processor\t: 0\nvendor_id\t: AuthenticAMD\ncpu family\t: 26\nmodel\t\t: 36\nmodel name\t: AMD Ryzen AI 9 HX 375 w/ Radeon 890M\nstepping\t: 0\nmicrocode\t: 0xffffffff\ncpu MHz\t\t: 1996.187\ncache size\t: 1024 KB\nphysical id\t: 0\nsiblings\t: 24\ncore id\t\t: 0\ncpu cores\t: 12\napicid\t\t: 0\ninitial apicid\t: 0\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: 13\nwp\t\t: yes\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid pni pclmulqdq ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core ssbd ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 clzero xsaveerptr arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nbugs\t\t: sysret_ss_attrs null_seg spectre_v1 spectre_v2 spec_store_bypass\nbogomips\t: 3992.37\nTLB size\t: 192 4K pages\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 48 bits physical, 48 bits virtual\npower management:",
+  "cpu_count": 24,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23
+  ],
+  "clk_tck": 100,
+  "config": {
+    "config": "<scratch>/arms_item5.json",
+    "output": "<scratch>/ab_item5",
+    "rounds": 3,
+    "seconds": 8,
+    "warmup": 2,
+    "threads": 4,
+    "connections": 100,
+    "port": 4400,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}
