@@ -965,6 +965,7 @@ module Gcry
       # a live-object count stuck at 33 instead of 1.
 
       if freed > 0
+        bitmap_capacity_changed(chunk)
         live_objects_sub(freed)
         free_bytes_add(freed * payload)
         # The header arm accounts this per block in `reclaim_small`; the

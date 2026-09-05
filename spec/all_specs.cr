@@ -51,3 +51,4 @@ require "./chunk_radix_spec"
 
 require "./cursor_set_spec"
 require "./adaptive_threshold_spec"
+require "./bitmap_pool_search_spec"

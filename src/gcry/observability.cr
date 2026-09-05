@@ -21,6 +21,8 @@ module Gcry
       {
         cursor_hit_allocations:      heap.cursor_hit_allocations,
         bitmap_locked_allocations:   heap.bitmap_locked_allocations,
+        bitmap_pool_searches:        heap.bitmap_pool_searches,
+        bitmap_pool_search_skips:    heap.bitmap_pool_search_skips,
         bitmap_alloc_refills:        heap.bitmap_alloc_refills,
         bitmap_alloc_chunk_advances: heap.bitmap_alloc_chunk_advances,
         cursor_sets_pinned:          heap.cursor_sets_pinned,
