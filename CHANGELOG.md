@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-05
+
+Minor release, and the reason it is minor rather than patch: the collector
+gained a second representation. Per-chunk `occ`/`mark` bitmaps with a
+streaming `occ &= mark` sweep and pool-cursor allocation
+(`GCRY_BITMAP_ALLOC=1`), an opt-in header-less small-object layout
+(`-Dgcry_headerless`) that drops the 16-byte block header, SIMD bitmap kernels
+with CPU-tier dispatch, an O(1) address→chunk radix, and a sharded parallel
+marker. **Every one of them is off by default**; the default path is the header
+layout and the freelist, as before.
+
+The line that matters in production is not any of those. It is that
+**`/proc/self/maps` is no longer how a Linux build finds its own globals.**
+The static roots come from the executable's ELF program headers now, read once
+at `GC.init`. The parser they replace failed three ways, each of which is a
+collection in which no class variable is a root: it identified `.data` by
+pathname — so a program that `mmap`ed its own data files had them scanned after
+`munmap` (#29), and a redeploy that renamed the running image to `… (deleted)`
+dropped the root set to **zero bytes**; it found the BSS by adjacency to that
+line, so losing one lost both; and it read a file that is not a snapshot. A
+program header can do none of these. Darwin derives the same set from its
+writable `__DATA*` sections rather than a three-name allow-list.
+
+Nine correctness defects were found and closed after the representation
+landed, by an adversarial audit of the merge, of the static-root rewrite, and
+of the audit's own fixes — including a live object reclaimed by a minor under
+`GCRY_BITMAP=1`, a `GCRY_CHUNK_BYTES` that had become silently inert, a
+cursor-pinned chunk that held 20 MB at `live_objects == 0`, and three
+default-path throughput regressions. Each is listed below with the measurement
+that found it and the gate that keeps it closed; every fix ships with a red arm
+that fails without it.
+
+Upgrading: no API change, no knob change, no default behaviour change beyond
+the static-root source and a 32-byte chunk header (which is what makes
+`GC.malloc` 16-byte aligned for the first time — it never was). `GCRY_NURSERY`
+is now documented as unsound rather than merely off.
+
 ### Fixed
 
 - **`GC.init`'s eager static-root resolve crashed every `-Dgc_none` binary on
@@ -2652,7 +2689,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.21.3...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/sdogruyol/gcry/compare/v0.21.3...v0.22.0
 [0.21.3]: https://github.com/sdogruyol/gcry/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sdogruyol/gcry/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sdogruyol/gcry/compare/v0.21.0...v0.21.1
