@@ -1240,20 +1240,6 @@ module GC
       ret.as(LibC::HANDLE)
     end
   {% elsif !flag?(:wasm32) %}
-    # `arg` is whatever the caller handed `pthread_create`. Crystal's `Thread`
-    # passes itself, but a raw caller passes anything — the thread-birth gate
-    # passes an obfuscated integer — so it is read as a `Thread` only once it is
-    # a live heap object of that exact type. Reading it blind was a SIGSEGV at
-    # the first non-`Thread` argument (CI 33930621625).
-    private def self.sysmon_thread_arg?(arg : Void*) : Bool
-      return false if arg.null?
-      heap = Gcry.default_heap?
-      return false unless heap && heap.live?(arg)
-      return false unless arg.as(Int32*).value == ::Thread.crystal_instance_type_id
-      name = arg.as(::Thread).@name
-      !name.nil? && name == "SYSMON"
-    end
-
     # :nodoc:
     # Record the thread with gcry as soon as its handle exists. Crystal only
     # publishes a thread from inside its own `start`, so until then `stop_world`
@@ -1284,15 +1270,17 @@ module GC
         #           retry loop (baseline codegen, no LSE). There the atomic path
         #           is genuinely more work, which is why this flips on a second
         #           thread rather than shipping on.
-        # The runtime's SYSMON thread never touches the heap (it is exempt
-        # from the stop-the-world by name), so it does not end the
-        # single-mutator regime that the allocation fast path relies on.
-        sysmon = sysmon_thread_arg?(arg)
-        unless sysmon
-          Gcry.single_mutator = false
-          if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
-            h.heap_counters_atomic = true
-          end
+        # Every thread ends the single-mutator regime, the runtime's SYSMON
+        # thread included. It is exempt from the stop-the-world by name, and
+        # for a while that was read as "never touches the heap" — but
+        # `Thread#start` builds its main `Fiber` on it, and its loop spawns
+        # threads. Exempting it let two threads pop one freelist head:
+        # `make scheduler-roots` hung under load with SYSMON's main fiber
+        # pushed twice onto `Fiber.fibers`, `next` pointing at itself
+        # (process_spec/regression/7_sysmon_alloc_race_spec.cr).
+        Gcry.single_mutator = false
+        if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
+          h.heap_counters_atomic = true
         end
       {% end %}
       ret = LibC.pthread_create(thread, attr, start, arg)

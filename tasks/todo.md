@@ -495,6 +495,40 @@ time, so the gap is the mutator's allocation path.
 - [x] Multi-mutator coverage through the process GC:
       `process_spec/regression/6_multi_mutator_alloc_spec.cr`.
 - [ ] Run the full CI `test` job list locally (23 targets) before pushing.
-- [ ] Multi-thread performance: per-thread pool cursors so the fast path
-      survives a second mutator (today it hands over to the locked path).
+- [x] `make scheduler-roots` hung under load (1 in 22 contended runs; upstream
+      0 in 101): SYSMON allocates its main Fiber in `Thread#start`, and the
+      exemption let two threads pop one freelist head — its fiber pushed twice
+      onto `Fiber.fibers`, `next` = itself, root scan looping. Exemption
+      withdrawn; `7_sysmon_alloc_race_spec.cr` reproduces it (4 892–8 518
+      shared blocks per 200 000); 60/60 clean after.
+
+## Multi-thread allocation: per-thread pool cursors (plan)
+
+The single-mutator regime is a global flag; it is sound only while exactly
+one thread allocates, so under execution contexts it ends at boot. Real
+multi-thread support means each thread owns its cursor, and the regime goes
+away:
+
+- [ ] `PoolCursors` (per thread, LibC-allocated, `@[ThreadLocal]` pointer):
+      per slot `chunk / word / free_mask / word_base / occ_word / in_flight`,
+      plus local `bytes_since_gc` and `live_objects` deltas. Registered in a
+      heap-side list under the pool lock so STW can walk every set.
+- [ ] `fast_alloc` reads the thread's set: pop, plain `occ` OR (the chunk is
+      claimed by one cursor at refill, under the lock, so the word is
+      private), local counters. No lock, no atomics, on every thread.
+- [ ] Refill (locked) flushes the local counters into the heap atomically —
+      one atomic per chunk, and the threshold lags by at most one chunk per
+      thread.
+- [ ] Sweep protocol: STW retires every set's cursors (chunks return to the
+      pool lists); the lazy sweep skips chunks a cursor holds, and a refill
+      only claims a chunk the sweep has finished this epoch. No `occ` word is
+      ever written by the sweep and a fast path at once.
+- [ ] `mark_bitmap_alloc_in_flight` walks every set; `free` of a block on
+      another thread's cursor chunk stays atomic (already is).
+- [ ] Header mode keeps TLAB; the lock-skipping `with_freelist_lock` branch
+      is deleted rather than generalised.
+- [ ] Gates: `7_sysmon_alloc_race_spec` (now: two unlocked threads must not
+      collide), `6_multi_mutator_alloc_spec`, heap-counters, mt/stw-mt
+      property tests, scheduler-roots ×60 contended; Kemal EC1 and EC4 vs
+      Boehm; then the full soak.
 - [ ] Full soak once the above is in.

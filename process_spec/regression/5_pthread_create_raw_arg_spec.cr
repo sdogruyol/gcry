@@ -6,8 +6,8 @@ require "spec"
 # `pthread_create`'s `arg` as a `Thread` outright; Crystal's `Thread` passes
 # itself, but a raw caller passes anything, and `make thread-birth-root`
 # passes an obfuscated integer — SIGSEGV at address 0 on x86_64 CI, at
-# 0xc7c7…cb on aarch64 (run 33930621625). `arg` is now read only once it is a
-# live heap object of type `Thread`.
+# 0xc7c7…cb on aarch64 (run 33930621625). The exemption is gone — SYSMON
+# allocates, see 7_sysmon_alloc_race_spec.cr — and `arg` is never read.
 {% if flag?(:linux) %}
   describe "GC.pthread_create with an argument that is not a Thread" do
     it "does not read it, and still ends the single-mutator regime" do

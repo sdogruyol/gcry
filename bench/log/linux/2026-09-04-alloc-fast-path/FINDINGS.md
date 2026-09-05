@@ -26,10 +26,17 @@ Two findings made a cheaper path possible without touching the multi-thread
 case:
 
 - gcry already flips the heap's counters to atomic in its `pthread_create`
-  wrapper when a second thread appears — but the runtime's SYSMON thread is
-  created at boot, so every program was on the atomic path from its first
-  allocation. SYSMON never allocates (gcry already exempts it from the
-  stop-the-world by name), so the wrapper now exempts it from the flip too.
+  wrapper when a second thread appears — and the runtime's SYSMON thread is
+  created at boot, so every program is on the atomic path from its first
+  allocation. An exemption for SYSMON was tried and withdrawn: it *does*
+  allocate (`Thread#start` builds its main `Fiber` on it), and two threads
+  on the unlocked path popped one freelist head — `make scheduler-roots`
+  hung under load with that fiber pushed twice onto `Fiber.fibers`, `next`
+  pointing at itself. `process_spec/regression/7_sysmon_alloc_race_spec.cr`
+  reproduces it in under a second. The regime therefore ends at boot under
+  execution contexts, and the numbers below for the fast path are what a
+  library heap or a monitor-less program gets; the Kemal numbers were
+  re-measured without it (next section).
 - The "plain" counter branch used `Atomic#set`, which is an `xchg` — locked
   whether asked or not — which is why an earlier measurement found it "never
   cheaper". `lazy_get`/`lazy_set` are the plain loads and stores.

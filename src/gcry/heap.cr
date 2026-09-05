@@ -7,8 +7,10 @@ require "crystal/spin_lock"
 require "c/pthread"
 
 module Gcry
-  # True until the first mutator thread beyond the main one is created (the
-  # runtime's SYSMON thread does not count: it never allocates). While true,
+  # True until the first thread beyond the main one is created — the
+  # runtime's SYSMON thread included: `Thread#start` allocates its main
+  # `Fiber` on it, and exempting it handed one block to two threads
+  # (process_spec/regression/7_sysmon_alloc_race_spec.cr). While true,
   # every heap's small-allocation fast path runs without its class lock, with
   # plain counter stores and a plain `occ` bit set — the mutator and the
   # collector are the same thread, so there is nothing to exclude. Cleared

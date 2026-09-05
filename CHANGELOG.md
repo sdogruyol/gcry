@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Small allocation runs lock-free and atomic-free while the process has one
   mutator thread, through a dedicated hit path.** `Gcry.single_mutator?` holds
-  until the first non-runtime thread is created (the runtime's SYSMON thread
-  never allocates and no longer ends it); while it holds, `malloc` and
+  until the first thread is created — the runtime's SYSMON thread included,
+  since `Thread#start` allocates its main `Fiber` on it, so under execution
+  contexts the regime ends at boot and the path serves library heaps and
+  programs without a monitor thread; while it holds, `malloc` and
   `malloc_atomic` take `Heap#fast_alloc` — table-driven size fit, pool-cursor
   pop, a plain `occ` OR through the cursor's cached word pointer, plain
   counter stores, the collection-threshold check, and unrolled clears for
