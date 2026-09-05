@@ -227,3 +227,17 @@ both bitmap representations. The existing background soak is
 not validation of this code. Root discovery stops at sub-timers; the simple
 live × factor controller, root coverage, and mark-stack representation remain
 unchanged. Conditional rewrites are deferred, not silently treated as completed.
+
+## Defect follow-up on the latest branch
+
+After the stage-2 commits through `42de285`, the header stress causes were
+reproduced and fixed: dormant capacity double-counting, stale bytes on revival,
+and a clearing decision that raced a peer's refill. The header stress is
+enabled normally again. A newly introduced cursor-cache use-after-free also
+has a regression and fix. See the [defect record](../bench/log/linux/2026-09-06-defect-fixes/FINDINGS.md).
+
+The historical `-Dasan` runs were not instrumented and are not sanitizer
+evidence. CI now checks an intentional UAF control and runs the cursor lifetime
+regression with actual ASan instrumentation in both bitmap representations.
+Header defaults remain unchanged; the application/memory decision gates still
+apply. These fixes make no new throughput claim.

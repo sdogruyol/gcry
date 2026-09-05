@@ -1,5 +1,11 @@
 # PR #34 performance implementation validation
 
+**Sanitizer correction:** the historical `-Dasan` command below did not
+instrument memory accesses; its 231 examples were ordinary correctness tests.
+The [defect follow-up](../2026-09-06-defect-fixes/FINDINGS.md) replaces that gate
+with real, focused ASan instrumentation and a required failing control, and
+resolves the header stress causes documented at the end of this record.
+
 Linux x86_64, Crystal 1.21.0. These are correctness checks, not performance
 trials. Full transcripts are adjacent; expected red controls and invariant
 self-tests are retained in the logs.

@@ -1,5 +1,10 @@
 # Native ARM process regression investigation
 
+**Follow-up:** the header accounting and zeroing causes have been reproduced
+and fixed after `42de285`; the header stress is enabled normally again. See
+[defect fixes and validation](../2026-09-06-defect-fixes/FINDINGS.md). The
+investigation below records the original findings before those fixes.
+
 The new medium-buffer cursor stress exposed a defect in the **reviewed header
 allocator baseline**, as well as in the performance implementation. It remains
 unresolved. Header production defaults are unchanged; resolving this defect is

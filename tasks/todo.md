@@ -593,7 +593,10 @@ All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
       Delivery uses new commits on the existing PR head without a force-push.
 - [x] Diagnose native ARM stress failure against the reviewed baseline; preserve
       the header reproducer and gate cursor regressions in both bitmap layouts.
-- [ ] Resolve the pre-existing native ARM header stress/accounting defect.
+- [x] Reproduce and fix header dormant accounting, revival zeroing and peer-refill
+      clearing; restore the process stress in header mode.
+- [x] Fix the stage-2 cursor-cache lifetime defect; replace the ineffective
+      ASan flag with actual instrumentation and a failing control.
 - [ ] Header default decision: independent exclusive-host confirmation,
       burst/drop/recovery and native platform gates still required.
 - [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.

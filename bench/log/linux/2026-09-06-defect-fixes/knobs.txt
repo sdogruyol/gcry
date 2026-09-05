@@ -1,0 +1,1 @@
+ok — all 163 GCRY_* knobs the source reads are in docs/HARDENING.md
