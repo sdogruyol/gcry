@@ -29,6 +29,10 @@ class MeasurementTest(unittest.TestCase):
             with self.subTest(xs=xs, ys=ys), self.assertRaises(ValueError):
                 paired_ratios(xs, ys)
 
+    def test_wrk_latency_units(self):
+        result = parse_wrk("100 requests in 1s\n  50% 900us\n  90% 1.5ms\n  99% 0.02s\n")
+        self.assertEqual(result["latency_us"], {"p50": 900, "p90": 1500, "p99": 20000})
+
     def test_refuse_bad_trials(self):
         original = self.rows()
         variants = [original[:-1], original + [original[0]]]

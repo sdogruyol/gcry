@@ -43,7 +43,10 @@ def parse_wrk(output):
     http = re.search(r"Non-2xx or 3xx responses:\s+(\d+)", output)
     if http:
         errors["http"] = int(http[1])
-    return {"requests": int(count[1]), "errors": errors}
+    latency = {}
+    for percentile, value, unit in re.findall(r"^\s*(50|75|90|99)%\s+([\d.]+)(us|ms|s)\s*$", output, re.MULTILINE):
+        latency["p" + percentile] = float(value) * {"us": 1, "ms": 1000, "s": 1000000}[unit]
+    return {"requests": int(count[1]), "errors": errors, "latency_us": latency}
 
 
 def fetch(base, path):
@@ -182,6 +185,7 @@ def build_arms(config, output):
                            cwd=app, stdout=log, stderr=log, check=True)
             if shared_lock is None:
                 shared_lock = lock.read_bytes()
+            (output / "shared-shard.lock").write_bytes(shared_lock)
             subprocess.run([str(root / "bench/assert_gcry_lib.sh"), "lib/gcry", str(root)],
                            cwd=app, stdout=log, stderr=log, check=True)
             subprocess.run(build, cwd=app, stdout=log, stderr=log, check=True)
@@ -209,6 +213,7 @@ def main():
         parser.error("rounds, durations, threads and connections must be positive")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
+    (args.output / "runner.py").write_bytes(Path(__file__).read_bytes())
     config = json.loads(args.config.read_text())
     if len(config) < 2:
         parser.error("supply at least two arms, including a reference")

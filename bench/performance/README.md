@@ -31,7 +31,8 @@ python3 -m unittest discover -s bench/performance -p 'test_*.py'
 ```
 
 The output directory must not exist. It includes build logs, binaries/hashes,
-source manifest, raw wrk/server output, GC snapshots, and every trial including
+source manifest, the shared dependency lock and runner snapshot, raw wrk/server
+output, request latency percentiles, GC snapshots, and every trial including
 failures. Publish the manifest, configuration, trials, analysis and findings;
 keep binaries outside git. The analyzer refuses errors, incomplete pairs,
 duplicate pairs, and incomplete runs detected from the manifest. It requires
@@ -134,3 +135,11 @@ Explicit frees currently invalidate the class index rather than incrementally
 inserting a single address. This favors ordinary GC churn; measure free-heavy
 workloads separately. Metadata is released when the heap is destroyed. Root
 coverage and the adaptive policy are unchanged.
+
+
+`extract_kemal.py <completed-raw-directory>` emits a JSON-lines supplement with
+request latency percentiles, collection/pause counter deltas and effective
+policy settings. It rejects incomplete or failed runs. Its GC interval includes
+the stats requests bracketing wrk, so the duty estimate is approximate; it is
+not a measurement-window GC pause histogram. Keep the original trial rows,
+shared dependency lock and supplement together when publishing application results.
