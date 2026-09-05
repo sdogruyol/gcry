@@ -64,6 +64,37 @@ ROUNDS  =  10_000
 BALLAST =  40_000
 FILL    = 0x5C_u8
 
+# Force the exact interleaving instead of relying only on the stress arm's
+# scheduling: a live walk holds a chunk, a peer frees/trims it, then the walk
+# reads that chunk. The unsafe control must fault at the protected mapping.
+class Gcry::Heap
+  def scheduled_flush_release : Nil
+    pointer = malloc_atomic(PAYLOAD)
+    chunk = chunk_for(pointer).not_nil!
+    expected = chunk.value.mapped_bytes
+    during_live_chunk_walk do
+      Thread.new { free(pointer) }.join
+      STDOUT.puts "scheduled: peer free returned; reading held chunk"
+      STDOUT.flush
+      observed = Atomic::Ops.load((chunk.as(UInt8*) + offsetof(ChunkHeader, @mapped_bytes)).as(UInt64*), :monotonic, true)
+      raise "held chunk changed" unless observed == expected
+    end
+    flush_pending_large_release
+  end
+end
+
+if ARGV.includes?("--scheduled")
+  heap = Gcry::Heap.new
+  heap.gc_threshold = UInt64::MAX
+  heap.large_cache_retain = 0_u64
+  heap.unmap_guard = true
+  heap.trim_immediate = ENV["GCRY_TRIM_IMMEDIATE"]? == "1"
+  heap.scheduled_flush_release
+  heap.destroy
+  puts "scheduled: held chunk remained mapped until the walk ended"
+  exit 0
+end
+
 class Verdict
   @@corrupt = Atomic(Int32).new(0)
   @@done = Atomic(Int32).new(0)
@@ -347,6 +378,15 @@ immediate = base.merge({"GCRY_TRIM_IMMEDIATE" => "1"})
 
 failures = [] of String
 
+scheduled_safe = BoundedChild.run(exe, ["--scheduled"], base, timeout: 30.seconds)
+scheduled_unsafe = BoundedChild.run(exe, ["--scheduled"], immediate, timeout: 30.seconds)
+scheduled_fault = !scheduled_unsafe.ok && !scheduled_unsafe.timed_out &&
+                  scheduled_unsafe.output.includes?("scheduled: peer free returned; reading held chunk") &&
+                  scheduled_unsafe.output.includes?("Invalid memory access")
+puts "  scheduled walk: queued=#{scheduled_safe.ok ? "safe" : "FAILED"}, immediate=#{scheduled_fault ? "faulted as required" : "FAILED control"}"
+failures << "the scheduled queued walk failed: #{scheduled_safe.output}" unless scheduled_safe.ok
+failures << "the scheduled immediate walk did not fault at the held chunk: #{scheduled_unsafe.output}" unless scheduled_fault
+
 queued_bad, queued_hung, queued_note = run(exe, base, attempts)
 puts "  queued (default):    #{queued_bad} of #{attempts} failed" \
      "#{queued_hung > 0 ? " (#{queued_hung} timed out)" : ""}" \
@@ -360,8 +400,8 @@ puts "  immediate (old):     #{immediate_bad} of #{attempts} failed" \
 # A killed child says nothing, but the two arms need that nothing differently.
 # A queued-arm hang is a defect on the arm being gated — fatal. A control-arm
 # hang only weakens the control, and the check below already demands the
-# control produce at least one *genuine* fault: with that satisfied, a hung
-# control child cannot turn a clean queued arm into a red run. This is what
+# scheduled control to produce a *genuine* fault at the held chunk: with that
+# satisfied, a hung stress-control child cannot turn a clean queued arm red. This is what
 # took the gate out of CI on its first day back — a two-core runner hung 3 of
 # 6 TRIM_IMMEDIATE children while the queued arm read 0 of 6 and the control
 # still faulted for real.
@@ -376,8 +416,7 @@ if immediate_hung > 0
 end
 failures << "the queued arm faulted #{queued_bad - queued_hung} of #{attempts} — a flush walk still meets a released chunk" if queued_bad - queued_hung > 0
 if immediate_bad - immediate_hung == 0
-  failures << "the immediate arm survived #{attempts} attempts, so this harness does not reach the race " \
-              "and the queued arm's silence is not evidence"
+  puts "  note: stress missed the unsafe window; the scheduled control above must still fault"
 end
 
 puts ""

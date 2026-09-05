@@ -1,0 +1,27 @@
+FF
+
+Failures:
+
+  1) counters while lazy sweep runs beside mutators keeps increments and decrements whole (bitmap=false)
+     Failure/Error: heap.free_bytes.should eq(1_000_000_u64)
+
+       Expected: 1000000
+            got: 1045247
+
+     # spec/sweep_counters_spec.cr:51
+
+  2) counters while lazy sweep runs beside mutators keeps increments and decrements whole (bitmap=true)
+     Failure/Error: heap.free_bytes.should eq(1_000_000_u64)
+
+       Expected: 1000000
+            got: 1031336
+
+     # spec/sweep_counters_spec.cr:51
+
+Finished in 21.64 milliseconds
+2 examples, 2 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/sweep_counters_spec.cr:28 # counters while lazy sweep runs beside mutators keeps increments and decrements whole (bitmap=false)
+crystal spec spec/sweep_counters_spec.cr:28 # counters while lazy sweep runs beside mutators keeps increments and decrements whole (bitmap=true)

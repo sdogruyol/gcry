@@ -88,3 +88,31 @@ and Darwin validation is performed by the PR's required CI jobs; local success
 alone does not establish a native result. The existing header policy experiments
 still require independent application/memory confirmation before any default
 change. Earlier throughput numbers describe their recorded source commits.
+
+## Native CI exposed a second accounting cause
+
+CI at `3c5831c` passed the real ASan gate but still failed header accounting
+on native ARM and Darwin. The dormant and zeroing regressions were valid; they
+did not explain all the counter drift. Lazy sweep keeps `collecting` true
+after mutators resume, while `free_bytes_add` and `live_objects_sub` used that
+flag to select non-atomic updates. They also missed the bitmap allocator's
+implied atomic-counter setting. A collector update could overwrite a mutator's
+debit, inflating free capacity.
+
+The helpers now use atomic updates whenever the world is running and the heap
+requires atomic counters. Only the actual stopped-world phase (or the explicit
+single-mutator/unsafe setting) permits plain updates. A two-thread regression
+loses 45,247 and 31,336 free-byte updates before the fix and none afterward,
+covering both explicit header atomicity and bitmap-implied atomicity. Full local
+unit suites now pass 273 / 273 / 253 examples, with one platform pending each.
+The local header process suite passes all 32 examples.
+
+The preceding stage-2 CI also failed the dormant-flush gate because none of its
+six unsafe stress trials reached the race. The gate now additionally schedules
+the exact interleaving: a walk holds a chunk, a peer frees/trims it, then the
+walk reads the held metadata. Queued release must keep it mapped; immediate
+release must fault at that read, with a verified diagnostic and a deadline.
+All six safe stress trials remain required. The stress-control counts are
+still reported, but timing alone no longer decides whether the control is
+engaged. The local scheduled control faults as required, with safe stress 0/1
+and unsafe stress 1/1 failures. Native confirmation follows in PR CI.
