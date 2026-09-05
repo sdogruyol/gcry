@@ -726,14 +726,22 @@ jobs:
         with:
           crystal: "1.21.0"
 
-      - name: Build ASan spec binary
+      - name: Install the ASan compiler and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19
+
+      - name: Build full spec binary
         run: |
           mkdir -p bin
-          crystal build -Dasan spec/all_specs.cr -o bin/all_specs_asan --error-trace
+          crystal build spec/all_specs.cr -o bin/all_specs_asan --error-trace
 
-      - name: Run ASan specs
+      - name: Run full specs
         run: |
           bin/all_specs_asan
+
+      - name: Instrumented ASan regressions and failing control
+        run: python3 ci/asan_check.py
 
   # `make monitor-gate-deadlock` in a job of its own: 106–193 s here, and the
   # worst case is 23 quick tries plus one 60 s hang, so a two-core runner needs
@@ -1124,7 +1132,11 @@ jobs:
         run: |
           mkdir -p bin
           crystal spec --error-trace
-          crystal spec -Dgc_none process_spec --error-trace
+          # Repeat the header pressure/accounting sequence in fresh processes
+          # on the platform that exposed its dormant-revival defects.
+          for trial in 1 2 3; do
+            crystal spec -Dgc_none process_spec --error-trace
+          done
           # Cursor/refill regressions require the bitmap allocator; cover both
           # representations on the native weakly ordered target.
           GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec --error-trace
