@@ -2,15 +2,17 @@ require "../../src/gcry"
 require "spec"
 
 # The runtime's SYSMON thread allocates: `Thread#start` builds its main
-# `Fiber` on that thread, and the monitor spawns threads from its loop.
-# Exempting it from ending the single-mutator regime let two threads pop the
-# same freelist head, and `make scheduler-roots` hung under load with
-# SYSMON's main fiber pushed twice onto `Fiber.fibers` — its `next` pointing
-# at itself, the root scan iterating it forever. This drives the same shape
-# on purpose: a thread that carries SYSMON's name allocates alongside the
-# main thread, and no block may be handed out twice.
+# `Fiber` on that thread, and the monitor spawns threads from its loop. A
+# process-wide "single mutator" regime once exempted it from ending the
+# lock-free path, and two threads popped the same freelist head:
+# `make scheduler-roots` hung under load with SYSMON's main fiber pushed
+# twice onto `Fiber.fibers` — its `next` pointing at itself, the root scan
+# iterating it forever. Allocation is now lock-free per thread through its
+# own cursor set, so this drives the same shape on purpose — a thread that
+# carries SYSMON's name allocates alongside the main thread, both on the hit
+# path — and no block may be handed out twice.
 {% if flag?(:linux) %}
-  describe "allocation alongside a thread the regime exempts" do
+  describe "two threads on the unlocked allocation path" do
     it "never hands the same block to both threads" do
       per = 200_000
       other = Array(Void*).new(per, Pointer(Void).null)

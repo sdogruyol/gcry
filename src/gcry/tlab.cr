@@ -137,8 +137,6 @@ module Gcry
     end
 
     protected def with_freelist_lock(index : Int32, nursery : Bool, &)
-      # One mutator, which is also the collector: nothing to exclude.
-      return yield if Gcry.single_mutator?
       lock = freelist_lock_ptr(index, nursery)
       lock.value.lock
       begin

@@ -36,7 +36,6 @@ describe "allocation with several mutator threads" do
     end
     workers.each(&.join)
     bad.get.should eq(0)
-    Gcry.single_mutator?.should be_false
     heap = Gcry.default_heap.not_nil!
     heap.heap_counters_atomic.should be_true
     # The counters survived four threads: a collection reconciles them

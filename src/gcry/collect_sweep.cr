@@ -938,6 +938,17 @@ module Gcry
       return SmallSweepCounts.new(false, 0_u64, 0_u64, 0_u64) if nblocks == 0
       words = ((nblocks + 63) >> 6).to_i32
 
+      # Pinned through this stop-the-world: its owner was frozen inside the
+      # unlocked hit path and will store into `occ` here without the class
+      # lock, so the after-world walk leaves the chunk alone (marks stale
+      # until the next stop-the-world zeroes them — `bitmap_settle_cursor_sets`).
+      if !@world_stopped && ChunkHeader.pinned?(chunk)
+        occupied = chunk_occupied_count(chunk)
+        @sweep_cursor_pinned &+= 1
+        return SmallSweepCounts.new(true, occupied * payload, nblocks * payload,
+          (nblocks - occupied) * payload)
+      end
+
       freed, live = if @poison_freed
                       sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
                     else

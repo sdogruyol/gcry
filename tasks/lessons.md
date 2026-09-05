@@ -116,3 +116,12 @@ Rules written after corrections, so the same mistake is not made twice.
   `Thread` passes itself; any raw caller passes anything (the thread-birth
   gate passes an obfuscated integer). Ask the heap whether it is a live block
   of the expected type first.
+- **A "this thread never allocates" claim is a test, not a comment.** The
+  SYSMON exemption rested on one; `Thread#start` allocates the thread's main
+  Fiber on it. The gate that caught it (`scheduler-roots`) hung 1 in 22
+  contended runs, so: any thread-exemption from a lock regime gets a spec
+  that runs the exempt thread's real work alongside the owner and checks
+  for shared blocks (`7_sysmon_alloc_race_spec.cr`), and rare hangs are
+  hunted with a contended loop that leaves the hung process alive —
+  `/proc/<pid>/mem` plus `ptrace` from Python and `addr2line` gave the
+  fiber list and the doubly-pushed node with no gdb on the box.

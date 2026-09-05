@@ -7,30 +7,6 @@ require "crystal/spin_lock"
 require "c/pthread"
 
 module Gcry
-  # True until the first thread beyond the main one is created — the
-  # runtime's SYSMON thread included: `Thread#start` allocates its main
-  # `Fiber` on it, and exempting it handed one block to two threads
-  # (process_spec/regression/7_sysmon_alloc_race_spec.cr). While true,
-  # every heap's small-allocation fast path runs without its class lock, with
-  # plain counter stores and a plain `occ` bit set — the mutator and the
-  # collector are the same thread, so there is nothing to exclude. Cleared
-  # process-wide by the `pthread_create` wrapper, before the second thread
-  # exists, and never set again.
-  @@single_mutator = true
-
-  def self.single_mutator? : Bool
-    @@single_mutator
-  end
-
-  def self.single_mutator=(value : Bool) : Bool
-    @@single_mutator = value
-  end
-
-  # mmap-backed allocator with size classes and conservative mark–sweep.
-  #
-  # The Heap *object* may live on Crystal's GC during unit tests. Mapped
-  # chunks and freelist links live outside the managed heap so this can later
-  # become the process GC under `-Dgc_none`.
   class Heap
     SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — library default; macOS process GC bumps to 256 KiB (gc_override.cr)
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
@@ -64,19 +40,27 @@ module Gcry
     @live_objects = Atomic(UInt64).new(0_u64)
     getter large_free_bytes : UInt64 = 0_u64
 
+    # The public readers first credit what the threads' cursor sets have
+    # allocated on the hit path (`credit_cursor_set`): a walk of at most 65
+    # sets, for a number that is otherwise behind by up to one refill per
+    # thread.
     def free_bytes : UInt64
+      credit_all_cursor_sets
       @free_bytes.get
     end
 
     def total_bytes : UInt64
+      credit_all_cursor_sets
       @total_bytes.get
     end
 
     def bytes_since_gc : UInt64
+      credit_all_cursor_sets
       @bytes_since_gc.get
     end
 
     def live_objects : UInt64
+      credit_all_cursor_sets
       @live_objects.get
     end
 
@@ -370,6 +354,7 @@ module Gcry
       # flush_pending_page_release_chunks. Reversing the order causes a
       # use-after-unmap SIGSEGV in at_exit handlers.
       destroy_collector
+      destroy_cursor_sets
 
       chunk = @chunks
       while chunk
@@ -575,8 +560,8 @@ module Gcry
       # this frame for the conservative scan; the root list costs a malloc, a
       # free and a walk per call, on a path JSON building takes several times
       # per request. Captured once so a flip mid-call cannot unbalance it.
-      rooted = !Gcry.single_mutator?
-      add_root(pointer) if rooted
+      rooted = true
+      add_root(pointer)
       begin
         @suppress_collect.add(1)
         begin
@@ -830,31 +815,43 @@ module Gcry
     # by at most the per-class slack.
     @[AlwaysInline]
     private def fast_alloc(size : UInt64, atomic : Bool) : Void*
-      return Pointer(Void).null unless @fast_path && Gcry.single_mutator?
-      return Pointer(Void).null if @collecting || @incremental_marking || size > FAST_PATH_MAX
+      return Pointer(Void).null unless @fast_path
+      return Pointer(Void).null if @collecting || @incremental_marking || @lazy_sweep_pending || size > FAST_PATH_MAX
+      set = cursor_set_cached
+      return Pointer(Void).null if set.null? || set == @fallback_cursor_set
       i = ((size &+ 7) >> 3).to_i32
       index = @fit_index[i].to_i32
       payload = @fit_payload[i]
-      slot = atomic ? index + SIZE_CLASS_COUNT : index
-      mask = @pool_free_mask[slot]
-      return Pointer(Void).null if mask == 0_u64
-      bsg = @bytes_since_gc.lazy_get &+ payload
-      return Pointer(Void).null if bsg >= @gc_threshold
+      s = CursorSet.slot(set, atomic ? index + SIZE_CLASS_COUNT : index)
+      return Pointer(Void).null if s.value.free_mask == 0_u64
+      local = set.value.bytes_local &+ payload
+      return Pointer(Void).null if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+      # Mid-allocation from here: a stop-the-world that finds the sentinel
+      # pins this set rather than retiring it, so the slot is re-read after
+      # the store — a suspension between the check above and here may have
+      # retired it. The fence keeps the compiler from hoisting the re-read.
+      s.value.in_flight = CursorSet.sentinel
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
+      mask = s.value.free_mask
+      if mask == 0_u64
+        s.value.in_flight = Pointer(Void).null
+        return Pointer(Void).null
+      end
       bit = mask.trailing_zeros_count
-      @pool_free_mask[slot] = mask & (mask &- 1)
-      addr = @pool_word_base[slot] &+ bit.to_u64 &* @block_bytes[index]
-      @pool_occ_word[slot].value |= 1_u64 << bit
-      @bytes_since_gc.lazy_set(bsg)
-      @total_bytes.lazy_set(@total_bytes.lazy_get &+ payload)
-      @live_objects.lazy_set(@live_objects.lazy_get &+ 1_u64)
-      fb = @free_bytes.lazy_get
-      @free_bytes.lazy_set(fb >= payload ? fb - payload : 0_u64)
+      addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]
+      user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
+      s.value.in_flight = user
+      s.value.free_mask = mask & (mask &- 1)
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64 << bit,
+        LLVM::AtomicOrdering::Monotonic, false)
+      set.value.bytes_local = local
+      set.value.objects_local = set.value.objects_local &+ 1_u64
       if (pfw = @alloc_pfw) > 0
         Kernels.prefetch_write(Pointer(Void).new(addr &+ pfw))
       end
       BlockHeader.set_used(Pointer(BlockHeader).new(addr), payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
-      user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
       clear_block(user, payload.to_u64) unless atomic
+      s.value.in_flight = Pointer(Void).null
       user
     end
 
@@ -863,8 +860,10 @@ module Gcry
     @fit_index = uninitialized StaticArray(UInt8, 257)
     @fit_payload = uninitialized StaticArray(UInt32, 257)
 
+    property fast_path_enabled : Bool = true
+
     private def refresh_fast_path : Nil
-      @fast_path = @bitmap_alloc && !@nursery_enabled && !@destroyed &&
+      @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
                    !Invariant.enabled? && !Trace.enabled? && !@birth_grace && !@always_clear &&
                    !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc)
     end
@@ -967,7 +966,7 @@ module Gcry
       # The bitmap sweep settles a chunk with one batched subtraction, which
       # needs atomics against other mutators — not against itself: with one
       # mutator the sweep runs on that thread.
-      @heap_counters_atomic || (@bitmap_alloc && !Gcry.single_mutator?)
+      @heap_counters_atomic || @bitmap_alloc
     end
 
     # Parallel: Atomic RMW. EC1: plain get/set (no LOCK on the alloc hot path).
@@ -1020,6 +1019,9 @@ module Gcry
 
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0
+      # A block allocated on a hit path and not yet credited would make this
+      # saturate at zero and lose the decrement for good.
+      credit_all_cursor_sets if @live_objects.get < n
       if @collecting || !@heap_counters_atomic
         cur = @live_objects.get
         @live_objects.set(cur > n ? cur - n : 0_u64)
@@ -2433,7 +2435,8 @@ module Gcry
       # inside a collection where that deadlocks.
       class_index = SizeClasses.index_of?(header.value.size)
       if class_index >= 0
-        chunk = @pool_chunk[class_index]
+        set = cursor_set_cached
+        chunk = set.null? ? Pointer(ChunkHeader).null : CursorSet.slot(set, class_index).value.chunk
         if !chunk.null? && ChunkHeader.contains?(chunk, header.address)
           chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
           return

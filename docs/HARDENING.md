@@ -184,7 +184,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_CLEAR_STACK=1` | Unused-stack wipe on alloc (RSS experiment; every **16**) |
 | `GCRY_CLEAR_STACK_BYTES` | Wipe size (default **4096**) |
 | `GCRY_CLEAR_STACK_EVERY` | Wipe every N allocs |
-| `GCRY_SINGLE_MUTATOR=0` | Keep the class locks and atomic counters on the small-allocation path even while the process has one mutator thread. By default that path runs lock-free with plain stores until the first thread is created (the runtime's SYSMON thread included, since it allocates); this pins the multi-thread path for A/B and diagnosis |
+| `GCRY_ALLOC_FAST_PATH=0` | Every small allocation takes the locked path instead of the thread's own cursor set (diagnosis and A/B only). By default each thread pops from its own per-(class, kind) cursor with no lock; the class lock is taken only to refill |
 | `GCRY_THRESHOLD_FACTOR` | Percent of the live bytes the sweep measured that the next collection threshold is set to (default **100**; clamped to 8–64 MiB), when no fixed `GCRY_THRESHOLD` is given. The warm-retention budget follows it under the bitmap allocator |
 | `GCRY_COLLECT_SCRUB` | Dead-stack bytes zeroed at every collection entry and exit so last cycle's mark frames are not scanned as roots (default **16384**; 0 disables). On a fiber stack the wipe uses the fiber's bounds, so a fiber that triggers a collection may fault in up to this many bytes below its SP once |
 | `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |

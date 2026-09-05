@@ -9,20 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Small allocation runs lock-free and atomic-free while the process has one
-  mutator thread, through a dedicated hit path.** `Gcry.single_mutator?` holds
-  until the first thread is created — the runtime's SYSMON thread included,
-  since `Thread#start` allocates its main `Fiber` on it, so under execution
-  contexts the regime ends at boot and the path serves library heaps and
-  programs without a monitor thread; while it holds, `malloc` and
-  `malloc_atomic` take `Heap#fast_alloc` — table-driven size fit, pool-cursor
-  pop, a plain `occ` OR through the cursor's cached word pointer, plain
-  counter stores, the collection-threshold check, and unrolled clears for
-  16–64-byte blocks — and fall to the existing path for refills, collections in
-  progress, the nursery, debug hooks, or a second thread. `realloc` skips its
-  root-list registration on the same condition. `GCRY_SINGLE_MUTATOR=0` pins
-  the multi-thread path. Headerless 48-byte `malloc` 50.5 → 21.6 ns,
-  `malloc_atomic` 34.0 → 8.8 ns (Boehm's pure path: 15–17 / ~10 ns).
+- **Every thread allocates small blocks lock-free through its own cursor
+  set.** Under the bitmap allocator each thread owns a `Gcry::CursorSet` —
+  one cursor per (class, kind), reached through a thread-local cache — and
+  `malloc`/`malloc_atomic` take `Heap#fast_alloc`: table-driven size fit, a
+  pop from the thread's own free mask, an atomic `occ` OR into the word its
+  cursor is consuming, per-set byte and object counters credited to the heap
+  on the locked path and at every stop-the-world, and unrolled clears for
+  16–64-byte blocks. A chunk under a cursor carries `ChunkHeader::Flags::CURSOR`
+  and no other cursor takes it; the class lock is taken only to refill. A
+  stop-the-world retires every idle set (its chunks return to the pool) and
+  pins the chunks of a set frozen mid-allocation, which the after-world sweep
+  then leaves alone until the next stop-the-world zeroes their marks. Sets
+  are reclaimed at thread exit through a pthread key destructor, and a
+  process past 64 threads shares a fallback set under the class lock.
+  `GCRY_ALLOC_FAST_PATH=0` pins the locked path. This replaced a
+  process-wide "single mutator" flag that skipped the locks while one thread
+  existed and exempted the runtime's SYSMON thread — which allocates its main
+  `Fiber` at start-up, so two threads popped one freelist head
+  (`process_spec/regression/7_sysmon_alloc_race_spec.cr`). Headerless
+  48-byte `malloc` 50.5 → 21.6 ns, `malloc_atomic` 34.0 → 8.8 ns on the
+  single-cursor prototype (Boehm's pure path: 15–17 / ~10 ns); the per-thread
+  numbers are in `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
 - **Emptied bitmap chunks are kept warm up to the collection threshold instead
   of released.** Under the bitmap allocator an emptied chunk is reusable in
   place, and releasing it made every 8 KiB block the next cycle handed out

@@ -664,10 +664,10 @@ module GC
     if csb = env_u64("GCRY_CLEAR_STACK_BYTES")
       heap.clear_stack_bytes = csb if csb >= 64 && csb <= 1024_u64 * 1024
     end
-    # `GCRY_SINGLE_MUTATOR=0`: keep every lock and atomic on the allocation
-    # path even while one mutator thread exists (diagnosis and A/B only).
-    if (v = LibC.getenv("GCRY_SINGLE_MUTATOR")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
-      Gcry.single_mutator = false
+    # `GCRY_ALLOC_FAST_PATH=0`: every small allocation takes the locked path
+    # (diagnosis and A/B only).
+    if (v = LibC.getenv("GCRY_ALLOC_FAST_PATH")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
+      heap.fast_path_enabled = false
     end
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
       heap.collect_scrub_bytes = scrub if scrub <= 1024_u64 * 1024
@@ -1270,15 +1270,6 @@ module GC
         #           retry loop (baseline codegen, no LSE). There the atomic path
         #           is genuinely more work, which is why this flips on a second
         #           thread rather than shipping on.
-        # Every thread ends the single-mutator regime, the runtime's SYSMON
-        # thread included. It is exempt from the stop-the-world by name, and
-        # for a while that was read as "never touches the heap" — but
-        # `Thread#start` builds its main `Fiber` on it, and its loop spawns
-        # threads. Exempting it let two threads pop one freelist head:
-        # `make scheduler-roots` hung under load with SYSMON's main fiber
-        # pushed twice onto `Fiber.fibers`, `next` pointing at itself
-        # (process_spec/regression/7_sysmon_alloc_race_spec.cr).
-        Gcry.single_mutator = false
         if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
           h.heap_counters_atomic = true
         end

@@ -1949,6 +1949,7 @@ module Gcry
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           mark_large_alloc_in_flight
+          bitmap_settle_cursor_sets
           mark_bitmap_alloc_in_flight
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
@@ -2370,6 +2371,7 @@ module Gcry
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight
+        bitmap_settle_cursor_sets
         mark_bitmap_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots

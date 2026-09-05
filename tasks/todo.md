@@ -509,26 +509,26 @@ one thread allocates, so under execution contexts it ends at boot. Real
 multi-thread support means each thread owns its cursor, and the regime goes
 away:
 
-- [ ] `PoolCursors` (per thread, LibC-allocated, `@[ThreadLocal]` pointer):
-      per slot `chunk / word / free_mask / word_base / occ_word / in_flight`,
-      plus local `bytes_since_gc` and `live_objects` deltas. Registered in a
-      heap-side list under the pool lock so STW can walk every set.
-- [ ] `fast_alloc` reads the thread's set: pop, plain `occ` OR (the chunk is
-      claimed by one cursor at refill, under the lock, so the word is
-      private), local counters. No lock, no atomics, on every thread.
-- [ ] Refill (locked) flushes the local counters into the heap atomically —
-      one atomic per chunk, and the threshold lags by at most one chunk per
-      thread.
-- [ ] Sweep protocol: STW retires every set's cursors (chunks return to the
-      pool lists); the lazy sweep skips chunks a cursor holds, and a refill
-      only claims a chunk the sweep has finished this epoch. No `occ` word is
-      ever written by the sweep and a fast path at once.
-- [ ] `mark_bitmap_alloc_in_flight` walks every set; `free` of a block on
-      another thread's cursor chunk stays atomic (already is).
-- [ ] Header mode keeps TLAB; the lock-skipping `with_freelist_lock` branch
-      is deleted rather than generalised.
-- [ ] Gates: `7_sysmon_alloc_race_spec` (now: two unlocked threads must not
-      collide), `6_multi_mutator_alloc_spec`, heap-counters, mt/stw-mt
-      property tests, scheduler-roots ×60 contended; Kemal EC1 and EC4 vs
-      Boehm; then the full soak.
+- [x] `CursorSet` per thread (`LibC.malloc`, thread-local cache of integers
+      — pointer initialisers go through `__crystal_once`, which allocates);
+      per slot `chunk / word / free_mask / word_base / occ_word / in_flight`;
+      monotonic per-set byte/object counters credited by delta.
+- [x] `fast_alloc` on the thread's set: sentinel in `in_flight` first (a
+      stop-the-world that finds it pins the set), re-read the mask, atomic
+      `occ` OR (a `free` on another thread shares the word), local counters.
+      Off while `@lazy_sweep_pending`, `@collecting`, or on the fallback set.
+- [x] Chunk `CURSOR` flag: taken under the class lock at refill, skipped by
+      other refills; `PINNED` for chunks held across a stop-the-world by a
+      mid-allocation set — the after-world sweep skips them, the next
+      stop-the-world zeroes their marks.
+- [x] `bitmap_settle_cursor_sets` at every stop-the-world: credit, retire
+      idle sets, pin mid-allocation ones, free sets whose thread exited
+      (pthread key destructor marks them). Table of 64 + a shared fallback
+      under the class lock; `cursor_set` never raises (a raise under the
+      class lock allocates on the same lock — that hung `process_spec` at the
+      65th thread).
+- [x] `with_freelist_lock` lock-skipping deleted; `single_mutator` gone;
+      `GCRY_ALLOC_FAST_PATH=0` replaces `GCRY_SINGLE_MUTATOR=0`.
+- [ ] Gates green on the tree; scheduler-roots ×40 contended; Kemal vs
+      Boehm re-measured; FINDINGS + PR updated; then the full soak.
 - [ ] Full soak once the above is in.
