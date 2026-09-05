@@ -60,6 +60,9 @@ module Gcry
     STATE_EXITING = 2_u8 # the owner's thread-exit destructor ran; retired and freed at the next stop-the-world
 
     property owner : UInt64 = 0_u64
+    # The heap this set belongs to, as an address: the thread-local cache
+    # holds one set pointer and checks it against the heap asking.
+    property heap : UInt64 = 0_u64
     property state : UInt8 = 0_u8
     # Non-zero for sets that never take the hit path: the fallback shared by
     # threads past the table, and the runtime's monitor thread, which is
@@ -161,14 +164,16 @@ module Gcry
     getter cursor_sets_pinned : UInt64 = 0_u64
     getter cursor_sets_retired : UInt64 = 0_u64
 
-    # The calling thread's set for the heap it last allocated from. A miss
-    # takes `@alloc_lock` once per (thread, heap). Integers with literal
-    # initialisers, not pointers: a class variable whose initialiser is a call
-    # is initialised lazily through `__crystal_once`, which asks for
-    # `Thread.current`, which allocates, which reads the variable — a spin on
-    # the once-lock at boot, before the runtime's first thread exists.
-    @[ThreadLocal]
-    @@tls_cursor_heap : UInt64 = 0_u64
+    # The calling thread's set for the heap it last allocated from; the set
+    # names its heap (`CursorSet#heap`), so one thread-local word answers
+    # both "which set" and "for which heap". It was two words, and every
+    # read of a thread-local class variable is an out-of-line call in the
+    # release build (`*Gcry::Heap::tls_cursor_set` in the disassembly), so
+    # the hit path paid two calls where it now pays one. An integer with a
+    # literal initialiser, not a pointer: a class variable whose initialiser
+    # is a call is initialised lazily through `__crystal_once`, which asks
+    # for `Thread.current`, which allocates, which reads the variable — a
+    # spin on the once-lock at boot, before the runtime's first thread exists.
     @[ThreadLocal]
     @@tls_cursor_set : UInt64 = 0_u64
     # Set by the thread-exit destructor: any allocation after it uses the
@@ -233,7 +238,9 @@ module Gcry
 
     @[AlwaysInline]
     protected def cursor_set_cached : CursorSet*
-      @@tls_cursor_heap == self.as(Void*).address ? Pointer(CursorSet).new(@@tls_cursor_set) : Pointer(CursorSet).null
+      set = Pointer(CursorSet).new(@@tls_cursor_set)
+      return set if set.null? || set.value.heap == self.as(Void*).address
+      Pointer(CursorSet).null
     end
 
     # Never raises and never allocates from the managed heap: it runs under
@@ -245,7 +252,6 @@ module Gcry
       key = current_thread_key
       exiting = @@tls_cursor_exiting != 0_u8
       set = @cursor_lock.sync { cursor_set_under_lock(key, exiting) }
-      @@tls_cursor_heap = self.as(Void*).address
       @@tls_cursor_set = set.address
       set
     end
@@ -256,7 +262,7 @@ module Gcry
           # Thread exit. Plain stores: the collector reads them only with this
           # thread frozen or gone, and the fallback takes any later allocation.
           p.as(CursorSet*).value.state = CursorSet::STATE_EXITING
-          @@tls_cursor_heap = 0_u64
+          @@tls_cursor_set = 0_u64
           @@tls_cursor_exiting = 1_u8
         }) == 0
       end
@@ -292,7 +298,10 @@ module Gcry
 
     private def alloc_cursor_set : CursorSet*
       set = LibC.malloc(LibC::SizeT.new(sizeof(CursorSet))).as(CursorSet*)
-      set.as(UInt8*).clear(sizeof(CursorSet)) unless set.null?
+      unless set.null?
+        set.as(UInt8*).clear(sizeof(CursorSet))
+        set.value.heap = self.as(Void*).address
+      end
       set
     end
 
@@ -353,16 +362,14 @@ module Gcry
         end
         i += 1
       end
+      # This thread's cache first, while the set it names is still readable.
+      @@tls_cursor_set = 0_u64 unless cursor_set_cached.null?
       each_cursor_set { |set| LibC.free(set.as(Void*)) }
       @cursor_set_count = 0
       @fallback_cursor_set = Pointer(CursorSet).null
       if @cursor_key_ok
         LibC.pthread_key_delete(@cursor_key)
         @cursor_key_ok = false
-      end
-      if @@tls_cursor_heap == self.as(Void*).address
-        @@tls_cursor_heap = 0_u64
-        @@tls_cursor_set = 0_u64
       end
     end
 

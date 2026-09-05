@@ -58,8 +58,22 @@ module Gcry
       enable(2, alloc_sample: sample, owned: false)
     end
 
+    # Inlined shells, so the allocation hit path pays one flag test rather
+    # than a call: `Heap#malloc` was calling this out of line on every hit,
+    # visible as a `call Trace::after_malloc` in the release disassembly.
+    @[AlwaysInline]
     def self.after_malloc(ptr : Void*, size : UInt64, atomic : Bool) : Nil
       return unless @@enabled
+      after_malloc_enabled(ptr, size, atomic)
+    end
+
+    @[AlwaysInline]
+    def self.after_free(ptr : Void*) : Nil
+      return unless @@enabled
+      after_free_enabled(ptr)
+    end
+
+    private def self.after_malloc_enabled(ptr : Void*, size : UInt64, atomic : Bool) : Nil
       return if ptr.null?
       return if @@alloc_sample == 0
       n = @@alloc_tick.add(1)
@@ -72,8 +86,7 @@ module Gcry
       end
     end
 
-    def self.after_free(ptr : Void*) : Nil
-      return unless @@enabled
+    private def self.after_free_enabled(ptr : Void*) : Nil
       return if ptr.null?
       return if @@alloc_sample == 0
       n = @@alloc_tick.add(1)
