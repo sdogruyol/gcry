@@ -81,3 +81,70 @@ Rules written after corrections, so the same mistake is not made twice.
   holds mid-allocation** (`header`, `chunk`): any allocation path must keep
   the user pointer visible, or publish it, from the moment the block reads
   USED until the caller holds it.
+
+## Measurement (2026-09-05)
+- **`bench/kemal/lib/gcry` is an absolute symlink to this checkout.** Every
+  Kemal built from a git worktree compiled *this tree's* gcry, so a
+  "master" or "old" arm built that way measured the working tree. Re-point
+  the link (`ln -sfn ../../.. lib/gcry`) in the worktree before building, and
+  check `readlink -f` in the run log. The PR #33 table's "gcry master" row
+  was this branch's default mode because of this.
+- A benchmark's `require` with an absolute path has the same problem; give
+  worktree builds their own copy with a relative require.
+- A run that waits on a server must bound every probe (`curl -m`, `timeout`
+  around `wrk`) and kill with `-9`; a crashed server wedged a job for seven
+  hours.
+- **A runner that passes a comma-joined environment must quote it.**
+  `run $2 $3 ${4//,/ }` split the expansion into extra positional arguments
+  and every arm after the first variable ran the *default* configuration:
+  three "tuning" runs measured nothing but noise, and the spread between
+  identical arms (±5% at n=9) is the noise floor to remember. Verify an arm's
+  configuration from the server's own stats before trusting its number.
+- **A gate calibrated against a default is a gate that fails when the default
+  moves.** `live-graph-audit`'s 8 MiB walk floor assumed the 32 MiB major
+  threshold; the adaptive threshold halved what the sparse walk had to release
+  and the gate called itself inconclusive. A harness that measures one
+  mechanism pins every other knob it depends on.
+- **Run the CI job's own gate list before opening a PR, not a remembered
+  subset.** PR #34 went up after a battery of 30 gates and failed CI on
+  `make thread-birth-root`, which was not in the battery: the `test` job runs
+  23 targets, extracted with
+  `sed -n 54,655p .github/workflows/ci.yml | grep -oE "make [a-z0-9_-]+|crystal spec[^#]*"`.
+  Extract the list from the workflow every time; a gate that exists is a
+  gate CI runs.
+- **Never dereference `pthread_create`'s `arg` as a Crystal object.** Crystal's
+  `Thread` passes itself; any raw caller passes anything (the thread-birth
+  gate passes an obfuscated integer). Ask the heap whether it is a live block
+  of the expected type first.
+- **A "this thread never allocates" claim is a test, not a comment.** The
+  SYSMON exemption rested on one; `Thread#start` allocates the thread's main
+  Fiber on it. The gate that caught it (`scheduler-roots`) hung 1 in 22
+  contended runs, so: any thread-exemption from a lock regime gets a spec
+  that runs the exempt thread's real work alongside the owner and checks
+  for shared blocks (`7_sysmon_alloc_race_spec.cr`), and rare hangs are
+  hunted with a contended loop that leaves the hung process alive —
+  `/proc/<pid>/mem` plus `ptrace` from Python and `addr2line` gave the
+  fiber list and the doubly-pushed node with no gdb on the box.
+- **Read the load average before and after every measurement, and kill
+  what a timed-out run leaves behind.** A `crystal spec` that hit its
+  timeout left its binary spinning on 19 cores for an hour; three Kemal
+  runs and a microbenchmark table were taken under load 25 and read as
+  regressions. `timeout` on the runner does not kill the child the runner
+  spawned; `pkill -f crystal-run-spec` after any timed-out spec, and the
+  harness prints `uptime` at both ends.
+- **Never force-push; history moves forward only.** A branch under review
+  gets a merge of upstream and new commits for the fixes, never a rewrite —
+  the reviewer's thread points at commits, and the record of what was
+  wrong is part of the change. A "split" is new branches with new PRs, not
+  a rewritten old one.
+- **Keep performance work in PR #34.** The user's latest explicit direction
+  is to include the performance plan's work in the existing PR, superseding
+  the suggestion to merge #34 first and open follow-up PRs. Use separate
+  reviewable commits with their own trials on the branch carrying #34;
+  preserve its history and update its description as the scope evolves.
+- **Rank optimizations against the target workload.** A 2.2 ms root phase
+  in a four-thread microbenchmark does not justify a root rewrite for Kemal.
+  Instrument first and require real-application evidence before risky root
+  changes or a more complex heap controller. Prioritize the known 8 KiB
+  allocation path and header retention; keep atomic-leaf enqueue skipping
+  separate from profile-dependent mark-stack representation changes.

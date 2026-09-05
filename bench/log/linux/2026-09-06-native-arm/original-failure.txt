@@ -1,0 +1,57 @@
+2026-09-05T15:55:32.8078088Z ##[group]Run mkdir -p bin
+2026-09-05T15:55:32.8078572Z mkdir -p bin
+2026-09-05T15:55:32.8078811Z crystal spec --error-trace
+2026-09-05T15:55:32.8079140Z crystal spec -Dgc_none process_spec --error-trace
+2026-09-05T15:55:32.8079541Z crystal build -Dgc_none samples/hello.cr -o bin/hello
+2026-09-05T15:55:32.8079867Z ./bin/hello
+2026-09-05T15:55:32.8080168Z crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
+2026-09-05T15:55:32.8080529Z ./bin/stw_sp_clamp
+2026-09-05T15:55:32.8080887Z crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
+2026-09-05T15:55:32.8081289Z ./bin/fork_reinit
+2026-09-05T15:55:32.8081507Z timeout 300 make greg-roots
+2026-09-05T15:55:32.8081763Z timeout 300 make scheduler-roots
+2026-09-05T15:55:32.8082399Z timeout 300 make ivar-layout-roots
+2026-09-05T15:55:32.8082718Z timeout 300 make ec-queue-audit
+2026-09-05T15:55:32.8082984Z timeout 300 make thread-block-audit
+2026-09-05T15:55:32.8083597Z timeout 300 make thread-birth-root
+2026-09-05T15:55:32.8083977Z # This arch is where the crash was first seen, so it gates here too.
+2026-09-05T15:55:32.8084466Z FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
+2026-09-05T15:55:32.8084815Z timeout 600 make large-cache-race
+2026-09-05T15:55:32.8153809Z shell: /usr/bin/bash -e {0}
+2026-09-05T15:55:32.8154111Z env:
+2026-09-05T15:55:32.8154295Z   GCRY_STW_WATCHDOG_MS: 10000
+2026-09-05T15:55:32.8154510Z ##[endgroup]
+2026-09-05T15:55:48.6325899Z GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2
+2026-09-05T15:55:48.6336096Z ......................................................................................................................................................................................................................................*.........................
+2026-09-05T15:55:48.6336766Z
+2026-09-05T15:55:48.6336862Z Pending:
+2026-09-05T15:55:48.6342290Z   Gcry::Platform soft-dirty clears soft-dirty and detects a subsequent write
+2026-09-05T15:55:48.6342637Z
+2026-09-05T15:55:48.6342742Z Finished in 7.54 seconds
+2026-09-05T15:55:48.6342997Z 256 examples, 0 failures, 0 errors, 1 pending
+2026-09-05T15:56:02.4501626Z F...F...........................
+2026-09-05T15:56:02.4502071Z
+2026-09-05T15:56:02.4502367Z Failures:
+2026-09-05T15:56:02.4502480Z
+2026-09-05T15:56:02.4509257Z   1) medium cursor allocations under process collection keeps reused buffers zeroed and owned across peer collections
+2026-09-05T15:56:02.4510581Z      Failure/Error: bad.get.should eq(0)
+2026-09-05T15:56:02.4510801Z
+2026-09-05T15:56:02.4511185Z        Expected: 0
+2026-09-05T15:56:02.4511424Z             got: 1
+2026-09-05T15:56:02.4511584Z
+2026-09-05T15:56:02.4537871Z ##[error]     # process_spec/regression/8_medium_cursor_spec.cr:34
+2026-09-05T15:56:02.4545240Z
+2026-09-05T15:56:02.4545805Z   2) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+2026-09-05T15:56:02.4546434Z      Failure/Error: heap.free_bytes.should be <= heap.heap_size
+2026-09-05T15:56:02.4546697Z
+2026-09-05T15:56:02.4546872Z        Expected 6064912 to be LessOrEqual 3104768
+2026-09-05T15:56:02.4547090Z
+2026-09-05T15:56:02.4548051Z ##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+2026-09-05T15:56:02.4548920Z
+2026-09-05T15:56:02.4549048Z Finished in 5.08 seconds
+2026-09-05T15:56:02.4549299Z 32 examples, 2 failures, 0 errors, 0 pending
+2026-09-05T15:56:02.4549488Z
+2026-09-05T15:56:02.4549574Z Failed examples:
+2026-09-05T15:56:02.4549690Z
+2026-09-05T15:56:02.4550226Z crystal spec process_spec/regression/8_medium_cursor_spec.cr:5 # medium cursor allocations under process collection keeps reused buffers zeroed and owned across peer collections
+2026-09-05T15:56:02.4552031Z crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole

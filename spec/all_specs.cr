@@ -48,3 +48,8 @@ require "./chunk_radix_spec"
 # `-Dgc_none` — measured: without the flag, three `GC.collect` calls move gcry's
 # collection count 0 → 0 and `GC.malloc`'s result is not in gcry's heap. Here
 # they were exercising Boehm.
+
+require "./cursor_set_spec"
+require "./adaptive_threshold_spec"
+require "./bitmap_pool_search_spec"
+require "./atomic_leaf_queue_spec"

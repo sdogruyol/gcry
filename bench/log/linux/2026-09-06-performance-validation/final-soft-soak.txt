@@ -1,0 +1,22 @@
+SOFT_SOAK_N=${SOFT_SOAK_N:-5} SOFT_SOAK_DURATION=${SOFT_SOAK_DURATION:-8} ./bench/soft_soak_ec4.sh
+I: Resolving dependencies
+I: Fetching https://github.com/kemalcr/kemal.git
+I: Fetching https://github.com/crystal-loot/exception_page.git
+I: Fetching https://github.com/luislavena/radix.git
+I: Fetching https://github.com/sija/backtracer.cr.git
+W: Shard "gcry" version (0.22.0) doesn't match tag version (0.21.3)
+I: Using radix (0.4.1)
+I: Using backtracer (1.2.4)
+I: Using exception_page (0.5.0)
+I: Using kemal (1.13.0)
+I: Using gcry (0.21.3 at ../..)
+gcry lib: /home/steve/projects/scratch/gcry (a57a114 +dirty)
+Building kemal-gcry (EC4 soft soak)...
+  trial 1/5 OK req/s=64479.17 soft=0 hard=0 alive=1
+  trial 2/5 OK req/s=62737.94 soft=0 hard=0 alive=1
+  trial 3/5 OK req/s=60088.05 soft=0 hard=0 alive=1
+  trial 4/5 OK req/s=53793.96 soft=0 hard=0 alive=1
+  trial 5/5 OK req/s=59689.16 soft=0 hard=0 alive=1
+process OK 5/5 fail=0 soft=0 hard=0
+OK thr med=60088.05 (n=5)
+PASS: soft-soak EC4 5/5 soft=0 hard=0

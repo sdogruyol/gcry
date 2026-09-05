@@ -1,0 +1,26 @@
+crystal build -Dgc_none bench/page_release_corruption.cr -o bin/page_release_corruption --error-trace
+bin/page_release_corruption
+=== page-release walk vs. a live object ===
+4 workers × 120 rounds × 8192 of 112 B, keeping the first 8 of each batch
+4 attempts per arm
+
+  GCRY_PAGE_DONTNEED=1:     0 of 4, released 8626176 B, unlinked 8344
+  GCRY_MOSTLY_EMPTY=1:      0 of 4, released 69816320 B, unlinked 0
+  GCRY_DISABLE_MADVISE=1:   0 of 4, released 3932160 B, unlinked 0
+
+ok — both release walks ran and no live object was corrupted
+crystal build -Dgc_none bench/heap_counters.cr -o bin/heap_counters --error-trace
+bin/heap_counters
+=== heap counters ===
+mode: atomic (flipped by the second thread)
+atomic path: true
+allocated 1200000, counter moved 1200014, lost 0
+
+ok — every allocation is accounted for, with four threads on the same counters
+GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 bin/heap_counters --plain
+=== heap counters ===
+mode: plain (GCRY_HEAP_COUNTERS_ATOMIC=0)
+atomic path: false
+allocated 1200000, counter moved 1199123, lost 877
+
+ok — the old path loses increments, which is what the atomic one is for

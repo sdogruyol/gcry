@@ -24,8 +24,49 @@ require "./finalizer"
 
 module Gcry
   class Heap
-    DEFAULT_GC_THRESHOLD =  4194304_u64 # 4 MiB — library / conservative
-    PROCESS_GC_THRESHOLD = 33554432_u64 # 32 MiB — empty munmap + two-pass reclaim
+    DEFAULT_GC_THRESHOLD = 4194304_u64 # 4 MiB — library / conservative
+    # Boehm-shaped sizing for the process heap: after each collection the next
+    # threshold is the live bytes the sweep just measured, times a factor,
+    # clamped. Allocation between collections then scales with the live set,
+    # so a small live set collects often and cheaply and a large one does not
+    # thrash; the warm-retention budget follows it, so what one cycle
+    # allocates is what the sweep keeps. `GCRY_THRESHOLD` pins a fixed
+    # threshold and disables this; `GCRY_THRESHOLD_FACTOR` is the factor in
+    # percent (default 100).
+    # Darwin's floor is the 16 MiB its fixed default used to be: the
+    # dense-live growth window under fat apps was measured there, not at 8.
+    {% if flag?(:darwin) %}
+      ADAPTIVE_THRESHOLD_MIN = 16777216_u64 # 16 MiB
+    {% else %}
+      ADAPTIVE_THRESHOLD_MIN = 8388608_u64 # 8 MiB
+    {% end %}
+    ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
+    property adaptive_threshold : Bool = false
+    property adaptive_threshold_pct : UInt64 = 100_u64
+    # The warm-retention budget follows the live set after every major
+    # whether the threshold is fixed or adaptive: what one cycle allocates is
+    # what the sweep keeps, capped by the threshold so a fixed 128 MiB never
+    # holds 128 MiB of emptied chunks once the live set has dropped.
+    property warm_retain_follows_live : Bool = false
+
+    # Live bytes the sweep just measured, small and large.
+    private def live_bytes_after_sweep : UInt64
+      large = @large_mapped_bytes > @large_free_bytes ? @large_mapped_bytes - @large_free_bytes : 0_u64
+      @size_class_live_bytes &+ large
+    end
+
+    private def adapt_after_sweep : Nil
+      return unless @adaptive_threshold || @warm_retain_follows_live
+      want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
+      want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
+      if @adaptive_threshold
+        @gc_threshold = want < ADAPTIVE_THRESHOLD_MAX ? want : ADAPTIVE_THRESHOLD_MAX
+      end
+      if @warm_retain_follows_live
+        @empty_chunk_warm_retain = want < @gc_threshold ? want : @gc_threshold
+      end
+    end
+
     # EC_PARALLELISM>1: 32 MiB majors storm under HTTP (~150+/20s). 64 MiB
     # cut Kemal EC4 /json ~47k→~53k (d=20); 128 MiB no further win.
     PROCESS_GC_THRESHOLD_PARALLEL  = 67108864_u64 # 64 MiB
@@ -291,6 +332,8 @@ module Gcry
       {% else %}
         @nursery_enabled = value
       {% end %}
+      refresh_fast_path
+      @nursery_enabled
     end
 
     # Adaptive nursery threshold: adjusted after each minor based on the
@@ -324,6 +367,13 @@ module Gcry
     # Parked-fiber stack scrub (inside STW roots window; split for Parallel A/B).
     getter last_phase_scrub_ns : UInt64 = 0_u64
     getter last_phase_roots_ns : UInt64 = 0_u64
+    # Optional root attribution: no extra clocks on the normal collection path.
+    property root_phase_timing : Bool = false
+    getter last_roots_explicit_ns : UInt64 = 0_u64
+    getter last_roots_cursors_ns : UInt64 = 0_u64
+    getter last_roots_metadata_ns : UInt64 = 0_u64
+    getter last_roots_fibers_ns : UInt64 = 0_u64
+    getter last_roots_threads_ns : UInt64 = 0_u64
     getter last_phase_static_ns : UInt64 = 0_u64
     getter last_phase_stacks_ns : UInt64 = 0_u64
     getter last_phase_mark_ns : UInt64 = 0_u64
@@ -1341,6 +1391,7 @@ module Gcry
           if @mark_stack.empty?
             enqueue_unreachable_finalizers
             sweep(major: true)
+            adapt_after_sweep
             @bytes_since_gc.set(0_u64)
             @nursery_alloc_bytes.set(0_u64)
             @expl_freed_bytes_since_gc = 0_u64
@@ -1918,26 +1969,51 @@ module Gcry
           StwWatchdog.enter(StwWatchdog::PHASE_ROOTS)
 
           t0 = monotonic_ns
+          @last_roots_explicit_ns = 0_u64
+          @last_roots_cursors_ns = 0_u64
+          @last_roots_metadata_ns = 0_u64
+          @last_roots_fibers_ns = 0_u64
+          @last_roots_threads_ns = 0_u64
+          root_part = @root_phase_timing ? monotonic_ns : 0_u64
           @before_collect_callbacks.each(&.call)
           # Explicit roots: no type_id_gate (must keep raw Pointer buffers for
           # realloc pin / add_root); still respect allow_interior_pointers.
           reset_mutator_seen
           @roots.each { |ptr| mark_explicit_root(ptr) }
           mark_large_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_explicit_ns = now - root_part
+            root_part = now
+          end
+          bitmap_settle_cursor_sets
           mark_bitmap_alloc_in_flight
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_cursors_ns = now - root_part
+            root_part = now
+          end
           roots.try &.each { |ptr| mark_explicit_root(ptr) }
           mark_metadata_roots
+          @last_roots_metadata_ns = monotonic_ns - root_part if @root_phase_timing
           # Fiber scrub timed separately (Parallel A/B); excluded from roots_ns.
           t_scrub = monotonic_ns
           scrub_parked_fiber_stacks if scan_stack
           scrub_ns = monotonic_ns - t_scrub
           @last_phase_scrub_ns = scrub_ns
           # Fiber objects + suspended stacks (once; not also via push_gc_roots).
+          root_part = monotonic_ns if @root_phase_timing
           scan_all_fiber_roots if scan_stack
+          if @root_phase_timing
+            now = monotonic_ns
+            @last_roots_fibers_ns = now - root_part
+            root_part = now
+          end
           # Research arms: stacks `Fiber.unsafe_each` does not yield
           # (src/gcry/unowned_stack_roots.cr). Off by default.
           scan_unowned_stacks if scan_stack
           scan_thread_roots if scan_stack && @stop_the_world
+          @last_roots_threads_ns = monotonic_ns - root_part if @root_phase_timing
           @last_phase_roots_ns = monotonic_ns - t0 - scrub_ns
           StwWatchdog.enter(StwWatchdog::PHASE_STATIC)
 
@@ -2175,6 +2251,7 @@ module Gcry
         unlock_post_stw
       end
 
+      adapt_after_sweep if major
       @running_finalizers = true
       begin
         @finalizers.run_pending
@@ -2344,6 +2421,7 @@ module Gcry
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight
+        bitmap_settle_cursor_sets
         mark_bitmap_alloc_in_flight
         roots.try &.each { |ptr| mark_explicit_root(ptr) }
         mark_metadata_roots

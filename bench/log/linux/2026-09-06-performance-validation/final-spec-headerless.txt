@@ -1,0 +1,8 @@
+.............................................................................................GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2
+......................................................................................................................*.................................
+
+Pending:
+  Gcry::Platform soft-dirty clears soft-dirty and detects a subsequent write
+
+Finished in 962.99 milliseconds
+245 examples, 0 failures, 0 errors, 1 pending

@@ -470,3 +470,130 @@ it is the phase aimed at RSS x Boehm < 1.0, which is the shipping bar.
       thread-birth registration (worker not yet in the STW list while its
       block is live), after-world sweep vs allocation, register capture.
       Green 5 runs in a row at 8 workers.
+
+## Close the gap to Boehm (2026-09-04)
+
+Headerless Kemal /json is 92.3% of Boehm; the collector is 0.2-0.5% of wall
+time, so the gap is the mutator's allocation path.
+- [x] Profile the headerless Kemal server under wrk (perf if the kernel has
+      it; otherwise an allocation microbenchmark per mode vs Boehm).
+- [x] Remove per-allocation atomics from the bitmap fast path: per-thread pool
+      cursor (lock only at refill), batched bytes_since_gc.
+- [x] Trim the GC.malloc entry (dedicated hit path) (checks, hooks, rounding) to what a hit needs.
+- [ ] Paired Kemal n>=7 per change; keep only measurable wins; gates; update
+      the PR table.
+- [x] The real gap: page faults from releasing emptied chunks every cycle;
+      warm retention up to the threshold by default. 112.7% of Boehm.
+- [x] RSS under load (44.5 MB vs Boehm 22 MB): the fixed 32 MiB threshold and
+      warm budget. Adaptive threshold = live × factor (clamped 8–64 MiB),
+      warm budget follows; `GCRY_THRESHOLD_FACTOR`; spec
+      `spec/adaptive_threshold_spec.cr`. Measure k = 50/100/200 vs Boehm.
+- [x] Gates on the final tree, squash, push, open the PR (#34).
+- [x] CI red on `thread-birth-root`: SYSMON check read `arg` as a Thread;
+      fixed with a live-block + type-id test; regression spec
+      `process_spec/regression/5_pthread_create_raw_arg_spec.cr`.
+- [x] Multi-mutator coverage through the process GC:
+      `process_spec/regression/6_multi_mutator_alloc_spec.cr`.
+- [ ] Run the full CI `test` job list locally (23 targets) before pushing.
+- [x] `make scheduler-roots` hung under load (1 in 22 contended runs; upstream
+      0 in 101): SYSMON allocates its main Fiber in `Thread#start`, and the
+      exemption let two threads pop one freelist head — its fiber pushed twice
+      onto `Fiber.fibers`, `next` = itself, root scan looping. Exemption
+      withdrawn; `7_sysmon_alloc_race_spec.cr` reproduces it (4 892–8 518
+      shared blocks per 200 000); 60/60 clean after.
+
+## Multi-thread allocation: per-thread pool cursors (plan)
+
+The single-mutator regime is a global flag; it is sound only while exactly
+one thread allocates, so under execution contexts it ends at boot. Real
+multi-thread support means each thread owns its cursor, and the regime goes
+away:
+
+- [x] `CursorSet` per thread (`LibC.malloc`, thread-local cache of integers
+      — pointer initialisers go through `__crystal_once`, which allocates);
+      per slot `chunk / word / free_mask / word_base / occ_word / in_flight`;
+      monotonic per-set byte/object counters credited by delta.
+- [x] `fast_alloc` on the thread's set: sentinel in `in_flight` first (a
+      stop-the-world that finds it pins the set), re-read the mask, atomic
+      `occ` OR (a `free` on another thread shares the word), local counters.
+      Off while `@lazy_sweep_pending`, `@collecting`, or on the fallback set.
+- [x] Chunk `CURSOR` flag: taken under the class lock at refill, skipped by
+      other refills; `PINNED` for chunks held across a stop-the-world by a
+      mid-allocation set — the after-world sweep skips them, the next
+      stop-the-world zeroes their marks.
+- [x] `bitmap_settle_cursor_sets` at every stop-the-world: credit, retire
+      idle sets, pin mid-allocation ones, free sets whose thread exited
+      (pthread key destructor marks them). Table of 64 + a shared fallback
+      under the class lock; `cursor_set` never raises (a raise under the
+      class lock allocates on the same lock — that hung `process_spec` at the
+      65th thread).
+- [x] `with_freelist_lock` lock-skipping deleted; `single_mutator` gone;
+      `GCRY_ALLOC_FAST_PATH=0` replaces `GCRY_SINGLE_MUTATOR=0`.
+- [x] Gates green on the tree (30 targets, 12 spec configurations);
+      scheduler-roots ×40 contended clean.
+- [x] Kemal vs Boehm re-measured on a quiet box (104.7%, t = 1.63; withdrawn
+      version 104.4%; realloc-without-roots 105.0% → reverted); FINDINGS +
+      PR #34 updated; `soak-smoke` and `soft-soak-ec4-smoke` green.
+- [x] (superseded, stopped for the evidence run) 24 h `make soak` started 2026-09-05 ~20:00 local; output in the
+      session scratchpad `soak_full.out`, telemetry `/tmp/gcry-soak.log`.
+- [ ] Execution-context throughput: the stop-the-world pause is 14–27 ms per
+      collection at 4 threads with mark and sweep in microseconds — whole
+      thread-stack scans. Measure `scan_other_thread_stacks` and the SP
+      snapshot on this box; low-water skip.
+- [ ] `bitmap_take_pool_chunk` walks every chunk of the class per refill:
+      O(chunks) at large heaps (1 125 ns/alloc at 960 MB). Per-class pool
+      list of chunks with capacity, ascending address order.
+- [x] Full soak: 24 h `make soak` running on the pushed tree (eb77356) from 21:08 local 2026-09-05, output `soak_full2.out` in the session scratchpad, telemetry `/tmp/gcry-soak.log`.
+
+## Review of PR #34 (sdogruyol, 2026-09-05 07:35Z) — done
+
+- [x] Blockers 1 and 2 (type-punned `arg`; SYSMON exemption): gone with the
+      single-mutator regime; per-thread cursor sets instead.
+- [x] Blocker 3: SYSMON's set is created with `no_hit_path` — it always
+      takes `allocate` and its cooperative wait, and the settle never
+      retires or credits it. In-flight sentinel, atomic `occ`, CAS-credited
+      counters.
+- [x] Blocker 4: `Invariant.after_malloc` / `Trace.after_malloc` run on the
+      hit path; `refresh_fast_path` no longer closes it under invariants
+      (249 examples run it).
+- [x] Should-fixes: warm budget = min(threshold, max(live × factor, floor))
+      after every major; adaptive threshold gated on the bitmap allocator;
+      `collect_a_little` recomputes; Darwin floor 16 MiB; factor clamp
+      10–1000; tight-grow `min_bsg` floor 8 MiB. Spec for the warm cap.
+- [x] Evidence: `run_kemal_ab.sh` + `analyze_ab.py` + `trials.jsonl` in the
+      log; paired, 95% CI, Boehm null control, n = 20, base = v0.22.0
+      headerless under the guard. Upstream 89.5% [86.1, 92.9] at 1.88× RSS;
+      policy alone 100.9% [96.8, 105.1] at 0.97×; with cursor sets 106.7%
+      [102.2, 111.2].
+- [x] Split declined by the author: one PR, updated in place by new commits
+      (merge of v0.22.0, fixes, logs), never a force-push. The policy-only
+      arm was measured on a local branch for the table.
+- [x] All 43 CI-job commands green on the final tree; reply posted.
+
+
+## PR #34 performance follow-through (2026-09-05–06)
+
+Plan: [PERFORMANCE_PLAN_PR34.md](../docs/PERFORMANCE_PLAN_PR34.md).
+All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
+
+- [x] Measurement infrastructure: maintained runners/analyzer, committed alloc_ns,
+      stable graph churn, counter names, root sub-timers; seven Python checks.
+- [x] Medium-buffer cursor dispatch and boundary/zeroing/process regressions.
+      Atomic EC4 allocation cost −22.5%; HTTP result inconclusive.
+- [x] Refill availability indexing, lifecycle/race coverage, scaling trials.
+      Fixed STW index locking and capacity freed behind a retiring cursor;
+      release/acquire publication. Final 960 MB cost −87.8%, 8 KiB EC4 −73.2%.
+- [x] Header-retention factorial micro/application trials. Keep defaults unchanged:
+      coupled peak RSS −40.2%, post-GC RSS +88.6%, throughput inconclusive.
+- [x] Atomic-leaf enqueue skip; graph correctness and paired phase measurements.
+      Atomic pause −34.2%; pointerful graph inconclusive.
+- [x] Final application confirmation: +5.5% [−0.6, +11.6], inconclusive;
+      60 error-free trials and exact collector/server source hash check.
+- [x] Record findings, update plan, and run applicable integration gates.
+      Delivery uses new commits on the existing PR head without a force-push.
+- [x] Diagnose native ARM stress failure against the reviewed baseline; preserve
+      the header reproducer and gate cursor regressions in both bitmap layouts.
+- [ ] Resolve the pre-existing native ARM header stress/accounting defect.
+- [ ] Header default decision: independent exclusive-host confirmation,
+      burst/drop/recovery and native platform gates still required.
+- [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.

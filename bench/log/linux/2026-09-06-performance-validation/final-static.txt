@@ -1,0 +1,17 @@
+shards install --development
+I: Resolving dependencies
+I: Fetching https://github.com/crystal-ameba/ameba.git
+I: Using ameba (1.7.1-dev at 7f18f0d)
+cd lib/ameba && shards build
+I: Dependencies are satisfied
+I: Building: ameba
+I: Building: json-schema-builder
+cp -f lib/ameba/bin/ameba bin/ameba
+bin/ameba
+Inspecting 123 files
+
+...........................................................................................................................
+
+Finished in 1.03 seconds
+123 inspected, 0 failures
+ok — all 163 GCRY_* knobs the source reads are in docs/HARDENING.md
