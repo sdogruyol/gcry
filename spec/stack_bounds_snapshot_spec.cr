@@ -60,6 +60,16 @@ require "./spec_helper"
       # so raising the soft limit lowers it. A cache that never looked again
       # would scan `[stale low, high)` from another thread and miss the frames
       # a deeper main stack had grown into.
+      #
+      # Only the initial thread's low follows the limit; a pool thread's is its
+      # mmap. CI run 34051069821 had this example on a pool thread — the
+      # execution context's monitor had moved the main fiber after an earlier
+      # `open(2)` — and the low read `0x7fbb38e49000`, 275 GiB below the top of
+      # user space, unchanged by the halving. That is not the cache failing to
+      # refresh (it refreshed, and matched the live answer); it is a premise
+      # this example cannot make hold, so it says so instead.
+      pending!("the main fiber is not on the initial thread (the execution context's monitor moved it), " \
+               "and only the initial thread's low follows RLIMIT_STACK") unless SpecInitialThread.current?
       self_id = LibC.pthread_self
       Gcry::Platform.note_main_thread
       Gcry::Platform.begin_stack_bounds_snapshot

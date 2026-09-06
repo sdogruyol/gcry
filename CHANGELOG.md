@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A unit spec assumed the main fiber runs on the initial thread; since
+  Crystal 1.21 it need not.** The execution context's monitor hands a
+  scheduler whose thread it catches inside `open(2)` to a pool thread, and
+  the main fiber carries on there — one move per ~1 000–3 000 `File.open`
+  calls, measured — while `Thread.current.name` still reads `DEFAULT-0`.
+  `spec/stack_bounds_snapshot_spec.cr`'s `RLIMIT_STACK` arm then measured a
+  pool thread's mmap (low `0x7fbb38e49000`, 275 GiB below the top of user
+  space, unmoved by the halving; CI 34051069821, 1 of 3 runs). The example
+  now records the initial thread at load (`SpecInitialThread`) and is
+  pending, saying why, when it is not on it. Nothing in the collector
+  changed: `GC.init` records the initial thread by pthread id, and threads
+  do not move.
+
 ## [0.24.0] - 2026-09-06
 
 Minor release, and the one that changes what the default build allocates
