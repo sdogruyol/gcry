@@ -1,0 +1,54 @@
+FFFFF
+
+Failures:
+
+  1) header dormant chunk revival accounts capacity once across repeated dormant cycles
+     Failure/Error: {% unless flag?(:gcry_headerless) %}
+
+       Expected: 98208
+            got: 196464
+
+     # spec/header_dormant_spec.cr:14
+
+  2) header dormant chunk revival counts newly dead capacity before a dormant chunk is revived
+     Failure/Error: {% unless flag?(:gcry_headerless) %}
+
+       Expected: 98256
+            got: 98208
+
+     # spec/header_dormant_spec.cr:14
+
+  3) header dormant chunk revival clears reused bytes on the metadata page as well as released pages
+     Failure/Error: {% unless flag?(:gcry_headerless) %}
+
+       Expected: true
+            got: false
+
+     # spec/header_dormant_spec.cr:14
+
+  4) header allocation zeroing across a peer refill keeps the claimed block's clearing decision (nursery=false)
+     Failure/Error: {% unless flag?(:gcry_headerless) %}
+
+       Expected: true
+            got: false
+
+     # spec/header_clear_race_spec.cr:28
+
+  5) header allocation zeroing across a peer refill keeps the claimed block's clearing decision (nursery=true)
+     Failure/Error: {% unless flag?(:gcry_headerless) %}
+
+       Expected: true
+            got: false
+
+     # spec/header_clear_race_spec.cr:28
+
+Finished in 21.37 milliseconds
+5 examples, 5 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/header_dormant_spec.cr:14 # header dormant chunk revival accounts capacity once across repeated dormant cycles
+crystal spec spec/header_dormant_spec.cr:14 # header dormant chunk revival counts newly dead capacity before a dormant chunk is revived
+crystal spec spec/header_dormant_spec.cr:14 # header dormant chunk revival clears reused bytes on the metadata page as well as released pages
+crystal spec spec/header_clear_race_spec.cr:28 # header allocation zeroing across a peer refill keeps the claimed block's clearing decision (nursery=false)
+crystal spec spec/header_clear_race_spec.cr:28 # header allocation zeroing across a peer refill keeps the claimed block's clearing decision (nursery=true)

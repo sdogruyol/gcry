@@ -1,0 +1,25 @@
+{
+  "arms": {
+    "base": "/home/steve/projects/scratch/gcry/bin/alloc_measurement_base",
+    "null": "/home/steve/projects/scratch/gcry/bin/alloc_measurement_base",
+    "candidate": "/home/steve/projects/scratch/gcry/bin/alloc_medium"
+  },
+  "arguments": [
+    "4",
+    "100000",
+    "8192"
+  ],
+  "rounds": 20,
+  "metric": "ns_per_alloc",
+  "binary_sha256": {
+    "base": "3c78664ae79e48270099f8b2473fded1a7a84aaed72b83d0656a60457321ec66",
+    "null": "3c78664ae79e48270099f8b2473fded1a7a84aaed72b83d0656a60457321ec66",
+    "candidate": "67362dd05a36b7f67d65fa70428bf68e10927a9e03cfa59ded3f5317fb53460e"
+  },
+  "environment": {},
+  "load_start": [
+    1.17724609375,
+    0.876953125,
+    0.6259765625
+  ]
+}

@@ -1,0 +1,23 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/dormant_flush_race.cr -o bin/dormant_flush_race --error-trace
+bin/dormant_flush_race
+=== post-STW flush walk vs. mutator unmap ===
+4 workers × 10000 rounds of 40960 B, one collector, 40000 ballast objects
+
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+     gcry: SIGSEGV at 0x7f057fe16000 — in a chunk gcry RELEASED — base 0x7f057fe16000, 45056 bytes, large-object release, at collection 271; the write is 0 bytes into it. Collections since: 0. First user word at release: 0x90000a000 (type_id 40960)
+
+ok — queued, the walks never meet a released chunk; unqueued, they do
+/tmp/gcry-crystal-headerless build -Dgc_none bench/page_release_corruption.cr -o bin/page_release_corruption --error-trace
+bin/page_release_corruption
+=== page-release walk vs. a live object ===
+4 workers × 120 rounds × 8192 of 112 B, keeping the first 8 of each batch
+4 attempts per arm
+
+  GCRY_PAGE_DONTNEED=1:     0 of 4, released 5898240 B, unlinked 0
+  GCRY_MOSTLY_EMPTY=1:      0 of 4, released 13762560 B, unlinked 0
+  GCRY_DISABLE_MADVISE=1:   0 of 4, released 11796480 B, unlinked 0
+
+FAIL: GCRY_PAGE_DONTNEED unlinked no page runs (0) — no chunk went HOLED, so a clean result says nothing about that walk
+FAIL: GCRY_MOSTLY_EMPTY released 13762560 B, under the 16 MiB this walk clears whenever it engages — no chunk was sparse enough, so a clean result says nothing about that walk
+make: *** [Makefile:547: page-release-corruption] Error 1

@@ -1,0 +1,18 @@
+F
+
+Failures:
+
+  1) bitmap pool capacity search publishes a block freed behind a cursor when that cursor retires
+     Failure/Error: heap.malloc(48).should eq(first)
+
+       Expected: Pointer(Void)@0x7fd07dab52d0
+            got: Pointer(Void)@0x7fd07d2742d0
+
+     # spec/bitmap_pool_search_spec.cr:132
+
+Finished in 990 microseconds
+1 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec spec/bitmap_pool_search_spec.cr:110 # bitmap pool capacity search publishes a block freed behind a cursor when that cursor retires

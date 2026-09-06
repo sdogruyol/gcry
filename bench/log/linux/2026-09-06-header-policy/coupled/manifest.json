@@ -1,0 +1,34 @@
+{
+  "arms": {
+    "base": "/home/steve/projects/scratch/gcry/bin/header_churn",
+    "null": "/home/steve/projects/scratch/gcry/bin/header_churn",
+    "candidate": "/home/steve/projects/scratch/gcry/bin/header_churn"
+  },
+  "arm_environment": {
+    "base": {
+      "BENCH_HEADER_POLICY": "base"
+    },
+    "null": {
+      "BENCH_HEADER_POLICY": "base"
+    },
+    "candidate": {
+      "BENCH_HEADER_POLICY": "coupled"
+    }
+  },
+  "arguments": [
+    "100000"
+  ],
+  "rounds": 20,
+  "metric": "ns_per_alloc",
+  "binary_sha256": {
+    "base": "7bdc110d18fa660eb1e2bdeddadc0b013722777e5df1fdede5ab13f686110529",
+    "null": "7bdc110d18fa660eb1e2bdeddadc0b013722777e5df1fdede5ab13f686110529",
+    "candidate": "7bdc110d18fa660eb1e2bdeddadc0b013722777e5df1fdede5ab13f686110529"
+  },
+  "environment": {},
+  "load_start": [
+    2.61279296875,
+    4.0068359375,
+    3.10009765625
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "arms": {
+    "base": "/home/steve/projects/scratch/gcry/bin/atomic_queue_base",
+    "null": "/home/steve/projects/scratch/gcry/bin/atomic_queue_base",
+    "candidate": "/home/steve/projects/scratch/gcry/bin/atomic_queue_candidate"
+  },
+  "arm_environment": {
+    "base": {},
+    "null": {},
+    "candidate": {}
+  },
+  "arguments": [
+    "--seconds=1",
+    "--live=100000",
+    "--size=8",
+    "--survival=0.5",
+    "--trace-only",
+    "--fanout=3"
+  ],
+  "rounds": 20,
+  "metric": "pause_per_gc_us",
+  "binary_sha256": {
+    "base": "9ac967e7d938c6aa15f7ace766a4241dad0971e395c75429825697cc2c8fd1d1",
+    "null": "9ac967e7d938c6aa15f7ace766a4241dad0971e395c75429825697cc2c8fd1d1",
+    "candidate": "6a90d98eea16012ffd40d46d701861f87aee7dc72ac96842dafef1202bccf455"
+  },
+  "environment": {},
+  "load_start": [
+    1.74560546875,
+    3.4765625,
+    2.97607421875
+  ]
+}

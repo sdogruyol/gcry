@@ -1,0 +1,7 @@
+[
+  {"name": "boehm", "root": "/home/steve/projects/scratch/gcry", "flags": ["--release"]},
+  {"name": "null", "copy_of": "boehm"},
+  {"name": "master-hl", "root": "<scratch>/wt_master"},
+  {"name": "master-hdr", "root": "<scratch>/wt_master", "flags": ["--release", "-Dgc_none"]},
+  {"name": "branch-hl", "root": "/home/steve/projects/scratch/gcry"}
+]

@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Less collector on the Kemal main thread at the same RSS.** A main-thread
+  profile put gcry at 9.5% of the time under wrk; five changes take most of
+  the avoidable part. `realloc` and `free` resolve the pointer they own
+  through the chunk radix with no index lock (`Heap#chunk_for_owned`; the
+  table is now on by default under the bitmap allocator, `GCRY_CHUNK_RADIX=0`
+  turns it off) and a growing `realloc` takes its fresh block from the
+  thread's cursor. A held cursor moves to the next word of its chunk without
+  the class lock (`cursor_word_advances`; 96% of locked refills were that
+  step), with a `fast_miss_*` census of why an allocation leaves the hit
+  path. A fully free chunk past the warm budget gets one cycle of grace
+  before it is unmapped (`ChunkHeader::Flags::IDLE`,
+  `empty_chunk_grace_kept`), which ends the map/unmap churn that cost ~8% in
+  two rounds of twenty. The hit path reads one thread-local word and calls
+  no hook. The initial thread's stack bounds are taken once instead of
+  parsing `/proc/self/maps` at every stop (`stack_bounds_main_cached`).
+  Kemal `/json` CPU per 10 k requests 209 → ≈ 195 ms on the paired runs;
+  48-byte `malloc` 34.8 → 31 ns; peak RSS unchanged.
+  `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`.
+- **Every thread allocates small blocks lock-free through its own cursor
+  set.** Under the bitmap allocator each thread owns a `Gcry::CursorSet` —
+  one cursor per (class, kind), reached through a thread-local cache — and
+  `malloc`/`malloc_atomic` take `Heap#fast_alloc`: table-driven size fit, a
+  pop from the thread's own free mask, an atomic `occ` OR into the word its
+  cursor is consuming, per-set byte and object counters credited to the heap
+  on the locked path and at every stop-the-world, and unrolled clears for
+  16–64-byte blocks. A chunk under a cursor carries `ChunkHeader::Flags::CURSOR`
+  and no other cursor takes it; the class lock is taken only to refill. A
+  stop-the-world retires every idle set (its chunks return to the pool) and
+  pins the chunks of a set frozen mid-allocation, which the after-world sweep
+  then leaves alone until the next stop-the-world zeroes their marks. Sets
+  are reclaimed at thread exit through a pthread key destructor, and a
+  process past 64 threads shares a fallback set under the class lock.
+  `GCRY_ALLOC_FAST_PATH=0` pins the locked path. This replaced a
+  process-wide "single mutator" flag that skipped the locks while one thread
+  existed and exempted the runtime's SYSMON thread — which allocates its main
+  `Fiber` at start-up, so two threads popped one freelist head
+  (`process_spec/regression/7_sysmon_alloc_race_spec.cr`). Headerless
+  48-byte `malloc` 50.5 → 21.6 ns, `malloc_atomic` 34.0 → 8.8 ns on the
+  single-cursor prototype (Boehm's pure path: 15–17 / ~10 ns); the per-thread
+  numbers are in `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
+- **Emptied bitmap chunks are kept warm up to a budget that follows the
+  live set instead of being released.** Under the bitmap allocator an
+  emptied chunk is reusable in place, and releasing it made every 8 KiB
+  block the next cycle handed out arrive on a fresh page — 1 256 minor
+  faults per 1 000 Kemal requests against Boehm's 2, on less CPU per
+  request than Boehm. `GCRY_EMPTY_CHUNK_WARM_RETAIN` now defaults to the
+  collection threshold and then tracks live × `GCRY_THRESHOLD_FACTOR` after
+  every major, capped by the threshold, so a fixed 128 MiB threshold does
+  not hold 128 MiB of emptied chunks once the live set has dropped; `0`
+  restores release-everything.
+- **The process heap sizes its collection threshold from the live set, the
+  way Boehm's `GC_free_space_divisor` does.** Under the bitmap allocator,
+  after each major (the incremental cycle's completion included) the next
+  threshold is the live bytes the sweep measured, times
+  `GCRY_THRESHOLD_FACTOR` percent (10–1000, default 100), clamped to
+  8–64 MiB (Darwin floor 16 MiB). A 10 MB live set therefore collects every
+  10 MB and keeps 10 MB of emptied chunks, instead of the fixed 32 MiB each.
+  `GCRY_THRESHOLD` still pins a fixed threshold, a Parallel execution
+  context keeps its fixed 64 MiB, and the header allocator keeps its fixed
+  defaults. `GCRY_TIGHT_GROW`'s collect-before-grow floor is pinned at the
+  8 MiB it was calibrated at. Numbers in
+  `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
+
 ### Added
 
 - **Every benchmark harness refuses to build against the wrong gcry.** The

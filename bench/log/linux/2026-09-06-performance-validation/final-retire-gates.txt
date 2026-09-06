@@ -1,0 +1,57 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+/tmp/gcry-crystal-headerless build -Dgc_none bench/stw_index_race.cr -o bin/stw_index_race --error-trace
+bin/stw_index_race
+=== STW chunk-index race ===
+4 allocating threads, 200 collections per arm
+  default     unlocked reads: collector 268120, other threads 0 (last 0x0)
+  late-clear  unlocked reads: collector 229664, other threads 12185 (last 0x7f867f7fe6c0)
+
+ok — with the flag cleared before the resume loop no mutator reads the index unlocked, and with it cleared after they do
+/tmp/gcry-crystal-headerless build -Dgc_none bench/fork_reinit.cr -o bin/fork_reinit
+bin/fork_reinit
+fork_reinit: 3 passed, 0 failed

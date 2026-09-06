@@ -1,0 +1,7 @@
+......*.........................
+
+Pending:
+  medium cursor allocations under process collection keeps reused buffers zeroed and owned across peer collections
+
+Finished in 2.55 seconds
+32 examples, 0 failures, 0 errors, 1 pending

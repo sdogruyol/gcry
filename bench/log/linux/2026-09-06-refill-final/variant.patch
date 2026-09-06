@@ -1,0 +1,73 @@
+diff --git a/src/gcry/bitmap_alloc.cr b/src/gcry/bitmap_alloc.cr
+index 7bd1c52..738f99c 100644
+--- a/src/gcry/bitmap_alloc.cr
++++ b/src/gcry/bitmap_alloc.cr
+@@ -203,9 +203,11 @@ module Gcry
+       slot += SIZE_CLASS_COUNT if ChunkHeader.atomic?(chunk)
+       # A signal can suspend an explicit free while the collector also frees
+       # this class. Atomic addition prevents losing either invalidation.
++      # Release/acquire publishes the preceding occupancy/ownership changes
++      # with the generation on weakly ordered CPUs as well as x86.
+       Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Add,
+         @bitmap_capacity_versions.to_unsafe + slot, 1_u64,
+-        LLVM::AtomicOrdering::Monotonic, false)
++        LLVM::AtomicOrdering::Release, false)
+     end
+ 
+     protected def bitmap_alloc_init : Nil
+@@ -409,7 +411,13 @@ module Gcry
+       chunk = s.value.chunk
+       unless chunk.null?
+         ChunkHeader.set_cursor(chunk, false)
+-        bitmap_capacity_changed(chunk) unless exhausted
++        # A concurrent free can restore a bit in a word this cursor already
++        # passed. Another thread may have cached "empty" while we still owned
++        # the chunk. Publish that capacity when ownership ends, even though
++        # this cursor reached its last word. Scan this chunk only, not the heap.
++        if !exhausted || bitmap_pool_candidate?(chunk, chunk.value.size_class.to_i32, ChunkHeader.atomic?(chunk))
++          bitmap_capacity_changed(chunk)
++        end
+       end
+       s.value.chunk = Pointer(ChunkHeader).null
+       s.value.free_mask = 0_u64
+@@ -718,7 +726,7 @@ module Gcry
+                                          atomic : Bool) : ChunkHeader*
+       slot = atomic ? index + SIZE_CLASS_COUNT : index
+       version = Atomic::Ops.load(@bitmap_capacity_versions.to_unsafe + slot,
+-        LLVM::AtomicOrdering::Monotonic, false)
++        LLVM::AtomicOrdering::Acquire, false)
+       pool = @bitmap_pool_indexes.to_unsafe + slot
+       # Adding blacklist bits only removes capacity; each pop rechecks them.
+       # Disabling the blacklist can restore capacity, so a mode change rebuilds.
+@@ -778,15 +786,24 @@ module Gcry
+ 
+     # The public containment lookup deliberately excludes chunk metadata.
+     # Cached entries are mapping bases, so resolve an exact index key instead.
++    # Match chunk_containing's stopped-world protocol: a suspended mutator
++    # may own the index lock; the collector must use the stable sorted index
++    # without waiting for that mutator to resume.
+     private def bitmap_indexed_chunk(address : UInt64) : ChunkHeader*?
+-      @index_lock.sync do
+-        at = index_lower_bound(address)
+-        if at < @chunk_index_count
+-          chunk = @chunk_index[at]
+-          return chunk if chunk.address == address
+-        end
+-        nil
++      if @world_stopped
++        bitmap_indexed_chunk_unlocked(address)
++      else
++        @index_lock.sync { bitmap_indexed_chunk_unlocked(address) }
++      end
++    end
++
++    private def bitmap_indexed_chunk_unlocked(address : UInt64) : ChunkHeader*?
++      at = index_lower_bound(address)
++      if at < @chunk_index_count
++        chunk = @chunk_index[at]
++        return chunk if chunk.address == address
+       end
++      nil
+     end
+ 
+     private def bitmap_pool_candidate?(chunk : ChunkHeader*, index : Int32, atomic : Bool) : Bool

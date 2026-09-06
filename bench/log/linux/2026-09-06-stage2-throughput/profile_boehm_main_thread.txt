@@ -1,0 +1,34 @@
+samples=5000 attach_fail=0
+  lib:libc.so.6   69.7%
+  app             21.5%
+  gc               8.7%
+  lib:?            0.0%
+top symbols:
+   41.4%  libc.so.6: sem_trywait@GLIBC_2.2.5
+   11.3%  libc.so.6: __xstat64@@GLIBC_2.2.5
+    4.6%  libc.so.6: __lll_lock_wait_private@@GLIBC_PRIVATE
+    3.6%  libc.so.6: __libc_alloca_cutoff@@GLIBC_PRIVATE
+    3.2%  libc.so.6: _dl_mcount_wrapper@GLIBC_2.2.5
+    2.8%  boehm: *JSON::Builder::Escape#write<Slice(UInt8)>:Nil
+    2.6%  libc.so.6: pthread_cond_broadcast@@GLIBC_2.3.2
+    2.3%  boehm: *JSON::Builder#end_scalar<Bool>:(JSON::Builder::ArrayState | JSON::Builder::DocumentEndState | JSON::Builder::
+    2.1%  boehm: *JSON::Builder#start_scalar<Bool>:Nil
+    2.1%  boehm: *Char#to_s<IO+>:Nil
+    1.9%  libc.so.6: pthread_mutex_trylock@GLIBC_2.2.5
+    1.8%  boehm: GC_malloc_kind
+    1.4%  boehm: *String::Builder#write_byte<UInt8>:Nil
+    0.7%  boehm: *String::Builder#increase_capacity_by<Int32>:(Pointer(UInt8) | Nil)
+    0.6%  boehm: GC_apply_to_all_blocks
+    0.6%  boehm: GC_generic_malloc_many
+    0.6%  boehm: GC_find_header
+    0.5%  boehm: *Crystal::EventLoop::Polling+@Crystal::EventLoop::Polling#run<Pointer(Fiber::List), Bool>:Nil
+    0.5%  boehm: GC_allochblk_nth
+    0.5%  libc.so.6: pthread_key_delete@GLIBC_2.2.5
+    0.5%  boehm: GC_realloc
+    0.4%  libc.so.6: __lll_lock_wake_private@@GLIBC_PRIVATE
+    0.4%  boehm: *Int32@Int#to_s<String::Builder>:Nil
+    0.4%  boehm: *JSON::Builder#string<String>:Nil
+    0.4%  boehm: *HTTP::Server::Response#write_headers:Bool
+    0.4%  boehm: GC_free
+    0.4%  boehm: GC_mark_some
+    0.4%  boehm: *HTTP::Server::RequestProcessor#process<IO+, IO+>:Nil

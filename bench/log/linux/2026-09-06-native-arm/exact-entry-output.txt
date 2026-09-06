@@ -1,0 +1,712 @@
+{"variant": "baseline", "trial": 0, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 3812912 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.05 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 1, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5028912 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.31 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 2, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4291536 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.04 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 3, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 6274608 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.39 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 4, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5631024 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.36 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 5, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5204016 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.43 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 6, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5477424 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.11 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 7, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 6929904 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.35 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 8, "exit": 1}
+F...F...........................
+
+Failures:
+
+  1) medium cursor allocations under process collection keeps reused buffers zeroed and owned across peer collections
+     Failure/Error: bad.get.should eq(0)
+
+       Expected: 0
+            got: 1
+
+##[error]     # process_spec/regression/8_medium_cursor_spec.cr:34
+
+  2) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4009760 to be LessOrEqual 3366912
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 8.29 seconds
+32 examples, 2 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/8_medium_cursor_spec.cr:5 # medium cursor allocations under process collection keeps reused buffers zeroed and owned across peer collections
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "trial": 9, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 6280752 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.37 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "baseline", "failed": 10, "trials": 10}
+Preparing worktree (detached HEAD 3a65fda)
+HEAD is now at 3a65fda docs: record final PR 34 performance results and validation
+{"variant": "tip", "trial": 0, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4842544 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.14 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 1, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4735536 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.42 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 2, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5366320 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.13 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 3, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5342256 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.38 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 4, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5383216 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.39 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 5, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5130192 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.18 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 6, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5426736 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.23 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 7, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 3775024 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.44 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 8, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4575280 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.18 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "trial": 9, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5587504 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.25 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "tip", "failed": 10, "trials": 10}
+Preparing worktree (detached HEAD 3a65fda)
+HEAD is now at 3a65fda docs: record final PR 34 performance results and validation
+{"variant": "no_atomic", "trial": 0, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4480048 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.1 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 1, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4486704 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.47 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 2, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5104016 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.16 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 3, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5825072 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.39 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 4, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4706352 to be LessOrEqual 3104768
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.24 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 5, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4491312 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.04 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 6, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5803568 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.44 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 7, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5149744 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.12 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 8, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 4946480 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.05 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "trial": 9, "exit": 1}
+....F...........................
+
+Failures:
+
+  1) allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+     Failure/Error: heap.free_bytes.should be <= heap.heap_size
+
+       Expected 5108272 to be LessOrEqual 3235840
+
+##[error]     # process_spec/regression/6_multi_mutator_alloc_spec.cr:44
+
+Finished in 5.22 seconds
+32 examples, 1 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec process_spec/regression/6_multi_mutator_alloc_spec.cr:9 # allocation with several mutator threads hands every thread its own blocks and keeps the counters whole
+
+{"variant": "no_atomic", "failed": 10, "trials": 10}
+Preparing worktree (detached HEAD 3a65fda)
+HEAD is now at 3a65fda docs: record final PR 34 performance results and validation
+{"variant": "headerless", "trial": 0, "exit": 0}
+................................
+
+Finished in 5.52 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 1, "exit": 0}
+................................
+
+Finished in 2.2 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 2, "exit": 0}
+................................
+
+Finished in 5.35 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 3, "exit": 0}
+................................
+
+Finished in 2.27 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 4, "exit": 0}
+................................
+
+Finished in 2.28 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 5, "exit": 0}
+................................
+
+Finished in 5.43 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 6, "exit": 0}
+................................
+
+Finished in 2.12 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 7, "exit": 0}
+................................
+
+Finished in 5.8 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 8, "exit": 0}
+................................
+
+Finished in 5.44 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "trial": 9, "exit": 0}
+................................
+
+Finished in 5.45 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "headerless", "failed": 0, "trials": 10}
+Preparing worktree (detached HEAD 3a65fda)
+HEAD is now at 3a65fda docs: record final PR 34 performance results and validation
+{"variant": "bitmap", "trial": 0, "exit": 0}
+................................
+
+Finished in 5.81 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 1, "exit": 0}
+................................
+
+Finished in 5.36 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 2, "exit": 0}
+................................
+
+Finished in 1.93 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 3, "exit": 0}
+................................
+
+Finished in 5.47 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 4, "exit": 0}
+................................
+
+Finished in 5.58 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 5, "exit": 0}
+................................
+
+Finished in 5.42 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 6, "exit": 0}
+................................
+
+Finished in 5.49 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 7, "exit": 0}
+................................
+
+Finished in 2.28 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 8, "exit": 0}
+................................
+
+Finished in 5.43 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "trial": 9, "exit": 0}
+................................
+
+Finished in 2.11 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+{"variant": "bitmap", "failed": 0, "trials": 10}

@@ -7,11 +7,6 @@ require "crystal/spin_lock"
 require "c/pthread"
 
 module Gcry
-  # mmap-backed allocator with size classes and conservative mark–sweep.
-  #
-  # The Heap *object* may live on Crystal's GC during unit tests. Mapped
-  # chunks and freelist links live outside the managed heap so this can later
-  # become the process GC under `-Dgc_none`.
   class Heap
     SMALL_CHUNK_BYTES     = 131072_u64 # 128 KiB — library default; macOS process GC bumps to 256 KiB (gc_override.cr)
     MIN_SMALL_CHUNK_BYTES =  65536_u64 # 64 KiB floor for GCRY_CHUNK_BYTES
@@ -45,19 +40,27 @@ module Gcry
     @live_objects = Atomic(UInt64).new(0_u64)
     getter large_free_bytes : UInt64 = 0_u64
 
+    # The public readers first credit what the threads' cursor sets have
+    # allocated on the hit path (`credit_cursor_set`): a walk of at most 65
+    # sets, for a number that is otherwise behind by up to one refill per
+    # thread.
     def free_bytes : UInt64
+      credit_all_cursor_sets
       @free_bytes.get
     end
 
     def total_bytes : UInt64
+      credit_all_cursor_sets
       @total_bytes.get
     end
 
     def bytes_since_gc : UInt64
+      credit_all_cursor_sets
       @bytes_since_gc.get
     end
 
     def live_objects : UInt64
+      credit_all_cursor_sets
       @live_objects.get
     end
 
@@ -264,7 +267,7 @@ module Gcry
         @bitmap_alloc = Heap.bitmap_alloc_from_env
         @bitmap_marks = @bitmap_alloc || Heap.bitmap_marks_from_env
       {% end %}
-      radix_init if Heap.chunk_radix_from_env
+      radix_init if Heap.chunk_radix_wanted?(@bitmap_alloc)
       bitmap_alloc_init
       @freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
       @nursery_freelists = StaticArray(Void*, SIZE_CLASS_COUNT).new(Pointer(Void).null)
@@ -328,6 +331,7 @@ module Gcry
       @clear_stack_bytes_total = 0_u64
       @fiber_scrub_bytes_total = 0_u64
       @clear_stack_calls = 0_u64
+      init_fast_path_tables
       @fiber_scrub_runs = 0_u64
       @clear_stack_ops = 0_u64
     end
@@ -338,6 +342,7 @@ module Gcry
 
     # Release all mapped memory. Safe to call multiple times.
     def destroy : Nil
+      @fast_path = false
       return if @destroyed
       @destroyed = true
       shutdown_mark_workers
@@ -349,6 +354,7 @@ module Gcry
       # flush_pending_page_release_chunks. Reversing the order causes a
       # use-after-unmap SIGSEGV in at_exit handlers.
       destroy_collector
+      destroy_cursor_sets
 
       chunk = @chunks
       while chunk
@@ -403,6 +409,15 @@ module Gcry
       env_is_one?("GCRY_CHUNK_RADIX")
     end
 
+    # The table is on by default under the bitmap allocator, because `realloc`
+    # and `free` resolve their pointer through it without the index lock
+    # (`chunk_for_owned`); `GCRY_CHUNK_RADIX=0` turns it off, `=1` turns it
+    # on for the header allocator too.
+    def self.chunk_radix_wanted?(bitmap_alloc : Bool) : Bool
+      return false if env_is_zero?("GCRY_CHUNK_RADIX")
+      bitmap_alloc || chunk_radix_from_env
+    end
+
     # `GCRY_RADIX_THP=1`. Research/A-B only; see `chunk_radix.cr`.
     def self.radix_thp_from_env : Bool
       env_is_one?("GCRY_RADIX_THP")
@@ -412,6 +427,12 @@ module Gcry
       raw = LibC.getenv(name)
       return false if raw.null?
       raw.value == '1'.ord.to_u8 && (raw + 1).value == 0
+    end
+
+    private def self.env_is_zero?(name : String) : Bool
+      raw = LibC.getenv(name)
+      return false if raw.null?
+      raw.value == '0'.ord.to_u8 && (raw + 1).value == 0
     end
 
     # Specs and `gc_override` may switch representation, but only before any
@@ -460,6 +481,14 @@ module Gcry
     end
 
     def malloc(size : Int) : Void*
+      u = fast_alloc(size.to_u64, false)
+      unless u.null?
+        # The same hooks the slow path runs, so `GCRY_DEBUG_INVARIANTS=1`
+        # and the trace cover the hit path rather than closing it.
+        Invariant.after_malloc(self, u, size.to_u64)
+        Trace.after_malloc(u, size.to_u64, atomic: false)
+        return u
+      end
       ptr = allocate(size.to_u64, atomic: false, clear: true)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: false)
@@ -467,6 +496,12 @@ module Gcry
     end
 
     def malloc_atomic(size : Int) : Void*
+      u = fast_alloc(size.to_u64, true)
+      unless u.null?
+        Invariant.after_malloc(self, u, size.to_u64)
+        Trace.after_malloc(u, size.to_u64, atomic: true)
+        return u
+      end
       ptr = allocate(size.to_u64, atomic: true, clear: false)
       Invariant.after_malloc(self, ptr, size.to_u64)
       Trace.after_malloc(ptr, size.to_u64, atomic: true)
@@ -474,17 +509,24 @@ module Gcry
     end
 
     def realloc(pointer : Void*, size : Int) : Void*
+      fresh = realloc_owned(pointer, size)
+      raise ArgumentError.new("pointer is not a gcry allocation") if fresh.null?
+      fresh
+    end
+
+    # `realloc`, answering null instead of raising when `pointer` is not a
+    # gcry allocation, so `GC.realloc` can route a bootstrap-era pointer to
+    # LibC without a lookup of its own.
+    def realloc_owned(pointer : Void*, size : Int) : Void*
       new_size = size.to_u64
       return malloc(new_size) if pointer.null?
 
       header = BlockHeader.from_user(pointer)
       # One lookup, shared by the ownership test and by the size/atomicity
-      # reads below — see `owns_user_pointer_in?`.
-      rchunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless rchunk
-      unless owns_user_pointer_in?(pointer, header, rchunk)
-        raise ArgumentError.new("pointer is not a gcry allocation")
-      end
+      # reads below — see `owns_user_pointer_in?` and `chunk_for_owned`.
+      rchunk = chunk_for_owned(pointer)
+      return Pointer(Void).null unless rchunk
+      return Pointer(Void).null unless owns_user_pointer_in?(pointer, header, rchunk)
 
       # Size and atomicity from the chunk (7.2 / 7.6). Reading them from the
       # block returns the object's own first words under headerless — a garbage
@@ -545,6 +587,35 @@ module Gcry
       # reuse the block (e.g. as a String) while Hash.@indices still points at
       # it → Headers#[]? / keep_alive? SEGV with ASCII garbage @indices (GDB
       # EC4). Leave the old block for the next sweep once the caller drops it.
+      # With one mutator there is no peer to collect during the allocation
+      # (`@suppress_collect` forbids a self-triggered one), and `pointer` is in
+      # this frame for the conservative scan; the root list costs a malloc, a
+      # free and a walk per call, on a path JSON building takes several times
+      # per request. Captured once so a flip mid-call cannot unbalance it.
+      # Measured 2026-09-05: skipping this list for the conservative frame
+      # scan was worth +0.3% on Kemal `/json` (t = 0.2), so the registration
+      # stays as it was.
+      # The thread's own cursor first. A hit cannot start a collection (the
+      # hit path returns null at the threshold rather than collecting), so
+      # nothing above applies to it: there is no window for a peer to free
+      # `pointer` before the copy that this frame does not already cover, and
+      # the hit path is only open with the nursery off, so every collection is
+      # a major that scans this frame. Measured before this: `realloc` always
+      # took the locked `allocate`, which was 10% of all allocations on Kemal
+      # `/json` (`bitmap_locked_allocations`), and the root list's malloc,
+      # free and walk came with it.
+      fresh = fast_alloc(new_size, atomic)
+      unless fresh.null?
+        realloc_copy_enter
+        begin
+          fresh.as(UInt8*).copy_from(pointer.as(UInt8*), old_size)
+        ensure
+          realloc_copy_leave
+        end
+        return fresh
+      end
+
+      rooted = true
       add_root(pointer)
       begin
         @suppress_collect.add(1)
@@ -564,23 +635,28 @@ module Gcry
         end
         fresh
       ensure
-        delete_root(pointer)
+        delete_root(pointer) if rooted
       end
     end
 
     def free(pointer : Void*) : Nil
       return if pointer.null?
+      raise ArgumentError.new("pointer is not a gcry allocation") unless free_owned?(pointer)
+    end
+
+    # `free`, answering false instead of raising when `pointer` is not a gcry
+    # allocation — the `GC.free` counterpart of `realloc_owned`.
+    def free_owned?(pointer : Void*) : Bool
+      return true if pointer.null?
       header = BlockHeader.from_user(pointer)
       # One lookup for the whole call. It used to be three — inside
       # `owns_user_pointer?`, again here, and a third in each arm below — and
       # `chunk_containing` takes `@index_lock` with the world running, which
       # cost +13% on `free` (measured against 287404d). See
-      # `owns_user_pointer_in?`.
-      chunk = chunk_for(pointer)
-      raise ArgumentError.new("pointer is not a gcry allocation") unless chunk
-      unless owns_user_pointer_in?(pointer, header, chunk)
-        raise ArgumentError.new("pointer is not a gcry allocation")
-      end
+      # `owns_user_pointer_in?` and `chunk_for_owned`.
+      chunk = chunk_for_owned(pointer)
+      return false unless chunk
+      return false unless owns_user_pointer_in?(pointer, header, chunk)
       large = ChunkHeader.large?(chunk)
       # A large object's header sits behind the object in both builds; under
       # headerless `from_user` is the object itself, and reading its first
@@ -603,7 +679,7 @@ module Gcry
         trim_large_cache
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return
+        return true
       end
 
       class_index = chunk.value.size_class.to_i32
@@ -639,7 +715,7 @@ module Gcry
         live_objects_dec
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
-        return
+        return true
       end
 
       if @tlab_enabled
@@ -661,6 +737,7 @@ module Gcry
       end
       Invariant.after_free(self, pointer)
       Trace.after_free(pointer)
+      true
     end
 
     def is_heap_ptr(pointer : Void*) : Bool
@@ -772,7 +849,123 @@ module Gcry
       end
     end
 
+    # A `memset` call for a 16-64 byte block costs more than the block; the
+    # common classes get unrolled stores the optimiser can keep in registers.
+    @[AlwaysInline]
+    private def clear_block(user : Void*, rounded : UInt64) : Nil
+      w = user.as(UInt64*)
+      case rounded
+      when 16_u64 then w[0] = 0_u64; w[1] = 0_u64
+      when 32_u64 then w[0] = 0_u64; w[1] = 0_u64; w[2] = 0_u64; w[3] = 0_u64
+      when 48_u64 then 6.times { |i| w[i] = 0_u64 }
+      when 64_u64 then 8.times { |i| w[i] = 0_u64 }
+      else             user.as(UInt8*).clear(rounded)
+      end
+    end
+
+    # The hit path for a thread-owned bitmap cursor, through the largest
+    # small size class. Ownership removes the class lock; the occupancy OR
+    # remains atomic against cross-thread free. Nursery/collection paths
+    # still use allocate. Any other case returns null and the caller
+    # takes `allocate`, which also recomputes `@fast_path` from the current
+    # configuration on every slow call, so the first allocation after any
+    # change goes the slow way and the flag is never stale.
+    #
+    # Accounting parity with the slow path: bytes are the class payload
+    # rather than the 8-byte-aligned size, which brings a collection forward
+    # by at most the per-class slack.
+    @[AlwaysInline]
+    private def fast_alloc(size : UInt64, atomic : Bool) : Void*
+      return Pointer(Void).null unless @fast_path
+      if @collecting || @incremental_marking || @lazy_sweep_pending
+        @fast_miss_collecting &+= 1
+        return Pointer(Void).null
+      end
+      if size > FAST_PATH_MAX
+        @fast_miss_size &+= 1
+        return Pointer(Void).null
+      end
+      set = cursor_set_cached
+      if set.null? || set.value.no_hit_path != 0_u8
+        @fast_miss_no_set &+= 1
+        return Pointer(Void).null
+      end
+      payload, index = if size <= 2048_u64
+                         i = ((size &+ 7) >> 3).to_i32
+                         {@fit_payload[i], @fit_index[i].to_i32}
+                       else
+                         SizeClasses.fit_medium(size)
+                       end
+      s = CursorSet.slot(set, atomic ? index + SIZE_CLASS_COUNT : index)
+      if s.value.free_mask == 0_u64 && s.value.chunk.null?
+        # No chunk in hand: only the locked path takes one from the pool.
+        @fast_miss_refill &+= 1
+        return Pointer(Void).null
+      end
+      local = set.value.bytes_local &+ payload
+      if @bytes_since_gc.lazy_get &+ (local &- set.value.bytes_credited) >= @gc_threshold
+        @fast_miss_threshold &+= 1
+        return Pointer(Void).null
+      end
+      # Mid-allocation from here: a stop-the-world that finds the sentinel
+      # pins this set rather than retiring it, so the slot is re-read after
+      # the store — a suspension between the check above and here may have
+      # retired it. The fence keeps the compiler from hoisting the re-read.
+      s.value.in_flight = CursorSet.sentinel
+      Atomic::Ops.fence(LLVM::AtomicOrdering::SequentiallyConsistent, true)
+      mask = s.value.free_mask
+      if mask == 0_u64
+        # The word is used up; the next word of the held chunk needs no lock.
+        mask = cursor_advance_word(s, index)
+        if mask == 0_u64
+          s.value.in_flight = Pointer(Void).null
+          @fast_miss_refill &+= 1
+          return Pointer(Void).null
+        end
+      end
+      bit = mask.trailing_zeros_count
+      addr = s.value.word_base &+ bit.to_u64 &* @block_bytes[index]
+      user = Pointer(Void).new(addr &+ BlockHeader::SIZE)
+      s.value.in_flight = user
+      s.value.free_mask = mask & (mask &- 1)
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, s.value.occ_word, 1_u64 << bit,
+        LLVM::AtomicOrdering::Monotonic, false)
+      set.value.bytes_local = local
+      set.value.objects_local = set.value.objects_local &+ 1_u64
+      if (pfw = @alloc_pfw) > 0
+        Kernels.prefetch_write(Pointer(Void).new(addr &+ pfw))
+      end
+      BlockHeader.set_used(Pointer(BlockHeader).new(addr), payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
+      clear_block(user, payload.to_u64) unless atomic
+      s.value.in_flight = Pointer(Void).null
+      user
+    end
+
+    FAST_PATH_MAX = 32768_u64
+    @fast_path = false
+    @fit_index = uninitialized StaticArray(UInt8, 257)
+    @fit_payload = uninitialized StaticArray(UInt32, 257)
+
+    property fast_path_enabled : Bool = true
+
+    private def refresh_fast_path : Nil
+      @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
+                   !@birth_grace && !@always_clear &&
+                   !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc)
+    end
+
+    private def init_fast_path_tables : Nil
+      i = 0
+      while i <= 256
+        _, index = SizeClasses.fit(i.to_u64 &* 8)
+        @fit_index[i] = index.to_u8
+        @fit_payload[i] = SizeClasses.payload(index)
+        i += 1
+      end
+    end
+
     private def allocate(size : UInt64, atomic : Bool, clear : Bool) : Void*
+      refresh_fast_path
       raise OutOfMemoryError.new("heap destroyed") if @destroyed
 
       # Cooperative STW for signal-exempt threads (SYSMON): do not mutate the
@@ -787,7 +980,8 @@ module Gcry
 
       # Skip memset when memory is still MAP_ANONYMOUS-zeroed (fresh chunk /
       # fresh large mmap). Freelist reuse / large-cache hits still clear.
-      # Check clean *after* alloc — refill may have just marked the freelist clean.
+      # Freelist allocation returns its cleanliness while holding the class
+      # lock: a peer may refill the class before this caller clears its block.
       user = Pointer(Void).null
       needs_clear = clear
       if class_index < 0
@@ -802,24 +996,22 @@ module Gcry
         end
         needs_clear = clear && from_cache
       elsif @nursery_enabled
-        user = if @tlab_enabled
-                 # Counters Atomic inside tlab_alloc_small (no @alloc_lock on hit).
-                 tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded)
-               else
-                 alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
-               end
-        needs_clear = clear && !@nursery_freelist_clean[class_index]
+        user, clean = if @tlab_enabled
+                        # A thread-local list can contain recycled blocks even
+                        # when another thread has a fresh global freelist.
+                        {tlab_alloc_small(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, true, rounded), false}
+                      else
+                        alloc_nursery(rounded.to_u32, flags | BlockHeader::Flags::NURSERY, class_index, rounded)
+                      end
+        needs_clear = clear && !clean
       else
-        # `&& !@bitmap_alloc`: TLAB is a freelist mechanism and the pool cursor
-        # replaces it. Dispatching to it here would bypass the bitmap allocator
-        # entirely, so `occ` would never be set and the streaming sweep — which
-        # trusts `occ` completely — would reclaim every live object.
-        user = if @tlab_enabled && !@bitmap_alloc
-                 tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded)
-               else
-                 alloc_old_small(rounded.to_u32, flags, class_index, rounded)
-               end
-        needs_clear = clear && !@freelist_clean[class_index]
+        # TLAB is a freelist mechanism; bitmap allocation must maintain occ.
+        user, clean = if @tlab_enabled && !@bitmap_alloc
+                        {tlab_alloc_small(rounded.to_u32, flags, class_index, false, rounded), false}
+                      else
+                        alloc_old_small(rounded.to_u32, flags, class_index, rounded)
+                      end
+        needs_clear = clear && !clean
       end
 
       # `GCRY_ALWAYS_CLEAR=1` — research arm. Every skip above is a claim that
@@ -831,7 +1023,7 @@ module Gcry
       # acikturkiye crash — nothing referenced the block when it died, and the
       # mutator writes into it afterwards through a field it never set.
       needs_clear = true if @always_clear && !user.null?
-      user.as(UInt8*).clear(rounded) if needs_clear
+      clear_block(user, rounded) if needs_clear
       # EXPERIMENT (GCRY_BIRTH_GRACE=1, src/gcry/birth_grace.cr): a block is
       # unreachable to the collector between here and the caller's store.
       note_birth(user) if @birth_grace
@@ -856,6 +1048,9 @@ module Gcry
     # here.
     @[AlwaysInline]
     private def counters_atomic? : Bool
+      # The bitmap sweep settles a chunk with one batched subtraction, which
+      # needs atomics against other mutators — not against itself: with one
+      # mutator the sweep runs on that thread.
       @heap_counters_atomic || @bitmap_alloc
     end
 
@@ -866,9 +1061,11 @@ module Gcry
         @bytes_since_gc.add(rounded)
         @live_objects.add(1_u64)
       else
-        @total_bytes.set(@total_bytes.get &+ rounded)
-        @bytes_since_gc.set(@bytes_since_gc.get &+ rounded)
-        @live_objects.set(@live_objects.get &+ 1_u64)
+        # `lazy_*`: plain loads and stores. `set` is an `xchg`, locked whether
+        # asked or not, which is why this branch never used to be cheaper.
+        @total_bytes.lazy_set(@total_bytes.lazy_get &+ rounded)
+        @bytes_since_gc.lazy_set(@bytes_since_gc.lazy_get &+ rounded)
+        @live_objects.lazy_set(@live_objects.lazy_get &+ 1_u64)
       end
     end
 
@@ -880,8 +1077,8 @@ module Gcry
           break if @free_bytes.compare_and_set(cur, nxt)[1]
         end
       else
-        cur = @free_bytes.get
-        @free_bytes.set(cur >= n ? cur - n : 0_u64)
+        cur = @free_bytes.lazy_get
+        @free_bytes.lazy_set(cur >= n ? cur - n : 0_u64)
       end
     end
 
@@ -898,16 +1095,20 @@ module Gcry
       end
     end
 
-    # Mutator free / Parallel: CAS. STW sweep is single-threaded (world
-    # stopped) — plain set matches pre-atomic bebedae and avoids a CAS per
-    # dead object (was ~half of phase_sweep on Kemal EC1).
+    # Only a stopped world permits the collector's non-atomic updates.
+    # @collecting remains true through lazy sweep and post-STW flush, while
+    # mutators debit these same counters. Bitmap heaps imply atomicity even
+    # when the explicit heap_counters_atomic setting is false.
     private def live_objects_dec : Nil
       live_objects_sub(1_u64)
     end
 
     private def live_objects_sub(n : UInt64) : Nil
       return if n == 0
-      if @collecting || !@heap_counters_atomic
+      # A block allocated on a hit path and not yet credited would make this
+      # saturate at zero and lose the decrement for good.
+      credit_all_cursor_sets if @live_objects.get < n
+      if @world_stopped || !counters_atomic?
         cur = @live_objects.get
         @live_objects.set(cur > n ? cur - n : 0_u64)
         return
@@ -920,34 +1121,34 @@ module Gcry
     end
 
     private def free_bytes_add(n : UInt64) : Nil
-      if @collecting || !@heap_counters_atomic
+      if @world_stopped || !counters_atomic?
         @free_bytes.set(@free_bytes.get &+ n)
       else
         @free_bytes.add(n)
       end
     end
 
-    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
-      user = alloc_nursery_locked(payload, flags, index)
+    private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : {Void*, Bool}
+      user, clean = alloc_nursery_locked(payload, flags, index)
       if user.null?
         oom!("failed to refill nursery size class #{payload}") unless retry_after_emergency_collect?
-        user = alloc_nursery_locked(payload, flags, index)
+        user, clean = alloc_nursery_locked(payload, flags, index)
         oom!("failed to refill nursery size class #{payload}") if user.null?
       end
       free_bytes_sub(payload.to_u64)
       @nursery_alloc_bytes.add(payload.to_u64)
       note_alloc_bytes(rounded)
-      user
+      {user, clean}
     end
 
-    private def alloc_nursery_locked(payload : UInt32, flags : UInt32, index : Int32) : Void*
+    private def alloc_nursery_locked(payload : UInt32, flags : UInt32, index : Int32) : {Void*, Bool}
       with_freelist_lock(index, true) do
         u = @nursery_freelists[index]
 
         if u.null?
           refill_size_class(index, payload, nursery: true)
           u = @nursery_freelists[index]
-          return Pointer(Void).null if u.null?
+          return {Pointer(Void).null, false} if u.null?
         end
 
         if @blacklist_enabled
@@ -968,18 +1169,18 @@ module Gcry
         if @incremental_marking || @collecting
           heap_set_mark(header)
         end
-        u
+        {u, @nursery_freelist_clean[index]}
       end
     end
 
-    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : Void*
+    private def alloc_old_small(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : {Void*, Bool}
       # `&& !@bitmap_alloc`: the batched path builds and drains a freelist run,
       # so it would bypass `occ` entirely. The comment below used to claim
       # alloc_batch was "inert by construction" under the bitmap representation;
       # it is not — `bitmap_alloc=` forces `@tlab_enabled = false`, which *opens*
       # this gate rather than closing it.
       if @alloc_batch > 0 && !@tlab_enabled && !@bitmap_alloc
-        return alloc_old_small_batched(payload, flags, index, rounded)
+        return {alloc_old_small_batched(payload, flags, index, rounded), false}
       end
 
       # Tight-grow: never collect under the freelist lock (STW vs lock deadlock).
@@ -990,8 +1191,11 @@ module Gcry
         end
         # Collect before grow only when the small heap is already sparse —
         # otherwise this becomes a thr-killing STW storm (seen: ~1k majors/30s).
+        # Floor at the 8 MiB this was calibrated at (a quarter of the old
+        # fixed 32 MiB); under the adaptive threshold a quarter can be 2 MiB,
+        # which opened the collect-before-grow far more often (11 → 38 majors).
         min_bsg = @gc_threshold >> 2
-        min_bsg = 1_048_576_u64 if min_bsg < 1_048_576_u64
+        min_bsg = 8_388_608_u64 if min_bsg < 8_388_608_u64
         sm = small_mapped_bytes
         sf = small_free_bytes
         sparse = sm > 0 && sf * 100 >= sm * @tight_grow_gc_pct.to_u64
@@ -1001,12 +1205,18 @@ module Gcry
         end
       end
 
-      user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+      user, clean = with_freelist_lock(index, false) do
+        claimed = alloc_old_small_locked(payload, flags, index)
+        {claimed, @freelist_clean[index]}
+      end
       if user.null?
         # The freelist lock is gone by now, so both the collection and the
         # raise are legal here — neither was inside `map_chunk`.
         oom!("failed to refill size class #{payload}") unless retry_after_emergency_collect?
-        user = with_freelist_lock(index, false) { alloc_old_small_locked(payload, flags, index) }
+        user, clean = with_freelist_lock(index, false) do
+          claimed = alloc_old_small_locked(payload, flags, index)
+          {claimed, @freelist_clean[index]}
+        end
         oom!("failed to refill size class #{payload}") if user.null?
       end
       # `user` is in this frame now, which the scan accepts, so the pool slot's
@@ -1016,7 +1226,7 @@ module Gcry
       clear_bitmap_alloc_in_flight(index, flags, user) if @bitmap_alloc
       free_bytes_sub(payload.to_u64)
       note_alloc_bytes(rounded)
-      user
+      {user, clean}
     end
 
     # Freelist lock held. Prefer-list first (tight_grow), then global, then map.
@@ -1420,7 +1630,6 @@ module Gcry
           cursor = ChunkHeader.data_start(chunk).as(UInt8*)
           limit = ChunkHeader.data_end(chunk).as(UInt8*)
           free_head = Pointer(Void).null
-          added = 0_u64
           while (cursor + block_bytes) <= limit
             header = cursor.as(BlockHeader*)
             user = (cursor + BlockHeader::SIZE).as(Void*)
@@ -1428,22 +1637,23 @@ module Gcry
             header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, free_head)
             free_head = user
             cursor += block_bytes
-            added += payload
           end
+          # Physical release excludes the page containing chunk metadata,
+          # and Darwin's reusable pages need not lose their contents at all.
+          # Relinking headers therefore does not make these payloads zero.
           if nursery
             @nursery_freelists[index] = free_head
-            @nursery_freelist_clean[index] = true
+            @nursery_freelist_clean[index] = false
           elsif @tight_grow
             fold_prefer_into_global(index)
             @grow_lo[index] = ChunkHeader.data_start(chunk).address
             @grow_hi[index] = ChunkHeader.data_end(chunk).address
             @prefer_freelists[index] = free_head
-            @freelist_clean[index] = true
+            @freelist_clean[index] = false
           else
             @freelists[index] = free_head
-            @freelist_clean[index] = true
+            @freelist_clean[index] = false
           end
-          @free_bytes.add(added)
           return true
         end
         chunk = chunk.value.next
@@ -2320,7 +2530,8 @@ module Gcry
       # inside a collection where that deadlocks.
       class_index = SizeClasses.index_of?(header.value.size)
       if class_index >= 0
-        chunk = @pool_chunk[class_index]
+        set = cursor_set_cached
+        chunk = set.null? ? Pointer(ChunkHeader).null : CursorSet.slot(set, class_index).value.chunk
         if !chunk.null? && ChunkHeader.contains?(chunk, header.address)
           chunk_set_mark(chunk, chunk_block_ordinal(chunk, header.address))
           return
@@ -2814,6 +3025,37 @@ module Gcry
 
     private def chunk_for(user : Void*) : ChunkHeader*?
       chunk_containing(user.address)
+    end
+
+    # The lookup for a pointer the caller *owns* — `realloc` and `free`.
+    #
+    # `chunk_containing` takes `@index_lock` because its result is
+    # dereferenced and a chunk can be index-removed and unmapped under a
+    # lock-free reader. An owned pointer cannot be in such a chunk: the
+    # caller holds it in a frame or register, so the block is live at every
+    # stop-the-world, its chunk is never fully free, and a chunk that is not
+    # fully free is never unmapped. The radix entry for a page holding a live
+    # block was written before the chunk was published and is only cleared
+    # ahead of an unmap that cannot happen, so the two loads in
+    # `radix_lookup` name the right, mapped chunk and the containment check
+    # dereferences nothing that can go away. A pointer that is *not* owned —
+    # `GC.realloc` on a bootstrap-era LibC pointer — misses the table
+    # (address outside every chunk) and falls through to the locked lookup,
+    # whose answer is authoritative.
+    #
+    # Measured before this existed: `GC.realloc` on Kemal `/json` spent 2% of
+    # the main thread in `chunk_search_unlocked` + `chunk_containing`, two
+    # locked binary searches per call (`is_heap_ptr` then `realloc`).
+    private def chunk_for_owned(user : Void*) : ChunkHeader*?
+      addr = user.address
+      unless @radix_l1.null?
+        hit = radix_lookup(addr)
+        if !hit.null? && ChunkHeader.contains?(hit, addr)
+          @radix_owned_hits &+= 1
+          return hit
+        end
+      end
+      chunk_for(user)
     end
 
     private def owns_user_pointer?(user : Void*, header : BlockHeader*) : Bool

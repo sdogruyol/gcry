@@ -36,6 +36,14 @@ module Gcry
     def self.begin_stack_bounds_snapshot : Nil
     end
 
+    # Linux caches the initial thread's bounds; here every lookup is direct.
+    def self.note_main_thread : Nil
+    end
+
+    def self.stack_bounds_main_cached : UInt64
+      0_u64
+    end
+
     def self.snapshot_pthread_stack_bounds(thread : LibC::PthreadT) : Nil
     end
 

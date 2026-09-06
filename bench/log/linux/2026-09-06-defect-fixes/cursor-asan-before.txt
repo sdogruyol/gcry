@@ -1,0 +1,72 @@
+=================================================================
+==182454==ERROR: AddressSanitizer: heap-use-after-free on address 0x520000001088 at pc 0x55de61100ba8 bp 0x7fbfb33ea9f0 sp 0x7fbfb33ea9e8
+READ of size 8 at 0x520000001088 thread T17
+    #0 0x55de61100ba7 in cursor_set_cached /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:242:21
+    #1 0x55de61100ba7 in fast_alloc /home/steve/projects/scratch/gcry/src/gcry/heap.cr:888:13
+    #2 0x55de61100ba7 in *Gcry::Heap#malloc<Int32>:Pointer(Void) /home/steve/projects/scratch/gcry/src/gcry/heap.cr:484:11
+    #3 0x55de610fc34c in ~procProc(Thread, Nil)@spec/cursor_cache_lifetime_spec.cr:17 /home/steve/projects/scratch/gcry/spec/cursor_cache_lifetime_spec.cr:23:13
+    #4 0x55de60ff6f7c in start /usr/share/crystal/src/crystal/system/thread.cr:249:13
+    #5 0x55de60ff6f7c in thread_proc /usr/share/crystal/src/crystal/system/unix/pthread.cr:47:5
+    #6 0x55de60ff6f7c in ~procProc(Pointer(Void), Pointer(Void))@/usr/share/crystal/src/crystal/system/unix/pthread.cr:22 /usr/share/crystal/src/crystal/system/unix/pthread.cr:22:14
+    #7 0x55de6117d1d0 in GC_inner_start_routine (/tmp/gcry-cache-real-asan+0x3351d0) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+    #8 0x55de61170e42 in GC_call_with_stack_base (/tmp/gcry-cache-real-asan+0x328e42) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+    #9 0x55de60f63fca in asan_thread_start(void*) asan_interceptors.cpp.o
+    #10 0x7fbfca060b7a  (/lib/x86_64-linux-gnu/libc.so.6+0x92b7a) (BuildId: fce446c9d4ad48e2b0c90cce1a11722897805281)
+    #11 0x7fbfca0de7b7  (/lib/x86_64-linux-gnu/libc.so.6+0x1107b7) (BuildId: fce446c9d4ad48e2b0c90cce1a11722897805281)
+
+0x520000001088 is located 8 bytes inside of 3896-byte region [0x520000001080,0x520000001fb8)
+freed by thread T0 here:
+    #0 0x55de60f663da in free (/tmp/gcry-cache-real-asan+0x11e3da) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+    #1 0x55de610f2967 in destroy_cursor_sets /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:367:31
+    #2 0x55de610f2967 in *Gcry::Heap#destroy:Nil /home/steve/projects/scratch/gcry/src/gcry/heap.cr:357:7
+
+previously allocated by thread T17 here:
+    #0 0x55de60f66673 in malloc (/tmp/gcry-cache-real-asan+0x11e673) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+    #1 0x55de6115e380 in alloc_cursor_set /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:300:13
+    #2 0x55de6115e380 in cursor_set_under_lock /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:285:16
+    #3 0x55de6115e380 in cursor_set /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:254:33
+    #4 0x55de6115e380 in bitmap_alloc_locked /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:620:13
+    #5 0x55de6115e380 in *Gcry::Heap#alloc_old_small_locked<UInt32, UInt32, Int32>:Pointer(Void) /home/steve/projects/scratch/gcry/src/gcry/heap.cr:1243:16
+    #6 0x55de610fe9df in alloc_old_small /home/steve/projects/scratch/gcry/src/gcry/heap.cr:1208:19
+    #7 0x55de610fe9df in allocate /home/steve/projects/scratch/gcry/src/gcry/heap.cr:1012:25
+    #8 0x55de610fe9df in *Gcry::Heap#malloc<Int32>:Pointer(Void) /home/steve/projects/scratch/gcry/src/gcry/heap.cr:492:13
+    #9 0x55de610fc2cb in ~procProc(Thread, Nil)@spec/cursor_cache_lifetime_spec.cr:17 /home/steve/projects/scratch/gcry/spec/cursor_cache_lifetime_spec.cr:18:7
+    #10 0x55de6117d1d0 in GC_inner_start_routine (/tmp/gcry-cache-real-asan+0x3351d0) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+
+Thread T17 created by T0 here:
+    #0 0x55de60f4bb85 in pthread_create (/tmp/gcry-cache-real-asan+0x103b85) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+    #1 0x55de6117710b in GC_pthread_create (/tmp/gcry-cache-real-asan+0x32f10b) (BuildId: 6cd1870fb63914de6071b1bf209cc64d76ec69b2)
+
+SUMMARY: AddressSanitizer: heap-use-after-free /home/steve/projects/scratch/gcry/src/gcry/bitmap_alloc.cr:242:21 in cursor_set_cached
+Shadow bytes around the buggy address:
+  0x520000000e00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000000e80: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000000f00: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000000f80: fd fd fd fd fd fd fd fa fa fa fa fa fa fa fa fa
+  0x520000001000: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+=>0x520000001080: fd[fd]fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000001100: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000001180: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000001200: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000001280: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+  0x520000001300: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==182454==ABORTING

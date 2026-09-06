@@ -1,0 +1,30 @@
+{
+  "arms": {
+    "base": "/home/steve/projects/scratch/gcry/bin/alloc_refill_candidate",
+    "null": "/home/steve/projects/scratch/gcry/bin/alloc_refill_candidate",
+    "candidate": "/home/steve/projects/scratch/gcry/bin/alloc_refill_stw_candidate"
+  },
+  "arm_environment": {
+    "base": {},
+    "null": {},
+    "candidate": {}
+  },
+  "arguments": [
+    "1",
+    "5000000",
+    "48"
+  ],
+  "rounds": 20,
+  "metric": "ns_per_alloc",
+  "binary_sha256": {
+    "base": "4382a725592bbe235764d82e597f3e689c1b546661f12a5f00e31518730486b8",
+    "null": "4382a725592bbe235764d82e597f3e689c1b546661f12a5f00e31518730486b8",
+    "candidate": "2a8c7c7b42435d21321a0aacd9673f4f74737881cec34cc3f867345ee66b5a75"
+  },
+  "environment": {},
+  "load_start": [
+    0.9912109375,
+    1.75537109375,
+    2.09423828125
+  ]
+}

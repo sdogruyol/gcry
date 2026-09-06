@@ -1,0 +1,18 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/dormant_flush_race.cr -o bin/dormant_flush_race --error-trace
+bin/dormant_flush_race
+=== post-STW flush walk vs. mutator unmap ===
+4 workers × 10000 rounds of 40960 B, one collector, 40000 ballast objects
+
+  queued (default):    0 of 1 failed
+  immediate (old):     1 of 1 failed
+     gcry: SIGSEGV at 0x7fe013d56000 — in a chunk gcry RELEASED — base 0x7fe013d56000, 45056 bytes, large-object release, at collection 207; the write is 0 bytes into it. Collections since: 0. First user word at release: 0x90000a000 (type_id 40960)
+
+ok — queued, the walks never meet a released chunk; unqueued, they do
+/tmp/gcry-crystal-headerless build -Dgc_none bench/stw_index_race.cr -o bin/stw_index_race --error-trace
+bin/stw_index_race
+=== STW chunk-index race ===
+4 allocating threads, 200 collections per arm
+  default     unlocked reads: collector 191650, other threads 0 (last 0x0)
+  late-clear  unlocked reads: collector 269326, other threads 12531 (last 0x7febf1cbe6c0)
+
+ok — with the flag cleared before the resume loop no mutator reads the index unlocked, and with it cleared after they do

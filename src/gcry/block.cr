@@ -425,6 +425,21 @@ module Gcry
       # failure that rejected 2026-08-01-ec4-alloc-bits. A chunk kind is fixed
       # at map time and costs the mutator nothing.
       ATOMIC = 16_u32
+      # Held by one thread's allocation cursor (`Gcry::CursorSet`). Set and
+      # cleared under the class lock when a cursor takes or drops the chunk;
+      # no other cursor may take it, and a sweep that finds it empty keeps it
+      # mapped.
+      CURSOR = 32_u32
+      # Held across a stop-the-world by a set that was mid-allocation, so
+      # its owner may write `occ` without the class lock once it resumes.
+      # The after-world sweep leaves the chunk alone; the next stop-the-world
+      # zeroes its marks and clears this (`bitmap_settle_cursor_sets`).
+      PINNED = 64_u32
+      # Fully free and past the warm budget at the last major sweep, kept
+      # mapped for one more cycle instead of unmapped. A second such sweep
+      # unmaps it; a cursor taking it, or a block surviving in it, clears the
+      # flag (`sweep_small_bitmap` retention, `bitmap_refill_pool`).
+      IDLE = 128_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -533,6 +548,48 @@ module Gcry
         h.flags |= Flags::DORMANT
       else
         h.flags &= ~Flags::DORMANT
+      end
+      chunk.value = h
+    end
+
+    def self.cursor?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::CURSOR) != 0
+    end
+
+    def self.set_cursor(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::CURSOR
+      else
+        h.flags &= ~Flags::CURSOR
+      end
+      chunk.value = h
+    end
+
+    def self.pinned?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::PINNED) != 0
+    end
+
+    def self.set_pinned(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::PINNED
+      else
+        h.flags &= ~Flags::PINNED
+      end
+      chunk.value = h
+    end
+
+    def self.idle?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::IDLE) != 0
+    end
+
+    def self.set_idle(chunk : ChunkHeader*, value : Bool) : Nil
+      h = chunk.value
+      if value
+        h.flags |= Flags::IDLE
+      else
+        h.flags &= ~Flags::IDLE
       end
       chunk.value = h
     end

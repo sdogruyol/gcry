@@ -1,0 +1,18 @@
+warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
+1 warning generated.
+ASan: instrumented 3349 functions in /home/steve/projects/scratch/gcry/ci/asan_control.cr
+ASan control: intentional heap-use-after-free detected
+warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
+1 warning generated.
+ASan: instrumented 6931 functions in /home/steve/projects/scratch/gcry/ci/asan_specs.cr
+.
+
+Finished in 2.75 milliseconds
+1 examples, 0 failures, 0 errors, 0 pending
+warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
+1 warning generated.
+ASan: instrumented 6927 functions in /home/steve/projects/scratch/gcry/ci/asan_specs.cr
+.
+
+Finished in 2.61 milliseconds
+1 examples, 0 failures, 0 errors, 0 pending

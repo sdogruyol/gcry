@@ -1,0 +1,44 @@
+name: PR34 ARM diagnostics
+on:
+  push:
+    branches: [pr34-arm-diagnostics]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: '1.21.0'
+      - name: Compare the same pressure test across collector variants
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root=pathlib.Path.cwd()
+          cases=[('baseline','b360bcd',[]),('tip','3a65fda',[]),('no_atomic','3a65fda',[]),('headerless','3a65fda',['-Dgcry_headerless']),('bitmap','3a65fda',[])]
+          for name,ref,flags in cases:
+            path=pathlib.Path('/tmp')/('gcry-'+name)
+            subprocess.run(['git','worktree','add','--detach',str(path),ref],check=True)
+            pressure=root/'process_spec/regression/8_medium_cursor_spec.cr'
+            (path/'process_spec/regression/8_medium_cursor_spec.cr').write_bytes(pressure.read_bytes())
+            if name=='no_atomic':
+              file=path/'src/gcry/collect_mark.cr';source=file.read_text()
+              old='      return if atomic_of(chunk, header)\n      mark_stack_push(header)'
+              assert old in source
+              file.write_text(source.replace(old,'      mark_stack_push(header)',1))
+            env={k:v for k,v in os.environ.items() if not k.startswith('GCRY_')}
+            env['GCRY_STW_WATCHDOG_MS']='10000'
+            if name=='bitmap':env['GCRY_BITMAP_ALLOC']='1'
+            failures=0
+            for trial in range(10):
+              result=subprocess.run(['timeout','-s','KILL','60','crystal','spec','-Dgc_none',*flags,'process_spec','--error-trace'],capture_output=True,text=True,env=env,cwd=path)
+              failures+=result.returncode!=0
+              print(json.dumps(dict(variant=name,trial=trial,exit=result.returncode)),flush=True)
+              print(result.stdout+result.stderr,flush=True)
+            print(json.dumps(dict(variant=name,failed=failures,trials=10)),flush=True)
+          PY

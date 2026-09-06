@@ -34,6 +34,27 @@ require "./spec_helper"
       snapped[1].address.should eq(live[1].address)
     end
 
+    it "answers the initial thread from its cached bounds after the first read" do
+      # `GC.init` records the initial thread; in the library the spec does.
+      # The process running this spec is that thread.
+      self_id = LibC.pthread_self
+      Gcry::Platform.note_main_thread
+      Gcry::Platform.begin_stack_bounds_snapshot
+      Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
+      first = Gcry::Platform.snapshotted_stack_bounds(self_id).not_nil!
+      cached = Gcry::Platform.stack_bounds_main_cached
+
+      Gcry::Platform.begin_stack_bounds_snapshot
+      Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
+      second = Gcry::Platform.snapshotted_stack_bounds(self_id).not_nil!
+
+      Gcry::Platform.stack_bounds_main_cached.should eq(cached + 1)
+      second[0].address.should eq(first[0].address)
+      second[1].address.should eq(first[1].address)
+      live = Gcry::Platform.pthread_stack_bounds(self_id).not_nil!
+      second[1].address.should eq(live[1].address)
+    end
+
     it "brackets an address that is actually on this thread's stack" do
       # Tying the table to a real address, not just to the other API: if both
       # ever agreed on a wrong range, the comparison above would still pass.

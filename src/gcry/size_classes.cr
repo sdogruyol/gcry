@@ -117,6 +117,17 @@ module Gcry
       end
     end
 
+    # The upper four groups each have four equally spaced classes. Caller
+    # has established 2048 < size <= 32768. Keep the tiny-allocation fit table
+    # small; dispatch these groups without walking the payload switch.
+    @[AlwaysInline]
+    def self.fit_medium(size : UInt64) : {UInt32, Int32}
+      shift = size > 16384 ? 12 : (size > 8192 ? 11 : (size > 4096 ? 10 : 9))
+      units = (((size - 1) >> shift) + 1).to_u32
+      index = 23 + (shift - 9) * 4 + units.to_i32 - 4
+      {units << shift, index}
+    end
+
     def self.round(size : UInt64) : UInt64
       fit(size)[0]
     end

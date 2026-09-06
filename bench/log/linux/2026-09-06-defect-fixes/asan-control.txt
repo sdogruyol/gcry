@@ -1,0 +1,59 @@
+=================================================================
+==183617==ERROR: AddressSanitizer: heap-use-after-free on address 0x502000000010 at pc 0x55a4a1e4cb9e bp 0x7ffc32124c10 sp 0x7ffc32124c08
+READ of size 1 at 0x502000000010 thread T0
+    #0 0x55a4a1e4cb9d in __crystal_main /home/steve/projects/scratch/gcry/ci/asan_control.cr:5:1
+    #1 0x55a4a1e4cb9d in main_user_code /usr/share/crystal/src/crystal/main.cr:129:5
+    #2 0x55a4a1e4cb9d in *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 /usr/share/crystal/src/crystal/main.cr:115:7
+    #3 0x55a4a1e2e5d8 in main /usr/share/crystal/src/crystal/system/unix/main.cr:9:12
+    #4 0x7f25af68fca7  (/lib/x86_64-linux-gnu/libc.so.6+0x29ca7) (BuildId: fce446c9d4ad48e2b0c90cce1a11722897805281)
+    #5 0x7f25af68fd64 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x29d64) (BuildId: fce446c9d4ad48e2b0c90cce1a11722897805281)
+    #6 0x55a4a1cc2430 in _start (/home/steve/projects/scratch/gcry/bin/asan/control+0xec430) (BuildId: 52f150e2b5e85d80b6d2e35a1de10da321c2b4da)
+
+0x502000000010 is located 0 bytes inside of 16-byte region [0x502000000010,0x502000000020)
+freed by thread T0 here:
+    #0 0x55a4a1d61fca in free (/home/steve/projects/scratch/gcry/bin/asan/control+0x18bfca) (BuildId: 52f150e2b5e85d80b6d2e35a1de10da321c2b4da)
+    #1 0x55a4a1e4bbdc in __crystal_main /home/steve/projects/scratch/gcry/ci/asan_control.cr:5:1
+    #2 0x55a4a1e4bbdc in main_user_code /usr/share/crystal/src/crystal/main.cr:129:5
+    #3 0x55a4a1e4bbdc in *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 /usr/share/crystal/src/crystal/main.cr:115:7
+    #4 0x55a4a1e2e5d8 in main /usr/share/crystal/src/crystal/system/unix/main.cr:9:12
+
+previously allocated by thread T0 here:
+    #0 0x55a4a1d62263 in malloc (/home/steve/projects/scratch/gcry/bin/asan/control+0x18c263) (BuildId: 52f150e2b5e85d80b6d2e35a1de10da321c2b4da)
+    #1 0x55a4a1e4bbd1 in __crystal_main /home/steve/projects/scratch/gcry/ci/asan_control.cr:4:11
+    #2 0x55a4a1e4bbd1 in main_user_code /usr/share/crystal/src/crystal/main.cr:129:5
+    #3 0x55a4a1e4bbd1 in *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 /usr/share/crystal/src/crystal/main.cr:115:7
+    #4 0x55a4a1e2e5d8 in main /usr/share/crystal/src/crystal/system/unix/main.cr:9:12
+
+SUMMARY: AddressSanitizer: heap-use-after-free /home/steve/projects/scratch/gcry/ci/asan_control.cr:5:1 in __crystal_main
+Shadow bytes around the buggy address:
+  0x501ffffffd80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x501ffffffe00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x501ffffffe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x501fffffff00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x501fffffff80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x502000000000: fa fa[fd]fd fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000000080: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000000100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000000180: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000000200: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000000280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==183617==ABORTING

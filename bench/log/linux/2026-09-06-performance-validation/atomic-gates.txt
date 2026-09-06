@@ -1,0 +1,38 @@
+/tmp/gcry-crystal-headerless build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
+bin/parallel_mark_process
+parallel_mark_process ok
+/tmp/gcry-crystal-headerless build -Dgc_none bench/parallel_mark_termination.cr -o bin/parallel_mark_termination --error-trace
+bin/parallel_mark_termination
+=== parallel mark termination ===
+64 chains x 400 nodes, 4 workers, 60 collections per arm
+fixed: exit=0 child runs=60 stolen=2249214 ok
+unlocked: exit=1 child runs=1 stolen=9 damage=chain 45 node 373: tag "chain-40-312" FAIL
+
+ok — the mark cycle does not end while a worker holds a batch
+/tmp/gcry-crystal-headerless build -Dgc_none bench/mark_audit.cr -o bin/mark_audit --error-trace
+bin/mark_audit
+=== mark completeness audit ===
+mode: hold (audit on)
+hold: 1579 edges walked, 199 missed
+clean: 1977 edges walked, 0 missed
+
+ok — the audit names a planted edge the mark does not follow, and reports none on the same workload without it
+bin/mark_audit --control
+=== mark completeness audit ===
+mode: control (GCRY_MARK_AUDIT unset; nothing may be walked)
+hold: 0 edges walked, 0 missed
+clean: 0 edges walked, 0 missed
+
+ok — with the knob off nothing is walked, so the other run's edge counts are attributable to the audit
+/tmp/gcry-crystal-headerless build -Dgc_none bench/fork_reinit.cr -o bin/fork_reinit
+bin/fork_reinit
+fork_reinit: 3 passed, 0 failed
+/tmp/gcry-crystal-headerless build -Dgc_none bench/oom_no_hang.cr -o bin/oom_no_hang --error-trace
+bin/oom_no_hang
+=== out of address space: error, or hang? ===
+child caps RLIMIT_AS at 512 MiB and retains everything
+
+  large: 0 of 3 hung, 0 of 3 ended without naming the failure
+  small: 0 of 3 hung, 0 of 3 ended without naming the failure
+
+ok — the allocator refuses and says so, on both size paths

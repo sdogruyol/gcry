@@ -114,6 +114,34 @@ module Gcry
     # for a diagnostic line, and 8 bytes either way.
     @@sb_in_flight = 0_u64
 
+    # The main thread's bounds, taken once. `pthread_getattr_np` on the
+    # initial thread parses `/proc/self/maps` — measured at 106 µs a call on
+    # this box, and it ran on every collection: 0.28 ms of the 1.18 ms Kemal
+    # `/json` pause was the suspend phase, on a process with two threads. The
+    # initial thread's `pthread_t` is never reused while the process lives,
+    # so the reuse hazard the table is rebuilt for does not apply to it; its
+    # high bound is fixed by the kernel; and its low bound is glibc's
+    # `high - min(RLIMIT_STACK, gap below)`, which a later mapping in that
+    # gap can only *raise* — so a cached low is at most more inclusive, and
+    # the scan's floor is the thread's own SP in any case.
+    @@main_pthread = 0_u64
+    @@main_low = 0_u64
+    @@main_high = 0_u64
+    @@sb_main_cached = 0_u64
+
+    # Record the calling thread as the process's initial thread. Called from
+    # `GC.init`, which runs on it before any other thread exists.
+    def self.note_main_thread : Nil
+      {% if flag?(:linux) %}
+        @@main_pthread = LibC.pthread_self.unsafe_as(UInt64)
+      {% end %}
+    end
+
+    # Snapshots answered from the main thread's cached bounds.
+    def self.stack_bounds_main_cached : UInt64
+      @@sb_main_cached
+    end
+
     # Drop the previous collection's entries. A pthread_t can be reused by a new
     # thread after the old one exits, so entries are never carried across a
     # collection — a stale one would hand the scan another thread's address
@@ -148,10 +176,20 @@ module Gcry
           @@sb_capacity_misses += 1
           return
         end
-        @@sb_in_flight = thread.unsafe_as(UInt64)
-        bounds = pthread_stack_bounds(thread)
-        @@sb_in_flight = 0_u64
-        return unless bounds
+        id = thread.unsafe_as(UInt64)
+        if id == @@main_pthread && @@main_high != 0_u64
+          bounds = {Pointer(Void).new(@@main_low), Pointer(Void).new(@@main_high)}
+          @@sb_main_cached += 1
+        else
+          @@sb_in_flight = id
+          bounds = pthread_stack_bounds(thread)
+          @@sb_in_flight = 0_u64
+          return unless bounds
+          if id == @@main_pthread
+            @@main_low = bounds[0].address
+            @@main_high = bounds[1].address
+          end
+        end
         @@sb_read += 1
         note_seen_id(thread.unsafe_as(UInt64))
         @@sb_ids[i] = thread

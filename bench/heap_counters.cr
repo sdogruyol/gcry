@@ -65,19 +65,36 @@ heap = Gcry.default_heap
 puts "=== heap counters ==="
 puts "mode: #{plain ? "plain (GCRY_HEAP_COUNTERS_ATOMIC=0)" : "atomic (flipped by the second thread)"}"
 
-GC.disable
-before = heap.live_objects
-threads = (0...THREADS).map { |i| Thread.new { hammer(i) } }
-threads.each(&.join)
-after = heap.live_objects
-GC.enable
+# One round of the hammer; `lost` is how many increments the counter missed.
+def round(heap) : {UInt64, UInt64, UInt64}
+  GC.disable
+  before = heap.live_objects
+  threads = (0...THREADS).map { |i| Thread.new { hammer(i) } }
+  threads.each(&.join)
+  after = heap.live_objects
+  GC.enable
+  expected = (PER_THREAD * THREADS).to_u64
+  counted = after - before
+  lost = counted >= expected ? 0_u64 : expected - counted
+  {expected, counted, lost}
+end
 
-expected = (PER_THREAD * THREADS).to_u64
-counted = after - before
-lost = counted >= expected ? 0_u64 : expected - counted
+expected, counted, lost = round(heap)
+
+# The plain arm is a race it has to *win*: four threads must overlap inside
+# `set(get + 1)` at least once in 1 200 000 tries, and on a two-vCPU runner
+# they can go a whole round without doing so (`lost 0` where the same
+# binary lost 55 and 215 the runs before). Give it a few rounds before
+# calling the loss absent; the atomic arm gets one, since its claim is
+# that no round loses anything.
+rounds = 1
+while plain && lost == 0 && rounds < 5
+  rounds += 1
+  expected, counted, lost = round(heap)
+end
 
 puts "atomic path: #{heap.heap_counters_atomic}"
-puts "allocated #{expected}, counter moved #{counted}, lost #{lost}"
+puts "allocated #{expected}, counter moved #{counted}, lost #{lost}#{rounds > 1 ? " (round #{rounds})" : ""}"
 
 failures = [] of String
 

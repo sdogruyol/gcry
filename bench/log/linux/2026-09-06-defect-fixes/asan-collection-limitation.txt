@@ -1,0 +1,23 @@
+warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
+1 warning generated.
+ASan: instrumented 3349 functions in /home/steve/projects/scratch/gcry/ci/asan_control.cr
+ASan control: intentional heap-use-after-free detected
+warning: overriding the module target triple with x86_64-pc-linux-gnu [-Woverride-module]
+1 warning generated.
+ASan: instrumented 7028 functions in /home/steve/projects/scratch/gcry/ci/asan_specs.cr
+Invalid memory access (signal 11) at address 0x0
+[0x564b78d99574] ?? +94882150061428 in /home/steve/projects/scratch/gcry/bin/asan/header
+[0x564b78d9833d] ?? +94882150056765 in /home/steve/projects/scratch/gcry/bin/asan/header
+[0x7f3c0690edf0] ?? +139895784926704 in /lib/x86_64-linux-gnu/libc.so.6
+[0x0] ???=================================================================
+Traceback (most recent call last):
+  File "/home/steve/projects/scratch/gcry/ci/asan_check.py", line 76, in <module>
+    main()
+    ~~~~^^
+  File "/home/steve/projects/scratch/gcry/ci/asan_check.py", line 72, in main
+    subprocess.run([str(binary)], cwd=ROOT, env=env, timeout=120, check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 577, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['/home/steve/projects/scratch/gcry/bin/asan/header']' died with <Signals.SIGSEGV: 11>.

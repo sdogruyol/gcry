@@ -879,12 +879,12 @@ coverage-macro:
 	./ci/coverage.sh macro
 
 asan: $(BIN)
-	$(CRYSTAL) build -Dasan spec/all_specs.cr -o $(BIN)/all_specs_asan
+	$(CRYSTAL) build spec/all_specs.cr -o $(BIN)/all_specs_asan
 	$(BIN)/all_specs_asan
+	python3 ci/asan_check.py --crystal $(CRYSTAL)
 
 asan-hello: $(BIN)
-	$(CRYSTAL) build -Dasan samples/hello.cr -o $(BIN)/hello_asan
-	$(BIN)/hello_asan
+	python3 ci/asan_check.py --crystal $(CRYSTAL) --source samples/hello.cr
 
 VALGRIND_FLAGS := --leak-check=full --suppressions=ci/valgrind-suppressions.txt --show-leak-kinds=definite --errors-for-leak-kinds=definite --undef-value-errors=no --error-exitcode=0
 
