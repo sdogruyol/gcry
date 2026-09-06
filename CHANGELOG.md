@@ -32,7 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   threshold, per-thread cursor sets, and the chunk radix. Every Makefile gate
   passes under it (`bench/live_graph_audit.cr` pins the freelist, since both
   walks it audits are freelist paths); CI keeps a `GCRY_BITMAP_ALLOC=0`
-  process-spec arm on Linux, aarch64 and Darwin.
+  process-spec arm on Linux, aarch64 and Darwin. The same five arms on a
+  Darwin host (Apple M2 Pro, 16 KiB pages, null at 100.9% [99.1, 102.6];
+  `bench/log/macos/2026-09-06-bitmap-default-ab/`): the default is
+  **101.8%** [100.5, 103.1] of Boehm against the freelist's 85.5%
+  [84.6, 86.4], 0.8 faults per 1 000 requests against 344, 10% less CPU per
+  request than Boehm, p99 3.0 against 5.2 ms — at **1.97×** Boehm's peak
+  footprint against the freelist's 1.78× (post-GC resident 1.20× against
+  1.07×). There the RSS order is the reverse of Linux: both arms sit at the
+  16 MiB Darwin threshold floor, and the warm-chunk budget is the whole
+  difference. Every Darwin CI gate passes under either allocator.
 - **An explicit `GC.collect` releases the warm chunks.** The warm-chunk
   budget keeps emptied chunks mapped for the *next* allocation-driven
   cycle; an explicit collect (and the emergency retry before

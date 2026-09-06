@@ -15,11 +15,40 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | CI | `macos-latest` correctness only — **not** a thr gate |
 | Low-water root-scan skip | **Linux-only — Darwin keeps the full scan.** `Platform.stack_low_water` reads `/proc/self/pagemap`; Darwin has no equivalent wired, so the parked-fiber scan still faults its whole lag window. The change that took Kemal EC4 pause 8.06 → 3.60 ms on Linux does **not** apply here |
 | Parked-fiber scrub | **Opt-in** (`GCRY_SCRUB_FIBERS=1`), on Darwin as well as Linux. Correctness of the flip is verified on a Darwin host — fuzz / property / soak / OOM / finalizer, both settings — see [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) § "The flip on Darwin". Every cut in this file *below the 2026-08-10 section* predates the flip and was taken with scrub **on** |
+| Allocator | **Bitmap, the process default since 0.24.0**; `GCRY_BITMAP_ALLOC=0` is the freelist. Both run at the Darwin threshold floor of **16 MiB** on a heap this size (Linux freelist: 32 MiB), which is why the two arms' RSS reads differently here — see the 2026-09-06 section |
 
 > **Cuts below the 2026-08-10 section were measured under defaults that no
-> longer exist**, on both counts in the table above. The Kemal side is now
-> re-cut on a Darwin host under current defaults (next section); the fat-app
-> headline is **not** — see [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+> longer exist**, on the low-water and scrub rows above. The Kemal side is now
+> re-cut on a Darwin host under current defaults (the two sections below);
+> the fat-app headline is **not** — see
+> [ACIKTURKIYE-macos.md](ACIKTURKIYE-macos.md).
+
+## Headline (2026-09-06 — 0.24.0, the bitmap default) — macOS aarch64
+
+`bench/log/macos/2026-09-06-bitmap-default-ab/` (`f43d2bc`, Crystal 1.21.0,
+Apple M2 Pro, Darwin 25.6.0 arm64, EC1). The Linux five-arm protocol on a
+Darwin host: `bench/performance/kemal_ab.py`, Kemal `/json`, **20 rotated
+rounds × 5 arms**, 15 s per trial, `wrk -t4 -c100`, identical-binary null
+control at 100.9% [99.1, 102.6]. Peak RSS is the `phys_footprint`
+high-water mark (libproc), post-GC RSS the resident size after `/gc-collect`.
+
+| arm | req/s | % Boehm [95% CI] | peak footprint × | post-GC RSS (KiB) | faults / 1k | p99 µs |
+|---|---:|---:|---:|---:|---:|---:|
+| Boehm | 59 546 | 100.0% | 1.00 | 23 464 | 0.3 | 2 925 |
+| **gcry, default** (bitmap, header layout) | 60 607 | **101.8%** [100.5, 103.1] | **1.97** | 28 264 (1.20×) | 0.8 | 3 005 |
+| gcry, `GCRY_BITMAP_ALLOC=0` (freelist) | 50 925 | **85.5%** [84.6, 86.4] | 1.78 | 25 096 (1.07×) | 344.3 | 5 155 |
+| gcry, `-Dgcry_headerless` | 60 686 | **101.9%** [100.9, 103.0] | 1.50 | 23 136 (0.99×) | 0.4 | 2 935 |
+
+Throughput reads as on Linux (bitmap at Boehm parity, +19% over the
+freelist, 10% less CPU per request than Boehm); RSS does not: the bitmap
+arm's peak footprint is **1.10× the freelist's** here where it was 0.69× on
+Linux, because both arms sit at the 16 MiB Darwin floor and the warm-chunk
+budget (= the threshold) is the whole difference. The short smoke
+(`bench/perf_smoke.sh`, `wrk -c50 -d5`) agrees: `/json` 101.3% at 1.275×
+post-GC RSS and 0.367 ms pause p50 on the default
+(`bench/log/macos/2026-09-06-173014/`), 88.4% at 1.202× and 0.419 ms on the
+freelist (`2026-09-06-173333/`). FINDINGS.md in the run directory has the
+per-phase table and the reading.
 
 ## Headline (2026-08-10 — current defaults, Darwin re-cut) — macOS aarch64
 

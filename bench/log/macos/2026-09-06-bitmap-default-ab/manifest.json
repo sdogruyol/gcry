@@ -1,0 +1,165 @@
+{
+  "arms": [
+    {
+      "name": "boehm",
+      "root": "/Users/bedo/playground/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/private/tmp/gcry-ab-darwin/boehm",
+      "gcry": false,
+      "commit": "f43d2bc26e404bca8a98d86f73df59e0d6c93f8f",
+      "tree": "cb245a5aa3b66e9c01c166cbdfcc1fd1ccba1be9",
+      "dirty": "M Makefile\n M bench/perf_smoke.sh\n M bench/performance/README.md\n M bench/performance/kemal_ab.py\n?? bench/log/macos/2026-09-06-173014/\n?? bench/log/macos/2026-09-06-173333/",
+      "source_sha256": "f36ec3385c670885dd0103a8c2398b9058731e713a134e9c828eacd9e0ebc181",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/private/tmp/gcry-ab-darwin/boehm"
+      ],
+      "binary_sha256": "b368fe5a251bca8709e373a25e69eca70dd5a9650f045e9161147b258a59acc5",
+      "shard_lock_sha256": "dfcbe75df3d8dd3cfc3087a3d44c361a5114db4cf0f5f4eb7e6e78de38844fc4",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/Users/bedo/playground/gcry"
+    },
+    {
+      "name": "null",
+      "root": "/Users/bedo/playground/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/private/tmp/gcry-ab-darwin/boehm",
+      "gcry": false,
+      "commit": "f43d2bc26e404bca8a98d86f73df59e0d6c93f8f",
+      "tree": "cb245a5aa3b66e9c01c166cbdfcc1fd1ccba1be9",
+      "dirty": "M Makefile\n M bench/perf_smoke.sh\n M bench/performance/README.md\n M bench/performance/kemal_ab.py\n?? bench/log/macos/2026-09-06-173014/\n?? bench/log/macos/2026-09-06-173333/",
+      "source_sha256": "f36ec3385c670885dd0103a8c2398b9058731e713a134e9c828eacd9e0ebc181",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/private/tmp/gcry-ab-darwin/boehm"
+      ],
+      "binary_sha256": "b368fe5a251bca8709e373a25e69eca70dd5a9650f045e9161147b258a59acc5",
+      "shard_lock_sha256": "dfcbe75df3d8dd3cfc3087a3d44c361a5114db4cf0f5f4eb7e6e78de38844fc4",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/Users/bedo/playground/gcry",
+      "copy_of": "boehm"
+    },
+    {
+      "name": "header",
+      "root": "/Users/bedo/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {
+        "GCRY_BITMAP_ALLOC": "0"
+      },
+      "binary": "/private/tmp/gcry-ab-darwin/header",
+      "gcry": true,
+      "commit": "f43d2bc26e404bca8a98d86f73df59e0d6c93f8f",
+      "tree": "cb245a5aa3b66e9c01c166cbdfcc1fd1ccba1be9",
+      "dirty": "M Makefile\n M bench/perf_smoke.sh\n M bench/performance/README.md\n M bench/performance/kemal_ab.py\n?? bench/log/macos/2026-09-06-173014/\n?? bench/log/macos/2026-09-06-173333/",
+      "source_sha256": "f36ec3385c670885dd0103a8c2398b9058731e713a134e9c828eacd9e0ebc181",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "/private/tmp/gcry-ab-darwin/header"
+      ],
+      "binary_sha256": "798eeb331d8cd0e9cb99c3ad39997de0d1ef300ca64790d42361d008cc75cf67",
+      "shard_lock_sha256": "dfcbe75df3d8dd3cfc3087a3d44c361a5114db4cf0f5f4eb7e6e78de38844fc4",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/Users/bedo/playground/gcry"
+    },
+    {
+      "name": "bitmap",
+      "root": "/Users/bedo/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {},
+      "binary": "/private/tmp/gcry-ab-darwin/bitmap",
+      "gcry": true,
+      "commit": "f43d2bc26e404bca8a98d86f73df59e0d6c93f8f",
+      "tree": "cb245a5aa3b66e9c01c166cbdfcc1fd1ccba1be9",
+      "dirty": "M Makefile\n M bench/perf_smoke.sh\n M bench/performance/README.md\n M bench/performance/kemal_ab.py\n?? bench/log/macos/2026-09-06-173014/\n?? bench/log/macos/2026-09-06-173333/",
+      "source_sha256": "f36ec3385c670885dd0103a8c2398b9058731e713a134e9c828eacd9e0ebc181",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "/private/tmp/gcry-ab-darwin/bitmap"
+      ],
+      "binary_sha256": "130d559cd2c73a1760fe15258d1bfeb0fc1d7f1336b980034f1238e89d90951b",
+      "shard_lock_sha256": "dfcbe75df3d8dd3cfc3087a3d44c361a5114db4cf0f5f4eb7e6e78de38844fc4",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/Users/bedo/playground/gcry"
+    },
+    {
+      "name": "headerless",
+      "root": "/Users/bedo/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless"
+      ],
+      "env": {},
+      "binary": "/private/tmp/gcry-ab-darwin/headerless",
+      "gcry": true,
+      "commit": "f43d2bc26e404bca8a98d86f73df59e0d6c93f8f",
+      "tree": "cb245a5aa3b66e9c01c166cbdfcc1fd1ccba1be9",
+      "dirty": "M Makefile\n M bench/perf_smoke.sh\n M bench/performance/README.md\n M bench/performance/kemal_ab.py\n?? bench/log/macos/2026-09-06-173014/\n?? bench/log/macos/2026-09-06-173333/",
+      "source_sha256": "f36ec3385c670885dd0103a8c2398b9058731e713a134e9c828eacd9e0ebc181",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "-Dgcry_headerless",
+        "src/server.cr",
+        "-o",
+        "/private/tmp/gcry-ab-darwin/headerless"
+      ],
+      "binary_sha256": "5bc0ad6c43109945bdc8bf0b6d7c6635c6ce6ba40ddcae855b5289f0e1d2f1ae",
+      "shard_lock_sha256": "dfcbe75df3d8dd3cfc3087a3d44c361a5114db4cf0f5f4eb7e6e78de38844fc4",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/Users/bedo/playground/gcry"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [57cf7da50] (2026-07-16)\n\nLLVM: 15.0.7\nDefault target: aarch64-apple-macosx11.0",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "cpu": "Apple M2 Pro",
+  "cpu_count": 10,
+  "affinity": null,
+  "page_size": 16384,
+  "clk_tck": 1000000000,
+  "proc_stats": "libproc: proc_pidinfo(PROC_PIDTASKINFO) faults/resident/cpu, proc_pid_rusage(V4) lifetime max phys_footprint as hwm_kb",
+  "config": {
+    "config": "/tmp/gcry-ab-darwin-arms.json",
+    "output": "/private/tmp/gcry-ab-darwin",
+    "rounds": 20,
+    "seconds": 15,
+    "warmup": 3,
+    "threads": 4,
+    "connections": 100,
+    "port": 4400,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}
