@@ -51,7 +51,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_SOFT_DIRTY=1` | No soft-dirty |
 | `GCRY_MPROTECT_BARRIER=1` | Force mprotect+SEGV barrier |
 | `GCRY_DISABLE_MPROTECT=1` | Forbid mprotect |
-| `GCRY_INCREMENTAL=1` | Sliced majors (+ dirty re-scan if barrier armed) |
+| `GCRY_INCREMENTAL=1` | Sliced majors (+ dirty re-scan if barrier armed). **Unsound with more than one mutator thread**: under `-Dpreview_mt -Dexecution_context` with four workers, `bench/incremental_mt_stress.cr` dies in seconds — SIGSEGV at `0x0`/`0x18` or a block reissued while held — with the knob on (or with explicit `GC.collect_a_little` slices), 3 of 3 on 0.23.0, both allocators; EC1 and a single worker run clean. The liveness of an object allocated or re-linked between slices rests on the page-dirty barrier, which has measured false negatives (same axis as `GCRY_NURSERY`); the fix is the write barrier on the roadmap. Do not turn it on in an MT program |
 | `GCRY_DISABLE_INCREMENTAL=1` | Full STW (process default) |
 | `GCRY_INCREMENTAL_WORK` | Objects per slice (default **1024**) |
 | `GCRY_BITMAP=1` | Mark bits in a per-chunk bitmap (one bit per block, in the chunk's own header) instead of the mark-generation byte in each `BlockHeader`. Opt-in, **default off** — the header path stays the shipping representation until a Kemal + acikturkiye cut says otherwise, and it is also the fallback on a CPU without the SIMD baseline. Read once at heap `initialize`: a chunk's `data_offset` is baked in at `map_chunk`, so it cannot change under a live heap |

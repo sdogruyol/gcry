@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`GCRY_INCREMENTAL=1` is documented as unsound under more than one
+  mutator thread.** The PR #34 review's allocation stress
+  (`bench/incremental_mt_stress.cr`: cross-thread free, realloc, tagged
+  blocks, a fiber forcing collections) dies in seconds with the knob on
+  under `-Dpreview_mt -Dexecution_context` and four workers — SIGSEGV at
+  `0x0`/`0x18` or a held block reissued — 3 of 3 on 0.23.0 with either
+  allocator, and runs clean on EC1, with one worker, or without the knob.
+  Off by default already; the knob table now says why, next to
+  `GCRY_NURSERY`. The fix is the write barrier on the roadmap.
+
 ### Fixed
 
 - **A live `Bytes` buffer was freed under a `--release` loop that held it
