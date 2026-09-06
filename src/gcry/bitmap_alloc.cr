@@ -631,6 +631,9 @@ module Gcry
       atomic = (flags & BlockHeader::Flags::ATOMIC) != 0
       slot = atomic ? index + SIZE_CLASS_COUNT : index
       set = cursor_set
+      # C-heap metadata can fail before a cursor exists. Let the caller retry
+      # collection and raise OOM after releasing the class lock.
+      return Pointer(Void).null if set.null?
       s = CursorSet.slot(set, slot)
 
       # Mid-allocation from here until `clear_bitmap_alloc_in_flight`: a
