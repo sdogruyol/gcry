@@ -517,13 +517,26 @@ module Gcry
         LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
     end
 
-    # Fork child: drop every publication, since only one thread survived.
-    protected def reset_bitmap_alloc_in_flight : Nil
+    # Fork child: only the forking thread survived. Drop every publication (a
+    # slot another thread left mid-handover would be rooted from every
+    # collection for the life of the child), rebuild `@cursor_lock` (a fork
+    # taken while another thread held it - its first allocation on this heap
+    # - would leave it held forever, and the child's next new thread would
+    # spin in `cursor_set`), and mark every set the survivor does not own as
+    # exiting so the next stop-the-world frees its slot instead of carrying
+    # a dead owner's key until the table fills and every later thread falls
+    # back to the shared set.
+    protected def reset_cursor_sets_after_fork : Nil
+      @cursor_lock = Crystal::SpinLock.new
+      mine = cursor_set_cached
       each_cursor_set do |set|
         i = 0
         while i < POOL_SLOTS
           CursorSet.slot(set, i).value.in_flight = Pointer(Void).null
           i += 1
+        end
+        if set != mine && set != @fallback_cursor_set && set.value.state == CursorSet::STATE_LIVE
+          set.value.state = CursorSet::STATE_EXITING
         end
       end
     end
