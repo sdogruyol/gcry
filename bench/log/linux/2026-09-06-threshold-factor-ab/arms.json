@@ -1,0 +1,7 @@
+[
+  {"name": "boehm", "root": "/home/uzumaki/playground/gcry", "flags": ["--release"]},
+  {"name": "null", "copy_of": "boehm"},
+  {"name": "factor100", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {}},
+  {"name": "factor75", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {"GCRY_THRESHOLD_FACTOR": "75"}},
+  {"name": "factor50", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {"GCRY_THRESHOLD_FACTOR": "50"}}
+]

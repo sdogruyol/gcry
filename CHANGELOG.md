@@ -21,7 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 15% *less* CPU — 141.9% [132.1, 151.6] of the old default at 0.69× its
   peak, with p99 6.4 → 2.4 ms. The remaining RSS above Boehm is the
   warm-chunk budget, a policy knob; headerless with the same policy sits at
-  1.07×. With it come the defaults that ride on it: the adaptive threshold
+  1.07×. On acikturkiye (`/api/v1/`, 8 paired trials) the same default is
+  **90.8%** of Boehm at 1.55× against the freelist's 80.7% at 1.47×. Cutting
+  `GCRY_THRESHOLD_FACTOR` to 50 puts Kemal on the product bar (105.1% at
+  0.95×) but halves the fat app's threshold too and costs it 12 pp, so the
+  factor stays at 100
+  (`bench/log/linux/2026-09-06-threshold-factor-ab/`). With it come the
+  defaults that ride on it: the adaptive threshold
   (live × `GCRY_THRESHOLD_FACTOR`, 8–64 MiB), warm retention up to that
   threshold, per-thread cursor sets, and the chunk radix. Every Makefile gate
   passes under it (`bench/live_graph_audit.cr` pins the freelist, since both

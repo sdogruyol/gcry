@@ -1,0 +1,184 @@
+{
+  "arms": [
+    {
+      "name": "boehm",
+      "root": "/home/uzumaki/playground/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-ab-factor/boehm",
+      "gcry": false,
+      "commit": "fd8835a240e8f191bf217da84223157188ea2daa",
+      "tree": "6ae4781531715ac41f5a06af057ba6ac663b14b7",
+      "dirty": "?? bench/log/linux/2026-09-06-060048/\n?? bench/log/linux/2026-09-06-060320/\n?? bench/log/linux/2026-09-06-124019/\n?? bench/log/linux/2026-09-06-124231/\n?? bench/log/linux/2026-09-06-124643/\n?? bench/log/linux/2026-09-06-124852/\n?? bench/log/linux/2026-09-06-125109/",
+      "source_sha256": "552037bd0c054c70ef338bb3028f1ededd7e89bb3fd14e2f3b2e7011fa2cd047",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-ab-factor/boehm"
+      ],
+      "binary_sha256": "ef5b04573b8fe00bd58ea83c34907b03681feeeb350691301d727b029a4b3ea4",
+      "shard_lock_sha256": "d3ac77d589a6ab467cd6953d9b93417df4a40a92b3e90c3701d29bbfb242d6b3",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/uzumaki/playground/gcry"
+    },
+    {
+      "name": "null",
+      "root": "/home/uzumaki/playground/gcry",
+      "flags": [
+        "--release"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-ab-factor/boehm",
+      "gcry": false,
+      "commit": "fd8835a240e8f191bf217da84223157188ea2daa",
+      "tree": "6ae4781531715ac41f5a06af057ba6ac663b14b7",
+      "dirty": "?? bench/log/linux/2026-09-06-060048/\n?? bench/log/linux/2026-09-06-060320/\n?? bench/log/linux/2026-09-06-124019/\n?? bench/log/linux/2026-09-06-124231/\n?? bench/log/linux/2026-09-06-124643/\n?? bench/log/linux/2026-09-06-124852/\n?? bench/log/linux/2026-09-06-125109/",
+      "source_sha256": "552037bd0c054c70ef338bb3028f1ededd7e89bb3fd14e2f3b2e7011fa2cd047",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-ab-factor/boehm"
+      ],
+      "binary_sha256": "ef5b04573b8fe00bd58ea83c34907b03681feeeb350691301d727b029a4b3ea4",
+      "shard_lock_sha256": "d3ac77d589a6ab467cd6953d9b93417df4a40a92b3e90c3701d29bbfb242d6b3",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/uzumaki/playground/gcry",
+      "copy_of": "boehm"
+    },
+    {
+      "name": "factor100",
+      "root": "/home/uzumaki/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {},
+      "binary": "/tmp/gcry-ab-factor/factor100",
+      "gcry": true,
+      "commit": "fd8835a240e8f191bf217da84223157188ea2daa",
+      "tree": "6ae4781531715ac41f5a06af057ba6ac663b14b7",
+      "dirty": "?? bench/log/linux/2026-09-06-060048/\n?? bench/log/linux/2026-09-06-060320/\n?? bench/log/linux/2026-09-06-124019/\n?? bench/log/linux/2026-09-06-124231/\n?? bench/log/linux/2026-09-06-124643/\n?? bench/log/linux/2026-09-06-124852/\n?? bench/log/linux/2026-09-06-125109/",
+      "source_sha256": "552037bd0c054c70ef338bb3028f1ededd7e89bb3fd14e2f3b2e7011fa2cd047",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-ab-factor/factor100"
+      ],
+      "binary_sha256": "dc828ed347f4653ee8811dd4f06ed2a35aef461b3605206a11e1dcbb0784f91b",
+      "shard_lock_sha256": "d3ac77d589a6ab467cd6953d9b93417df4a40a92b3e90c3701d29bbfb242d6b3",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/uzumaki/playground/gcry"
+    },
+    {
+      "name": "factor75",
+      "root": "/home/uzumaki/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {
+        "GCRY_THRESHOLD_FACTOR": "75"
+      },
+      "binary": "/tmp/gcry-ab-factor/factor75",
+      "gcry": true,
+      "commit": "fd8835a240e8f191bf217da84223157188ea2daa",
+      "tree": "6ae4781531715ac41f5a06af057ba6ac663b14b7",
+      "dirty": "?? bench/log/linux/2026-09-06-060048/\n?? bench/log/linux/2026-09-06-060320/\n?? bench/log/linux/2026-09-06-124019/\n?? bench/log/linux/2026-09-06-124231/\n?? bench/log/linux/2026-09-06-124643/\n?? bench/log/linux/2026-09-06-124852/\n?? bench/log/linux/2026-09-06-125109/",
+      "source_sha256": "552037bd0c054c70ef338bb3028f1ededd7e89bb3fd14e2f3b2e7011fa2cd047",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-ab-factor/factor75"
+      ],
+      "binary_sha256": "dc828ed347f4653ee8811dd4f06ed2a35aef461b3605206a11e1dcbb0784f91b",
+      "shard_lock_sha256": "d3ac77d589a6ab467cd6953d9b93417df4a40a92b3e90c3701d29bbfb242d6b3",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/uzumaki/playground/gcry"
+    },
+    {
+      "name": "factor50",
+      "root": "/home/uzumaki/playground/gcry",
+      "flags": [
+        "--release",
+        "-Dgc_none"
+      ],
+      "env": {
+        "GCRY_THRESHOLD_FACTOR": "50"
+      },
+      "binary": "/tmp/gcry-ab-factor/factor50",
+      "gcry": true,
+      "commit": "fd8835a240e8f191bf217da84223157188ea2daa",
+      "tree": "6ae4781531715ac41f5a06af057ba6ac663b14b7",
+      "dirty": "?? bench/log/linux/2026-09-06-060048/\n?? bench/log/linux/2026-09-06-060320/\n?? bench/log/linux/2026-09-06-124019/\n?? bench/log/linux/2026-09-06-124231/\n?? bench/log/linux/2026-09-06-124643/\n?? bench/log/linux/2026-09-06-124852/\n?? bench/log/linux/2026-09-06-125109/",
+      "source_sha256": "552037bd0c054c70ef338bb3028f1ededd7e89bb3fd14e2f3b2e7011fa2cd047",
+      "build": [
+        "crystal",
+        "build",
+        "--release",
+        "-Dgc_none",
+        "src/server.cr",
+        "-o",
+        "/tmp/gcry-ab-factor/factor50"
+      ],
+      "binary_sha256": "dc828ed347f4653ee8811dd4f06ed2a35aef461b3605206a11e1dcbb0784f91b",
+      "shard_lock_sha256": "d3ac77d589a6ab467cd6953d9b93417df4a40a92b3e90c3701d29bbfb242d6b3",
+      "server_source_sha256": "0ddfc6bb93c44097f3a918ba527b9401e426cc5d01ab590e4d3550be1f1bff7e",
+      "gcry_lib": "/home/uzumaki/playground/gcry"
+    }
+  ],
+  "compiler": "Crystal 1.21.0 [4da7e07] (2026-07-23)\n\nLLVM: 22.1.8\nDefault target: x86_64-pc-linux-gnu",
+  "platform": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+  "cpu": "processor\t: 0\nvendor_id\t: AuthenticAMD\ncpu family\t: 26\nmodel\t\t: 36\nmodel name\t: AMD Ryzen AI 9 465 w/ Radeon 880M\nstepping\t: 0\nmicrocode\t: 0xb204037\ncpu MHz\t\t: 5038.688\ncache size\t: 1024 KB\nphysical id\t: 0\nsiblings\t: 20\ncore id\t\t: 0\ncpu cores\t: 10\napicid\t\t: 0\ninitial apicid\t: 0\nfpu\t\t: yes\nfpu_exception\t: yes\ncpuid level\t: 16\nwp\t\t: yes\nflags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx_vnni avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid bus_lock_detect movdiri movdir64b overflow_recov succor smca fsrm avx512_vp2intersect flush_l1d amd_lbr_pmc_freeze\nbugs\t\t: sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass srso spectre_v2_user vmscape\nbogomips\t: 3992.86\nTLB size\t: 192 4K pages\nclflush size\t: 64\ncache_alignment\t: 64\naddress sizes\t: 48 bits physical, 48 bits virtual\npower management: ts ttp tm hwpstate cpb eff_freq_ro [13] [14]",
+  "cpu_count": 20,
+  "affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "clk_tck": 100,
+  "config": {
+    "config": "/tmp/arms_factor.json",
+    "output": "/tmp/gcry-ab-factor",
+    "rounds": 20,
+    "seconds": 15,
+    "warmup": 3,
+    "threads": 4,
+    "connections": 100,
+    "port": 4400,
+    "path": "/json"
+  },
+  "rate_clock": "monotonic_ns around wrk subprocess, including startup/exit overhead"
+}

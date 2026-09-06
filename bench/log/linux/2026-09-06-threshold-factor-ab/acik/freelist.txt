@@ -1,0 +1,16 @@
+=== acikturkiye A/B (paired, order-rotated) — /api/v1/, wrk -c 100 -d 20, 8 trials ===
+host load at start: 9.73 9.40 7.84
+  trial 1 [boehm first]  boehm   1092.87 r/s    52304 KiB | gcry    937.83 r/s    82468 KiB  -> thr 85.8% rss 1.58x  col=262 heap=83340K
+  trial 2 [gcry first]  boehm   1176.03 r/s    52512 KiB | gcry   1117.06 r/s    80600 KiB  -> thr 95.0% rss 1.53x  col=307 heap=79760K
+  trial 3 [boehm first]  boehm   1311.15 r/s    56188 KiB | gcry    982.75 r/s    82264 KiB  -> thr 74.9% rss 1.46x  col=274 heap=82676K
+  trial 4 [gcry first]  boehm   1264.04 r/s    58120 KiB | gcry    935.87 r/s    81600 KiB  -> thr 74.0% rss 1.40x  col=262 heap=79992K
+  trial 5 [boehm first]  boehm   1302.76 r/s    55448 KiB | gcry   1089.23 r/s    81528 KiB  -> thr 83.6% rss 1.47x  col=300 heap=81488K
+  trial 6 [gcry first]  boehm   1322.68 r/s    61440 KiB | gcry   1029.10 r/s    80404 KiB  -> thr 77.8% rss 1.31x  col=285 heap=80536K
+  trial 7 [boehm first]  boehm   1257.71 r/s    56916 KiB | gcry   1109.87 r/s    80352 KiB  -> thr 88.2% rss 1.41x  col=306 heap=79632K
+  trial 8 [gcry first]  boehm   1141.82 r/s    50880 KiB | gcry    827.00 r/s    80128 KiB  -> thr 72.4% rss 1.57x  col=234 heap=80680K
+host load at end:   11.13 9.67 8.52
+  median of per-trial thr ratios: 80.7% of Boehm
+  median of per-trial RSS ratios: 1.47x Boehm
+  thr ratios: 0.8581 0.9499 0.7495 0.7404 0.8361 0.7780 0.8825 0.7243
+  rss ratios: 1.5767 1.5349 1.4641 1.4040 1.4704 1.3087 1.4118 1.5748
+  trials used: 8 of 8 (0 died)
