@@ -1,0 +1,7 @@
+[
+  {"name": "boehm", "root": "/home/uzumaki/playground/gcry", "flags": ["--release"]},
+  {"name": "null", "copy_of": "boehm"},
+  {"name": "header", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {}},
+  {"name": "bitmap", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {"GCRY_BITMAP_ALLOC": "1"}},
+  {"name": "headerless", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none", "-Dgcry_headerless"], "env": {}}
+]
