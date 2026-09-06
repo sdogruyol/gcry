@@ -26,10 +26,13 @@ path; each ships with a spec that is red without it.
   stacks. The flag is re-read after the occupancy store, as the locked path
   does; hit path cost unchanged (54–58 ns either side)
   (`spec/fast_alloc_allocate_black_spec.cr`).
-- **A cursor set the C heap refused was dereferenced at `0xb8`.** The null
-  from `LibC.malloc` was cached and then indexed under the class lock; it is
-  now `OutOfMemoryError` from `malloc`, and the thread asks again once the C
-  heap recovers (`spec/cursor_set_oom_spec.cr`).
+- **Bitmap allocation now reports cursor-metadata exhaustion as OOM** (#35,
+  stakach). If the C allocator could not create even the shared cursor set,
+  the locked bitmap path dereferenced the null set (SIGSEGV at `0xb8` under
+  the class lock) before its existing retry and OOM handling. It now returns
+  allocation failure while holding the class lock, then retries collection
+  and raises after releasing that lock. A fault-injection spec also covers
+  recovery and the per-thread-set fallback (`spec/cursor_failure_spec.cr`).
 - **A fork child kept a `@cursor_lock` a dead thread held, and the dead
   threads' sets.** The lock is rebuilt with the others, and every set the
   survivor does not own is marked exiting so the next stop-the-world frees
@@ -151,14 +154,6 @@ docs said it did. Everything else new is behind `GCRY_BITMAP_ALLOC=1`.
   8 MiB it was calibrated at. Numbers in
   `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
 
-### Fixed
-
-- **Bitmap allocation now reports cursor-metadata exhaustion as OOM.** If the
-  C allocator could not create even the shared cursor set, the locked bitmap
-  path dereferenced the null set before its existing retry and OOM handling.
-  It now returns allocation failure while holding the class lock, then retries
-  collection and raises after releasing that lock. A fault-injection spec also
-  covers recovery and the per-thread-set fallback.
 - **A live `Array` buffer was freed under a `--release` loop that held only
   an interior pointer into it.** `live[i % n]` in a hot loop is
   strength-reduced by LLVM to a register holding `buffer + k*8`; the base is
