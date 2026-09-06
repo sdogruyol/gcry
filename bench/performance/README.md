@@ -1,11 +1,17 @@
 # PR #34 performance measurements
 
 `kemal_ab.py` builds each arm from its own checkout, checks its gcry shard,
-then rotates the order each round. Linux only (`/proc`); Python standard
-library, Crystal, shards, and wrk are required. Build sequentially and do not
-edit a source tree during the build/run. An existing shard lock is shared with
-new worktrees; mismatched existing locks are rejected. If no arm has a lock,
-the first arm resolves dependencies once and the others use that lock. Use a quiet host.
+then rotates the order each round. Linux reads the per-process counters from
+`/proc`; Darwin reads them from libproc (`proc_pidinfo` for faults, resident
+size and CPU time, `proc_pid_rusage` for the peak), and the manifest's
+`proc_stats` names which. On Darwin `hwm_kb` is the lifetime peak
+*phys_footprint* (the number the kernel keeps a high-water mark of) where
+Linux reports peak RSS, and `cpu_ticks` are nanoseconds with `clk_tck` = 1e9.
+Python standard library, Crystal, shards, and wrk are required. Build
+sequentially and do not edit a source tree during the build/run. An existing
+shard lock is shared with new worktrees; mismatched existing locks are
+rejected. If no arm has a lock, the first arm resolves dependencies once and
+the others use that lock. Use a quiet host.
 
 Example `arms.json` (replace checkout paths):
 
@@ -19,7 +25,8 @@ Example `arms.json` (replace checkout paths):
 ```
 
 Default flags are `--release -Dgc_none -Dgcry_headerless`. Set flags explicitly
-for header builds; use `GCRY_BITMAP_ALLOC=1` in `env` for bitmap with headers.
+for header builds; the bitmap allocator is the process default there since
+0.24.0, so put `GCRY_BITMAP_ALLOC=0` in `env` for a freelist arm.
 `copy_of` uses exactly the reference binary and environment for a null arm.
 Inherited `GCRY_*`, `EC_PARALLELISM`, and `CRYSTAL_WORKERS` are removed; put
 every arm's tuning variables in its `env` object.

@@ -2,6 +2,8 @@
 """Build and measure rotated, paired Kemal trials. See README.md for config."""
 
 import argparse
+import ctypes
+import ctypes.util
 import hashlib
 import json
 import os
@@ -11,9 +13,15 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
+
+# cpu_ticks are in 1/CLK_TCK seconds. Linux reads them from /proc in
+# SC_CLK_TCK units; Darwin reads nanoseconds from libproc, so its rows carry
+# 1e9 and every trial row says which.
+CLK_TCK = 1_000_000_000 if sys.platform == "darwin" else os.sysconf("SC_CLK_TCK")
 
 
 def command(args, cwd=None):
@@ -21,6 +29,8 @@ def command(args, cwd=None):
 
 
 def proc_stats(pid):
+    if sys.platform == "darwin":
+        return darwin_proc_stats(pid)
     # comm may contain spaces or parentheses: fields after the final ')' start at 3.
     fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     status = Path(f"/proc/{pid}/status").read_text()
@@ -29,6 +39,50 @@ def proc_stats(pid):
         "cpu_ticks": int(fields[11]) + int(fields[12]),
         "hwm_kb": int(re.search(r"VmHWM:\s+(\d+)", status)[1]),
         "rss_kb": int(re.search(r"VmRSS:\s+(\d+)", status)[1]),
+    }
+
+
+class ProcTaskInfo(ctypes.Structure):
+    # <sys/proc_info.h> struct proc_taskinfo, PROC_PIDTASKINFO = 4.
+    _fields_ = [(name, ctypes.c_uint64) for name in (
+        "virtual_size", "resident_size", "total_user", "total_system", "threads_user", "threads_system",
+    )] + [(name, ctypes.c_int32) for name in (
+        "policy", "faults", "pageins", "cow_faults", "messages_sent", "messages_received",
+        "syscalls_mach", "syscalls_unix", "csw", "threadnum", "numrunning", "priority",
+    )]
+
+
+class RusageInfoV4(ctypes.Structure):
+    # <sys/resource.h> struct rusage_info_v4: a 16-byte uuid then 35 uint64s;
+    # only the lifetime max footprint (index 28) is read.
+    _fields_ = [("uuid", ctypes.c_uint8 * 16), ("words", ctypes.c_uint64 * 35)]
+
+
+class MachTimebase(ctypes.Structure):
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
+def darwin_proc_stats(pid):
+    # No /proc. Same four numbers from libproc, which answers for any process
+    # of the calling user. Times come back in mach_absolute_time units (125/3
+    # ns per unit on Apple Silicon, 1/1 on Intel), hence the timebase.
+    # `hwm_kb` is the lifetime peak *phys_footprint* — the number Darwin keeps
+    # a high-water mark of — where Linux reports peak RSS (VmHWM); `rss_kb` is
+    # the resident size, what `ps -o rss` shows.
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    info = ProcTaskInfo()
+    if libc.proc_pidinfo(pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info):
+        raise OSError(ctypes.get_errno(), f"proc_pidinfo(PROC_PIDTASKINFO) failed for pid {pid}")
+    usage = RusageInfoV4()
+    if libc.proc_pid_rusage(pid, 4, ctypes.byref(usage)) != 0:
+        raise OSError(ctypes.get_errno(), f"proc_pid_rusage(RUSAGE_INFO_V4) failed for pid {pid}")
+    timebase = MachTimebase()
+    libc.mach_timebase_info(ctypes.byref(timebase))
+    return {
+        "minflt": info.faults,
+        "cpu_ticks": (info.total_user + info.total_system) * timebase.numer // timebase.denom,
+        "hwm_kb": usage.words[28] // 1024,
+        "rss_kb": info.resident_size // 1024,
     }
 
 
@@ -87,7 +141,7 @@ def trial(args, arm, directory, port):
         if key.startswith("GCRY_") or key in ("EC_PARALLELISM", "CRYSTAL_WORKERS", "BENCH_HEADER_POLICY"):
             del env[key]
     env.update(arm["env"], PORT=str(port))
-    row = {"arm": arm["name"], "load1": os.getloadavg()[0], "clk_tck": os.sysconf("SC_CLK_TCK")}
+    row = {"arm": arm["name"], "load1": os.getloadavg()[0], "clk_tck": CLK_TCK}
     check_port(port)
     with (directory / "server.log").open("w") as log:
         server = subprocess.Popen([arm["binary"]], env=env, stdout=log, stderr=log, start_new_session=True)
@@ -218,10 +272,17 @@ def main():
     if len(config) < 2:
         parser.error("supply at least two arms, including a reference")
     arms = build_arms(config, args.output)
+    if sys.platform == "darwin":
+        cpu = command(["sysctl", "-n", "machdep.cpu.brand_string"])
+        proc_stats_source = "libproc: proc_pidinfo(PROC_PIDTASKINFO) faults/resident/cpu, proc_pid_rusage(V4) lifetime max phys_footprint as hwm_kb"
+    else:
+        cpu = Path("/proc/cpuinfo").read_text().split("\n\n", 1)[0]
+        proc_stats_source = "/proc/<pid>/stat minflt/utime+stime, /proc/<pid>/status VmHWM/VmRSS"
     manifest = dict(arms=arms, compiler=command(["crystal", "--version"]),
-                    platform=platform.platform(), cpu=Path("/proc/cpuinfo").read_text().split("\n\n", 1)[0],
-                    cpu_count=os.cpu_count(), affinity=sorted(os.sched_getaffinity(0)),
-                    clk_tck=os.sysconf("SC_CLK_TCK"), config=vars(args),
+                    platform=platform.platform(), cpu=cpu, cpu_count=os.cpu_count(),
+                    affinity=sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None,
+                    page_size=os.sysconf("SC_PAGESIZE"), clk_tck=CLK_TCK, proc_stats=proc_stats_source,
+                    config=vars(args),
                     rate_clock="monotonic_ns around wrk subprocess, including startup/exit overhead")
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
     failed = False
