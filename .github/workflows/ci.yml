@@ -510,6 +510,13 @@ jobs:
         run: |
           make poison-freed
 
+      # v0.22.0 freed a live Array buffer under a --release loop that held
+      # only an interior pointer. Interiors are on by default now; the
+      # base-only control arm must still fault.
+      - name: Interior-only buffer
+        run: |
+          make interior-only-buffer
+
       # And the reporter that reads the poison back: a crash now says whether
       # the address was in the heap, in a free block, in a used one, or nowhere
       # gcry mapped. Tested by crashing, one child process per shape.

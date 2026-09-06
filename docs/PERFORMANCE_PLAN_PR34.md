@@ -29,6 +29,16 @@ The 20-round paired headerless run contains a Boehm null control and separate up
 | Retention + adaptive threshold | 100.9%, [96.8, 105.1] | 0.97 | 5.0 | 204 |
 | PR with per-thread cursors | 106.7%, [102.2, 111.2] | 0.97 | 4.8 | 193 |
 
+**Superseded.** The cursor row was measured on the single-mutator prototype
+(`a0ec7d7`), withdrawn after review for an unsound fast path; the shipped
+per-thread cursor sets measured 97.7% of Boehm [93.6, 101.8] at 1.28× its
+peak RSS on an independent quiet pinned box (`b360bcd`, n=12, identical-binary
+null control 98.8%) and 105.9% [101.2, 110.6] at 1.03× on the author's host
+(PR head, five-arm baseline) — see
+`../bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Neither
+106.7% nor 0.97× describes the merged code, and no 20-round paired run exists
+at or after the stage-2 commits.
+
 Re-running the analysis with `policy-hl` as reference gives **+5.8% for cursors over policy alone**, with a ratio CI of **+3.2% to +8.5%**, n=20. That direct comparison supports the cursor work more clearly than comparing two separate intervals against Boehm.
 
 The [header-allocator trials](../bench/log/linux/2026-09-04-alloc-fast-path/trials_header.jsonl) still show about **1,548 faults / 1,000 requests** and **2.48× Boehm peak RSS** for the PR. Re-analysis against the upstream header arm gives +2.8%, CI −6.3% to +11.8%, n=10: the result is inconclusive, establishing neither an improvement nor parity. This remains a substantial opportunity for users who build only with `-Dgc_none`.

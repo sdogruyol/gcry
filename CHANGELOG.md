@@ -45,10 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process-wide "single mutator" flag that skipped the locks while one thread
   existed and exempted the runtime's SYSMON thread — which allocates its main
   `Fiber` at start-up, so two threads popped one freelist head
-  (`process_spec/regression/7_sysmon_alloc_race_spec.cr`). Headerless
-  48-byte `malloc` 50.5 → 21.6 ns, `malloc_atomic` 34.0 → 8.8 ns on the
-  single-cursor prototype (Boehm's pure path: 15–17 / ~10 ns); the per-thread
-  numbers are in `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
+  (`process_spec/regression/7_sysmon_alloc_race_spec.cr`). As shipped,
+  headerless 48-byte `malloc` is 31–32 ns on one thread and 29 ns aggregate
+  across four (Boehm in the same harness, collection on: 131 / 135;
+  `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`). The 21.6 /
+  8.8 ns and the "111.8% of Boehm at 0.97× RSS" figures in the earlier logs
+  (`2026-09-04-alloc-fast-path`, `2026-09-05-cursor-sets`) belong to the
+  withdrawn single-mutator prototype and are superseded, not reproduced.
 - **Emptied bitmap chunks are kept warm up to a budget that follows the
   live set instead of being released.** Under the bitmap allocator an
   emptied chunk is reusable in place, and releasing it made every 8 KiB
@@ -71,6 +74,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defaults. `GCRY_TIGHT_GROW`'s collect-before-grow floor is pinned at the
   8 MiB it was calibrated at. Numbers in
   `bench/log/linux/2026-09-04-alloc-fast-path/FINDINGS.md`.
+
+### Fixed
+
+- **A live `Array` buffer was freed under a `--release` loop that held only
+  an interior pointer into it.** `live[i % n]` in a hot loop is
+  strength-reduced by LLVM to a register holding `buffer + k*8`; the base is
+  dead and the `Array` object's spill slot is dropped once nothing reads it,
+  so base-only ambient marking found no pointer *at* the buffer and released
+  the chunk under the loop — SIGSEGV 3 of 3 on a 40-line program (400 000
+  `Node`s + allocation churn), `GCRY_SEGV_REPORT=1` naming "a chunk gcry
+  RELEASED … large-object release, at collection 1"; the debug build, which
+  keeps the base live, never faulted. bdwgc as Crystal links it has always
+  resolved interiors, so every Crystal release before gcry ran this shape
+  safely. `allow_interior_pointers` is now **on** for the process heap
+  (measured −0.1% on Kemal `/json`, docs/SOUND-DEFAULTS.md);
+  `GCRY_DISABLE_INTERIOR=1` is the measurement escape and `GCRY_INTERIOR=1`
+  is gone. `make interior-only-buffer` (CI) runs both arms: the default must
+  keep its objects intact, the base-only arm must fault.
+- **The header allocator handed out un-zeroed memory as clean, and counted a
+  dormant chunk's capacity twice.** Both are master defects the PR #34 audit
+  found on the default (header) path: a block claimed from the class freelist
+  outside the class lock could be cleared *after* a peer refilled the class,
+  so the caller's zeroing raced the refill (`spec/header_clear_race_spec.cr`);
+  and reviving a DORMANT header chunk rebuilt its headers without zeroing the
+  payloads — page release skips the metadata page and Darwin's reusable pages
+  keep their contents — while adding its capacity to `free_bytes` a second
+  time (`spec/header_dormant_spec.cr`). Both specs are red on 0.22.0, and the
+  dormant one is reachable on the macOS default, which retains 512 KiB of
+  dormant chunks (Linux retains none unless `GCRY_EMPTY_CHUNK_RETAIN` is set).
+- **The sweep's counter updates were plain get/set while mutators ran.** The
+  after-world sweep gated its atomic path on `@collecting`, which is already
+  false by then, so `live_objects_sub` / `free_bytes_add` raced every
+  allocating thread (`spec/sweep_counters_spec.cr`, red on 0.22.0). Gated on
+  `@world_stopped` now; the default build pays a CAS per reclaimed block
+  (+5.6% on the per-block lazy sweep).
+- **`GCRY_THRESHOLD_FACTOR` was ignored under a fixed `GCRY_THRESHOLD`.** The
+  factor was parsed inside the adaptive-threshold branch, so with a fixed
+  threshold the warm-retention budget followed live × 100% whatever the knob
+  said, against what HARDENING.md and the entry above promise. Parsed once,
+  before the threshold decision.
+- **`make heap-counters` could not see the loss it exists to show.** The
+  counter was read around `Thread.new` / `join`, and each thread's own
+  bootstrap allocates *inside* the thread, so +5..9 of bootstrap covered the
+  0–5 increments the plain path now loses per round (`lazy_set` narrowed the
+  race ~100× on 2026-09-05) — the control reported `lost 0` while losing,
+  3 of 5 runs locally, and the retry loop added to it only widened the odds.
+  The read now sits between a ready barrier and a done barrier: the atomic
+  arm counts exactly 1 200 000 of 1 200 000, the plain arm loses 10–29 on the
+  first round every run, and losses accumulate across rounds instead of
+  being asked of one.
+- **`make asan` failed on any box without `clang-19`.** `ci/asan_check.py`
+  now takes `clang-19` when present (CI), else `clang` on PATH; `CLANG=…`
+  still overrides.
 
 ### Added
 

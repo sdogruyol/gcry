@@ -1,5 +1,14 @@
 # Per-thread cursor sets: the unlocked allocation path on every thread
 
+> **Superseded (2026-09-06).** The Kemal figures below (106.7% of Boehm at
+> 0.97× RSS, 111.8% in the policy table) and the 21.6 / 8.8 ns microbench
+> rows were taken on the withdrawn single-mutator prototype (`a0ec7d7`),
+> not on the per-thread cursor sets that merged. The shipped numbers are in
+> `../2026-09-06-stage2-throughput/FINDINGS.md` (31–32 ns single-thread;
+> Kemal 97.7% of Boehm at 1.28× RSS on an independent pinned box for
+> `b360bcd`, 105.9% at 1.03× on the author's host for the PR head). Kept for
+> provenance.
+
 Branch `cursor-sets`, stacked on `perf-single-mutator` (PR #34: heap
 policy) on upstream `master` at 9bcd0e6. The paired Kemal run that places
 this branch against Boehm, upstream v0.22.0 and the heap-policy branch is

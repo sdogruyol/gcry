@@ -12,10 +12,24 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def default_clang():
+    """CI's runner ships `clang-19`; a developer box has whatever `clang` is on
+    PATH (22 on Arch today). Any clang new enough to read Crystal's IR can run
+    the ASan pass, so take the versioned name when present and fall back to the
+    bare one instead of failing with `FileNotFoundError: clang-19`."""
+    if env := os.environ.get("CLANG"):
+        return env
+    for name in ("clang-19", "clang"):
+        if shutil.which(name):
+            return name
+    return "clang-19"
 
 
 def build(source, output, crystal, clang, flags):
@@ -56,7 +70,7 @@ def build(source, output, crystal, clang, flags):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--crystal", default=os.environ.get("CRYSTAL", "crystal"))
-    parser.add_argument("--clang", default=os.environ.get("CLANG", "clang-19"))
+    parser.add_argument("--clang", default=default_clang())
     parser.add_argument("--source", type=Path, default=ROOT / "ci" / "asan_specs.cr")
     args = parser.parse_args()
     out = ROOT / "bin" / "asan"

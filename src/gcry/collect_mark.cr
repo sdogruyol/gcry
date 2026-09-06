@@ -27,7 +27,8 @@ module Gcry
     end
 
     # Ambient roots (stack / static / fiber stacks): optional type_id gate;
-    # base-pointer-only unless GCRY_INTERIOR=1 (cuts false retention).
+    # interiors resolved unless GCRY_DISABLE_INTERIOR=1 (base-only cuts false
+    # retention but frees buffers LLVM holds only by an interior pointer).
     #
     # type_id_gate applies to *static* roots only by default. Applying it to
     # stacks rejected live Channel/Deque buffers and similar raw allocations
@@ -555,7 +556,7 @@ module Gcry
       # ambient roots: an interior pointer stored inside a Slice / raw buffer is
       # dropped. It is also a second, silent consumer of type_id_plausible? —
       # so with @type_id_gate off, the type_id heuristic still steered marking
-      # from here. @allow_interior_pointers (GCRY_INTERIOR / GCRY_SOUND) now
+      # from here. @allow_interior_pointers (on by default; GCRY_DISABLE_INTERIOR) now
       # switches both off together, which is what makes `root_soundness=sound`
       # a true statement. See docs/SOUND-DEFAULTS.md.
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)

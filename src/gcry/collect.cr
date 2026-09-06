@@ -193,7 +193,9 @@ module Gcry
     # only ever report zero proves nothing.
     property large_release_from_base : Bool = false
     # When false (default for library heaps), only object-base pointers are marked.
-    # Process GC keeps this false; GCRY_INTERIOR=1 enables interiors for C embeds.
+    # Process GC turns it on at `GC.init`: under `--release` LLVM keeps only an
+    # interior pointer alive across a strength-reduced buffer loop, so base-only
+    # marking frees live buffers. GCRY_DISABLE_INTERIOR=1 is the escape.
     property allow_interior_pointers : Bool = false
     # Follow candidates whose *value* is not word-aligned. Crystal-emitted
     # references are aligned, so the default drops misaligned words cheaply

@@ -126,7 +126,15 @@ module GC
     # scans cut false root hits sharply — the abandon spiral is unlikely.
     # Escape: GCRY_DISABLE_BLACKLIST=1.
     # (blacklist_enabled set in the Darwin/Linux branches above.)
-    heap.allow_interior_pointers = false
+    # Interior pointers on ambient roots are a *soundness* requirement under
+    # LLVM -O3, not a tuning: a strength-reduced loop over an Array/String
+    # buffer keeps only `buffer + i*8` in a register while the base is dead,
+    # and base-only marking then frees the buffer under the loop. A 40-line
+    # program (400k-element Array + allocation churn) SIGSEGVs 3 of 3 on
+    # `--release` with this false; bdwgc as Crystal links it has always
+    # accepted interiors. Measured cost on Kemal /json: −0.1% (SOUND-DEFAULTS).
+    # Escape for measurement: GCRY_DISABLE_INTERIOR=1.
+    heap.allow_interior_pointers = true
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
@@ -321,6 +329,14 @@ module GC
     # override it, so this must run before them.
     apply_sound_profile(heap) if env_flag_one?("GCRY_SOUND")
 
+    # Live × factor sizes both the adaptive threshold and the warm-retention
+    # budget (`adapt_after_sweep`), and the budget follows it under a fixed
+    # `GCRY_THRESHOLD` too - so the factor is read once, outside the branch
+    # that decides whether the threshold adapts.
+    if pct = env_u64("GCRY_THRESHOLD_FACTOR")
+      heap.adaptive_threshold_pct = pct.clamp(10_u64, 1000_u64)
+    end
+
     if env_flag_one?("GCRY_DISABLE_AUTO")
       heap.gc_threshold = UInt64::MAX
     elsif thr = env_u64("GCRY_THRESHOLD")
@@ -336,9 +352,6 @@ module GC
       # none of the relief.
       heap.gc_threshold = Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
       heap.adaptive_threshold = true
-      if pct = env_u64("GCRY_THRESHOLD_FACTOR")
-        heap.adaptive_threshold_pct = pct.clamp(10_u64, 1000_u64)
-      end
       # Parallel EC: raise major threshold (see PROCESS_GC_THRESHOLD_PARALLEL).
       # Explicit GCRY_THRESHOLD above wins; EC1/default unchanged.
       if (ec = env_u64("EC_PARALLELISM")) && ec > 1
@@ -557,8 +570,8 @@ module GC
       end
     {% end %}
 
-    if env_flag_one?("GCRY_INTERIOR")
-      heap.allow_interior_pointers = true
+    if env_flag_one?("GCRY_DISABLE_INTERIOR")
+      heap.allow_interior_pointers = false
     end
 
     # Follow misaligned candidate *values* (interiors into byte buffers).

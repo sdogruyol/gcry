@@ -270,7 +270,7 @@ print(f\"  rss={d['rss_kib']} KiB{extra}\")"
 #   BENCH_CONFIGS='boehm
 #   tuned
 #   unaligned GCRY_UNALIGNED_CANDIDATES=1
-#   interior GCRY_INTERIOR=1' ./bench/sound_profile_ab.sh
+#   base-only GCRY_DISABLE_INTERIOR=1' ./bench/sound_profile_ab.sh
 CONFIGS="${BENCH_CONFIGS:-$(cat <<'EOF'
 boehm
 tuned
