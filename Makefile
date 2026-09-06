@@ -807,7 +807,7 @@ darwin-static-root-sections: $(BIN)
 darwin-bitmap-page-release: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/darwin_bitmap_page_release.cr -o $(BIN)/darwin_bitmap_page_release --error-trace
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release
-	GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --headers
+	GCRY_BITMAP_ALLOC=0 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --headers
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/darwin_bitmap_page_release --walk
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 GCRY_PAGE_RELEASE_UNCHECKED=1 $(BIN)/darwin_bitmap_page_release --unchecked
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --selfcheck

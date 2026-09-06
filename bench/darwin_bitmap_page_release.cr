@@ -50,7 +50,7 @@
 #   GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 bin/darwin_bitmap_page_release
 #   GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 \
 #     bin/darwin_bitmap_page_release --walk
-#   GCRY_PAGE_DONTNEED=1 bin/darwin_bitmap_page_release --headers
+#   GCRY_BITMAP_ALLOC=0 GCRY_PAGE_DONTNEED=1 bin/darwin_bitmap_page_release --headers
 
 require "../src/gcry"
 
@@ -245,7 +245,7 @@ when "default", "walk", "unchecked"
   end
 when "headers"
   if bitmap_alloc
-    failures << "harness: --headers must run without GCRY_BITMAP_ALLOC=1"
+    failures << "harness: --headers must run with GCRY_BITMAP_ALLOC=0 (the bitmap allocator is the process default)"
   end
 end
 if (arm == "walk" || arm == "unchecked") && !walk_knob

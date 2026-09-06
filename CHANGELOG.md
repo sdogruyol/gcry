@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes under it (`bench/live_graph_audit.cr` pins the freelist, since both
   walks it audits are freelist paths); CI keeps a `GCRY_BITMAP_ALLOC=0`
   process-spec arm on Linux, aarch64 and Darwin.
+- **An explicit `GC.collect` releases the warm chunks.** The warm-chunk
+  budget keeps emptied chunks mapped for the *next* allocation-driven
+  cycle; an explicit collect (and the emergency retry before
+  `OutOfMemoryError`) is a request for memory back, so it sweeps with the
+  budget and the unmap grace off. Post-collect RSS is the live footprint
+  again — Kemal `/json` after `/gc-collect` 15.2 MB against Boehm's 12.9
+  here, where the resident warm chunks had read 1.61× on the CI runner —
+  and automatic cycles are untouched. `warm_released_collects` on
+  `/gc-stats`.
 - **`GCRY_INCREMENTAL=1` is documented as unsound under more than one
   mutator thread.** The PR #34 review's allocation stress
   (`bench/incremental_mt_stress.cr`: cross-thread free, realloc, tagged

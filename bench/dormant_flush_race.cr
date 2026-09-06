@@ -253,9 +253,21 @@ if ARGV.includes?("--child")
     end
   end
 
+  # A breath between collections. Back to back, the world is stopped for all
+  # but the post-STW section, and that section is the *only* time the
+  # workers run: 2.5 ms of lazy freelist sweep per cycle, but ~0.2 ms under
+  # the bitmap allocator, whose streaming sweep is 40x shorter. Measured on
+  # this shape (40 000 ballast, 4 workers, 8 000 large alloc+free): 29
+  # collections and 1.1 s with the freelist, 305 collections and 11.6 s
+  # with the bitmap allocator at the same 37 ms pause - the workers were not
+  # slower, they were starved, and the CI runner's 120 s deadline read the
+  # starvation as a hang (12 of 12 children, 2026-09-06). The race the walk
+  # is being tested for happens in the post-STW section either way; the
+  # sleep changes how often it is entered, not what happens inside it.
   collector = Thread.new do
     until Verdict.finished >= WORKERS
       GC.collect
+      Thread.sleep(1.millisecond) # a bare Thread has no context for `sleep`
     end
   end
 
@@ -368,12 +380,24 @@ def run(exe : String, env, attempts : Int32) : {Int32, Int32, String?}
         l.includes?("gcry:") || l.includes?("Invalid memory access") ||
           l.includes?("Unhandled exception") || l.includes?("refused 0x")
       end
+      # A child killed on the deadline with nothing quotable above still
+      # said *something* before it wedged; the last lines are the only
+      # record of where.
+      if result.timed_out && first.nil?
+        tail = result.output.lines.last(6)
+        first = "killed on the deadline; last output: " + (tail.empty? ? "(none)" : tail.join(" | "))
+      end
     end
   end
   {bad, hung, first}
 end
 
-base = {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_UNMAP_GUARD" => "1", "GCRY_SEGV_REPORT" => "1"}
+# The watchdog is armed in every child: a child killed on the deadline with
+# no phase named is the one outcome this harness cannot read (2026-09-06:
+# 12 of 12 children on the CI runner, none locally), and the watcher is a
+# raw pthread that costs nothing until a stop outlives its bound.
+base = {"GCRY_MOSTLY_EMPTY" => "1", "GCRY_UNMAP_GUARD" => "1", "GCRY_SEGV_REPORT" => "1",
+        "GCRY_STW_WATCHDOG_MS" => "5000"}
 immediate = base.merge({"GCRY_TRIM_IMMEDIATE" => "1"})
 
 failures = [] of String
