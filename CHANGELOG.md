@@ -7,33 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **A unit spec assumed the main fiber runs on the initial thread; since
-  Crystal 1.21 it need not.** The execution context's monitor hands a
-  scheduler whose thread it catches inside `open(2)` to a pool thread, and
-  the main fiber carries on there — one move per ~1 000–3 000 `File.open`
-  calls, measured — while `Thread.current.name` still reads `DEFAULT-0`.
-  `spec/stack_bounds_snapshot_spec.cr`'s `RLIMIT_STACK` arm then measured a
-  pool thread's mmap (low `0x7fbb38e49000`, 275 GiB below the top of user
-  space, unmoved by the halving; CI 34051069821, 1 of 3 runs). The example
-  now records the initial thread at load (`SpecInitialThread`) and is
-  pending, saying why, when it is not on it. Nothing in the collector
-  changed: `GC.init` records the initial thread by pthread id, and threads
-  do not move.
-- **The bench RSS reader moved the thread it was measuring.** The same
-  monitor move, from inside `BenchRss.read_kb?`'s `File.open` of
-  `/proc/self/status`: under the bitmap allocator the pool thread the main
-  fiber lands on takes its own cursor set — a chunk per size class in use —
-  and `heap_size` reads about 2× from then on (+92–111% on a 5.7 MB heap,
-  measured by forcing the move; the retired set's chunks stay in the warm
-  pool). The v0.24.0 tag run's rss-leak gate failed exactly so (CI
-  34051071982: heap 3.3 → 6.3 MB between cycles 10 and 15, "late-half grew
-  92.35%"), on a host whose reader opens nothing 0 of 40. The reader uses
-  `open(2)`/`read(2)` directly now, outside `Fiber.syscall`. The shape
-  itself is documented under `GCRY_BITMAP_ALLOC` in HARDENING: one-time,
-  inside the warm budget, not a leak.
-
 ## [0.24.0] - 2026-09-06
 
 Minor release, and the one that changes what the default build allocates
@@ -189,6 +162,34 @@ bounds; each ships with a spec that is red without it.
   (`stack_bounds_main_refreshed` on `/gc-stats`). A child forked from a
   non-initial thread also drops the dead main thread's `pthread_t` as the
   cache key, which a new thread could otherwise have been handed.
+
+Two harness findings from the release's own CI runs, both the same Crystal
+1.21 behaviour seen from two sides:
+
+- **A unit spec assumed the main fiber runs on the initial thread; since
+  Crystal 1.21 it need not.** The execution context's monitor hands a
+  scheduler whose thread it catches inside `open(2)` to a pool thread, and
+  the main fiber carries on there — one move per ~1 000–3 000 `File.open`
+  calls, measured — while `Thread.current.name` still reads `DEFAULT-0`.
+  `spec/stack_bounds_snapshot_spec.cr`'s `RLIMIT_STACK` arm then measured a
+  pool thread's mmap (low `0x7fbb38e49000`, 275 GiB below the top of user
+  space, unmoved by the halving; CI 34051069821, 1 of 3 runs). The example
+  now records the initial thread at load (`SpecInitialThread`) and is
+  pending, saying why, when it is not on it. Nothing in the collector
+  changed: `GC.init` records the initial thread by pthread id, and threads
+  do not move.
+- **The bench RSS reader moved the thread it was measuring.** The same
+  monitor move, from inside `BenchRss.read_kb?`'s `File.open` of
+  `/proc/self/status`: under the bitmap allocator the pool thread the main
+  fiber lands on takes its own cursor set — a chunk per size class in use —
+  and `heap_size` reads about 2× from then on (+92–111% on a 5.7 MB heap,
+  measured by forcing the move; the retired set's chunks stay in the warm
+  pool). The v0.24.0 tag run's rss-leak gate failed exactly so (CI
+  34051071982: heap 3.3 → 6.3 MB between cycles 10 and 15, "late-half grew
+  92.35%"), on a host whose reader opens nothing 0 of 40. The reader uses
+  `open(2)`/`read(2)` directly now, outside `Fiber.syscall`. The shape
+  itself is documented under `GCRY_BITMAP_ALLOC` in HARDENING: one-time,
+  inside the warm budget, not a leak.
 
 ## [0.23.0] - 2026-09-06
 
