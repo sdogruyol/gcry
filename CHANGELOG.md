@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-06
+
+Minor release. Two things happened since 0.22.0, and one of them changes
+what the default build does.
+
+**The collector now resolves interior pointers on the default build.** Under
+`--release`, LLVM strength-reduces `live[i % n]` in a hot loop to a register
+holding `buffer + k*8`; the base pointer is dead, and a base-only conservative
+mark found no root at the buffer and freed it under the loop — a 40-line
+program faulted 3 of 3 on 0.22.0, the debug build never did. That is the
+shape of the live-object reclaims seen in production, and it is the one class
+of root bdwgc has always honoured that gcry did not. `allow_interior_pointers`
+is on for the process heap now (measured −0.1% throughput on Kemal `/json`;
+RSS inside noise on this box), `GCRY_DISABLE_INTERIOR=1` is the escape, and
+`make interior-only-buffer` keeps both arms honest in CI. If you run 0.22.x in
+production, upgrade for this line alone.
+
+**Under the bitmap allocator, every thread allocates through its own cursor
+set** (PR #34, stakach): lock-free small-object allocation per thread, a
+collection threshold and warm-chunk budget that follow the live set, a
+lock-free `realloc`/`free` chunk lookup through the radix, one cycle of grace
+before an emptied chunk is unmapped, and the initial thread's stack bounds
+taken once. Headerless 48-byte `malloc` 31–32 ns on one thread and 29 ns
+aggregate across four (Boehm 131 / 135 in the same harness); Kemal `/json`
+page faults 1 256 → ≈5 per 1 000 requests. All of it is gated on
+`GCRY_BITMAP_ALLOC=1`, which stays **off by default**; the header build gets
+no policy change. The review of that PR also found three defects in the
+default (header) allocator that 0.22.0 shipped — un-zeroed memory handed out
+as clean under a peer refill, dormant-chunk revival that neither zeroed nor
+accounted once, and sweep counters that were plain get/set while mutators
+ran — each closed with a spec that is red on 0.22.0.
+
+Upgrading: no API change. One knob removed (`GCRY_INTERIOR=1`, now the
+default) and one added in its place (`GCRY_DISABLE_INTERIOR=1`);
+`GCRY_THRESHOLD_FACTOR` now applies under a fixed `GCRY_THRESHOLD` as the
+docs said it did. Everything else new is behind `GCRY_BITMAP_ALLOC=1`.
+
 ### Changed
 
 - **Less collector on the Kemal main thread at the same RSS.** A main-thread
@@ -2826,7 +2863,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/sdogruyol/gcry/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sdogruyol/gcry/compare/v0.21.3...v0.22.0
 [0.21.3]: https://github.com/sdogruyol/gcry/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sdogruyol/gcry/compare/v0.21.1...v0.21.2
