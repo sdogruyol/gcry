@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+Six items the PR #34 review carried over, none on the default (header)
+path; each ships with a spec that is red without it.
+
+- **A shared cursor slot's in-flight root could be erased by a peer.** Past
+  the 64th thread (or after a `pthread_key_create` failure) threads share the
+  fallback cursor set, and `clear_bitmap_alloc_in_flight` stored null into
+  the slot unconditionally after the class lock was released — over a peer's
+  sentinel or freshly published address, the peer's only root until its
+  frame holds the block. Compare-and-clear on the locked path
+  (`spec/cursor_in_flight_clear_spec.cr`).
+- **A cycle that began marking mid-allocation left the hit path's block
+  white.** `fast_alloc` read `@incremental_marking` once, before the
+  sentinel; a thread frozen after that completed its allocation unmarked,
+  and the incremental cycle's finishing slice rescans dirty pages, not
+  stacks. The flag is re-read after the occupancy store, as the locked path
+  does; hit path cost unchanged (54–58 ns either side)
+  (`spec/fast_alloc_allocate_black_spec.cr`).
+- **A cursor set the C heap refused was dereferenced at `0xb8`.** The null
+  from `LibC.malloc` was cached and then indexed under the class lock; it is
+  now `OutOfMemoryError` from `malloc`, and the thread asks again once the C
+  heap recovers (`spec/cursor_set_oom_spec.cr`).
+- **A fork child kept a `@cursor_lock` a dead thread held, and the dead
+  threads' sets.** The lock is rebuilt with the others, and every set the
+  survivor does not own is marked exiting so the next stop-the-world frees
+  its slot (`spec/cursor_sets_after_fork_spec.cr`).
+- **`adapt_after_sweep` ran after `unlock_post_stw`**, so a peer collection
+  could overwrite the live-bytes it reads before it ran; it now runs inside
+  the section (`spec/adapt_after_sweep_ordering_spec.cr`).
+- **The initial thread's cached stack low never followed `RLIMIT_STACK`.**
+  glibc derives it from the soft limit; a program that raised the limit
+  after its first collection and grew its main stack below the cached low
+  had other threads' collections scan `[stale low, high)`. The soft limit is
+  read at each snapshot and a change re-derives the bounds
+  (`stack_bounds_main_refreshed` on `/gc-stats`). A child forked from a
+  non-initial thread also drops the dead main thread's `pthread_t` as the
+  cache key, which a new thread could otherwise have been handed.
+
 ## [0.23.0] - 2026-09-06
 
 Minor release. Two things happened since 0.22.0, and one of them changes
