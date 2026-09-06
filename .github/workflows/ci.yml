@@ -594,8 +594,17 @@ jobs:
 
       # The allocator hands out large chunks under @alloc_lock while the cache
       # trim walks the same list. Deterministic both ways: the old behaviour
-      # faults 5 of 5, serialised 0 of 5.
+      # faults 5 of 5, serialised 0 of 5 — until the v0.24.0 tag run
+      # (34051071982), where one locked child of five outlived its 120 s
+      # deadline on a workload that takes 0.3 s, and could say nothing about
+      # where it was: no watchdog was armed. 0 of 400 locked children on a
+      # Darwin host with the watchdog on, either allocator. Same arming as the
+      # STW property tests, so the next one names its phase.
       - name: Large-cache race
+        env:
+          GCRY_STW_WATCHDOG_MS: "10000"
+          GCRY_POISON_HOLDERS: "1"
+          GCRY_THREAD_CENSUS: "1"
         run: |
           make large-cache-race
 
