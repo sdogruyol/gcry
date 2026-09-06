@@ -47,13 +47,33 @@ module BenchRss
   # caller has to decide what to do about not knowing.
   def self.read_kb? : UInt64?
     {% if flag?(:linux) %}
-      File.open("/proc/self/status") do |f|
-        f.each_line do |line|
+      # Raw syscalls, not `File`. `File.open` runs under `Fiber.syscall`, and
+      # Crystal 1.21's execution-context monitor hands a scheduler it catches
+      # there to a pool thread; the main fiber then carries on *there*, which
+      # under the bitmap allocator is a second cursor set and a heap that reads
+      # about 2× — inside the sample that was taken to measure the heap. The
+      # v0.24.0 tag run's rss-leak gate failed exactly so (CI 34051071982: heap
+      # 3.3 → 6.3 MB between cycles 10 and 15, 0 of 40 on a host whose reader
+      # opens nothing). A reader must not move the thread it reads from.
+      fd = LibC.open("/proc/self/status", LibC::O_RDONLY | LibC::O_CLOEXEC, 0)
+      return nil if fd < 0
+      begin
+        buf = uninitialized UInt8[4096]
+        filled = 0
+        while filled < buf.size
+          n = LibC.read(fd, buf.to_unsafe + filled, buf.size - filled)
+          break if n <= 0
+          filled += n
+        end
+        return nil if filled == 0
+        String.new(buf.to_unsafe, filled).each_line do |line|
           if line.starts_with?("VmRSS:")
             parts = line.split
             return parts[1].to_u64 if parts.size >= 2
           end
         end
+      ensure
+        LibC.close(fd)
       end
       nil
     {% elsif flag?(:darwin) %}
