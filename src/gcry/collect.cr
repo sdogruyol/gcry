@@ -55,6 +55,11 @@ module Gcry
       @size_class_live_bytes &+ large
     end
 
+    # Set for the span of an explicit `collect(release_warm: true)`; read by
+    # the sweep's retention decision.
+    @release_warm_this_collect = false
+    getter warm_released_collects : UInt64 = 0_u64
+
     private def adapt_after_sweep : Nil
       return unless @adaptive_threshold || @warm_retain_follows_live
       want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
@@ -1320,7 +1325,15 @@ module Gcry
     # Full major collection (resets any in-progress incremental cycle).
     # `coalesce`: if true and a peer collect already cleared the debt while we
     # waited on the post-STW mutex, skip (Parallel EC alloc storms).
-    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
+    # `release_warm`: the caller is asking for memory back, not for a cycle.
+    # The warm-chunk budget exists so an *allocation-driven* major keeps the
+    # chunks the next cycle is about to refill; an explicit `GC.collect` (and
+    # the emergency retry before an OutOfMemoryError) sweeps with that budget
+    # and the unmap grace off, so every fully free chunk is released and the
+    # post-collect RSS is the live footprint - what `/gc-collect` followed by
+    # a read of RSS has always meant. Automatic cycles are untouched.
+    def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false,
+                release_warm : Bool = false) : Nil
       return if @destroyed
       return if @collecting
       return if monitor_thread?
@@ -1331,7 +1344,13 @@ module Gcry
       note_collect_entry_regs if @birth_grace
       abort_incremental
       Trace.collect_start(major: true)
-      run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
+      @release_warm_this_collect = release_warm
+      @warm_released_collects &+= 1 if release_warm
+      begin
+        run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
+      ensure
+        @release_warm_this_collect = false
+      end
       Trace.collect_end(self, major: true)
       Invariant.after_collect(self)
     end

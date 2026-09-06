@@ -105,8 +105,8 @@ module Gcry
                     # Warm retain is the thr middle path vs KEEP_CHUNKS (RSS tax
                     # without page-fault on reuse). Unbounded Parallel dormant
                     # remains opt-in via parallel_empty_chunk_dormant_all.
-                    within_warm = @empty_chunk_warm_retain > 0 &&
-                                  (warm_budget_used + mapped <= @empty_chunk_warm_retain)
+                    warm_cap = @release_warm_this_collect ? 0_u64 : @empty_chunk_warm_retain
+                    within_warm = warm_cap > 0 && (warm_budget_used + mapped <= warm_cap)
                     within_retain = @empty_chunk_retain > 0 &&
                                     (dormant_budget_used + mapped <= @empty_chunk_retain)
                     can_dormant = within_retain ||
@@ -128,7 +128,8 @@ module Gcry
                     # than churning around it. Bitmap chunks only: the header
                     # allocator has no hook that clears the flag on reuse.
                     grace = !within_warm && !can_dormant && munmap_empty_chunks_this_collect? &&
-                            bitmap_alloc_chunk?(chunk) && !ChunkHeader.idle?(chunk)
+                            bitmap_alloc_chunk?(chunk) && !ChunkHeader.idle?(chunk) &&
+                            !@release_warm_this_collect
                     # Drop freelist nodes via one rebuild_size_class_freelist per
                     # class at end of sweep (rebuild skips DORMANT / dropped
                     # chunks). Per-empty unlink_freelist_range was O(freelist ×

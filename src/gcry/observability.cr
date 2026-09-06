@@ -117,6 +117,7 @@ module Gcry
         tight_grow_maps:             heap.tight_grow_maps,
         empty_chunk_retain:          heap.empty_chunk_retain,
         empty_chunk_warm_retain:     heap.empty_chunk_warm_retain,
+        warm_released_collects:      heap.warm_released_collects,
         layout_precise_scans:        heap.layout_precise_scans,
         layout_hash_bodies:          heap.layout_hash_bodies,
         sweep_large_uninitialised:   heap.sweep_large_uninitialised,

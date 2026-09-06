@@ -1143,7 +1143,7 @@ module GC
   def self.collect
     return unless @@gcry_ready
     check_fork_poison!
-    Gcry.default_heap.collect
+    Gcry.default_heap.collect(release_warm: true)
   end
 
   # Boehm-compatible: clear unused stack near SP (also GCRY_CLEAR_STACK on alloc).

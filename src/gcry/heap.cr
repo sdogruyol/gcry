@@ -795,7 +795,7 @@ module Gcry
       return false unless @emergency_collecting.compare_and_set(0, 1)[1]
       begin
         @emergency_collects &+= 1
-        collect(scan_stack: true)
+        collect(scan_stack: true, release_warm: true)
       ensure
         @emergency_collecting.set(0)
       end
