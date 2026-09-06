@@ -164,7 +164,12 @@ print(json.dumps({
 # ── collect data ─────────────────────────────────────────────────────
 
 RUN_LABEL="$(date -u +%Y-%m-%d-%H%M%S)"
-RUN_DIR="$LOG/linux/$RUN_LABEL"
+# Same split as run_all.sh: a Darwin smoke must not land among the Linux cuts.
+PLATFORM_DIR="linux"
+case "$(uname -s)" in
+  Darwin) PLATFORM_DIR="macos" ;;
+esac
+RUN_DIR="$LOG/$PLATFORM_DIR/$RUN_LABEL"
 mkdir -p "$RUN_DIR"
 
 echo ""
