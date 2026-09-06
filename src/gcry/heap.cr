@@ -935,7 +935,16 @@ module Gcry
       if (pfw = @alloc_pfw) > 0
         Kernels.prefetch_write(Pointer(Void).new(addr &+ pfw))
       end
-      BlockHeader.set_used(Pointer(BlockHeader).new(addr), payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
+      header = Pointer(BlockHeader).new(addr)
+      BlockHeader.set_used(header, payload, atomic ? BlockHeader::Flags::ATOMIC : 0_u32)
+      # Re-read after the occupancy store, not only at entry: a stop-the-world
+      # that began an incremental cycle while this thread sat between the
+      # sentinel and here pinned the set and rooted nothing (the slot held the
+      # sentinel, or an address the block did not yet occupy), and the cycle's
+      # finishing slice sweeps inside its own stopped world and rescans dirty
+      # pages, not stacks. Every block handed out while marking is black on
+      # the locked path; this makes the hit path keep the same promise.
+      heap_set_mark_allocating(header) if @incremental_marking || @collecting
       clear_block(user, payload.to_u64) unless atomic
       s.value.in_flight = Pointer(Void).null
       user
