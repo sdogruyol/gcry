@@ -500,13 +500,21 @@ module Gcry
       end
     end
 
-    # Drop the slot's copy once the caller's frame holds the pointer. The slot
-    # is this thread's own, so the store is unconditional.
+    # Drop the slot's copy once the caller's frame holds the pointer - but
+    # only if it is still *this* call's pointer. A thread past the 64th (or
+    # one whose pthread key failed) shares `@fallback_cursor_set`, and this
+    # runs after `with_freelist_lock` released the class lock, so the slot may
+    # already carry a peer's sentinel or freshly published address; a plain
+    # null store would erase that peer's root before its frame holds the
+    # block. The locked path pays a CAS here, never the hit path.
     protected def clear_bitmap_alloc_in_flight(index : Int32, flags : UInt32, user : Void*) : Nil
       set = cursor_set_cached
       return if set.null?
       slot = (flags & BlockHeader::Flags::ATOMIC) != 0 ? index + SIZE_CLASS_COUNT : index
-      CursorSet.slot(set, slot).value.in_flight = Pointer(Void).null
+      s = CursorSet.slot(set, slot)
+      field = (s.as(UInt8*) + offsetof(CursorSlot, @in_flight)).as(UInt64*)
+      Atomic::Ops.cmpxchg(field, user.address, 0_u64,
+        LLVM::AtomicOrdering::SequentiallyConsistent, LLVM::AtomicOrdering::Monotonic)
     end
 
     # Fork child: drop every publication, since only one thread survived.
