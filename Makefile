@@ -431,8 +431,8 @@ poison-freed: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_freed.cr -o $(BIN)/poison_freed --error-trace
 	GCRY_POISON_FREED=1 $(BIN)/poison_freed
 	$(BIN)/poison_freed --control
-	GCRY_BITMAP_ALLOC=1 GCRY_POISON_FREED=1 $(BIN)/poison_freed
-	GCRY_BITMAP_ALLOC=1 $(BIN)/poison_freed --control
+	GCRY_BITMAP_ALLOC=0 GCRY_POISON_FREED=1 $(BIN)/poison_freed
+	GCRY_BITMAP_ALLOC=0 $(BIN)/poison_freed --control
 
 # After mark, before sweep: does any marked object point at a block the sweep is
 # about to free? The `hold` arm plants an edge the mark provably does not follow

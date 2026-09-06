@@ -90,11 +90,12 @@ module Gcry
     # chunks exist: it determines each chunk's `data_offset`, so flipping it
     # under a live heap would make already-carved chunks unreadable.
     #
-    # Off by default. The header path stays the shipping representation until a
-    # Kemal + acikturkiye cut says the bitmap wins, and it is also the fallback
-    # on a CPU without the SIMD baseline.
+    # Implied by `bitmap_alloc`, which the process GC has on since 0.24.0 (the
+    # Kemal cut that decided it is cited at `bitmap_alloc_from_env`); on its
+    # own it is `GCRY_BITMAP=1`, mark bits in the chunk with the freelist kept.
+    # The kernels have a scalar tier, so no CPU falls back to the header path.
     getter? bitmap_marks : Bool = false
-    # `GCRY_BITMAP_ALLOC=1` (Phase 3): `occ` bitmaps, bitmap sweep, and pool
+    # `GCRY_BITMAP_ALLOC` (Phase 3): `occ` bitmaps, bitmap sweep, and pool
     # allocation. Implies `bitmap_marks`, and goes strictly further — it retires
     # the Phase 1 union, because a bitmap-only sweep cannot see a mark that only
     # exists in a header generation.
@@ -399,9 +400,20 @@ module Gcry
       env_is_one?("GCRY_BITMAP")
     end
 
-    # `GCRY_BITMAP_ALLOC=1`. Implies `GCRY_BITMAP`.
+    # Implies `GCRY_BITMAP`. The process GC (`-Dgc_none`) has it **on** unless
+    # `GCRY_BITMAP_ALLOC=0`: the five-arm paired run in
+    # `bench/log/linux/2026-09-06-bitmap-default-ab/` put the freelist default
+    # at 74.9% of Boehm at 1.87x its peak RSS with 1 671 faults per 1 000
+    # requests, and this allocator on the same layout at 105.3% [99.2, 111.3]
+    # at 1.30x with 2.7 - 141.9% [132.1, 151.6] of the freelist at 0.69x its
+    # peak. Library heaps keep the freelist unless `GCRY_BITMAP_ALLOC=1`, so
+    # the unit suite still exercises both paths by construction.
     def self.bitmap_alloc_from_env : Bool
-      env_is_one?("GCRY_BITMAP_ALLOC")
+      {% if flag?(:gc_none) %}
+        !env_is_zero?("GCRY_BITMAP_ALLOC")
+      {% else %}
+        env_is_one?("GCRY_BITMAP_ALLOC")
+      {% end %}
     end
 
     # `GCRY_CHUNK_RADIX=1`.

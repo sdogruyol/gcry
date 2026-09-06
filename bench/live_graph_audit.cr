@@ -524,7 +524,11 @@ puts ""
 # The walk floor below was calibrated at a fixed 32 MiB major threshold; the
 # adaptive default (live-sized, 8 MiB floor) leaves the sparse walk less to
 # release per cycle, so the harness pins the threshold it was measured at.
-BASE_ENV = {"GCRY_THRESHOLD" => "33554432"}
+# Both walks are freelist-allocator paths (`flush_pending_page_release_chunks`
+# and the mostly-empty flush stand down on bitmap chunks), so the harness pins
+# the freelist too: under the bitmap default every arm releases 0 B through
+# the walk and the gate rightly refuses to certify a walk that never ran.
+BASE_ENV = {"GCRY_THRESHOLD" => "33554432", "GCRY_BITMAP_ALLOC" => "0"}
 ARMS     = {
   "no walk"      => BASE_ENV.merge({"GCRY_DISABLE_MADVISE" => "1"}),
   "HOLED"        => BASE_ENV.merge({"GCRY_PAGE_DONTNEED" => "1"}),

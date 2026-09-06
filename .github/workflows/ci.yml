@@ -142,6 +142,11 @@ jobs:
       - name: Process GC specs (header-less layout)
         run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
 
+      # The bitmap allocator is the process default since 0.24.0; the freelist
+      # is the escape (GCRY_BITMAP_ALLOC=0) and keeps its own arm.
+      - name: Process GC specs (freelist allocator)
+        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
+
       - name: Sample hello (header-less layout)
         run: |
           crystal build -Dgc_none -Dgcry_headerless samples/hello.cr -o bin/hello_hl
@@ -185,9 +190,9 @@ jobs:
           GCRY_MPROTECT_BARRIER=1 ./bin/hello_env
           GCRY_INCREMENTAL=1 ./bin/hello_env
           GCRY_BITMAP=1 ./bin/hello_env
-          GCRY_BITMAP_ALLOC=1 ./bin/hello_env
-          GCRY_BITMAP_ALLOC=1 GCRY_CHUNK_RADIX=1 ./bin/hello_env
-          GCRY_BITMAP_ALLOC=1 GCRY_TLAB=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=0 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=0 GCRY_CHUNK_RADIX=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=0 GCRY_TLAB=1 ./bin/hello_env
           GCRY_SIMD=off ./bin/hello_env
           GCRY_SIMD=scalar GCRY_BITMAP_ALLOC=1 ./bin/hello_env
           GCRY_PREFETCH=0 ./bin/hello_env
@@ -1151,9 +1156,9 @@ jobs:
           for trial in 1 2 3; do
             crystal spec -Dgc_none process_spec --error-trace
           done
-          # Cursor/refill regressions require the bitmap allocator; cover both
-          # representations on the native weakly ordered target.
-          GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec --error-trace
+          # The bitmap allocator is the process default; cover the freelist
+          # escape too on the native weakly ordered target.
+          GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
           crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
           crystal build -Dgc_none samples/hello.cr -o bin/hello
           ./bin/hello
@@ -1259,8 +1264,8 @@ jobs:
       - name: Unit specs (header-less layout) on Darwin
         run: crystal spec -Dgcry_headerless --error-trace
 
-      - name: Process GC specs (bitmap allocator) on Darwin
-        run: GCRY_BITMAP_ALLOC=1 crystal spec -Dgc_none process_spec --error-trace
+      - name: Process GC specs (freelist allocator) on Darwin
+        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
 
       - name: Process GC specs (header-less layout) on Darwin
         run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
