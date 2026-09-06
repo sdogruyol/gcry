@@ -2247,6 +2247,11 @@ module Gcry
             end
             @large_cache_hits = 0_u64
             @large_cache_misses = 0_u64
+            # Inside the post-STW section on purpose: after `unlock_post_stw`
+            # a peer collection can begin and overwrite `@size_class_live_bytes`
+            # and `@gc_threshold` before this thread's late write, which then
+            # sizes the next threshold and warm budget from two cycles' numbers.
+            adapt_after_sweep
           end
         ensure
           @suppress_collect.sub(1)
@@ -2256,7 +2261,6 @@ module Gcry
         unlock_post_stw
       end
 
-      adapt_after_sweep if major
       @running_finalizers = true
       begin
         @finalizers.run_pending
