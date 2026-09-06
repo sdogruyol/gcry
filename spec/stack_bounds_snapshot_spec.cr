@@ -55,6 +55,46 @@ require "./spec_helper"
       second[1].address.should eq(live[1].address)
     end
 
+    it "re-derives the initial thread's cached low when the soft RLIMIT_STACK changes" do
+      # glibc derives the main thread's low as `high - min(RLIMIT_STACK, gap)`,
+      # so raising the soft limit lowers it. A cache that never looked again
+      # would scan `[stale low, high)` from another thread and miss the frames
+      # a deeper main stack had grown into.
+      self_id = LibC.pthread_self
+      Gcry::Platform.note_main_thread
+      Gcry::Platform.begin_stack_bounds_snapshot
+      Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
+      before = Gcry::Platform.snapshotted_stack_bounds(self_id).not_nil!
+      refreshed = Gcry::Platform.stack_bounds_main_refreshed
+
+      rl = uninitialized LibC::Rlimit
+      LibC.getrlimit(LibC::RLIMIT_STACK, pointerof(rl)).should eq(0)
+      saved = rl
+      # Halve the soft limit rather than raise it: lowering never needs the
+      # hard limit's permission, so the spec runs on any box. The gap below
+      # the main stack is far larger than 4 MiB, so `min` picks the limit and
+      # the low bound must move *up* by the same amount.
+      pending!("RLIMIT_STACK is unlimited here; nothing to halve") if rl.rlim_cur == LibC::RlimT::MAX
+      rl.rlim_cur = rl.rlim_cur // 2
+      LibC.setrlimit(LibC::RLIMIT_STACK, pointerof(rl)).should eq(0)
+      begin
+        Gcry::Platform.begin_stack_bounds_snapshot
+        Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
+        after = Gcry::Platform.snapshotted_stack_bounds(self_id).not_nil!
+        live = Gcry::Platform.pthread_stack_bounds(self_id).not_nil!
+
+        Gcry::Platform.stack_bounds_main_refreshed.should eq(refreshed + 1)
+        after[0].address.should eq(live[0].address)
+        after[1].address.should eq(before[1].address)
+        after[0].address.should be > before[0].address
+      ensure
+        LibC.setrlimit(LibC::RLIMIT_STACK, pointerof(saved))
+        # Leave the cache matching the restored limit for the specs after this.
+        Gcry::Platform.begin_stack_bounds_snapshot
+        Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
+      end
+    end
+
     it "brackets an address that is actually on this thread's stack" do
       # Tying the table to a real address, not just to the other API: if both
       # ever agreed on a wrong range, the comparison above would still pass.

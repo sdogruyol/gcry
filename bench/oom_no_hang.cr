@@ -39,15 +39,8 @@ require "./bounded_child"
 {% end %}
 
 {% if flag?(:linux) %}
-  lib LibC
-    struct GcryRlimit
-      rlim_cur : ULong
-      rlim_max : ULong
-    end
-
-    fun setrlimit(resource : Int, rlim : GcryRlimit*) : Int
-  end
-
+  # `LibC::Rlimit` and `setrlimit` come with the collector
+  # (src/gcry/platform/linux_stack.cr, which re-reads RLIMIT_STACK).
   RLIMIT_AS = 9
 {% end %}
 
@@ -57,9 +50,9 @@ CAP_BYTES = 512_u64 * 1024 * 1024
 
 if ARGV.includes?("--child")
   {% if flag?(:linux) %}
-    lim = LibC::GcryRlimit.new
-    lim.rlim_cur = LibC::ULong.new(CAP_BYTES)
-    lim.rlim_max = LibC::ULong.new(CAP_BYTES)
+    lim = LibC::Rlimit.new
+    lim.rlim_cur = LibC::RlimT.new(CAP_BYTES)
+    lim.rlim_max = LibC::RlimT.new(CAP_BYTES)
     if LibC.setrlimit(RLIMIT_AS, pointerof(lim)) != 0
       STDOUT.puts "child: setrlimit failed"
       exit 3

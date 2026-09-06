@@ -40,7 +40,14 @@ module Gcry
     def self.note_main_thread : Nil
     end
 
+    def self.reset_main_thread_after_fork : Nil
+    end
+
     def self.stack_bounds_main_cached : UInt64
+      0_u64
+    end
+
+    def self.stack_bounds_main_refreshed : UInt64
       0_u64
     end
 

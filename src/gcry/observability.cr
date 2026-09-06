@@ -251,6 +251,7 @@ module Gcry
         stack_bounds_visited:                  Gcry::Platform.stack_bounds_visited,
         stack_bounds_read:                     Gcry::Platform.stack_bounds_read,
         stack_bounds_main_cached:              Gcry::Platform.stack_bounds_main_cached,
+        stack_bounds_main_refreshed:           Gcry::Platform.stack_bounds_main_refreshed,
         stack_bounds_capacity_misses:          Gcry::Platform.stack_bounds_capacity_misses,
         birth_grace_rooted:                    heap.birth_grace_rooted,
         birth_grace_saved:                     heap.birth_grace_saved,

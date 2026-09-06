@@ -418,6 +418,7 @@ module Gcry
       @barrier_backend = Platform::BarrierBackend::None
       reset_mark_workers_after_fork
       Platform.reset_stw_after_fork
+      Platform.reset_main_thread_after_fork
       Platform.invalidate_static_root_cache
       begin
         set_stackbottom(Fiber.current.@stack.bottom)

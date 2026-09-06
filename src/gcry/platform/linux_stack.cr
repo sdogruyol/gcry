@@ -1,4 +1,16 @@
 require "c/pthread"
+require "c/sys/resource"
+
+{% if flag?(:linux) %}
+  lib LibC
+    # musl's binding declares this; glibc's does not. Same value on both.
+    {% unless LibC.has_constant?(:RLIMIT_STACK) %}
+      RLIMIT_STACK = 3
+    {% end %}
+
+    fun setrlimit(resource : Int, rlim : Rlimit*) : Int
+  end
+{% end %}
 
 module Gcry
   # Linux pthread stack bounds (for STW root scanning / main-fiber setup).
@@ -124,10 +136,19 @@ module Gcry
     # `high - min(RLIMIT_STACK, gap below)`, which a later mapping in that
     # gap can only *raise* — so a cached low is at most more inclusive, and
     # the scan's floor is the thread's own SP in any case.
+    #
+    # The one input that can *lower* it is the soft `RLIMIT_STACK` itself: a
+    # program that raises it after its first collection and then grows its
+    # main stack below the cached low would have a collection from another
+    # thread scan `[stale low, high)` and miss the frames beneath. So the
+    # soft limit is read at each snapshot (one syscall, no libc lock) and a
+    # change re-derives the bounds the way the first read did.
     @@main_pthread = 0_u64
     @@main_low = 0_u64
     @@main_high = 0_u64
+    @@main_rlimit = 0_u64
     @@sb_main_cached = 0_u64
+    @@sb_main_refreshed = 0_u64
 
     # Record the calling thread as the process's initial thread. Called from
     # `GC.init`, which runs on it before any other thread exists.
@@ -137,9 +158,38 @@ module Gcry
       {% end %}
     end
 
+    # Fork child. Forked from the initial thread, the survivor *is* it: same
+    # `pthread_t`, same `[stack]` mapping, cache still true. Forked from any
+    # other thread, the initial thread is gone and its `pthread_t` is free
+    # for reuse - the one hazard the cache was exempt from - so a thread
+    # created in the child could be handed the dead main thread's bounds.
+    # Drop the identity; the child has no initial thread to cache.
+    def self.reset_main_thread_after_fork : Nil
+      {% if flag?(:linux) %}
+        return if @@main_pthread == 0_u64 || LibC.pthread_self.unsafe_as(UInt64) == @@main_pthread
+        @@main_pthread = 0_u64
+        @@main_low = 0_u64
+        @@main_high = 0_u64
+        @@main_rlimit = 0_u64
+      {% end %}
+    end
+
     # Snapshots answered from the main thread's cached bounds.
     def self.stack_bounds_main_cached : UInt64
       @@sb_main_cached
+    end
+
+    # Cached bounds re-derived because the soft RLIMIT_STACK had changed.
+    def self.stack_bounds_main_refreshed : UInt64
+      @@sb_main_refreshed
+    end
+
+    # The soft stack limit, as glibc reads it when deriving the initial
+    # thread's low bound; 0 when the query fails so a failure never matches.
+    private def self.stack_rlimit : UInt64
+      rl = uninitialized LibC::Rlimit
+      return 0_u64 unless LibC.getrlimit(LibC::RLIMIT_STACK, pointerof(rl)) == 0
+      rl.rlim_cur.to_u64
     end
 
     # Drop the previous collection's entries. A pthread_t can be reused by a new
@@ -177,17 +227,21 @@ module Gcry
           return
         end
         id = thread.unsafe_as(UInt64)
-        if id == @@main_pthread && @@main_high != 0_u64
+        main = id == @@main_pthread
+        rlimit = main ? stack_rlimit : 0_u64
+        if main && @@main_high != 0_u64 && rlimit == @@main_rlimit
           bounds = {Pointer(Void).new(@@main_low), Pointer(Void).new(@@main_high)}
           @@sb_main_cached += 1
         else
+          @@sb_main_refreshed += 1 if main && @@main_high != 0_u64
           @@sb_in_flight = id
           bounds = pthread_stack_bounds(thread)
           @@sb_in_flight = 0_u64
           return unless bounds
-          if id == @@main_pthread
+          if main
             @@main_low = bounds[0].address
             @@main_high = bounds[1].address
+            @@main_rlimit = rlimit
           end
         end
         @@sb_read += 1
