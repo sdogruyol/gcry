@@ -114,6 +114,12 @@ docs said it did. Everything else new is behind `GCRY_BITMAP_ALLOC=1`.
 
 ### Fixed
 
+- **Bitmap allocation now reports cursor-metadata exhaustion as OOM.** If the
+  C allocator could not create even the shared cursor set, the locked bitmap
+  path dereferenced the null set before its existing retry and OOM handling.
+  It now returns allocation failure while holding the class lock, then retries
+  collection and raises after releasing that lock. A fault-injection spec also
+  covers recovery and the per-thread-set fallback.
 - **A live `Array` buffer was freed under a `--release` loop that held only
   an interior pointer into it.** `live[i % n]` in a hot loop is
   strength-reduced by LLVM to a register holding `buffer + k*8`; the base is
