@@ -135,6 +135,14 @@ module GC
     # accepted interiors. Measured cost on Kemal /json: −0.1% (SOUND-DEFAULTS).
     # Escape for measurement: GCRY_DISABLE_INTERIOR=1.
     heap.allow_interior_pointers = true
+    # The same argument one byte over: a byte-wise loop over a `Bytes` is
+    # reduced to a raw pointer induction variable that is word-aligned one
+    # time in eight, and the cheap alignment filter rejected that one
+    # reference before `find_block` ran (`make unaligned-only-buffer`:
+    # SIGSEGV 3 of 3 with the filter). bdwgc resolves it through GC_base.
+    # Cost is +4.3% of root work, a few µs per collection (SOUND-DEFAULTS).
+    # Escape for measurement: GCRY_ALIGNED_CANDIDATES=1.
+    heap.scan_unaligned_candidates = true
     heap.layout_precise = true
     # Avoid mid-boot collections until env config runs.
     heap.gc_threshold = UInt64::MAX
@@ -574,12 +582,9 @@ module GC
       heap.allow_interior_pointers = false
     end
 
-    # Follow misaligned candidate *values* (interiors into byte buffers).
-    # Implied by GCRY_SOUND; GCRY_ALIGNED_CANDIDATES=1 forces the cheap
-    # alignment filter back on so the two costs can be measured apart.
-    if env_flag_one?("GCRY_UNALIGNED_CANDIDATES")
-      heap.scan_unaligned_candidates = true
-    end
+    # Misaligned candidate *values* (interiors into byte buffers) are followed
+    # by default; GCRY_ALIGNED_CANDIDATES=1 forces the cheap alignment filter
+    # back on so its cost can be measured apart.
     if env_flag_one?("GCRY_ALIGNED_CANDIDATES")
       heap.scan_unaligned_candidates = false
     end

@@ -180,9 +180,11 @@ module Gcry
         report_thread_list_offer(pointer, gate_type_id)
       end
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
-      # Crystal pointers are word-aligned; reject interior/misaligned false hits fast.
-      # scan_unaligned_candidates keeps them (GCRY_SOUND) — a misaligned interior
-      # into a byte buffer is a root bdwgc would resolve via GC_base.
+      # Crystal pointers are word-aligned, so the filter below is a cheap reject
+      # of misaligned false hits - but a misaligned interior into a byte buffer
+      # is a root bdwgc would resolve via GC_base, and under --release it can be
+      # the only one, so the process GC keeps them (GCRY_ALIGNED_CANDIDATES=1
+      # restores the filter for measurement).
       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
       found = find_block_with_chunk(pointer)

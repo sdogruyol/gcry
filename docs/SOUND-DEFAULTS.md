@@ -24,7 +24,7 @@ GCRY_SOUND=1 ./your-app
 | Knob | Default | What it can drop |
 |------|---------|------------------|
 | `allow_interior_pointers` | `true` (process, since 0.22.1 — was `false`; `GCRY_DISABLE_INTERIOR=1` restores it) | Two things at once. **(a) Ambient roots:** LLVM may keep only an **interior** pointer live in a register or spill slot while the base is dead — a strength-reduced loop over a `String`/`Array` buffer is the canonical shape, and it is not hypothetical: `make interior-only-buffer` (400k-element `Array` + allocation churn, `--release`) freed the live buffer 3 of 3 with this `false`, which is why it is on by default now. bdwgc as Crystal links it treats interiors as valid, so base-only ambient roots are strictly less conservative than what Crystal's codegen has ever been validated against. **(b) Heap edges out of raw buffers:** `scan_object`'s conservative fallback marks untyped allocations base-only, so an interior pointer stored *inside* a `Slice` or raw buffer is dropped too. That path also keys off `type_id_plausible?`, which made the type_id heuristic steer marking even with `type_id_gate` off — this flag switches both off together. |
-| `scan_unaligned_candidates` | `false` | The same, for `str.to_unsafe + 3`. A misaligned interior is a root bdwgc resolves via `GC_base`; gcry drops it before `find_block` ever runs. |
+| `scan_unaligned_candidates` | `true` (process, since 0.23.1 — was `false`; `GCRY_ALIGNED_CANDIDATES=1` restores it) | The same, for `str.to_unsafe + 3`. A misaligned interior is a root bdwgc resolves via `GC_base`; gcry dropped it before `find_block` ever ran — and `make unaligned-only-buffer` (a byte-wise `--release` loop holding a 1 MiB `Bytes` by its induction pointer) faulted 3 of 3 with the filter on, which is why it is off by default now. |
 | `type_id_gate` | `true` (static roots) | Rejects a static root whose payload's first `Int32` is `<= 0` or `> 1_000_000`. That is a heuristic applied to a real reference. The collector already counts when it was wrong: `type_id_root_false_negatives`. |
 | `stw_multi_stack_lag` | `256 KiB` | Bounds how far below a parked fiber's `stack_top` another thread's stack is scanned. A live pointer deeper than the lag is never seen. `0` means full `guard → bottom`. |
 | `stw_multi_pthread_lag` | `256 KiB` | Same, for the OS thread mapping when SP sits on a pool fiber. |
@@ -253,7 +253,7 @@ a 398 µs pause. Per knob, against tuned:
 
 | Knob | Δ work | Note |
 |------|-------:|------|
-| `GCRY_UNALIGNED_CANDIDATES=1` | +4.3% | largest single cost |
+| `GCRY_UNALIGNED_CANDIDATES=1` (now the default; escape `GCRY_ALIGNED_CANDIDATES=1`) | +4.3% | largest single cost |
 | `GCRY_DISABLE_BLACKLIST=1` | +2.4% | a real cost, not free |
 | `GCRY_STW_*_LAG=0` | +1.1% | inert at EC1 — see below |
 | `GCRY_DISABLE_TYPE_ID_GATE=1` | +0.2% | |

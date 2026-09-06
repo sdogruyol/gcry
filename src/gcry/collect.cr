@@ -202,7 +202,8 @@ module Gcry
     # before find_block. But an interior pointer into a byte buffer
     # (`str.to_unsafe + 3`) is a legitimate misaligned root that bdwgc would
     # honour via GC_base. Root-completeness knob — see docs/SOUND-DEFAULTS.md.
-    # GCRY_SOUND=1 turns it on; GCRY_ALIGNED_CANDIDATES=1 forces it back off.
+    # Process GC turns it on at `GC.init` (a byte-wise `--release` loop holds
+    # its buffer by exactly such a word); GCRY_ALIGNED_CANDIDATES=1 is the escape.
     property scan_unaligned_candidates : Bool = false
     # Reject ambient root candidates (stack/static) whose payload type_id looks
     # absurd. Heap-scan marks stay ungated so Array/Hash buffers remain reachable.

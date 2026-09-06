@@ -517,6 +517,13 @@ jobs:
         run: |
           make interior-only-buffer
 
+      # And its misaligned twin: a byte-wise loop holds its Bytes by a
+      # pointer aligned one time in eight. Followed by default now; the
+      # alignment-filter control arm must still fault.
+      - name: Unaligned-only buffer
+        run: |
+          make unaligned-only-buffer
+
       # And the reporter that reads the poison back: a crash now says whether
       # the address was in the heap, in a free block, in a used one, or nowhere
       # gcry mapped. Tested by crashing, one child process per shape.

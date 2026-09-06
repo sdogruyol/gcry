@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A live `Bytes` buffer was freed under a `--release` loop that held it
+  only by a misaligned pointer.** The twin of the interior-pointer defect
+  0.23.0 fixed: a byte-wise loop over a buffer is reduced to a raw pointer
+  induction variable that is word-aligned one time in eight, and the cheap
+  alignment filter on root candidates rejected it before `find_block` ran —
+  SIGSEGV 3 of 3 with a 1 MiB `Bytes` and allocation churn
+  (`GCRY_SEGV_REPORT=1`: "inside the heap span but in no live chunk").
+  bdwgc resolves the same word through `GC_base`. `scan_unaligned_candidates`
+  is now **on** for the process heap; `GCRY_ALIGNED_CANDIDATES=1` is the
+  measurement escape and `GCRY_UNALIGNED_CANDIDATES=1` is gone. Cost at the
+  collector: +4.3% of root work (SOUND-DEFAULTS, ~2 µs on a 400 µs pause);
+  Kemal `/json` pause p50 0.386 / 0.390 ms and RSS 0.95–0.99× Boehm on either
+  side, throughput inside this box's noise. `make unaligned-only-buffer`
+  (CI) runs both arms.
+
 Six items the PR #34 review carried over, none on the default (header)
 path; each ships with a spec that is red without it.
 
