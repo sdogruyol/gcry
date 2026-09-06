@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-06
+
+Minor release, and the one that changes what the default build allocates
+with.
+
+**The bitmap allocator is the process default.** What 0.23.0 shipped behind
+`GCRY_BITMAP_ALLOC=1` — `occ` bitmaps, the streaming `occ &= mark` sweep,
+per-thread cursor sets, the adaptive threshold and the warm-chunk budget —
+is now what `-Dgc_none` runs. The decision is a five-arm paired Kemal
+`/json` run with an identical-binary null control, on Linux and then on
+Darwin. Linux: the freelist default was **74.9%** of Boehm at 1.87× its
+peak RSS with 1 671 minor faults per 1 000 requests; the bitmap allocator on
+the same header layout is **105.3%** [99.2, 111.3] at 1.30× with 2.7 faults
+and 15% less CPU per request. Darwin: **101.8%** [100.5, 103.1] against the
+freelist's 85.5%, 0.8 faults against 344 — at 1.97× Boehm's peak footprint
+against 1.78×, because both arms sit at the 16 MiB Darwin threshold floor
+and the warm budget is the difference. `GCRY_BITMAP_ALLOC=0` is the escape
+and keeps its own process-spec arm in CI on every platform; library heaps
+(`Gcry::Heap.new`) stay on the freelist unless `=1`. An explicit
+`GC.collect` now releases the warm chunks, so post-collect RSS is the live
+footprint again.
+
+**One more root the `--release` build needs.** 0.23.0 resolved interior
+pointers; this release also scans misaligned candidate words
+(`scan_unaligned_candidates`, on for the process heap): a byte-wise loop
+over a `Bytes` buffer reduces to a raw pointer that is word-aligned one time
+in eight, and the alignment filter dropped the only root — SIGSEGV 3 of 3
+with a 1 MiB buffer under churn. +4.3% of root work. Both gates
+(`make interior-only-buffer`, `make unaligned-only-buffer`) run in CI with
+their red arms.
+
+Also here: the six fixes the PR #34 review carried over — five under the
+allocator that is now the default, one in the initial thread's stack
+bounds, each with a spec that is red without it; #35 (cursor-set metadata
+exhaustion reported as OOM rather than a null dereference, stakach) is one
+of the five — and `GCRY_INCREMENTAL=1` documented as unsound with more than
+one mutator thread.
+
+Upgrading: no API change. One knob removed (`GCRY_UNALIGNED_CANDIDATES=1`,
+now the default) and one added in its place (`GCRY_ALIGNED_CANDIDATES=1`);
+`GCRY_BITMAP_ALLOC=1` is now what the process heap does on its own, and `=0`
+is the escape. If a workload's RSS matters more than its throughput, `=0` is
+where to start; under the default, `GCRY_THRESHOLD_FACTOR` is the lever.
+
 ### Changed
 
 - **The bitmap allocator is the process default.** `GCRY_BITMAP_ALLOC=0`
@@ -78,8 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   side, throughput inside this box's noise. `make unaligned-only-buffer`
   (CI) runs both arms.
 
-Six items the PR #34 review carried over, none on the default (header)
-path; each ships with a spec that is red without it.
+Six items the PR #34 review carried over — five under the bitmap allocator,
+which this release makes the default, one in the initial thread's stack
+bounds; each ships with a spec that is red without it.
 
 - **A shared cursor slot's in-flight root could be erased by a peer.** Past
   the 64th thread (or after a `pthread_key_create` failure) threads share the
@@ -2972,7 +3017,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/sdogruyol/gcry/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sdogruyol/gcry/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sdogruyol/gcry/compare/v0.21.3...v0.22.0
 [0.21.3]: https://github.com/sdogruyol/gcry/compare/v0.21.2...v0.21.3
