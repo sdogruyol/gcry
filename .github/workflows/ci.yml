@@ -1200,7 +1200,11 @@ jobs:
           timeout 300 make thread-birth-root
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
-          timeout 600 make large-cache-race
+          # The harness installs this reporter after Crystal replaces the
+          # process signal handlers. A rare locked-arm fault without it leaves
+          # only an address, so it cannot distinguish a released large chunk
+          # from an unrelated crash.
+          GCRY_SEGV_REPORT=1 timeout 600 make large-cache-race
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same
