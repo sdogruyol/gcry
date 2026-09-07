@@ -327,14 +327,14 @@ segv-report: $(BIN)
 	$(BIN)/segv_report
 	$(BIN)/segv_report --control
 
-# The SIMD bitmap kernels are stamped from one source body into a scalar clone
-# and, on x86_64, an AVX2 and an AVX-512 clone, so `spec/kernels_spec.cr` fuzzes
-# every clone against the scalar one as oracle. That fuzz can only ever report
-# "they agree", which is worth nothing on its own — a vectoriser that silently
-# did nothing would also agree. So the gate is two arms and the first one is the
-# point: `-Dgcry_kernels_broken` drops the last word from the vector clones
+# The SIMD bitmap kernels are allocation-free backend structs: Scalar plus
+# handwritten AVX2/AVX-512 assembly on x86_64 or NEON/SVE/SVE2 assembly on
+# AArch64. `spec/kernels_spec.cr` fuzzes every runnable backend against Scalar
+# as oracle. That fuzz can only ever report "they agree", so the gate is two
+# arms and the first one is the
+# point: `-Dgcry_kernels_broken` drops the last word from vector backends
 # only, and the fuzz has to go **red**. Then the same fuzz, unbroken, has to go
-# green. On a host whose top tier is scalar there are no vector clones to break,
+# green. On a host whose top tier is scalar there are no vector backends to break,
 # so the positive control cannot fire and the target refuses the run rather than
 # reporting a green it did not earn.
 #
@@ -372,15 +372,15 @@ bench-kernels: $(BIN)
 	$(BIN)/kernels_micro --passes=$${KERNEL_PASSES:-12}
 
 kernels-broken:
-	@echo "== positive control: broken vector clones must fail the equivalence fuzz =="
+	@echo "== positive control: broken vector backends must fail the equivalence fuzz =="
 	@if [ "$$($(CRYSTAL) run ci/kernel_tier.cr --no-debug 2>/dev/null)" = "scalar" ]; then \
 	  echo "REFUSED: host top tier is scalar, so -Dgcry_kernels_broken changes nothing"; \
-	  echo "         and a green run here would prove nothing. Run on an AVX2+ host."; \
+	  echo "         and a green run here would prove nothing. Run on a SIMD host."; \
 	  exit 1; \
 	fi
 	@out=$$($(CRYSTAL) spec spec/kernels_spec.cr -Dgcry_kernels_broken 2>&1); \
 	if echo "$$out" | grep -qE '[0-9]+ examples, [1-9][0-9]* failures'; then \
-	  echo "OK: broken vector clones observed red -- $$(echo "$$out" | grep -E 'examples,' | tail -1)"; \
+	  echo "OK: broken vector backends observed red -- $$(echo "$$out" | grep -E 'examples,' | tail -1)"; \
 	else \
 	  echo "FAIL: the broken arm did not fail as an equivalence mismatch."; \
 	  echo "      A non-zero exit is not enough: a compile error would also be non-zero"; \

@@ -1,11 +1,20 @@
 require "./kernels"
 
 module Gcry
+  {% if flag?(:aarch64) && flag?(:linux) %}
+    # libc's allocation-free view of the ELF auxiliary vector. Heap asks for
+    # the SIMD backend during GC.init, where opening /proc/self/auxv or building
+    # a Hash/String is not safe.
+    lib LibGcryAuxv
+      fun getauxval(type : UInt64) : UInt64
+    end
+  {% end %}
+
   # Which SIMD tier this CPU can actually run.
   #
-  # Calling a `@[TargetFeature]` clone on a CPU without the feature is SIGILL,
-  # not a graceful fallback, so this runs once at `Heap#initialize` and the
-  # answer is carried as a `UInt8`. There is no lazy memoisation and no `once`
+  # Calling a `@[TargetFeature]` backend on a CPU without the feature is SIGILL,
+  # not a graceful fallback, so detection runs once at `Heap#initialize` and
+  # selects a `Kernels::Base` value. There is no lazy memoisation and no `once`
   # constant: `size_classes.cr` records why — this code can run before `Fiber`
   # is up under `-Dgc_none`, and a runtime constant initializer deadlocks there.
   module Cpu
@@ -27,17 +36,14 @@ module Gcry
       {% if flag?(:x86_64) %}
         detect_x86
       {% elsif flag?(:aarch64) %}
-        # NEON is ARMv8-A baseline: no detection, no clones, and the scalar
-        # body is what LLVM vectorises. SVE would need a real variant and does
-        # not pay for one yet.
-        Kernels::TIER_NEON
+        detect_arm
       {% else %}
         Kernels::TIER_SCALAR
       {% end %}
     end
 
     # Resolve `GCRY_SIMD` against what the host can run. The override only ever
-    # clamps *down*: naming a tier this CPU lacks would turn a knob into a
+    # clamps *down* on the current architecture: naming a tier this CPU lacks would turn a knob into a
     # SIGILL, so an unknown or unsupported value falls back to the detected
     # tier rather than being honoured.
     def self.resolve(override : String?) : UInt8
@@ -46,11 +52,13 @@ module Gcry
       requested = case override
                   when "off", "scalar", "none" then Kernels::TIER_SCALAR
                   when "neon"                  then Kernels::TIER_NEON
+                  when "sve"                   then Kernels::TIER_SVE
+                  when "sve2"                  then Kernels::TIER_SVE2
                   when "avx2"                  then Kernels::TIER_AVX2
                   when "avx512"                then Kernels::TIER_AVX512
-                  else                              detected
+                  else                              return detected
                   end
-      requested < detected ? requested : detected
+      clamp(requested, detected)
     end
 
     # `GCRY_SIMD` read the only way it can be read here.
@@ -69,14 +77,18 @@ module Gcry
                     Kernels::TIER_SCALAR
                   elsif env_is?(raw, "neon")
                     Kernels::TIER_NEON
+                  elsif env_is?(raw, "sve")
+                    Kernels::TIER_SVE
+                  elsif env_is?(raw, "sve2")
+                    Kernels::TIER_SVE2
                   elsif env_is?(raw, "avx2")
                     Kernels::TIER_AVX2
                   elsif env_is?(raw, "avx512")
                     Kernels::TIER_AVX512
                   else
-                    detected
+                    return detected
                   end
-      requested < detected ? requested : detected
+      clamp(requested, detected)
     end
 
     private def self.env_is?(raw : UInt8*, want : String) : Bool
@@ -92,10 +104,45 @@ module Gcry
       case tier
       when Kernels::TIER_AVX512 then "avx512"
       when Kernels::TIER_AVX2   then "avx2"
+      when Kernels::TIER_SVE2   then "sve2"
+      when Kernels::TIER_SVE    then "sve"
       when Kernels::TIER_NEON   then "neon"
       else                           "scalar"
       end
     end
+
+    # A tier number only has an ordering within its own architecture. This also
+    # prevents an x86 host from interpreting `GCRY_SIMD=neon` as a scalar clamp,
+    # and vice versa.
+    private def self.clamp(requested : UInt8, detected : UInt8) : UInt8
+      return Kernels::TIER_SCALAR if requested == Kernels::TIER_SCALAR
+      {% if flag?(:x86_64) %}
+        return requested if requested == Kernels::TIER_AVX2 && detected >= Kernels::TIER_AVX2
+        return requested if requested == Kernels::TIER_AVX512 && detected >= Kernels::TIER_AVX512
+      {% elsif flag?(:aarch64) %}
+        return requested if requested == Kernels::TIER_NEON && detected >= Kernels::TIER_NEON
+        return requested if requested == Kernels::TIER_SVE && detected >= Kernels::TIER_SVE
+        return requested if requested == Kernels::TIER_SVE2 && detected >= Kernels::TIER_SVE2
+      {% end %}
+      detected
+    end
+
+    {% if flag?(:aarch64) %}
+      private AT_HWCAP     = 16_u64
+      private AT_HWCAP2    = 26_u64
+      private HWCAP_SVE    = 1_u64 << 22
+      private HWCAP2_SVE2  = 1_u64 << 1
+
+      private def self.detect_arm : UInt8
+        {% if flag?(:linux) %}
+          hwcap = LibGcryAuxv.getauxval(AT_HWCAP)
+          hwcap2 = LibGcryAuxv.getauxval(AT_HWCAP2)
+          return Kernels::TIER_SVE2 if (hwcap & HWCAP_SVE) != 0 && (hwcap2 & HWCAP2_SVE2) != 0
+          return Kernels::TIER_SVE if (hwcap & HWCAP_SVE) != 0
+        {% end %}
+        Kernels::TIER_NEON
+      end
+    {% end %}
 
     {% if flag?(:x86_64) %}
       private def self.detect_x86 : UInt8
@@ -114,11 +161,11 @@ module Gcry
         avx2 = (ebx7 & (1_u32 << 5)) != 0
         return Kernels::TIER_SCALAR unless avx2
 
-        # The AVX2 clone is compiled `+avx2,+bmi,+bmi2,+popcnt` (kernels.cr), so
+        # The AVX2 backend is compiled `+avx2,+bmi,+bmi2,+popcnt`, so
         # LLVM is free to emit `popcnt`, `tzcnt`/`blsr` (BMI1) and `pdep`/`pext`
         # (BMI2) anywhere in it. Granting the tier on AVX2 alone would run those
         # on a part without them — SIGILL, not a slow path. Every CPU with
-        # AVX2 shipped since Haswell has all three, but the clone's contract is
+        # AVX2 shipped since Haswell has all three, but the backend's contract is
         # the feature string, not the era, so it is checked. The AVX-512 tier
         # sits above this one and inherits the requirement.
         popcnt = (ecx1 & (1_u32 << 23)) != 0
@@ -132,7 +179,7 @@ module Gcry
         vpopcntdq = (ecx7 & (1_u32 << 14)) != 0
 
         # AVX-512 is only worth a tier where the popcount actually lowers to
-        # `vpopcntq`; without VPOPCNTDQ the 512-bit clone is the AVX2 clone with
+        # `vpopcntq`; without VPOPCNTDQ the 512-bit backend is AVX2-width work with
         # a worse frequency licence.
         if avx512f && avx512bw && avx512vl && vpopcntdq &&
            (xcr0 & XCR0_AVX512_MASK) == XCR0_AVX512_MASK

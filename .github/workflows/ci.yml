@@ -199,15 +199,17 @@ jobs:
           GCRY_COLLECT_SCRUB=0 ./bin/hello_env
           GCRY_PARALLEL_MARK=4 ./bin/hello_env
 
-      # The SIMD kernels' scalar-vs-vector equivalence fuzz, in release mode.
-      # Without `--release` LLVM does not vectorise, so the AVX2/AVX-512
-      # clones the fuzz compares are scalar code carrying feature flags — the
-      # gate passes without ever executing the loops that ship. The broken-
-      # clone positive control refuses to run on a scalar-only host rather
-      # than passing vacuously.
+      # The SIMD kernels' scalar-vs-assembly equivalence fuzz in the shipping
+      # optimisation mode, followed by an IR check that the intended mnemonics
+      # remain present. The broken-backend positive control refuses to run on a
+      # scalar-only host rather than passing vacuously.
       - name: SIMD kernel equivalence (release)
         run: |
           crystal spec --release spec/kernels_spec.cr --error-trace
+          crystal build --release --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_x86
+          grep -Fq 'vpandn' bin/kernels_x86.ll
+          grep -Fq 'vpopcntq' bin/kernels_x86.ll
+          grep -Fq 'vpcmpuq' bin/kernels_x86.ll
           make kernels-broken
 
       - name: Sample stress under GCRY_STRESS
@@ -1036,9 +1038,17 @@ jobs:
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o bin/hello_aarch64
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/min.cr -o bin/min_aarch64
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/alloc.cr -o bin/alloc_aarch64
+          crystal build --release --cross-compile --target aarch64-linux-gnu --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_aarch64
           test -f bin/hello_aarch64.o
           test -f bin/min_aarch64.o
           test -f bin/alloc_aarch64.o
+          test -f bin/kernels_aarch64.ll
+          grep -Fq '"target-features"="+neon"' bin/kernels_aarch64.ll
+          grep -Fq '"target-features"="+sve"' bin/kernels_aarch64.ll
+          grep -Fq '"target-features"="+sve,+sve2"' bin/kernels_aarch64.ll
+          grep -Fq 'cnt v' bin/kernels_aarch64.ll
+          grep -Fq 'cnt z' bin/kernels_aarch64.ll
+          grep -Fq 'whilelo' bin/kernels_aarch64.ll
 
   # musl LibC ABI smoke (object emit). Catches PthreadT/Void* and similar typedef
   # mismatches that glibc hosts do not exercise (Alpine / static musl).
@@ -1160,6 +1170,12 @@ jobs:
         run: |
           mkdir -p bin
           crystal spec --error-trace
+          crystal spec --release spec/kernels_spec.cr --error-trace
+          make kernels-broken
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          crystal build --release spec/kernels_spec.cr -o bin/kernels_spec_arm
+          qemu-aarch64 -cpu max ./bin/kernels_spec_arm
           # Repeat the header pressure/accounting sequence in fresh processes
           # on the platform that exposed its dormant-revival defects.
           for trial in 1 2 3; do

@@ -563,7 +563,7 @@ module Gcry
     def chunk_occupied_count(chunk : ChunkHeader*) : UInt64
       occ = ChunkHeader.occ_bitmap(chunk)
       return 0_u64 if occ.null?
-      Kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32, @simd_tier)
+      @kernels.popcount_words(occ, chunk.value.bitmap_words.to_i32)
     end
 
     # Blocks this chunk actually holds.

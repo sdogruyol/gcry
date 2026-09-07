@@ -105,8 +105,14 @@ module Gcry
     # shipped while this is still being built out. Nursery chunks are excluded
     # under both: their allocation is still `alloc_nursery`'s freelist, so `occ`
     # is not maintained for them (Phase 8).
-    # Instruction-set tier for the bitmap kernels; see `Gcry::Cpu`.
-    getter simd_tier : UInt8 = Kernels::TIER_SCALAR
+    # Allocation-free kernel backend selected once for this heap. Keeping the
+    # concrete value behind Base removes the per-call UInt8 tier switch.
+    @kernels : Kernels::Base = Kernels::Scalar.new
+
+    def simd_tier : UInt8
+      @kernels.tier
+    end
+
     # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
     # `serial_mark_drain`.
     property mark_prefetch : Bool = true
@@ -253,7 +259,7 @@ module Gcry
       # Both read through LibC.getenv rather than ENV[]: under -Dgc_none this
       # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
       # SEGV (gc_override.cr:520).
-      @simd_tier = Cpu.tier_from_env
+      @kernels = Kernels.for_tier(Cpu.tier_from_env)
       # Headerless *requires* the bitmap representation, and is not optional
       # about it. The freelist allocator threads `next_free` through the block
       # header, and a headerless small block has none — so every freelist push

@@ -988,7 +988,7 @@ module Gcry
       freed, live = if @poison_freed
                       sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
                     else
-                      Kernels.sweep_words(occ, mark, words, @simd_tier)
+                      @kernels.sweep_words(occ, mark, words)
                     end
 
       # No tail correction, and getting that wrong cost an afternoon: the first
