@@ -112,7 +112,6 @@ backends << Gcry::Kernels::Scalar.new
 {% elsif flag?(:aarch64) %}
   backends << Gcry::Kernels::NEON.new
   backends << Gcry::Kernels::SVE.new if detected >= Gcry::Kernels::TIER_SVE
-  backends << Gcry::Kernels::SVE2.new if detected >= Gcry::Kernels::TIER_SVE2
 {% end %}
 
 { {"l2", L2_WORDS}, {"dram", DRAM_WORDS} }.each do |(where, words)|

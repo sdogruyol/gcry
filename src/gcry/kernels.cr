@@ -16,9 +16,8 @@ module Gcry
     TIER_SCALAR = 0_u8
     TIER_NEON   = 1_u8
     TIER_SVE    = 2_u8
-    TIER_SVE2   = 3_u8
-    TIER_AVX2   = 4_u8
-    TIER_AVX512 = 5_u8
+    TIER_AVX2   = 3_u8
+    TIER_AVX512 = 4_u8
 
     abstract struct Base
       abstract def tier : UInt8
@@ -39,7 +38,6 @@ module Gcry
         end
       {% elsif flag?(:aarch64) %}
         case tier
-        when TIER_SVE2 then SVE2.new
         when TIER_SVE  then SVE.new
         when TIER_NEON then NEON.new
         else                Scalar.new
@@ -67,7 +65,5 @@ require "./kernels/scalar"
   require "./kernels/x86_64/*"
 {% elsif flag?(:aarch64) %}
   require "./kernels/aarch64/neon"
-  require "./kernels/aarch64/sve_common"
   require "./kernels/aarch64/sve"
-  require "./kernels/aarch64/sve2"
 {% end %}

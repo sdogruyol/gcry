@@ -53,7 +53,6 @@ module Gcry
                   when "off", "scalar", "none" then Kernels::TIER_SCALAR
                   when "neon"                  then Kernels::TIER_NEON
                   when "sve"                   then Kernels::TIER_SVE
-                  when "sve2"                  then Kernels::TIER_SVE2
                   when "avx2"                  then Kernels::TIER_AVX2
                   when "avx512"                then Kernels::TIER_AVX512
                   else                              return detected
@@ -79,8 +78,6 @@ module Gcry
                     Kernels::TIER_NEON
                   elsif env_is?(raw, "sve")
                     Kernels::TIER_SVE
-                  elsif env_is?(raw, "sve2")
-                    Kernels::TIER_SVE2
                   elsif env_is?(raw, "avx2")
                     Kernels::TIER_AVX2
                   elsif env_is?(raw, "avx512")
@@ -104,7 +101,6 @@ module Gcry
       case tier
       when Kernels::TIER_AVX512 then "avx512"
       when Kernels::TIER_AVX2   then "avx2"
-      when Kernels::TIER_SVE2   then "sve2"
       when Kernels::TIER_SVE    then "sve"
       when Kernels::TIER_NEON   then "neon"
       else                           "scalar"
@@ -122,23 +118,17 @@ module Gcry
       {% elsif flag?(:aarch64) %}
         return requested if requested == Kernels::TIER_NEON && detected >= Kernels::TIER_NEON
         return requested if requested == Kernels::TIER_SVE && detected >= Kernels::TIER_SVE
-        return requested if requested == Kernels::TIER_SVE2 && detected >= Kernels::TIER_SVE2
       {% end %}
       detected
     end
 
     {% if flag?(:aarch64) %}
-      private AT_HWCAP     = 16_u64
-      private AT_HWCAP2    = 26_u64
-      private HWCAP_SVE    = 1_u64 << 22
-      private HWCAP2_SVE2  = 1_u64 << 1
+      private AT_HWCAP  = 16_u64
+      private HWCAP_SVE = 1_u64 << 22
 
       private def self.detect_arm : UInt8
         {% if flag?(:linux) %}
-          hwcap = LibGcryAuxv.getauxval(AT_HWCAP)
-          hwcap2 = LibGcryAuxv.getauxval(AT_HWCAP2)
-          return Kernels::TIER_SVE2 if (hwcap & HWCAP_SVE) != 0 && (hwcap2 & HWCAP2_SVE2) != 0
-          return Kernels::TIER_SVE if (hwcap & HWCAP_SVE) != 0
+          return Kernels::TIER_SVE if (LibGcryAuxv.getauxval(AT_HWCAP) & HWCAP_SVE) != 0
         {% end %}
         Kernels::TIER_NEON
       end

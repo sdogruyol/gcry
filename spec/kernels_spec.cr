@@ -18,7 +18,6 @@ private def each_backend(& : Gcry::Kernels::Base ->)
   {% elsif flag?(:aarch64) %}
     yield Gcry::Kernels::NEON.new if detected >= Gcry::Kernels::TIER_NEON
     yield Gcry::Kernels::SVE.new if detected >= Gcry::Kernels::TIER_SVE
-    yield Gcry::Kernels::SVE2.new if detected >= Gcry::Kernels::TIER_SVE2
   {% end %}
 end
 
@@ -188,7 +187,7 @@ end
 describe Gcry::Cpu do
   it "never resolves above what the host can execute" do
     detected = Gcry::Cpu.detect
-    ["off", "scalar", "none", "neon", "sve", "sve2", "avx2", "avx512", "nonsense", ""].each do |name|
+    ["off", "scalar", "none", "neon", "sve", "avx2", "avx512", "nonsense", ""].each do |name|
       Gcry::Cpu.resolve(name).should be <= detected
     end
     Gcry::Cpu.resolve(nil).should eq(detected)
@@ -214,8 +213,6 @@ describe Gcry::Cpu do
       Gcry::Cpu.tier_from_env.should eq(Gcry::Kernels::TIER_SCALAR)
       ENV["GCRY_SIMD"] = "avx512"
       Gcry::Cpu.tier_from_env.should be <= Gcry::Cpu.detect
-      ENV["GCRY_SIMD"] = "sve2"
-      Gcry::Cpu.tier_from_env.should be <= Gcry::Cpu.detect
       ENV["GCRY_SIMD"] = "avx"
       Gcry::Cpu.tier_from_env.should eq(Gcry::Cpu.detect)
       ENV["GCRY_SIMD"] = "offx"
@@ -235,7 +232,7 @@ describe Gcry::Cpu do
 
   it "names every tier it can return" do
     [Gcry::Kernels::TIER_SCALAR, Gcry::Kernels::TIER_NEON,
-     Gcry::Kernels::TIER_SVE, Gcry::Kernels::TIER_SVE2,
+     Gcry::Kernels::TIER_SVE,
      Gcry::Kernels::TIER_AVX2, Gcry::Kernels::TIER_AVX512].each do |tier|
       Gcry::Cpu.tier_name(tier).should_not be_empty
     end
