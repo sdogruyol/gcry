@@ -57,7 +57,7 @@ module Gcry
             note_chunk_fill(0_u64, 1_u64)
           end
           if !after_world || relink_chunks_after_world?
-            chunk.value.next = kept
+            ChunkHeader.set_next(chunk, kept)
             kept = chunk
           end
           chunk = nxt
@@ -199,7 +199,7 @@ module Gcry
                         @grow_hi[class_index] = 0_u64
                         @prefer_freelists[class_index] = Pointer(Void).null
                       end
-                      chunk.value.next = to_unmap
+                      ChunkHeader.set_next(chunk, to_unmap)
                       to_unmap = chunk
                       drop = true
                       any_drop = true
@@ -283,7 +283,7 @@ module Gcry
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
           if !after_world || relink_chunks_after_world?
-            chunk.value.next = kept
+            ChunkHeader.set_next(chunk, kept)
             kept = chunk
           end
         end
@@ -327,7 +327,7 @@ module Gcry
         while !tail.value.next.null?
           tail = tail.value.next
         end
-        tail.value.next = @pending_empty_chunks
+        ChunkHeader.set_next(tail, @pending_empty_chunks)
         @pending_empty_chunks = to_unmap
       end
 
@@ -506,7 +506,13 @@ module Gcry
       if @empty_flush_unlocked
         flush_pending_empty_chunks_locked(chunk)
       else
-        with_alloc_lock { flush_pending_empty_chunks_locked(chunk) }
+        with_alloc_lock do
+          # A mutator may have been suspended while searching the list, with
+          # a pointer to a small chunk the STW sweep detached. Wait for that
+          # search to finish before unmapping its queued chunks, just as large
+          # trims wait for list readers before detaching their mappings.
+          @chunk_list_lock.sync { flush_pending_empty_chunks_locked(chunk) }
+        end
       end
     end
 

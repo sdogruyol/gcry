@@ -1,0 +1,72 @@
+FFFFFFF
+
+Failures:
+
+  1) chunk fields updated under different locks does not restore an unlinked next pointer when setting dormant
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  2) chunk fields updated under different locks does not restore an unlinked next pointer when setting cursor
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  3) chunk fields updated under different locks does not restore an unlinked next pointer when setting pinned
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  4) chunk fields updated under different locks does not restore an unlinked next pointer when setting idle
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  5) chunk fields updated under different locks does not restore an unlinked next pointer when setting holed
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  6) chunk fields updated under different locks does not restore an unlinked next pointer when setting sparse
+     Failure/Error: {% for flag in %w[dormant cursor pinned idle holed sparse] %}
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66
+
+  7) chunk fields updated under different locks preserves a concurrent flag change when unlinking a successor
+     Failure/Error: Gcry::ChunkHeader.cursor?(predecessor).should be_true
+
+       Expected: true
+            got: false
+
+     # ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:96
+
+Finished in 553 microseconds
+7 examples, 7 failures, 0 errors, 0 pending
+
+Failed examples:
+
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting dormant
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting cursor
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting pinned
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting idle
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting holed
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:66 # chunk fields updated under different locks does not restore an unlinked next pointer when setting sparse
+crystal spec ../../../../../tmp/gcry-crash-before-tree/spec/chunk_field_race_spec.cr:83 # chunk fields updated under different locks preserves a concurrent flag change when unlinking a successor

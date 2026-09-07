@@ -1,0 +1,62 @@
+2026-09-07T04:21:40.6963316Z   locked (default):    0 of 20 failed
+2026-09-07T04:21:40.6965609Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xff0e6d00d3f0
+2026-09-07T04:21:40.6966011Z 
+2026-09-07T04:21:40.6966616Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:21:40.6985292Z   running total: 0 locked-arm faults in 20 attempts
+2026-09-07T04:21:56.6327444Z 
+2026-09-07T04:21:56.6327990Z   locked (default):    0 of 20 failed
+2026-09-07T04:21:56.6329377Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xff149f7d9af0
+2026-09-07T04:21:56.6329723Z 
+2026-09-07T04:21:56.6330405Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:21:56.6346827Z   running total: 0 locked-arm faults in 40 attempts
+2026-09-07T04:22:12.1533851Z 
+2026-09-07T04:22:12.1536110Z   locked (default):    0 of 20 failed
+2026-09-07T04:22:12.1538293Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xffbdc0c0b5b0
+2026-09-07T04:22:12.1538725Z 
+2026-09-07T04:22:12.1539269Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:22:12.1553797Z   running total: 0 locked-arm faults in 60 attempts
+2026-09-07T04:22:28.5932221Z 
+2026-09-07T04:22:28.5932754Z   locked (default):    0 of 20 failed
+2026-09-07T04:22:28.5933389Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xff79b422d530
+2026-09-07T04:22:28.5933737Z 
+2026-09-07T04:22:28.5934301Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:22:28.5954535Z   running total: 0 locked-arm faults in 80 attempts
+2026-09-07T04:22:45.8821191Z 
+2026-09-07T04:22:45.8821831Z   locked (default):    0 of 20 failed
+2026-09-07T04:22:45.8822515Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xff2df47a5008
+2026-09-07T04:22:45.8823151Z 
+2026-09-07T04:22:45.8823876Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:22:45.8840780Z   running total: 0 locked-arm faults in 100 attempts
+2026-09-07T04:23:02.3972845Z 
+2026-09-07T04:23:02.3992485Z   locked (default):    0 of 20 failed
+2026-09-07T04:23:02.3993448Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xffedfa60a830
+2026-09-07T04:23:02.3993818Z 
+2026-09-07T04:23:02.3994340Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:23:02.3994775Z   running total: 0 locked-arm faults in 120 attempts
+2026-09-07T04:23:19.8046928Z 
+2026-09-07T04:23:19.8047526Z   locked (default):    0 of 20 failed
+2026-09-07T04:23:19.8048010Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xff5018361ff0
+2026-09-07T04:23:19.8048393Z 
+2026-09-07T04:23:19.8048890Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:23:19.8065890Z   running total: 0 locked-arm faults in 140 attempts
+2026-09-07T04:25:35.2255723Z 
+2026-09-07T04:25:35.2258094Z   locked (default):    1 of 20 failed (1 timed out)
+2026-09-07T04:25:35.2258455Z   what the locked arm's first crash said:
+2026-09-07T04:25:35.2259485Z     gcry: SIGSEGV at 0xffa7ce601010 — inside the heap span but in no live chunk — the chunk was unmapped, or the address is in a hole between chunks
+2026-09-07T04:25:35.2260396Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xffb8f1a0a8b0
+2026-09-07T04:25:35.2260741Z 
+2026-09-07T04:25:35.2261302Z FAIL: the locked arm timed out 1 of 20 — a killed child is not evidence about serialisation, so raise BENCH_CHILD_TIMEOUT_S or find the hang
+2026-09-07T04:25:35.2274600Z   running total: 1 locked-arm faults in 160 attempts
+2026-09-07T04:25:51.1679899Z 
+2026-09-07T04:25:51.1680559Z   locked (default):    0 of 20 failed
+2026-09-07T04:25:51.1681044Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0xffd690aec9f0
+2026-09-07T04:25:51.1682624Z 
+2026-09-07T04:25:51.1683331Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:25:51.1702081Z   running total: 1 locked-arm faults in 180 attempts
+2026-09-07T04:26:07.7808555Z 
+2026-09-07T04:26:07.7809227Z   locked (default):    0 of 20 failed
+2026-09-07T04:26:07.7810363Z   unlocked (old):      20 of 20 failed   Invalid memory access (signal Invalid memory access (signal 1111) at address ) at address 0x0xff99736087b0ff9971360db0
+2026-09-07T04:26:07.7810967Z 
+2026-09-07T04:26:07.7811502Z ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+2026-09-07T04:26:07.7828014Z   running total: 1 locked-arm faults in 200 attempts
+2026-09-07T04:26:07.7828380Z TOTAL: 1 locked-arm faults in 200 attempts

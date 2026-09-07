@@ -588,6 +588,11 @@ large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
 	$(BIN)/large_cache_race
 
+.PHONY: chunk-search-race
+chunk-search-race: $(BIN)
+	$(CRYSTAL) build bench/chunk_search_race.cr -o $(BIN)/chunk_search_race --error-trace
+	$(BIN)/chunk_search_race
+
 # A mutator inside `find_block` while collections run.
 #
 # It used to die in 5 runs of 8, on an impossible chunk pointer the last-chunk

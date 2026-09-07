@@ -818,7 +818,7 @@ module Gcry
         @bitmap_search_counts[slot] &+= 1
         best = Pointer(ChunkHeader).null
         indexed = true
-        each_chunk do |chunk|
+        each_chunk_for_allocation do |chunk|
           next unless bitmap_pool_candidate?(chunk, index, atomic)
           best = chunk if best.null? || chunk.address < best.address
           indexed = false if indexed && !bitmap_pool_append(pool, chunk.address)
@@ -924,46 +924,37 @@ module Gcry
     # writes. Same flag flip and byte accounting as the header path; free bytes
     # were never subtracted when the chunk went dormant, so none are added back.
     private def bitmap_revive_dormant(index : Int32, atomic : Bool) : {ChunkHeader*?, Bool}
-      chunk = @chunks
-      while chunk
-        if !ChunkHeader.large?(chunk) &&
-           ChunkHeader.dormant?(chunk) &&
-           !ChunkHeader.nursery?(chunk) &&
-           chunk.value.size_class == index.to_u32 &&
-           ChunkHeader.atomic?(chunk) == atomic
-          # The post-STW flush walks dormant chunks and DONTNEEDs their pages
-          # without a lock, so a chunk revived after it read the flag would
-          # have the objects allocated into it zeroed silently. The walk flag
-          # is set and cleared under the alloc lock; taking it here orders
-          # this revive strictly before or after the whole walk. Refused
-          # revives fall through to mapping a fresh chunk.
-          refused = false
-          with_alloc_lock do
-            if @live_chunk_walk
-              @dormant_revive_during_flush &+= 1
-              refused = true
-            else
-              ChunkHeader.set_dormant(chunk, false)
-            end
-          end
-          return {nil, true} if refused
-          mapped = chunk.value.mapped_bytes
-          @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
-          words = chunk.value.bitmap_words.to_i32
-          occ = ChunkHeader.occ_bitmap(chunk)
-          mark = ChunkHeader.mark_bitmap(chunk)
-          i = 0
-          while i < words
-            occ[i] = 0_u64
-            mark[i] = 0_u64
-            i += 1
-          end
-          @bitmap_dormant_revives &+= 1
-          return {chunk, false}
+      chunk = dormant_chunk_for_allocation(index, false, atomic)
+      return {nil, false} unless chunk
+      # The post-STW flush walks dormant chunks and DONTNEEDs their pages
+      # without a lock, so a chunk revived after it read the flag would
+      # have the objects allocated into it zeroed silently. The walk flag
+      # is set and cleared under the alloc lock; taking it here orders
+      # this revive strictly before or after the whole walk. Refused
+      # revives fall through to mapping a fresh chunk.
+      refused = false
+      with_alloc_lock do
+        if @live_chunk_walk
+          @dormant_revive_during_flush &+= 1
+          refused = true
+        else
+          ChunkHeader.set_dormant(chunk, false)
         end
-        chunk = chunk.value.next
       end
-      {nil, false}
+      return {nil, true} if refused
+      mapped = chunk.value.mapped_bytes
+      @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
+      words = chunk.value.bitmap_words.to_i32
+      occ = ChunkHeader.occ_bitmap(chunk)
+      mark = ChunkHeader.mark_bitmap(chunk)
+      i = 0
+      while i < words
+        occ[i] = 0_u64
+        mark[i] = 0_u64
+        i += 1
+      end
+      @bitmap_dormant_revives &+= 1
+      {chunk, false}
     end
 
     # Release one block back to `occ`. The bit is shared with 63 others, so the

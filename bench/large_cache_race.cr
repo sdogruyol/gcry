@@ -163,8 +163,8 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
   first = nil
   report = nil
   env = {} of String => String
-  env["GCRY_TRIM_UNLOCKED"] = "1" if unlocked
-  attempts.times do
+  env["GCRY_TRIM_UNLOCKED"] = unlocked ? "1" : "0"
+  attempts.times do |attempt|
     result = BoundedChild.run(exe, ["--child"], env)
     captured = result.output
     unless result.ok
@@ -172,6 +172,13 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
       hung += 1 if result.timed_out
       first ||= captured.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
       report ||= gcry_lines(captured)
+      unless unlocked
+        # Preserve the whole backtrace, including faults whose signal handler
+        # subsequently hangs. A timeout can also be the aftermath of a crash.
+        STDERR.puts "locked child #{attempt + 1}/#{attempts} failed#{result.timed_out ? " (timed out)" : ""}:"
+        STDERR.puts captured
+        STDERR.flush
+      end
     end
   end
   {bad, hung, first, report}

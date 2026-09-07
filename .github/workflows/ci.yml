@@ -609,6 +609,7 @@ jobs:
           GCRY_POISON_HOLDERS: "1"
           GCRY_THREAD_CENSUS: "1"
         run: |
+          make chunk-search-race
           make large-cache-race
 
       # A mutator inside `find_block` while collections run. It used to crash on
@@ -1205,6 +1206,7 @@ jobs:
           # only an address, so it cannot distinguish a released large chunk
           # from an unrelated crash.
           GCRY_SEGV_REPORT=1 timeout 600 make large-cache-race
+          timeout 60 make chunk-search-race
 
   # Sampling, not gating. The `Thread` use-after-free fires in roughly one
   # aarch64 job in three and has never been seen off CI — 40 runs of the same
@@ -1258,6 +1260,7 @@ jobs:
         run: |
           mkdir -p bin
           crystal spec --error-trace
+          make chunk-search-race
           crystal spec -Dgc_none process_spec --error-trace
           crystal build -Dgc_none samples/hello.cr -o bin/hello
           ./bin/hello
