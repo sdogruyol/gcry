@@ -1,4 +1,8 @@
 struct Gcry::Kernels::AVX2 < Gcry::Kernels::Base
+  # AVX2 has no lane-wise UInt64 population count. Count both nibbles of every
+  # byte through VPSHUFB, then use VPSADBW to widen each eight-byte group into
+  # UInt64 accumulators. This keeps the sweep in vector registers instead of
+  # extracting four lanes for scalar POPCNT on every iteration.
   def tier : UInt8
     TIER_AVX2
   end
@@ -15,50 +19,58 @@ struct Gcry::Kernels::AVX2 < Gcry::Kernels::Base
         "movq $2, %r8
          movq $3, %r9
          movl $4, %ecx
-         xorq %r10, %r10
-         xorq %r11, %r11
+         movabsq $$0x0f0f0f0f0f0f0f0f, %rax
+         vmovq %rax, %xmm4
+         vpbroadcastq %xmm4, %ymm4
+         movabsq $$0x0302020102010100, %rax
+         vmovq %rax, %xmm5
+         movabsq $$0x0403030203020201, %rax
+         vpinsrq $$1, %rax, %xmm5, %xmm5
+         vinserti128 $$1, %xmm5, %ymm5, %ymm5
+         vpxor %ymm6, %ymm6, %ymm6
+         vpxor %ymm7, %ymm7, %ymm7
+         vpxor %ymm8, %ymm8, %ymm8
          1:
          vmovdqu (%r8), %ymm0
          vmovdqu (%r9), %ymm1
          vpandn %ymm0, %ymm1, %ymm2
          vmovdqu %ymm1, (%r8)
-         vpxor %ymm0, %ymm0, %ymm0
-         vmovdqu %ymm0, (%r9)
-         vextracti128 $$1, %ymm2, %xmm3
-         vmovq %xmm2, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vpextrq $$1, %xmm2, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vmovq %xmm3, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vpextrq $$1, %xmm3, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vextracti128 $$1, %ymm1, %xmm3
-         vmovq %xmm1, %rax
-         popcntq %rax, %rax
-         addq %rax, %r11
-         vpextrq $$1, %xmm1, %rax
-         popcntq %rax, %rax
-         addq %rax, %r11
-         vmovq %xmm3, %rax
-         popcntq %rax, %rax
-         addq %rax, %r11
-         vpextrq $$1, %xmm3, %rax
-         popcntq %rax, %rax
-         addq %rax, %r11
+         vmovdqu %ymm7, (%r9)
+         vpand %ymm4, %ymm2, %ymm3
+         vpsrlw $$4, %ymm2, %ymm9
+         vpand %ymm4, %ymm9, %ymm9
+         vpshufb %ymm3, %ymm5, %ymm3
+         vpshufb %ymm9, %ymm5, %ymm9
+         vpaddb %ymm9, %ymm3, %ymm3
+         vpsadbw %ymm7, %ymm3, %ymm3
+         vpaddq %ymm3, %ymm6, %ymm6
+         vpand %ymm4, %ymm1, %ymm3
+         vpsrlw $$4, %ymm1, %ymm9
+         vpand %ymm4, %ymm9, %ymm9
+         vpshufb %ymm3, %ymm5, %ymm3
+         vpshufb %ymm9, %ymm5, %ymm9
+         vpaddb %ymm9, %ymm3, %ymm3
+         vpsadbw %ymm7, %ymm3, %ymm3
+         vpaddq %ymm3, %ymm8, %ymm8
          addq $$32, %r8
          addq $$32, %r9
          subl $$4, %ecx
          jnz 1b
-         movq %r10, ($0)
-         movq %r11, ($1)
+         vextracti128 $$1, %ymm6, %xmm0
+         vpaddq %xmm0, %xmm6, %xmm6
+         vpsrldq $$8, %xmm6, %xmm0
+         vpaddq %xmm0, %xmm6, %xmm6
+         vmovq %xmm6, %rax
+         movq %rax, ($0)
+         vextracti128 $$1, %ymm8, %xmm0
+         vpaddq %xmm0, %xmm8, %xmm8
+         vpsrldq $$8, %xmm8, %xmm0
+         vpaddq %xmm0, %xmm8, %xmm8
+         vmovq %xmm8, %rax
+         movq %rax, ($1)
          vzeroupper"
               :: "r"(pointerof(freed)), "r"(pointerof(live)), "r"(occ), "r"(mark), "r"(vector_n)
-              : "rax", "rcx", "r8", "r9", "r10", "r11", "xmm0", "xmm1", "xmm2", "xmm3", "memory", "cc"
+              : "rax", "rcx", "r8", "r9", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "memory", "cc"
               : "volatile"
       )
     end
@@ -79,35 +91,64 @@ struct Gcry::Kernels::AVX2 < Gcry::Kernels::Base
   def popcount_words(words : UInt64*, n : Int32) : UInt64
     {% if flag?(:gcry_kernels_broken) %} n -= 1 if n > 1 {% end %}
     return 0_u64 if n <= 0
-    vector_n = n & ~3
     acc = 0_u64
-    if vector_n > 0
+    # Materialising the nibble lookup table is not worthwhile below two YMM
+    # vectors. Keep those uncommon, larger-class bitmaps on direct POPCNT.
+    if n < 8
       asm(
         "movq $1, %r8
          movl $2, %ecx
          xorq %r10, %r10
          1:
+         popcntq (%r8), %rax
+         addq %rax, %r10
+         addq $$8, %r8
+         decl %ecx
+         jnz 1b
+         movq %r10, ($0)"
+              :: "r"(pointerof(acc)), "r"(words), "r"(n)
+              : "rax", "rcx", "r8", "r10", "memory", "cc"
+              : "volatile"
+      )
+      return acc
+    end
+    vector_n = n & ~3
+    if vector_n > 0
+      asm(
+        "movq $1, %r8
+         movl $2, %ecx
+         movabsq $$0x0f0f0f0f0f0f0f0f, %rax
+         vmovq %rax, %xmm4
+         vpbroadcastq %xmm4, %ymm4
+         movabsq $$0x0302020102010100, %rax
+         vmovq %rax, %xmm5
+         movabsq $$0x0403030203020201, %rax
+         vpinsrq $$1, %rax, %xmm5, %xmm5
+         vinserti128 $$1, %xmm5, %ymm5, %ymm5
+         vpxor %ymm6, %ymm6, %ymm6
+         vpxor %ymm7, %ymm7, %ymm7
+         1:
          vmovdqu (%r8), %ymm0
-         vextracti128 $$1, %ymm0, %xmm1
-         vmovq %xmm0, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vpextrq $$1, %xmm0, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vmovq %xmm1, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
-         vpextrq $$1, %xmm1, %rax
-         popcntq %rax, %rax
-         addq %rax, %r10
+         vpand %ymm4, %ymm0, %ymm1
+         vpsrlw $$4, %ymm0, %ymm2
+         vpand %ymm4, %ymm2, %ymm2
+         vpshufb %ymm1, %ymm5, %ymm1
+         vpshufb %ymm2, %ymm5, %ymm2
+         vpaddb %ymm2, %ymm1, %ymm1
+         vpsadbw %ymm7, %ymm1, %ymm1
+         vpaddq %ymm1, %ymm6, %ymm6
          addq $$32, %r8
          subl $$4, %ecx
          jnz 1b
-         movq %r10, ($0)
+         vextracti128 $$1, %ymm6, %xmm0
+         vpaddq %xmm0, %xmm6, %xmm6
+         vpsrldq $$8, %xmm6, %xmm0
+         vpaddq %xmm0, %xmm6, %xmm6
+         vmovq %xmm6, %rax
+         movq %rax, ($0)
          vzeroupper"
               :: "r"(pointerof(acc)), "r"(words), "r"(vector_n)
-              : "rax", "rcx", "r8", "r10", "xmm0", "xmm1", "memory", "cc"
+              : "rax", "rcx", "r8", "xmm0", "xmm1", "xmm2", "xmm4", "xmm5", "xmm6", "xmm7", "memory", "cc"
               : "volatile"
       )
     end

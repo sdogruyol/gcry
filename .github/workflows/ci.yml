@@ -208,6 +208,7 @@ jobs:
           crystal spec --release spec/kernels_spec.cr --error-trace
           crystal build --release --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_x86
           grep -Fq 'vpandn' bin/kernels_x86.ll
+          grep -Fq 'vpshufb' bin/kernels_x86.ll
           grep -Fq 'vpopcntq' bin/kernels_x86.ll
           grep -Fq 'vpcmpuq' bin/kernels_x86.ll
           make kernels-broken

@@ -74,17 +74,41 @@ struct Gcry::Kernels::AVX512 < Gcry::Kernels::Base
     vector_n = n & ~7
     acc = 0_u64
     if vector_n > 0
+      # Two accumulators hide VPOPCNTQ/add latency on the common 64-word
+      # class-0 bitmap. Shorter bitmaps stay on the smaller single stream.
       asm(
         "movq $1, %r8
          movl $2, %ecx
          vpxord %zmm2, %zmm2, %zmm2
+         cmpl $$64, %ecx
+         jb 3f
+         vpxord %zmm3, %zmm3, %zmm3
          1:
+         vmovdqu64 (%r8), %zmm0
+         vmovdqu64 64(%r8), %zmm1
+         vpopcntq %zmm0, %zmm0
+         vpopcntq %zmm1, %zmm1
+         vpaddq %zmm0, %zmm2, %zmm2
+         vpaddq %zmm1, %zmm3, %zmm3
+         addq $$128, %r8
+         subl $$16, %ecx
+         cmpl $$16, %ecx
+         jae 1b
+         vpaddq %zmm3, %zmm2, %zmm2
+         testl $$8, %ecx
+         jz 4f
+         vmovdqu64 (%r8), %zmm0
+         vpopcntq %zmm0, %zmm0
+         vpaddq %zmm0, %zmm2, %zmm2
+         jmp 4f
+         3:
          vmovdqu64 (%r8), %zmm0
          vpopcntq %zmm0, %zmm0
          vpaddq %zmm0, %zmm2, %zmm2
          addq $$64, %r8
          subl $$8, %ecx
-         jnz 1b
+         jnz 3b
+         4:
          vextracti64x4 $$1, %zmm2, %ymm0
          vpaddq %ymm0, %ymm2, %ymm2
          vextracti128 $$1, %ymm2, %xmm0
@@ -95,7 +119,7 @@ struct Gcry::Kernels::AVX512 < Gcry::Kernels::Base
          movq %rax, ($0)
          vzeroupper"
               :: "r"(pointerof(acc)), "r"(words), "r"(vector_n)
-              : "rax", "rcx", "r8", "xmm0", "xmm2", "memory", "cc"
+              : "rax", "rcx", "r8", "xmm0", "xmm1", "xmm2", "xmm3", "memory", "cc"
               : "volatile"
       )
     end
