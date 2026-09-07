@@ -1049,7 +1049,7 @@ jobs:
           test -f bin/kernels_aarch64.ll
           grep -Fq '"target-features"="+neon"' bin/kernels_aarch64.ll
           grep -Fq '"target-features"="+sve"' bin/kernels_aarch64.ll
-          grep -Fq 'cnt v' bin/kernels_aarch64.ll
+          grep -Fq 'llvm.ctpop.v2i64' bin/kernels_aarch64.ll
           grep -Fq 'cnt z' bin/kernels_aarch64.ll
           grep -Fq 'whilelo' bin/kernels_aarch64.ll
 
