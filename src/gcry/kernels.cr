@@ -33,9 +33,9 @@ module Gcry
     # wherever the compiler's output is at least as fast as hand assembly on
     # every microarchitecture it was measured on — on Zen 5 the vectoriser's
     # multi-accumulator unroll beat the single-accumulator asm from #36 by
-    # 11–48% in L2 on everything but the AVX2 sweep (`make bench-kernels`,
-    # 2026-09-07). Hand assembly earns its place only with an A/B on both an
-    # Intel and an AMD part.
+    # 21–52% in L2 on everything but the AVX2 sweep
+    # (`bench/log/linux/2026-09-07-kernel-backend-ab`). Hand assembly earns its
+    # place only with an A/B on both an Intel and an AMD part.
     #
     # `-Dgcry_kernels_broken` is the positive control for `make kernels-broken`:
     # it drops the last word from every vector backend so the equivalence fuzz

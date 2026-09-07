@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live under `src/gcry/kernels/`. The AVX2 sweep is hand-written assembly
   (VPSHUFB nibble popcount in vector registers); every other x86 kernel stays
   on LLVM's vectorised loops, which beat the single-accumulator assembly on
-  Zen 5 by 11–48% in L2. AArch64 gains an SVE
+  Zen 5 by 21–52% in L2 (`bench/log/linux/2026-09-07-kernel-backend-ab`).
+  AArch64 gains an SVE
   backend (predicated, vector-length-agnostic assembly) selected from Linux
   `AT_HWCAP`; NEON remains the compiler-vectorised baseline. `GCRY_SIMD`
   accepts `sve`.

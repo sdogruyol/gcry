@@ -348,7 +348,9 @@ segv-report: $(BIN)
 # L2-resident and a DRAM-resident working set. The plan's bar is sweep >= 20
 # GB/s on AVX2. Expect the tiers to spread at L2 and converge at DRAM — the
 # kernel is bandwidth-bound there, which is why AVX-512 is worth ~1.3x on sweep
-# and not 2x (simdgc-perf-notes.md). ~10 s.
+# and not 2x (simdgc-perf-notes.md). Latest per-backend reading, and the method
+# for a fair A/B (rotate binaries, take the max of several runs):
+# bench/log/linux/2026-09-07-kernel-backend-ab/FINDINGS.md. ~10 s.
 # Steady-state GC workload with a tunable survival rate, reporting per-phase
 # timings and the **GC duty cycle** — the fraction of wall time the process is
 # stopped for GC, which is the entire budget any mark-side optimisation can

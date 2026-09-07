@@ -88,8 +88,10 @@ struct Gcry::Kernels::AVX2 < Gcry::Kernels::Base
   end
 
   # LLVM's own vpshufb/vpsadbw popcount, unrolled with independent
-  # accumulators, beat the single-accumulator asm on Zen 5 (-18% popcount,
-  # -48% all_zero, -41% range_any in L2); see `def_autovec_*` in kernels.cr.
+  # accumulators, beat the single-accumulator asm on Zen 5 (asm was -25%
+  # popcount, -52% all_zero, -44% range_any in L2; the sweep asm above was at
+  # parity, -9%, and claims +40% on Intel). `def_autovec_*` in kernels.cr;
+  # numbers in `bench/log/linux/2026-09-07-kernel-backend-ab`.
   Gcry::Kernels.def_autovec_popcount("+avx2,+bmi,+bmi2,+popcnt")
   Gcry::Kernels.def_autovec_all_zero("+avx2,+bmi,+bmi2,+popcnt")
   Gcry::Kernels.def_autovec_range_any("+avx2,+bmi,+bmi2,+popcnt")
