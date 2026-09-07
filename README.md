@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs at ~87% of Boehm's throughput with ~0.80x the RSS (Linux).</b>
+  <b>gcry runs at Boehm parity on throughput — ~105% on Kemal <code>/json</code> — at ~1.3× its peak RSS (Linux, 0.24.0).</b>
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ crystal build -Dgc_none app.cr -o app
 String, Array, Hash — everything allocates on gcry. No API changes. One line
 to swap Boehm out, one line to swap it back.
 
-**Near-Boehm performance: ~87% throughput at ~0.80x RSS (Linux).**
+**Boehm-parity throughput: ~105% [99, 111] on Kemal `/json` at ~1.3× peak RSS (Linux, 0.24.0); ~102% at ~2.0× peak on macOS.**
 
 ---
 
@@ -181,31 +181,32 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.19.0)* |
-|----------|------------------------:|
-| Kemal `/json` throughput | **~87%** *(carry v0.16)* (~95% with `GCRY_KEEP_CHUNKS=1`, escape) |
-| Kemal `/json` post-GC RSS | **~0.80x** *(carry v0.16)* |
-| Kemal `/` throughput | **~82%** *(carry v0.16)* |
-| Fat app `/api/v1/` throughput | **~90–96%** |
-| Fat app `/api/v1/` RSS | **~1–1.6x** / **~0.92x** *(`GCRY_TIGHT_GROW=1`)* / **~3.43x** *(v0.17 i3 cut)* |
+| Workload | gcry vs Boehm (v0.24.0, bitmap default)* |
+|----------|-----------------------------------------:|
+| Kemal `/json` throughput | **105.3%** [99.2, 111.3] *(freelist escape `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
+| Kemal `/json` peak RSS | **1.30×** *(0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50`)* |
+| Kemal `/json` post-`/gc-collect` RSS | **~1.2×** *(15.2 vs 12.9 MB; warm chunks released on explicit collect)* |
+| Kemal `/` throughput | **~82%** *(carry v0.16; not re-measured on 0.24.0)* |
+| Fat app `/api/v1/` throughput | **90.8%** *(freelist: 80.7%)* |
+| Fat app `/api/v1/` RSS | **1.55×** *(freelist: 1.47×)* |
 
-\*Kemal: carry v0.16 `bench/log/linux/2026-08-01-093130/` (median-of-3, scrub on; `/` from `slash-recut/`). Quiet tip / post-tag 9950X smokes ~**80%** `/json` @ ~**0.74×** — headline stays the v0.16 cut. Fat app: finalizer + Linux retain=0 — i3 **~96%** @ **~1.63×** (`…/2026-08-04-acik-i3-retain0-med3/`); 9950X band **~1.0–1.8×** (post-tag **~102%** @ **~1.76×**, `…/2026-08-05-091820/`). Opt-in `GCRY_TIGHT_GROW=1` → acik **~103%** @ **~0.92×** (Kemal thr soft; not default) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant — not this release’s win. Linux numbers are unchanged in v0.19.0; nothing here was re-measured.
+\*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The bitmap default is **141.9%** of the old freelist default at **0.69×** its peak RSS, 2.7 minor faults per 1 000 requests against 1 671, 15% less CPU per request than Boehm, p99 2.4 ms against 6.4. `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Headerless (`-Dgcry_headerless`, a compile flag) is 112.6% at 1.07× on the same run. Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
 ### macOS (Apple Silicon)
 
-| Workload | gcry vs Boehm (tip)* |
-|----------|--------------------:|
-| Kemal `/json` throughput | **~84%** |
-| Kemal `/json` post-GC RSS | **~1.01x** |
-| Kemal `/` throughput | **~91%** |
-| Fat app `/api/v1/` throughput | **~98%** |
-| Fat app `/api/v1/` RSS | **~0.97x** |
+| Workload | gcry vs Boehm (v0.24.0, bitmap default)* |
+|----------|-----------------------------------------:|
+| Kemal `/json` throughput | **101.8%** [100.5, 103.1] *(freelist escape: 85.5%)* |
+| Kemal `/json` peak footprint | **1.97×** *(post-GC resident 1.20×; freelist 1.78× / 1.07×)* |
+| Kemal `/` throughput | **~91%** *(carry 2026-08-04; not re-measured on 0.24.0)* |
+| Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
+| Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
-\*Kemal: `bench/log/macos/2026-08-04-172842/` (median-of-3, scrub on). Fat app: `…/2026-08-14-acik-recut/` tip base, n=9 per arm, 0 Non-2xx in 18 trials — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md). Tagged v0.17 carry was Kemal ~84% @ ~0.93× / acik ~71% @ ~18×.
+\*Kemal: `bench/log/macos/2026-09-06-bitmap-default-ab/` (Apple M2 Pro, five paired arms, 20 rotated rounds, null at 100.9% [99.1, 102.6]); 0.8 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 3.0 against 5.2 ms. Both arms sit at the 16 MiB Darwin threshold floor, so the warm-chunk budget is the whole RSS difference — the reverse of the Linux ordering. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
-Linux tip fat-app RSS is ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**98%** thr @ ~**0.97x** RSS at n=9 (2026-08-14 re-cut; was ~**18x** at v0.17). The ~**0.63x** this line used to carry does not reproduce — gcry's post-GC RSS is within 0.6% of that cut, and what fell 35% between the two sessions is Boehm's arm. Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
+Freelist-era history (pre-0.24.0, `GCRY_BITMAP_ALLOC=0`; `GCRY_TIGHT_GROW` is freelist-only): Linux tip fat-app RSS was ~**1–1.6x** Boehm after finalizer + retain=0 (i3 headline ~**1.63x**; residual is mapped freelist). Opt-in `GCRY_TIGHT_GROW=1` brings acik to ~**0.92x**. The v0.17 i3 cut was ~**3.43x**. Darwin tip fat-app is ~**98%** thr @ ~**0.97x** RSS at n=9 (2026-08-14 re-cut; was ~**18x** at v0.17). The ~**0.63x** this line used to carry does not reproduce — gcry's post-GC RSS is within 0.6% of that cut, and what fell 35% between the two sessions is Boehm's arm. Stack maps remain research-only for precise roots — product path is tip without `PRECISE_STACK`.
 
 ### What the default heuristics cost
 
@@ -320,7 +321,8 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
-| **Empty-chunk release** | On by default — Kemal post-GC RSS ~**0.80×** Boehm (Linux v0.16.0) |
+| **Bitmap allocator** | Process default since 0.24.0 — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors; Kemal `/json` ~**105%** of Boehm (Linux). `GCRY_BITMAP_ALLOC=0` is the freelist escape |
+| **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR`; an explicit `GC.collect` releases them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal) |
 | **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
 | **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |
 | **Fork** | `pthread_atfork` reinit (default); see [POLICY](docs/POLICY.md) |
@@ -361,7 +363,9 @@ Defaults tuned for process GC. Change after you measure:
 | Variable | Effect |
 |----------|--------|
 | `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved; **large pause cost where the root scan is big** — EC4 or a big heap) |
-| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks -> ~95% `/json` thr, ~3x RSS |
+| `GCRY_BITMAP_ALLOC=0` | Freelist allocator, the pre-0.24.0 default (Kemal `/json` ~75% of Boehm at 1.87× peak RSS on Linux; ~85% on macOS) |
+| `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
+| `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |
 | `GCRY_THRESHOLD` | Fixed bytes before auto-major. Unset, the threshold adapts: live bytes after each major × `GCRY_THRESHOLD_FACTOR`% (default 100), clamped 8–64 MiB |
 | `GCRY_AUTO_LAYOUTS=1` | Whole-program precise layouts (~-7pp thr) |
 | `GCRY_NURSERY=1` | Opt-in nursery (off by default for process) |

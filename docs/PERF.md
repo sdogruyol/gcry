@@ -8,6 +8,39 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
+## Headline (v0.24.0 — the bitmap default) — Linux *(measured)*
+
+`bench/log/linux/2026-09-06-bitmap-default-ab/` (`8421f7b`, Crystal 1.21.0,
+Ryzen AI 9 465, Linux 7.2.2, EC1). `bench/performance/kemal_ab.py`, Kemal
+`/json`, **20 rotated rounds × 5 arms**, 15 s per trial after warmup,
+identical-binary null control at 97.5% [93.0, 102.0]. Peak RSS is the HWM,
+post-GC the resident size after `/gc-collect`.
+
+| arm | req/s | % Boehm [95% CI] | peak RSS × | faults / 1k | CPU ms / 10k | p99 µs |
+|---|---:|---:|---:|---:|---:|---:|
+| Boehm | 101 268 | 100.0% | 1.00 | 0.4 | 87.8 | 2 600 |
+| **gcry, default** (bitmap, header layout) | 106 453 | **105.3%** [99.2, 111.3] | **1.30** | 2.7 | 74.6 | 2 360 |
+| gcry, `GCRY_BITMAP_ALLOC=0` (freelist, the old default) | 75 455 | **74.9%** [70.9, 78.9] | 1.87 | 1 671 | 112.9 | 6 380 |
+| gcry, `-Dgcry_headerless` | 113 552 | **112.6%** [106.6, 118.6] | 1.07 | 1.1 | 69.0 | 2 210 |
+
+Against the old default the bitmap allocator is **141.9%** [132.1, 151.6] at
+**0.69×** its peak RSS. The RSS above Boehm is the warm-chunk budget (live ×
+`GCRY_THRESHOLD_FACTOR`, capped by the threshold): peak = post-GC = 37.5 MB
+flat where the freelist spiked to 54 MB and collapsed to 17 MB. An explicit
+`GC.collect` releases the budget on the release tree — Kemal `/json` after
+`/gc-collect` 15.2 MB against Boehm's 12.9 on the CI runner (~1.2×).
+
+`GCRY_THRESHOLD_FACTOR` (`…/2026-09-06-threshold-factor-ab/`, same protocol,
+null 98.0% [93.8, 102.3]): factor 100 107.4% @ 1.31×, 75 98.6% @ 1.13×,
+50 105.1% @ **0.95×** — throughput inside the null band, RSS linear in the
+factor. On acikturkiye `/api/v1/` (8 paired trials) the default is **90.8%**
+@ 1.55× against the freelist's 80.7% @ 1.47×; factor 50 halves that app's
+threshold too (16 → 8 MiB), 1.7× the collections, **78.8%** — so 100 stays.
+The same five arms on Darwin: [PERF-macos.md](PERF-macos.md).
+
+Everything below this line was measured on the freelist allocator and is
+kept as history; `GCRY_BITMAP_ALLOC=0` reproduces that configuration.
+
 ## Headline (v0.16.0) — Linux *(measured)*
 
 Same host, Crystal 1.21.0, WSL2 x86_64 (i3-12100F), median of 3, pure `--release`, **in-header MARK** (default), scrub **on** (EC1 **4 KiB** blind parked-fiber clear), auto-layouts **off**, EC1 non-atomic heap counters. Session: `bench/log/linux/2026-08-01-093130/` (`cb4d7f2`); idle `/` from `slash-recut/` (same binaries; first `/` pass noisy).
