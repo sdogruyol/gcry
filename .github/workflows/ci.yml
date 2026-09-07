@@ -199,18 +199,20 @@ jobs:
           GCRY_COLLECT_SCRUB=0 ./bin/hello_env
           GCRY_PARALLEL_MARK=4 ./bin/hello_env
 
-      # The SIMD kernels' scalar-vs-assembly equivalence fuzz in the shipping
-      # optimisation mode, followed by an IR check that the intended mnemonics
-      # remain present. The broken-backend positive control refuses to run on a
-      # scalar-only host rather than passing vacuously.
+      # The SIMD kernels' scalar-vs-backend equivalence fuzz in the shipping
+      # optimisation mode, followed by an IR check: the AVX2 sweep asm is
+      # present, and the compiler-vectorised AVX-512 popcount really did
+      # vectorise (`llvm.ctpop.v8i64` only exists in a vector loop). Without
+      # `--release` the latter would be scalar code carrying feature flags. The
+      # broken-backend positive control refuses to run on a scalar-only host
+      # rather than passing vacuously.
       - name: SIMD kernel equivalence (release)
         run: |
           crystal spec --release spec/kernels_spec.cr --error-trace
           crystal build --release --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_x86
           grep -Fq 'vpandn' bin/kernels_x86.ll
           grep -Fq 'vpshufb' bin/kernels_x86.ll
-          grep -Fq 'vpopcntq' bin/kernels_x86.ll
-          grep -Fq 'vpcmpuq' bin/kernels_x86.ll
+          grep -Fq 'llvm.ctpop.v8i64' bin/kernels_x86.ll
           make kernels-broken
 
       - name: Sample stress under GCRY_STRESS

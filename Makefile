@@ -328,8 +328,8 @@ segv-report: $(BIN)
 	$(BIN)/segv_report --control
 
 # The SIMD bitmap kernels are allocation-free backend structs: Scalar plus
-# handwritten AVX2/AVX-512 assembly on x86_64 or NEON/SVE/SVE2 assembly on
-# AArch64. `spec/kernels_spec.cr` fuzzes every runnable backend against Scalar
+# AVX2/AVX-512 (asm sweep, vectorised rest) on x86_64, NEON (vectorised) and
+# SVE (asm) on AArch64. `spec/kernels_spec.cr` fuzzes every runnable backend against Scalar
 # as oracle. That fuzz can only ever report "they agree", so the gate is two
 # arms and the first one is the
 # point: `-Dgcry_kernels_broken` drops the last word from vector backends
