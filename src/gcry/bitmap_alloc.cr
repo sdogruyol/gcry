@@ -816,21 +816,34 @@ module Gcry
         pool.value.next_index = 0
         pool.value.valid = false
         @bitmap_search_counts[slot] &+= 1
+        # First refill of this slot: size the index before the walk, so the
+        # common case indexes on its first pass. Outside the list lock (below):
+        # an mmap under that spinlock would stall every `map_chunk` and
+        # `unlink_chunk` on other threads for the syscall.
+        bitmap_pool_grow(pool, 1) if pool.value.capacity == 0
         best = Pointer(ChunkHeader).null
-        indexed = true
+        candidates = 0
         each_chunk_for_allocation do |chunk|
           next unless bitmap_pool_candidate?(chunk, index, atomic)
           best = chunk if best.null? || chunk.address < best.address
-          indexed = false if indexed && !bitmap_pool_append(pool, chunk.address)
+          # Overflow is only counted here; the walk never allocates.
+          pool.value.addresses[candidates] = chunk.address if candidates < pool.value.capacity
+          candidates += 1
         end
-        # OOM in optional metadata must not raise under the class lock. Fall
-        # back to the old lowest-address search result and retry indexing on
-        # a later refill. Never publish a truncated available-chunk index.
-        return best if !indexed && !best.null?
-        pool.value.addresses.to_slice(pool.value.count).sort! if pool.value.count > 1
+        if candidates > pool.value.capacity
+          # Grow now, outside the walk, so the next refill indexes fully. This
+          # one falls back to the lowest-address search result. OOM in optional
+          # metadata must not raise under the class lock: a failed grow leaves
+          # the pool as it was and the fallback still stands. Never publish a
+          # truncated available-chunk index.
+          bitmap_pool_grow(pool, candidates)
+          return best
+        end
+        pool.value.count = candidates
+        pool.value.addresses.to_slice(candidates).sort! if candidates > 1
         pool.value.version = version
         pool.value.blacklist_enabled = @blacklist_enabled
-        pool.value.valid = indexed
+        pool.value.valid = true
       end
 
       while pool.value.next_index < pool.value.count
@@ -898,25 +911,26 @@ module Gcry
       false
     end
 
-    private def bitmap_pool_append(pool : BitmapPoolIndex*, address : UInt64) : Bool
-      if pool.value.count == pool.value.capacity
-        old_capacity = pool.value.capacity
-        return false if old_capacity > Int32::MAX // 2
-        capacity = old_capacity == 0 ? 512 : old_capacity * 2
-        bytes = capacity.to_u64 * 8
-        memory = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-          LibC::PROT_READ | LibC::PROT_WRITE, LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
-        return false if Gcry.mmap_failed?(memory)
-        addresses = memory.as(UInt64*)
-        unless pool.value.addresses.null?
-          pool.value.addresses.copy_to(addresses, pool.value.count)
-          LibC.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(old_capacity.to_u64 * 8))
-        end
-        pool.value.addresses = addresses
-        pool.value.capacity = capacity
+    # Replace the pool's address buffer with one holding at least `needed`
+    # entries. Contents are not carried over: callers grow only while the pool
+    # is invalid and about to be rebuilt. Returns false on OOM, leaving the old
+    # buffer in place.
+    private def bitmap_pool_grow(pool : BitmapPoolIndex*, needed : Int32) : Bool
+      capacity = pool.value.capacity == 0 ? 512 : pool.value.capacity
+      while capacity < needed
+        return false if capacity > Int32::MAX // 2
+        capacity *= 2
       end
-      pool.value.addresses[pool.value.count] = address
-      pool.value.count = pool.value.count + 1
+      return true if capacity == pool.value.capacity
+      bytes = capacity.to_u64 * 8
+      memory = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+        LibC::PROT_READ | LibC::PROT_WRITE, LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
+      return false if Gcry.mmap_failed?(memory)
+      unless pool.value.addresses.null?
+        LibC.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
+      end
+      pool.value.addresses = memory.as(UInt64*)
+      pool.value.capacity = capacity
       true
     end
 
