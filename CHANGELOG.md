@@ -11,10 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Select an allocation-free abstract kernel backend once per heap instead of
   passing a numeric SIMD tier through every bitmap operation. Kernel bodies now
-  live under `src/gcry/kernels/` and use explicit architecture instructions.
-  AArch64 gains distinct NEON, SVE and SVE2 implementations selected from Linux
-  auxv feature bits; x86 uses AVX2 nibble-shuffle vector popcount and AVX-512
-  VPOPCNTQ. Independent AVX-512 accumulators hide latency on 64-word bitmaps.
+  live under `src/gcry/kernels/`. The AVX2 sweep is hand-written assembly
+  (VPSHUFB nibble popcount in vector registers); every other x86 kernel stays
+  on LLVM's vectorised loops, which beat the single-accumulator assembly on
+  Zen 5 by 11–48% in L2. AArch64 gains an SVE
+  backend (predicated, vector-length-agnostic assembly) selected from Linux
+  `AT_HWCAP`; NEON remains the compiler-vectorised baseline. `GCRY_SIMD`
+  accepts `sve`.
+
+### Fixed
+
+- Allocation searches raced with large-cache trimming and the post-collect
+  empty-chunk flush: a search could dereference an unmapped chunk, and
+  whole-header flag updates could restore a removed list link. Searches now
+  hold the chunk-list lock, deferred small-chunk release waits for those
+  readers, and flag/link updates address individual fields (#36).
+- The bitmap allocation pool grows its address index outside the chunk-list
+  spinlock instead of calling `mmap` while holding it.
 
 ## [0.24.0] - 2026-09-06
 
