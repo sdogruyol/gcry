@@ -1,0 +1,113 @@
+gcry-crash-fix-spec.log
+......................................................................................................................GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2
+.....................................................................................................................................*......................................
+
+Pending:
+  Gcry::Platform soft-dirty clears soft-dirty and detects a subsequent write
+
+Finished in 4.46 seconds
+290 examples, 0 failures, 0 errors, 1 pending
+
+gcry-crash-fix-process.log
+................................
+
+Finished in 1.3 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+gcry-crash-fix-header.log
+................................
+
+Finished in 1.32 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+gcry-crash-fix-headerless.log
+................................
+
+Finished in 1.44 seconds
+32 examples, 0 failures, 0 errors, 0 pending
+
+gcry-chunk-search-after.log
+crystal build bench/chunk_search_race.cr -o bin/chunk_search_race --error-trace
+bin/chunk_search_race
+pool: search survived concurrent trim
+bitmap-dormant: search survived concurrent trim
+header-dormant: search survived concurrent trim
+stopped: search did not wait on a suspended owner's lock
+
+gcry-chunk-search-release.log
+pool: search survived concurrent trim
+bitmap-dormant: search survived concurrent trim
+header-dormant: search survived concurrent trim
+stopped: search did not wait on a suspended owner's lock
+
+gcry-large-cache-after.log
+crystal build -Dgc_none bench/large_cache_race.cr -o bin/large_cache_race --error-trace
+bin/large_cache_race
+=== large-cache race ===
+4 workers × 20000 rounds of 40960 B, one trimmer, 20 attempts per arm
+
+  locked (default):    0 of 20 failed
+  unlocked (old):      20 of 20 failed   Invalid memory access (signal 11) at address 0x7f45c85e3d70
+
+ok — serialised, the allocator and the trim cannot collide; unserialised, they do
+
+gcry-crash-fix-stw.log
+crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+bin/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=false
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+Process-GC STW + concurrent mutation property test
+  seed=1 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  tlab_enabled=false
+  nursery_enabled=true
+
+  STW-MT workers=2 iterations=50 seed=1
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10001
+    allocs=420 pinned=416 collects=51 roots=16 ok=true
+
+=== Summary ===
+RESULT: PASS
+
+gcry-crash-fix-dormant.log
+crystal build -Dgc_none bench/dormant_flush_race.cr -o bin/dormant_flush_race --error-trace
+bin/dormant_flush_race
+=== post-STW flush walk vs. mutator unmap ===
+4 workers × 10000 rounds of 40960 B, one collector, 40000 ballast objects
+
+  scheduled walk: queued=safe, immediate=faulted as required
+  queued (default):    0 of 6 failed
+  immediate (old):     6 of 6 failed
+     gcry: SIGSEGV at 0x7f4b6cbaa018 — in a chunk gcry RELEASED — base 0x7f4b6cbaa000, 45056 bytes, large-object release, at collection 83; the write is 24 bytes into it. Collections since: 0. First user word at release: 0x5c (type_id 92)
+
+ok — queued, the walks never meet a released chunk; unqueued, they do

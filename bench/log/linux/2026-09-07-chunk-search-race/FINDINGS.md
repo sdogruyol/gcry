@@ -65,18 +65,23 @@ sources and passes with the fix; see [fields-before.log](fields-before.log).
 
 ## Validation
 
-- Scheduled searches: all three now survive; an additional stopped-world
+- Scheduled searches, development and release builds: all three now survive; an additional stopped-world
   case verifies the search does not wait on an already-held list lock.
 - Full unit suite: 290 examples, zero failures, one existing pending example.
 - Process specs: 32 examples each, zero failures with bitmap allocation,
   header allocation, and the headerless build.
 - Local large-cache stress: zero failures in 20 locked children; all 20
   unsafe controls fail with SIGSEGV.
+- STW concurrent mutation property tests: all three configurations pass.
+- Dormant flush race: zero failures in six queued children, all six immediate
+  controls fault; the scheduled safe/unsafe pair behaves as required.
 - Formatting and Ameba pass.
 
 The scheduled gate is added to x86, native ARM, and Darwin CI. Failed locked
 stress children now print their complete captured output rather than dropping
-the backtrace. Native ARM validation of the fix is recorded below when complete.
+the backtrace. The 200-child native ARM validation of the fix runs in
+[run 34083610580](https://github.com/stakach/gcry/actions/runs/34083610580/job/101623396215).
+Local output is retained in [validation-local.log](validation-local.log).
 
 These are reproducible memory-safety fixes. A finite stress sample alone cannot
 prove the absence of other crashes.

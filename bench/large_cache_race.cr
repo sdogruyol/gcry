@@ -202,8 +202,8 @@ unlocked_bad, unlocked_hung, unlocked_note, _ = run(exe, true, attempts)
 puts "  unlocked (old):      #{unlocked_bad} of #{attempts} failed#{unlocked_note ? "   #{unlocked_note.strip}" : ""}"
 
 if locked_hung > 0
-  failures << "the locked arm timed out #{locked_hung} of #{attempts} — a killed child is not " \
-              "evidence about serialisation, so raise BENCH_CHILD_TIMEOUT_S or find the hang"
+  failures << "the locked arm timed out #{locked_hung} of #{attempts} — inspect its captured " \
+              "output for a crash or stalled phase; a signal handler may hang after SIGSEGV"
 end
 if locked_bad > locked_hung
   failures << "the locked arm faulted #{locked_bad - locked_hung} of #{attempts} — the allocator " \
