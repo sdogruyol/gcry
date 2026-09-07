@@ -80,13 +80,13 @@ def fill(words : Int32, seed : UInt64) : Pointer(UInt64)
   ptr
 end
 
-def report(label : String, tier : UInt8, words : Int32, passes : Int32,
+def report(label : String, backend : Gcry::Kernels::Base, words : Int32, passes : Int32,
            arrays : Int32, ns : UInt64) : Nil
   bytes = words.to_f * 8.0 * arrays.to_f * passes.to_f
   gbps = bytes / (ns.to_f / 1_000_000_000.0) / 1_000_000_000.0
   json_line({
     "bench"       => "\"#{label}\"",
-    "tier"        => "\"#{Gcry::Cpu.tier_name(tier)}\"",
+    "tier"        => "\"#{Gcry::Cpu.tier_name(backend.tier)}\"",
     "words"       => words.to_s,
     "passes"      => passes.to_s,
     "gb_per_s"    => gbps.round(2).to_s,
@@ -102,16 +102,17 @@ end
 detected = Gcry::Cpu.detect
 json_line({"host_tier" => "\"#{Gcry::Cpu.tier_name(detected)}\"", "passes" => passes.to_s})
 
-# Only tiers this build actually has clones for. On x86_64 the NEON tier
-# dispatches to the scalar clone, so measuring it would print the scalar number
-# twice under two names — the kind of duplicate a reader would later mistake for
-# evidence that NEON was tested here.
-tiers = [Gcry::Kernels::TIER_SCALAR]
+# Only backends this host can execute. The benchmark calls through Base, which
+# is the same call shape Heap uses after selecting its backend once.
+backends = [] of Gcry::Kernels::Base
+backends << Gcry::Kernels::Scalar.new
 {% if flag?(:x86_64) %}
-  tiers << Gcry::Kernels::TIER_AVX2 if detected >= Gcry::Kernels::TIER_AVX2
-  tiers << Gcry::Kernels::TIER_AVX512 if detected >= Gcry::Kernels::TIER_AVX512
+  backends << Gcry::Kernels::AVX2.new if detected >= Gcry::Kernels::TIER_AVX2
+  backends << Gcry::Kernels::AVX512.new if detected >= Gcry::Kernels::TIER_AVX512
 {% elsif flag?(:aarch64) %}
-  tiers = [Gcry::Kernels::TIER_NEON]
+  backends << Gcry::Kernels::NEON.new
+  backends << Gcry::Kernels::SVE.new if detected >= Gcry::Kernels::TIER_SVE
+  backends << Gcry::Kernels::SVE2.new if detected >= Gcry::Kernels::TIER_SVE2
 {% end %}
 
 { {"l2", L2_WORDS}, {"dram", DRAM_WORDS} }.each do |(where, words)|
@@ -128,13 +129,13 @@ tiers = [Gcry::Kernels::TIER_SCALAR]
   occ.copy_to(seed_occ, words)
   mark.copy_to(seed_mark, words)
 
-  tiers.each do |tier|
+  backends.each do |backend|
     # ---- sweep_words: mutating, so the clock stops across each reseed ----
     sink = 0_u64
     2.times do # warm
       seed_occ.copy_to(occ, words)
       seed_mark.copy_to(mark, words)
-      chunks.times { |c| Gcry::Kernels.sweep_words(occ + c * CHUNK_WORDS, mark + c * CHUNK_WORDS, CHUNK_WORDS, tier) }
+      chunks.times { |c| backend.sweep_words(occ + c * CHUNK_WORDS, mark + c * CHUNK_WORDS, CHUNK_WORDS) }
     end
 
     total = 0_u64
@@ -143,36 +144,36 @@ tiers = [Gcry::Kernels::TIER_SCALAR]
       seed_mark.copy_to(mark, words)
       t0 = now_ns
       chunks.times do |c|
-        freed, live = Gcry::Kernels.sweep_words(occ + c * CHUNK_WORDS, mark + c * CHUNK_WORDS, CHUNK_WORDS, tier)
+        freed, live = backend.sweep_words(occ + c * CHUNK_WORDS, mark + c * CHUNK_WORDS, CHUNK_WORDS)
         sink &+= freed &+ live
       end
       total &+= now_ns &- t0
     end
     SINK[0] ^= sink
-    report("sweep_words/#{where}", tier, words, passes, 2, total)
+    report("sweep_words/#{where}", backend, words, passes, 2, total)
 
     # ---- read-only kernels: no reseed, but still walked per chunk ----
     sink = 0_u64
-    2.times { chunks.times { |c| sink &+= Gcry::Kernels.popcount_words(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, tier) } }
+    2.times { chunks.times { |c| sink &+= backend.popcount_words(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS) } }
     total = 0_u64
     passes.times do
       t0 = now_ns
-      chunks.times { |c| sink &+= Gcry::Kernels.popcount_words(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, tier) }
+      chunks.times { |c| sink &+= backend.popcount_words(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS) }
       total &+= now_ns &- t0
     end
     SINK[0] ^= sink
-    report("popcount_words/#{where}", tier, words, passes, 1, total)
+    report("popcount_words/#{where}", backend, words, passes, 1, total)
 
     sink = 0_u64
-    2.times { chunks.times { |c| sink &+= Gcry::Kernels.all_zero?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, tier) ? 1_u64 : 0_u64 } }
+    2.times { chunks.times { |c| sink &+= backend.all_zero?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS) ? 1_u64 : 0_u64 } }
     total = 0_u64
     passes.times do
       t0 = now_ns
-      chunks.times { |c| sink &+= Gcry::Kernels.all_zero?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, tier) ? 1_u64 : 0_u64 }
+      chunks.times { |c| sink &+= backend.all_zero?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS) ? 1_u64 : 0_u64 }
       total &+= now_ns &- t0
     end
     SINK[0] ^= sink
-    report("all_zero/#{where}", tier, words, passes, 1, total)
+    report("all_zero/#{where}", backend, words, passes, 1, total)
 
     # A range at the bottom of the address space misses every word of a random
     # bitmap. That is the shape a stack scan sees — most words are not heap
@@ -180,15 +181,15 @@ tiers = [Gcry::Kernels::TIER_SCALAR]
     # these". The hit case is deliberately not measured here: it degenerates to
     # the scalar path by design, and its cost belongs to Phase 4's A/B.
     sink = 0_u64
-    2.times { chunks.times { |c| sink &+= Gcry::Kernels.range_any?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, 0_u64, 4096_u64, tier) ? 1_u64 : 0_u64 } }
+    2.times { chunks.times { |c| sink &+= backend.range_any?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, 0_u64, 4096_u64) ? 1_u64 : 0_u64 } }
     total = 0_u64
     passes.times do
       t0 = now_ns
-      chunks.times { |c| sink &+= Gcry::Kernels.range_any?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, 0_u64, 4096_u64, tier) ? 1_u64 : 0_u64 }
+      chunks.times { |c| sink &+= backend.range_any?(seed_occ + c * CHUNK_WORDS, CHUNK_WORDS, 0_u64, 4096_u64) ? 1_u64 : 0_u64 }
       total &+= now_ns &- t0
     end
     SINK[0] ^= sink
-    report("range_any_miss/#{where}", tier, words, passes, 1, total)
+    report("range_any_miss/#{where}", backend, words, passes, 1, total)
   end
 end
 

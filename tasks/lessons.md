@@ -160,3 +160,10 @@ Rules written after corrections, so the same mistake is not made twice.
 - The author wants short per-item A/Bs (about a minute) to keep moving;
   report CPU per request alongside the wide interval, and keep the long
   paired run for the final headline only.
+
+## 2026-09-07: crashes during unrelated performance work
+
+- An allocator crash remains part of the task even when SIMD specs pass.
+  Diagnose and fix it; a successful retry or added diagnostics is not closure.
+- Inspect captured output before calling a child failure just a timeout: a
+  SIGSEGV handler can hang after reporting the original fault.

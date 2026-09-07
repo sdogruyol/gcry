@@ -163,8 +163,8 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
   first = nil
   report = nil
   env = {} of String => String
-  env["GCRY_TRIM_UNLOCKED"] = "1" if unlocked
-  attempts.times do
+  env["GCRY_TRIM_UNLOCKED"] = unlocked ? "1" : "0"
+  attempts.times do |attempt|
     result = BoundedChild.run(exe, ["--child"], env)
     captured = result.output
     unless result.ok
@@ -172,6 +172,13 @@ def run(exe : String, unlocked : Bool, attempts : Int32) : {Int32, Int32, String
       hung += 1 if result.timed_out
       first ||= captured.lines.find { |l| l.includes?("Invalid memory access") || l.includes?("corrupt") }
       report ||= gcry_lines(captured)
+      unless unlocked
+        # Preserve the whole backtrace, including faults whose signal handler
+        # subsequently hangs. A timeout can also be the aftermath of a crash.
+        STDERR.puts "locked child #{attempt + 1}/#{attempts} failed#{result.timed_out ? " (timed out)" : ""}:"
+        STDERR.puts captured
+        STDERR.flush
+      end
     end
   end
   {bad, hung, first, report}
@@ -195,8 +202,8 @@ unlocked_bad, unlocked_hung, unlocked_note, _ = run(exe, true, attempts)
 puts "  unlocked (old):      #{unlocked_bad} of #{attempts} failed#{unlocked_note ? "   #{unlocked_note.strip}" : ""}"
 
 if locked_hung > 0
-  failures << "the locked arm timed out #{locked_hung} of #{attempts} — a killed child is not " \
-              "evidence about serialisation, so raise BENCH_CHILD_TIMEOUT_S or find the hang"
+  failures << "the locked arm timed out #{locked_hung} of #{attempts} — inspect its captured " \
+              "output for a crash or stalled phase; a signal handler may hang after SIGSEGV"
 end
 if locked_bad > locked_hung
   failures << "the locked arm faulted #{locked_bad - locked_hung} of #{attempts} — the allocator " \

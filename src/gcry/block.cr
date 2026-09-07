@@ -538,18 +538,33 @@ module Gcry
       (chunk.value.flags & Flags::NURSERY) != 0
     end
 
+    # Pointer#value returns a struct copy. Even `chunk.value.flags = ...`
+    # copies it back, overwriting a concurrent link change. Address the field
+    # itself; atomic RMW also preserves flags set by a stopped-world collector
+    # if a mutator was suspended midway through its update.
+    private def self.update_flag(chunk : ChunkHeader*, flag : UInt32, value : Bool) : Nil
+      flags = pointerof(chunk.value.@flags)
+      if value
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::Or, flags, flag,
+          LLVM::AtomicOrdering::Monotonic, false)
+      else
+        Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And, flags, ~flag,
+          LLVM::AtomicOrdering::Monotonic, false)
+      end
+    end
+
+    # Link writers hold the list lock (or STW); flag writers hold class locks.
+    # Never copy the flags back when changing the list.
+    def self.set_next(chunk : ChunkHeader*, successor : ChunkHeader*) : Nil
+      pointerof(chunk.value.@next).value = successor
+    end
+
     def self.dormant?(chunk : ChunkHeader*) : Bool
       (chunk.value.flags & Flags::DORMANT) != 0
     end
 
     def self.set_dormant(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::DORMANT
-      else
-        h.flags &= ~Flags::DORMANT
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::DORMANT, value)
     end
 
     def self.cursor?(chunk : ChunkHeader*) : Bool
@@ -557,13 +572,7 @@ module Gcry
     end
 
     def self.set_cursor(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::CURSOR
-      else
-        h.flags &= ~Flags::CURSOR
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::CURSOR, value)
     end
 
     def self.pinned?(chunk : ChunkHeader*) : Bool
@@ -571,13 +580,7 @@ module Gcry
     end
 
     def self.set_pinned(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::PINNED
-      else
-        h.flags &= ~Flags::PINNED
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::PINNED, value)
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool
@@ -585,13 +588,7 @@ module Gcry
     end
 
     def self.set_idle(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::IDLE
-      else
-        h.flags &= ~Flags::IDLE
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::IDLE, value)
     end
 
     def self.holed?(chunk : ChunkHeader*) : Bool
@@ -599,13 +596,7 @@ module Gcry
     end
 
     def self.set_holed(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::HOLED
-      else
-        h.flags &= ~Flags::HOLED
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::HOLED, value)
     end
 
     def self.sparse?(chunk : ChunkHeader*) : Bool
@@ -613,13 +604,7 @@ module Gcry
     end
 
     def self.set_sparse(chunk : ChunkHeader*, value : Bool) : Nil
-      h = chunk.value
-      if value
-        h.flags |= Flags::SPARSE
-      else
-        h.flags &= ~Flags::SPARSE
-      end
-      chunk.value = h
+      update_flag(chunk, Flags::SPARSE, value)
     end
   end
 

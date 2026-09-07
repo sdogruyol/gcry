@@ -105,8 +105,14 @@ module Gcry
     # shipped while this is still being built out. Nursery chunks are excluded
     # under both: their allocation is still `alloc_nursery`'s freelist, so `occ`
     # is not maintained for them (Phase 8).
-    # Instruction-set tier for the bitmap kernels; see `Gcry::Cpu`.
-    getter simd_tier : UInt8 = Kernels::TIER_SCALAR
+    # Allocation-free kernel backend selected once for this heap. Keeping the
+    # concrete value behind Base removes the per-call UInt8 tier switch.
+    @kernels : Kernels::Base = Kernels::Scalar.new
+
+    def simd_tier : UInt8
+      @kernels.tier
+    end
+
     # Mark-loop prefetch pipeline (`GCRY_PREFETCH`, default on). See
     # `serial_mark_drain`.
     property mark_prefetch : Bool = true
@@ -253,7 +259,7 @@ module Gcry
       # Both read through LibC.getenv rather than ENV[]: under -Dgc_none this
       # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
       # SEGV (gc_override.cr:520).
-      @simd_tier = Cpu.tier_from_env
+      @kernels = Kernels.for_tier(Cpu.tier_from_env)
       # Headerless *requires* the bitmap representation, and is not optional
       # about it. The freelist allocator threads `next_free` through the block
       # header, and a headerless small block has none — so every freelist push
@@ -1623,63 +1629,55 @@ module Gcry
 
     # Fault a dormant empty chunk back in and install its freelist.
     private def revive_dormant_chunk(index : Int32, payload : UInt32, nursery : Bool) : Bool
-      chunk = @chunks
-      while chunk
-        if !ChunkHeader.large?(chunk) &&
-           ChunkHeader.dormant?(chunk) &&
-           chunk.value.size_class == index.to_u32 &&
-           ChunkHeader.nursery?(chunk) == nursery
-          # A revival that lands inside the post-STW dormant pass is the shape
-          # that would let that pass madvise a chunk this thread is about to
-          # hand blocks out of. Counted here, where both facts are in hand.
-          # See `bitmap_revive_dormant`: never revive under a live chunk walk,
-          # or the flush's DONTNEED lands on blocks handed out meanwhile.
-          refused = false
-          with_alloc_lock do
-            if @live_chunk_walk
-              @dormant_revive_during_flush &+= 1
-              refused = true
-            else
-              ChunkHeader.set_dormant(chunk, false)
-            end
-          end
-          return false if refused
-          mapped = chunk.value.mapped_bytes
-          @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
-
-          block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
-          cursor = ChunkHeader.data_start(chunk).as(UInt8*)
-          limit = ChunkHeader.data_end(chunk).as(UInt8*)
-          free_head = Pointer(Void).null
-          while (cursor + block_bytes) <= limit
-            header = cursor.as(BlockHeader*)
-            user = (cursor + BlockHeader::SIZE).as(Void*)
-            # Touch page (recommit after DONTNEED) and link freelist.
-            header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, free_head)
-            free_head = user
-            cursor += block_bytes
-          end
-          # Physical release excludes the page containing chunk metadata,
-          # and Darwin's reusable pages need not lose their contents at all.
-          # Relinking headers therefore does not make these payloads zero.
-          if nursery
-            @nursery_freelists[index] = free_head
-            @nursery_freelist_clean[index] = false
-          elsif @tight_grow
-            fold_prefer_into_global(index)
-            @grow_lo[index] = ChunkHeader.data_start(chunk).address
-            @grow_hi[index] = ChunkHeader.data_end(chunk).address
-            @prefer_freelists[index] = free_head
-            @freelist_clean[index] = false
-          else
-            @freelists[index] = free_head
-            @freelist_clean[index] = false
-          end
-          return true
+      chunk = dormant_chunk_for_allocation(index, nursery)
+      return false unless chunk
+      # A revival that lands inside the post-STW dormant pass is the shape
+      # that would let that pass madvise a chunk this thread is about to
+      # hand blocks out of. Counted here, where both facts are in hand.
+      # See `bitmap_revive_dormant`: never revive under a live chunk walk,
+      # or the flush's DONTNEED lands on blocks handed out meanwhile.
+      refused = false
+      with_alloc_lock do
+        if @live_chunk_walk
+          @dormant_revive_during_flush &+= 1
+          refused = true
+        else
+          ChunkHeader.set_dormant(chunk, false)
         end
-        chunk = chunk.value.next
       end
-      false
+      return false if refused
+      mapped = chunk.value.mapped_bytes
+      @dormant_chunk_bytes -= mapped if @dormant_chunk_bytes >= mapped
+
+      block_bytes = BlockHeader::SIZE.to_u64 + payload.to_u64
+      cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+      limit = ChunkHeader.data_end(chunk).as(UInt8*)
+      free_head = Pointer(Void).null
+      while (cursor + block_bytes) <= limit
+        header = cursor.as(BlockHeader*)
+        user = (cursor + BlockHeader::SIZE).as(Void*)
+        # Touch page (recommit after DONTNEED) and link freelist.
+        header.value = BlockHeader.new(payload, BlockHeader::Flags::FREE, free_head)
+        free_head = user
+        cursor += block_bytes
+      end
+      # Physical release excludes the page containing chunk metadata,
+      # and Darwin's reusable pages need not lose their contents at all.
+      # Relinking headers therefore does not make these payloads zero.
+      if nursery
+        @nursery_freelists[index] = free_head
+        @nursery_freelist_clean[index] = false
+      elsif @tight_grow
+        fold_prefer_into_global(index)
+        @grow_lo[index] = ChunkHeader.data_start(chunk).address
+        @grow_hi[index] = ChunkHeader.data_end(chunk).address
+        @prefer_freelists[index] = free_head
+        @freelist_clean[index] = false
+      else
+        @freelists[index] = free_head
+        @freelist_clean[index] = false
+      end
+      true
     end
 
     # Returns {user, from_cache}. Fresh mmap pages are already zeroed.
@@ -2188,15 +2186,44 @@ module Gcry
           prev = @chunks
           while prev
             if prev.value.next == target
-              node = prev.value
-              node.next = target.value.next
-              prev.value = node
+              # Flags are updated under the class lock. A whole-header copy
+              # here could overwrite a concurrent cursor/dormant flag change.
+              ChunkHeader.set_next(prev, target.value.next)
               break
             end
             prev = prev.value.next
           end
         end
       end
+    end
+
+    # Small-allocation searches hold their class lock, but trim holds the
+    # alloc lock. Neither protects a walk past an unrelated large chunk.
+    # Keep list removal excluded until the last dereference. Callbacks must
+    # not acquire alloc/class locks: lock order is class -> alloc -> list ->
+    # index. A stopped-world caller must not wait on a suspended lock owner.
+    private def each_chunk_for_allocation(& : ChunkHeader* ->) : Nil
+      if @world_stopped
+        each_chunk { |chunk| yield chunk }
+      else
+        @chunk_list_lock.sync { each_chunk { |chunk| yield chunk } }
+      end
+    end
+
+    # A selected dormant small chunk stays mapped after releasing the list
+    # lock: the caller holds its class lock, and dormant chunks are retained
+    # by the STW sweep. Release the list lock before the revival takes alloc.
+    private def dormant_chunk_for_allocation(index : Int32, nursery : Bool,
+                                             atomic : Bool? = nil) : ChunkHeader*?
+      each_chunk_for_allocation do |chunk|
+        next if ChunkHeader.large?(chunk)
+        next unless ChunkHeader.dormant?(chunk)
+        next unless chunk.value.size_class == index.to_u32
+        next unless ChunkHeader.nursery?(chunk) == nursery
+        next if !atomic.nil? && ChunkHeader.atomic?(chunk) != atomic
+        return chunk
+      end
+      nil
     end
 
     # Public for the invariant checker — walks the chunk linked list.

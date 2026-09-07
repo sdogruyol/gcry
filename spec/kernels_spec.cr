@@ -2,23 +2,24 @@ require "./spec_helper"
 
 # Equivalence fuzz for the SIMD bitmap kernels.
 #
-# The vector clones are stamped from the same source body as the scalar one, so
-# a divergence means the *compiler* did something the body did not say — a
-# vectoriser bug, a bad `@[TargetFeature]` set, or a reduction that is not
-# actually associative. That is exactly the class of defect a hand-written
-# assertion would never find, so the gate is a fuzz against the scalar oracle
-# rather than against expected values.
+# The SIMD backends use handwritten assembly, so this fuzz treats Scalar as the
+# executable specification. A divergence catches operand-order mistakes,
+# broken tail handling, reduction errors and bad target-feature contracts.
 #
-# `make kernels-broken` is the other half: it perturbs a vector clone and this
+# `make kernels-broken` is the other half: it perturbs every vector backend and this
 # file must go red. A green run here is only worth something because that one
 # has been observed red.
-private def each_tier(& : UInt8 ->)
+private def each_backend(& : Gcry::Kernels::Base ->)
   detected = Gcry::Cpu.detect
-  tier = Gcry::Kernels::TIER_SCALAR
-  while tier <= detected
-    yield tier
-    tier += 1
-  end
+  yield Gcry::Kernels::Scalar.new
+  {% if flag?(:x86_64) %}
+    yield Gcry::Kernels::AVX2.new if detected >= Gcry::Kernels::TIER_AVX2
+    yield Gcry::Kernels::AVX512.new if detected >= Gcry::Kernels::TIER_AVX512
+  {% elsif flag?(:aarch64) %}
+    yield Gcry::Kernels::NEON.new if detected >= Gcry::Kernels::TIER_NEON
+    yield Gcry::Kernels::SVE.new if detected >= Gcry::Kernels::TIER_SVE
+    yield Gcry::Kernels::SVE2.new if detected >= Gcry::Kernels::TIER_SVE2
+  {% end %}
 end
 
 private def fill_pair(rng : Random, n : Int32, density : Int32) : {Pointer(UInt64), Pointer(UInt64)}
@@ -40,6 +41,12 @@ private def fill_pair(rng : Random, n : Int32, density : Int32) : {Pointer(UInt6
 end
 
 describe Gcry::Kernels do
+  it "constructs the detected backend once and rejects unknown tiers" do
+    detected = Gcry::Cpu.detect
+    Gcry::Kernels.for_tier(detected).tier.should eq(detected)
+    Gcry::Kernels.for_tier(UInt8::MAX).tier.should eq(Gcry::Kernels::TIER_SCALAR)
+  end
+
   it "sweep_words: every tier agrees with the scalar oracle on counts and on both bitmaps" do
     rng = Random.new(0x5EED)
     # 4096 rounds x up to 256 words x 64 bits ~= 6.7e7 bit decisions, so the
@@ -54,14 +61,14 @@ describe Gcry::Kernels do
       want_mark = Pointer(UInt64).malloc(n)
       base_occ.copy_to(want_occ, n)
       base_mark.copy_to(want_mark, n)
-      want = Gcry::Kernels.sweep_words(want_occ, want_mark, n, Gcry::Kernels::TIER_SCALAR)
+      want = Gcry::Kernels::Scalar.new.sweep_words(want_occ, want_mark, n)
 
-      each_tier do |tier|
+      each_backend do |backend|
         got_occ = Pointer(UInt64).malloc(n)
         got_mark = Pointer(UInt64).malloc(n)
         base_occ.copy_to(got_occ, n)
         base_mark.copy_to(got_mark, n)
-        got = Gcry::Kernels.sweep_words(got_occ, got_mark, n, tier)
+        got = backend.sweep_words(got_occ, got_mark, n)
 
         got.should eq(want)
         n.times do |i|
@@ -80,7 +87,7 @@ describe Gcry::Kernels do
     occ.copy_to(before_occ, 128)
     mark.copy_to(before_mark, 128)
 
-    freed, live = Gcry::Kernels.sweep_words(occ, mark, 128, Gcry::Cpu.detect)
+    freed, live = Gcry::Kernels.for_tier(Gcry::Cpu.detect).sweep_words(occ, mark, 128)
 
     expect_freed = 0_u64
     expect_live = 0_u64
@@ -109,12 +116,13 @@ describe Gcry::Kernels do
       zero = rng.rand(4) == 0
       n.times { |i| words[i] = zero ? 0_u64 : rng.rand(UInt64::MAX) }
 
-      want_pop = Gcry::Kernels.popcount_words(words, n, Gcry::Kernels::TIER_SCALAR)
-      want_zero = Gcry::Kernels.all_zero?(words, n, Gcry::Kernels::TIER_SCALAR)
+      scalar = Gcry::Kernels::Scalar.new
+      want_pop = scalar.popcount_words(words, n)
+      want_zero = scalar.all_zero?(words, n)
 
-      each_tier do |tier|
-        Gcry::Kernels.popcount_words(words, n, tier).should eq(want_pop)
-        Gcry::Kernels.all_zero?(words, n, tier).should eq(want_zero)
+      each_backend do |backend|
+        backend.popcount_words(words, n).should eq(want_pop)
+        backend.all_zero?(words, n).should eq(want_zero)
       end
     end
   end
@@ -136,41 +144,51 @@ describe Gcry::Kernels do
                  end
       end
 
-      want = Gcry::Kernels.range_any?(ptr, n, lo, span, Gcry::Kernels::TIER_SCALAR)
-      each_tier { |tier| Gcry::Kernels.range_any?(ptr, n, lo, span, tier).should eq(want) }
+      want = Gcry::Kernels::Scalar.new.range_any?(ptr, n, lo, span)
+      each_backend { |backend| backend.range_any?(ptr, n, lo, span).should eq(want) }
     end
   end
 
   it "range_any treats the range as half-open [lo, lo + span)" do
-    tier = Gcry::Cpu.detect
+    backend = Gcry::Kernels.for_tier(Gcry::Cpu.detect)
     lo = 0x1000_u64
     span = 0x100_u64
     words = Pointer(UInt64).malloc(1)
 
     words[0] = lo
-    Gcry::Kernels.range_any?(words, 1, lo, span, tier).should be_true
+    backend.range_any?(words, 1, lo, span).should be_true
     words[0] = lo &+ span &- 1
-    Gcry::Kernels.range_any?(words, 1, lo, span, tier).should be_true
+    backend.range_any?(words, 1, lo, span).should be_true
     words[0] = lo &+ span
-    Gcry::Kernels.range_any?(words, 1, lo, span, tier).should be_false
+    backend.range_any?(words, 1, lo, span).should be_false
     words[0] = lo &- 1
-    Gcry::Kernels.range_any?(words, 1, lo, span, tier).should be_false
+    backend.range_any?(words, 1, lo, span).should be_false
   end
 
   it "handles a zero-length run without touching memory" do
-    tier = Gcry::Cpu.detect
+    backend = Gcry::Kernels.for_tier(Gcry::Cpu.detect)
     empty = Pointer(UInt64).null
-    Gcry::Kernels.sweep_words(empty, empty, 0, tier).should eq({0_u64, 0_u64})
-    Gcry::Kernels.popcount_words(empty, 0, tier).should eq(0_u64)
-    Gcry::Kernels.all_zero?(empty, 0, tier).should be_true
-    Gcry::Kernels.range_any?(empty, 0, 0_u64, 1_u64, tier).should be_false
+    backend.sweep_words(empty, empty, 0).should eq({0_u64, 0_u64})
+    backend.popcount_words(empty, 0).should eq(0_u64)
+    backend.all_zero?(empty, 0).should be_true
+    backend.range_any?(empty, 0, 0_u64, 1_u64).should be_false
+  end
+
+  it "treats a negative length as an empty run" do
+    empty = Pointer(UInt64).null
+    each_backend do |backend|
+      backend.sweep_words(empty, empty, -1).should eq({0_u64, 0_u64})
+      backend.popcount_words(empty, -1).should eq(0_u64)
+      backend.all_zero?(empty, -1).should be_true
+      backend.range_any?(empty, -1, 0_u64, 1_u64).should be_false
+    end
   end
 end
 
 describe Gcry::Cpu do
   it "never resolves above what the host can execute" do
     detected = Gcry::Cpu.detect
-    ["off", "scalar", "none", "neon", "avx2", "avx512", "nonsense", ""].each do |name|
+    ["off", "scalar", "none", "neon", "sve", "sve2", "avx2", "avx512", "nonsense", ""].each do |name|
       Gcry::Cpu.resolve(name).should be <= detected
     end
     Gcry::Cpu.resolve(nil).should eq(detected)
@@ -196,6 +214,8 @@ describe Gcry::Cpu do
       Gcry::Cpu.tier_from_env.should eq(Gcry::Kernels::TIER_SCALAR)
       ENV["GCRY_SIMD"] = "avx512"
       Gcry::Cpu.tier_from_env.should be <= Gcry::Cpu.detect
+      ENV["GCRY_SIMD"] = "sve2"
+      Gcry::Cpu.tier_from_env.should be <= Gcry::Cpu.detect
       ENV["GCRY_SIMD"] = "avx"
       Gcry::Cpu.tier_from_env.should eq(Gcry::Cpu.detect)
       ENV["GCRY_SIMD"] = "offx"
@@ -215,14 +235,15 @@ describe Gcry::Cpu do
 
   it "names every tier it can return" do
     [Gcry::Kernels::TIER_SCALAR, Gcry::Kernels::TIER_NEON,
+     Gcry::Kernels::TIER_SVE, Gcry::Kernels::TIER_SVE2,
      Gcry::Kernels::TIER_AVX2, Gcry::Kernels::TIER_AVX512].each do |tier|
       Gcry::Cpu.tier_name(tier).should_not be_empty
     end
   end
 
   {% if flag?(:aarch64) %}
-    it "reports NEON as baseline on aarch64" do
-      Gcry::Cpu.detect.should eq(Gcry::Kernels::TIER_NEON)
+    it "reports at least the architectural NEON baseline on aarch64" do
+      Gcry::Cpu.detect.should be >= Gcry::Kernels::TIER_NEON
     end
   {% end %}
 end

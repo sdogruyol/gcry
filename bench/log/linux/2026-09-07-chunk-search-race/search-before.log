@@ -1,0 +1,49 @@
+Invalid memory access (signal 11) at address 0x7fbd9b53a010
+[0x559b220df11a] *Exception::CallStack::print_backtrace:Nil +122 in /tmp/gcry-chunk-search-before
+[0x559b220be8c6] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in /tmp/gcry-chunk-search-before
+[0x7fbd9b353df0] ?? +140452329504240 in /lib/x86_64-linux-gnu/libc.so.6
+[0x559b2227b380] ?? +94124781319040 in /tmp/gcry-chunk-search-before
+[0x559b2227b373] *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool +19 in /tmp/gcry-chunk-search-before
+[0x559b2220f552] *Gcry::Heap#bitmap_pool_candidate?<Pointer(Gcry::ChunkHeader), Int32, Bool>:Bool +34 in /tmp/gcry-chunk-search-before
+[0x559b222563b7] *Gcry::Heap#bitmap_take_pool_chunk<Int32, UInt32, Bool>:Pointer(Gcry::ChunkHeader) +583 in /tmp/gcry-chunk-search-before
+[0x559b22259bd7] *Gcry::Heap#chunk_search_probe<String>:Nil +311 in /tmp/gcry-chunk-search-before
+[0x559b220b7f53] __crystal_main +1955 in /tmp/gcry-chunk-search-before
+[0x559b220fd356] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +6 in /tmp/gcry-chunk-search-before
+[0x559b220fd29f] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +63 in /tmp/gcry-chunk-search-before
+[0x559b220be31b] main +27 in /tmp/gcry-chunk-search-before
+[0x7fbd9b33dca8] ?? +140452329413800 in /lib/x86_64-linux-gnu/libc.so.6
+[0x7fbd9b33dd65] __libc_start_main +133 in /lib/x86_64-linux-gnu/libc.so.6
+[0x559b220b76e1] _start +33 in /tmp/gcry-chunk-search-before
+[0x0] ???
+Invalid memory access (signal 11) at address 0x7fc3206ba010
+[0x556732ac311a] *Exception::CallStack::print_backtrace:Nil +122 in /tmp/gcry-chunk-search-before
+[0x556732aa28c6] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in /tmp/gcry-chunk-search-before
+[0x7fc3204d3df0] ?? +140476037283312 in /lib/x86_64-linux-gnu/libc.so.6
+[0x556732c5f380] ?? +93901721826176 in /tmp/gcry-chunk-search-before
+[0x556732c5f373] *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool +19 in /tmp/gcry-chunk-search-before
+[0x556732c3ada2] *Gcry::Heap#bitmap_revive_dormant<Int32, Bool>:Tuple(Pointer(Gcry::ChunkHeader) | Nil, Bool) +66 in /tmp/gcry-chunk-search-before
+[0x556732c3dc46] *Gcry::Heap#chunk_search_probe<String>:Nil +422 in /tmp/gcry-chunk-search-before
+[0x556732a9bf53] __crystal_main +1955 in /tmp/gcry-chunk-search-before
+[0x556732ae1356] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +6 in /tmp/gcry-chunk-search-before
+[0x556732ae129f] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +63 in /tmp/gcry-chunk-search-before
+[0x556732aa231b] main +27 in /tmp/gcry-chunk-search-before
+[0x7fc3204bdca8] ?? +140476037192872 in /lib/x86_64-linux-gnu/libc.so.6
+[0x7fc3204bdd65] __libc_start_main +133 in /lib/x86_64-linux-gnu/libc.so.6
+[0x556732a9b6e1] _start +33 in /tmp/gcry-chunk-search-before
+[0x0] ???
+Invalid memory access (signal 11) at address 0x7fb6a7acb010
+[0x55953b74711a] *Exception::CallStack::print_backtrace:Nil +122 in /tmp/gcry-chunk-search-before
+[0x55953b7268c6] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil) +278 in /tmp/gcry-chunk-search-before
+[0x7fb6a78e4df0] ?? +140422471896560 in /lib/x86_64-linux-gnu/libc.so.6
+[0x55953b8e3380] ?? +94099437663104 in /tmp/gcry-chunk-search-before
+[0x55953b8e3373] *Gcry::ChunkHeader::large?<Pointer(Gcry::ChunkHeader)>:Bool +19 in /tmp/gcry-chunk-search-before
+[0x55953b8b4b56] *Gcry::Heap#revive_dormant_chunk<Int32, UInt32, Bool>:Bool +70 in /tmp/gcry-chunk-search-before
+[0x55953b8c1d3f] *Gcry::Heap#chunk_search_probe<String>:Nil +671 in /tmp/gcry-chunk-search-before
+[0x55953b71ff53] __crystal_main +1955 in /tmp/gcry-chunk-search-before
+[0x55953b765356] *Crystal::main_user_code<Int32, Pointer(Pointer(UInt8))>:Nil +6 in /tmp/gcry-chunk-search-before
+[0x55953b76529f] *Crystal::main<Int32, Pointer(Pointer(UInt8))>:Int32 +63 in /tmp/gcry-chunk-search-before
+[0x55953b72631b] main +27 in /tmp/gcry-chunk-search-before
+[0x7fb6a78ceca8] ?? +140422471806120 in /lib/x86_64-linux-gnu/libc.so.6
+[0x7fb6a78ced65] __libc_start_main +133 in /lib/x86_64-linux-gnu/libc.so.6
+[0x55953b71f6e1] _start +33 in /tmp/gcry-chunk-search-before
+[0x0] ???

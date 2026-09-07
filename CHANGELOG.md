@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Select an allocation-free abstract kernel backend once per heap instead of
+  passing a numeric SIMD tier through every bitmap operation. Kernel bodies now
+  live under `src/gcry/kernels/` and use explicit architecture instructions.
+  AArch64 gains distinct NEON, SVE and SVE2 implementations selected from Linux
+  auxv feature bits; x86 uses AVX2 nibble-shuffle vector popcount and AVX-512
+  VPOPCNTQ. Independent AVX-512 accumulators hide latency on 64-word bitmaps.
+
 ## [0.24.0] - 2026-09-06
 
 Minor release, and the one that changes what the default build allocates
