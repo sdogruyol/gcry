@@ -348,6 +348,17 @@ CI asymmetry that hid both.
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
+- [ ] **The EC4 pause is the parked-fiber lag scan, and it grows with uptime.**
+      `bench/log/linux/2026-09-08-ec4-root-phase/`: 8.4 of a 9.2 ms p50 pause
+      at Kemal `-c100` is `roots_fibers_ns`. Under multi-mutator STW every
+      parked fiber is scanned 256 KiB below its saved SP (a fiber in transit
+      may report a stale one); the pagemap low-water skip only helps on stacks
+      no previous tenant faulted deeper, so pooled stacks lose it over time
+      (~8 MB scanned per collection here; 15.5 ms with the skip off; 77 ms at
+      lag 0). Fix belongs with the audit below: a fully parked fiber (wait
+      queue, no owning thread) has a trustworthy SP and can be scanned from it
+      as on EC1; only fibers in transit need the lag. A per-fiber high-water
+      mark written at swap time would replace the pagemap probe.
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now

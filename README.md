@@ -252,8 +252,14 @@ The whole gap is the root phase — the two STW lag knobs scanning every parked
 fiber's stack from the top instead of from its low-water mark — and each
 collection holds the world eight times longer. The 2026-08-09 reading had the
 same shape at 3.60 → 16.39 ms; the tuned EC4 pause has since grown to 12.6 ms
-with 12.3 ms in roots, which is the next thing to attribute
-(`GCRY_ROOT_PHASE_TIMING=1`). Fat-app pause (acik, ~72 MiB heap: 10.7 → 18.2
+with 12.3 ms in roots. Attributed (`…/2026-09-08-ec4-root-phase/`): 98% of
+it is the parked-fiber scan — under multi-mutator STW every parked fiber is
+scanned `GCRY_STW_STACK_LAG` (256 KiB) below its saved SP because a fiber in
+transit between threads may report a stale SP, and the pagemap low-water skip
+cannot see through pages a previous tenant of the pooled stack already
+faulted in. ~8 MB of stack words per collection at ~100 connections, growing
+with uptime. The fix is scheduler-side: scan a fully parked fiber from its SP
+and reserve the lag for fibers in transit (ROADMAP Phase 2). Fat-app pause (acik, ~72 MiB heap: 10.7 → 18.2
 ms on the freelist cut) was not re-measured.
 
 Parked-fiber scrub was in the heuristic list through v0.18 and is **opt-in**
