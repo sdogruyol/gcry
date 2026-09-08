@@ -36,10 +36,9 @@ module BoundedChild
       end
 
       if timed_out
-        # SIGKILL rather than SIGTERM: the thing being killed is a process
-        # wedged inside the allocator, and a handler that has to allocate is
-        # not going to run.
-        process.signal(Signal::KILL) rescue nil
+        # Force termination (SIGKILL on Unix, TerminateProcess on Windows):
+        # a process wedged inside the allocator cannot run an allocating handler.
+        process.terminate(graceful: false) rescue nil
       end
       status = process.wait
       tmp.flush

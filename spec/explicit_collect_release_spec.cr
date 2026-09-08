@@ -12,6 +12,9 @@ describe "explicit collect releases warm chunks" do
       heap.nursery_enabled = false
       heap.gc_threshold = UInt64::MAX
       heap.release_empty_chunks = true
+      # Runtime worker threads can trip the parallel release gate, even though
+      # only this example uses the heap. Keep its release policy explicit.
+      heap.parallel_empty_chunk_munmap = true
       heap.empty_chunk_retain = 0_u64
       heap.empty_chunk_warm_retain = 64_u64 * 1024 * 1024
       # 4 KiB blocks: a few chunks' worth, all garbage at the collection.

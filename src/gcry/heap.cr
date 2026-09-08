@@ -2214,11 +2214,17 @@ module Gcry
     # Keep list removal excluded until the last dereference. Callbacks must
     # not acquire alloc/class locks: lock order is class -> alloc -> list ->
     # index. A stopped-world caller must not wait on a suspended lock owner.
-    private def each_chunk_for_allocation(& : ChunkHeader* ->) : Nil
+    private def with_chunk_list_for_allocation(&) : Nil
       if @world_stopped
-        each_chunk { |chunk| yield chunk }
+        yield
       else
-        @chunk_list_lock.sync { each_chunk { |chunk| yield chunk } }
+        @chunk_list_lock.sync { yield }
+      end
+    end
+
+    private def each_chunk_for_allocation(& : ChunkHeader* ->) : Nil
+      with_chunk_list_for_allocation do
+        each_chunk { |chunk| yield chunk }
       end
     end
 

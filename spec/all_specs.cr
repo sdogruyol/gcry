@@ -54,6 +54,7 @@ require "./cursor_set_spec"
 require "./empty_chunk_grace_spec"
 require "./adaptive_threshold_spec"
 require "./bitmap_pool_search_spec"
+require "./cached_bitmap_pool_race_spec"
 require "./atomic_leaf_queue_spec"
 
 require "./header_dormant_spec"
