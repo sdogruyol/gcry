@@ -763,7 +763,6 @@ module Gcry
         if chunk.null?
           chunk = bitmap_take_pool_chunk(index, payload, atomic)
           return false if chunk.null?
-          ChunkHeader.set_cursor(chunk, true)
           # In use again: a fully free chunk past the warm budget keeps its
           # one cycle of grace only while nothing takes it.
           ChunkHeader.set_idle(chunk, false) if ChunkHeader.idle?(chunk)
@@ -801,6 +800,8 @@ module Gcry
     # Cache all available chunks in ascending address order. A rebuild costs
     # one heap walk plus a sort, amortized across the available chunks instead
     # of repeating the heap walk for every exhausted allocation cursor.
+    # Return a CURSOR-owned chunk: the STW sweep ignores the caller's class
+    # lock, so ownership must survive the handoff to bitmap_refill_pool.
     protected def bitmap_take_pool_chunk(index : Int32, payload : UInt32,
                                          atomic : Bool) : ChunkHeader*
       slot = atomic ? index + SIZE_CLASS_COUNT : index
@@ -825,12 +826,17 @@ module Gcry
         bitmap_pool_grow(pool, 1) if pool.value.capacity == 0
         best = Pointer(ChunkHeader).null
         candidates = 0
-        each_chunk_for_allocation do |chunk|
-          next unless bitmap_pool_candidate?(chunk, index, atomic)
-          best = chunk if best.null? || chunk.address < best.address
-          # Overflow is only counted here; the walk never allocates.
-          pool.value.addresses[candidates] = chunk.address if candidates < pool.value.capacity
-          candidates += 1
+        with_chunk_list_for_allocation do
+          each_chunk do |chunk|
+            next unless bitmap_pool_candidate?(chunk, index, atomic)
+            best = chunk if best.null? || chunk.address < best.address
+            # Overflow is only counted here; the walk never allocates.
+            pool.value.addresses[candidates] = chunk.address if candidates < pool.value.capacity
+            candidates += 1
+          end
+          # The overflow fallback keeps this pointer across the unlocked
+          # metadata grow below. Pin it before releasing list protection.
+          ChunkHeader.set_cursor(best, true) if candidates > pool.value.capacity
         end
         if candidates > pool.value.capacity
           # Grow now, outside the walk, so the next refill indexes fully. This
@@ -857,6 +863,7 @@ module Gcry
         with_chunk_list_for_allocation do
           if chunk = bitmap_indexed_chunk(address)
             if chunk.address == address && bitmap_pool_candidate?(chunk, index, atomic)
+              ChunkHeader.set_cursor(chunk, true)
               return chunk
             end
           end
@@ -875,7 +882,7 @@ module Gcry
         @bitmap_empty_versions[slot] = version unless refused
       end
       map_chunk(@small_chunk_bytes, index.to_u32,
-        atomic ? ChunkHeader::Flags::ATOMIC : 0_u32)
+        ChunkHeader::Flags::CURSOR | (atomic ? ChunkHeader::Flags::ATOMIC : 0_u32))
     end
 
     # The public containment lookup deliberately excludes chunk metadata.
@@ -956,6 +963,9 @@ module Gcry
           @dormant_revive_during_flush &+= 1
           refused = true
         else
+          # A suspended reviver must be either dormant (skipped) or cursor
+          # owned (pinned) throughout the transition and bitmap reset.
+          ChunkHeader.set_cursor(chunk, true)
           ChunkHeader.set_dormant(chunk, false)
         end
       end

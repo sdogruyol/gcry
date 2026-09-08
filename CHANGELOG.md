@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it made one thread's scrub silently skip while any other thread was
   mid-scrub.
 - Cached bitmap-pool probes now hold the chunk-list lock while resolving a
-  cached address and checking the candidate, preventing stale-header reads
-  when a concurrent trim releases the chunk.
+  cached address and checking the candidate, and claim cursor ownership before
+  returning a chunk to allocation refill. This prevents stale-header reads and
+  stopped-world release of the selected chunk during the handoff.
 
 ## [0.24.1] - 2026-09-08
 
