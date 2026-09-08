@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 it "Platform SP table records and looks up by pthread id" do
-  id = LibC.pthread_self
+  id = Gcry::OS.pthread_self
   sp = 0x7fff00001234_u64
   Gcry::Platform.record_thread_sp(id, sp)
   begin

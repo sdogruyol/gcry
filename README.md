@@ -18,7 +18,7 @@
   <a href="https://github.com/sdogruyol/gcry/releases"><img src="https://img.shields.io/github/v/release/sdogruyol/gcry?style=flat-square&logo=github&label=version" alt="Version"></a>
   <a href="https://crystal-lang.org"><img src="https://img.shields.io/badge/Crystal-%3E%3D1.21-000?style=flat-square&logo=crystal" alt="Crystal"></a>
   <a href="https://github.com/sdogruyol/gcry/actions"><img src="https://img.shields.io/github/actions/workflow/status/sdogruyol/gcry/ci.yml?branch=master&style=flat-square&logo=githubactions&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Linux-macOS-4a90d9?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-4a90d9?style=flat-square" alt="Platform">
   <img src="https://img.shields.io/badge/license-MIT-3da639?style=flat-square" alt="License">
 </p>
 
@@ -50,7 +50,8 @@ to swap Boehm out, one line to swap it back.
 - **You contribute to Crystal** and want the language to own its runtime.
 - **You're curious** — one `crystal build -Dgc_none` and you'll see.
 
-Crystal >= 1.21. Linux (x86_64 + aarch64) and macOS (arm64 + x86_64).
+Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
+[Windows x86_64](docs/WINDOWS.md).
 
 ---
 
@@ -317,7 +318,7 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | Feature | Description |
 |---------|-------------|
 | **Conservative mark-sweep** | Safe for today's Crystal ABI; scans for pointer-shaped words |
-| **Stop-the-world** | Linux signals / Darwin Mach suspend; HDR histogram via `Gcry.pause_stats` |
+| **Stop-the-world** | Linux signals / Darwin Mach suspend / Windows SuspendThread; HDR histogram via `Gcry.pause_stats` |
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
@@ -332,11 +333,12 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 ## Scope (honest)
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
-Windows is coming.
+Windows x86_64 has native unit, process-GC, and release-sample CI coverage.
+Windows workload performance has not been benchmarked; see [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|
-| **Linux + macOS** process GC (Crystal >= 1.21) | Windows process GC |
+| **Linux + macOS + Windows x86_64** process GC (Crystal >= 1.21) | Windows workload benchmarks |
 | Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
@@ -347,7 +349,7 @@ Windows is coming.
 
 ```
   Phase 1  DONE  Conservative mark-sweep, STW, Linux + macOS     ✓
-  Phase 2  NOW   Stack maps, barriers, Windows, -Dgc_gcry        ○
+  Phase 2  NOW   Stack maps, barriers, -Dgc_gcry                 ○
   Phase 3  NEXT  Performance parity, parallel mark, nursery def.  ◐
   Phase 4  GOAL  Crystal's default GC                             △
 ```

@@ -66,9 +66,9 @@ module Gcry
     # `GC.init` — before `Fiber` exists. Crystal's `ENV[]` uses `once` and
     # allocates, and `gc_override.cr:520` records what that does at this point
     # in startup ("ENV[] allocates and can SEGV during GC.init"). So this
-    # compares the raw `LibC.getenv` bytes and never builds a `String`.
+    # compares the raw `Gcry::OS.getenv` bytes and never builds a `String`.
     def self.tier_from_env : UInt8
-      raw = LibC.getenv("GCRY_SIMD")
+      raw = Gcry::OS.getenv("GCRY_SIMD")
       return detect if raw.null?
 
       detected = detect

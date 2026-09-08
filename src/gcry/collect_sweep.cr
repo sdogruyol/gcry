@@ -540,7 +540,8 @@ module Gcry
         # page) must be a separate munmap — overlapping or with a gap means
         # the kernel placed some other VMA between them and a single
         # munmap would unmap unintended pages.
-        while nxt && nxt.as(Void*).address == run_end
+        # VirtualFree(MEM_RELEASE) requires each original reservation separately.
+        while {{ !flag?(:win32) }} && nxt && nxt.as(Void*).address == run_end
           new_end = nxt.as(Void*).address + nxt.value.mapped_bytes
           run_end = new_end if new_end > run_end
           index_remove(nxt)
@@ -552,7 +553,7 @@ module Gcry
         unless guard_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                refuse_live_release(run_base, run_total, GUARD_KIND_EMPTY_CHUNK) ||
                quarantine_release(run_base, run_total)
-          LibC.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
+          Gcry::OS.munmap(Pointer(Void).new(run_base), LibC::SizeT.new(run_total))
         end
         chunk = nxt
       end
@@ -1456,7 +1457,7 @@ module Gcry
     # Drop RSS for a fully-free chunk while keeping the VMA (dormant reuse).
     # Addr/len must be page-aligned into the data region.
     private def dontneed_chunk_data(chunk : ChunkHeader*) : Nil
-      {% if flag?(:linux) || flag?(:darwin) %}
+      {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
         page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address
@@ -1546,7 +1547,7 @@ module Gcry
     end
 
     private def release_free_pages_in_chunk(chunk : ChunkHeader*, payload : UInt32, *, preserve_content : Bool) : Bool
-      {% if flag?(:linux) || flag?(:darwin) %}
+      {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
         page = Platform.host_page_size
         data0 = ChunkHeader.data_start(chunk).address
         data1 = ChunkHeader.data_end(chunk).address
@@ -1588,11 +1589,11 @@ module Gcry
         # frequent enough to measure a fix against, and a real fix has to hold
         # it at zero *with the stall on*.
         if (stall = @page_release_test_stall_ms) > 0
-          ts = uninitialized LibC::Timespec
+          ts = uninitialized Gcry::OS::Timespec
           ts.tv_sec = typeof(ts.tv_sec).new(stall // 1000)
           ts.tv_nsec = typeof(ts.tv_nsec).new((stall % 1000) * 1_000_000)
-          rem = uninitialized LibC::Timespec
-          LibC.nanosleep(pointerof(ts), pointerof(rem))
+          rem = uninitialized Gcry::OS::Timespec
+          Gcry::OS.nanosleep(pointerof(ts), pointerof(rem))
         end
 
         any = false

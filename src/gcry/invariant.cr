@@ -347,7 +347,7 @@ module Gcry
 
     private def self.libc_write_err(msg : String) : Nil
       # write(2) to stderr is signal-safe and does not allocate.
-      LibC.write(2, msg, msg.bytesize)
+      Gcry::OS.write(2, msg, msg.bytesize)
     end
   end
 end

@@ -20,7 +20,7 @@ module Gcry
 
     def destroy : Nil
       return if @base.null?
-      LibC.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+      Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
       @base = Pointer(Void).null
       @capacity = 0
       @size = 0
@@ -63,11 +63,11 @@ module Gcry
     end
 
     private def grow(bytes : UInt64) : Nil
-      ptr = LibC.mmap(
+      ptr = Gcry::OS.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
         -1,
         0
       )
@@ -76,7 +76,7 @@ module Gcry
       new_capacity = (bytes // sizeof(Void*)).to_i32
       unless @base.null?
         @base.as(Void**).copy_to(ptr.as(Void**), @size)
-        LibC.munmap(@base, LibC::SizeT.new(@mapped_bytes))
+        Gcry::OS.munmap(@base, LibC::SizeT.new(@mapped_bytes))
       end
 
       @base = ptr

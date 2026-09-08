@@ -51,7 +51,7 @@ end
 describe "Gcry::Trace" do
   it "emits parseable NDJSON for collect" do
     path = File.tempname("gcry-trace-spec", ".ndjson")
-    fd = LibC.open(path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
+    fd = Gcry::OS.open(path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
     fd.should be >= 0
     Gcry::Trace.enable(fd, alloc_sample: 1_u64, owned: true)
     begin

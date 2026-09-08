@@ -1,6 +1,6 @@
 # Stop-the-world: GC lock, thread suspend/resume, fork child reinit.
 #
-# RWLock notes for Darwin:
+# RWLock notes for Darwin and Windows:
 #   `Crystal::RWLock` is a pure userspace spinlock with no `try_write_lock`.
 #   If thread A holds `lock_read` and then calls `lock_write` (via allocation →
 #   `maybe_collect`), it spins forever because it can't release its own read lock.
@@ -9,18 +9,21 @@
 #
 #   Fortunately, Mach STW already provides mutual exclusion: the collector stops
 #   **all** other threads before touching the heap, so there is no concurrent
-#   mutation during GC.  The RWLock is thus redundant on Darwin — make it a no-op.
+#   mutation during GC.  Windows SuspendThread has the same lock hazard and mutual exclusion.
+#   The RWLock is a no-op on both platforms.
 
 # `pthread_kill(id, 0)` asks whether a handle still names a live thread without
 # sending anything. Crystal does not bind it.
-lib LibStwProbe
-  fun pthread_kill(thread : LibC::PthreadT, sig : LibC::Int) : LibC::Int
-end
+{% unless flag?(:win32) %}
+  lib LibStwProbe
+    fun pthread_kill(thread : Gcry::OS::PthreadT, sig : LibC::Int) : LibC::Int
+  end
+{% end %}
 
 module Gcry
   class Heap
     def lock_read : Nil
-      {% unless flag?(:darwin) %}
+      {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
         wait_if_world_stopped_other_thread
         @gc_lock.read_lock
@@ -28,21 +31,21 @@ module Gcry
     end
 
     def unlock_read : Nil
-      {% unless flag?(:darwin) %}
+      {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
         @gc_lock.read_unlock
       {% end %}
     end
 
     def lock_write : Nil
-      {% unless flag?(:darwin) %}
+      {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
         @gc_lock.write_lock
       {% end %}
     end
 
     def unlock_write : Nil
-      {% unless flag?(:darwin) %}
+      {% unless (flag?(:darwin) || flag?(:win32)) %}
         return unless @stop_the_world
         @gc_lock.write_unlock
       {% end %}
@@ -92,10 +95,27 @@ module Gcry
       MonitorGate.close
       StwWatchdog.note_suspend_step(StwWatchdog::STEP_GATE_CLOSED)
       @stw_owner = current_thread
-      @stw_owner_pthread = LibC.pthread_self.unsafe_as(UInt64)
-      {% if flag?(:darwin) %}
-        Platform.stop_world_threads(current_thread)
+      @stw_owner_pthread = Gcry::Platform.current_thread_id
+      {% if (flag?(:darwin) || flag?(:win32)) %}
+        begin
+          Platform.stop_world_threads(current_thread)
+        rescue ex
+          @stw_owner = nil
+          @stw_owner_pthread = 0_u64
+          MonitorGate.open
+          StwWatchdog.leave
+          raise ex
+        end
         @world_stopped = true
+        {% if flag?(:win32) %}
+          Thread.unsafe_each do |thread|
+            id = thread.to_unsafe.address
+            Platform.unstage_thread(id)
+            if rooted = ThreadBirthRoot.release(id)
+              @roots.delete(rooted)
+            end
+          end
+        {% end %}
       {% else %}
         # `GCRY_STAGED_WAIT=1`: give a thread that exists but has not published
         # itself a moment to do so, before the world is stopped around it.
@@ -268,7 +288,7 @@ module Gcry
       len = RawOut.append(p, len, " acknowledged. ")
       # ESRCH means the handle names no live thread, which is what a `Thread`
       # object that was swept and reissued would look like from here.
-      rc = LibStwProbe.pthread_kill(id.unsafe_as(LibC::PthreadT), 0)
+      rc = LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0)
       len = RawOut.append(p, len, rc == 0 ? "the handle is live (pthread_kill 0 → 0)" : "pthread_kill(0) → ")
       len = RawOut.append_u64(p, len, rc.to_u64) unless rc == 0
       len = RawOut.append(p, len, rc == 3 ? " ESRCH: the handle names no live thread" : "")
@@ -331,7 +351,8 @@ module Gcry
       invalidate_chunk_cache
 
       current_thread = Thread.current
-      {% if flag?(:darwin) %}
+      {% if (flag?(:darwin) || flag?(:win32)) %}
+        {% if flag?(:win32) %} @world_stopped = false {% end %}
         Platform.start_world_threads(current_thread)
         Platform.clear_thread_sps
         @world_stopped = false

@@ -83,7 +83,24 @@ module Gcry
     end
 
     def self.flush(buf : UInt8*, len : Int32) : Nil
-      LibC.write(2, buf, LibC::SizeT.new(len))
+      Gcry::OS.write(2, buf, LibC::SizeT.new(len))
     end
+  end
+end
+
+module Gcry::RawOut
+  def self.print_backtrace : Nil
+    {% if flag?(:win32) %}
+      frames = uninitialized Void*[32]
+      count = LibGcryWindows.RtlCaptureStackBackTrace(0, 32, frames.to_unsafe, nil)
+      count.times do |i|
+        buffer = uninitialized UInt8[32]
+        n = append_hex(buffer.to_unsafe, 0, frames[i].address)
+        buffer[n] = 10_u8
+        flush(buffer.to_unsafe, n + 1)
+      end
+    {% else %}
+      Exception::CallStack.print_backtrace
+    {% end %}
   end
 end

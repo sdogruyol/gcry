@@ -8,7 +8,7 @@
 # `bench/log/linux/2026-08-10-stw-startup-hang/FINDINGS.md`) took inserting
 # markers and rebuilding. With this armed it takes reading one line.
 #
-# The watchdog is a raw `LibC.pthread_create` thread, not a `Crystal::Thread`,
+# The watchdog is a raw `Gcry::OS.pthread_create` thread, not a `Crystal::Thread`,
 # for the same reason the parallel mark helpers are (see parallel_mark.cr): STW
 # only signals threads in Crystal's list, so a raw thread keeps running while the
 # world is stopped, which is exactly when it has to work.
@@ -21,11 +21,13 @@
 # collection phase (the breadcrumb, which is kept unconditionally so it is also
 # available for post-mortem) and creates no thread.
 
-require "c/pthread"
+require "./platform/os"
 
-lib LibC
-  fun nanosleep(req : Timespec*, rem : Timespec*) : Int
-end
+{% unless flag?(:win32) %}
+  lib LibC
+    fun nanosleep(req : Timespec*, rem : Timespec*) : Int
+  end
+{% end %}
 
 # C ABI entry — must not be a Crystal::Thread, or STW would suspend the one
 # thread whose job is to notice that STW is stuck.
@@ -164,15 +166,15 @@ module Gcry
       return if @@started
       @@started = true
 
-      tid = uninitialized LibC::PthreadT
-      ret = LibC.pthread_create(pointerof(tid), Pointer(LibC::PthreadAttrT).null,
+      tid = uninitialized Gcry::OS::PthreadT
+      ret = Gcry::OS.pthread_create(pointerof(tid), Pointer(Gcry::OS::PthreadAttrT).null,
         ->gcry_stw_watchdog_main(Void*), Pointer(Void).null)
       if ret != 0
         @@started = false
         write_str("gcry: STW watchdog could not start (pthread_create failed)\n")
         return
       end
-      LibC.pthread_detach(tid)
+      Gcry::OS.pthread_detach(tid)
     end
 
     # Breadcrumb. Two plain stores; kept even when disarmed so a post-mortem has
@@ -195,13 +197,13 @@ module Gcry
     end
 
     def self.watch_loop : Nil
-      req = uninitialized LibC::Timespec
+      req = uninitialized Gcry::OS::Timespec
       req.tv_sec = typeof(req.tv_sec).new(0)
       req.tv_nsec = typeof(req.tv_nsec).new(POLL_NS)
-      rem = uninitialized LibC::Timespec
+      rem = uninitialized Gcry::OS::Timespec
 
       loop do
-        LibC.nanosleep(pointerof(req), pointerof(rem))
+        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
 
         id = @@phase
         next if id == PHASE_NONE || @@reported
@@ -259,7 +261,7 @@ module Gcry
         len = append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
                                          "reported once per stop\n")
       end
-      LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
+      Gcry::OS.write(2, buf.to_unsafe, LibC::SizeT.new(len))
     end
 
     private def self.append(buf : UInt8*, len : Int32, str : String) : Int32
@@ -323,7 +325,7 @@ module Gcry
     end
 
     private def self.write_str(str : String) : Nil
-      LibC.write(2, str.to_unsafe, LibC::SizeT.new(str.bytesize))
+      Gcry::OS.write(2, str.to_unsafe, LibC::SizeT.new(str.bytesize))
     end
 
     private def self.now_ns : UInt64

@@ -143,7 +143,7 @@ module Gcry
           mk = c ? chunk_marked?(c, ord) : false
           LibC.printf("HL DOUBLE PUSH header=%p class=%u ordinal=%llu marked_now=%d chunk=%p\n",
             header.as(Void*), cls, ord, mk ? 1 : 0, c ? c.as(Void*) : Pointer(Void).null)
-          Exception::CallStack.print_backtrace
+          Gcry::RawOut.print_backtrace
           LibC.exit(9)
         end
         @hl_pushed_base[w] |= bit
@@ -802,11 +802,11 @@ module Gcry
     # Confirm the kernel sets soft-dirty after a store (broken on some WSL builds).
     # Uses a dedicated anonymous page — never touch the managed heap.
     protected def soft_dirty_tracks_writes? : Bool
-      page = LibC.mmap(
+      page = Gcry::OS.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(Platform::PAGE_SIZE),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
         -1,
         0,
       )
@@ -821,7 +821,7 @@ module Gcry
         end
         ok && dirty
       ensure
-        LibC.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
+        Gcry::OS.munmap(page, LibC::SizeT.new(Platform::PAGE_SIZE))
       end
     end
 

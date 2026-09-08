@@ -5,7 +5,7 @@
 #
 # Fields (@alloc_lock, @freelist_locks, @tlab_enabled, …) are in heap.cr.
 
-require "c/pthread"
+require "./platform/os"
 
 module Gcry
   class Heap
@@ -178,13 +178,15 @@ module Gcry
     end
 
     private def current_thread_key : UInt64
-      {% if flag?(:win32) || flag?(:wasm32) %}
+      {% if flag?(:win32) %}
+        Platform.current_thread_id
+      {% elsif flag?(:wasm32) %}
         1_u64
       {% elsif flag?(:darwin) || flag?(:musl) %}
         # PthreadT is Void* — no integer conversion (same as darwin).
-        LibC.pthread_self.as(Void*).address
+        Gcry::OS.pthread_self.as(Void*).address
       {% else %}
-        LibC.pthread_self.to_u64!
+        Gcry::OS.pthread_self.to_u64!
       {% end %}
     end
 

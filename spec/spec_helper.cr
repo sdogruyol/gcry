@@ -14,8 +14,8 @@ module SpecInitialThread
   class_property pthread : UInt64 = 0_u64
 
   def self.current? : Bool
-    LibC.pthread_self.unsafe_as(UInt64) == pthread
+    Gcry::Platform.current_thread_id == pthread
   end
 end
 
-SpecInitialThread.pthread = LibC.pthread_self.unsafe_as(UInt64)
+SpecInitialThread.pthread = Gcry::Platform.current_thread_id

@@ -1,3 +1,5 @@
+{% skip_file unless flag?(:unix) %}
+
 require "./spec_helper"
 
 # How a fault outside the heap span is read.

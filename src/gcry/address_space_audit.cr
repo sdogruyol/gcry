@@ -120,31 +120,32 @@ module Gcry
       # very collection it was measuring. `pread` on that file reports the same
       # page as an error instead, so the audit degrades to "could not read one
       # page" where it used to take the process down.
-      mem_fd = LibC.open("/proc/self/mem".to_unsafe.as(LibC::Char*), 0)
-
       walked = false
-      if mem_fd >= 0
-        begin
-          walked = Platform.each_map_region do |lo, hi, perms, name, name_len|
-            if scanned >= ADDRESS_SPACE_SCAN_LIMIT
-              truncated = true
-              unscanned_regions &+= 1
-              unscanned_bytes &+= (hi - lo)
-            elsif skip_region?(perms, name, name_len)
-              skipped &+= 1
-            else
-              regions &+= 1
-              scanned &+= (hi - lo)
-              reported = scan_region_for_target(mem_fd, lo, hi, target, high,
-                pointerof(base_hits), pointerof(interior_hits), pointerof(unreadable),
-                reported, perms, name, name_len)
-            end
-          end
-        ensure
-          LibC.close(mem_fd)
-        end
-      end
+      {% if flag?(:linux) %}
+        mem_fd = Gcry::OS.open("/proc/self/mem".to_unsafe.as(LibC::Char*), 0)
 
+        if mem_fd >= 0
+          begin
+            walked = Platform.each_map_region do |lo, hi, perms, name, name_len|
+              if scanned >= ADDRESS_SPACE_SCAN_LIMIT
+                truncated = true
+                unscanned_regions &+= 1
+                unscanned_bytes &+= (hi - lo)
+              elsif skip_region?(perms, name, name_len)
+                skipped &+= 1
+              else
+                regions &+= 1
+                scanned &+= (hi - lo)
+                reported = scan_region_for_target(mem_fd, lo, hi, target, high,
+                  pointerof(base_hits), pointerof(interior_hits), pointerof(unreadable),
+                  reported, perms, name, name_len)
+              end
+            end
+          ensure
+            Gcry::OS.close(mem_fd)
+          end
+        end
+      {% end %}
       @address_space_hits &+= base_hits
       @address_space_absent &+= 1 if walked && base_hits == 0
 

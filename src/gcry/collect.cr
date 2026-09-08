@@ -8,6 +8,8 @@
   require "./platform/linux_thread_census"
   require "./platform/linux_address_space"
   require "./platform/linux_fork"
+{% elsif flag?(:win32) %}
+  require "./platform/windows"
 {% elsif flag?(:darwin) %}
   require "./platform/darwin_stubs"
   require "./platform/darwin_roots"
@@ -505,7 +507,7 @@ module Gcry
     # pthread mutex (not SpinLock): under Parallel, SpinLock waiters burned a
     # whole EC worker for hundreds of ms while another flushes — ~8–11s of
     # wait in a 20s Kemal /json run. Embedded LibC mutex — no GC malloc at boot.
-    @post_stw_mutex = uninitialized LibC::PthreadMutexT
+    @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @mark_stack = MarkStack.new
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
@@ -797,13 +799,13 @@ module Gcry
         # counted, because a quarantine that is always full is not a
         # quarantine and its zero would not mean anything.
         i = @q_head
-        LibC.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
         @quarantine_forced_drains &+= 1
       end
       # Drop the pages; keep the address.
-      LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE)
+      Gcry::OS.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), Gcry::OS::PROT_NONE)
       i = (@q_head + @q_count) % QUARANTINE_SLOTS
       @q_base[i] = base
       @q_len[i] = len
@@ -821,7 +823,7 @@ module Gcry
       while @q_count > 0
         i = @q_head
         break if @collections - @q_gen[i] < @release_quarantine
-        LibC.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
+        Gcry::OS.munmap(Pointer(Void).new(@q_base[i]), LibC::SizeT.new(@q_len[i]))
         @q_head = (i + 1) % QUARANTINE_SLOTS
         @q_count -= 1
       end
@@ -1014,7 +1016,7 @@ module Gcry
       tag = guard_user_tag(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
-      if LibC.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), LibC::PROT_NONE) != 0
+      if Gcry::OS.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), Gcry::OS::PROT_NONE) != 0
         # The slot is claimed and this release did not happen: leave it with a
         # zero length so the walk steps over it.
         @guard_len[i] = 0_u64
@@ -1130,7 +1132,7 @@ module Gcry
     # and empties are queued for munmap (same cooperative spin as STW).
     @block_other_heap = false
     # Serializes collect vs fiber context swap (ExecutionContext takes read lock).
-    @gc_lock = Crystal::RWLock.new
+    @gc_lock : Crystal::RWLock = Crystal::RWLock.new
     @heap_min : UInt64 = UInt64::MAX
     @heap_max : UInt64 = 0_u64
     # Monotonic span of every address ever mapped — never shrinks on munmap.
@@ -1844,19 +1846,19 @@ module Gcry
 
     private def init_post_stw_mutex : Nil
       # Fresh mutex (also used after fork — parent copy may be locked/undefined).
-      LibC.pthread_mutex_init(pointerof(@post_stw_mutex), Pointer(LibC::PthreadMutexattrT).null)
+      Gcry::OS.pthread_mutex_init(pointerof(@post_stw_mutex), Pointer(Gcry::OS::PthreadMutexattrT).null)
     end
 
     private def lock_post_stw : Nil
-      LibC.pthread_mutex_lock(pointerof(@post_stw_mutex))
+      Gcry::OS.pthread_mutex_lock(pointerof(@post_stw_mutex))
     end
 
     private def try_lock_post_stw : Bool
-      LibC.pthread_mutex_trylock(pointerof(@post_stw_mutex)) == 0
+      Gcry::OS.pthread_mutex_trylock(pointerof(@post_stw_mutex)) == 0
     end
 
     private def unlock_post_stw : Nil
-      LibC.pthread_mutex_unlock(pointerof(@post_stw_mutex))
+      Gcry::OS.pthread_mutex_unlock(pointerof(@post_stw_mutex))
     end
 
     private def debt_under_threshold?(major : Bool) : Bool
@@ -2056,11 +2058,11 @@ module Gcry
           @last_phase_static_ns = monotonic_ns - t0
           StwWatchdog.enter(StwWatchdog::PHASE_STACKS)
           if (stall = @stw_test_stall_ms) > 0
-            ts = uninitialized LibC::Timespec
+            ts = uninitialized Gcry::OS::Timespec
             ts.tv_sec = typeof(ts.tv_sec).new(stall // 1000)
             ts.tv_nsec = typeof(ts.tv_nsec).new((stall % 1000) * 1_000_000)
-            rem = uninitialized LibC::Timespec
-            LibC.nanosleep(pointerof(ts), pointerof(rem))
+            rem = uninitialized Gcry::OS::Timespec
+            Gcry::OS.nanosleep(pointerof(ts), pointerof(rem))
           end
 
           t0 = monotonic_ns

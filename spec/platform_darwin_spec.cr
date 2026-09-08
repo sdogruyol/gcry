@@ -39,7 +39,7 @@ require "./spec_helper"
       sp.should be >= low.address
       sp.should be < high.address
 
-      self_bounds = Gcry::Platform.pthread_stack_bounds(LibC.pthread_self)
+      self_bounds = Gcry::Platform.pthread_stack_bounds(Gcry::OS.pthread_self)
       self_bounds.should_not be_nil
       self_low, self_high = self_bounds.not_nil!
       self_low.address.should eq(low.address)
@@ -52,11 +52,11 @@ require "./spec_helper"
       page = Gcry::Platform.host_page_size
       page.should be > 0
 
-      ptr = LibC.mmap(
+      ptr = Gcry::OS.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(page),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
         -1,
         0,
       )
@@ -74,7 +74,7 @@ require "./spec_helper"
         # Page remains mapped and readable.
         _ = ptr.as(UInt8*).value
       ensure
-        LibC.munmap(ptr, LibC::SizeT.new(page)) unless Gcry.mmap_failed?(ptr)
+        Gcry::OS.munmap(ptr, LibC::SizeT.new(page)) unless Gcry.mmap_failed?(ptr)
       end
     end
   end

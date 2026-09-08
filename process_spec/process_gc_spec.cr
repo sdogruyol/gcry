@@ -56,13 +56,20 @@ describe "process GC (-Dgc_none)" do
 
   # Crystal prepare_args omitted argv NULL; Boehm over-alloc hid it (#14).
   it "runs Process / command literals (argv NULL terminator)" do
-    `echo gcry-process-argv`.should eq("gcry-process-argv\n")
-    Process.run("echo", ["direct"], output: Process::Redirect::Pipe) do |proc|
-      proc.output.gets_to_end.should eq("direct\n")
-    end
-    Process.run("echo shell", shell: true, output: Process::Redirect::Pipe) do |proc|
-      proc.output.gets_to_end.should eq("shell\n")
-    end
+    {% if flag?(:win32) %}
+      `cmd.exe /c echo gcry-process-argv`.strip.should eq("gcry-process-argv")
+      Process.run("cmd.exe", ["/c", "echo", "direct"], output: Process::Redirect::Pipe) do |proc|
+        proc.output.gets_to_end.strip.should eq("direct")
+      end
+    {% else %}
+      `echo gcry-process-argv`.should eq("gcry-process-argv\n")
+      Process.run("echo", ["direct"], output: Process::Redirect::Pipe) do |proc|
+        proc.output.gets_to_end.should eq("direct\n")
+      end
+      Process.run("echo shell", shell: true, output: Process::Redirect::Pipe) do |proc|
+        proc.output.gets_to_end.should eq("shell\n")
+      end
+    {% end %}
   end
 
   it "alloc storm + periodic collect" do
@@ -124,13 +131,13 @@ describe "process GC (-Dgc_none)" do
     h.tlab_refills.should eq(0)
   end
 
-  it "registers pthread_atfork by default" do
-    Gcry::Platform.atfork_installed?.should be_true
+  it "registers atfork handlers on platforms with fork" do
+    Gcry::Platform.atfork_installed?.should eq({{ flag?(:unix) }})
   end
 end
 
-{% if flag?(:darwin) %}
-  describe "process GC Darwin Mach STW" do
+{% if flag?(:darwin) || flag?(:win32) %}
+  describe "process GC native thread suspension" do
     it "stop_world_threads / start_world_threads round-trip" do
       # Wake ExecutionContext Monitor so STW has another OS thread.
       ch = Channel(Nil).new
@@ -156,7 +163,7 @@ end
       GC.collect
     end
 
-    it "GC.collect exercises Mach STW SP clamp" do
+    it "GC.collect captures suspended stack pointers and registers" do
       # Park a real OS thread (Monitor-only wake races on Darwin CI).
       # Thread.new has no Fiber execution_context — spin on Atomic.
       ready = Atomic(Int32).new(0)

@@ -84,7 +84,9 @@ module Gcry
     # "LibC::") change shape across versions or carry platform-specific
     # conditional fields that the macro cannot see. Skip them — they keep
     # conservative scanning, which is safe.
-    UNSAFE_PREFIXES = {"Cry", "Crystal::", "LibC::"}
+    # ConsoleUtils is a file-private Windows namespace. Its public nested
+    # ReadRequest type cannot be named here; keep it conservatively scanned.
+    UNSAFE_PREFIXES = {"Cry", "Crystal::", "LibC::", "ConsoleUtils::"}
 
     def self.unsafe_skips_count : UInt64
       @@unsafe_skips
@@ -243,7 +245,7 @@ module Gcry
     private def self.dump? : Bool
       unless @@dump_checked
         @@dump_checked = true
-        v = LibC.getenv("GCRY_LAYOUT_DUMP")
+        v = Gcry::OS.getenv("GCRY_LAYOUT_DUMP")
         @@dump = !v.null? && v.value == '1'.ord.to_u8 && (v + 1).value == 0_u8
       end
       @@dump
@@ -638,7 +640,7 @@ module Gcry
     def self.register_scan_caps : Nil
       {% begin %}
         {% for t in Reference.all_subclasses %}
-          {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
+          {% skip = t.abstract? || t.private? || t.stringify.starts_with?("ConsoleUtils::") || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
           {% for tv in t.type_vars %}
             {% unless tv.is_a?(TypeNode) && !tv.abstract? %}
               {% skip = true %}

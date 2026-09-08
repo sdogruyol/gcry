@@ -1,5 +1,4 @@
-require "c/unistd"
-require "c/fcntl"
+require "./platform/os"
 
 module Gcry
   # Explicit roots and conservative stack scanning helpers.
@@ -103,19 +102,25 @@ module Gcry
       {% end %}
     end
 
+    {% if flag?(:win32) %}
+      REGISTER_BUFFER_SIZE = 1248
+    {% else %}
+      REGISTER_BUFFER_SIZE = 256
+    {% end %}
+
     # Combined: spill regs + scan [SP−red_zone, bottom), feeding each candidate
     # to *block*.
     def self.scan_mutator(bottom : Void*, & : Void* ->) : Nil
       spill_registers
-      env = uninitialized StaticArray(UInt8, 256)
-      LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+      env = uninitialized StaticArray(UInt8, REGISTER_BUFFER_SIZE)
+      capture_registers(env.to_unsafe)
       scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
         yield candidate
       end
       # Prefer hardware SP (− red zone). pointerof(local) sits mid-frame and
       # skipped the leaf / red-zone window — Parallel collect-on-alloc then
       # missed caller-held buffers (Kemal EC>1).
-      red = {% if flag?(:x86_64) %} 128_u64 {% else %} 0_u64 {% end %}
+      red = {% if flag?(:x86_64) && !flag?(:win32) %} 128_u64 {% else %} 0_u64 {% end %}
       sp = hardware_stack_pointer.address
       low = sp > red ? sp - red : 0_u64
       # Also cover pointerof(local) if it somehow sits below hardware SP
@@ -157,12 +162,22 @@ module Gcry
     # the mutator stack.
     def self.each_spilled_register(& : Void* ->) : Nil
       spill_registers
-      env = uninitialized StaticArray(UInt8, 256)
-      LibSetjmp.setjmp(env.to_unsafe.as(Void*))
+      env = uninitialized StaticArray(UInt8, REGISTER_BUFFER_SIZE)
+      capture_registers(env.to_unsafe)
       scan_range(env.to_unsafe.as(Void*), (env.to_unsafe + env.size).as(Void*)) do |candidate|
         yield candidate
       end
       keep_alive(env.to_unsafe.as(Void*))
+    end
+
+    @[AlwaysInline]
+    private def self.capture_registers(buffer : UInt8*) : Nil
+      {% if flag?(:win32) %}
+        buffer.clear(1248)
+        LibC.RtlCaptureContext(buffer.align_up(16).as(LibC::CONTEXT*))
+      {% else %}
+        LibSetjmp.setjmp(buffer.as(Void*))
+      {% end %}
     end
 
     def self.keep_alive(ptr : Void*) : Nil
@@ -275,7 +290,7 @@ module Gcry
       return if page >= hi
 
       last_page = (hi - 1) & ~(PAGE_SIZE - 1)
-      if last_page == page || page_readable?(last_page)
+      if {{ !flag?(:win32) }} && (last_page == page || page_readable?(last_page))
         start = lo > page ? lo : page
         start = (start + word - 1) & ~(word - 1)
         finish = hi & ~(word - 1)
@@ -321,13 +336,17 @@ module Gcry
     end
 
     private def self.ensure_probe_pipe : Nil
-      return if @@probe_wr >= 0
-      fds = StaticArray(Int32, 2).new(0)
-      return if LibC.pipe(fds) != 0
-      @@probe_rd = fds[0]
-      @@probe_wr = fds[1]
-      flags = LibC.fcntl(@@probe_rd, LibC::F_GETFL)
-      LibC.fcntl(@@probe_rd, LibC::F_SETFL, flags | LibC::O_NONBLOCK) if flags >= 0
+      {% if flag?(:win32) %}
+        @@probe_wr = 0
+      {% else %}
+        return if @@probe_wr >= 0
+        fds = StaticArray(Int32, 2).new(0)
+        return if LibC.pipe(fds) != 0
+        @@probe_rd = fds[0]
+        @@probe_wr = fds[1]
+        flags = LibC.fcntl(@@probe_rd, LibC::F_GETFL)
+        LibC.fcntl(@@probe_rd, LibC::F_SETFL, flags | LibC::O_NONBLOCK) if flags >= 0
+      {% end %}
     end
 
     # Kernel copies one byte from *page*; EFAULT ⇒ not readable (PROT_NONE / hole).
@@ -337,15 +356,19 @@ module Gcry
     # than only its value, so it cannot go through `scan_range`, and a blind
     # read over a guard page from a signal handler is a second crash.
     def self.page_readable?(page : UInt64) : Bool
-      return false if @@probe_wr < 0
-      n = LibC.write(@@probe_wr, Pointer(Void).new(page), 1)
-      if n == 1
-        buf = uninitialized UInt8
-        LibC.read(@@probe_rd, pointerof(buf).as(Void*), 1)
-        true
-      else
-        false
-      end
+      {% if flag?(:win32) %}
+        Platform.page_readable?(page)
+      {% else %}
+        return false if @@probe_wr < 0
+        n = Gcry::OS.write(@@probe_wr, Pointer(Void).new(page), 1)
+        if n == 1
+          buf = uninitialized UInt8
+          LibC.read(@@probe_rd, pointerof(buf).as(Void*), 1)
+          true
+        else
+          false
+        end
+      {% end %}
     end
 
     # Zero [low, high) only on pages the kernel will let us read — fiber stacks

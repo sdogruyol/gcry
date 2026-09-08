@@ -7,10 +7,9 @@
 # Under `-Dgc_none` we must avoid:
 #   - `require "json"` (JSON::Builder ↔ GC.malloc cycle)
 #   - writing through abstract `IO` (pulls OpenSSL::SSL::Socket into codegen)
-# Emit with LibC.write into a stack buffer + reentrancy guard.
+# Emit with Gcry::OS.write into a stack buffer + reentrancy guard.
 
-require "c/unistd"
-require "c/fcntl"
+require "./platform/os"
 
 module Gcry
   module Trace
@@ -49,7 +48,7 @@ module Gcry
       end
 
       if path = ENV["GCRY_TRACE_FILE"]?
-        fd = LibC.open(path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
+        fd = Gcry::OS.open(path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
         if fd >= 0
           enable(fd, alloc_sample: sample, owned: true)
           return
@@ -142,7 +141,7 @@ module Gcry
 
     private def self.close_owned : Nil
       if @@owned_fd && @@fd >= 0 && @@fd != 2
-        LibC.close(@@fd)
+        Gcry::OS.close(@@fd)
       end
       @@owned_fd = false
     end
@@ -159,7 +158,7 @@ module Gcry
         len = append_i64_value(buf.to_unsafe, len, Clock.monotonic_ns.to_i64!)
         len = yield buf.to_unsafe, len
         len = append_raw(buf.to_unsafe, len, "}\n")
-        LibC.write(@@fd, buf.to_unsafe, LibC::SizeT.new(len)) if len > 0
+        Gcry::OS.write(@@fd, buf.to_unsafe, LibC::SizeT.new(len)) if len > 0
       ensure
         @@emitting = false
       end

@@ -10,9 +10,9 @@ require "./spec_helper"
   describe "Gcry::Platform.stack_low_water" do
     it "reports the first touched page of a freshly mapped region" do
       len = 1024 * 1024
-      map = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(len),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, LibC::OffT.new(0))
+      map = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(len),
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, LibC::OffT.new(0))
       map.address.should_not eq(0)
       low = map.address
       high = low + len
@@ -36,15 +36,15 @@ require "./spec_helper"
         Pointer(UInt8).new(lower).value = 0x5a_u8
         Gcry::Platform.stack_low_water(low, high).should be <= lower
       ensure
-        LibC.munmap(map, LibC::SizeT.new(len))
+        Gcry::OS.munmap(map, LibC::SizeT.new(len))
       end
     end
 
     it "never reports above a written word, scanning a whole region" do
       len = 512 * 1024
-      map = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(len),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, LibC::OffT.new(0))
+      map = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(len),
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, LibC::OffT.new(0))
       low = map.address
       high = low + len
 
@@ -60,7 +60,7 @@ require "./spec_helper"
         end
         Gcry::Platform.stack_low_water(low, high).should eq(low)
       ensure
-        LibC.munmap(map, LibC::SizeT.new(len))
+        Gcry::OS.munmap(map, LibC::SizeT.new(len))
       end
     end
 

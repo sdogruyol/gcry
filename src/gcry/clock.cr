@@ -9,6 +9,8 @@
 # Four copies of these three lines had accumulated (`Collector`, `MonitorGate`,
 # `StwWatchdog`, and the trace emitter) before this existed. Same reason
 # `RawOut` exists.
+require "./platform/os"
+
 module Gcry
   module Clock
     # CLOCK_MONOTONIC: never goes backwards, but does not count time the system
@@ -17,9 +19,17 @@ module Gcry
     # backward jump, seen in Linux CI at_exit after STW.
     @[AlwaysInline]
     def self.monotonic_ns : UInt64
-      ts = uninitialized LibC::Timespec
-      LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
-      ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      {% if flag?(:win32) %}
+        LibC.QueryPerformanceCounter(out ticks)
+        LibC.QueryPerformanceFrequency(out frequency)
+        # Divide first to keep the conversion from overflowing after long uptime.
+        whole, fraction = ticks.to_u64.divmod(frequency.to_u64)
+        whole * 1_000_000_000_u64 + fraction * 1_000_000_000_u64 // frequency.to_u64
+      {% else %}
+        ts = uninitialized Gcry::OS::Timespec
+        LibC.clock_gettime(LibC::CLOCK_MONOTONIC, pointerof(ts))
+        ts.tv_sec.to_u64 * 1_000_000_000_u64 + ts.tv_nsec.to_u64
+      {% end %}
     end
   end
 end
