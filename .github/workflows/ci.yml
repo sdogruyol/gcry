@@ -1265,6 +1265,38 @@ jobs:
         shell: pwsh
         run: ./ci/windows.ps1 -Variant '${{ matrix.variant }}' -Suite samples
 
+  # Crystal's ARM64 Windows distribution currently uses the GNU/MinGW ABI.
+  # Pin the upstream archive; MSYS2 supplies its native linker and libraries.
+  test-windows-arm64:
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, freelist, headerless]
+    name: test (windows arm64, ${{ matrix.variant }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            mingw-w64-clang-aarch64-crystal
+            mingw-w64-clang-aarch64-lld
+      - name: Install pinned native ARM64 Crystal
+        shell: pwsh
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: ./ci/install-windows-arm64.ps1 -Msys2Location $env:MSYS2_LOCATION
+      - name: Native unit and process GC specs
+        shell: pwsh
+        run: ./ci/windows.ps1 -Architecture aarch64 -Variant '${{ matrix.variant }}' -Suite specs
+      - name: Optimized process GC samples
+        shell: pwsh
+        run: ./ci/windows.ps1 -Architecture aarch64 -Variant '${{ matrix.variant }}' -Suite samples
+
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
   test-macos:
     runs-on: macos-latest

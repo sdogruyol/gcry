@@ -132,10 +132,32 @@ require "./spec_helper"
       end
     end
 
-    it "captures suspended integer and nonvolatile XMM registers" do
+    it "captures suspended integer and nonvolatile SIMD registers" do
       ready = Atomic(Int32).new(0)
       finish = Atomic(Int32).new(0)
       worker = Thread.new do
+        {% if flag?(:aarch64) %}
+          # Immediate markers keep the SIMD reference out of all integer
+          # registers and stack slots, independently of compiler allocation.
+          asm("movz x19, #0xEF01
+               movk x19, #0xABCD, lsl #16
+               movk x19, #0x5678, lsl #32
+               movk x19, #0x1234, lsl #48
+               movz x9, #0xEF02
+               movk x9, #0xABCD, lsl #16
+               movk x9, #0x6789, lsl #32
+               movk x9, #0x2345, lsl #48
+               fmov d15, x9
+               mov w9, #1
+               stlr w9, [$0]
+               1:
+               yield
+               ldar w9, [$1]
+               cbz w9, 1b"
+              :: "r"(pointerof(ready)), "r"(pointerof(finish))
+              : "x9", "x19", "v15", "memory", "cc"
+              : "volatile")
+        {% else %}
         asm("movabsq $$0x12345678ABCDEF01, %r12
              movabsq $$0x23456789ABCDEF02, %rax
              movq %rax, %xmm15
@@ -148,20 +170,21 @@ require "./spec_helper"
                 :: "r"(pointerof(ready)), "r"(pointerof(finish))
                 : "rax", "r12", "xmm15", "memory", "cc"
                 : "volatile")
+        {% end %}
       end
       begin
         until ready.get == 1
           Thread.yield
         end
         integer_root = false
-        xmm_root = false
+        simd_root = false
         captured_sp = false
         Gcry::Platform.stop_world_threads(Thread.current)
         begin
           captured_sp = !Gcry::Platform.thread_sp(worker.to_unsafe).nil?
           Gcry::Platform.each_thread_greg(worker.to_unsafe) do |candidate|
             integer_root ||= candidate.address == 0x1234_5678_ABCD_EF01_u64
-            xmm_root ||= candidate.address == 0x2345_6789_ABCD_EF02_u64
+            simd_root ||= candidate.address == 0x2345_6789_ABCD_EF02_u64
           end
         ensure
           Gcry::Platform.start_world_threads(Thread.current)
@@ -169,7 +192,7 @@ require "./spec_helper"
         end
         captured_sp.should be_true
         integer_root.should be_true
-        xmm_root.should be_true
+        simd_root.should be_true
         # Saved contexts reside in the PE image. They must disappear from
         # that root source after resume, even if this worker later exits.
         stale = false

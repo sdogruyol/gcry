@@ -1042,7 +1042,9 @@ module Gcry
     end
 
     # SysV x86_64 red zone: callees may store below SP without adjusting it.
-    {% if flag?(:x86_64) && !flag?(:win32) %}
+    {% if flag?(:aarch64) && flag?(:win32) %}
+      STACK_SCAN_RED_ZONE = 16_u64
+    {% elsif flag?(:x86_64) && !flag?(:win32) %}
       STACK_SCAN_RED_ZONE = 128_u64
     {% else %}
       STACK_SCAN_RED_ZONE = 0_u64

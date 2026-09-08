@@ -3,8 +3,12 @@
 require "./windows_os"
 
 module Gcry::Platform
-  MAX_STW_SP_SLOTS    = 64
-  GREG_WORDS          = 80
+  MAX_STW_SP_SLOTS = 64
+  {% if flag?(:aarch64) %}
+    GREG_WORDS = 96 # X0-X30, SP, and 32 128-bit SIMD registers
+  {% else %}
+    GREG_WORDS = 80 # RAX-R15 and the 512-byte FP/XMM save area
+  {% end %}
   GREG_CAPACITY       = MAX_STW_SP_SLOTS * GREG_WORDS
   UCONTEXT_SP_OFFSET  = 152
   UCONTEXT_RSP_OFFSET = UCONTEXT_SP_OFFSET
@@ -74,16 +78,23 @@ module Gcry::Platform
     @@stw_sps[i] = sp
   end
 
-  private def self.record_thread_gregs(id : LibC::HANDLE, state : UInt32*) : Nil
+  private def self.record_thread_context(id : LibC::HANDLE, context : LibC::CONTEXT*) : Nil
     i = slot_for(id)
     return if i < 0
-    src = state.as(UInt64*)
     base = i * GREG_WORDS
-    j = 0
-    while j < 16
-      @@stw_gregs[base + j] = src[j]
-      j += 1
-    end
+    {% if flag?(:aarch64) %}
+      @@stw_sps[i] = context.value.sp
+      31.times { |j| @@stw_gregs[base + j] = context.value.x[j] }
+      @@stw_gregs[base + 31] = context.value.sp
+      simd = (context.as(UInt8*) + offsetof(LibC::CONTEXT, @v)).as(UInt64*)
+      64.times { |j| @@stw_gregs[base + 32 + j] = simd[j] }
+    {% else %}
+      @@stw_sps[i] = context.value.rsp
+      integer = (context.as(UInt8*) + offsetof(LibC::CONTEXT, @rax)).as(UInt64*)
+      16.times { |j| @@stw_gregs[base + j] = integer[j] }
+      simd = (context.as(UInt8*) + offsetof(LibC::CONTEXT, @fltSave)).as(UInt64*)
+      64.times { |j| @@stw_gregs[base + 16 + j] = simd[j] }
+    {% end %}
     @@stw_greg_ok[i] = true
   end
 
@@ -193,13 +204,7 @@ module Gcry::Platform
         error = true
         break
       end
-      record_thread_sp(handle, context.value.rsp)
-      record_thread_gregs(handle, (context.as(UInt8*) + offsetof(LibC::CONTEXT, @rax)).as(UInt32*))
-      # Windows has nonvolatile XMM registers; a reference need not be in a GP
-      # register or stack slot. Scan the saved FP/XMM area as words as well.
-      slot = slot_for(handle)
-      fp = (context.as(UInt8*) + offsetof(LibC::CONTEXT, @fltSave)).as(UInt64*)
-      64.times { |i| @@stw_gregs[slot * GREG_WORDS + 16 + i] = fp[i] }
+      record_thread_context(handle, context)
     end
     if error
       resume_suspended_threads

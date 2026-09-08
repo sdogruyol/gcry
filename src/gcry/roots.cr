@@ -120,7 +120,7 @@ module Gcry
       # Prefer hardware SP (− red zone). pointerof(local) sits mid-frame and
       # skipped the leaf / red-zone window — Parallel collect-on-alloc then
       # missed caller-held buffers (Kemal EC>1).
-      red = {% if flag?(:x86_64) && !flag?(:win32) %} 128_u64 {% else %} 0_u64 {% end %}
+      red = {% if flag?(:aarch64) && flag?(:win32) %} 16_u64 {% elsif flag?(:x86_64) && !flag?(:win32) %} 128_u64 {% else %} 0_u64 {% end %}
       sp = hardware_stack_pointer.address
       low = sp > red ? sp - red : 0_u64
       # Also cover pointerof(local) if it somehow sits below hardware SP
@@ -145,6 +145,12 @@ module Gcry
       {% if flag?(:x86_64) %}
         asm("" ::: "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
                    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "memory")
+      {% elsif flag?(:aarch64) && flag?(:win32) %}
+        # X18 is the Windows thread-environment pointer, not a scratch register.
+        asm("" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+                   "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
+                   "x16", "x17", "x19", "x20", "x21", "x22", "x23",
+                   "x24", "x25", "x26", "x27", "x28", "memory")
       {% elsif flag?(:aarch64) %}
         asm("" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
                    "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",

@@ -26,11 +26,36 @@ module Gcry::OS
   # own call frames may occupy. Windows grows stacks through PAGE_GUARD.
   def self.clear_dead_stack(bytes : UInt64) : UInt64
     sp = 0_u64
-    asm("movq %rsp, $0" : "=r"(sp) :: "memory" : "volatile")
+    {% if flag?(:aarch64) %}
+      asm("mov $0, sp" : "=r"(sp) :: "memory" : "volatile")
+    {% else %}
+      asm("movq %rsp, $0" : "=r"(sp) :: "memory" : "volatile")
+    {% end %}
     return 0_u64 if LibC.VirtualQuery(Pointer(Void).new(sp), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION)) == 0
     base = info.baseAddress.address
     cleared = 0_u64
-    asm("movq %rsp, %rdi
+    {% if flag?(:aarch64) %}
+      # Windows reserves [SP-16, SP) for instrumentation. Use byte stores so
+      # an arbitrary wipe budget never rounds down into the guard page.
+      asm("sub x9, sp, #16
+           sub x10, x9, $1
+           cmp x10, $2
+           csel x10, x10, $2, hs
+           mov $0, xzr
+           cmp x10, x9
+           b.hs 2f
+           sub $0, x9, x10
+           1:
+           strb wzr, [x10], #1
+           cmp x10, x9
+           b.lo 1b
+           2:"
+              : "=&r"(cleared)
+              : "r"(bytes), "r"(base)
+              : "x9", "x10", "memory", "cc"
+              : "volatile")
+    {% else %}
+      asm("movq %rsp, %rdi
          subq $1, %rdi
          cmpq $2, %rdi
          cmovbq $2, %rdi
@@ -39,10 +64,11 @@ module Gcry::OS
          movq %rcx, $0
          xorl %eax, %eax
          rep stosb"
-            : "=&r"(cleared)
-            : "r"(bytes), "r"(base)
-            : "rax", "rcx", "rdi", "memory", "cc"
-            : "volatile")
+              : "=&r"(cleared)
+              : "r"(bytes), "r"(base)
+              : "rax", "rcx", "rdi", "memory", "cc"
+              : "volatile")
+    {% end %}
     cleared
   end
 

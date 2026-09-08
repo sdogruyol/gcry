@@ -1,8 +1,8 @@
 # Allocation-free operating-system primitives used by the collector.
 # POSIX keeps its native ABI; Windows implements the small subset gcry uses.
 {% if flag?(:win32) %}
-  {% unless flag?(:x86_64) %}
-    {% raise "gcry Windows support currently requires x86_64" %}
+  {% unless flag?(:x86_64) || flag?(:aarch64) %}
+    {% raise "gcry Windows support requires x86_64 or aarch64" %}
   {% end %}
   require "./windows_os"
 {% else %}
