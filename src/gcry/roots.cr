@@ -176,8 +176,10 @@ module Gcry
       keep_alive(env.to_unsafe.as(Void*))
     end
 
+    # Shared with the collect-entry diagnostics: Windows GNU does not export
+    # the POSIX setjmp symbol. Callers provide REGISTER_BUFFER_SIZE bytes.
     @[AlwaysInline]
-    private def self.capture_registers(buffer : UInt8*) : Nil
+    def self.capture_registers(buffer : UInt8*) : Nil
       {% if flag?(:win32) %}
         buffer.clear(1248)
         LibC.RtlCaptureContext(buffer.align_up(16).as(LibC::CONTEXT*))

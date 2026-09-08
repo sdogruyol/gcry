@@ -51,7 +51,7 @@ to swap Boehm out, one line to swap it back.
 - **You're curious** — one `crystal build -Dgc_none` and you'll see.
 
 Crystal >= 1.21. Linux (x86_64 + aarch64), macOS (arm64 + x86_64), and
-[Windows x86_64](docs/WINDOWS.md).
+[Windows x86_64 + ARM64](docs/WINDOWS.md).
 
 ---
 
@@ -333,12 +333,12 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 ## Scope (honest)
 
 gcry is **production-curious** on Linux and macOS process GC at parallelism 1.
-Windows x86_64 has native unit, process-GC, and release-sample CI coverage.
+Windows x86_64 + ARM64 have native unit, process-GC, and release-sample CI coverage.
 Windows workload performance has not been benchmarked; see [support details](docs/WINDOWS.md).
 
 | Today | Later / elsewhere |
 |-------|-------------------|
-| **Linux + macOS + Windows x86_64** process GC (Crystal >= 1.21) | Windows workload benchmarks |
+| **Linux + macOS + Windows x86_64 + ARM64** process GC (Crystal >= 1.21) | Windows workload benchmarks |
 | Default ExecutionContext, **parallelism 1** (PERF headline) | Parallel **supported opt-in:** EC>1 + TLAB off + lazy (~79% `/json`); TLAB-on still experimental |
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |

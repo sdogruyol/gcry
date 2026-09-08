@@ -37,7 +37,7 @@ module Gcry
     # to save them into its own frames. `scan_mutator`'s `setjmp` is taken much
     # later, and whether that is late enough is the open question this buffer
     # exists to answer.
-    @collect_entry_regs = uninitialized StaticArray(UInt8, 256)
+    @collect_entry_regs = uninitialized StaticArray(UInt8, Roots::REGISTER_BUFFER_SIZE)
     @collect_entry_regs_valid = false
 
     # Blocks this cycle had to save, carried into the next one. The question the
@@ -269,7 +269,7 @@ module Gcry
     # it is a register snapshot and nothing else.
     protected def note_collect_entry_regs : Nil
       Roots.spill_registers
-      Roots::LibSetjmp.setjmp(@collect_entry_regs.to_unsafe.as(Void*))
+      Roots.capture_registers(@collect_entry_regs.to_unsafe)
       @collect_entry_regs_valid = true
     end
 
