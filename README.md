@@ -215,97 +215,60 @@ Every number above is measured with gcry's **root-completeness heuristics
 armed** — base-pointer-only ambient roots, the static-root `type_id` gate,
 256 KiB STW stack lags. Each can decline to mark a pointer that is genuinely
 live, so those numbers price a collector that is allowed to guess.
-(Parked-fiber scrub was in this list through v0.18; it is **opt-in** since
-tip — nothing measured kept its default alive.) `GCRY_SOUND=1` turns the
-whole class off:
+`GCRY_SOUND=1` turns the whole class off:
 
 ```sh
 GCRY_SOUND=1 ./your-app
 ```
 
-| Kemal `/json` (i3, 9 rounds × 30 s) | % of Boehm | RSS × |
-|-------------------------------------|-----------:|------:|
-| tuned (process defaults) | 81.8% | 0.75× |
-| **sound roots** (`GCRY_SOUND=1`) | **83.0%** | **0.76×** |
-| sound + fully conservative bodies | 83.6% | 0.74× |
+Re-cut on the 0.24.x bitmap default, `bench/log/linux/2026-09-08-heuristics-ab/`
+(Ryzen AI 9 465, 20 rotated rounds × 15 s, identical-binary null control at
+100.0% [96.5, 103.5]):
 
-**RSS is flat across all three** — that much reproduces across two sessions.
-The throughput column did not, and the reason turned out to be the harness:
-**WSL2 steps `CLOCK_REALTIME` backwards ~1.6 s every ~32 s**, and wrk derives
-its duration from that clock, so a pass containing a step reports ~19% high.
-Which config gets hit is random, so it biased rather than merely widened — that
-is how `sound` came out *ahead* of `tuned` despite doing strictly more work.
+| Kemal `/json`, EC1 | % of Boehm [95% CI] | % of tuned | peak RSS × | pause p50 / p99 |
+|--------------------|--------------------:|-----------:|-----------:|----------------:|
+| tuned (process defaults) | 110.5% [105.5, 115.6] | 100% | 1.29× | 0.78 / 1.58 ms |
+| **sound roots** (`GCRY_SOUND=1`) | **117.0%** [111.3, 122.6] | 106.5% [100.6, 112.5] | **1.29×** | **0.76 / 1.20 ms** |
+| sound + fully conservative bodies | 112.8% [108.0, 117.6] | 102.7% [97.4, 108.0] | 1.28× | 0.76 / 1.29 ms |
 
-That was one of four biases in the harness — the others were blocked execution
-(config order confounded with time, worth ~2–3%) and a fixed config order
-within each round (whichever ran first came out ~2% slow). All four were bias,
-not variance, so no run count ever helped. Fixed: monotonic timing, round-robin
-interleaving, order rotated each round.
+**On one mutator thread, sound roots are free.** RSS is identical across the
+three (all sit at the warm-chunk budget), pause is identical, and throughput
+is at or slightly above tuned — the heuristics cost per-candidate work in the
+mark (type-id gate, blacklist) and buy nothing on this heap. The 2026-08-06
+session read the same thing through a noisier harness and called it
+"throughput-neutral, under ~1%"; the harness biases it found and fixed
+(monotonic timing, rotated order, null arm) are what this cut runs on —
+[SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
-With the confounds out (`bench/log/linux/2026-08-06-140037-sound-profile/`,
-9 rounds × 30 s, paired):
+**With more mutator threads, sound roots cost the pause**, and through it the
+throughput. Same session, `EC_PARALLELISM=4`:
 
-| Config | vs tuned | rounds won | σ |
-|--------|---------:|-----------:|--:|
-| `GCRY_DISABLE_SCRUB_FIBERS=1` | +1.29% *(retracted)* | 8/9 | 3.2 |
-| `GCRY_SOUND=1` | +0.82% | 8/9 | 1.7 |
-| `GCRY_DISABLE_BLACKLIST=1` | +0.73% | 7/9 | 1.2 |
+| Kemal `/json`, EC4 | vs tuned EC4 [95% CI] | pause p50 | root phase | collections / 15 s |
+|--------------------|----------------------:|----------:|-----------:|-------------------:|
+| tuned | 100% | **12.6 ms** | 12.3 ms | 270 |
+| `GCRY_SOUND=1` | **50.2%** [46.7, 53.7] | **97.1 ms** | 112 ms | 151 |
 
-**The whole class is throughput-neutral on this workload** — under ~1% either
-way, not distinguishable from zero.
+The whole gap is the root phase — the two STW lag knobs scanning every parked
+fiber's stack from the top instead of from its low-water mark — and each
+collection holds the world eight times longer. The 2026-08-09 reading had the
+same shape at 3.60 → 16.39 ms; the tuned EC4 pause has since grown to 12.6 ms
+with 12.3 ms in roots, which is the next thing to attribute
+(`GCRY_ROOT_PHASE_TIMING=1`). Fat-app pause (acik, ~72 MiB heap: 10.7 → 18.2
+ms on the freelist cut) was not re-measured.
 
-The `scrub_fibers` row was once read as the exception, the one knob with a real
-signal. **That is retracted:** a second session on the same host and harness
-measured **−1.22%** — sign flipped, significance gone. The arithmetic says why
-and says no run count would have helped. `roots + scrub + stacks` is 223 µs of
-each of 131 collections per 20 s, i.e. **0.146% of wall time**, and the knob
-moves ~9% of that — **~0.013%**. Both readings are ~100× the largest effect the
-mechanism can produce. Throughput cannot resolve this knob on this workload, in
-either direction.
-
-What settled it was the per-collection trace plus the fact that nothing else
-supported the default: the fat-app RSS it was turned on for does not reproduce,
-Kemal RSS is flat, and the wipe writes into another fiber's stack below an
-*estimated* SP. It is **opt-in** on tip (`GCRY_SCRUB_FIBERS=1`), and
-turning it back on costs 11.2% more root work and 5.9% more pause for no
-measured retention — [PERF.md](docs/PERF.md) § "Tip default-path re-cut".
-
-Pause cost *is* resolved, measured per collection off the GC trace:
-
-| Cut | tuned | `GCRY_SOUND=1` |
-|-----|------:|---------------:|
-| Kemal `/json`, EC1 | 398 µs | 398 µs (+0.1%) |
-| Kemal `/json`, **EC4** | **3.60 ms** | 16.39 ms (+356%) |
-| acik `/api/v1/`, EC1, heap ~72 MiB | **10.7 ms** | 18.2 ms (+70%) |
-
-Both tuned figures moved this session, and downward: the low-water skip used to
-apply only when `lag = 0`, so the default was faulting in a fixed 256 KiB window
-per parked fiber that nothing had ever written. It now starts at
-`max(stack_top − lag, low_water)` — **Kemal EC4 pause 8.06 → 3.60 ms**, RSS flat.
-The fat-app row read 17 ms → 213 ms two sessions ago, then briefly had
-`GCRY_SOUND=1` *ahead* of the default; the skip on the default path reversed
-that back. [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md)
-
-In all three the whole cost is the two STW lag knobs — the other five
-heuristics are within ±6%.
-
-The EC4 arrow is a fix, not a re-measurement. `lag = 0` was scanning each parked
-fiber's entire 8 MiB of reserved stack, **0.05% of which has ever been written**;
-the scan now starts at the stack's low-water mark. That is not a precision trade
-— a page with neither the present nor the swapped bit in `/proc/self/pagemap` has
-never been faulted, so both ranges see identical words. EC4 pause 147 ms → 13 ms
-in the same run, RSS unchanged. Method, per-knob decomposition, known limits of
-the label, and the fat-app cut: [docs/SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
+Parked-fiber scrub was in the heuristic list through v0.18 and is **opt-in**
+since (`GCRY_SCRUB_FIBERS=1`); the per-collection trace showed it moving
+~0.013% of wall time for no measured retention.
 
 ### Pause distribution (Kemal `/json`, Linux)
 
-Illustrative histogram from an earlier cut (not the v0.16.0 median session). Prefer `Gcry.pause_stats` / `/gc-stats` on your host.
+Tuned defaults, EC1, medians of 20 trials' `/gc-stats` from the session above
+(`pause_p50_ns` / `pause_p99_ns` / `pause_max_ns`; 589 collections per 15 s):
 
 ```
-p50:  2.1 ms  ████████████████████████████████▌
-p90:  4.8 ms  ████████████████████████████████████████████
-p99:  9.3 ms  ███████████████████████████████████████████████████▌
-max: 48.0 ms  ████████████████████████████████████████████████████████████████
+p50:  0.78 ms  ██████████████████
+p99:  1.58 ms  ████████████████████████████████████
+max:  2.82 ms  ████████████████████████████████████████████████████████████████
 ```
 
 HDR histogram built in via `Gcry.pause_stats` — no external tools needed.
@@ -364,7 +327,7 @@ Defaults tuned for process GC. Change after you measure:
 
 | Variable | Effect |
 |----------|--------|
-| `GCRY_SOUND=1` | Turn off every root-completeness heuristic (RSS-neutral; thr cost unresolved; **large pause cost where the root scan is big** — EC4 or a big heap) |
+| `GCRY_SOUND=1` | Turn off every root-completeness heuristic. Free on one mutator thread (RSS, pause and throughput at parity, 2026-09-08); **halves throughput under EC4** through an 8× pause, and costs pause on any big root scan |
 | `GCRY_BITMAP_ALLOC=0` | Freelist allocator, the pre-0.24.0 default (Kemal `/json` ~75% of Boehm at 1.87× peak RSS on Linux; ~85% on macOS) |
 | `GCRY_THRESHOLD_FACTOR` | Warm-chunk budget and adaptive threshold, % of live (default 100). 50 → Kemal 0.95× peak RSS at unchanged throughput, but −12 pp on the fat app |
 | `GCRY_KEEP_CHUNKS=1` | Keep empty chunks (freelist-era knob: ~95% `/json` thr, ~3x RSS on the freelist) |

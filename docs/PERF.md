@@ -38,6 +38,13 @@ factor. On acikturkiye `/api/v1/` (8 paired trials) the default is **90.8%**
 threshold too (16 → 8 MiB), 1.7× the collections, **78.8%** — so 100 stays.
 The same five arms on Darwin: [PERF-macos.md](PERF-macos.md).
 
+`GCRY_SOUND=1` on the same default (`…/2026-09-08-heuristics-ab/`, 7 arms,
+20 rotated rounds, null 100.0% [96.5, 103.5]): EC1 tuned 110.5% @ 1.29×,
+sound 117.0% @ 1.29× (106.5% [100.6, 112.5] of tuned), pause p50 0.78 vs
+0.76 ms — free. EC4: sound is 50.2% [46.7, 53.7] of tuned with pause p50
+12.6 → 97.1 ms, all of it root phase. README § "What the default heuristics
+cost" carries the tables.
+
 Everything below this line was measured on the freelist allocator and is
 kept as history; `GCRY_BITMAP_ALLOC=0` reproduces that configuration.
 

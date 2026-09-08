@@ -1,0 +1,9 @@
+[
+  {"name": "boehm", "root": "/home/uzumaki/playground/gcry", "flags": ["--release"]},
+  {"name": "null", "copy_of": "boehm"},
+  {"name": "tuned", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {}},
+  {"name": "sound", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {"GCRY_SOUND": "1"}},
+  {"name": "sound_cons", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none"], "env": {"GCRY_SOUND": "1", "GCRY_DISABLE_LAYOUT": "1"}},
+  {"name": "tuned_ec4", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none", "-Dpreview_mt", "-Dexecution_context"], "env": {"EC_PARALLELISM": "4"}},
+  {"name": "sound_ec4", "root": "/home/uzumaki/playground/gcry", "flags": ["--release", "-Dgc_none", "-Dpreview_mt", "-Dexecution_context"], "env": {"EC_PARALLELISM": "4", "GCRY_SOUND": "1"}}
+]
