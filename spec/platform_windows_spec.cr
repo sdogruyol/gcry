@@ -1,6 +1,13 @@
 require "./spec_helper"
 
 {% if flag?(:win32) %}
+  @[Link("kernel32")]
+  lib LibWindowsPlatformSpec
+    fun SetStdHandle(kind : UInt32, handle : LibC::HANDLE) : Int32
+    fun CreatePipe(reader : LibC::HANDLE*, writer : LibC::HANDLE*, attributes : Void*, size : UInt32) : Int32
+    fun PeekNamedPipe(handle : LibC::HANDLE, buffer : Void*, size : UInt32, read : UInt32*, available : UInt32*, left : UInt32*) : Int32
+  end
+
   module WindowsPlatformSpec
     class_property root : Void* = Pointer(Void).null
     @@destructors = Atomic(Int32).new(0)
@@ -15,6 +22,35 @@ require "./spec_helper"
   end
 
   describe "Windows platform" do
+    it "writes stopped-world diagnostics through the Win32 stderr handle without using the CRT descriptor" do
+      LibWindowsPlatformSpec.CreatePipe(out reader, out writer, nil, 0).should_not eq 0
+      original = LibC.GetStdHandle(LibC::STD_ERROR_HANDLE)
+      message = "gcry Windows raw stderr\n"
+      written = -1
+      begin
+        # SetStdHandle does not redirect CRT fd 2. The old _write path writes
+        # elsewhere and leaves this pipe empty, without hanging the test.
+        LibWindowsPlatformSpec.SetStdHandle(LibC::STD_ERROR_HANDLE, writer).should_not eq 0
+        Gcry::Platform.stop_world_threads(Thread.current)
+        begin
+          written = Gcry::OS.write(2, message, message.bytesize)
+        ensure
+          Gcry::Platform.start_world_threads(Thread.current)
+          Gcry::Platform.clear_thread_sps
+        end
+        written.should eq message.bytesize
+        LibWindowsPlatformSpec.PeekNamedPipe(reader, nil, 0, nil, out available, nil).should_not eq 0
+        available.should eq message.bytesize
+        buffer = uninitialized UInt8[64]
+        LibC.ReadFile(reader, buffer.to_unsafe, available, out received, nil).should_not eq 0
+        String.new(buffer.to_unsafe, received).should eq message
+      ensure
+        LibWindowsPlatformSpec.SetStdHandle(LibC::STD_ERROR_HANDLE, original)
+        LibC.CloseHandle(reader)
+        LibC.CloseHandle(writer)
+      end
+    end
+
     it "retains a class-variable root from the main PE image without scanning stacks" do
       heap = Gcry::Heap.new
       begin
@@ -87,6 +123,27 @@ require "./spec_helper"
         Gcry::OS.pthread_key_delete(key).should eq 0
       end
       WindowsPlatformSpec.destructors.should eq before + 1
+    end
+
+    it "scans multi-page regions around reserved and inaccessible holes with clipped boundaries" do
+      page = Gcry::Platform.host_page_size
+      memory = Gcry::OS.mmap(nil, page * 8, Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0).as(UInt8*)
+      memory.null?.should be_false
+      begin
+        LibC.VirtualFree(memory + page * 3, page, LibC::MEM_DECOMMIT).should_not eq 0
+        Gcry::OS.mprotect(memory + page * 4, page, Gcry::OS::PROT_NONE).should eq 0
+        low = memory.address + 8
+        high = memory.address + page * 8 - 8
+        regions = [] of {UInt64, UInt64}
+        Gcry::Platform.each_readable_region(low, high) { |a, b| regions << {a, b} }
+        regions.should eq [{low, memory.address + page * 3}, {memory.address + page * 5, high}]
+        count = 0
+        Gcry::Roots.scan_range(Pointer(Void).new(low), Pointer(Void).new(high), safe: true) { count += 1 }
+        count.should eq (page * 6 - 16) // 8
+      ensure
+        Gcry::OS.munmap(memory, page * 8)
+      end
     end
 
     it "uses distinct thread IDs instead of the current-thread pseudo handle" do

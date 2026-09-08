@@ -74,7 +74,7 @@ module Gcry
     #   allocate/lock_read spin until start_world (cooperative STW).
     # - Still signal-suspend other mutator threads; busy-wait `@suspended`.
     # - Hold `Thread.lock` for stop→start (Crystal list-mutex protocol).
-    def stop_world : Nil
+    def stop_world(*, raise_on_error : Bool = true) : Nil
       return unless @stop_the_world
       return if @world_stopped
 
@@ -98,7 +98,18 @@ module Gcry
       @stw_owner_pthread = Gcry::Platform.current_thread_id
       {% if (flag?(:darwin) || flag?(:win32)) %}
         begin
+          {% if flag?(:win32) %}
+            unless Platform.try_stop_world_threads(current_thread)
+              @stw_owner = nil
+              @stw_owner_pthread = 0_u64
+              MonitorGate.open
+              StwWatchdog.leave
+              Platform.raise_thread_suspension_error if raise_on_error
+              return
+            end
+          {% else %}
           Platform.stop_world_threads(current_thread)
+          {% end %}
         rescue ex
           @stw_owner = nil
           @stw_owner_pthread = 0_u64
@@ -332,15 +343,28 @@ module Gcry
       @roots_lock.lock
       @finalizers.lock_for_stw
       begin
-        stop_world
+        {% if flag?(:win32) %}
+          stop_world(raise_on_error: false)
+        {% else %}
+          stop_world
+        {% end %}
         # The locks below are released with the world already stopped. If that
         # is where a stop wedges, the report should say so rather than blaming
         # the suspension it has already finished.
-        StwWatchdog.enter(StwWatchdog::PHASE_QUIESCE)
+        {% if flag?(:win32) %}
+          StwWatchdog.enter(StwWatchdog::PHASE_QUIESCE) if @world_stopped
+        {% else %}
+          StwWatchdog.enter(StwWatchdog::PHASE_QUIESCE)
+        {% end %}
       ensure
         @finalizers.unlock_for_stw
         @roots_lock.unlock
       end
+      {% if flag?(:win32) %}
+        # Exception::CallStack grows an Array via realloc, which pins the old
+        # buffer under @roots_lock. Raise only after BOTH locks are released.
+        Platform.raise_thread_suspension_error if @stop_the_world && !@world_stopped
+      {% end %}
     end
 
     def start_world : Nil

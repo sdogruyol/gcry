@@ -289,6 +289,19 @@ module Gcry
     # page, bulk-scan. Slow path: walk readable runs if the end is unmapped
     # (glibc sometimes reports a range that includes a trailing guard).
     private def self.scan_range_safe(lo : UInt64, hi : UInt64, word : UInt64, & : Void* ->) : Nil
+      {% if flag?(:win32) %}
+        Platform.each_readable_region(lo, hi) do |run_lo, run_hi|
+          start = (run_lo + word - 1) & ~(word - 1)
+          finish = run_hi & ~(word - 1)
+          cursor = Pointer(UInt64).new(start)
+          end_ptr = Pointer(UInt64).new(finish)
+          while cursor < end_ptr
+            {% if flag?(:gcry_hl_assert) %} @@hl_slot = cursor.address {% end %}
+            yield Pointer(Void).new(cursor.value)
+            cursor += 1
+          end
+        end
+      {% else %}
       ensure_probe_pipe
 
       page = lo & ~(PAGE_SIZE - 1)
@@ -298,7 +311,7 @@ module Gcry
       return if page >= hi
 
       last_page = (hi - 1) & ~(PAGE_SIZE - 1)
-      if {{ !flag?(:win32) }} && (last_page == page || page_readable?(last_page))
+      if last_page == page || page_readable?(last_page)
         start = lo > page ? lo : page
         start = (start + word - 1) & ~(word - 1)
         finish = hi & ~(word - 1)
@@ -341,6 +354,7 @@ module Gcry
           cursor += 1
         end
       end
+      {% end %}
     end
 
     private def self.ensure_probe_pipe : Nil

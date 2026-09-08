@@ -31,14 +31,26 @@ scrubbing dead stack. Conservative root scans include that red zone.
 - `VirtualAlloc` reserves and commits heap memory. Releasing whole chunks uses
   `VirtualFree`; adjacent reservations are released separately. Reclaiming dead
   pages decommits and recommits them at the same address, guaranteeing zeros.
+  This reduces resident working set, but immediate recommit retains commit
+  charge: `PagefileUsage` / Task Manager's Commit need not fall. Whole-chunk
+  release returns both the reservation and its commit charge.
 - `VirtualQuery` bounds conservative scanning and stack scrubbing to committed,
-  readable pages. Scans leave `PAGE_GUARD` pages intact.
+  readable memory. Root scans advance by region, including across unreadable
+  holes, and leave `PAGE_GUARD` pages intact.
 - Writable sections of the main PE executable supply static roots, including
   zero-initialized class variables. Globals in DLLs require explicit roots.
+  Per-thread TLS copies are not scanned, matching Linux/macOS policy. Crystal
+  threads and fibers are rooted through the runtime thread list and fiber roots;
+  application references held only in native TLS require explicit roots.
 - `SuspendThread` and `GetThreadContext` stop Crystal threads and capture stack
   pointers, integer registers, and floating-point/SIMD registers. `ResumeThread`
   releases them after collection. A failed suspend/capture resumes all threads
   already stopped and fails the collection instead of scanning incomplete roots.
+  Failure is reported without allocating until suspension and collector locks
+  are released. Exception creation then suppresses process-GC auto-collection,
+  including when suspension is requested directly through `GC.stop_world`.
+- Stopped-world stderr diagnostics use `WriteFile` on the standard error handle,
+  bypassing CRT descriptor locks that a suspended mutator might hold.
 - Thread creation publishes its birth root before resuming the new thread.
   SRW locks and FLS provide collector mutexes and cursor TLS; deleting a TLS key
   does not invoke cursor exit callbacks.

@@ -1,6 +1,9 @@
 require "c/process"
 require "c/fcntl"
 require "c/io"
+require "c/fileapi"
+require "c/processenv"
+require "c/winbase"
 require "c/memoryapi"
 require "c/processthreadsapi"
 require "c/sysinfoapi"
@@ -107,10 +110,6 @@ module Gcry::OS
   def self.mprotect(address, size, protection) : Int32
     protect = protection == PROT_NONE ? 1_u32 : LibC::PAGE_READWRITE.to_u32
     LibC.VirtualProtect(address, size, protect, out old) != 0 ? 0 : -1
-  end
-
-  def self.pthread_self : PthreadT
-    LibC.GetCurrentThread
   end
 
   def self.pthread_mutex_init(lock, attributes) : Int32
@@ -241,6 +240,13 @@ end
 
 module Gcry::OS
   def self.write(fd : Int32, buffer, count) : Int32
+    if fd == 2
+      # A suspended mutator may own the CRT's per-fd lock. Diagnostics run
+      # inside STW, so stderr must bypass _write and that lock entirely.
+      handle = LibC.GetStdHandle(LibC::STD_ERROR_HANDLE)
+      return -1 if LibC.WriteFile(handle, buffer.as(Void*), count.to_u32, out written, nil) == 0
+      return written.to_i32
+    end
     LibC._write(fd, buffer.as(UInt8*), count.to_u32)
   end
 

@@ -91,8 +91,26 @@ module Gcry::Platform
 
   def self.page_readable?(addr : UInt64) : Bool
     return false if LibC.VirtualQuery(Pointer(Void).new(addr), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION)) == 0
+    memory_readable?(info)
+  end
+
+  private def self.memory_readable?(info : LibC::MEMORY_BASIC_INFORMATION) : Bool
     info.state == LibC::MEM_COMMIT && (info.protect & (LibC::PAGE_GUARD | 1)) == 0 &&
       (info.protect & 0xEE) != 0
+  end
+
+  # VirtualQuery describes a whole run with identical state/protection.
+  # Walk every run (including interior guards), without a syscall per page.
+  def self.each_readable_region(low : UInt64, high : UInt64, & : UInt64, UInt64 ->) : Nil
+    cursor = low
+    while cursor < high
+      return if LibC.VirtualQuery(Pointer(Void).new(cursor), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION)) == 0
+      finish = info.baseAddress.address &+ info.regionSize
+      return if finish <= cursor
+      finish = high if finish > high
+      yield cursor, finish if memory_readable?(info)
+      cursor = finish
+    end
   end
 
   def self.os_thread_count : Int32?

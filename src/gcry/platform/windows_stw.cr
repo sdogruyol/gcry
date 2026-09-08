@@ -178,6 +178,12 @@ module Gcry::Platform
   end
 
   def self.stop_world_threads(current : Thread) : Nil
+    raise_thread_suspension_error unless try_stop_world_threads(current)
+  end
+
+  # Failure is allocation-free so the heap can release its root/finalizer
+  # locks before constructing an exception and its allocating backtrace.
+  def self.try_stop_world_threads(current : Thread) : Bool
     ensure_stw_table
     Thread.lock
     clear_thread_sps
@@ -210,7 +216,22 @@ module Gcry::Platform
       resume_suspended_threads
       Thread.unlock
       clear_thread_sps
+      return false
+    end
+    true
+  end
+
+  def self.raise_thread_suspension_error : NoReturn
+    {% if flag?(:gc_none) %}
+      process_heap = Gcry.default_heap?
+      process_heap.try &.suppress_collect_enter
+    {% end %}
+    begin
       raise "gcry: Windows thread suspension/context capture failed or exceeded 64 threads"
+    ensure
+      {% if flag?(:gc_none) %}
+        process_heap.try &.suppress_collect_leave
+      {% end %}
     end
   end
 
