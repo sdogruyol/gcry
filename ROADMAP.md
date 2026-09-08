@@ -1606,7 +1606,7 @@ Target: Crystal compiler defaults to gcry on Linux.
 - [ ] **Crystal defaults to gcry on Linux** — no `-Dgc_none` required
 - [ ] **Full concurrent collection** — no STW pause at any heap size
 - [ ] **Moving / compacting collector** — after precise roots are stable
-- [ ] **Windows parity** — full process GC parity across all platforms
+- [ ] **Windows parity** — process GC ships since #38 (x86_64 MSVC, ARM64 GNU); parity still needs the incremental barrier (no soft-dirty), workload benchmarks, and fork/signal-diagnostic equivalents
 - [ ] **Conference talks** — CrystalConf, FOSDEM, local meetups
 - [ ] **MacOS default consideration** — platform-by-platform rollout
 
