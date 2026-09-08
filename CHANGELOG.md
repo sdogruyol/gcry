@@ -7,28 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.24.1] - 2026-09-08
 
-- Select an allocation-free abstract kernel backend once per heap instead of
-  passing a numeric SIMD tier through every bitmap operation. Kernel bodies now
-  live under `src/gcry/kernels/`. The AVX2 sweep is hand-written assembly
-  (VPSHUFB nibble popcount in vector registers); every other x86 kernel stays
-  on LLVM's vectorised loops, which beat the single-accumulator assembly on
-  Zen 5 by 21–52% in L2 (`bench/log/linux/2026-09-07-kernel-backend-ab`).
-  AArch64 gains an SVE
-  backend (predicated, vector-length-agnostic assembly) selected from Linux
-  `AT_HWCAP`; NEON remains the compiler-vectorised baseline. `GCRY_SIMD`
-  accepts `sve`.
+Patch release. **The bitmap allocator that 0.24.0 made the default could
+crash a multi-threaded process** (#37, same family as #29): the search that
+rebuilds a size class's pool index walked the chunk list without the
+chunk-list lock, so a concurrent large-cache trim or the post-collect
+empty-chunk flush could `munmap` the chunk it was standing on — `SIGSEGV`
+at a page-aligned address inside the heap span, in no live chunk. The
+reporter's program crashes 0.24.0 in 2–3 minutes at 32 threads and ran
+clean for 2 × 20 minutes on this tree. Fixed by #36 (stakach), which also
+found that the whole-header flag setters could restore a removed list link.
+
+With it come #36's kernel backends, kept where they measured at least at
+parity and returned to the compiler where they did not
+(`bench/log/linux/2026-09-07-kernel-backend-ab`). No default-configuration
+collection behaves differently from 0.24.0; `GCRY_BITMAP_ALLOC=0` remains
+the freelist escape.
+
+Upgrading: no API change. `GCRY_SIMD` accepts `sve`.
 
 ### Fixed
 
-- Allocation searches raced with large-cache trimming and the post-collect
-  empty-chunk flush: a search could dereference an unmapped chunk, and
-  whole-header flag updates could restore a removed list link. Searches now
-  hold the chunk-list lock, deferred small-chunk release waits for those
-  readers, and flag/link updates address individual fields (#36).
+- **Allocation searches raced with large-cache trimming and the post-collect
+  empty-chunk flush** (#37, #36): a search could dereference an unmapped
+  chunk, and whole-header flag updates (`set_dormant`, `set_cursor`, …)
+  copied the header back and could restore a removed `next` link. Searches
+  now hold `@chunk_list_lock` (bypassed only by the stopped-world owner, as
+  `chunk_containing` already does), deferred small-chunk release waits for
+  those readers, and flag/link updates address individual fields with atomic
+  RMW. `make chunk-search-race` (3 scheduled searches + a stopped-world lock
+  check) and `spec/chunk_field_race_spec.cr` (7 examples) are red against
+  0.24.0 and green here.
 - The bitmap allocation pool grows its address index outside the chunk-list
   spinlock instead of calling `mmap` while holding it.
+
+### Changed
+
+- Select an allocation-free abstract kernel backend once per heap instead of
+  passing a numeric SIMD tier through every bitmap operation (#36). Kernel
+  bodies now live under `src/gcry/kernels/`. The AVX2 sweep is hand-written
+  assembly (VPSHUFB nibble popcount in vector registers); every other x86
+  kernel stays on LLVM's vectorised loops, which beat the single-accumulator
+  assembly on Zen 5 by 21–52% in L2
+  (`bench/log/linux/2026-09-07-kernel-backend-ab`). AArch64 gains an SVE
+  backend (predicated, vector-length-agnostic assembly) selected from Linux
+  `AT_HWCAP`; NEON remains the compiler-vectorised baseline. `GCRY_SIMD`
+  accepts `sve`.
 
 ## [0.24.0] - 2026-09-06
 
@@ -3068,7 +3093,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/sdogruyol/gcry/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/sdogruyol/gcry/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sdogruyol/gcry/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sdogruyol/gcry/compare/v0.21.3...v0.22.0
