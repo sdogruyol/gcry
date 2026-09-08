@@ -10,7 +10,7 @@ license: MIT
 
 description: |
   Crystal-native conservative mark–sweep GC (Boehm-class).
-  Drop-in via `require "gcry"` + `-Dgc_none` — Linux + macOS, no compiler patch.
+  Drop-in via `require "gcry"` + `-Dgc_none` — Linux + macOS + Windows x86_64 + ARM64, no compiler patch.
 
 repository: https://github.com/sdogruyol/gcry
 homepage: https://github.com/sdogruyol/gcry

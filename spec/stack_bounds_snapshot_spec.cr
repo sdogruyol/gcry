@@ -18,7 +18,7 @@ require "./spec_helper"
 {% if flag?(:linux) %}
   describe "Gcry::Platform stack bounds snapshot" do
     it "answers what pthread_getattr_np would, for the calling thread" do
-      self_id = LibC.pthread_self
+      self_id = Gcry::OS.pthread_self
       live = Gcry::Platform.pthread_stack_bounds(self_id)
       live.should_not be_nil
       live = live.not_nil!
@@ -37,7 +37,7 @@ require "./spec_helper"
     it "answers the initial thread from its cached bounds after the first read" do
       # `GC.init` records the initial thread; in the library the spec does.
       # The process running this spec is that thread.
-      self_id = LibC.pthread_self
+      self_id = Gcry::OS.pthread_self
       Gcry::Platform.note_main_thread
       Gcry::Platform.begin_stack_bounds_snapshot
       Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
@@ -70,7 +70,7 @@ require "./spec_helper"
       # this example cannot make hold, so it says so instead.
       pending!("the main fiber is not on the initial thread (the execution context's monitor moved it), " \
                "and only the initial thread's low follows RLIMIT_STACK") unless SpecInitialThread.current?
-      self_id = LibC.pthread_self
+      self_id = Gcry::OS.pthread_self
       Gcry::Platform.note_main_thread
       Gcry::Platform.begin_stack_bounds_snapshot
       Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
@@ -111,7 +111,7 @@ require "./spec_helper"
       probe = uninitialized UInt8[64]
       here = probe.to_unsafe.address
 
-      self_id = LibC.pthread_self
+      self_id = Gcry::OS.pthread_self
       Gcry::Platform.begin_stack_bounds_snapshot
       Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
       bounds = Gcry::Platform.snapshotted_stack_bounds(self_id).not_nil!
@@ -144,7 +144,7 @@ require "./spec_helper"
       Gcry::Platform.begin_stack_bounds_snapshot
       before = Gcry::Platform.stack_bounds_snapshot_misses
 
-      Gcry::Platform.snapshotted_stack_bounds(LibC.pthread_self).should be_nil
+      Gcry::Platform.snapshotted_stack_bounds(Gcry::OS.pthread_self).should be_nil
 
       Gcry::Platform.stack_bounds_snapshot_misses.should be > before
     end
@@ -153,7 +153,7 @@ require "./spec_helper"
       # A pthread_t is reusable once its thread exits, so an entry carried across
       # a collection could hand the scan another thread's address range. The
       # snapshot must start empty every time.
-      self_id = LibC.pthread_self
+      self_id = Gcry::OS.pthread_self
       Gcry::Platform.begin_stack_bounds_snapshot
       Gcry::Platform.snapshot_pthread_stack_bounds(self_id)
       Gcry::Platform.snapshotted_stack_bounds(self_id).should_not be_nil

@@ -104,7 +104,7 @@ module Gcry
     # may briefly skip — acceptable for an opt-in hygiene path.
     @@clear_stack_active = false
 
-    {% if flag?(:x86_64) %}
+    {% if flag?(:x86_64) && !flag?(:win32) %}
       # SysV ABI red zone — callees may use [SP-128, SP) without adjusting SP.
       CLEAR_STACK_RED_ZONE = 128_u64
     {% else %}
@@ -168,6 +168,11 @@ module Gcry
     end
 
     private def clear_stack_body(bytes : UInt64, fiber_bounds : Bool) : UInt64
+      {% if flag?(:win32) %}
+        # Windows commits a stack incrementally. Do not touch its guard page
+        # or call memset on memory below SP that memset itself could occupy.
+        return OS.clear_dead_stack(Math.min(bytes, Roots::MAX_SCAN_BYTES))
+      {% end %}
       # Must use hardware SP — Roots.stack_pointer is mid-frame and wiping
       # up to it corrupts the leaf (null-deref SEGV on aarch64 CI).
       sp_addr = Roots.hardware_stack_pointer.address
@@ -215,8 +220,8 @@ module Gcry
         # parse while leaving a success-gated counter at zero.
         @clear_stack_libc_bounds += 1 if fiber_bounds
         {% if flag?(:linux) || flag?(:freebsd) || flag?(:openbsd) || flag?(:dragonfly) %}
-          attr = uninitialized LibC::PthreadAttrT
-          if LibC.pthread_getattr_np(LibC.pthread_self, pointerof(attr)) == 0
+          attr = uninitialized Gcry::OS::PthreadAttrT
+          if LibC.pthread_getattr_np(Gcry::OS.pthread_self, pointerof(attr)) == 0
             stackaddr = Pointer(Void).null
             stacksize = LibC::SizeT.new(0)
             if LibC.pthread_attr_getstack(pointerof(attr), pointerof(stackaddr), pointerof(stacksize)) == 0 &&
@@ -230,7 +235,7 @@ module Gcry
             end
             LibC.pthread_attr_destroy(pointerof(attr))
           end
-        {% elsif flag?(:darwin) %}
+        {% elsif flag?(:darwin) || flag?(:win32) %}
           if bounds = Platform.current_pthread_stack_bounds
             lo = bounds[0].address
             hi = bounds[1].address
@@ -379,7 +384,7 @@ module Gcry
           @fiber_scrub_live_frame_overlaps += 1 if top > fsp
         end
 
-        if multi
+        if multi || {{ flag?(:win32) }}
           scrubbed += Roots.clear_range_safe(low, top)
         else
           len = top - low

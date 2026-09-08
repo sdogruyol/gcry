@@ -430,7 +430,7 @@ module Gcry
       {% end %}
     end
 
-    private def scan_precise_thread_stack(pthread : LibC::PthreadT, stack_lo : UInt64, stack_hi : UInt64) : Nil
+    private def scan_precise_thread_stack(pthread : Gcry::OS::PthreadT, stack_lo : UInt64, stack_hi : UInt64) : Nil
       return unless @precise_stack_roots
       return unless StackMaps.loaded? || StackMaps.ensure_loaded
 
@@ -482,7 +482,13 @@ module Gcry
       n = 0
       Thread.unsafe_each do
         n += 1
-        return true if n > 2
+        # The Windows runtime also has an IOCP forwarding thread. It only
+        # forwards completions and is suspended/scanned like every peer.
+        {% if flag?(:win32) && ((!flag?(:without_mt) && !flag?(:preview_mt)) || flag?(:execution_context)) %}
+          return true if n > 3
+        {% else %}
+          return true if n > 2
+        {% end %}
       end
       false
     end
@@ -737,7 +743,7 @@ module Gcry
     # so the warning now fires only when the skip is not in play, which is the
     # only case still carrying the old cost.
     #
-    # LibC.write, not STDERR: this runs inside STW and must not allocate.
+    # Gcry::OS.write, not STDERR: this runs inside STW and must not allocate.
     private def warn_stw_lag_zero_once : Nil
       return if @warned_stw_lag_zero
       {% if flag?(:linux) %}
@@ -748,7 +754,7 @@ module Gcry
             "low-water skip — every parked fiber stack is scanned in full (measured 19× " \
             "pause at Parallel EC4, 14.5× on a large heap). Re-enable GCRY_STACK_LOW_WATER, " \
             "or set GCRY_STW_STACK_LAG. See docs/SOUND-DEFAULTS.md\n"
-      LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
+      Gcry::OS.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
     end
 
     # Which window each running fiber's stack scan started from.
@@ -1036,7 +1042,9 @@ module Gcry
     end
 
     # SysV x86_64 red zone: callees may store below SP without adjusting it.
-    {% if flag?(:x86_64) %}
+    {% if flag?(:aarch64) && flag?(:win32) %}
+      STACK_SCAN_RED_ZONE = 16_u64
+    {% elsif flag?(:x86_64) && !flag?(:win32) %}
       STACK_SCAN_RED_ZONE = 128_u64
     {% else %}
       STACK_SCAN_RED_ZONE = 0_u64

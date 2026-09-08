@@ -438,7 +438,7 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
-      Exception::CallStack.print_backtrace
+      Gcry::RawOut.print_backtrace
     end
   end
 end

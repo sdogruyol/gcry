@@ -4,17 +4,19 @@
 # work under `@mark_lock`.
 #
 # Process GC (`stop_the_world`): Crystal::Thread would freeze in `stop_world`, so
-# helpers are raw `LibC.pthread_create` threads (not registered with Crystal).
+# helpers are raw `Gcry::OS.pthread_create` threads (not registered with Crystal).
 # They only touch mark state / heap headers — no Fiber, no managed alloc.
 #
 # Fields (@parallel_mark_workers, …) are declared/initialized in heap.cr.
 
-require "c/pthread"
+require "./platform/os"
 
-lib LibC
-  fun pthread_create(thread : PthreadT*, attr : PthreadAttrT*, start : Void* -> Void*, arg : Void*) : Int
-  fun pthread_join(thread : PthreadT, retval : Void**) : Int
-end
+{% unless flag?(:win32) %}
+  lib LibC
+    fun pthread_create(thread : PthreadT*, attr : PthreadAttrT*, start : Void* -> Void*, arg : Void*) : Int
+    fun pthread_join(thread : PthreadT, retval : Void**) : Int
+  end
+{% end %}
 
 # C ABI entry — must not be a Crystal::Thread so STW will not suspend it.
 fun gcry_mark_worker_main(arg : Void*) : Void*
@@ -95,10 +97,10 @@ module Gcry
 
       @mark_pthread_mode = true
       while @mark_pthread_count < need && @mark_pthread_count < MAX_MARK_PTHREADS
-        tid = uninitialized LibC::PthreadT
-        rc = LibC.pthread_create(
+        tid = uninitialized Gcry::OS::PthreadT
+        rc = Gcry::OS.pthread_create(
           pointerof(tid),
-          Pointer(LibC::PthreadAttrT).null,
+          Pointer(Gcry::OS::PthreadAttrT).null,
           ->gcry_mark_worker_main(Void*),
           self.as(Void*),
         )
@@ -114,7 +116,7 @@ module Gcry
 
       if @mark_pthread_mode || @mark_pthread_count > 0
         @mark_pthread_count.times do |i|
-          LibC.pthread_join(@mark_pthreads[i], Pointer(Void*).null)
+          Gcry::OS.pthread_join(@mark_pthreads[i], Pointer(Void*).null)
         end
         @mark_pthread_count = 0
         @mark_pthread_mode = false
@@ -178,9 +180,9 @@ module Gcry
     protected def ensure_pushbuf(slot : Int32) : Nil
       return if @mark_pushbuf[slot] != 0_u64
       bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
-      ptr = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
+      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return if Gcry.mmap_failed?(ptr)
       @mark_pushbuf[slot] = ptr.address
       @mark_pushbuf_n[slot] = 0

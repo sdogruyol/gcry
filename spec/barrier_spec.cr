@@ -67,11 +67,11 @@ describe "Gcry mprotect barrier" do
 
     Gcry::Platform.install_mprotect_barrier.should be_true
     begin
-      page = LibC.mmap(
+      page = Gcry::OS.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(4096),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
         -1,
         0,
       )
@@ -95,7 +95,7 @@ describe "Gcry mprotect barrier" do
         dirty.should eq(1)
         Gcry::Platform.mprotect_hits.should be > before
       ensure
-        LibC.munmap(page, LibC::SizeT.new(4096)) unless Gcry.mmap_failed?(page)
+        Gcry::OS.munmap(page, LibC::SizeT.new(4096)) unless Gcry.mmap_failed?(page)
       end
     ensure
       Gcry::Platform.disable_mprotect_barrier

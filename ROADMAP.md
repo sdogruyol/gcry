@@ -1190,8 +1190,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
 - [ ] **Write barrier** (Phase 2) — precondition for a sound concurrent /
       incremental backend, and therefore for "nursery + incremental on by default"
       (Phase 3). Ordering, not a new item.
-- [ ] **Windows process GC** (Phase 2) — `src/gcry/platform/` is `linux_*` and
-      `darwin_*` only. The widest good-first-issue surface on the board.
+- [x] **Windows x86_64 + ARM64 process GC** (Phase 2) — native memory, PE roots,
+      thread suspension/context capture, and CI. [Limits and testing](docs/WINDOWS.md).
 
 Ecosystem work runs alongside and blocks none of the above: the `-Dgc_gcry`
 compiler PR, production dogfood (which would also settle **which compiler and gcry
@@ -1207,13 +1207,13 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 - [ ] **Compiler stack maps** — precise roots (Darwin acik ~18×; Linux tip ~1–1.6× via
       finalizer + retain=0, freelist residual); spike: [docs/STACK_MAPS.md](docs/STACK_MAPS.md)
 - [ ] **Write barrier** — sound concurrent / incremental GC backend
-- [ ] **Windows process GC** — platform stubs + process GC parity
-- [ ] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows
+- [x] **Windows x86_64 + ARM64 process GC** — native backend + unit/process/sample CI
+- [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64
 - [ ] **Benchmark regression alerts** — GitHub Action comparing PR vs baseline perf
 - [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
       (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)
 - [ ] **Security / fuzzing** — documented fuzz hours, crash-free stress runs
-- [ ] **good-first-issue grooming** — Windows stubs, benchmark workloads, specs
+- [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 
 ---

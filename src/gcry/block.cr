@@ -1,10 +1,10 @@
-require "c/sys/mman"
+require "./platform/os"
 
 # The Linux name, on the Darwin targets whose bindings lack it.
 #
 # Not every Darwin target: Crystal's `x86_64-macosx-darwin` bindings already
 # define `MAP_ANONYMOUS`, and defining it again is a hard error — `already
-# initialized constant LibC::MAP_ANONYMOUS`, which is what `-Dgc_none` did on
+# initialized constant Gcry::OS::MAP_ANONYMOUS`, which is what `-Dgc_none` did on
 # x86_64 macOS for as long as this shim was unconditional. CI runs
 # `macos-latest`, which is Apple Silicon, so the platform this repo claims to
 # support was never compiled for it. Found by `make darwin-typecheck`.
@@ -314,8 +314,8 @@ module Gcry
     private def self.hl_check(addr : UInt64, what : String) : Nil
       {% if flag?(:gcry_hl_assert) %}
         if @@hl_guard_hi > 0 && addr >= @@hl_guard_lo && addr < @@hl_guard_hi
-          LibC.write(2, what.to_unsafe.as(Void*), LibC::SizeT.new(what.bytesize))
-          Exception::CallStack.print_backtrace
+          Gcry::OS.write(2, what.to_unsafe.as(Void*), LibC::SizeT.new(what.bytesize))
+          Gcry::RawOut.print_backtrace
           LibC.exit(9)
         end
       {% end %}
@@ -376,7 +376,7 @@ module Gcry
         # hand-out itself rather than at the crash that follows it. The crash
         # handler's own printer: no allocation, so no reentry into the
         # allocator this runs inside of.
-        Exception::CallStack.print_backtrace
+        Gcry::RawOut.print_backtrace
       end
       header.value = new(size, flags & ~Flags::FREE, Pointer(Void).null)
     end

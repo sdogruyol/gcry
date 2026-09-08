@@ -8,11 +8,11 @@ describe "Gcry::Platform soft-dirty" do
     supported.should be_true
 
     # Anonymous page under our control.
-    page = LibC.mmap(
+    page = Gcry::OS.mmap(
       Pointer(Void).null,
       LibC::SizeT.new(4096),
-      LibC::PROT_READ | LibC::PROT_WRITE,
-      LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+      Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+      Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
       -1,
       0,
     )
@@ -43,7 +43,7 @@ describe "Gcry::Platform soft-dirty" do
         pending! "kernel did not set soft-dirty bit after write"
       end
     ensure
-      LibC.munmap(page, LibC::SizeT.new(4096)) unless Gcry.mmap_failed?(page)
+      Gcry::OS.munmap(page, LibC::SizeT.new(4096)) unless Gcry.mmap_failed?(page)
     end
   end
 end

@@ -1,6 +1,7 @@
 require "./block"
 require "./kernels"
 
+{% unless flag?(:win32) %}
 lib LibC
   {% if flag?(:darwin) %}
     alias GcryPthreadKeyT = ULong
@@ -11,6 +12,7 @@ lib LibC
   fun pthread_key_delete(key : GcryPthreadKeyT) : Int
   fun pthread_setspecific(key : GcryPthreadKeyT, value : Void*) : Int
 end
+{% end %}
 
 module Gcry
   # One (class, kind) allocation cursor: the chunk it stands on, the `occ`
@@ -149,7 +151,7 @@ module Gcry
     @fallback_cursor_set = Pointer(CursorSet).null
     # A thread's exit runs the key's destructor with its set, which marks the
     # set exiting; the next stop-the-world retires it and frees its slot.
-    @cursor_key = uninitialized LibC::GcryPthreadKeyT
+    @cursor_key = uninitialized Gcry::OS::GcryPthreadKeyT
     @cursor_key_ok = false
     # Its own lock, taken once per (thread, heap) and never with another heap
     # lock held inside it: set creation happens under the class lock, and the
@@ -253,7 +255,7 @@ module Gcry
 
     private def cursor_set_under_lock(key : UInt64, exiting : Bool) : CursorSet*
       unless @cursor_key_ok
-        @cursor_key_ok = LibC.pthread_key_create(pointerof(@cursor_key), ->(p : Void*) {
+        @cursor_key_ok = Gcry::OS.pthread_key_create(pointerof(@cursor_key), ->(p : Void*) {
           # Thread exit. Plain stores: the collector reads them only with this
           # thread frozen or gone, and the fallback takes any later allocation.
           p.as(CursorSet*).value.state = CursorSet::STATE_EXITING
@@ -287,7 +289,7 @@ module Gcry
       free.value.owner = key
       free.value.state = CursorSet::STATE_LIVE
       free.value.no_hit_path = sysmon ? 1_u8 : 0_u8
-      LibC.pthread_setspecific(@cursor_key, free.as(Void*))
+      Gcry::OS.pthread_setspecific(@cursor_key, free.as(Void*))
       free
     end
 
@@ -347,7 +349,7 @@ module Gcry
       while i < POOL_SLOTS
         pool = @bitmap_pool_indexes.to_unsafe + i
         unless pool.value.addresses.null?
-          LibC.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
+          Gcry::OS.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
           pool.value.addresses = Pointer(UInt64).null
           pool.value.capacity = 0
           pool.value.valid = false
@@ -356,13 +358,13 @@ module Gcry
       end
       # Drop this thread's cache before freeing its sets.
       @@tls_cursor_cache = 0_u128 unless cursor_set_cached.null?
+      if @cursor_key_ok
+        Gcry::OS.pthread_key_delete(@cursor_key)
+        @cursor_key_ok = false
+      end
       each_cursor_set { |set| LibC.free(set.as(Void*)) }
       @cursor_set_count = 0
       @fallback_cursor_set = Pointer(CursorSet).null
-      if @cursor_key_ok
-        LibC.pthread_key_delete(@cursor_key)
-        @cursor_key_ok = false
-      end
     end
 
     # Is the set between its sentinel store and its clear — inside `fast_alloc`
@@ -923,11 +925,11 @@ module Gcry
       end
       return true if capacity == pool.value.capacity
       bytes = capacity.to_u64 * 8
-      memory = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE, LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
+      memory = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE, Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return false if Gcry.mmap_failed?(memory)
       unless pool.value.addresses.null?
-        LibC.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
+        Gcry::OS.munmap(pool.value.addresses.as(Void*), LibC::SizeT.new(pool.value.capacity.to_u64 * 8))
       end
       pool.value.addresses = memory.as(UInt64*)
       pool.value.capacity = capacity

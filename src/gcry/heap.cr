@@ -4,7 +4,8 @@ require "./chunk_layout"
 require "./chunk_radix"
 require "./bitmap_alloc"
 require "crystal/spin_lock"
-require "c/pthread"
+require "crystal/rw_lock"
+require "./platform/os"
 
 module Gcry
   class Heap
@@ -203,7 +204,7 @@ module Gcry
     # the STW × TLAB property test. This one is contended only by other
     # list mutations. Order is list → index; nothing goes the other way.
     @chunk_list_lock = Crystal::SpinLock.new
-    @post_stw_mutex = uninitialized LibC::PthreadMutexT
+    @post_stw_mutex = uninitialized Gcry::OS::PthreadMutexT
     @tlab_enabled = false
     @tlab_refills = 0_u64
     @tlab_steals = 0_u64
@@ -223,7 +224,7 @@ module Gcry
     @mark_lock = Crystal::SpinLock.new
     @mark_parallel = false
     @mark_worker_threads = [] of Thread
-    @mark_pthreads = uninitialized StaticArray(LibC::PthreadT, 15)
+    @mark_pthreads = uninitialized StaticArray(Gcry::OS::PthreadT, 15)
     @mark_pthread_count = 0
     @mark_pthread_mode = false
     # Per-worker mark-stack shards. `@mark_pushbuf[slot]` is a raw mmap'd buffer
@@ -256,7 +257,7 @@ module Gcry
     @suppress_collect = Atomic(Int32).new(0)
 
     def initialize
-      # Both read through LibC.getenv rather than ENV[]: under -Dgc_none this
+      # Both read through Gcry::OS.getenv rather than ENV[]: under -Dgc_none this
       # runs inside GC.init, before Fiber exists, where ENV[] allocates and can
       # SEGV (gc_override.cr:520).
       @kernels = Kernels.for_tier(Cpu.tier_from_env)
@@ -315,9 +316,9 @@ module Gcry
       @mark_parallel = false
       @mark_worker_threads = [] of Thread
       # PthreadT is Void* on musl/darwin/BSD (no .new) and an integer alias on glibc.
-      zero_tid = uninitialized LibC::PthreadT
+      zero_tid = uninitialized Gcry::OS::PthreadT
       pointerof(zero_tid).clear
-      @mark_pthreads = StaticArray(LibC::PthreadT, 15).new(zero_tid)
+      @mark_pthreads = StaticArray(Gcry::OS::PthreadT, 15).new(zero_tid)
       @mark_pthread_count = 0
       @mark_pthread_mode = false
       @mark_pushbuf = StaticArray(UInt64, 16).new(0_u64)
@@ -366,7 +367,7 @@ module Gcry
       chunk = @chunks
       while chunk
         nxt = chunk.value.next
-        LibC.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+        Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
         chunk = nxt
       end
 
@@ -401,7 +402,7 @@ module Gcry
       radix_destroy
     end
 
-    # `GCRY_BITMAP=1`. Read with LibC.getenv, not ENV[] — see `initialize`.
+    # `GCRY_BITMAP=1`. Read with Gcry::OS.getenv, not ENV[] — see `initialize`.
     def self.bitmap_marks_from_env : Bool
       env_is_one?("GCRY_BITMAP")
     end
@@ -442,13 +443,13 @@ module Gcry
     end
 
     private def self.env_is_one?(name : String) : Bool
-      raw = LibC.getenv(name)
+      raw = Gcry::OS.getenv(name)
       return false if raw.null?
       raw.value == '1'.ord.to_u8 && (raw + 1).value == 0
     end
 
     private def self.env_is_zero?(name : String) : Bool
-      raw = LibC.getenv(name)
+      raw = Gcry::OS.getenv(name)
       return false if raw.null?
       raw.value == '0'.ord.to_u8 && (raw + 1).value == 0
     end
@@ -825,8 +826,19 @@ module Gcry
     # the boot stack and says so.
     @oom_error : OutOfMemoryError = begin
       e = OutOfMemoryError.new(
-        "out of memory (nested raise; this backtrace is gcry's boot stack, not the allocation site)")
-      e.callstack = Exception::CallStack.new
+        {% if flag?(:win32) %}
+          "out of memory (nested raise; backtrace unavailable)"
+        {% else %}
+          "out of memory (nested raise; this backtrace is gcry's boot stack, not the allocation site)"
+        {% end %}
+      )
+      {% if flag?(:win32) %}
+        # DbgHelp initialisation needs Fiber.current, unavailable during GC.init.
+        # An empty prebuilt trace still prevents allocation on the nested-OOM path.
+        e.callstack = Exception::CallStack.new([] of Void*)
+      {% else %}
+        e.callstack = Exception::CallStack.new
+      {% end %}
       e
     end
     @oom_raising = Atomic(Int32).new(0)
@@ -1819,7 +1831,7 @@ module Gcry
         unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
                refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
                quarantine_release(base, mapped)
-          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         end
         user = nxt
       end
@@ -1938,7 +1950,7 @@ module Gcry
             @large_mapped_bytes -= mapped if @large_mapped_bytes >= mapped
             @unmapped_bytes += mapped
             unless guard_release(chunk.as(Void*).address, mapped, GUARD_KIND_LARGE)
-              LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+              Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
             end
             user = nxt
           end
@@ -1997,7 +2009,7 @@ module Gcry
         unless guard_release(base, mapped, GUARD_KIND_LARGE) ||
                refuse_live_release(base, mapped, GUARD_KIND_LARGE) ||
                quarantine_release(base, mapped)
-          LibC.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
+          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(mapped))
         end
         user = nxt
       end
@@ -2160,11 +2172,11 @@ module Gcry
     end
 
     private def mmap_anonymous(bytes : UInt64) : Void*
-      LibC.mmap(
+      Gcry::OS.mmap(
         Pointer(Void).null,
         LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS,
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS,
         -1,
         0
       )
@@ -2279,11 +2291,11 @@ module Gcry
         # but the collector being able to get here, and two threads in this
         # codebase can.
         if @index_audit
-          if LibC.pthread_self.unsafe_as(UInt64) == @stw_owner_pthread
+          if Gcry::Platform.current_thread_id == @stw_owner_pthread
             @index_unlocked_owner &+= 1
           else
             @index_unlocked_foreign &+= 1
-            @index_unlocked_foreign_id = LibC.pthread_self.unsafe_as(UInt64)
+            @index_unlocked_foreign_id = Gcry::Platform.current_thread_id
           end
         end
         chunk_containing_unlocked(addr)
@@ -2501,8 +2513,8 @@ module Gcry
         {% if flag?(:gcry_hl_assert) %}
           c = chunk_containing(header.address)
           if c && ChunkHeader.large?(c) && header != ChunkHeader.large_header(c)
-            LibC.write(2, "HL: set_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(34))
-            Exception::CallStack.print_backtrace
+            Gcry::OS.write(2, "HL: set_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(34))
+            Gcry::RawOut.print_backtrace
             LibC.exit(9)
           end
         {% end %}
@@ -2609,8 +2621,8 @@ module Gcry
         return if chunk.nil? || !ChunkHeader.large?(chunk)
         {% if flag?(:gcry_hl_assert) %}
           if header != ChunkHeader.large_header(chunk)
-            LibC.write(2, "HL: clear_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(36))
-            Exception::CallStack.print_backtrace
+            Gcry::OS.write(2, "HL: clear_mark with non-header addr\n".to_unsafe.as(Void*), LibC::SizeT.new(36))
+            Gcry::RawOut.print_backtrace
             LibC.exit(9)
           end
         {% end %}
@@ -3055,7 +3067,7 @@ module Gcry
         if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
            (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
            ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
-          Exception::CallStack.print_backtrace
+          Gcry::RawOut.print_backtrace
         end
         pos = index_lower_bound(chunk.address)
         unless pos >= @chunk_index_count || (@chunk_index + pos).value != chunk

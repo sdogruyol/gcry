@@ -36,7 +36,7 @@ module Gcry
     # under the process GC, so allocating anything on the managed heap there —
     # including the object header for a wrapper whose own storage is `mmap`ed —
     # faults on a heap that does not exist yet. Same reason the env reads use
-    # `LibC.getenv` rather than `ENV[]`, and the same reason `size_classes.cr`
+    # `Gcry::OS.getenv` rather than `ENV[]`, and the same reason `size_classes.cr`
     # refuses runtime constant initializers. The comment stating that constraint
     # was three lines above the line that broke it.
     #
@@ -147,7 +147,7 @@ module Gcry
       @radix_thp = Heap.radix_thp_from_env
       # Direct sysconf: `Platform.host_page_size` is a `once`-initialised
       # constant and this can run inside GC.init. See the note above.
-      raw = LibC.sysconf(LibC::SC_PAGESIZE)
+      raw = Gcry::OS.sysconf(Gcry::OS::SC_PAGESIZE)
       page = raw > 0 ? raw.to_u64 : 4096_u64
       shift = 0
       while (1_u64 << shift) < page
@@ -169,9 +169,9 @@ module Gcry
       return if l1.null?
       RADIX_L1_SIZE.times do |i|
         l2 = l1[i]
-        LibC.munmap(l2.as(Void*), LibC::SizeT.new(@radix_l2_bytes)) unless l2.null?
+        Gcry::OS.munmap(l2.as(Void*), LibC::SizeT.new(@radix_l2_bytes)) unless l2.null?
       end
-      LibC.munmap(l1.as(Void*), LibC::SizeT.new(RADIX_L1_SIZE.to_u64 * 8))
+      Gcry::OS.munmap(l1.as(Void*), LibC::SizeT.new(RADIX_L1_SIZE.to_u64 * 8))
       @radix_l1 = Pointer(Pointer(ChunkHeader*)).null
     end
 
@@ -256,9 +256,9 @@ module Gcry
     # manages. Zeroed by the kernel and lazily faulted, which is what keeps a
     # multi-MiB reservation cheap.
     private def radix_map_zeroed(bytes : UInt64) : Void*
-      ptr = LibC.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
-        LibC::PROT_READ | LibC::PROT_WRITE,
-        LibC::MAP_PRIVATE | LibC::MAP_ANONYMOUS, -1, 0)
+      ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
+        Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+        Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
       # See the cost note above: one touched entry otherwise faults a whole
       # 2 MiB huge page and the table's RSS stops tracking the live heap.

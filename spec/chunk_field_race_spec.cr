@@ -97,7 +97,7 @@ describe "chunk fields updated under different locks" do
     ensure
       ChunkFieldRaceSpec.before_next = nil
       # The test detached this mapping without freeing it.
-      LibC.munmap(target.as(Void*), LibC::SizeT.new(target.value.mapped_bytes)) if target
+      Gcry::OS.munmap(target.as(Void*), LibC::SizeT.new(target.value.mapped_bytes)) if target
       heap.destroy
     end
   end

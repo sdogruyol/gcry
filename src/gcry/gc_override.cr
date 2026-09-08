@@ -149,7 +149,7 @@ module GC
 
     {% if flag?(:linux) && flag?(:gnu) %}
       heap.set_stackbottom(LibC.__libc_stack_end)
-    {% elsif flag?(:darwin) %}
+    {% elsif flag?(:darwin) || flag?(:win32) %}
       if bounds = Gcry::Platform.current_pthread_stack_bounds
         heap.set_stackbottom(bounds[1])
       end
@@ -171,7 +171,7 @@ module GC
       # `bench/large_cache_race.cr` and the two orders were indistinguishable
       # there — the reporter installs either way — so this is ordering for a
       # reason, not a measured fix.
-      Gcry::SegvReport.install_if_requested
+      {% if flag?(:unix) %} Gcry::SegvReport.install_if_requested {% end %}
       heap.set_stackbottom(Fiber.current.@stack.bottom)
     end
 
@@ -330,7 +330,7 @@ module GC
     heap.incremental_auto = false
   end
 
-  # Use LibC.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
+  # Use Gcry::OS.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
     heap.root_phase_timing = env_flag_one?("GCRY_ROOT_PHASE_TIMING")
     # First: whole-class root-completeness profile. Individual knobs below
@@ -560,8 +560,8 @@ module GC
         if budget = env_u64("GCRY_MOSTLY_EMPTY_BUDGET")
           heap.mostly_empty_budget = budget
         end
-        # LibC.getenv only — ENV[] allocates and can SEGV during GC.init.
-        mode = LibC.getenv("GCRY_MOSTLY_EMPTY_MODE")
+        # Gcry::OS.getenv only — ENV[] allocates and can SEGV during GC.init.
+        mode = Gcry::OS.getenv("GCRY_MOSTLY_EMPTY_MODE")
         unless mode.null?
           # "dontneed" (case-sensitive ASCII); any other value keeps MADV_FREE.
           # Measured REJECT on acik (COLLECT_HANG 2/3) — research only.
@@ -701,7 +701,7 @@ module GC
     end
     # `GCRY_ALLOC_FAST_PATH=0`: every small allocation takes the locked path
     # (diagnosis and A/B only).
-    if (v = LibC.getenv("GCRY_ALLOC_FAST_PATH")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
+    if (v = Gcry::OS.getenv("GCRY_ALLOC_FAST_PATH")) && !v.null? && v.value == 0x30_u8 && (v + 1).value == 0_u8
       heap.fast_path_enabled = false
     end
     if scrub = env_u64("GCRY_COLLECT_SCRUB")
@@ -756,7 +756,7 @@ module GC
     # (src/gcry/segv_report.cr). Costs nothing until something faults; default
     # off because it installs a signal handler, and a collector should not do
     # that to a process that did not ask.
-    Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
+    {% if flag?(:unix) %} Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT") {% end %}
     # After mark, before sweep: does any marked object point at a block the
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.
@@ -956,8 +956,8 @@ module GC
     if env_flag_one?("GCRY_POISON_HOLDERS")
       heap.poison_freed = true
       heap.poison_tag_addr = true
-      Gcry::SegvReport.request
-      Gcry::PoisonHolders.request
+      {% if flag?(:unix) %} Gcry::SegvReport.request {% end %}
+      {% if flag?(:unix) %} Gcry::PoisonHolders.request {% end %}
     end
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
@@ -1034,6 +1034,15 @@ module GC
       end
       warn_unsupported_env("gcry: GCRY_PRECISE_FIBERS=1 — parked full scan off; research\n")
     end
+    {% if flag?(:win32) %}
+      # The research walker decodes SysV fiber contexts, not Microsoft's ABI.
+      if heap.precise_stack_roots || heap.precise_stack_fibers_exclusive
+        warn_unsupported_env("gcry: precise stack maps are unsupported on Windows; using conservative stacks\n")
+        heap.precise_stack_roots = false
+        heap.precise_stack_exclusive = false
+        heap.precise_stack_fibers_exclusive = false
+      end
+    {% end %}
     # Research: parked map-miss PC ring on /gc-stats (exclusivef gap hunt).
     if env_flag_one?("GCRY_STACKMAP_MISS_LOG")
       Gcry::StackMaps.miss_log = true
@@ -1055,27 +1064,27 @@ module GC
   end
 
   # stderr warn for knobs that stay wired for research but are not a product path.
-  # LibC.write avoids allocating during GC.init / apply_env_config.
+  # Gcry::OS.write avoids allocating during GC.init / apply_env_config.
   private def self.warn_unsupported_env(msg : String) : Nil
-    LibC.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
+    Gcry::OS.write(2, msg.to_unsafe, LibC::SizeT.new(msg.bytesize))
   end
 
   private def self.env_flag_one?(name : String) : Bool
-    flag = LibC.getenv(name)
+    flag = Gcry::OS.getenv(name)
     return false if flag.null?
     flag.value == '1'.ord.to_u8 && (flag + 1).value == 0
   end
 
   # For knobs that default *on*: only an explicit "0" turns them off.
   private def self.env_flag_zero?(name : String) : Bool
-    flag = LibC.getenv(name)
+    flag = Gcry::OS.getenv(name)
     return false if flag.null?
     flag.value == '0'.ord.to_u8 && (flag + 1).value == 0
   end
 
   # Single ASCII digit env (e.g. GCRY_PRECISE_STACK=1|2). Nil if unset/invalid.
   private def self.env_digit(name : String) : Int32?
-    flag = LibC.getenv(name)
+    flag = Gcry::OS.getenv(name)
     return nil if flag.null?
     ch = flag.value
     return nil unless ch >= '0'.ord.to_u8 && ch <= '9'.ord.to_u8
@@ -1084,7 +1093,7 @@ module GC
   end
 
   private def self.env_u64(name : String) : UInt64?
-    ptr = LibC.getenv(name)
+    ptr = Gcry::OS.getenv(name)
     return nil if ptr.null?
     parse_u64_cstr(ptr)
   end
@@ -1195,9 +1204,13 @@ module GC
 
   private def self.add_finalizer_impl(object : T) forall T
     return unless @@gcry_ready
-    Gcry.default_heap.add_finalizer(object.as(Void*)) do |ptr|
-      ptr.as(T).finalize
-    end
+    {% if flag?(:win32) %}
+      gcry_register_finalizer(object.as(Void*), ->(ptr : Void*) { ptr.as(T).finalize })
+    {% else %}
+      Gcry.default_heap.add_finalizer(object.as(Void*)) do |ptr|
+        ptr.as(T).finalize
+      end
+    {% end %}
   end
 
   def self.add_root(object : Reference)
@@ -1270,8 +1283,17 @@ module GC
   {% if flag?(:win32) %}
     # :nodoc:
     def self.beginthreadex(security : Void*, stack_size : LibC::UInt, start_address : Void* -> LibC::UInt, arglist : Void*, initflag : LibC::UInt, thrdaddr : LibC::UInt*) : LibC::HANDLE
-      ret = LibC._beginthreadex(security, stack_size, start_address, arglist, initflag, thrdaddr)
+      if (h = Gcry.default_heap?) && !h.heap_counters_atomic_pinned
+        h.heap_counters_atomic = true
+      end
+      # Publish the birth root before the new thread can allocate or run.
+      ret = LibC._beginthreadex(security, stack_size, start_address, arglist, initflag | 4_u32, thrdaddr)
       raise RuntimeError.from_errno("_beginthreadex") if ret.null?
+      Gcry::Platform.stage_thread(ret.address)
+      Gcry::ThreadBirthRoot.arm(ret.address, arglist)
+      if initflag & 4_u32 == 0
+        LibC.abort if LibC.ResumeThread(ret) == UInt32::MAX
+      end
       ret.as(LibC::HANDLE)
     end
   {% elsif !flag?(:wasm32) %}
@@ -1282,7 +1304,7 @@ module GC
     # Recording here does not cover the interval *inside* `pthread_create` —
     # doing that needs a trampoline on the new thread, which was tried and
     # crashed 8 runs in 10. The census reports what this placement leaves.
-    def self.pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
+    def self.pthread_create(thread : Gcry::OS::PthreadT*, attr : Gcry::OS::PthreadAttrT*, start : Void* -> Void*, arg : Void*)
       {% if flag?(:gc_none) %}
         # **Before** the call, not after. A second thread is about to exist, and
         # the allocation counters are plain get/set until told otherwise —
@@ -1309,7 +1331,7 @@ module GC
           h.heap_counters_atomic = true
         end
       {% end %}
-      ret = LibC.pthread_create(thread, attr, start, arg)
+      ret = Gcry::OS.pthread_create(thread, attr, start, arg)
       {% if flag?(:gc_none) %}
         if ret == 0
           Gcry::Platform.stage_thread(thread.value.unsafe_as(UInt64))
@@ -1325,13 +1347,13 @@ module GC
     end
 
     # :nodoc:
-    def self.pthread_join(thread : LibC::PthreadT)
-      LibC.pthread_join(thread, nil)
+    def self.pthread_join(thread : Gcry::OS::PthreadT)
+      Gcry::OS.pthread_join(thread, nil)
     end
 
     # :nodoc:
-    def self.pthread_detach(thread : LibC::PthreadT)
-      LibC.pthread_detach(thread)
+    def self.pthread_detach(thread : Gcry::OS::PthreadT)
+      Gcry::OS.pthread_detach(thread)
     end
   {% end %}
 
@@ -1412,3 +1434,13 @@ module GC
     ptr
   end
 end
+
+{% if flag?(:win32) %}
+  # The C boundary breaks recursive type inference through Windows runtime mutex
+  # finalizers -> collector locks -> exceptions -> IOCP initializers.
+  fun gcry_register_finalizer(object : Void*, callback : Void* ->) : Nil
+    if heap = Gcry.default_heap?
+      heap.add_finalizer(object, callback)
+    end
+  end
+{% end %}

@@ -28,7 +28,7 @@ module Gcry
       len = append(buf.to_unsafe, len, " — not a live Fiber\n")
       len = append(buf.to_unsafe, len, "gcry: this is the first collection that saw it; the write is earlier " \
                                        "and the dequeue that would SEGV on it has not run yet\n")
-      LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
+      Gcry::OS.write(2, buf.to_unsafe, LibC::SizeT.new(len))
     end
 
     # A structure the context points at that is no longer that structure — the
@@ -48,7 +48,7 @@ module Gcry
       len = append(buf.to_unsafe, len, " — not a live object of the declared type\n")
       len = append(buf.to_unsafe, len, "gcry: the slots it holds are being read out of whatever that block " \
                                        "became; the walk below cannot be trusted\n")
-      LibC.write(2, buf.to_unsafe, LibC::SizeT.new(len))
+      Gcry::OS.write(2, buf.to_unsafe, LibC::SizeT.new(len))
     end
 
     private def self.append(buf : UInt8*, len : Int32, str : String) : Int32

@@ -1,8 +1,7 @@
 # LLVM `.llvm_stackmaps` (format v3) loader + PC→location lookup.
 # See docs/STACK_MAPS.md. Used only when Heap#precise_stack_roots is set.
 
-require "c/unistd"
-require "c/fcntl"
+require "./platform/os"
 
 module Gcry
   module StackMaps
