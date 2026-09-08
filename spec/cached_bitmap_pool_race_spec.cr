@@ -3,7 +3,7 @@ require "../bench/bounded_child"
 
 describe "cached bitmap pool probes" do
   it "survives scheduled chunk release windows" do
-    executable = File.tempfile("cached-bitmap-pool-race")
+    executable = File.tempfile("cached-bitmap-pool-race", {{ flag?(:win32) ? ".exe" : "" }})
     executable.close
     begin
       # The scheduled races use real threads and guarded mappings. Keep them in
