@@ -108,7 +108,7 @@ module Gcry
               return
             end
           {% else %}
-          Platform.stop_world_threads(current_thread)
+            Platform.stop_world_threads(current_thread)
           {% end %}
         rescue ex
           @stw_owner = nil
