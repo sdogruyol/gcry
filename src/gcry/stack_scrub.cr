@@ -99,10 +99,15 @@ module Gcry
 
     @clear_stack_ops : UInt64 = 0_u64
 
-    # Plain flag (not ThreadLocal): must work before Thread TLS exists.
-    # Same-thread reentrancy only; concurrent MT clears on different stacks
-    # may briefly skip — acceptable for an opt-in hygiene path.
-    @@clear_stack_active = false
+    # Re-entrancy is a per-thread property, so the guard is per thread. As a
+    # process-global it made every thread's scrub skip while any other thread
+    # was inside `collect_scrub` or `clear_stack` — the "may briefly skip" that
+    # showed up as `spec/stack_scrub_spec.cr` counting no call on a Windows CI
+    # run (34203285116) that passed on rerun. LLVM TLS needs no Crystal
+    # `Thread`, so this still works before Thread TLS exists, the same way
+    # `@@tls_cursor_cache` does.
+    @[ThreadLocal]
+    @@clear_stack_active : Bool = false
 
     {% if flag?(:x86_64) && !flag?(:win32) %}
       # SysV ABI red zone — callees may use [SP-128, SP) without adjusting SP.

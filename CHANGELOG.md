@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows stack scrubbing walks `VirtualQuery` regions down to the wipe floor.
+  Windows reports the committed stack as several regions with identical
+  state and protection, so a single query's `baseAddress` could sit a few
+  KiB — or zero bytes — below SP, and `clear_stack`/`collect_scrub` wiped
+  that much instead of the requested budget. Seen as
+  `spec/stack_scrub_spec.cr` counting no scrub on a Windows CI run.
+- The stack-scrub re-entrancy guard is thread-local; as a process-global flag
+  it made one thread's scrub silently skip while any other thread was
+  mid-scrub.
+
 ## [0.24.1] - 2026-09-08
 
 Patch release. **The bitmap allocator that 0.24.0 made the default could
