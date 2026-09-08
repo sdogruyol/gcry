@@ -7,29 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Minor release: **gcry runs on Windows.** Native x86_64 (MSVC) and ARM64
+(GNU/MinGW) process GC, `require "gcry"` + `-Dgc_none` as on Linux and macOS,
+with six native CI jobs covering the bitmap, freelist and headerless
+allocators. The rest is the bitmap allocator's handoff races closed to
+the last one, a Windows stack-scrub defect the new CI found on its own
+first day, and the ARM kernel backends measured on real hardware.
+
+### Added
+
+- **Native Windows process GC — x86_64 and ARM64** (#38, stakach). The
+  backend is `VirtualAlloc`/`VirtualFree` for chunks (decommit + recommit for
+  page release, whole reservations only), writable PE sections of the main
+  image for static roots, `SuspendThread` + `GetThreadContext` for the
+  stopped world with integer and SIMD registers captured as roots, SRW locks
+  and FLS for the collector's mutexes and cursor TLS, and
+  `CREATE_SUSPENDED` thread creation so a new thread is rooted before it can
+  run. Stopped-world diagnostics write through `WriteFile` on the stderr
+  handle, never the CRT lock a suspended mutator may hold; root scans and
+  the dead-stack scrub walk `VirtualQuery` regions and leave `PAGE_GUARD`
+  intact. A failed suspend or capture resumes every thread already stopped
+  and raises without allocating until the collector's locks are released — a
+  process-level regression with 65 workers found and closed a re-entrancy
+  hang in that path. Limits, documented in `docs/WINDOWS.md`: 64 peer
+  threads per collection; no fork, Unix signal diagnostics, soft-dirty or
+  mprotect barrier; research stack maps ignored; per-thread native TLS is
+  not a root (same policy as Linux/macOS); no Windows throughput numbers
+  yet. CI: `windows-latest` (MSVC) and `windows-11-arm` (Crystal's
+  unsupported ARM64 GNU archive, pinned by SHA-256, MSYS2 CLANGARM64
+  linker) × default/freelist/headerless, unit + process specs + optimised
+  samples.
+
 ### Changed
 
 - The SVE backend runs `range_any?` on the vectorised NEON body: the
   predicated SVE loop measured 21.9 GB/s against 45.3 on a Neoverse-N2
-  (`bench/log/linux/2026-09-08-neon-sve-ab`). The same session confirms the
-  vectorised NEON backend over #36's assembly for the reductions (2.1× and
-  1.7×) and SVE2 at parity with SVE.
+  (`bench/log/linux/2026-09-08-neon-sve-ab`). The same session, the first
+  native ARM reading, confirms the vectorised NEON backend over #36's
+  assembly for the reductions (2.1× and 1.7×, sweep at parity, popcount 13%
+  behind) and SVE2 at parity with SVE.
+- README and PERF.md carry the 0.24.x bitmap-default numbers: Kemal `/json`
+  105% of Boehm at 1.30× peak RSS on Linux, 102% at 1.97× on macOS. The
+  heuristics section and pause table are re-cut on the same default
+  (`bench/log/linux/2026-09-08-heuristics-ab`): `GCRY_SOUND=1` is free on
+  one mutator thread (117% vs 110.5% of Boehm, identical RSS and pause) and
+  halves throughput under EC4 through an 8× pause. That EC4 pause is
+  attributed (`…/2026-09-08-ec4-root-phase`): 98% is the parked-fiber lag
+  scan, ~8 MB of stack words per collection at 100 connections, growing
+  with stack-pool reuse — now a concrete roadmap item.
 
 ### Fixed
 
-- Windows stack scrubbing walks `VirtualQuery` regions down to the wipe floor.
-  Windows reports the committed stack as several regions with identical
-  state and protection, so a single query's `baseAddress` could sit a few
-  KiB — or zero bytes — below SP, and `clear_stack`/`collect_scrub` wiped
-  that much instead of the requested budget. Seen as
-  `spec/stack_scrub_spec.cr` counting no scrub on a Windows CI run.
-- The stack-scrub re-entrancy guard is thread-local; as a process-global flag
-  it made one thread's scrub silently skip while any other thread was
+- **Bitmap-pool handoff races** (#39, stakach). A cached pool probe read a
+  chunk header after the index lookup released its lock, so a concurrent
+  trim could unmap it in between; and every path that handed a chunk to the
+  allocation cursor — cached pop, overflow fallback, dormant revival, fresh
+  `map_chunk` — did so before setting the `CURSOR` flag, leaving a window
+  in which the in-STW sweep (which ignores the mutator's class lock) could
+  reclaim the chunk as empty. Probes now hold the chunk-list lock through
+  the header read, and ownership is claimed wherever a chunk is obtained,
+  before the protecting lock is released: revive sets cursor before
+  clearing dormant, fresh chunks are mapped with `CURSOR` set. Four new
+  `make chunk-search-race` arms are red against 0.24.1 (three `SIGSEGV` at
+  header+0x14, one "sweep reclaimed a chunk during revival") and green here.
+- Windows stack scrubbing walks `VirtualQuery` regions down to the wipe
+  floor (#40). Windows reports the committed stack as several regions with
+  identical state and protection, so a single query's `baseAddress` could
+  sit a few KiB — or zero bytes — below SP, and `clear_stack` /
+  `collect_scrub` wiped that much instead of the requested budget. Found by
+  the new Windows CI as `spec/stack_scrub_spec.cr` counting no scrub.
+- The stack-scrub re-entrancy guard is thread-local; as a process-global
+  flag it made one thread's scrub silently skip while any other thread was
   mid-scrub.
-- Cached bitmap-pool probes now hold the chunk-list lock while resolving a
-  cached address and checking the candidate, and claim cursor ownership before
-  returning a chunk to allocation refill. This prevents stale-header reads and
-  stopped-world release of the selected chunk during the handoff.
+
+Upgrading: no API change. `GCRY_SIMD` accepts `sve`. Windows: build with
+`crystal build -Dgc_none app.cr` from a PowerShell with Crystal's MSVC
+toolchain; see `docs/WINDOWS.md`.
 
 ## [0.24.1] - 2026-09-08
 
