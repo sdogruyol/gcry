@@ -34,8 +34,8 @@ module Gcry::OS
     {% else %}
       asm("movq %rsp, $0" : "=r"(sp) :: "memory" : "volatile")
     {% end %}
-    return 0_u64 if LibC.VirtualQuery(Pointer(Void).new(sp), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION)) == 0
-    base = info.baseAddress.address
+    base = dead_stack_floor(sp, bytes)
+    return 0_u64 if base >= sp
     cleared = 0_u64
     {% if flag?(:aarch64) %}
       # Windows reserves [SP-16, SP) for instrumentation. Use byte stores so
@@ -73,6 +73,27 @@ module Gcry::OS
               : "volatile")
     {% end %}
     cleared
+  end
+
+  # Lowest address in `[sp - bytes, sp)` that is committed, plain read-write
+  # stack, walking `VirtualQuery` regions downward. One query is not enough:
+  # Windows reports the committed stack as several regions with identical
+  # state and protection — measured on the CI runner as a two-page region
+  # around SP over a three-page one below it, both `MEM_COMMIT`/`PAGE_READWRITE`
+  # — so a single `baseAddress` can sit a few KiB, or zero bytes, below SP.
+  # That zero was `spec/stack_scrub_spec.cr` counting no scrub on run
+  # 34203285116. The walk stops at the first region that is not committed
+  # read-write, which is how `PAGE_GUARD` stays untouched.
+  private def self.dead_stack_floor(sp : UInt64, bytes : UInt64) : UInt64
+    target = bytes >= sp ? 0_u64 : sp - bytes
+    lo = sp
+    while lo > target
+      return lo if LibC.VirtualQuery(Pointer(Void).new(lo - 1), out info, sizeof(LibC::MEMORY_BASIC_INFORMATION)) == 0
+      return lo unless info.state == LibC::MEM_COMMIT && info.protect == LibC::PAGE_READWRITE
+      base = info.baseAddress.address
+      lo = base > target ? base : target
+    end
+    lo
   end
 
   alias PthreadT = LibC::HANDLE
