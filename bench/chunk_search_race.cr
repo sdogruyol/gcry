@@ -12,6 +12,10 @@ module ChunkSearchRace
     @@target.set(address)
   end
 
+  def self.target : UInt64
+    @@target.get
+  end
+
   def self.stage=(value : Int32)
     @@stage.set(value)
   end
@@ -76,6 +80,18 @@ class Gcry::Heap
       case mode
       when "pool"
         bitmap_take_pool_chunk(index, payload, false)
+      when "cached-pool"
+        slot = index
+        pool = @bitmap_pool_indexes.to_unsafe + slot
+        raise "failed to allocate test bitmap pool" unless bitmap_pool_grow(pool, 1)
+        pool.value.addresses[0] = ChunkSearchRace.target
+        pool.value.count = 1
+        pool.value.next_index = 0
+        pool.value.version = Atomic::Ops.load(@bitmap_capacity_versions.to_unsafe + slot,
+          LLVM::AtomicOrdering::Acquire, false)
+        pool.value.blacklist_enabled = @blacklist_enabled
+        pool.value.valid = true
+        bitmap_take_pool_chunk(index, payload, false)
       when "bitmap-dormant"
         bitmap_revive_dormant(index, false)
       when "header-dormant"
@@ -116,7 +132,7 @@ end
 
 exe = Process.executable_path.not_nil!
 failed = false
-["pool", "bitmap-dormant", "header-dormant", "stopped"].each do |mode|
+["pool", "cached-pool", "bitmap-dormant", "header-dormant", "stopped"].each do |mode|
   result = BoundedChild.run(exe, ["--child", mode], timeout: 10.seconds)
   puts result.output
   failed ||= !result.ok

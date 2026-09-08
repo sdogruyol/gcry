@@ -854,9 +854,11 @@ module Gcry
         address = pool.value.addresses[at]
         # A stale address is harmless only after this lookup. Do not cast it
         # to ChunkHeader* or read its flags before the live index accepts it.
-        if chunk = bitmap_indexed_chunk(address)
-          if chunk.address == address && bitmap_pool_candidate?(chunk, index, atomic)
-            return chunk
+        with_chunk_list_for_allocation do
+          if chunk = bitmap_indexed_chunk(address)
+            if chunk.address == address && bitmap_pool_candidate?(chunk, index, atomic)
+              return chunk
+            end
           end
         end
       end
