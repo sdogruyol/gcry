@@ -4,7 +4,8 @@
 # code from a generic AArch64 build. Selected on Linux from `AT_HWCAP`.
 #
 # SVE2 adds no instruction these four kernels can use, so there is no SVE2
-# backend: an SVE2 host runs this one.
+# backend: an SVE2 host runs this one (measured at parity with the SVE
+# stamping on a Neoverse-N2, `bench/log/linux/2026-09-08-neon-sve-ab`).
 struct Gcry::Kernels::SVE < Gcry::Kernels::Base
   def tier : UInt8
     TIER_SVE
@@ -115,41 +116,9 @@ struct Gcry::Kernels::SVE < Gcry::Kernels::Base
     any == 0
   end
 
-  @[TargetFeature("+sve")]
-  def range_any?(ptr : UInt64*, n : Int32, lo : UInt64, span : UInt64) : Bool
-    {% if flag?(:gcry_kernels_broken) %} n -= 1 if n > 1 {% end %}
-    return false if n <= 0
-    count = n.to_u64
-    any = 0_u64
-    asm(
-      "mov x8, $1
-       mov x9, $2
-       mov x10, xzr
-       mov x12, $3
-       mov x13, $4
-       dup z2.d, x12
-       dup z3.d, x13
-       1:
-       whilelo p0.d, x10, x9
-       b.eq 3f
-       ld1d {z0.d}, p0/z, [x8, x10, lsl #3]
-       sub z0.d, z0.d, z2.d
-       cmplo p1.d, p0/z, z0.d, z3.d
-       cntp x11, p0, p1.d
-       cbnz x11, 2f
-       incd x10
-       b 1b
-       2:
-       mov x11, #1
-       str x11, [$0]
-       b 4f
-       3:
-       str xzr, [$0]
-       4:"
-            :: "r"(pointerof(any)), "r"(ptr), "r"(count), "r"(lo), "r"(span)
-            : "x8", "x9", "x10", "x11", "x12", "x13", "z0", "z2", "z3", "p0", "p1", "memory", "cc"
-            : "volatile"
-    )
-    any != 0
-  end
+  # The predicated SVE loop with a per-iteration `cntp`/`cbnz` exit measured
+  # half the vectorised NEON body on a Neoverse-N2 (21.9 vs 45.3 GB/s in L2,
+  # `bench/log/linux/2026-09-08-neon-sve-ab`), so this one kernel stays on
+  # the compiler's NEON code even on SVE hosts.
+  Gcry::Kernels.def_autovec_range_any("+neon")
 end

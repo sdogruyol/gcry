@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The SVE backend runs `range_any?` on the vectorised NEON body: the
+  predicated SVE loop measured 21.9 GB/s against 45.3 on a Neoverse-N2
+  (`bench/log/linux/2026-09-08-neon-sve-ab`). The same session confirms the
+  vectorised NEON backend over #36's assembly for the reductions (2.1× and
+  1.7×) and SVE2 at parity with SVE.
+
 ### Fixed
 
 - Windows stack scrubbing walks `VirtualQuery` regions down to the wipe floor.
