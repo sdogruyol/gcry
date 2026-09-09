@@ -49,9 +49,11 @@ error.
   headerless; the header layout keeps arms on both allocators (Linux,
   aarch64, Darwin, Windows x86_64 and ARM64 `headers` / `freelist`
   variants, ASan), and the env-knob smoke exercises the nursery, freelist
-  and TLAB knobs on the layout that reads them, and `make heap-counters`
-  builds its plain-counter control on the header layout, the only heap that
-  still has a non-atomic counter path to lose increments on. `bench/baseline/perf_smoke.json`
+  and TLAB knobs on the layout that reads them, and the gates whose control
+  arm pins a header-layout knob — `heap-counters` (plain counters),
+  `poison-freed` (freelist arms), `darwin-bitmap-page-release` (`--headers`)
+  and the sound-profile smoke (`GCRY_NURSERY`) — build that arm with
+  `-Dgcry_block_headers`, so the knob is read rather than silently ignored. `bench/baseline/perf_smoke.json`
   was recorded on the header layout and needs re-recording on the first ten
   green master runs after this lands, as its provenance note says for any
   default-allocator change.
