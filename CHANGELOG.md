@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The perf-smoke baseline is re-recorded on the bitmap allocator default
+  (`bench/baseline/perf_smoke.json`, ten green master runs). The previous one
+  was taken on the freelist default before 0.24.0, so it read every current
+  run as an RSS regression — 5 of 10 replayed runs fail `--gate` against it,
+  none for a real regression. `pct_json` now gates 23.8 pp above the fixed
+  floor; `rss_x` is documented as report-only until it has more samples.
 - The conservative root scan is asserted to visit every pointer-aligned word
   of a range (`spec/scan_completeness_spec.cr`). Stepping its cursor two
   words at a time passed all 291 pre-existing examples, and a root the scan

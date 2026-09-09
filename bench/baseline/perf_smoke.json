@@ -1,47 +1,50 @@
 {
   "provenance": {
     "runner": "ubuntu-latest",
-    "commit": "7709898",
-    "runs": 5,
-    "recorded": "2026-08-15",
-    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm."
+    "commit": "4b86ee1",
+    "runs": 10,
+    "recorded": "2026-09-09",
+    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm. Recorded from the perf-smoke-report artifacts of ten green master runs (2026-09-08/09), the first ten on the bitmap allocator default (0.24.0). The previous file was recorded 2026-08-15 on the freelist default and read every current run as an RSS regression: 5 of these 10 runs would have failed --gate against it, none for a real regression."
   },
   "metrics": {
     "pct_json": {
-      "value": 76.0,
-      "runs": 5,
+      "value": 100.5,
+      "runs": 10,
       "observed_range": [
-        70.6,
-        81.9
+        94.7,
+        106.7
       ],
-      "tolerance": 9.375
+      "tolerance": 11.7375,
+      "note": "Now worth gating: fires below 88.8 against a fixed floor of 65, and the lowest of the 10 recording runs is 94.7. On the freelist baseline this metric fired below 66.6, i.e. under the floor it was meant to tighten."
     },
     "pct_root": {
-      "value": 83.0,
-      "runs": 5,
+      "value": 97.2,
+      "runs": 10,
       "observed_range": [
-        78.1,
-        91.7
+        93.0,
+        103.0
       ],
-      "tolerance": 12.525
+      "tolerance": 6.9
     },
     "rss_x": {
-      "value": 0.884,
-      "runs": 5,
+      "value": 0.9585,
+      "runs": 10,
       "observed_range": [
-        0.869,
-        0.926
+        0.886,
+        1.132
       ],
-      "tolerance": 0.0795
+      "tolerance": 0.1425,
+      "note": "Reports, does not hold as a gate: 1 of the 10 recording runs (1.132) sits outside value+tolerance, so --gate carries ~10% false alarms on this metric. The warm-chunk budget makes post-GC RSS the noisiest of the four on a shared runner. Needs more samples before PERF_GATE_BASELINE=1 is honest."
     },
     "pause_p50_ms": {
-      "value": 0.7606,
-      "runs": 5,
+      "value": 0.6116,
+      "runs": 10,
       "observed_range": [
-        0.6773,
-        0.8512
+        0.3411,
+        0.799
       ],
-      "tolerance": 0.2
+      "tolerance": 0.4437,
+      "note": "Fires above 1.055 ms against a fixed floor of 2.5; the highest recording run is 0.799."
     }
   }
 }

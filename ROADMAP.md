@@ -733,20 +733,44 @@ CI asymmetry that hid both.
       (70.6–81.9 across the five) makes an honest `pct_json` tolerance so wide
       that the baseline gate sits **1.6 pp** below the fixed floor it was meant
       to tighten.
-      **And the first real firing confirms it was worse than that.** On
+      **And the first real firing confirmed it was worse than that.** On
       2026-08-17 (`31997472378`) `perf-smoke` failed at `pct_json` **63.90** —
       under the fixed floor *and* outside the tolerance — on a commit whose only
       runtime change was a ≤64-entry array scan on the snapshot path, with RSS
       and pause both *better* than baseline. A re-run of the same job on the same
-      commit passed. So the runner's real spread is wider than the five-run
-      baseline captured, and `pct_json` currently produces false alarms at the
-      rate the tolerance implies. Before `PERF_GATE_BASELINE=1` is worth turning
-      on, `pct_json` needs either many more baseline runs or exclusion from the
-      gate; RSS and pause are the two that hold. The file's own note predicted exactly this before it was
-      measured. The RSS and pause halves did land — **1.3×** and **2.6×** tighter
-      than their floors — and those are the two a collector change is most likely
-      to move quietly. Next: set `PERF_GATE_BASELINE=1` if that trade is worth
-      blocking a PR on, and re-record when the runner class changes.
+      commit passed.
+
+      **2026-09-09: re-recorded on the bitmap default, and the two halves have
+      swapped.** The 2026-08-15 file was taken on the freelist default; 0.24.0
+      changed what the process allocates with, so it had been comparing the
+      collector against a different one. Replayed against it, **5 of 10** green
+      master runs from 2026-09-08/09 fail `--gate` — every one of them on
+      `rss_x` (0.98–1.13 against a baseline of 0.884), none for a real
+      regression. Anyone who had set `PERF_GATE_BASELINE=1` would have been
+      blocking PRs on a policy change made deliberately in 0.24.0. The file now
+      carries those ten runs (`bench/baseline/perf_smoke.json`, taken from the
+      `perf-smoke-report` artifacts the job already uploads, so again no quiet
+      host was needed):
+
+      | metric | baseline | tolerance | gate fires at | fixed floor | self-fires |
+      |---|---|---|---|---|---|
+      | `pct_json` | 100.5 | ±11.7375 | below **88.8** | 65 | 0 of 10 (min 94.7) |
+      | `rss_x` | 0.9585 | ±0.1425 | above **1.101** | 1.25 | **1 of 10** (1.132) |
+      | `pause_p50_ms` | 0.6116 | ±0.4437 | above **1.055** | 2.5 | 0 of 10 (max 0.799) |
+      | `pct_root` | 97.2 | ±6.9 | warn-only | — | — |
+
+      `pct_json` is now the half that lands — the gate sits **23.8 pp above**
+      the fixed floor, where the old one sat below it, because the default got
+      faster (median 76.0 → 100.5) while the runner's spread stayed ~12 pp
+      wide. `pause_p50_ms` still holds, 2.4× tighter than its floor. `rss_x` is
+      the one that does not: the warm-chunk budget makes post-GC RSS the
+      noisiest of the four, and one of the ten recording runs already sits
+      outside its own tolerance, so `--gate` carries ~10% false alarms there.
+      Next: `PERF_GATE_BASELINE=1` is worth turning on only once `rss_x` is
+      either excluded from gating or given many more samples; re-record
+      whenever the default allocator or the runner class changes, and note that
+      this file is now the third recording to show that a baseline is only as
+      honest as the configuration it was taken on.
 
 - [ ] **The process heap's counters lose updates, and the assumption that they
       do not is written in the source.** `note_alloc_bytes` uses plain
