@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The conservative root scan is asserted to visit every pointer-aligned word
+  of a range (`spec/scan_completeness_spec.cr`). Stepping its cursor two
+  words at a time passed all 291 pre-existing examples, and a root the scan
+  skips is an object freed while live. The mutation gate's mutant 09 is that
+  perturbation; four of its ten mutants had also stopped matching the source
+  and were silently unmeasured (`bench/mutations/README.md`). 10/10 killed.
+
 ## [0.25.0] - 2026-09-09
 
 Minor release: **gcry runs on Windows.** Native x86_64 (MSVC) and ARM64
