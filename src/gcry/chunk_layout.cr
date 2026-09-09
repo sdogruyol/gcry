@@ -57,7 +57,7 @@ module Gcry
     #
     # It depends on `BlockHeader::SIZE`. The header build's tightest class is
     # `block_bytes = 24592`, first failing at 86.3 MiB — the number the old
-    # comment quoted. `-Dgcry_headerless` sets `SIZE` to 0, which makes the
+    # comment quoted. The headerless layout sets `SIZE` to 0, which makes the
     # tightest class 28672 and moves the bound to **51.2 MiB**, *below* the
     # 64 MiB the constant allowed. `GCRY_CHUNK_BYTES` is user-settable, so a
     # headerless build with a chunk in (51.2, 64] MiB resolved the wrong block
@@ -127,7 +127,7 @@ module Gcry
       # own bytes. One header per large chunk is free; one per small block is
       # the 16 bytes this phase exists to remove.
       unless bitmaps
-        {% if flag?(:gcry_headerless) %}
+        {% if !flag?(:gcry_block_headers) %}
           return {0_u32, (ChunkHeader::SIZE + 16).to_u32}
         {% else %}
           return {0_u32, ChunkHeader::SIZE.to_u32}

@@ -32,7 +32,7 @@ describe Gcry::Heap do
     # The reciprocal's failure is not monotone — past the first bad offset the
     # two agree again at most offsets — so four offsets per class prove
     # nothing, and that is exactly how a real bound violation passed this
-    # spec: under `-Dgcry_headerless` class 38 first disagrees at 51.2 MiB
+    # spec: on the headerless layout class 38 first disagrees at 51.2 MiB
     # while the ceiling allowed 64 MiB, and `limit - 1` happened to land in an
     # agreeing region.
     #
@@ -122,7 +122,7 @@ describe Gcry::Heap do
         Gcry::SizeClasses::COUNT.times do |i|
           block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(i).to_u64
           _, data_offset = Gcry::Heap.chunk_geometry(block_bytes, chunk_bytes, true)
-          {% if flag?(:gcry_headerless) %}
+          {% if !flag?(:gcry_block_headers) %}
             # Class 0 is a 16-byte block, so a 256 KiB chunk carries 2 x 2 KiB of
             # bitmaps and the region ends at byte 4128 — into page 1 on a 4 KiB
             # page host. That page is still never released: every page-release
@@ -157,7 +157,7 @@ describe Gcry::Heap do
     it "costs under 1% of a chunk even in the worst class" do
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(0).to_u64
       words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, true)
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # 16-byte blocks: 8192 bits per bitmap, two bitmaps, 1.6% of the chunk.
         words.should eq(128)
         data_offset.should eq(2080)
@@ -169,7 +169,7 @@ describe Gcry::Heap do
       {% end %}
     end
 
-    {% unless flag?(:gcry_headerless) %}
+    {% if flag?(:gcry_block_headers) %}
       # Bitmaps cannot be off under headerless; the geometry's off-branch is unreachable there.
       it "reports no bitmap and the bare header when bitmaps are off" do
         Gcry::SizeClasses::COUNT.times do |i|
@@ -203,7 +203,7 @@ describe Gcry::Heap do
       block_bytes = Gcry::BlockHeader::SIZE.to_u64 + Gcry::SizeClasses.payload(0).to_u64
       words, data_offset = Gcry::Heap.chunk_geometry(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, true)
       nblocks = Gcry::Heap.chunk_block_count(block_bytes, Gcry::Heap::SMALL_CHUNK_BYTES, data_offset)
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         nblocks.should eq(8062_u64)
         (words.to_u64 * 64 - nblocks).should eq(130_u64)
         Gcry::Heap.tail_mask(nblocks).popcount.should eq(8062 & 63)

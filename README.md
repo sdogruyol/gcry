@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>gcry runs at Boehm parity on throughput — ~105% on Kemal <code>/json</code> — at ~1.3× its peak RSS (Linux, 0.24.0).</b>
+  <b>gcry beats Boehm on throughput — ~113% on Kemal <code>/json</code> — at ~1.07× its peak RSS (Linux, headerless default).</b>
 </p>
 
 <p align="center">
@@ -182,28 +182,28 @@ Full methodology: [docs/PERF.md](docs/PERF.md).
 
 ### Linux
 
-| Workload | gcry vs Boehm (v0.24.0, bitmap default)* |
-|----------|-----------------------------------------:|
-| Kemal `/json` throughput | **105.3%** [99.2, 111.3] *(freelist escape `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
-| Kemal `/json` peak RSS | **1.30×** *(0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50`)* |
-| Kemal `/json` post-`/gc-collect` RSS | **~1.2×** *(15.2 vs 12.9 MB; warm chunks released on explicit collect)* |
-| Kemal `/` throughput | **~82%** *(carry v0.16; not re-measured on 0.24.0)* |
-| Fat app `/api/v1/` throughput | **90.8%** *(freelist: 80.7%)* |
-| Fat app `/api/v1/` RSS | **1.55×** *(freelist: 1.47×)* |
+| Workload | gcry vs Boehm (headerless default)* |
+|----------|------------------------------------:|
+| Kemal `/json` throughput | **112.6%** [106.6, 118.6] *(header layout `-Dgcry_block_headers`: 105.3%; its freelist `GCRY_BITMAP_ALLOC=0`: 74.9%)* |
+| Kemal `/json` peak RSS | **1.07×** *(header layout: 1.30×; 0.95× at 105.1% with `GCRY_THRESHOLD_FACTOR=50` there)* |
+| Kemal `/json` post-`/gc-collect` RSS | **~1.07×** *(31.2 vs 29.3 MB, peak = post-GC; header layout ~1.2× on the CI runner, 15.2 vs 12.9 MB)* |
+| Kemal `/` throughput | **~82%** *(carry v0.16; not re-measured since)* |
+| Fat app `/api/v1/` throughput | **90.8%** *(header layout, 0.24.0; freelist: 80.7%)* |
+| Fat app `/api/v1/` RSS | **1.55×** *(header layout, 0.24.0; freelist: 1.47×)* |
 
-\*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The bitmap default is **141.9%** of the old freelist default at **0.69×** its peak RSS, 2.7 minor faults per 1 000 requests against 1 671, 15% less CPU per request than Boehm, p99 2.4 ms against 6.4. `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Headerless (`-Dgcry_headerless`, a compile flag) is 112.6% at 1.07× on the same run. Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
+\*Kemal: `bench/log/linux/2026-09-06-bitmap-default-ab/` — five paired arms, 20 rotated rounds, identical-binary null control at 97.5% [93.0, 102.0] (Ryzen AI 9 465). The headerless default is **151.7%** of the old freelist default at **0.57×** its peak RSS, 1.1 minor faults per 1 000 requests against 1 671, 21% less CPU per request than Boehm, p99 2.2 ms against 6.4; the header layout's bitmap allocator (the 0.24.x default, `-Dgcry_block_headers`) is 141.9% at 0.69× on the same run. `GCRY_THRESHOLD_FACTOR` scaling and the fat app were measured on the header layout: `GCRY_THRESHOLD_FACTOR` scaling and the fat app: `…/2026-09-06-threshold-factor-ab/` (acik: 8 paired trials; factor 50 puts Kemal on the product bar but costs the fat app 12 pp, so 100 stays). Post-collect RSS from the 0.24.0 changelog (CI runner). Pre-0.24.0 freelist history (v0.16 headline ~87% @ ~0.80× post-GC, `GCRY_TIGHT_GROW`, 9950X bands) — [PERF.md](docs/PERF.md), [ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Parallel opt-in (EC>1 + TLAB off + lazy): ~**79%** `/json` — not the default. Stack maps dormant.
 
 ### macOS (Apple Silicon)
 
-| Workload | gcry vs Boehm (v0.24.0, bitmap default)* |
-|----------|-----------------------------------------:|
-| Kemal `/json` throughput | **101.8%** [100.5, 103.1] *(freelist escape: 85.5%)* |
-| Kemal `/json` peak footprint | **1.97×** *(post-GC resident 1.20×; freelist 1.78× / 1.07×)* |
+| Workload | gcry vs Boehm (headerless default)* |
+|----------|------------------------------------:|
+| Kemal `/json` throughput | **101.9%** [100.9, 103.0] *(header layout: 101.8%; its freelist: 85.5%)* |
+| Kemal `/json` peak footprint | **1.50×** *(post-GC resident 0.99×; header layout 1.97× / 1.20×; freelist 1.78× / 1.07×)* |
 | Kemal `/` throughput | **~91%** *(carry 2026-08-04; not re-measured on 0.24.0)* |
 | Fat app `/api/v1/` throughput | **~98%** *(carry 2026-08-14 freelist re-cut)* |
 | Fat app `/api/v1/` RSS | **~0.97×** *(carry 2026-08-14 freelist re-cut)* |
 
-\*Kemal: `bench/log/macos/2026-09-06-bitmap-default-ab/` (Apple M2 Pro, five paired arms, 20 rotated rounds, null at 100.9% [99.1, 102.6]); 0.8 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 3.0 against 5.2 ms. Both arms sit at the 16 MiB Darwin threshold floor, so the warm-chunk budget is the whole RSS difference — the reverse of the Linux ordering. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
+\*Kemal: `bench/log/macos/2026-09-06-bitmap-default-ab/` (Apple M2 Pro, five paired arms, 20 rotated rounds, null at 100.9% [99.1, 102.6]); 0.4 faults per 1 000 requests against the freelist's 344, 10% less CPU per request than Boehm, p99 2.9 against 5.2 ms. Every gcry arm sits at the 16 MiB Darwin threshold floor, so the warm-chunk budget is most of the RSS difference between the header layout and the freelist — the reverse of the Linux ordering; the headerless layout's 0.47× cut in peak footprint against the header layout comes on top of it. Fat app: `…/2026-08-14-acik-recut/`, n=9 per arm, 0 Non-2xx in 18 trials, on the freelist — [PERF-macos.md](docs/PERF-macos.md), [ACIKTURKIYE-macos.md](docs/ACIKTURKIYE-macos.md).
 
 Detailed tables: [PERF.md](docs/PERF.md) · [PERF-macos.md](docs/PERF-macos.md) · [ACIKTURKIYE.md](docs/ACIKTURKIYE.md)
 
@@ -291,7 +291,8 @@ Prometheus `/metrics` exposes pause percentiles as gauges.
 | **Non-moving** | Stable addresses — no compaction surprises |
 | **Fiber roots** | Stacks + parked fibers; STW SP clamp on other threads |
 | **Layout-precise scan** | Builtins + opt-in — fewer false keeps where registered |
-| **Bitmap allocator** | Process default since 0.24.0 — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors; Kemal `/json` ~**105%** of Boehm (Linux). `GCRY_BITMAP_ALLOC=0` is the freelist escape |
+| **Headerless layout** | Compile default — no 16-byte per-object header; small blocks are carved back-to-back and size, kind, marks and occupancy live in the chunk. Kemal `/json` ~**113%** of Boehm at **1.07×** its peak RSS (Linux). `-Dgcry_block_headers` restores the header layout |
+| **Bitmap allocator** | Process default since 0.24.0 and forced on by the headerless layout — `occ` bitmaps, streaming `occ &= mark` sweep, per-thread cursors. `GCRY_BITMAP_ALLOC=0` is the freelist escape, on `-Dgcry_block_headers` only |
 | **Warm-chunk budget** | Emptied chunks stay mapped up to live × `GCRY_THRESHOLD_FACTOR`; an explicit `GC.collect` releases them, so post-collect RSS is the live footprint (~**1.2×** Boehm on Kemal) |
 | **macOS reclaim** | `mach_vm` punch-hole at host page size (16 KiB on Apple Silicon) |
 | **Observability** | `Gcry.metrics`, `prometheus_text`, `Observability.json_stats` |

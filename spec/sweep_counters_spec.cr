@@ -25,7 +25,7 @@ end
 
 describe "counters while lazy sweep runs beside mutators" do
   [false, true].each do |bitmap|
-    {% if flag?(:gcry_headerless) %}
+    {% if !flag?(:gcry_block_headers) %}
       next unless bitmap
     {% end %}
     it "keeps increments and decrements whole (bitmap=#{bitmap})" do

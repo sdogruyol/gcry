@@ -124,7 +124,7 @@ module Gcry
     # addresses: mark-stack batches, the prefetch ring, `find_block` results.
     # The next collection's scan chain pushes frames over that region and then
     # scans it, so every slot a frame does not write reads as last cycle's
-    # heap pointer and is accepted as a root. Under `-Dgcry_headerless` a
+    # heap pointer and is accepted as a root. On the headerless layout a
     # block's address *is* its user pointer, so `base_only` accepts them; the
     # header build only escaped because the same residue was header-valued.
     # Measured: 2.1k stale seeds retaining a 74k-object web on gc_phases.

@@ -85,7 +85,7 @@ def main():
     if result.returncode == 0 or "ERROR: AddressSanitizer: heap-use-after-free" not in report:
         raise RuntimeError("ASan control did not detect the intentional use-after-free")
     print("ASan control: intentional heap-use-after-free detected", flush=True)
-    for name, flags in [("header", []), ("headerless", ["-Dgcry_headerless"])]:
+    for name, flags in [("headerless", []), ("header", ["-Dgcry_block_headers"])]:
         binary = out / name
         build(args.source.resolve(), binary, args.crystal, args.clang, flags)
         subprocess.run([str(binary)], cwd=ROOT, env=env, timeout=120, check=True)

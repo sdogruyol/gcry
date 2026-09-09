@@ -83,7 +83,7 @@ describe "Gcry::Heap mark bitmaps" do
           chunk.value.bitmap_words.should eq(0_u32)
           # The field points at the block header (header build) or at the object
           # itself (headerless, where the large header sits behind the object).
-          large_offset = {% if flag?(:gcry_headerless) %} Gcry::ChunkHeader.large_data_offset {% else %} Gcry::ChunkHeader::SIZE {% end %}
+          large_offset = {% if !flag?(:gcry_block_headers) %} Gcry::ChunkHeader.large_data_offset {% else %} Gcry::ChunkHeader::SIZE {% end %}
           chunk.value.data_offset.should eq(large_offset.to_u32)
           Gcry::ChunkHeader.mark_bitmap(chunk).should eq(Pointer(UInt64).null)
         else
@@ -101,7 +101,7 @@ describe "Gcry::Heap mark bitmaps" do
     end
   end
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # Headerless has no header to fall back to; the representation cannot be off.
     it "leaves chunks bare when the representation is off" do
       heap = header_heap
@@ -118,7 +118,7 @@ describe "Gcry::Heap mark bitmaps" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # Headerless has no header to fall back to; the representation cannot be off.
     it "refuses to change representation once chunks exist" do
       heap = header_heap

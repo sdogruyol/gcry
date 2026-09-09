@@ -1,9 +1,9 @@
 require "./spec_helper"
 
-# What `-Dgcry_headerless` refuses, and the large-object layout it keeps. All
-# of it is compiled out on the header build, where the switches are live and
-# covered by their own specs.
-{% if flag?(:gcry_headerless) %}
+# What the headerless layout (the default) refuses, and the large-object
+# layout it keeps. All of it is compiled out under `-Dgcry_block_headers`,
+# where the switches are live and covered by their own specs.
+{% if !flag?(:gcry_block_headers) %}
   describe "headerless switches" do
     it "has no block header" do
       Gcry::BlockHeader::SIZE.should eq(0)

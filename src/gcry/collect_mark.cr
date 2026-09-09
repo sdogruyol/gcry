@@ -289,7 +289,7 @@ module Gcry
     # 32 KiB IO buffers). Optional watch type_id → first_mark_watch_*.
     private def note_first_mark(chunk : ChunkHeader*, header : BlockHeader*, source : RootSource) : Nil
       # Size and kind come from the chunk: the header alone has neither for a
-      # small block under `-Dgcry_headerless`.
+      # small block on the headerless layout.
       bytes = block_payload(chunk, header).to_u64
       atomic = atomic_of(chunk, header)
       case source

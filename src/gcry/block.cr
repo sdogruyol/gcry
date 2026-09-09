@@ -31,10 +31,20 @@ module Gcry
     # the object — its `type_id` lives in the first word. Every accessor below
     # is therefore conditioned on the flag, and the ones that cannot be answered
     # without a chunk are removed rather than left to return garbage.
-    {% if flag?(:gcry_headerless) %}
-      SIZE = 0
-    {% else %}
+    #
+    # Headerless is the default layout; `-Dgcry_block_headers` restores the
+    # 16-byte header (and with it the freelist allocator and the nursery,
+    # which both live in header fields). `-Dgcry_headerless` was the opt-in
+    # spelling before the flip and is accepted as a no-op — asking for both
+    # is a contradiction, refused at compile time rather than resolved
+    # silently in either direction.
+    {% if flag?(:gcry_block_headers) && flag?(:gcry_headerless) %}
+      {% raise "gcry: -Dgcry_block_headers and -Dgcry_headerless are mutually exclusive (headerless is the default; pass neither)" %}
+    {% end %}
+    {% if flag?(:gcry_block_headers) %}
       SIZE = 16
+    {% else %}
+      SIZE = 0
     {% end %}
 
     property size : UInt32
@@ -109,7 +119,7 @@ module Gcry
     # "not free" is the safe direction for a marker (it never skips a live
     # object); sweep does not consult this at all on a bitmap chunk.
     def self.free?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         false
       {% else %}
         (header.value.flags & Flags::FREE) != 0
@@ -120,7 +130,7 @@ module Gcry
     # the block get `false` under headerless — the conservative answer, since it
     # means "scan it", which is safe if wasteful. Live scan paths take the chunk.
     def self.atomic?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         false
       {% else %}
         (header.value.flags & Flags::ATOMIC) != 0
@@ -133,7 +143,7 @@ module Gcry
     # small object into the large-object free path — `cache_large_chunk` on a
     # size-class chunk, which corrupts the heap.
     def self.large?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         false
       {% else %}
         (header.value.flags & Flags::LARGE) != 0
@@ -141,7 +151,7 @@ module Gcry
     end
 
     def self.nursery?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Nursery chunks are excluded from bitmap chunks, and headerless
         # requires bitmap_alloc, so no headerless block is ever nursery.
         false
@@ -151,7 +161,7 @@ module Gcry
     end
 
     def self.marked?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Unanswerable without a chunk; `Heap#heap_marked?` reads the bitmap.
         # False means "not yet marked", which at worst re-marks — never skips.
         false
@@ -162,7 +172,7 @@ module Gcry
     end
 
     def self.set_mark(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # The mark lives in the chunk's mark bitmap. Writing here would land on
         # the object's own bytes. `Heap#heap_set_mark` / `heap_marked?` are the
         # only correct entry points; R3 in the plan is exactly this hazard, and
@@ -184,7 +194,7 @@ module Gcry
     # about one child in ninety, 2026-09-04). A compare-and-swap that re-reads
     # the generation until the stored one is current cannot lose that write.
     def self.set_mark_allocating(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         return
       {% else %}
         cas_mark_gen(pointerof(header.value.@flags))
@@ -209,7 +219,7 @@ module Gcry
     end
 
     def self.clear_mark(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # The mark lives in the chunk's mark bitmap. Writing here would land on
         # the object's own bytes. `Heap#heap_set_mark` / `heap_marked?` are the
         # only correct entry points; R3 in the plan is exactly this hazard, and
@@ -243,7 +253,7 @@ module Gcry
     end
 
     def self.set_finalizer(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Nothing reads this flag since 7.4 replaced it with the finalizer
         # registry's index, and under headerless a small block has no header —
         # this write would land in the object's own first words.
@@ -255,7 +265,7 @@ module Gcry
     end
 
     def self.set_disappearing(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Nothing reads this flag since 7.4 replaced it with the finalizer
         # registry's index, and under headerless a small block has no header —
         # this write would land in the object's own first words.
@@ -273,7 +283,7 @@ module Gcry
     end
 
     def self.set_free(header : BlockHeader*, next_free : Void*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Freelist-shaped, and the freelist is gone under bitmap_alloc (which
         # headerless requires). Reaching here would corrupt an object.
         return
@@ -365,7 +375,7 @@ module Gcry
     end
 
     def self.set_used(header : BlockHeader*, size : UInt32, flags : UInt32) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Nothing to write. Occupancy is `occ`, size is the chunk's size class,
         # ATOMIC is the chunk kind (7.2), and the mark bit is the mark bitmap.
         # Writing here would land on the object's own first 16 bytes.
@@ -518,7 +528,7 @@ module Gcry
     end
 
     def self.large_header(chunk : ChunkHeader*) : BlockHeader*
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         (chunk.as(UInt8*) + ChunkHeader::SIZE).as(BlockHeader*)
       {% else %}
         data_start(chunk).as(BlockHeader*)
@@ -527,7 +537,7 @@ module Gcry
 
     # The user pointer of a large chunk's single object.
     def self.large_user(chunk : ChunkHeader*) : Void*
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         data_start(chunk)
       {% else %}
         (data_start(chunk).as(UInt8*) + BlockHeader::SIZE).as(Void*)

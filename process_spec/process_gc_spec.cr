@@ -336,8 +336,8 @@ describe "process GC free-path flag" do
     #     (`occ &= mark`) and writes no block header at all — removing that
     #     per-block write is the whole point of the representation, so
     #     recording the flag there would cost exactly what it bought;
-    #   * `-Dgcry_headerless` has no header to write, and forces
-    #     `bitmap_alloc` on for unrelated reasons (`Heap#initialize`).
+    #   * the headerless layout (the default) has no header to write, and
+    #     forces `bitmap_alloc` on for unrelated reasons (`Heap#initialize`).
     #
     # So the condition is `bitmap_alloc?`, which covers both, and it is a
     # *runtime* test because `GCRY_BITMAP_ALLOC` is an env knob rather than a

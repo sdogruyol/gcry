@@ -35,15 +35,18 @@ high-water mark (libproc), post-GC RSS the resident size after `/gc-collect`.
 | arm | req/s | % Boehm [95% CI] | peak footprint × | post-GC RSS (KiB) | faults / 1k | p99 µs |
 |---|---:|---:|---:|---:|---:|---:|
 | Boehm | 59 546 | 100.0% | 1.00 | 23 464 | 0.3 | 2 925 |
-| **gcry, default** (bitmap, header layout) | 60 607 | **101.8%** [100.5, 103.1] | **1.97** | 28 264 (1.20×) | 0.8 | 3 005 |
-| gcry, `GCRY_BITMAP_ALLOC=0` (freelist) | 50 925 | **85.5%** [84.6, 86.4] | 1.78 | 25 096 (1.07×) | 344.3 | 5 155 |
-| gcry, `-Dgcry_headerless` | 60 686 | **101.9%** [100.9, 103.0] | 1.50 | 23 136 (0.99×) | 0.4 | 2 935 |
+| **gcry, default** (headerless layout, bitmap allocator) | 60 686 | **101.9%** [100.9, 103.0] | **1.50** | 23 136 (0.99×) | 0.4 | 2 935 |
+| gcry, `-Dgcry_block_headers` (header layout, bitmap — the 0.24.x default) | 60 607 | **101.8%** [100.5, 103.1] | 1.97 | 28 264 (1.20×) | 0.8 | 3 005 |
+| gcry, `-Dgcry_block_headers` + `GCRY_BITMAP_ALLOC=0` (freelist) | 50 925 | **85.5%** [84.6, 86.4] | 1.78 | 25 096 (1.07×) | 344.3 | 5 155 |
 
-Throughput reads as on Linux (bitmap at Boehm parity, +19% over the
-freelist, 10% less CPU per request than Boehm); RSS does not: the bitmap
-arm's peak footprint is **1.10× the freelist's** here where it was 0.69× on
-Linux, because both arms sit at the 16 MiB Darwin floor and the warm-chunk
-budget (= the threshold) is the whole difference. The short smoke
+Throughput reads as on Linux (the bitmap allocator at Boehm parity on either
+layout, +19% over the freelist, 10% less CPU per request than Boehm); RSS
+does not: the header layout's peak footprint is **1.10× the freelist's** here
+where it was 0.69× on Linux, because both arms sit at the 16 MiB Darwin floor
+and the warm-chunk budget (= the threshold) is the whole difference. The
+headerless default takes the peak footprint from 1.97× to 1.50× (44.4 → 33.6
+MB) and post-GC resident to Boehm parity on top of that, at the same
+throughput. The short smoke
 (`bench/perf_smoke.sh`, `wrk -c50 -d5`) agrees: `/json` 101.3% at 1.275×
 post-GC RSS and 0.367 ms pause p50 on the default
 (`bench/log/macos/2026-09-06-173014/`), 88.4% at 1.202× and 0.419 ms on the

@@ -467,10 +467,16 @@ mark-audit: $(BIN)
 # cheap path. Both directions, because the first arm alone is just a run that
 # happened not to race: four threads must lose some on the old path and none on
 # the new one. Measured: 5 723 of 1 200 000 lost, and 0.
+#
+# The plain arm is a header-layout build: the bitmap allocator implies atomic
+# counters, and the headerless default forces the bitmap allocator on, so the
+# only heap that still has the plain path to lose increments on is the
+# freelist under `-Dgcry_block_headers`.
 heap-counters: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/heap_counters.cr -o $(BIN)/heap_counters --error-trace
 	$(BIN)/heap_counters
-	GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 $(BIN)/heap_counters --plain
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/heap_counters.cr -o $(BIN)/heap_counters_hdr --error-trace
+	GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 $(BIN)/heap_counters_hdr --plain
 
 # The fix for the `Thread` use-after-free, and the window it closes.
 #

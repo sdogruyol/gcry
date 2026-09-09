@@ -25,7 +25,7 @@ class Gcry::Heap
   end
 end
 
-{% unless flag?(:gcry_headerless) %}
+{% if flag?(:gcry_block_headers) %}
   describe "header allocation zeroing across a peer refill" do
     [false, true].each do |nursery|
       it "keeps the claimed block's clearing decision (nursery=#{nursery})" do

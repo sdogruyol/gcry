@@ -662,3 +662,22 @@ re-sampled profile; peak RSS × Boehm must not move.
       would lower idle RSS without touching the loaded number.
 - [x] Items 3–5 together: 113.3% [88.5, 138.0] of item 2 at n = 3, CPU 224 → 199 ms/10k, RSS 1.01×.
       Log: `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Branch `perf-stage2` on the PR head, unpushed.
+
+## Headerless default (2026-09-10)
+
+Branch `feat/headerless-default`, PR against `sdogruyol/gcry`.
+
+- [x] Flag polarity: `flag?(:gcry_headerless)` → `!flag?(:gcry_block_headers)`
+      at every code site; both flags together is a compile error; the old
+      spelling alone is a no-op
+- [x] CI: plain runs build headerless; the header layout keeps arms on both
+      allocators (Linux, aarch64, Darwin, Windows `headers`/`freelist`, ASan);
+      env-knob smoke runs nursery/freelist/TLAB on the layout that reads them
+- [x] Docs: README tables and feature row, HARDENING compile-flag table +
+      knob rows, PERF / PERF-macos headline tables, WINDOWS, CHANGELOG
+- [x] `crystal tool format`, `make lint`, `make knob-doc-check` clean
+- [x] Every Linux CI gate green on the headerless default; spec suites on all
+      three layout/allocator arms (`make heap-counters` control moved to the
+      header layout — the only heap with a plain counter path)
+- [ ] `bench/baseline/perf_smoke.json` re-recorded after merge (ten green
+      master runs) — follow-up, per the file's provenance note

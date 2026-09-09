@@ -21,7 +21,7 @@ describe "scan length is chunk-derived" do
       keep << a
       # Corrupt a's header size to something absurd. If the collector trusted
       # it, scanning `a` would walk far past the block — and past the chunk.
-      {% unless flag?(:gcry_headerless) %}
+      {% if flag?(:gcry_block_headers) %}
         header = Gcry::BlockHeader.from_user(a)
         h = header.value
         h.size = 0x7FFF_FFFF_u32

@@ -325,14 +325,14 @@ module Gcry
     property scan_static_roots : Bool = false
     # Default `true`, except under headerless, where the setter below explains
     # why a nursery cannot exist and the initial value must agree with it.
-    {% if flag?(:gcry_headerless) %}
+    {% if !flag?(:gcry_block_headers) %}
       getter nursery_enabled : Bool = false
     {% else %}
       getter nursery_enabled : Bool = true
     {% end %}
 
     def nursery_enabled=(value : Bool) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Phase 7.3: nursery chunks are header-based and excluded from bitmap
         # chunks, so a headerless heap cannot run one. Enabling it put a
         # freelist-era allocator under objects with no header — the
@@ -1921,7 +1921,7 @@ module Gcry
     # previous cycle's mark batches survived there, were re-established at the
     # same address next cycle, and were scanned as mutator stack before this
     # cycle overwrote them. Measured: 40 stale stack seeds retaining a 44k
-    # object web on gc_phases under `-Dgcry_headerless`.
+    # object web on gc_phases on the headerless layout.
     private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector

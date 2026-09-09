@@ -8,7 +8,7 @@ Load: `bench/kemal`, `wrk -c 100 -d 30`, fresh process per path, `--release` (`-
 
 **RSS:** after wrk, `GET /gc-collect`, then read process RSS (`ps` / VmRSS) — end-of-run noise otherwise dominates.
 
-## Headline (v0.24.0 — the bitmap default) — Linux *(measured)*
+## Headline (the headerless default) — Linux *(measured)*
 
 `bench/log/linux/2026-09-06-bitmap-default-ab/` (`8421f7b`, Crystal 1.21.0,
 Ryzen AI 9 465, Linux 7.2.2, EC1). `bench/performance/kemal_ab.py`, Kemal
@@ -19,16 +19,28 @@ post-GC the resident size after `/gc-collect`.
 | arm | req/s | % Boehm [95% CI] | peak RSS × | faults / 1k | CPU ms / 10k | p99 µs |
 |---|---:|---:|---:|---:|---:|---:|
 | Boehm | 101 268 | 100.0% | 1.00 | 0.4 | 87.8 | 2 600 |
-| **gcry, default** (bitmap, header layout) | 106 453 | **105.3%** [99.2, 111.3] | **1.30** | 2.7 | 74.6 | 2 360 |
-| gcry, `GCRY_BITMAP_ALLOC=0` (freelist, the old default) | 75 455 | **74.9%** [70.9, 78.9] | 1.87 | 1 671 | 112.9 | 6 380 |
-| gcry, `-Dgcry_headerless` | 113 552 | **112.6%** [106.6, 118.6] | 1.07 | 1.1 | 69.0 | 2 210 |
+| **gcry, default** (headerless layout, bitmap allocator) | 113 552 | **112.6%** [106.6, 118.6] | **1.07** | 1.1 | 69.0 | 2 210 |
+| gcry, `-Dgcry_block_headers` (header layout, bitmap — the 0.24.x default) | 106 453 | **105.3%** [99.2, 111.3] | 1.30 | 2.7 | 74.6 | 2 360 |
+| gcry, `-Dgcry_block_headers` + `GCRY_BITMAP_ALLOC=0` (freelist, the pre-0.24.0 default) | 75 455 | **74.9%** [70.9, 78.9] | 1.87 | 1 671 | 112.9 | 6 380 |
 
-Against the old default the bitmap allocator is **141.9%** [132.1, 151.6] at
-**0.69×** its peak RSS. The RSS above Boehm is the warm-chunk budget (live ×
-`GCRY_THRESHOLD_FACTOR`, capped by the threshold): peak = post-GC = 37.5 MB
-flat where the freelist spiked to 54 MB and collapsed to 17 MB. An explicit
-`GC.collect` releases the budget on the release tree — Kemal `/json` after
-`/gc-collect` 15.2 MB against Boehm's 12.9 on the CI runner (~1.2×).
+Against the freelist the headerless default is **151.7%** [142.0, 161.4] at
+**0.57×** its peak RSS; the header layout's bitmap allocator is 141.9%
+[132.1, 151.6] at 0.69×. Headerless against the header layout, same run:
++6.9 pp of Boehm on throughput (t 4.43 against 1.83 on the Boehm pairing),
+peak RSS 31.2 against 37.5 MB (**−17%**), 1.1 against 2.7 faults per 1 000
+requests, 7% less CPU per request, p99 2.21 against 2.36 ms. The RSS above
+Boehm is the warm-chunk budget (live × `GCRY_THRESHOLD_FACTOR`, capped by
+the threshold): peak = post-GC = 31.2 MB flat on headerless (37.5 MB on the
+header layout) where the freelist spiked to 54 MB and collapsed to 17 MB. An
+explicit `GC.collect` releases the budget on the release tree — Kemal `/json`
+after `/gc-collect` 15.2 MB against Boehm's 12.9 on the CI runner (~1.2×,
+header layout). The per-object saving is the 16-byte header: 1 M live
+16-byte objects, chain walked after collection, 34.9 → 19.3 MB (**−44.5%**;
+32 B −31.2%, 64 B −19.2%, 128 B −10.8%,
+`bench/log/linux/2026-09-03-phase7-headerless-rss/`).
+
+`GCRY_THRESHOLD_FACTOR` and the acikturkiye rows below were measured on the
+header layout (0.24.0) and have not been re-cut on headerless.
 
 `GCRY_THRESHOLD_FACTOR` (`…/2026-09-06-threshold-factor-ab/`, same protocol,
 null 98.0% [93.8, 102.3]): factor 100 107.4% @ 1.31×, 75 98.6% @ 1.13×,
