@@ -1,0 +1,6 @@
+[
+  {"name": "boehm", "root": "/tmp/g41", "flags": ["--release"]},
+  {"name": "null", "copy_of": "boehm"},
+  {"name": "headers", "root": "/tmp/g41", "flags": ["--release", "-Dgc_none", "-Dgcry_block_headers"], "env": {}},
+  {"name": "headerless", "root": "/tmp/g41", "flags": ["--release", "-Dgc_none"], "env": {}}
+]
