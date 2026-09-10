@@ -11,7 +11,7 @@ private def header_dormant_heap : Gcry::Heap
   heap
 end
 
-{% unless flag?(:gcry_headerless) %}
+{% if flag?(:gcry_block_headers) %}
   describe "header dormant chunk revival" do
     it "accounts capacity once across repeated dormant cycles" do
       heap = header_dormant_heap

@@ -16,7 +16,7 @@ describe "Gcry TLAB" do
 
       ptrs = [] of Void*
       200.times { ptrs << heap.malloc(48) }
-      {% unless flag?(:gcry_headerless) %} heap.tlab_refills.should be > 0 {% end %} # headerless: bitmap pool, no TLAB
+      {% if flag?(:gcry_block_headers) %} heap.tlab_refills.should be > 0 {% end %} # headerless: bitmap pool, no TLAB
       ptrs.each { |p| heap.is_heap_ptr(p).should be_true }
       ptrs.each { |p| heap.free(p) }
       heap.live_objects.should eq(0)
@@ -158,7 +158,7 @@ describe "Gcry MT alloc storm (TLAB)" do
 
       # Collect from the main thread after workers finish.
       heap.collect(scan_stack: false)
-      {% unless flag?(:gcry_headerless) %} heap.tlab_refills.should be > 0 {% end %} # headerless: bitmap pool, no TLAB
+      {% if flag?(:gcry_block_headers) %} heap.tlab_refills.should be > 0 {% end %} # headerless: bitmap pool, no TLAB
     ensure
       heap.destroy
     end

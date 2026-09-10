@@ -36,7 +36,7 @@ describe "block_payload (chunk-derived size)" do
           header = cursor.as(Gcry::BlockHeader*)
           if heap.block_allocated_public?(chunk, header)
             checked += 1
-            expected = {% if flag?(:gcry_headerless) %} Gcry::SizeClasses.payload(cls) {% else %} header.value.size {% end %}
+            expected = {% if !flag?(:gcry_block_headers) %} Gcry::SizeClasses.payload(cls) {% else %} header.value.size {% end %}
             heap.block_payload(chunk, header).should eq(expected)
           end
           cursor += block_bytes
@@ -80,7 +80,7 @@ describe "block_payload (chunk-derived size)" do
       heap.nursery_enabled = false
       p = heap.malloc(96)
       h = Gcry::BlockHeader.from_user(p)
-      expected = {% if flag?(:gcry_headerless) %} Gcry::SizeClasses.round(96_u64).to_u32 {% else %} h.value.size {% end %}
+      expected = {% if !flag?(:gcry_block_headers) %} Gcry::SizeClasses.round(96_u64).to_u32 {% else %} h.value.size {% end %}
       heap.block_payload(h).should eq(expected)
     ensure
       heap.destroy

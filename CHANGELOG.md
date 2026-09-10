@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrading:** the headerless small-object layout is now the compile default.
+A plain `crystal build -Dgc_none` gets it; nothing changes in how gcry is
+required or built. `-Dgcry_block_headers` restores the 16-byte per-object
+header layout that shipped through 0.25.0, and is required for
+`GCRY_BITMAP_ALLOC=0` (the freelist), `GCRY_NURSERY`, and a
+`GCRY_CHUNK_BYTES` above 51.2 MiB — none of which exist on a headerless heap.
+`-Dgcry_headerless` is accepted as a no-op; passing both flags is a compile
+error.
+
+### Changed
+
+- **The headerless layout is the compile default.** Small blocks are carved
+  back-to-back with no 16-byte `BlockHeader` in front of each object; size and
+  kind come from the chunk, marks and occupancy from its bitmaps, and large
+  objects keep their header inside the chunk's metadata region. The
+  representation shipped opt-in (`-Dgcry_headerless`) in 0.22.0 and has run
+  its own unit, process, ASan, Darwin, aarch64 and Windows CI arms since;
+  what changes here is the polarity of the flag. Measured on the five-arm
+  paired Kemal `/json` run that decided the 0.24.0 bitmap default
+  (`bench/log/linux/2026-09-06-bitmap-default-ab/`, 20 rotated rounds,
+  identical-binary null control, Ryzen AI 9 465): headerless **112.6%**
+  [106.6, 118.6] of Boehm at **1.07×** its peak RSS, 1.1 minor faults per
+  1 000 requests, 69.0 CPU ms per 10 k requests, p99 2.21 ms — against the
+  header layout's 105.3% [99.2, 111.3] at 1.30×, 2.7 faults, 74.6 ms and
+  2.36 ms on the same binary tree. Peak RSS 31.2 against 37.5 MB (−17%),
+  post-GC the same, both flat. Darwin, same protocol
+  (`bench/log/macos/2026-09-06-bitmap-default-ab/`, Apple M2 Pro): 101.9%
+  [100.9, 103.0] at **1.50×** peak footprint and **0.99×** post-GC resident
+  against the header layout's 101.8% at 1.97× and 1.20×. The per-object
+  saving is the header itself: 1 M live 16-byte objects, chain walked after
+  the collection, 34.9 → 19.3 MB (**−44.5%**; 32 B −31.2%, 64 B −19.2%,
+  128 B −10.8%, `bench/log/linux/2026-09-03-phase7-headerless-rss/`). The
+  5-hour soak passed on the layout (+3.2 MB against a 4 MB bound, 0
+  errors). What the layout gives up, unchanged from its opt-in days: the
+  bitmap allocator is forced on (no freelist), the nursery is off and
+  `GCRY_NURSERY` ignored (it was already off by default because it is
+  unsound), `GCRY_CHUNK_BYTES` is exact to 51.2 MiB rather than 86.3, and
+  the SegvReport cannot name the free path for a swept block. CI: the plain
+  spec, process-spec, sample and gate runs on every platform now build
+  headerless; the header layout keeps arms on both allocators (Linux,
+  aarch64, Darwin, Windows x86_64 and ARM64 `headers` / `freelist`
+  variants, ASan), and the env-knob smoke exercises the nursery, freelist
+  and TLAB knobs on the layout that reads them, and the gates whose control
+  arm pins a header-layout knob — `heap-counters` (plain counters),
+  `poison-freed` (freelist arms), `darwin-bitmap-page-release` (`--headers`)
+  and the sound-profile smoke (`GCRY_NURSERY`) — build that arm with
+  `-Dgcry_block_headers`, so the knob is read rather than silently ignored. `bench/baseline/perf_smoke.json`
+  was recorded on the header layout and needs re-recording on the first ten
+  green master runs after this lands, as its provenance note says for any
+  default-allocator change.
+
 ### Fixed
 
 - The perf-smoke baseline is re-recorded on the bitmap allocator default

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('default', 'freelist', 'headerless')]
+    [ValidateSet('default', 'headers', 'freelist')]
     [string] $Variant = 'default',
     [ValidateSet('all', 'specs', 'samples')]
     [string] $Suite = 'all',
@@ -38,8 +38,11 @@ if (($version -join "`n") -notmatch "Default target: $Architecture.*windows") {
 $previousBitmap = $env:GCRY_BITMAP_ALLOC
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
+    # default: the headerless layout (the compile default). headers: the
+    # 16-byte header layout on the bitmap allocator. freelist: the header
+    # layout on the freelist — GCRY_BITMAP_ALLOC=0 is only read there.
     $env:GCRY_BITMAP_ALLOC = if ($Variant -eq 'freelist') { '0' } else { '1' }
-    $flags = if ($Variant -eq 'headerless') { @('-Dgcry_headerless') } else { @() }
+    $flags = if ($Variant -eq 'default') { @() } else { @('-Dgcry_block_headers') }
 
     if ($Suite -ne 'samples') {
         Write-Host "Windows library specs ($Variant)"

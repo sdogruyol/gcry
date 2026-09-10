@@ -1,5 +1,8 @@
 # Phase 7 — headerless blocks (`-Dgcry_headerless`)
 
+> **2026-09-10:** headerless is the compile default; the header layout is
+> `-Dgcry_block_headers`. The flag names below are the pre-flip spelling.
+
 Branch `simdgc-headerless`, forked from `simdgc`. This is the RSS phase: 16 B
 per object, which is **50% of a class-0 block**, aimed at RSS × Boehm < 1.0 —
 the half of the shipping bar (`EC1 /json ≥95% @ ≤1.0× RSS`) that the `simdgc`

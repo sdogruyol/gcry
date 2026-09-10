@@ -73,9 +73,9 @@ scrubbing dead stack. Conservative root scans include that red zone.
 Run the same checks as the Windows CI matrix:
 
 ```powershell
-./ci/windows.ps1 -Variant default
-./ci/windows.ps1 -Variant freelist
-./ci/windows.ps1 -Variant headerless
+./ci/windows.ps1 -Variant default    # headerless layout, bitmap allocator
+./ci/windows.ps1 -Variant headers    # -Dgcry_block_headers, bitmap allocator
+./ci/windows.ps1 -Variant freelist   # -Dgcry_block_headers, GCRY_BITMAP_ALLOC=0
 # On ARM64, add -Architecture aarch64 to each command.
 ```
 

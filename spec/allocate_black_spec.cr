@@ -6,7 +6,7 @@ require "./spec_helper"
 # and its write and then overwrite the collector's mark with a stale copy.
 # This pins the observable contract: the mark lands, other flags survive, and
 # a generation bump before the write is honoured.
-{% unless flag?(:gcry_headerless) %}
+{% if flag?(:gcry_block_headers) %}
   describe "allocate-black mark" do
     it "marks with the current generation and keeps the other flags" do
       header = Pointer(Gcry::BlockHeader).malloc(1)

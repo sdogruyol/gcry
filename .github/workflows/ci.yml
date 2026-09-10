@@ -128,29 +128,29 @@ jobs:
           done
           test "$ok" = 1
 
-      # The two representations the collector now ships. Neither was built by
-      # any CI job when they landed: `GCRY_BITMAP_ALLOC` had unit coverage
-      # only under the Boehm library heap, and `spec/headerless_switches_spec.cr`
-      # is entirely inside `{% if flag?(:gcry_headerless) %}`, so it was
-      # compiled out of every job in the matrix.
-      - name: Unit specs (bitmap allocator)
-        run: GCRY_BITMAP_ALLOC=1 crystal spec --error-trace
+      # The headerless layout is the compile default, so the plain runs above
+      # cover it. The 16-byte header layout is `-Dgcry_block_headers` and keeps
+      # its own arms: the bitmap allocator on it (the 0.24.x process default)
+      # and the freelist (`GCRY_BITMAP_ALLOC=0`, which is only a knob on the
+      # header layout — headerless forces the bitmap representation). Library
+      # heaps on the header layout keep the freelist unless `=1`, so the unit
+      # suite runs both ways there.
+      - name: Unit specs (header layout, freelist)
+        run: crystal spec -Dgcry_block_headers --error-trace
 
-      - name: Unit specs (header-less layout)
-        run: crystal spec -Dgcry_headerless --error-trace
+      - name: Unit specs (header layout, bitmap allocator)
+        run: GCRY_BITMAP_ALLOC=1 crystal spec -Dgcry_block_headers --error-trace
 
-      - name: Process GC specs (header-less layout)
-        run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
+      - name: Process GC specs (header layout, bitmap allocator)
+        run: crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
 
-      # The bitmap allocator is the process default since 0.24.0; the freelist
-      # is the escape (GCRY_BITMAP_ALLOC=0) and keeps its own arm.
-      - name: Process GC specs (freelist allocator)
-        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
+      - name: Process GC specs (header layout, freelist)
+        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
 
-      - name: Sample hello (header-less layout)
+      - name: Sample hello (header layout)
         run: |
-          crystal build -Dgc_none -Dgcry_headerless samples/hello.cr -o bin/hello_hl
-          ./bin/hello_hl
+          crystal build -Dgc_none -Dgcry_block_headers samples/hello.cr -o bin/hello_hdr
+          ./bin/hello_hdr
 
       - name: Sample hello (-Dgc_none)
         run: |
@@ -180,9 +180,14 @@ jobs:
       - name: Env knobs smoke (nursery / chunks / incremental / stress)
         run: |
           crystal build -Dgc_none samples/hello.cr -o bin/hello_env
+          # Knobs that only exist on the header layout (nursery, freelist,
+          # TLAB) are ignored on the headerless default; exercise them on the
+          # layout that reads them.
+          crystal build -Dgc_none -Dgcry_block_headers samples/hello.cr -o bin/hello_env_hdr
           GCRY_DISABLE_AUTO=1 ./bin/hello_env
           GCRY_DISABLE_NURSERY=1 ./bin/hello_env
           GCRY_NURSERY=262144 ./bin/hello_env
+          GCRY_NURSERY=262144 ./bin/hello_env_hdr
           GCRY_KEEP_CHUNKS=1 ./bin/hello_env
           GCRY_RELEASE_CHUNKS=1 ./bin/hello_env
           # timeout: GCRY_STRESS × SYSMON/Thread.lock deadlock used to hang the job for hours
@@ -191,8 +196,9 @@ jobs:
           GCRY_INCREMENTAL=1 ./bin/hello_env
           GCRY_BITMAP=1 ./bin/hello_env
           GCRY_BITMAP_ALLOC=0 ./bin/hello_env
-          GCRY_BITMAP_ALLOC=0 GCRY_CHUNK_RADIX=1 ./bin/hello_env
-          GCRY_BITMAP_ALLOC=0 GCRY_TLAB=1 ./bin/hello_env
+          GCRY_BITMAP_ALLOC=0 ./bin/hello_env_hdr
+          GCRY_BITMAP_ALLOC=0 GCRY_CHUNK_RADIX=1 ./bin/hello_env_hdr
+          GCRY_BITMAP_ALLOC=0 GCRY_TLAB=1 ./bin/hello_env_hdr
           GCRY_SIMD=off ./bin/hello_env
           GCRY_SIMD=scalar GCRY_BITMAP_ALLOC=1 ./bin/hello_env
           GCRY_PREFETCH=0 ./bin/hello_env
@@ -672,8 +678,10 @@ jobs:
           GCRY_SOUND=1 ./bin/sound_profile
           # An explicit knob must still override the profile.
           GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./bin/sound_profile
-          # Barrier axis: sound roots + a page-dirty barrier must demote the label.
-          GCRY_SOUND=1 GCRY_NURSERY=262144 ./bin/sound_profile
+          # Barrier axis: sound roots + a page-dirty barrier must demote the
+          # label. The nursery only exists on the header layout.
+          crystal build -Dgc_none -Dgcry_block_headers samples/sound_profile.cr -o bin/sound_profile_hdr
+          GCRY_SOUND=1 GCRY_NURSERY=262144 ./bin/sound_profile_hdr
 
       # The sound profile is the configuration a correctness claim cites, so it
       # has to stay green — a heuristic-off path that only runs at bench time
@@ -1184,10 +1192,10 @@ jobs:
           for trial in 1 2 3; do
             crystal spec -Dgc_none process_spec --error-trace
           done
-          # The bitmap allocator is the process default; cover the freelist
-          # escape too on the native weakly ordered target.
-          GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
-          crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
+          # Headerless is the compile default; cover the header layout on
+          # both allocators too on the native weakly ordered target.
+          crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
+          GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
           crystal build -Dgc_none samples/hello.cr -o bin/hello
           ./bin/hello
           crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
@@ -1251,7 +1259,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [default, freelist, headerless]
+        variant: [default, headers, freelist]
     name: test (windows x86_64, ${{ matrix.variant }})
     steps:
       - uses: actions/checkout@v7
@@ -1273,7 +1281,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [default, freelist, headerless]
+        variant: [default, headers, freelist]
     name: test (windows arm64, ${{ matrix.variant }})
     steps:
       - uses: actions/checkout@v7
@@ -1344,36 +1352,32 @@ jobs:
           make ec-queue-audit
           make perf-baseline
 
-      # The two representations PR #33 shipped, on the platform that was
-      # missing them. The Linux job gained these arms when they landed; this
-      # job did not, so `GCRY_BITMAP_ALLOC` and `-Dgcry_headerless` were never
-      # *built* on Darwin — and the two are not interchangeable with the Linux
-      # readings, because the page size is 16 KiB here against 4 KiB there and
-      # every bitmap ordinal and free-page mask is derived from it.
-      # All four verified on an Apple M2 Pro / Darwin 25.6.0 / Crystal 1.21.0
-      # host on 2026-09-04 before being added: 233, 219, 21 and 21 examples,
-      # 0 failures each.
-      - name: Unit specs (bitmap allocator) on Darwin
-        run: GCRY_BITMAP_ALLOC=1 crystal spec --error-trace
+      # Both representations on the platform whose page size is 16 KiB
+      # against Linux's 4 KiB — every bitmap ordinal and free-page mask is
+      # derived from it, so the Linux readings do not transfer. Headerless is
+      # the compile default and is what the plain runs above build; the header
+      # layout (`-Dgcry_block_headers`) keeps its own arms on both allocators.
+      - name: Unit specs (header layout, freelist) on Darwin
+        run: crystal spec -Dgcry_block_headers --error-trace
 
-      - name: Unit specs (header-less layout) on Darwin
-        run: crystal spec -Dgcry_headerless --error-trace
+      - name: Unit specs (header layout, bitmap allocator) on Darwin
+        run: GCRY_BITMAP_ALLOC=1 crystal spec -Dgcry_block_headers --error-trace
 
-      - name: Process GC specs (freelist allocator) on Darwin
-        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none process_spec --error-trace
+      - name: Process GC specs (header layout, bitmap allocator) on Darwin
+        run: crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
 
-      - name: Process GC specs (header-less layout) on Darwin
-        run: crystal spec -Dgc_none -Dgcry_headerless process_spec --error-trace
+      - name: Process GC specs (header layout, freelist) on Darwin
+        run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
 
-      - name: Samples (header-less layout) on Darwin
+      - name: Samples (header layout) on Darwin
         run: |
           mkdir -p bin
-          crystal build -Dgc_none -Dgcry_headerless samples/hello.cr -o bin/hello_hl
-          ./bin/hello_hl
-          crystal build -Dgc_none -Dgcry_headerless samples/stress.cr -o bin/stress_hl
-          ./bin/stress_hl 300
-          crystal build -Dgc_none -Dgcry_headerless samples/json_churn.cr -o bin/json_churn_hl
-          ./bin/json_churn_hl 800
+          crystal build -Dgc_none -Dgcry_block_headers samples/hello.cr -o bin/hello_hdr
+          ./bin/hello_hdr
+          crystal build -Dgc_none -Dgcry_block_headers samples/stress.cr -o bin/stress_hdr
+          ./bin/stress_hdr 300
+          crystal build -Dgc_none -Dgcry_block_headers samples/json_churn.cr -o bin/json_churn_hdr
+          ./bin/json_churn_hdr 800
 
       # `GC.init` resolves the static roots eagerly on both platforms as of
       # 2026-09-04. Darwin was excluded until then because doing it crashed

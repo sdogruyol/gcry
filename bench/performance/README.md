@@ -24,9 +24,10 @@ Example `arms.json` (replace checkout paths):
 ]
 ```
 
-Default flags are `--release -Dgc_none -Dgcry_headerless`. Set flags explicitly
-for header builds; the bitmap allocator is the process default there since
-0.24.0, so put `GCRY_BITMAP_ALLOC=0` in `env` for a freelist arm.
+Default flags are `--release -Dgc_none`, which is the headerless layout.
+Set `-Dgcry_block_headers` explicitly for a header-layout arm; the bitmap
+allocator is the process default there since 0.24.0, so put
+`GCRY_BITMAP_ALLOC=0` in `env` as well for a freelist arm.
 `copy_of` uses exactly the reference binary and environment for a null arm.
 Inherited `GCRY_*`, `EC_PARALLELISM`, and `CRYSTAL_WORKERS` are removed; put
 every arm's tuning variables in its `env` object.
@@ -62,7 +63,7 @@ ring and batched per-thread timing; it adds a ready barrier, size/kind controls,
 JSON output, aggregate elapsed time, and collection/pause deltas.
 
 ```sh
-crystal build --release -Dgc_none -Dgcry_headerless bench/micro/alloc_ns.cr -o bin/alloc_ns
+crystal build --release -Dgc_none bench/micro/alloc_ns.cr -o bin/alloc_ns
 bin/alloc_ns 1 5000000 48
 bin/alloc_ns 4 200000 8192 atomic
 ```

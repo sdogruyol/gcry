@@ -208,7 +208,7 @@ def build_arms(config, output):
             arms.append(dict(source, name=name, copy_of=entry["copy_of"]))
             continue
         root = Path(entry["root"]).resolve()
-        flags = entry.get("flags", ["--release", "-Dgc_none", "-Dgcry_headerless"])
+        flags = entry.get("flags", ["--release", "-Dgc_none"])
         if not isinstance(flags, list) or not all(isinstance(flag, str) for flag in flags):
             raise ValueError("flags must be a string array")
         env = entry.get("env", {})

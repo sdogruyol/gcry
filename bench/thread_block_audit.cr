@@ -159,7 +159,7 @@ exe = Process.executable_path.not_nil!
 failures = [] of String
 
 arms = ["dies", "lives", "lives-minor", "lives-minor-all", "thread", "staged", "staged-nowait"]
-{% if flag?(:gcry_headerless) %}
+{% if !flag?(:gcry_block_headers) %}
   # The two minor-collection arms assert on nursery behaviour — "on a minor an
   # old live object reads unmarked and is *not* dying". Headerless has no
   # nursery: nursery chunks are header-based and excluded from bitmap chunks,

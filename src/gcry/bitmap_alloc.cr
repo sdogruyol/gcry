@@ -157,7 +157,7 @@ module Gcry
     # lock held inside it: set creation happens under the class lock, and the
     # collector holds `@alloc_lock` around the after-world sweep while it
     # waits for that class lock — taking `@alloc_lock` here deadlocked
-    # `process_spec` under `-Dgcry_headerless`.
+    # `process_spec` on the headerless layout.
     @cursor_lock = Crystal::SpinLock.new
     getter cursor_set_count : Int32
     getter cursor_sets_pinned : UInt64 = 0_u64
@@ -1110,8 +1110,8 @@ module Gcry
     # inside the sweep with the class's freelist lock held, and the spinlock is
     # not reentrant. An `[a, b].each` here allocates an `Array(Int32)` on the
     # managed heap, which re-enters `allocate` and deadlocks against the lock
-    # its own caller is holding — observed as `process_spec` hanging under
-    # `-Dgcry_headerless`.
+    # its own caller is holding — observed as `process_spec` hanging on
+    # the headerless layout.
     protected def bitmap_retire_cursor_on(chunk : ChunkHeader*, class_index : Int32) : Bool
       return false if class_index < 0 || class_index >= SIZE_CLASS_COUNT
       # Only this thread's own set: another thread's owner may be inside its

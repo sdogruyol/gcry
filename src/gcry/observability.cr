@@ -393,7 +393,7 @@ module Gcry
             header = cursor.as(BlockHeader*)
             if heap.block_allocated_public?(chunk, header)
               # Size and kind come from the chunk, which is the only place they
-              # exist under `-Dgcry_headerless`; the header build agrees.
+              # exist on the headerless layout; the header build agrees.
               size = heap.block_payload(chunk, header).to_u64
               sc_count[class_index] += 1
               sc_bytes[class_index] += size

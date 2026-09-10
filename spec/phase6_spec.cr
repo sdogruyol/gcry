@@ -1,7 +1,7 @@
 require "./spec_helper"
 
 describe "Gcry nursery (minor GC)" do
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "reclaims unreachable nursery objects on minor_collect" do
       heap = Gcry::Heap.new
@@ -26,7 +26,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "keeps nursery objects reachable from old objects" do
       heap = Gcry::Heap.new
@@ -50,7 +50,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "does not run finalizers for live old objects during minor" do
       heap = Gcry::Heap.new
@@ -81,7 +81,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "triggers minor collect when nursery threshold is crossed" do
       heap = Gcry::Heap.new
@@ -97,7 +97,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "records nursery survival statistics after minor" do
       heap = Gcry::Heap.new
@@ -124,7 +124,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "adjusts nursery threshold via adaptation and stays within clamp bounds" do
       heap = Gcry::Heap.new
@@ -152,7 +152,7 @@ describe "Gcry nursery (minor GC)" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "disables adaptive nursery when property is false" do
       heap = Gcry::Heap.new
@@ -181,7 +181,7 @@ describe "Gcry nursery (minor GC)" do
 end
 
 describe "Gcry incremental mark" do
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "completes a cycle across collect_a_little slices" do
       heap = Gcry::Heap.new
@@ -211,7 +211,7 @@ describe "Gcry incremental mark" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "auto-collects via incremental slices when enabled" do
       heap = Gcry::Heap.new
@@ -234,7 +234,7 @@ describe "Gcry incremental mark" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "records pause percentiles over a ring of samples" do
       heap = Gcry::Heap.new
@@ -258,7 +258,7 @@ describe "Gcry incremental mark" do
     end
   {% end %}
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The nursery is off under headerless (no per-block NURSERY flag); see docs/HARDENING.md GCRY_NURSERY.
     it "tracks reclaimed bytes for prof_stats" do
       heap = Gcry::Heap.new

@@ -102,7 +102,7 @@ describe "Gcry mprotect barrier" do
     end
   end
 
-  {% unless flag?(:gcry_headerless) %}
+  {% if flag?(:gcry_block_headers) %}
     # The mprotect barrier serves the nursery, which is off under headerless.
     it "can prefer mprotect on a process-like heap" do
       pending! "Linux only" unless {{ flag?(:linux) }}

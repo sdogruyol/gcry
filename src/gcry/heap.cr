@@ -268,7 +268,7 @@ module Gcry
       # without `bitmap_alloc` would corrupt silently and only surface after
       # tens of thousands of operations, so the dependency is enforced here
       # rather than documented.
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         @bitmap_alloc = true
         @bitmap_marks = true
       {% else %}
@@ -462,7 +462,7 @@ module Gcry
       if value != @bitmap_marks && !@chunks.null?
         raise ArgumentError.new("bitmap_marks cannot change once chunks are mapped")
       end
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         return value # headerless cannot run on the header representation
       {% end %}
       @bitmap_alloc = false unless value
@@ -475,7 +475,7 @@ module Gcry
     # cursor replaces it outright. Enabling both would have two allocators
     # handing out the same blocks.
     def bitmap_alloc=(value : Bool) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Cannot be turned off: a headerless small block has no header for the
         # freelist to thread `next_free` through, so the freelist allocator
         # would write links into live objects.
@@ -2102,7 +2102,7 @@ module Gcry
                       # offset 48. `large_data_offset` is the chunk-to-object
                       # distance — 48 in both builds — and is what sizes the
                       # mapping; this is the field, and it differs.
-                      {% if flag?(:gcry_headerless) %}
+                      {% if !flag?(:gcry_block_headers) %}
                         (ChunkHeader::SIZE + 16).to_u32
                       {% else %}
                         ChunkHeader::SIZE.to_u32
@@ -2515,7 +2515,7 @@ module Gcry
     # permanently unmarked and it was swept while live.
     @[AlwaysInline]
     private def hdr_set_mark(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         {% if flag?(:gcry_hl_assert) %}
           c = chunk_containing(header.address)
           if c && ChunkHeader.large?(c) && header != ChunkHeader.large_header(c)
@@ -2532,7 +2532,7 @@ module Gcry
 
     @[AlwaysInline]
     private def hdr_marked?(header : BlockHeader*) : Bool
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         BlockHeader.marked_large?(header)
       {% else %}
         BlockHeader.marked?(header)
@@ -2577,7 +2577,7 @@ module Gcry
     end
 
     private def hdr_set_mark_allocating(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         BlockHeader.set_mark_large_allocating(header)
       {% else %}
         BlockHeader.set_mark_allocating(header)
@@ -2618,7 +2618,7 @@ module Gcry
     # at a time — see `chunk_clear_marks`.
     @[AlwaysInline]
     private def heap_clear_mark(header : BlockHeader*) : Nil
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         # Only a block that has a header can have its generation cleared, and
         # under headerless that means large. Writing to a small block here would
         # land on the object; its marks live in the bitmap and are cleared
@@ -2728,7 +2728,7 @@ module Gcry
     def diag_flags(header : BlockHeader*) : UInt64
       chunk = diag_chunk(header)
       return header.value.flags.to_u64 if chunk.nil? || ChunkHeader.large?(chunk)
-      {% if flag?(:gcry_headerless) %}
+      {% if !flag?(:gcry_block_headers) %}
         f = 0_u64
         f |= BlockHeader::Flags::FREE.to_u64 unless block_allocated?(chunk, header)
         f |= BlockHeader::Flags::ATOMIC.to_u64 if atomic_of(chunk, header)

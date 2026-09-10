@@ -433,8 +433,9 @@ poison-freed: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/poison_freed.cr -o $(BIN)/poison_freed --error-trace
 	GCRY_POISON_FREED=1 $(BIN)/poison_freed
 	$(BIN)/poison_freed --control
-	GCRY_BITMAP_ALLOC=0 GCRY_POISON_FREED=1 $(BIN)/poison_freed
-	GCRY_BITMAP_ALLOC=0 $(BIN)/poison_freed --control
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/poison_freed.cr -o $(BIN)/poison_freed_hdr --error-trace
+	GCRY_BITMAP_ALLOC=0 GCRY_POISON_FREED=1 $(BIN)/poison_freed_hdr
+	GCRY_BITMAP_ALLOC=0 $(BIN)/poison_freed_hdr --control
 
 # After mark, before sweep: does any marked object point at a block the sweep is
 # about to free? The `hold` arm plants an edge the mark provably does not follow
@@ -467,10 +468,16 @@ mark-audit: $(BIN)
 # cheap path. Both directions, because the first arm alone is just a run that
 # happened not to race: four threads must lose some on the old path and none on
 # the new one. Measured: 5 723 of 1 200 000 lost, and 0.
+#
+# The plain arm is a header-layout build: the bitmap allocator implies atomic
+# counters, and the headerless default forces the bitmap allocator on, so the
+# only heap that still has the plain path to lose increments on is the
+# freelist under `-Dgcry_block_headers`.
 heap-counters: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/heap_counters.cr -o $(BIN)/heap_counters --error-trace
 	$(BIN)/heap_counters
-	GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 $(BIN)/heap_counters --plain
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/heap_counters.cr -o $(BIN)/heap_counters_hdr --error-trace
+	GCRY_HEAP_COUNTERS_ATOMIC=0 GCRY_BITMAP_ALLOC=0 $(BIN)/heap_counters_hdr --plain
 
 # The fix for the `Thread` use-after-free, and the window it closes.
 #
@@ -814,7 +821,8 @@ darwin-static-root-sections: $(BIN)
 darwin-bitmap-page-release: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/darwin_bitmap_page_release.cr -o $(BIN)/darwin_bitmap_page_release --error-trace
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release
-	GCRY_BITMAP_ALLOC=0 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --headers
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/darwin_bitmap_page_release.cr -o $(BIN)/darwin_bitmap_page_release_hdr --error-trace
+	GCRY_BITMAP_ALLOC=0 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release_hdr --headers
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/darwin_bitmap_page_release --walk
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 GCRY_PAGE_RELEASE_UNCHECKED=1 $(BIN)/darwin_bitmap_page_release --unchecked
 	GCRY_BITMAP_ALLOC=1 GCRY_PAGE_DONTNEED=1 $(BIN)/darwin_bitmap_page_release --selfcheck
@@ -940,7 +948,8 @@ sound-profile-smoke: $(BIN)
 	$(BIN)/sound_profile
 	GCRY_SOUND=1 $(BIN)/sound_profile
 	GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 $(BIN)/sound_profile
-	GCRY_SOUND=1 GCRY_NURSERY=262144 $(BIN)/sound_profile
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers samples/sound_profile.cr -o $(BIN)/sound_profile_hdr
+	GCRY_SOUND=1 GCRY_NURSERY=262144 $(BIN)/sound_profile_hdr
 
 # Short A/B thr gate for CI (needs wrk). MIN_PCT=70 by default.
 bench-perf-smoke:

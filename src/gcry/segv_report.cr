@@ -247,7 +247,7 @@ module Gcry
       # `push_size_class_free`, the header-freelist reclaim; under
       # `bitmap_alloc` the sweep is `sweep_small_bitmap`, which reclaims by
       # `occ &= mark` and writes no header — that is the point of the
-      # representation — and under `-Dgcry_headerless` there is no header to
+      # representation — and on the headerless layout there is no header to
       # write. Reading the bit there returns 0 for every block the sweep
       # condemned, so the old two-way branch reported "freed by an explicit
       # free" about every swept block on those heaps. Same reasoning as the

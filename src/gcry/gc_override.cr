@@ -398,8 +398,8 @@ module GC
     if env_flag_one?("GCRY_DISABLE_NURSERY")
       heap.nursery_enabled = false
       heap.nursery_threshold = UInt64::MAX
-    elsif (nursery = env_u64("GCRY_NURSERY")) && {% if flag?(:gcry_headerless) %} false {% else %} true {% end %}
-      # (headerless: GCRY_NURSERY is ignored — see Heap#nursery_enabled=)
+    elsif (nursery = env_u64("GCRY_NURSERY")) && {% if flag?(:gcry_block_headers) %} true {% else %} false {% end %}
+      # (headerless, the default layout: GCRY_NURSERY is ignored — see Heap#nursery_enabled=)
       # Opt-in: nursery without barriers is expensive (old→young full scan).
       heap.nursery_enabled = true
       heap.nursery_threshold = nursery unless nursery == 0
@@ -633,8 +633,8 @@ module GC
     # Must be ≥64 KiB, page-aligned, and no larger than the bound the block
     # ordinal's magic reciprocal is exact to — past that a block address would
     # resolve to the wrong ordinal, silently, on the collector's hottest path.
-    # That bound depends on the layout (86.3 MiB with headers, 51.2 MiB under
-    # `-Dgcry_headerless`) and is a **method**: as a constant it would be
+    # That bound depends on the layout (51.2 MiB headerless, 86.3 MiB under
+    # `-Dgcry_block_headers`) and is a **method**: as a constant it would be
     # `once`-initialised, and this code runs inside `GC.init`, before Crystal's
     # runtime — where it read 0 and rejected every legal value.
     if chunk_bytes = env_u64("GCRY_CHUNK_BYTES")

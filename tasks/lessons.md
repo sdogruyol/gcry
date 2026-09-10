@@ -167,3 +167,19 @@ Rules written after corrections, so the same mistake is not made twice.
   Diagnose and fix it; a successful retry or added diagnostics is not closure.
 - Inspect captured output before calling a child failure just a timeout: a
   SIGSEGV handler can hang after reporting the original fault.
+
+## 2026-09-10: moving a compile default
+
+- **A knob that the new default ignores turns every gate that pins it into
+  a silent duplicate of the default arm.** Flipping headerless on made
+  `GCRY_BITMAP_ALLOC=0` and `GCRY_NURSERY` no-ops; four gates
+  (`heap-counters`, `poison-freed`, `darwin-bitmap-page-release`, the
+  sound-profile smoke) pinned one of them as their *control* and either
+  failed or passed for the wrong reason. Before flipping a default, grep
+  the workflow, the Makefile and `ci/` for every knob the new default
+  ignores, and build those arms on the layout that reads the knob.
+- **The Makefile target list is not the CI job.** Inline `run:` steps
+  (the sound-profile smoke) and the Darwin-only targets were not in the
+  local battery; two of the three CI failures were there. Extract every
+  `run:` block of every job, and for the platforms not on this box read
+  their targets for the same knob pins.
