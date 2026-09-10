@@ -14,7 +14,13 @@ header layout that shipped through 0.25.0, and is required for
 `GCRY_BITMAP_ALLOC=0` (the freelist), `GCRY_NURSERY`, and a
 `GCRY_CHUNK_BYTES` above 51.2 MiB — none of which exist on a headerless heap.
 `-Dgcry_headerless` is accepted as a no-op; passing both flags is a compile
-error.
+error. Each of those knobs now warns on stderr when the layout ignores it,
+naming the flag that brings it back — silence would have been the whole
+defect, since `GCRY_BITMAP_ALLOC=0` was the documented escape for a workload
+that cares about RSS. If that is why you set it: headerless is the
+*lower*-RSS layout of the three (0.85× the header layout's peak, and the
+freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
+is now the default and the flag would take you the wrong way.
 
 ### Changed
 

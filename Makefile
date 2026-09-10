@@ -518,6 +518,38 @@ darwin-typecheck: $(BIN)
 knob-doc-check:
 	@ci/knob-doc-check.sh
 
+# The headerless default cannot honour three knobs, and their env reads are
+# compiled out on it, so nothing but this says they were ignored. That silence
+# is the whole defect: `GCRY_BITMAP_ALLOC=0` was the documented escape for a
+# workload that cares about RSS, and after the 0.26.0 default flip it does
+# nothing until the caller also passes `-Dgcry_block_headers`. Asserted in
+# both directions — the warning on the layout that ignores the knob, and its
+# absence on the layout that honours it — because a gate that only checks the
+# message would pass a build that warns on every layout. ~20 s.
+.PHONY: ignored-knob-warnings
+ignored-knob-warnings: $(BIN)
+	@$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/knob_hl --error-trace
+	@$(CRYSTAL) build -Dgc_none -Dgcry_block_headers samples/hello.cr -o $(BIN)/knob_hdr --error-trace
+	@fail=0; \
+	for knob in GCRY_BITMAP_ALLOC=0 GCRY_NURSERY=262144 GCRY_TLAB=1; do \
+	  name=$${knob%%=*}; \
+	  if env $$knob $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "$$name.*is ignored on the headerless layout"; then \
+	    echo "  ok   $$knob warns on the headerless default"; \
+	  else \
+	    echo "  FAIL $$knob is silently ignored on the headerless default"; fail=1; \
+	  fi; \
+	  if env $$knob $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored on the headerless layout"; then \
+	    echo "  FAIL $$knob claims to be ignored on -Dgcry_block_headers, which honours it"; fail=1; \
+	  else \
+	    echo "  ok   $$knob is honoured on -Dgcry_block_headers"; \
+	  fi; \
+	done; \
+	if env GCRY_BITMAP_ALLOC=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
+	  echo "  FAIL a knob the layout does honour warned anyway"; fail=1; \
+	else echo "  ok   GCRY_BITMAP_ALLOC=1 is silent on the headerless default"; fi; \
+	[ $$fail -eq 0 ] || exit 1
+	@echo "ok — every knob the compile default ignores says so, and only there"
+
 # gcry vs Boehm on the fat app, paired and order-rotated.
 #
 # Needs ../acikturkiye with a reachable Postgres and `wrk`. Reports the median

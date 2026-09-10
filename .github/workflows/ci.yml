@@ -111,6 +111,12 @@ jobs:
       - name: Env knob reference is complete
         run: make knob-doc-check
 
+      # A knob the compile default cannot honour must say so. Three of them
+      # became inert when headerless became the default, and their env reads
+      # are compiled out on that layout, so nothing else would notice.
+      - name: Knobs the default ignores warn about it
+        run: make ignored-knob-warnings
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 

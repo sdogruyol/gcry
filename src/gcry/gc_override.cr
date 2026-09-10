@@ -651,13 +651,52 @@ module GC
       heap.stress_every = every.to_i32 if every > 0 && every <= Int32::MAX
     end
 
-    # TLAB under Parallel is UNSUPPORTED (supported opt-in keeps TLAB off).
-    # Knob retained for research / A/B only — emits a stderr warning.
+    # Knobs the headerless layout — the compile default since 0.26.0 — cannot
+    # honour, because it has no per-block header for a freelist link or a
+    # NURSERY flag to live in. Their reads are compiled out on that layout, so
+    # without this they are silently inert: `GCRY_BITMAP_ALLOC=0` was the
+    # documented escape for a workload that cares about RSS more than
+    # throughput, and a user who upgrades into a changed default deserves to
+    # be told rather than to measure no difference and wonder. One line per
+    # knob, and it names the way back. `make ignored-knob-warnings` asserts
+    # both directions.
+    {% unless flag?(:gcry_block_headers) %}
+      if env_flag_zero?("GCRY_BITMAP_ALLOC")
+        warn_unsupported_env(
+          "gcry: GCRY_BITMAP_ALLOC=0 is ignored on the headerless layout (the compile " \
+          "default): a headerless block has no header for the freelist to thread a link " \
+          "through. Rebuild with -Dgcry_block_headers for the freelist allocator. " \
+          "Headerless is the lower-RSS layout of the two, so this is likely not the knob " \
+          "you want — see docs/HARDENING.md\n"
+        )
+      end
+      if (n = env_u64("GCRY_NURSERY")) && n != 0
+        warn_unsupported_env(
+          "gcry: GCRY_NURSERY is ignored on the headerless layout (the compile default): " \
+          "nursery chunks keep the header representation. Rebuild with " \
+          "-Dgcry_block_headers to run one — it is off by default there too, and off " \
+          "because it is unsound without a barrier (docs/HARDENING.md)\n"
+        )
+      end
+    {% end %}
+
+    # TLAB is freelist-shaped: the bitmap cursor replaces it, and
+    # `tlab_enabled=` refuses it whenever that allocator is on — which the
+    # headerless default forces. On the header layout it is merely unsupported
+    # under Parallel EC. One warning either way, naming which case this is.
     if env_flag_one?("GCRY_TLAB")
-      warn_unsupported_env(
-        "gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC " \
-        "(supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md\n"
-      )
+      {% if flag?(:gcry_block_headers) %}
+        warn_unsupported_env(
+          "gcry: WARNING: GCRY_TLAB=1 is unsupported under Parallel EC " \
+          "(supported path: TLAB off + lazy). Soft-soak/SEGV risk — see docs/POLICY.md\n"
+        )
+      {% else %}
+        warn_unsupported_env(
+          "gcry: GCRY_TLAB=1 is ignored on the headerless layout (the compile default): " \
+          "the per-thread allocation buffer is freelist-shaped and the bitmap cursor " \
+          "replaces it. Rebuild with -Dgcry_block_headers to A/B it\n"
+        )
+      {% end %}
       heap.tlab_enabled = true
     end
     # TLAB-off: batch-pop N size-class nodes under freelist lock (USED stash).
