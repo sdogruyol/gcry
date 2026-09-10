@@ -17,6 +17,27 @@ function Invoke-Checked {
     }
 }
 
+# `crystal spec` compiles to `<cache>/crystal-run-spec.tmp.exe`, runs it, and
+# deletes it. Two invocations in one job share that path, and on the ARM64
+# runner the delete raced a lingering handle on the just-exited image often
+# enough to fail two of four master runs on 2026-09-10 — after the specs
+# themselves had reported `0 failures`, and reported as "you've found a bug in
+# the Crystal compiler". One cache directory per invocation removes the shared
+# path; the exit code is still checked, so a real failure fails. Named rather
+# than randomised so a re-run reuses the same compile cache.
+function Invoke-CrystalSpec {
+    param([string] $Label, [string[]] $Arguments)
+    $previous = $env:CRYSTAL_CACHE_DIR
+    $root = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+    $env:CRYSTAL_CACHE_DIR = Join-Path $root "gcry-cache-$Architecture-$Variant-$Label"
+    try {
+        Invoke-Checked $crystal $Arguments
+    }
+    finally {
+        $env:CRYSTAL_CACHE_DIR = $previous
+    }
+}
+
 function Assert-NativeBinary {
     param([string] $Path)
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -46,9 +67,9 @@ try {
 
     if ($Suite -ne 'samples') {
         Write-Host "Windows library specs ($Variant)"
-        Invoke-Checked $crystal (@('spec') + $flags + @('--error-trace', '--fail-fast'))
+        Invoke-CrystalSpec 'spec' (@('spec') + $flags + @('--error-trace', '--fail-fast'))
         Write-Host "Windows process GC specs ($Variant)"
-        Invoke-Checked $crystal (@('spec', '-Dgc_none') + $flags + @('process_spec', '--error-trace', '--fail-fast'))
+        Invoke-CrystalSpec 'process' (@('spec', '-Dgc_none') + $flags + @('process_spec', '--error-trace', '--fail-fast'))
     }
 
     if ($Suite -ne 'specs') {

@@ -70,6 +70,8 @@ done <<'EOF'
 08|src/gcry/collect.cr|s/@collections += 1/@collections += 0/g|collections counter never increments
 09|src/gcry/roots.cr|s/cursor += 1/cursor += 2/g|root scan skips every other word
 10|src/gcry/bitmap_alloc.cr|s/return Pointer(Void).null if set.null?/# MUT10 use a null cursor set/|cursor metadata failure ignored
+11|src/gcry/block.cr|/Writing here would land on the object's own first 16 bytes/{n;s/return/# MUT11 write the header anyway/;}|headerless set_used writes into the object
+12|src/gcry/bitmap_alloc.cr|s/      clear = ~(1_u64 << (ordinal \& 63))/      clear = ~(0_u64)/|freeing a block leaves its occupancy bit set
 EOF
 
 killed=$(grep -c ' KILLED ' "$SCORE" || true)

@@ -66,6 +66,16 @@ is now the default and the flag would take you the wrong way.
 
 ### Fixed
 
+- `ci/windows.ps1` gives each `crystal spec` invocation its own
+  `CRYSTAL_CACHE_DIR`. Two invocations per job shared
+  `<cache>/crystal-run-spec.tmp.exe`, and on the ARM64 runner the compiler's
+  delete of it raced a lingering handle — failing two of four master runs on
+  2026-09-10 *after* the specs reported `0 failures`, and reporting as a
+  Crystal compiler bug.
+- The mutation gate covers the headerless layout: writing the header that no
+  longer exists, and freeing a block without clearing its occupancy bit.
+  12/12 killed; before this no mutant touched the layout that is now the
+  compile default.
 - The perf-smoke baseline is re-recorded on the bitmap allocator default
   (`bench/baseline/perf_smoke.json`, ten green master runs). The previous one
   was taken on the freelist default before 0.24.0, so it read every current

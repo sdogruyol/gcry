@@ -15,7 +15,7 @@ while the score still looks like a score. Four of the ten had gone NOOP by
 2026-09-09 as the code they named moved; they are repointed at the current
 source, and a NOOP now means "fix this row", not "ignore it".
 
-Current: 10/10 killed. Mutant 09 (`cursor += 1` → `cursor += 2`: the
+Current: 12/12 killed. Mutants 11 and 12 are the headerless layout's own hazards, added when it became the compile default (#41): writing the 16-byte header that no longer exists (it lands on the object's first words), and freeing a block without clearing its occupancy bit. Before them no mutant touched the layout at all. Mutant 09 (`cursor += 1` → `cursor += 2`: the
 conservative scan skips every other word) survived all 291 examples until
 `spec/scan_completeness_spec.cr` was written for it — a root the scan skips
 is an object freed while live, so that was the most expensive hole on the
