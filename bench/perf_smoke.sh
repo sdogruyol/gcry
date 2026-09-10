@@ -51,6 +51,7 @@ echo "Building kemal-boehm..."
 crystal build --release src/server.cr -o "$BIN/kemal-boehm-smoke"
 echo "Building kemal-gcry..."
 crystal build -Dgc_none --release src/server.cr -o "$BIN/kemal-gcry-smoke"
+LAYOUT="headerless"
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -262,6 +263,12 @@ summary = {
     # baseline recorded on a GitHub runner still does not describe a laptop —
     # perf_compare.py says so out loud rather than comparing silently.
     'runner': '${RUNNER_LABEL:-$(uname -s)-$(uname -m)}',
+    # Which object layout the gcry arm was built with. A baseline recorded on
+    # one layout does not describe the other — that mistake shipped twice
+    # (0.24.0's allocator flip, 0.26.0's layout flip), each time as a file
+    # that kept comparing and kept looking authoritative. perf_compare.py
+    # refuses to gate across a mismatch.
+    'layout': '$LAYOUT',
 }
 open('$RUN_DIR/summary.json', 'w').write(json.dumps(summary) + '\n')
 print(json.dumps(summary, indent=2))

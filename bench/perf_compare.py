@@ -84,6 +84,24 @@ def compare(baseline, summary, gate):
                 "NOTE: this run is on {}, the baseline was recorded on {} — "
                 "absolute numbers do not carry across runner classes".format(
                     summary["runner"], prov["runner"]))
+    # A baseline recorded on another object layout or allocator default is not
+    # a baseline for this run: it happened twice (0.24.0 flipped the allocator,
+    # 0.26.0 the layout) and both times the file kept comparing and kept
+    # reading as authority — the second one would have failed every green run
+    # on `rss_x` alone. Report, never gate, until it is re-recorded.
+    stale_layout = (prov.get("layout") and summary.get("layout")
+                    and prov["layout"] != summary["layout"])
+    if stale_layout:
+        lines.append(
+            "STALE: this run is the {} layout, the baseline was recorded on {}. "
+            "Re-record from green runs on this layout; comparing across a "
+            "default flip is how a baseline lies. Reporting only.".format(
+                summary["layout"], prov["layout"]))
+    elif prov.get("recorded") and not prov.get("layout"):
+        lines.append(
+            "STALE: the baseline carries no layout, so it predates the "
+            "0.26.0 flip. Re-record; reporting only.")
+        stale_layout = True
     else:
         lines.append("baseline: none recorded yet")
 
@@ -117,11 +135,13 @@ def compare(baseline, summary, gate):
 
     if regressions:
         lines.append("")
+        if stale_layout:
+            lines.append("The differences below are across a layout change, not a regression:")
         for name, label, value, delta in regressions:
             entry = metrics[name]
             lines.append("FAIL: {} is {:.2f} against a baseline of {:g} — {:+.2f}, outside ±{:g}".format(
                 label, value, float(entry["value"]), delta, float(entry["tolerance"])))
-        return "\n".join(lines), (1 if gate else 0)
+        return "\n".join(lines), (1 if gate and not stale_layout else 0)
 
     lines.append("")
     lines.append("PASS — every gated metric is within tolerance of the baseline")
@@ -136,6 +156,10 @@ def record(summaries, runner, commit, recorded):
     With fewer than 3 runs there is no spread to speak of, so the tolerance is
     left null and the baseline reports instead of gating.
     """
+    layouts = {s.get("layout") for s in summaries if s.get("layout")}
+    if len(layouts) > 1:
+        raise SystemExit("refusing to record a baseline from mixed layouts: "
+                         + ", ".join(sorted(layouts)))
     floors = {"pct_json": 2.0, "pct_root": 2.0, "rss_x": 0.05, "pause_p50_ms": 0.2}
     metrics = {}
     for name in METRICS:
@@ -158,6 +182,7 @@ def record(summaries, runner, commit, recorded):
     return {
         "provenance": {
             "runner": runner,
+            "layout": (layouts.pop() if layouts else None),
             "commit": commit,
             "runs": len(summaries),
             "recorded": recorded,
@@ -171,7 +196,8 @@ def record(summaries, runner, commit, recorded):
 def selftest():
     """Fixtures, including both directions of every verdict."""
     base = {
-        "provenance": {"runner": "test", "commit": "0" * 40, "runs": 5, "recorded": "1970-01-01"},
+        "provenance": {"runner": "test", "layout": "headerless", "commit": "0" * 40,
+                        "runs": 5, "recorded": "1970-01-01"},
         "metrics": {
             "pct_json": {"value": 85.0, "tolerance": 3.0},
             "pct_root": {"value": 80.0, "tolerance": 3.0},
@@ -200,14 +226,42 @@ def selftest():
     if failures_partial:
         failures.append(failures_partial)
     for label, summary, want_code, want_word in cases:
+        summary = dict(summary, layout="headerless")
         text, code = compare(base, summary, gate=True)
         if code != want_code or want_word not in text:
             failures.append("{}: exit {} (want {}), text missing {!r}".format(
                 label, code, want_code, want_word))
 
+    # A regression across a layout change is not a regression. The baseline
+    # that shipped through 0.25.0 was recorded on the header layout and read
+    # every headerless run as an RSS regression; gating on that would have
+    # blocked every PR. Report the difference, name it, exit 0.
+    text, code = compare(base, {"pct_json": 70.0, "rss_x": 0.95, "layout": "block_headers"}, gate=True)
+    if code != 0 or "STALE" not in text or "across a layout change" not in text:
+        failures.append("cross-layout baseline gated (exit {})".format(code))
+
+    # A baseline with no layout at all predates the field, so it cannot be
+    # shown to describe this run either. Same treatment.
+    no_layout = {
+        "provenance": {"runner": "test", "commit": "0" * 40, "runs": 5, "recorded": "1970-01-01"},
+        "metrics": {"pct_json": {"value": 85.0, "tolerance": 3.0}},
+    }
+    text, code = compare(no_layout, {"pct_json": 40.0, "layout": "headerless"}, gate=True)
+    if code != 0 or "predates" not in text:
+        failures.append("layout-less baseline gated (exit {})".format(code))
+
+    # Recording must refuse to average two layouts into one number.
+    try:
+        record([{"pct_json": 100.0, "layout": "headerless"},
+                {"pct_json": 80.0, "layout": "block_headers"},
+                {"pct_json": 90.0, "layout": "headerless"}], "test", "0" * 40, "1970-01-01")
+        failures.append("recording accepted mixed layouts")
+    except SystemExit:
+        pass
+
     # A regression must NOT fail the run when --gate is off: the report is
     # useful before anyone is willing to block a PR on it.
-    _, code = compare(base, {"pct_json": 70.0}, gate=False)
+    _, code = compare(base, {"pct_json": 70.0, "layout": "headerless"}, gate=False)
     if code != 0:
         failures.append("ungated regression exited {} (want 0)".format(code))
 
@@ -253,7 +307,8 @@ def selftest():
             print("SELFTEST FAIL: " + f, file=sys.stderr)
         return 1
     print("perf_compare selftest ok — {} comparison fixtures, both gate modes, "
-          "tolerance-less and empty baselines, and both recording paths".format(len(cases)))
+          "tolerance-less and empty baselines, a cross-layout and a layout-less "
+          "baseline, mixed-layout recording, and both recording paths".format(len(cases)))
     return 0
 
 

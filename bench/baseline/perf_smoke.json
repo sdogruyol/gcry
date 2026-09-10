@@ -1,10 +1,11 @@
 {
   "provenance": {
     "runner": "ubuntu-latest",
+    "layout": "block_headers",
     "commit": "4b86ee1",
     "runs": 10,
     "recorded": "2026-09-09",
-    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm. Recorded from the perf-smoke-report artifacts of ten green master runs (2026-09-08/09), the first ten on the bitmap allocator default (0.24.0). The previous file was recorded 2026-08-15 on the freelist default and read every current run as an RSS regression: 5 of these 10 runs would have failed --gate against it, none for a real regression."
+    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm. Recorded from the perf-smoke-report artifacts of ten green master runs (2026-09-08/09), the first ten on the bitmap allocator default (0.24.0). The previous file was recorded 2026-08-15 on the freelist default and read every current run as an RSS regression: 5 of these 10 runs would have failed --gate against it, none for a real regression. Recorded on the 16-byte header layout, which was the compile default until 0.26.0 made headerless the default (#41) \u2014 so this file no longer describes a plain build. perf_compare.py reports and refuses to gate across that mismatch; re-record from the first ten green master runs after the flip."
   },
   "metrics": {
     "pct_json": {

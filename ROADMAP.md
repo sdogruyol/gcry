@@ -767,10 +767,21 @@ CI asymmetry that hid both.
       noisiest of the four, and one of the ten recording runs already sits
       outside its own tolerance, so `--gate` carries ~10% false alarms there.
       Next: `PERF_GATE_BASELINE=1` is worth turning on only once `rss_x` is
-      either excluded from gating or given many more samples; re-record
-      whenever the default allocator or the runner class changes, and note that
-      this file is now the third recording to show that a baseline is only as
-      honest as the configuration it was taken on.
+      either excluded from gating or given many more samples.
+
+      **2026-09-10: the staleness is now self-detecting, because it happened
+      again the next day.** #41 made the headerless layout the compile
+      default, which invalidated the recording taken hours earlier on the
+      header layout — the same mistake as the 0.24.0 allocator flip, one
+      release apart, and both times the file kept comparing and kept reading
+      as authority. `summary.json` now carries the `layout` the gcry arm was
+      built with, the baseline carries the layout it was recorded on, and
+      `perf_compare.py` prints `STALE:` and **refuses to gate** across a
+      mismatch (or across a baseline with no layout at all, which is what
+      predates the field). `--record` refuses to average two layouts into one
+      number. Four new fixtures in `make perf-baseline` cover those paths.
+      A human noticing that a default flip invalidated a baseline is not a
+      control; this is.
 
 - [ ] **The process heap's counters lose updates, and the assumption that they
       do not is written in the source.** `note_alloc_bytes` uses plain
