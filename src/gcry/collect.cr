@@ -263,6 +263,19 @@ module Gcry
     # which is the first thing to rule out when the counter above is silent.
     getter sweep_occ_audit_words : UInt64 = 0_u64
     property sweep_occ_audit : Bool = false
+    # `GCRY_RELEASE_HOLDERS=1`. Large releases the holders search was run
+    # against, and the ones where something pointed into the block at that
+    # instant. The second being non-zero is a live block being released, with
+    # the holder named on stderr — the question the fault-time search cannot
+    # answer because it arrives a hundred collections late.
+    getter release_holders_searches : UInt64 = 0_u64
+    getter release_live_holders : UInt64 = 0_u64
+    # Of those, the stack words that sat **above** the collector's entry SP —
+    # live mutator frames the mark phase read. Non-zero is a missing root;
+    # zero with a non-zero count above means every reference was in the
+    # collection's own frames or in dead space, and the release was correct.
+    getter release_live_frame_holders : UInt64 = 0_u64
+    property release_holders : Bool = false
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.
@@ -1028,9 +1041,73 @@ module Gcry
       n
     end
 
+    # Does anything point into this large block at the instant it is released?
+    #
+    # The holders search has only ever been run from a fault, and by then it is
+    # answering about a block that was released tens or hundreds of collections
+    # earlier — on the open live-large-object release, 109 of them. "Nothing
+    # points into it" is unsurprising at that distance and says nothing about
+    # whether anything did when the decision was made. This asks at the
+    # decision, which is the only moment the answer discriminates: a holder
+    # here is a live block being released and the search names who held it; no
+    # holder here means the reference appeared *after* the release, which is a
+    # different defect with a different owner.
+    #
+    # Large only. A size-class chunk's release is a statement about 64-odd
+    # blocks at once and the search takes one range.
+    #
+    # Expensive by construction — `search_at` walks the root set, every live
+    # block and every fiber stack, per released chunk — and it runs with the
+    # world up, where the heap it walks is moving under it. Research only, and
+    # it stays silent unless it finds something, so the reproducer's hundred
+    # releases per run cost time and no output.
+    private def audit_release_holders(base : UInt64, len : UInt64, kind : UInt8) : Nil
+      return unless kind == GUARD_KIND_LARGE
+      off = ChunkHeader.large_data_offset.to_u64
+      return if len <= off
+      user = base &+ off
+      size = len &- off
+      @release_holders_searches &+= 1
+      found = 0_u64
+      live_frames = 0_u64
+      # `PoisonHolders` is a unix diagnostic (`skip_file unless flag?(:unix)`),
+      # so this knob is one too. Windows has no equivalent walk of stacks and
+      # live blocks to borrow.
+      {% if flag?(:unix) %}
+        # The verdict floor: slots above this were mutator frames when the
+        # mark phase ran, slots below are this collection's own.
+        PoisonHolders.entry_sp = @collect_entry_sp
+        PoisonHolders.reset_live_frame_hits
+        found = PoisonHolders.holders_count(self, user, size)
+        live_frames = PoisonHolders.live_frame_hits
+        @release_live_frame_holders &+= live_frames
+      {% end %}
+      return if found == 0
+      # Found one. Say everything about it, once: this is the sighting the
+      # whole knob exists for.
+      @release_live_holders &+= 1
+      buf = uninitialized UInt8[256]
+      l = RawOut.append(buf.to_unsafe, 0,
+        "gcry: RELEASING A BLOCK SOMETHING POINTS AT — large chunk 0x")
+      l = RawOut.append_hex(buf.to_unsafe, l, base)
+      l = RawOut.append(buf.to_unsafe, l, ", user 0x")
+      l = RawOut.append_hex(buf.to_unsafe, l, user)
+      l = RawOut.append(buf.to_unsafe, l, ", ")
+      l = RawOut.append_u64(buf.to_unsafe, l, size)
+      l = RawOut.append(buf.to_unsafe, l, " bytes, at collection ")
+      l = RawOut.append_u64(buf.to_unsafe, l, @collections)
+      l = RawOut.append(buf.to_unsafe, l, ", ")
+      l = RawOut.append_u64(buf.to_unsafe, l, live_frames)
+      l = RawOut.append(buf.to_unsafe, l,
+        " of the stack words are above the collector's entry SP (live mutator frames)\n")
+      RawOut.flush(buf.to_unsafe, l)
+      {% if flag?(:unix) %} PoisonHolders.search(self, user, size) {% end %}
+    end
+
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
       ThreadListWatch.check(base, len, ThreadListWatch::SITE_RELEASE)
       note_release_base(base, kind) if @release_ledger || @unmap_guard
+      audit_release_holders(base, len, kind) if @release_holders
       unless @unmap_guard
         return false unless @release_ledger
         # Ring, not a bounded list: a ledger that fills up stops recording the

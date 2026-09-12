@@ -1182,7 +1182,24 @@ CI asymmetry that hid both.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
-- [ ] **A live large object is released under load on the fat app.** Found
+- [ ] **A large object is released under load on the fat app, and measured at
+      the release it was garbage.** The title said *live* from 2026-08-23 to
+      2026-09-12; the holders search, run at the release instead of at the
+      fault (`GCRY_RELEASE_HOLDERS=1`), says otherwise. At the instant the
+      chunk is let go: explicit roots **0**, one word in a 32-byte `type_id 0`
+      block that **nothing** points at, and **0 of 11** stack words above
+      `@collect_entry_sp` — every one of them inside the collection's own
+      frames rather than a live mutator frame. Both objects were garbage and
+      the release was correct. The fault-time answer could never have said so:
+      it arrives 109 collections later, and "holders: none" at that distance
+      is about a different heap. So what remains is a write through a pointer
+      the collector cannot see, and two of the three places that can hide one
+      closed on 2026-09-12 — registers are spilled and scanned for every
+      suspended thread and for the Monitor, and thread-local storage became a
+      root. Dead stack and non-gcry memory are what is left, and the next
+      instrument is a backtrace of the *writer*, not of the reader.
+      `bench/log/linux/2026-09-12-release-holders/FINDINGS.md`
+      Original sighting:
       2026-08-23 while cutting gcry vs Boehm on acikturkiye: the gcry binary
       dies under `wrk` in about one run in eight, in a request fiber writing
       JSON. `GCRY_UNMAP_GUARD=1` — added for this, and what made it legible —

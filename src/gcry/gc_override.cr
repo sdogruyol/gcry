@@ -894,6 +894,11 @@ module GC
     # Research only: per dead word, ask every cursor set whether it is
     # mid-allocation inside a block the after-world sweep just called dead.
     heap.sweep_occ_audit = true if env_flag_one?("GCRY_SWEEP_OCC_AUDIT")
+    # Research only: run the holders search at every large release, so a live
+    # block being let go names its holder then instead of a hundred
+    # collections later at the fault. Walks the heap and every stack per
+    # release, with the world up.
+    heap.release_holders = true if env_flag_one?("GCRY_RELEASE_HOLDERS")
     # The main thread's thread-local storage is a root (2026-09-12). Off is
     # the pre-fix behaviour, which `make tls-roots` needs as its red arm.
     # Linux only: locating the block means finding the mapping that contains

@@ -62,6 +62,48 @@ module Gcry
       @@requested = true
     end
 
+    # Count holders without saying anything.
+    #
+    # The loud form is for one block, after a fault, when the whole process is
+    # already lost. A caller that asks this question *per released chunk* —
+    # `GCRY_RELEASE_HOLDERS=1`, from the release path — needs the opposite:
+    # silence on the overwhelming majority that are genuinely dead, and a
+    # report only for the one that is not. So the walks are shared and the
+    # printing is gated.
+    @@quiet = false
+    # The collector's entry SP, when the caller is the collector. Splits its
+    # own frames from the mutator frames above them; 0 means "cannot tell",
+    # which is the honest answer from a signal handler.
+    @@entry_sp = 0_u64
+
+    def self.entry_sp=(value : UInt64) : UInt64
+      @@entry_sp = value
+    end
+
+    # Hits above the entry SP, i.e. in mutator frames the mark phase read.
+    @@live_frame_hits = 0_u64
+
+    def self.live_frame_hits : UInt64
+      @@live_frame_hits
+    end
+
+    def self.reset_live_frame_hits : Nil
+      @@live_frame_hits = 0_u64
+    end
+
+    private def self.emit(buf : UInt8*, len : Int32) : Nil
+      return if @@quiet
+      RawOut.flush(buf, len)
+    end
+
+    def self.holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
+      return 0_u64 if user == 0 || size == 0
+      @@quiet = true
+      found = search_at(heap, user, size, "release")
+      @@quiet = false
+      found
+    end
+
     def self.requested? : Bool
       @@requested
     end
@@ -82,7 +124,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, user &+ size)
       len = RawOut.append(buf.to_unsafe, len, "), the range gcry released\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
 
       @@first_holder_base = 0_u64
       @@first_holder_size = 0_u64
@@ -96,7 +138,7 @@ module Gcry
           "gcry: holders — none. Nothing in the root set, in a live block or on a fiber stack points " \
           "into it, so the pointer is in a register, in thread-local storage, or in memory gcry never " \
           "mapped — and those are three different defects\n")
-        RawOut.flush(buf.to_unsafe, len)
+        emit(buf.to_unsafe, len)
         return
       end
 
@@ -118,7 +160,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, base &+ bsize)
       len = RawOut.append(buf.to_unsafe, len, ")\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
 
       owners = search_at(heap, base, bsize, "owner")
       return unless owners == 0
@@ -127,7 +169,7 @@ module Gcry
         "gcry: owner — none. Nothing points at the holder either, so the collector was right to " \
         "consider it garbage and the mutator is reading an object it never published anywhere the " \
         "collector can see\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
     end
 
     # One pass of the three walks over `[lo, lo + size)`, tagged so a second
@@ -138,6 +180,9 @@ module Gcry
       found &+= search_roots(heap, lo, finish, tag)
       found &+= search_heap(heap, lo, finish, tag)
       found &+= search_stacks(heap, lo, finish, tag)
+      # Not added to `found`: these words are a *subset* of the walk above,
+      # and the point is to say which subset.
+      search_scanned_windows(heap, lo, finish, tag)
       found
     end
 
@@ -162,7 +207,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, " of ")
       len = RawOut.append_u64(buf.to_unsafe, len, total)
       len = RawOut.append(buf.to_unsafe, len, hits == 0 ? " point into it — gcry is not rooting it\n" : " point into it\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
       hits
     end
 
@@ -254,7 +299,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", collections ")
       len = RawOut.append_u64(buf.to_unsafe, len, heap.collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
       hits
     end
 
@@ -318,7 +363,7 @@ module Gcry
             len = RawOut.append(buf.to_unsafe, len, " (block+")
             len = RawOut.append_u64(buf.to_unsafe, len, w &- user)
             len = RawOut.append(buf.to_unsafe, len, ")\n")
-            RawOut.flush(buf.to_unsafe, len)
+            emit(buf.to_unsafe, len)
             dump_payload(base, size)
             # The first holder is the one the caller runs the search against a
             # second time. Recorded here rather than returned: the walk is a
@@ -360,7 +405,7 @@ module Gcry
         i &+= 1
       end
       len = RawOut.append(buf.to_unsafe, len, "\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
     end
 
     # Fiber stacks, and the faulting thread's live frames. A hit here means a
@@ -432,7 +477,64 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, " word(s) across ")
       len = RawOut.append_u64(buf.to_unsafe, len, stacks)
       len = RawOut.append(buf.to_unsafe, len, " stack(s)\n")
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
+      hits
+    end
+
+    # The windows the collector actually scanned, and this is the walk that
+    # makes the wider one above mean something.
+    #
+    # `search_stacks` reads each stack from `base + PAGE_SIZE` to `bottom`,
+    # excluding below-SP dead space only for the thread it is running on — it
+    # has no SP for the others. So a hit it reports on a *running* fiber is
+    # unattributable: dead space a few calls ago looks exactly like a live
+    # root, and its own note says so.
+    #
+    # The collector does have those SPs: it records one per thread at every
+    # stop (`Platform.thread_sp`), and they stay valid until the next stop —
+    # which includes the whole post-STW section, where `GCRY_RELEASE_HOLDERS`
+    # asks this question. `[recorded SP, bottom)` is precisely what the mark
+    # phase read. A hit in here is a root the collector had and did not
+    # follow; a hit only in the wider walk is dead space it is right to
+    # ignore. The difference between the two numbers is the whole answer.
+    private def self.search_scanned_windows(heap : Heap, user : UInt64, finish : UInt64,
+                                            tag : String) : UInt64
+      hits = 0_u64
+      threads = 0_u64
+      reported = 0
+      Thread.unsafe_each do |thread|
+        handle = thread.@system_handle
+        sp = Platform.thread_sp(handle)
+        {% if flag?(:linux) %}
+          # The live table is zeroed at resume, so the post-STW caller reads
+          # the retained copy. Linux keeps one; Darwin's Mach stop has no
+          # equivalent table, and there the verdict falls back to
+          # `@collect_entry_sp` alone.
+          sp ||= Platform.last_stop_sp(handle)
+        {% end %}
+        next unless sp
+        lo = sp.address
+        next if lo == 0
+        bounds = Platform.snapshotted_stack_bounds(handle)
+        next unless bounds
+        bottom = bounds[1].address
+        next unless bottom > lo && (bottom &- lo) <= Roots::MAX_SCAN_BYTES
+        threads &+= 1
+        hits &+= scan_stack_range(lo, bottom, user, finish, tag, 0_u64, lo, true, reported) { |r| reported = r }
+      end
+
+      buf = uninitialized UInt8[512]
+      len = 0
+      len = RawOut.append(buf.to_unsafe, len, "gcry: ")
+      len = RawOut.append(buf.to_unsafe, len, tag)
+      len = RawOut.append(buf.to_unsafe, len, " — scanned windows: ")
+      len = RawOut.append_u64(buf.to_unsafe, len, hits)
+      len = RawOut.append(buf.to_unsafe, len, " word(s) across ")
+      len = RawOut.append_u64(buf.to_unsafe, len, threads)
+      len = RawOut.append(buf.to_unsafe, len,
+        " thread(s), reading only [recorded SP, bottom) — the region the mark phase read. " \
+        "Zero here with a non-zero count above means every reference is in dead stack space\n")
+      emit(buf.to_unsafe, len)
       hits
     end
 
@@ -464,6 +566,9 @@ module Gcry
           a = Pointer(UInt64).new(cursor).value
           if a >= user && a < finish
             hits &+= 1
+            if (entry = @@entry_sp) != 0 && cursor >= entry
+              @@live_frame_hits &+= 1
+            end
             if reported < MAX_REPORTED
               reported += 1
               report_stack_hit(cursor, a, user, tag, fiber_id, stack_top, running)
@@ -502,10 +607,20 @@ module Gcry
       # space to the collector and a live root to whoever wrote it.
       if fiber_id != 0 && !running
         len = RawOut.append(buf.to_unsafe, len, slot < stack_top ? " — BELOW stack_top, so the collector's parked-fiber scan never reads this slot\n" : " — inside the scanned window\n")
+      elsif (entry = @@entry_sp) != 0
+        # A running fiber's saved `stack_top` is stale, so it cannot be the
+        # verdict. The collector's own entry SP can: it is where the mutator's
+        # frames end and the collection's begin. A slot above it was a live
+        # mutator frame when the mark phase ran and the scan read it, which
+        # makes an unmarked block a missing root; a slot below it is the
+        # collector's own working copy of a pointer it is in the middle of
+        # releasing, and no root at all.
+        len = RawOut.append(buf.to_unsafe, len,
+          slot >= entry ? " — above the collector's entry SP: a live mutator frame the mark phase read\n" : " — below the collector's entry SP, i.e. inside the collection's own frames\n")
       else
         len = RawOut.append(buf.to_unsafe, len, "\n")
       end
-      RawOut.flush(buf.to_unsafe, len)
+      emit(buf.to_unsafe, len)
     end
   end
 end

@@ -270,6 +270,18 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
+- `GCRY_RELEASE_HOLDERS=1` (research): run the holders search at every large
+  release rather than at a fault, printing only when something points into the
+  block being released. The fault-time search answers about a release that
+  happened 109 collections earlier on the open live-large-object item, which
+  is why "holders: none" there never settled anything. Asked at the decision:
+  explicit roots 0, one word in a 32-byte `type_id 0` block that nothing
+  points at, and every stack word below `@collect_entry_sp` — the collection's
+  own frames, not a live mutator frame. The block was garbage and the release
+  was correct. `Platform.last_stop_sp` retains the stop's SP table for the
+  post-STW section so that verdict can be taken there.
+  `bench/log/linux/2026-09-12-release-holders/FINDINGS.md`
+
 - `GCRY_SWEEP_OCC_AUDIT=1` (research): per dead word of the after-world
   sweep, ask every cursor set whether it is mid-allocation inside a block that
   pass just called dead — occupied, live, unmarked and about to be handed to a

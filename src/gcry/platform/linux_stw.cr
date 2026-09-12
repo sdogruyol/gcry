@@ -563,8 +563,46 @@ module Gcry
     # `declined … redundant 2`, one thread never acknowledging. With the ids
     # zeroed a scanner sees either its own live slot or no match, and no
     # `pthread_t` compares equal to a cleared one.
+    # Retained copy of the last stop's SP table, for the post-STW section.
+    #
+    # `clear_thread_sps` runs at resume, so by the time the after-world sweep
+    # releases anything there is no record of what the mark phase read. That is
+    # the one thing a release-time diagnostic needs: a word pointing at a
+    # released block matters only if it sits in `[recorded SP, bottom)`, and
+    # every other hit is dead stack space the collector is right to ignore
+    # (`GCRY_RELEASE_HOLDERS`). Copied rather than kept live, because the live
+    # table has to read zero before the next stop claims slots in it.
+    @@last_stop_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
+    @@last_stop_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
+    @@last_stop_claimed = 0_u64
+
+    # The SP this thread was stopped at during the most recent stop, or nil.
+    # Valid through the post-STW section; after that it describes a stop that
+    # has since been superseded.
+    def self.last_stop_sp(id : LibC::PthreadT) : Void*?
+      return nil unless @@stw_booted
+      claimed = @@last_stop_claimed
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@last_stop_ids[i], id) != 0
+          sp = @@last_stop_sps[i]
+          return nil if sp == 0
+          return Pointer(Void).new(sp)
+        end
+        i += 1
+      end
+      nil
+    end
+
     def self.clear_thread_sps : Nil
       return unless @@stw_booted
+      @@last_stop_claimed = @@stw_claimed.get(:acquire)
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        @@last_stop_ids[i] = @@stw_ids[i]
+        @@last_stop_sps[i] = @@stw_sps[i]
+        i += 1
+      end
       @@stw_claimed.set(0_u64, :release)
       i = 0
       while i < MAX_STW_SP_SLOTS
