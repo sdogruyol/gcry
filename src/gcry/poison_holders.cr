@@ -511,6 +511,18 @@ module Gcry
     # ignore. The difference between the two numbers is the whole answer.
     private def self.search_scanned_windows(heap : Heap, user : UInt64, finish : UInt64,
                                             tag : String) : UInt64
+      # Only for a collector caller, and that is not a preference. The verdict
+      # this walk exists to give needs the SP table the stop recorded, which is
+      # meaningful inside or just after a collection and empty otherwise — from
+      # a fault it prints "0 across 0" and says nothing. `@@entry_sp` is set by
+      # the release and pin paths and by nobody else, so it is the condition.
+      #
+      # It also keeps this walk off the crash path, where it does not belong:
+      # it reads `Thread.unsafe_each` with no lock and two platform tables, and
+      # a fault inside it would truncate the report it was added to enrich —
+      # which is what `make poison-holders` caught on the CI runner while
+      # passing 24 times locally.
+      return 0_u64 if @@entry_sp == 0
       hits = 0_u64
       threads = 0_u64
       reported = 0

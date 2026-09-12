@@ -100,3 +100,15 @@ The search walks the root set, every live block and every stack per released
 chunk, with the world up. On the reproducer that is ~100 releases per run over
 a 42 500-block heap and it roughly doubles the run. Research only, silent
 unless it finds something, and documented as such.
+
+## One correction, from CI
+
+The scanned-window walk was reachable from the **fault** path too, and it does
+not belong there: it reads `Thread.unsafe_each` with no lock plus two platform
+tables, and the SP table it needs is empty outside a collection — so from a
+fault it printed `0 across 0` and added risk for nothing. `make
+poison-holders` caught it on the x86_64 runner (CI 34716143018) while passing
+24 of 24 locally: the child's report stopped after its first line, so the gate
+saw no holder sections at all. The walk now runs only when `@@entry_sp` is
+set, which the release and pin paths do and nothing else does, leaving the
+crash report byte-identical to the one that passed the four runs before it.
