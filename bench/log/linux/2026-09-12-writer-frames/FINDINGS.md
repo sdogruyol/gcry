@@ -243,8 +243,58 @@ caught a trap worth keeping — a holder whose only ivar is a `UInt64` has no
 inner pointers, so Crystal allocates it *atomic*, gcry never scans it, and the
 target is reclaimed: the first control drew the first case's own address.
 
-So the next session starts here, with one question and no hypotheses: walk to
-the array's block from the refusal and print its four payload words. Either
-word 2 is the buffer — and the walk that reads the same word disagrees, which
-is a defect in the walk — or it is not, and the array whose `@buffer` was
-recorded is not the array the walk sees at that address.
+## Resolved: the chunk index and the chunk list disagree
+
+The four payload words settled it. The array's block holds
+
+```
+0x100000014  0x1  0x7ff2b2d00840  0x0
+```
+
+— `type_id` and size packed in word 0, capacity and shift-offset in word 1,
+and **word 2 is the buffer**, the same address the heap walk says nothing
+points at. So both reads are of the same memory, and the walk is not reading
+that block. One more question, asked at the refusal:
+
+```
+the array's chunk is in the index: true, in the @chunks list: FALSE;
+the buffer's chunk in the list: true
+```
+
+**`@chunk_index` and `@chunks` are not the same set.** They are maintained
+separately — `map_chunk` inserts into the index, `unlink_chunk` and the
+sweep's drop path remove — and `chunk_containing` reads the index while every
+*walk* reads the list. Measured with a dedicated audit
+(`GCRY_CHUNK_LIST_AUDIT=1`): **2 of 34 indexed chunks missing from the list at
+collection 65** under thread churn, 0 the other way, and no divergence at all
+on a quiescent program.
+
+From there the chain to the fault is mechanical, and every link is either
+measured here or read from the source:
+
+1. The array's chunk is in the index and not the list.
+2. `clear_all_marks` zeroes bitmap marks through `each_chunk` — the list — so
+   that chunk's marks are **never cleared**.
+3. Every block in it therefore reads **permanently marked**.
+4. `mark_impl_unlocked` has `return if block_marked_in?(chunk, header)`, so the
+   array is never pushed onto the mark stack.
+5. `scan_object` never runs on it, so its `@buffer` edge is **never followed**.
+6. The buffer's chunk *is* in the list, so the sweep reaches it, finds the
+   block unmarked, reclaims it and writes poison into it.
+7. The next collection's pin walk reads the poisoned element as `sched`;
+   `pointerof(sched.@name)` is `poison + 8`, non-canonical, and the kernel
+   reports the fault at address 0.
+
+The sweep never reclaiming those chunks is the same divergence seen from the
+other side: a chunk off the list is also a chunk that is never swept, which is
+a leak rather than a use-after-free and is why nothing noticed.
+
+## What the fix has to be, and what it is not
+
+Not the mark skip, and not the pin site. The invariant is that the index and
+the list describe the same set of chunks, and the fix is either to keep them
+in sync or to make the walks that carry correctness — mark clearing and the
+sweep — read the authority that `chunk_containing` reads. Which of the two
+producers diverges (`map_chunk`'s insert order, `unlink_chunk`, or the
+post-STW `@chunks` rebuild) is the next thing to find, and the audit above is
+what will confirm a fix rather than a coincidence.

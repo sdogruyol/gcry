@@ -455,6 +455,23 @@ module Gcry
     # `ec.@schedulers`. A `String` literal, so reading it costs nothing and
     # holding it allocates nothing.
     getter ec_root_bad_slot_site : String = ""
+    # Chunks `@chunk_index` knows about that the `@chunks` list does not.
+    #
+    # The two are maintained separately — `map_chunk` inserts into the index,
+    # `unlink_chunk` and the sweep's drop path remove — and every walk that
+    # matters reads the **list**: `clear_all_marks` zeroes mark bitmaps through
+    # it, the sweep reclaims through it, and the holders search walks it. A
+    # chunk in the index and not the list is therefore a chunk whose marks are
+    # never cleared, so every block in it reads permanently marked — and
+    # `mark_impl` returns early on an already-marked block, which means the
+    # object is never pushed onto the mark stack and **its out-edges are never
+    # followed**. That is how a live array's buffer gets swept while the array
+    # itself is retained (`bench/log/linux/2026-09-12-writer-frames/`).
+    #
+    # `GCRY_CHUNK_LIST_AUDIT=1`. O(index × list), and both are in the tens.
+    getter chunk_index_only : UInt64 = 0_u64
+    getter chunk_list_only : UInt64 = 0_u64
+    property chunk_list_audit : Bool = false
     # The `@schedulers` array of the context being pinned when a slot was
     # refused: identity, the buffer it points at, the base that buffer was
     # allocated at, and its two sizes. Written per context per collection and
@@ -2147,6 +2164,9 @@ module Gcry
 
           t0 = monotonic_ns
           if major
+            # Before the marks are cleared, because the audit is about which
+            # chunks that clear will reach.
+            audit_chunk_list
             clear_all_marks
           else
             clear_nursery_marks

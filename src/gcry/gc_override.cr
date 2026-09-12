@@ -894,6 +894,9 @@ module GC
     # Research only: per dead word, ask every cursor set whether it is
     # mid-allocation inside a block the after-world sweep just called dead.
     heap.sweep_occ_audit = true if env_flag_one?("GCRY_SWEEP_OCC_AUDIT")
+    # Research only: does `@chunk_index` agree with the `@chunks` list? A chunk
+    # in one and not the other is never swept and never has its marks cleared.
+    heap.chunk_list_audit = true if env_flag_one?("GCRY_CHUNK_LIST_AUDIT")
     # Research only: run the holders search at every large release, so a live
     # block being let go names its holder then instead of a hundred
     # collections later at the fault. Walks the heap and every stack per

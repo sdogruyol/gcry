@@ -281,6 +281,21 @@ is now the default and the flag would take you the wrong way.
   the block the report was about. First run, it named a three-week-old fault:
   the writer was the collector, in its own execution-context root pin.
 
+- **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the
+  live-object release open since 2026-08-23.** `@chunk_index` and the
+  `@chunks` list are maintained separately, and `chunk_containing` reads the
+  index while every walk reads the list — `clear_all_marks`, the sweep, the
+  holders search. Measured under thread churn: 2 of 34 indexed chunks missing
+  from the list at collection 65, none on a quiescent program. An off-list
+  chunk never has its marks cleared, so its blocks read permanently marked,
+  and `mark_impl` returns early on a marked block — so the object is never
+  pushed onto the mark stack and its out-edges are never followed. That is how
+  an execution context's `@schedulers` buffer was swept while the array
+  holding it stayed retained, and the poisoned element is what the collector
+  then dereferenced. The audit is O(index × list) with both in the tens and
+  reports once with the first offending chunk.
+  `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+
 - **A control for the holders search** (`make holders-find`). Every
   use-after-free investigation on this heap turns on *"holders — none. Nothing
   in the root set, in a live block or on a fiber stack points into it"*, and

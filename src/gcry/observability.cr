@@ -226,6 +226,8 @@ module Gcry
         ec_root_null_slots:                    heap.ec_root_null_slots,
         ec_root_poisoned_slots:                heap.ec_root_poisoned_slots,
         ec_root_bad_slot_site:                 heap.ec_root_bad_slot_site,
+        chunk_index_only:                      heap.chunk_index_only,
+        chunk_list_only:                       heap.chunk_list_only,
         ec_root_unpinned_ivars:                heap.ec_root_unpinned_ivars,
         ec_queue_audit_ring_slots:             heap.ec_queue_audit_ring_slots,
         ec_queue_audit_list_slots:             heap.ec_queue_audit_list_slots,

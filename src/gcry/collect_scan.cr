@@ -208,6 +208,45 @@ module Gcry
         len = RawOut.append(buf.to_unsafe, len, ", in no block gcry can find\n")
       end
       RawOut.flush(buf.to_unsafe, len)
+
+      # The words the walk reads, read the same way. The report above says the
+      # array holds the buffer at offset 16 and the heap walk says nothing in
+      # any live block points at that buffer; one of those reads the wrong
+      # memory, and these four words say which. Same source for both: the
+      # object's own address, which under headerless is its block's payload.
+      len = 0
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the array's payload words —")
+      i = 0
+      while i < 4
+        len = RawOut.append(buf.to_unsafe, len, " 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, Pointer(UInt64).new(arr &+ i.to_u64 &* 8).value)
+        i += 1
+      end
+      len = RawOut.append(buf.to_unsafe, len, ", the word at +16 is the buffer: ")
+      len = RawOut.append(buf.to_unsafe, len,
+        Pointer(UInt64).new(arr &+ 16).value == @ec_sched_root ? "true" : "FALSE")
+
+      # And the last place the two answers can differ: `chunk_containing` reads
+      # the incrementally maintained `@chunk_index`, while the heap walk reads
+      # the `@chunks` list. A chunk in one and not the other is invisible to
+      # every walk that uses the list — the sweep included.
+      in_index = !chunk_containing(arr).nil?
+      in_list = false
+      buf_in_list = false
+      each_chunk do |c|
+        lo = c.address
+        hi = lo &+ c.value.mapped_bytes
+        in_list = true if arr >= lo && arr < hi
+        buf_in_list = true if @ec_sched_root >= lo && @ec_sched_root < hi
+      end
+      len = RawOut.append(buf.to_unsafe, len, ". the array's chunk is in the index: ")
+      len = RawOut.append(buf.to_unsafe, len, in_index ? "true" : "false")
+      len = RawOut.append(buf.to_unsafe, len, ", in the @chunks list: ")
+      len = RawOut.append(buf.to_unsafe, len, in_list ? "true" : "FALSE")
+      len = RawOut.append(buf.to_unsafe, len, "; the buffer's chunk in the list: ")
+      len = RawOut.append(buf.to_unsafe, len, buf_in_list ? "true" : "FALSE")
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     private def describe_poisoned_pin_source(addr : UInt64) : Nil
@@ -411,6 +450,65 @@ module Gcry
       # test rather than a plausibility one — which is the difference between
       # this and the conservative marking path.
       ptr.as(Int32*).value == Fiber.crystal_instance_type_id
+    end
+
+    # Do the chunk index and the chunk list agree?
+    #
+    # Nothing checked, and the divergence is a soundness hole rather than an
+    # accounting one: see the note on `chunk_index_only`. Reported once, with
+    # the first offending chunk, because the second thousand say the same
+    # thing as the first.
+    protected def audit_chunk_list : Nil
+      return unless @chunk_list_audit
+      index_only = 0_u64
+      first = 0_u64
+      i = 0
+      n = @chunk_index_count
+      while i < n
+        c = (@chunk_index + i).value
+        unless c.null?
+          listed = false
+          each_chunk { |l| listed = true if l == c }
+          unless listed
+            index_only &+= 1
+            first = c.address if first == 0
+          end
+        end
+        i += 1
+      end
+
+      list_only = 0_u64
+      each_chunk do |l|
+        list_only &+= 1 if chunk_containing(ChunkHeader.data_start(l).address).nil?
+      end
+
+      @chunk_index_only &+= index_only
+      @chunk_list_only &+= list_only
+      return if index_only == 0 && list_only == 0
+      return unless @chunk_index_only == index_only && @chunk_list_only == list_only
+
+      buf = uninitialized UInt8[352]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the chunk index and the chunk list disagree — ")
+      len = RawOut.append_u64(buf.to_unsafe, len, index_only)
+      len = RawOut.append(buf.to_unsafe, len, " chunk(s) indexed but not listed")
+      if first != 0
+        len = RawOut.append(buf.to_unsafe, len, " (first 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, first)
+        len = RawOut.append(buf.to_unsafe, len, ")")
+      end
+      len = RawOut.append(buf.to_unsafe, len, ", ")
+      len = RawOut.append_u64(buf.to_unsafe, len, list_only)
+      len = RawOut.append(buf.to_unsafe, len,
+        " listed but not indexed. A chunk off the list is never swept and its marks are never " \
+        "cleared, so its objects read marked forever and nothing follows their edges\n")
+      RawOut.flush(buf.to_unsafe, len)
+      len = 0
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, ", indexed ")
+      len = RawOut.append_u64(buf.to_unsafe, len, n.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " chunk(s)\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     private def audit_ec_queues : Nil

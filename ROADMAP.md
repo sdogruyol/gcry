@@ -1220,6 +1220,27 @@ CI asymmetry that hid both.
       `MonitorGate.enter` (238 of 240 collections) and its stack is scanned
       with no recorded SP. That is the next thing to read.
       `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+      **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
+      the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
+      reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`: **2
+      of 34 indexed chunks missing from the list at collection 65** under
+      thread churn, 0 the other way, none at all on a quiescent program. The
+      chain from there is mechanical and every link is measured or read from
+      the source: `clear_all_marks` zeroes mark bitmaps through the list, so an
+      off-list chunk's marks are never cleared → every block in it reads
+      permanently marked → `mark_impl_unlocked` returns early on an
+      already-marked block → the object is never pushed onto the mark stack →
+      `scan_object` never follows its edges → the `@schedulers` buffer it
+      points at, whose own chunk *is* listed, is swept and poisoned → the next
+      collection's pin walk reads the poisoned element as `sched` and
+      `pointerof(sched.@name)` is a non-canonical address the kernel reports as
+      a fault at 0. The same divergence also means those chunks are never
+      swept, which is a leak and is why nothing noticed. The fix is the
+      invariant, not the symptom: the two structures must describe the same
+      set, or the walks that carry correctness must read the authority
+      `chunk_containing` reads. Which producer diverges — `map_chunk`'s insert
+      order, `unlink_chunk`, or the post-STW `@chunks` rebuild — is the next
+      thing to find, and the audit is what will tell a fix from a coincidence.
       **And it names a structure (2026-09-12).** The pin sites now carry a
       compile-time tag, because `__LINE__` cannot discriminate nine callers
       that are one `{% if %}`'s macro expansion. The refused slot is
