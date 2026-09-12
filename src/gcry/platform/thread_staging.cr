@@ -91,6 +91,7 @@ module Gcry
       @@staged_overflows = 0_u64
       @@staged_evictions = 0_u64
       @@staged_no_evict = false
+      @@unstage_on_death = false
       @@staged_total = 0_u64
     end
 
@@ -237,6 +238,41 @@ module Gcry
         i += 1
       end
       n
+    end
+
+    # `GCRY_THREAD_UNSTAGE_ON_DEATH=1` — **a reproducer, not a feature.**
+    #
+    # Dropping a thread's staging record when it dies is obviously right: a
+    # dead thread is not a thread being born, and leaving the record behind
+    # makes `wait_for_staged_threads` spend its whole budget on it and then
+    # report a timeout. It is also the single change that turned a churn of
+    # 960 short-lived threads from 0 crashes in 40 runs into 7.
+    #
+    # What it removes is an accident. The wait spins 2 000 times before
+    # giving up, and those spins sit between a thread calling `detach` and
+    # the world stopping around it — which is exactly the window in which
+    # `Thread#start`'s `ensure` has already taken the thread off Crystal's
+    # list and is still dereferencing it, on a stack gcry does not scan
+    # because a thread off the list is one it cannot see. The wait was
+    # buying that window time to close. Stop paying, and the collector sweeps
+    # something the dying thread still uses: `GCRY_POISON_HOLDERS=1` reports
+    # a use-after-free on a 16-byte block with no holder anywhere.
+    #
+    # A pure delay in the same place does **not** reproduce it (0 of 40 at
+    # HEAD with 4 000 `pause` iterations added to `pthread_detach`), so the
+    # trigger is the missing wait rather than the timing.
+    #
+    # So the knob stays off and the defect stays open — but it now has a
+    # reproducer that fires in seconds on one box, which is more than the
+    # thread family has had since 2026-08-16.
+    @@unstage_on_death = uninitialized Bool
+
+    def self.unstage_on_death=(value : Bool) : Bool
+      @@unstage_on_death = value
+    end
+
+    def self.unstage_on_death(id : UInt64) : Nil
+      unstage_thread(id) if @@unstage_on_death
     end
 
     # Births that found the table full. Not the same as a lost record since

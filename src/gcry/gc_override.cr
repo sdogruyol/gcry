@@ -917,6 +917,12 @@ module GC
     # rather than evicting the oldest, which is what it did before 2026-08-22
     # (src/gcry/platform/thread_staging.cr).
     Gcry::Platform.staged_no_evict = true if env_flag_one?("GCRY_STAGED_NO_EVICT")
+    # Research only, and a **reproducer for an open defect**: drop a thread's
+    # staging record when it dies. Right on its face, and it crashes — the
+    # pre-stop wait's spin budget is what has been giving a dying thread time
+    # to leave the window where it is off Crystal's list and still using
+    # itself (src/gcry/platform/thread_staging.cr).
+    Gcry::Platform.unstage_on_death = true if env_flag_one?("GCRY_THREAD_UNSTAGE_ON_DEATH")
     # Research only: let the dying-type audit walk every block on a minor
     # collection, where unmarked does not mean dying
     # (src/gcry/thread_block_audit.cr).
@@ -1443,10 +1449,12 @@ module GC
     #
     # What is deliberately **not** here: dropping the thread's staging
     # record. It belongs here logically — a dead thread is not a thread being
-    # born — and it crashes. The commit after this one adds it as a
-    # reproducer rather than a behaviour.
+    # born, and leaving the record makes every later stop spin its whole
+    # budget waiting for it — and shipping it crashes. See
+    # `GCRY_THREAD_UNSTAGE_ON_DEATH`.
     def self.pthread_join(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
+        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
         Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
       {% end %}
       Gcry::OS.pthread_join(thread, nil)
@@ -1455,6 +1463,7 @@ module GC
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
       {% if flag?(:gc_none) %}
+        Gcry::Platform.unstage_on_death(thread.unsafe_as(UInt64))
         Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
       {% end %}
       Gcry::OS.pthread_detach(thread)
