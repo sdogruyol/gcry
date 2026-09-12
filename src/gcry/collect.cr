@@ -716,6 +716,9 @@ module Gcry
     # identity has to be taken at release time or not at all. For a Crystal
     # reference the low four bytes are the type_id.
     @guard_tag = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
+    # Blocks still allocated in the chunk at release; -1 when the chunk
+    # carries no occupancy bitmap. See `guard_occupied`.
+    @guard_occ = uninitialized StaticArray(Int32, UNMAP_GUARD_SLOTS)
     # **Atomic, because every writer is a mutator and none of them holds a
     # lock.** `guard_release` runs from `GC.free` → `trim_large_cache` on
     # whichever thread frees, and the old code read this counter twice — once
@@ -976,6 +979,44 @@ module Gcry
       Pointer(UInt64).new(base &+ off).value
     end
 
+    # How many blocks the chunk still had **allocated** when it was released.
+    #
+    # This is the question the guard record could not answer, and it splits
+    # the remaining space for the open "live large object released under load"
+    # item in half. Either the release decided a chunk was empty while blocks
+    # in it were still allocated — an accounting bug in the decision — or the
+    # blocks really were free, and the fault afterwards is a mutator holding a
+    # stale pointer, which is a missing-root or a premature-free question
+    # instead. A number read at the moment of release answers it; everything
+    # available after the fact has had 100-odd collections to change.
+    #
+    # Read before the `mprotect`, for the same reason the first user word is:
+    # afterwards the pages are `PROT_NONE` and the read itself faults.
+    #
+    # `-1` means the count is not available rather than zero: a chunk with no
+    # occupancy bitmap, i.e. the freelist allocator. A large chunk has exactly
+    # one block, so its answer is that block's own FREE flag — 0 or 1.
+    private def guard_occupied(base : UInt64, len : UInt64, kind : UInt8) : Int32
+      if kind == GUARD_KIND_LARGE
+        off = ChunkHeader::SIZE.to_u64
+        return -1 if len <= off &+ BlockHeader::SIZE.to_u64
+        header = Pointer(BlockHeader).new(base &+ off)
+        return BlockHeader.free?(header) ? 0 : 1
+      end
+      chunk = Pointer(ChunkHeader).new(base)
+      words = chunk.value.bitmap_words
+      return -1 if words == 0
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return -1 if occ.null?
+      n = 0
+      i = 0
+      while i < words
+        n += occ[i].popcount
+        i += 1
+      end
+      n
+    end
+
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool
       ThreadListWatch.check(base, len, ThreadListWatch::SITE_RELEASE)
       note_release_base(base, kind) if @release_ledger || @unmap_guard
@@ -988,6 +1029,7 @@ module Gcry
         @guard_kind[i] = kind
         @guard_gen[i] = @collections
         @guard_tag[i] = guard_user_tag(base, len, kind)
+        @guard_occ[i] = guard_occupied(base, len, kind)
         # Length last, and that is the read protocol: `guarded_release_at`
         # tests `addr < base + len`, so a slot whose length is not in yet
         # matches nothing and a concurrent report skips it instead of naming a
@@ -1014,6 +1056,7 @@ module Gcry
       # backout; the crash it causes was chased for several rounds afterwards
       # and briefly read as a double free.
       tag = guard_user_tag(base, len, kind)
+      occ = guard_occupied(base, len, kind)
       # PROT_NONE drops the pages exactly as munmap would; what it keeps is the
       # mapping's identity, which is the whole point.
       if Gcry::OS.mprotect(Pointer(Void).new(base), LibC::SizeT.new(len), Gcry::OS::PROT_NONE) != 0
@@ -1026,18 +1069,19 @@ module Gcry
       @guard_kind[i] = kind
       @guard_gen[i] = @collections
       @guard_tag[i] = tag
+      @guard_occ[i] = occ
       @guard_len[i] = len
       true
     end
 
     # For the SIGSEGV report: which released region holds *addr*, if any.
-    def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64, UInt64}?
+    def guarded_release_at(addr : UInt64) : {UInt64, UInt64, UInt8, UInt64, UInt64, Int32}?
       limit = guard_slots_used
       i = 0
       while i < limit
         base = @guard_base[i]
         if addr >= base && addr < base + @guard_len[i]
-          return {base, @guard_len[i], @guard_kind[i], @guard_gen[i], @guard_tag[i]}
+          return {base, @guard_len[i], @guard_kind[i], @guard_gen[i], @guard_tag[i], @guard_occ[i]}
         end
         i += 1
       end
@@ -1054,12 +1098,13 @@ module Gcry
     # nor the ledger is armed, so this costs a refused pointer one nil check.
     def release_note(addr : UInt64) : String
       if g = guarded_release_at(addr)
-        base, glen, kind, gen, tag = g
+        base, glen, kind, gen, tag, occ = g
         path = kind == GUARD_KIND_LARGE ? "large-object release" : "empty size-class chunk release"
         note = " — the chunk was RELEASED: base 0x#{base.to_s(16)}, #{glen} bytes, #{path}, " \
                "at collection #{gen} (#{@collections - gen} since); the pointer is " \
                "#{addr - base} bytes into it"
         note += ", first user word at release 0x#{tag.to_s(16)}" unless tag == 0
+        note += ", #{occ} block(s) still allocated at release" if occ >= 0
         return note
       end
 

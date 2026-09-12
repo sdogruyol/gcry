@@ -428,7 +428,7 @@ module Gcry
         # about what is there *now*, which is why the two say different things
         # below.
         if g = heap.guarded_release_at(a)
-          base, glen, kind, gen, tag = g
+          base, glen, kind, gen, tag, occ = g
           len = RawOut.append(buf.to_unsafe, len,
             heap.unmap_guard? ? "in a chunk gcry RELEASED — base 0x" : "in a range gcry RELEASED and unmapped — base 0x")
           len = RawOut.append_hex(buf.to_unsafe, len, base)
@@ -455,6 +455,17 @@ module Gcry
             len = RawOut.append(buf.to_unsafe, len, " (type_id ")
             len = RawOut.append_u64(buf.to_unsafe, len, tag & 0xffff_ffff_u64)
             len = RawOut.append(buf.to_unsafe, len, ")")
+          end
+          # The question the record could not answer until 2026-09-12, and the
+          # one that splits the open "live large object released under load"
+          # item in half: was the chunk released while blocks in it were still
+          # allocated — an accounting bug in the release decision — or were
+          # they genuinely free, making this a stale pointer a mutator kept?
+          # Read from the occupancy bitmap at the moment of release, before
+          # the `mprotect`.
+          if occ >= 0
+            len = RawOut.append(buf.to_unsafe, len, ". Blocks still allocated at release: ")
+            len = RawOut.append_u64(buf.to_unsafe, len, occ.to_u64)
           end
           # Under the ledger the mapping was handed back to the kernel, so
           # whatever answers at this address now may belong to something else
