@@ -192,12 +192,81 @@ Monitor does, instead of being signalled. That covers `detach` to exit
 without a single stale-handle question. It does not cover
 `Thread.threads.delete` to `detach`, which is where `Fiber.inactive` runs.
 
+## What the reproducer actually crashes on — corrected
+
+The first reading of it, recorded above, called the dying thread the user.
+That was wrong, and the correction is the most useful thing in this file.
+
+Two manifestations, and which one appears depends on the poison:
+
+- **Bare**, exit 5, ~15–20% of runs: an exception, not a fault.
+- **With `GCRY_POISON_FREED=1`**, SIGSEGV: the poison read at +8 of a
+  16-byte block, no holder in roots, heap or fiber stacks. Poison changes
+  the timing enough that this arm almost never fires (0 crashes in 534
+  runs), which is why the bare arm is the one to drive.
+
+The bare arm's exception, and its stack:
+
+```
+Tried to raise:: pthread_mutex_unlock: Invalid argument (RuntimeError)
+  Thread::Mutex#unlock
+  Thread::LinkedList(Fiber)          ← Fiber.fibers.push
+  Fiber#initialize<Pointer(Void), Thread>
+  Fiber::new<Pointer(Void), Thread>
+  Thread#start                       ← a thread being BORN
+  Crystal::System::Thread::thread_proc
+```
+
+So the thread is **starting**, not dying: `Thread#start` has already pushed
+itself and set its TLS and is building its main `Fiber`, which pushes onto
+`Fiber.fibers` and takes that list's mutex. The `unlock` comes back
+**EINVAL** — not EPERM, which is what an error-checking mutex returns for a
+non-owner — so the mutex memory is not a valid mutex. `Fiber.fibers`, or the
+`Thread::Mutex` it holds, has been reclaimed or overwritten.
+
+A second sighting lands in the Monitor instead
+(`Fiber::ExecutionContext::Monitor#run_loop`'s `every` rescue, then a SEGV
+inside DWARF decoding while printing the exception) — same `EINVAL`, a
+different consumer. The DWARF fault is noise, but destructive noise: it
+turns the report into a recursive backtrace storm, which is why the first
+legible reading took several attempts.
+
+Sizes ruled out by measurement, since the 16-byte block cannot be any of
+them: `Thread` 184, `Thread::Mutex` 48, `Fiber` 176, `Fiber::StackPool` 24,
+`EC::ThreadPool` 48, `Thread::LinkedList` 32, `Fiber::Stack` 24. So the
+16-byte victim carries no `type_id` — a raw `Array`/`Deque`/`Hash` buffer or
+a closure box — which is also why the dying-type audit cannot name it.
+
+## A soundness hole found on the way, and closed
+
+Every thread the stop suspends by signal has its GP registers spilled into
+the `ucontext` and scanned, because — the collector's own words — a
+reference can live only in a register. **The Monitor is never signalled**, by
+design: a resume race leaves it in `sigsuspend` forever. It waits out the
+stop in `MonitorGate.enter` instead, and it was the one thread whose
+registers nothing captured. It parks there on **238 of 240** collections in
+this workload, so the hole is on a hot path, not a corner.
+
+Closed by the pair the collector already uses on itself: the asm clobber
+that forces live pointers out of registers, then `setjmp` into a **local**,
+which the Monitor's own stack scan already covers.
+
+Stated with its weight: this did **not** change the reproducer's rate — 56
+of 258 runs with it against 49 of 252 without. It closes a hole; it does not
+close this crash. A survival A/B cannot discriminate here for the reason
+`make greg-roots --explain` gives about its own arm: whether a pointer lives
+only in a register is a codegen outcome no source-level test can compel. The
+gate is that the spill happens, counted as `monitor_reg_spills`.
+
 ## Open
 
-The death window. It now has a reproducer that fires in seconds on one box,
-which is more than this family has had since 2026-08-16, and the victim is a
-16-byte block that no holder search accounts for and that is **not** the
-`Thread` (rooting every `Thread` for its whole life does not fix it).
-Naming it is the next step, and it should precede any further covering
-mechanism: two of the three attempts here were aimed at objects that turned
-out not to be the victim.
+The reproducer's defect. `Fiber.fibers`' mutex reads as uninitialised to a
+**starting** thread, so the next question is what makes a class-variable
+linked list and its mutex invalid — a missed static root, or memory reused
+under it. The 16-byte victim has no `type_id`, so it is a raw buffer, and
+naming it needs an instrument the audits do not have: they key on Crystal
+types.
+
+Two framings to drop, because both cost a day here: that the dying thread is
+the user (it is a starting one), and that the `Thread` object is the victim
+(rooting it for its whole life changes nothing).

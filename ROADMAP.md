@@ -1000,6 +1000,33 @@ CI asymmetry that hid both.
       **Name the victim first.** It is 16 bytes and it is not the `Thread`;
       two of the three attempts here were aimed at objects that turned out
       not to be it.
+      **Corrected attribution (2026-09-12, later the same day).** The
+      reproducer does not crash in the dying thread. Bare — no poison — it
+      raises rather than faults, and the stack names a thread being **born**:
+      `Thread#start` → `Fiber.new` → `Fiber#initialize` →
+      `Thread::LinkedList(Fiber)#push` → `Thread::Mutex#unlock` returning
+      **EINVAL**, i.e. `Fiber.fibers`' mutex is not a valid mutex. EINVAL and
+      not EPERM, so it is not a non-owner unlock — the memory is wrong. A
+      second sighting lands in the Monitor's `every` rescue with the same
+      error and a different consumer, then SEGVs inside DWARF decoding while
+      printing, which turns the evidence into a backtrace storm. Under
+      `GCRY_POISON_FREED=1` the same defect appears as the 16-byte read
+      instead, and poison perturbs the timing enough that that arm fires
+      almost never (0 in 534) — so the bare arm is the one to drive. Sizes
+      measured and ruled out for the 16-byte block: `Thread` 184,
+      `Thread::Mutex` 48, `Fiber` 176, `Fiber::StackPool` 24,
+      `EC::ThreadPool` 48, `Thread::LinkedList` 32, `Fiber::Stack` 24 — so it
+      carries no `type_id` and the dying-type audit cannot name it.
+      **And a soundness hole closed on the way**: every thread the stop
+      suspends by signal has its GP registers scanned, because a reference
+      can live only in a register — and the Monitor is never signalled, so it
+      was the one thread whose registers nothing captured. It parks in
+      `MonitorGate.enter` on **238 of 240** collections, so the hole is on a
+      hot path. It now spills them with the same `setjmp` pair the collector
+      uses on itself, into a local its own stack scan already covers. This
+      did **not** change the reproducer's rate (56 of 258 against 49 of 252):
+      it closes a hole, not this crash, and a survival A/B cannot
+      discriminate for the reason `make greg-roots --explain` gives.
       **And a shape to keep in view**: the stop now prints
       `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
       Crystal's list has a handle libc says names nothing. That is this
