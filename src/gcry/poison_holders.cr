@@ -96,6 +96,18 @@ module Gcry
       RawOut.flush(buf, len)
     end
 
+    # The heap walk alone. `holders_count` sums roots, live blocks and stacks,
+    # and for a question about *the heap walk* that is the wrong total: a
+    # caller's own locals put the address on a stack, so every target looks
+    # held. `bench/holders_find.cr` is the control that needs this.
+    def self.heap_holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
+      return 0_u64 if user == 0 || size == 0
+      @@quiet = true
+      found = search_heap(heap, user, user &+ size, "release")
+      @@quiet = false
+      found
+    end
+
     def self.holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
       return 0_u64 if user == 0 || size == 0
       @@quiet = true

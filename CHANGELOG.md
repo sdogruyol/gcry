@@ -281,6 +281,23 @@ is now the default and the flag would take you the wrong way.
   the block the report was about. First run, it named a three-week-old fault:
   the writer was the collector, in its own execution-context root pin.
 
+- **A control for the holders search** (`make holders-find`). Every
+  use-after-free investigation on this heap turns on *"holders — none. Nothing
+  in the root set, in a live block or on a fiber stack points into it"*, and
+  that search had no test. Three block shapes, one constructed holder each,
+  plus a masked block whose address exists nowhere a walk can see: the three
+  are found and the control reports zero. `PoisonHolders.heap_holders_count`
+  is the heap-only count it needs — the full search sums roots, blocks and
+  stacks, and a caller's own locals make every target look held.
+
+- The poisoned-pin diagnostic resolves the address to its block before
+  describing or searching it. It arrives as the poison word plus the ivar
+  offset the pin site added (8 bytes for `sched.@name`), so the first version
+  asked about `[base+8, base+24)` and answered "nothing points at it" about a
+  range the buffer's owner does not point into. It also prints `allocated` and
+  the mark bit separately rather than calling `live?` liveness: that predicate
+  answers occupancy.
+
 - The execution-context pin sites carry a compile-time site tag, so a refused
   slot address names the expression it came from rather than a line nine sites
   share. It named the structure this defect has never named: `sched.@name`,

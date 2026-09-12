@@ -455,6 +455,17 @@ module Gcry
     # `ec.@schedulers`. A `String` literal, so reading it costs nothing and
     # holding it allocates nothing.
     getter ec_root_bad_slot_site : String = ""
+    # The `@schedulers` array of the context being pinned when a slot was
+    # refused: identity, the buffer it points at, the base that buffer was
+    # allocated at, and its two sizes. Written per context per collection and
+    # read only by the diagnostic.
+    @ec_sched_arr = 0_u64
+    @ec_sched_buf = 0_u64
+    @ec_sched_root = 0_u64
+    @ec_sched_size = 0
+    @ec_sched_cap = 0
+    @ec_sched_buf_off = 0
+    @ec_sched_obj_size = 0
     # Pointer-bearing ivars of the Parallel EC structures that the pin block
     # could *not* cover. Wide ones it can — a Proc, a Tuple,
     # `(Fiber::ExecutionContext | Nil)` get every word of the slot marked — so

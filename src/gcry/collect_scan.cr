@@ -68,6 +68,26 @@ module Gcry
       (addr >> 47) == 0
     end
 
+    # The `@schedulers` array of the context currently being pinned: its
+    # identity, the buffer it points at, and the base that buffer was allocated
+    # at — `@buffer` moves on `shift`, so the two differ by
+    # `@offset_to_buffer` and only the base is the block.
+    private def note_ec_scheduler_array(arr) : Nil
+      @ec_sched_arr = arr.object_id
+      @ec_sched_buf = arr.@buffer.address
+      @ec_sched_root = (arr.@buffer - arr.@offset_to_buffer).address
+      @ec_sched_size = arr.size
+      @ec_sched_cap = arr.@capacity
+      # Where the buffer pointer sits in the object, and how big the object
+      # says it is. The conservative scan has to reach that offset for the
+      # edge to exist at all, and the block the object lives in has to be big
+      # enough to be scanned that far.
+      # `pointerof` rather than `offsetof`: the latter cannot take a `typeof`,
+      # and the subtraction is the same number with no macro gymnastics.
+      @ec_sched_buf_off = (pointerof(arr.@buffer).address &- arr.object_id).to_i32
+      @ec_sched_obj_size = instance_sizeof(typeof(arr))
+    end
+
     private def note_ec_root_bad_slot(site : String, slot_addr : UInt64) : Nil
       poisoned = (slot_addr & POISON_TAG_MASK) == POISON_TAG
       if poisoned
@@ -107,12 +127,112 @@ module Gcry
     # `GCRY_POISON_HOLDERS=1` runs from a fault, run from the pin site instead.
     # A holder names the structure whose reference was lost, which is the one
     # fact this defect has never produced.
+    # Does the array that owns the elements still point at the freed block, and
+    # is that array itself live? Those two answers split the remaining space:
+    # if it points at it and is live, a heap edge from a marked object to its
+    # own buffer was not followed; if it is not live, the array went first and
+    # the buffer is a consequence.
+    private def report_ec_scheduler_array(addr : UInt64) : Nil
+      arr = @ec_sched_arr
+      return if arr == 0
+      buf = uninitialized UInt8[384]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the owning array is 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, arr)
+      # `live?` answers occupancy, not reachability — it asks
+      # `block_allocated?`. The reachability answer is the mark bit, and both
+      # are printed because they mean different things: an allocated,
+      # *unmarked* array at this point in the walk is one nothing has reached.
+      len = RawOut.append(buf.to_unsafe, len, ", allocated=")
+      len = RawOut.append(buf.to_unsafe, len,
+        live?(Pointer(Void).new(arr)) ? "true" : "false")
+      if found = find_block_with_chunk(Pointer(Void).new(arr))
+        h, c = found
+        len = RawOut.append(buf.to_unsafe, len, " marked=")
+        len = RawOut.append(buf.to_unsafe, len, block_marked_in?(c, h) ? "true" : "false")
+      end
+      len = RawOut.append(buf.to_unsafe, len, ", buffer 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, @ec_sched_buf)
+      len = RawOut.append(buf.to_unsafe, len, ", allocated base 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, @ec_sched_root)
+      len = RawOut.append(buf.to_unsafe, len, ", size ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_size.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " capacity ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_cap.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+
+      # The edge that should have kept the buffer alive: the `@buffer` word
+      # inside a live array object. It exists only if the conservative scan of
+      # that object reaches the offset, which needs the block it lives in to be
+      # at least that big.
+      len = 0
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the edge that should hold it — @buffer at offset ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_buf_off.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " of a ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @ec_sched_obj_size.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, "-byte object")
+      if hdr = find_block(Pointer(Void).new(arr))
+        pay = block_payload(hdr).to_u64
+        len = RawOut.append(buf.to_unsafe, len, ", in a block of payload ")
+        len = RawOut.append_u64(buf.to_unsafe, len, pay)
+        len = RawOut.append(buf.to_unsafe, len,
+          pay >= @ec_sched_buf_off.to_u64 &+ 8 ? " — the scan reaches it" : " — THE SCAN STOPS SHORT OF IT")
+        # And the other way the edge can fail to exist: an ATOMIC block is
+        # never pushed onto the mark stack at all ("atomic payloads have no
+        # edges"), so a pointer inside one is never followed however big the
+        # block is.
+        if chunk = chunk_containing(arr)
+          len = RawOut.append(buf.to_unsafe, len, ", atomic=")
+          len = RawOut.append(buf.to_unsafe, len,
+            atomic_of(chunk, hdr) ? "TRUE — its @buffer edge is never followed" : "false")
+        end
+        {% if flag?(:unix) %}
+          # The heap walk's own answer for this exact block, asked here rather
+          # than inferred from the wider search that follows.
+          # `bench/holders_find.cr` is the control that says the walk can find
+          # a word like this one: three block shapes, one constructed holder
+          # each, all found, and a masked control at zero.
+          len = RawOut.append(buf.to_unsafe, len, ", heap holders of the buffer: ")
+          len = RawOut.append_u64(buf.to_unsafe, len,
+            PoisonHolders.heap_holders_count(self, @ec_sched_root, 16_u64))
+          # And of the array itself, which the context points at. Zero for both
+          # says the walk is not reaching these blocks at all; non-zero here
+          # with zero above says it reaches the array and the array's `@buffer`
+          # word is not what it was a moment ago.
+          len = RawOut.append(buf.to_unsafe, len, ", of the array itself: ")
+          len = RawOut.append_u64(buf.to_unsafe, len,
+            PoisonHolders.heap_holders_count(self, arr, 32_u64))
+        {% end %}
+        len = RawOut.append(buf.to_unsafe, len, "\n")
+      else
+        len = RawOut.append(buf.to_unsafe, len, ", in no block gcry can find\n")
+      end
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     private def describe_poisoned_pin_source(addr : UInt64) : Nil
-      buf = uninitialized UInt8[320]
+      # Resolve to the block first. `addr` comes from the poison word the
+      # receiver was read as, plus the ivar offset the pin site added to it —
+      # measured, 8 bytes for `sched.@name` — so it points *into* the block and
+      # not at it. Describing the address rather than the block made the
+      # holders search below ask about `[base+8, base+24)` and answer "nothing
+      # points at it" while the owning array's `@buffer` pointed squarely at
+      # `base`.
+      base = addr
+      if found = find_block_with_chunk(Pointer(Void).new(addr))
+        h, c = found
+        base = user_of(c, h).address
+      end
+      buf = uninitialized UInt8[384]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: the freed block is 0x")
-      len = RawOut.append_hex(buf.to_unsafe, len, addr)
+      len = RawOut.append_hex(buf.to_unsafe, len, base)
+      if base != addr
+        len = RawOut.append(buf.to_unsafe, len, " (the poisoned word was read at 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, addr)
+        len = RawOut.append(buf.to_unsafe, len, ")")
+      end
       size = 0_u64
-      if chunk = chunk_containing(addr)
+      if chunk = chunk_containing(base)
         len = RawOut.append(buf.to_unsafe, len, ", in a chunk of size class ")
         len = RawOut.append_u64(buf.to_unsafe, len, chunk.value.size_class.to_u64)
         if ChunkHeader.large?(chunk)
@@ -128,11 +248,12 @@ module Gcry
       end
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+      report_ec_scheduler_array(base)
       # `PoisonHolders` is a unix diagnostic (`skip_file unless flag?(:unix)`).
       {% if flag?(:unix) %}
         return unless PoisonHolders.requested? && size > 0
         PoisonHolders.entry_sp = @collect_entry_sp
-        PoisonHolders.search(self, addr, size)
+        PoisonHolders.search(self, base, size)
       {% end %}
     end
 
@@ -245,6 +366,12 @@ module Gcry
             # Derived rather than named: a context that owns schedulers has an
             # `@schedulers` ivar, and each scheduler is a root in its own right.
             {% if t.instance_vars.any? { |v| v.name == "schedulers" } %}
+              # Recorded before the elements are read, so a refusal below can
+              # say whether the block it refused is this array's own buffer and
+              # whether the array that owns it is live. Five stores per context
+              # per collection, and the only thing that reads them is a
+              # diagnostic that fires when the walk has already found damage.
+              note_ec_scheduler_array(ec.@schedulers)
               ec.@schedulers.each do |sched|
                 pin_ec_root(sched)
                 pin_ec_ivars(sched, Fiber::ExecutionContext::Parallel::Scheduler)

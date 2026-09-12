@@ -574,6 +574,16 @@ jobs:
         run: |
           make poison-holders
 
+      # And the control that search never had. Three block shapes, one
+      # constructed holder each, plus a masked block no walk can see: the three
+      # must be found and the control must not. Added 2026-09-12 after a report
+      # contradicted itself — an array that was allocated, marked, non-atomic
+      # and holding a buffer's address at a scanned offset, beside the same
+      # report's heap walk saying nothing pointed at that buffer.
+      - name: Holders search finds what it must
+        run: |
+          make holders-find
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

@@ -195,13 +195,56 @@ elements out of it during its own root pin, and Crystal's Monitor reads the
 same elements through `each_scheduler` — which is exactly where the fault
 lands once gcry stops dereferencing it.
 
-## Still open
+## The owning array, measured at the refusal
 
-Why the buffer is unreachable. The `Array` is pinned (`ec.@schedulers` is a
-`Reference` ivar and the walk marks it), and a heap edge to an interior
-pointer is allowed on purpose (`collect_mark.cr`: *"Heap marks must allow
-interiors (shift)"*), so marking the `Array` should mark its buffer. One of
-those two statements is not true at the moment the buffer is freed, and the
-next instrument is the one that says which: the holders search already reports
-`heap: 0 word(s) in 0 live block(s)` for the buffer, so the `Array` object
-either is not marked or is not being scanned when it is.
+Recording the `@schedulers` array before its elements are walked lets the
+refusal describe the edge that should have kept the buffer alive. Every number
+here is from one report:
+
+```
+the freed block is 0x7fd097960840 (the poisoned word was read at 0x7fd097960848),
+  in a chunk of size class 0, payload 16 bytes
+the owning array is 0x7fd098462620, allocated=true marked=true,
+  buffer 0x7fd097960840, allocated base 0x7fd097960840, size 1 capacity 1
+the edge that should hold it — @buffer at offset 16 of a 24-byte object,
+  in a block of payload 32 — the scan reaches it, atomic=false,
+  heap holders of the buffer: 0, of the array itself: 1
+```
+
+Two corrections to earlier readings are in there. `live?` answers *occupancy*,
+not reachability — it asks `block_allocated?` — so the report now prints
+`allocated` and the mark bit separately. And the poisoned address is resolved
+to its block before anything is asked about it: it arrives as the poison word
+*plus the ivar offset the pin site added*, 8 bytes for `sched.@name`, so the
+first version searched `[base+8, base+24)` and answered "nothing points at it"
+about a range the buffer's owner does not point into.
+
+## The contradiction that is left, stated as one
+
+With the range corrected, the same report says all of this at once:
+
+* the array is **allocated and marked**, and **not atomic** — so its payload
+  is scanned and its edges are followed;
+* its block's payload is **32 bytes** and `@buffer` sits at **offset 16**, so
+  the scan reaches the word;
+* `@buffer` **is** the freed block's base;
+* the heap walk finds **1** holder of the array itself, so it is reaching
+  these chunks;
+* and **0** holders of the buffer.
+
+The last two cannot both be true. The walk visits the block that points at the
+array, and the array's own block is in the same walk, and the word at offset 16
+of it is the buffer's address.
+
+**It is not the search.** `make holders-find` is the control that walk never
+had: three block shapes, one constructed holder each, all found, and a masked
+block whose address exists nowhere a walk can see reporting zero. It also
+caught a trap worth keeping — a holder whose only ivar is a `UInt64` has no
+inner pointers, so Crystal allocates it *atomic*, gcry never scans it, and the
+target is reclaimed: the first control drew the first case's own address.
+
+So the next session starts here, with one question and no hypotheses: walk to
+the array's block from the refusal and print its four payload words. Either
+word 2 is the buffer — and the walk that reads the same word disagrees, which
+is a defect in the walk — or it is not, and the array whose `@buffer` was
+recorded is not the array the walk sees at that address.

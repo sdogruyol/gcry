@@ -849,6 +849,22 @@ poison-holders: $(BIN)
 	$(BIN)/poison_holders
 	$(BIN)/poison_holders --control
 
+# Can the holders search find a word it is guaranteed to be able to find?
+# Every use-after-free investigation on this heap turns on one sentence —
+# "holders — none. Nothing in the root set, in a live block or on a fiber stack
+# points into it" — and a search that can miss makes every one of those
+# conclusions weaker than it reads. Three block shapes, one constructed holder
+# each, plus a masked control whose address exists nowhere a walk can see: the
+# three must be found and the control must not, or the counts are not
+# attributable to the holders that were built. It also pins a lesson the first
+# version of the probe learned the hard way: a holder whose only ivar is a
+# `UInt64` has no inner pointers, so Crystal allocates it atomic, gcry never
+# scans it, and the target is reclaimed — the control drew the first case's own
+# address.
+holders-find: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
+	$(BIN)/holders_find
+
 darwin-page-query: $(BIN)
 	$(CRYSTAL) build bench/darwin_page_query.cr -o $(BIN)/darwin_page_query --error-trace
 	$(BIN)/darwin_page_query $${PAGE_QUERY_PRESSURE:+--pressure=$$PAGE_QUERY_PRESSURE}
