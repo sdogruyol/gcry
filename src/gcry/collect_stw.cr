@@ -187,9 +187,44 @@ module Gcry
           # Off by default: it reads /proc inside the pause.
           StwWatchdog.note_suspend_step(StwWatchdog::STEP_BOUNDS_DONE)
           census_threads(listed) if @thread_census
+          # The stop id every suspend signal below is tagged with, set before
+          # the first `pthread_kill`: a delivery that arrives while the epoch
+          # is 0 is declined by its own handler, so sending first and stamping
+          # after would drop the signal it was meant to authorise
+          # (src/gcry/platform/linux_stw.cr).
+          Platform.begin_stop_epoch
+          # Research, two different failures with the same symptom.
+          #
+          #   drop — swallow the first N suspend signals of every stop: a
+          #     delivery that was lost. The resend is exactly the repair for
+          #     it, so this is the arm that must go green.
+          #   mute — swallow every signal to the first N threads, resends
+          #     included: a thread that cannot take the signal at all, which
+          #     is the other candidate for the aarch64 hang. No number of
+          #     resends fixes that one, and saying so is the point.
+          #
+          # Per stop rather than a one-shot budget, so the arm does not depend
+          # on which collection happens to run first.
+          drop_budget = @stw_test_drop_suspends
+          mute_budget = @stw_test_mute_threads
+          @stw_muted_count = 0
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
+            if mute_budget > 0
+              mute_budget -= 1
+              note_muted_suspend(thread.to_unsafe.unsafe_as(UInt64))
+              thread.@suspended.set(false)
+              next
+            end
+            if drop_budget > 0
+              drop_budget -= 1
+              @stw_suspend_dropped_for_test &+= 1
+              # Cleared by hand: `Thread#suspend` is what normally clears it,
+              # and this arm is the absence of that call.
+              thread.@suspended.set(false)
+              next
+            end
             thread.suspend
           end
           # The breadcrumbs the first legible sighting of the aarch64 hang asked
@@ -218,20 +253,54 @@ module Gcry
           StwWatchdog.note_suspend_step(StwWatchdog::STEP_SIGNALS_SENT)
           acked = 0
           @suspend_stall_reported = false
+          @stw_abandoned_count = 0
+          # Zero disables the resend, which is the control arm: the wait then
+          # spins forever on a dropped signal exactly as it did before the
+          # epoch existed. Hoisted out of the spin — the loop below runs
+          # hundreds of millions of iterations and must stay three
+          # instructions wide.
+          resend_spins = @suspend_resend ? @suspend_resend_spins : 0_u64
+          resend_limit = @suspend_resend_limit
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
             id = thread.to_unsafe.unsafe_as(UInt64)
             StwWatchdog.note_suspend(expected, acked, id)
             spins = 0_u64
+            since_resend = 0_u64
+            resends = 0_u32
+            abandoned = false
             until thread.@suspended.get
               Intrinsics.pause
               spins &+= 1
               if spins == @suspend_stall_spins
-                report_stuck_suspend(thread, id, expected, acked)
+                report_stuck_suspend(thread, id, expected, acked, resends)
+              end
+              next if resend_spins == 0
+              since_resend &+= 1
+              next if since_resend < resend_spins
+              since_resend = 0_u64
+              if resends < resend_limit
+                # Safe only because of the epoch: a duplicate that lands after
+                # this thread has already served the stop is declined instead
+                # of suspending it again with nobody left to resume it. That
+                # hazard is why the symmetry with `start_world`'s resume retry
+                # was refused twice before.
+                resends &+= 1
+                @stw_suspend_resends &+= 1
+                resend_suspend_signal(id)
+              elsif suspend_handle_dead?(id)
+                # The handle names no live thread, so there is nothing left to
+                # suspend and nothing left that can mutate the heap through it.
+                # Waiting on it is the 20-minute job timeout that has been
+                # reading as `cancelled` since 2026-08-20.
+                report_abandoned_suspend(id, expected, acked, resends)
+                note_abandoned_suspend(id)
+                abandoned = true
+                break
               end
             end
-            acked += 1
+            acked += 1 unless abandoned
           end
           StwWatchdog.note_suspend(expected, acked, 0_u64)
           # Positive control for the other half of the report: the loop is
@@ -253,6 +322,10 @@ module Gcry
             end
           end
         rescue ex
+          # The epoch is cleared on every path that leaves without a stopped
+          # world. A stop that raises here has signals outstanding, and a
+          # thread that serves one after this point must keep running.
+          Platform.end_stop_epoch
           @world_stopped = false
           @stw_owner = nil
           @stw_owner_pthread = 0_u64
@@ -277,13 +350,159 @@ module Gcry
 
     @suspend_stall_reported = false
 
+    # Re-sending a suspend signal is safe **only** with the stop epoch: see
+    # `Platform.admit_suspend_signal?`. Default on; `GCRY_STW_RESEND=0` is the
+    # control arm that restores the wait that hung six aarch64 jobs.
+    property suspend_resend : Bool = true
+
+    # Spins between resends — roughly a tenth of the stall report's threshold,
+    # so a stop that is merely slow resends a few times in silence and one
+    # that is stuck still reaches the loud report. A property for the same
+    # reason `suspend_stall_spins` is one: a constant with a runtime
+    # initializer would evaluate `ENV[]?` with the world stopped.
+    property suspend_resend_spins : UInt64 = 20_000_000_u64
+
+    # After this many unanswered resends the collector stops asking and starts
+    # asking *about* the thread instead. Bounded because a live thread that
+    # ignored sixteen signals will not answer the seventeenth, and an unbounded
+    # retry is a signal storm aimed at a thread that may be mid-teardown.
+    property suspend_resend_limit : UInt32 = 16_u32
+
+    # Research: drop this many suspend signals before sending any, to stand in
+    # for the delivery the aarch64 hang has never let anyone observe.
+    property stw_test_drop_suspends : UInt32 = 0_u32
+
+    # Research: swallow every suspend signal to this many threads, resends
+    # included — a thread that never answers rather than a delivery that went
+    # missing. The resend cannot repair this one; only the abandonment can,
+    # and only when the handle is dead.
+    property stw_test_mute_threads : UInt32 = 0_u32
+
+    # Research: answer every `pthread_kill(id, 0)` with ESRCH, so the
+    # abandonment path can be walked without arranging a dead handle on
+    # Crystal's list — which is the open use-after-free itself. Unsound on
+    # purpose: with it the stop proceeds around a thread that is very much
+    # alive.
+    property stw_test_esrch : Bool = false
+
+    # Research: after the world has restarted, send one more `SIG_SUSPEND` to
+    # every thread it just resumed. That is exactly the delivery the epoch
+    # exists to decline — the redundant signal that stays pending inside the
+    # handler and lands after the resume — and arranging it here is what turns
+    # "resending would be unsafe" from an argument into an arm.
+    property stw_test_double_suspend : Bool = false
+
+    getter stw_suspend_resends : UInt64 = 0_u64
+    getter stw_suspend_abandoned : UInt64 = 0_u64
+    getter stw_suspend_dropped_for_test : UInt64 = 0_u64
+
+    # Deliveries the epoch declined. Kept on the heap rather than read from
+    # `Platform` at the call site so `/gc-stats` stays one shape on every
+    # platform: a Mach or Windows stop suspends by API and has no signal that
+    # could arrive twice, which is a real zero rather than a missing field.
+    def stw_suspend_stale_signals : UInt64
+      {% if flag?(:linux) %}
+        Platform.stw_stale_signals
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    def stw_suspend_redundant_signals : UInt64
+      {% if flag?(:linux) %}
+        Platform.stw_redundant_signals
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    # `ESRCH`. Spelled out rather than reached through `Errno`, which is an
+    # enum lookup on a path that runs with the world stopped.
+    SUSPEND_ESRCH = 3
+
+    # Threads abandoned during this stop, so `start_world` does not resume a
+    # handle libc has already told us names nothing: Crystal's `Thread#resume`
+    # panics the process when `pthread_kill` fails, which would turn a handled
+    # defect into an abort.
+    STW_ABANDON_SLOTS = 8
+    @stw_abandoned = uninitialized StaticArray(UInt64, STW_ABANDON_SLOTS)
+    @stw_abandoned_count = 0
+
+    private def note_abandoned_suspend(id : UInt64) : Nil
+      @stw_suspend_abandoned &+= 1
+      return if @stw_abandoned_count >= STW_ABANDON_SLOTS
+      @stw_abandoned[@stw_abandoned_count] = id
+      @stw_abandoned_count += 1
+    end
+
+    private def suspend_abandoned?(id : UInt64) : Bool
+      i = 0
+      while i < @stw_abandoned_count
+        return true if @stw_abandoned[i] == id
+        i += 1
+      end
+      false
+    end
+
+    # Research only, and the same shape: threads whose signals this stop is
+    # deliberately swallowing.
+    @stw_muted = uninitialized StaticArray(UInt64, STW_ABANDON_SLOTS)
+    @stw_muted_count = 0
+
+    private def note_muted_suspend(id : UInt64) : Nil
+      @stw_suspend_dropped_for_test &+= 1
+      return if @stw_muted_count >= STW_ABANDON_SLOTS
+      @stw_muted[@stw_muted_count] = id
+      @stw_muted_count += 1
+    end
+
+    private def suspend_muted?(id : UInt64) : Bool
+      i = 0
+      while i < @stw_muted_count
+        return true if @stw_muted[i] == id
+        i += 1
+      end
+      false
+    end
+
+    private def resend_suspend_signal(id : UInt64) : Nil
+      return if @stw_muted_count > 0 && suspend_muted?(id)
+      LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), Platform::STW_SIG_SUSPEND)
+    end
+
+    # Does this handle still name a live thread? `pthread_kill(id, 0)` sends
+    # nothing and answers exactly that.
+    private def suspend_handle_dead?(id : UInt64) : Bool
+      return true if @stw_test_esrch
+      LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0) == SUSPEND_ESRCH
+    end
+
+    # Unconditional, unlike `report_stuck_suspend`: this one is not asking a
+    # question that can fault — it has already been answered — and a stop that
+    # proceeds without one of its threads must say so whether or not a
+    # watchdog happens to be armed.
+    private def report_abandoned_suspend(id : UInt64, expected : Int32, acked : Int32, resends : UInt32) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: SUSPEND ABANDONED thread 0x")
+      len = RawOut.append_hex(p, len, id)
+      len = RawOut.append(p, len, " — no acknowledgement after ")
+      len = RawOut.append_u64(p, len, resends.to_u64)
+      len = RawOut.append(p, len, " resends and pthread_kill(0) says ESRCH, so the handle names no live thread. ")
+      len = RawOut.append_u64(p, len, acked.to_u64)
+      len = RawOut.append(p, len, " of ")
+      len = RawOut.append_u64(p, len, expected.to_u64)
+      len = RawOut.append(p, len, " acknowledged; stopping without it. A `Thread` still on Crystal's list whose handle is dead is the shape of the open use-after-free\n")
+      RawOut.flush(p, len)
+    end
+
     # Called once per stop, from inside the suspend wait, and only when the
     # watchdog is armed — this asks libc about a `pthread_t` the collector has
     # been unable to get an answer from, and if that handle came out of a freed
     # `Thread` (the open use-after-free on this same runner) the question can
     # fault. A fault here names the defect; a hang names nothing, and a hang is
     # what six aarch64 jobs have produced.
-    private def report_stuck_suspend(thread : Thread, id : UInt64, expected : Int32, acked : Int32) : Nil
+    private def report_stuck_suspend(thread : Thread, id : UInt64, expected : Int32, acked : Int32, resends : UInt32) : Nil
       return unless StwWatchdog.armed?
       return if @suspend_stall_reported
       @suspend_stall_reported = true
@@ -296,13 +515,26 @@ module Gcry
       len = RawOut.append_u64(p, len, acked.to_u64)
       len = RawOut.append(p, len, " of ")
       len = RawOut.append_u64(p, len, expected.to_u64)
-      len = RawOut.append(p, len, " acknowledged. ")
+      len = RawOut.append(p, len, " acknowledged, ")
+      len = RawOut.append_u64(p, len, resends.to_u64)
+      # Three numbers that separate the readings of a missing acknowledgement:
+      # a signal that was never delivered (handler calls flat across the
+      # resends), one delivered and declined (stale/redundant climbing), and a
+      # thread that cannot run its handler at all (calls flat, handle live).
+      # Without them the report says only that nobody answered.
+      len = RawOut.append(p, len, " resends unanswered; handler entries so far ")
+      len = RawOut.append_u64(p, len, Platform.stw_handler_calls)
+      len = RawOut.append(p, len, ", declined stale ")
+      len = RawOut.append_u64(p, len, Platform.stw_stale_signals)
+      len = RawOut.append(p, len, " / redundant ")
+      len = RawOut.append_u64(p, len, Platform.stw_redundant_signals)
+      len = RawOut.append(p, len, ". ")
       # ESRCH means the handle names no live thread, which is what a `Thread`
       # object that was swept and reissued would look like from here.
       rc = LibStwProbe.pthread_kill(id.unsafe_as(Gcry::OS::PthreadT), 0)
       len = RawOut.append(p, len, rc == 0 ? "the handle is live (pthread_kill 0 → 0)" : "pthread_kill(0) → ")
       len = RawOut.append_u64(p, len, rc.to_u64) unless rc == 0
-      len = RawOut.append(p, len, rc == 3 ? " ESRCH: the handle names no live thread" : "")
+      len = RawOut.append(p, len, rc == SUSPEND_ESRCH ? " ESRCH: the handle names no live thread" : "")
       len = RawOut.append(p, len, "\n")
       RawOut.flush(p, len)
     end
@@ -406,9 +638,20 @@ module Gcry
           # `GCRY_STW_LATE_CLEAR=1` restores the old order, which is how the
           # gate shows the reads coming back.
           @world_stopped = false unless @stw_late_clear
+          # **Before** the first resume as well, and for a different reason:
+          # a duplicate suspend signal still in flight must find no stop in
+          # progress by the time its thread runs again, or it re-suspends a
+          # thread this loop has already woken. Closing the epoch here is what
+          # makes the resend above a repair rather than a new hang
+          # (src/gcry/platform/linux_stw.cr).
+          Platform.end_stop_epoch
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
+            # A thread the stop gave up on: libc said its handle names nothing,
+            # and Crystal's `Thread#resume` panics the process when
+            # `pthread_kill` fails.
+            next if suspend_abandoned?(thread.to_unsafe.unsafe_as(UInt64))
             thread.resume
             spins = 0
             until !thread.@suspended.get
@@ -418,6 +661,20 @@ module Gcry
                 thread.resume
                 spins = 0
               end
+            end
+          end
+          # Research: the redundant delivery, arranged. With the epoch it is
+          # declined and counted in `stw_suspend_stale_signals`; without it,
+          # each of these suspends a running thread that nothing will ever
+          # resume, and the next stop waits on it forever. That is the hazard
+          # that made the resend above unshippable twice.
+          if @stw_test_double_suspend
+            Thread.unsafe_each do |thread|
+              next if thread == current_thread
+              next if stw_signal_exempt?(thread)
+              id = thread.to_unsafe.unsafe_as(UInt64)
+              next if suspend_abandoned?(id)
+              resend_suspend_signal(id)
             end
           end
           Platform.clear_thread_sps

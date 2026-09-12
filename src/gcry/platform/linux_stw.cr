@@ -85,6 +85,64 @@ module Gcry
     @@stw_enabled = true
     @@stw_installed = false
 
+    # ── The stop epoch ───────────────────────────────────────────────────────
+    #
+    # A suspend signal is only honoured for the stop that asked for it.
+    #
+    # Why this exists: `stop_world` spins `until thread.@suspended.get` for a
+    # thread that never acknowledged, and six aarch64 CI jobs died at the
+    # 20-minute job timeout there (reported as *cancelled*, which is why it went
+    # unread for weeks). The obvious repair is the one `start_world` already
+    # makes for resume — send the signal again — and without this epoch it is
+    # **not safe**: `SIG_SUSPEND` is blocked for the whole handler and inside
+    # `sigsuspend`, so a redundant one stays pending and is delivered *after*
+    # the thread resumes, suspending it again with nobody left to wake it.
+    #
+    # `@@stw_epoch` is 0 when no stop is in progress and carries the stop's id
+    # while one is. A sentinel rather than a parity bit on purpose: `stop_world`
+    # has failure paths that leave through a `rescue`, and a counter whose
+    # meaning depends on being incremented an even number of times would invert
+    # — every later suspend signal dropped, which is the hang this closes, with
+    # the collector now the one holding the wrong end.
+    #
+    # A delivery is honoured only when the epoch is non-zero and this thread has
+    # not already served *that* epoch. Every other case is a duplicate, and each
+    # is safe:
+    #
+    #   - epoch 0 — no stop is in progress; the world is running and a thread
+    #     that suspended itself here would never be resumed.
+    #   - already served — the collector is still inside the same stop and has
+    #     the acknowledgement it asked for.
+    #   - a *newer* epoch it has not served — a stale signal delivered inside
+    #     the next stop. It suspends, which that stop wants anyway, and the
+    #     collector's own signal then arrives as the already-served case.
+    #
+    # Per-thread rather than global because the state being answered is
+    # per-thread: two threads can be at different points of the same stop.
+    # It rides in the slot table this file already keys by `pthread_t`.
+    @@stw_epoch = uninitialized Atomic(UInt64)
+    @@stw_next_epoch = uninitialized UInt64
+    @@stw_served = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
+    # Deliveries the epoch declined, split by which case they were. Both are
+    # expected to be zero on a quiet run and non-zero the moment the collector
+    # resends, which is what makes "the resend is safe" a reading rather than a
+    # claim.
+    @@stw_stale_signals = uninitialized UInt64
+    @@stw_redundant_signals = uninitialized UInt64
+    # `GCRY_STW_EPOCH=0`: honour every delivery, as this handler did before the
+    # epoch. The red arm for `make stw-epoch` — with it the double-signal arm
+    # wedges, which is the behaviour the resend would have shipped.
+    #
+    # `uninitialized`, and defaulted in `ensure_stw_table`, for the reason the
+    # rest of this table is: a class variable with an initializer is set up
+    # lazily behind `Crystal.once`, and the **first** read of this one is
+    # inside the suspend handler. Written the obvious way it hung every
+    # collection with four mutator threads — one thread acknowledged and the
+    # rest sat in the lazy initializer, which is not async-signal-safe. The
+    # arm that set the knob explicitly passed, because setting it is what
+    # initialised it on a normal thread.
+    @@stw_epoch_enabled = uninitialized Bool
+
     def self.stw_sp_clamp_enabled? : Bool
       @@stw_enabled
     end
@@ -103,23 +161,110 @@ module Gcry
       @@stw_handler_calls = 0_u64
       @@stw_sp_zero = 0_u64
       @@stw_records = 0_u64
+      @@stw_epoch.set(0_u64)
+      @@stw_next_epoch = 0_u64
+      @@stw_stale_signals = 0_u64
+      @@stw_redundant_signals = 0_u64
+      @@stw_epoch_enabled = true
       i = 0
       while i < MAX_STW_SP_SLOTS
-        # A claim publishes its bit before writing its id, so a peer scanning
-        # the very first stop must not be able to match whatever was left in
-        # this static.
+        @@stw_served[i] = 0_u64
+        # The ids too, and for the same reason `clear_thread_sps` clears them:
+        # a claim publishes its bit before its id, so a peer scanning the very
+        # first stop must not be able to match whatever was in this static.
         clear_slot_id(i)
         i += 1
       end
       @@stw_booted = true
     end
 
-    # `PthreadT` is an integer alias on glibc and `Void*` on musl, so neither
-    # `0` nor `.new` writes it portably. Same idiom as `Heap#@mark_pthreads`.
-    private def self.clear_slot_id(i : Int32) : Nil
-      zero = uninitialized LibC::PthreadT
-      pointerof(zero).clear
-      @@stw_ids[i] = zero
+    # The stop in progress, or 0. Read by the suspend handler on every
+    # delivery, so it is one acquire load and nothing else.
+    def self.stw_epoch : UInt64
+      @@stw_booted ? @@stw_epoch.get(:acquire) : 0_u64
+    end
+
+    def self.stw_epoch_enabled? : Bool
+      ensure_stw_table
+      @@stw_epoch_enabled
+    end
+
+    # `ensure_stw_table` first, and the order matters: it defaults the flag,
+    # so booting *after* this setter would reinstate the default and quietly
+    # ignore the knob. Boot, then overwrite.
+    def self.stw_epoch_enabled=(value : Bool) : Bool
+      ensure_stw_table
+      @@stw_epoch_enabled = value
+    end
+
+    def self.stw_stale_signals : UInt64
+      @@stw_booted ? @@stw_stale_signals : 0_u64
+    end
+
+    def self.stw_redundant_signals : UInt64
+      @@stw_booted ? @@stw_redundant_signals : 0_u64
+    end
+
+    # Called by `stop_world` **before** the first suspend signal. A signal sent
+    # while the epoch is still 0 would be declined by its own handler.
+    #
+    # Only the collector calls this, and only with `Thread.lock` held, so the
+    # id counter needs no atomic. The published value does: the handler reads
+    # it from another thread.
+    def self.begin_stop_epoch : UInt64
+      ensure_stw_table
+      e = @@stw_next_epoch &+ 1
+      e = 1_u64 if e == 0 # 0 is the "no stop" sentinel, never an epoch
+      @@stw_next_epoch = e
+      @@stw_epoch.set(e, :release)
+      e
+    end
+
+    # Called by `start_world` before the first resume, and by every path that
+    # leaves `stop_world` without a stopped world. Idempotent: a stop that
+    # fails twice must not leave the sentinel inverted.
+    def self.end_stop_epoch : Nil
+      return unless @@stw_booted
+      @@stw_epoch.set(0_u64, :release)
+    end
+
+    # Async-signal-safe. Answers whether this `SIG_SUSPEND` delivery belongs to
+    # a stop that is in progress and that this thread has not already served,
+    # and records the SP/register snapshot when it does.
+    #
+    # The snapshot is deliberately **not** taken for a declined delivery: the
+    # thread is about to return to what it was doing, so its SP is not a
+    # stopped-world SP and writing it would hand the scan a stack bound from a
+    # thread that is running.
+    def self.admit_suspend_signal?(sp : UInt64, uctx : Void*) : Bool
+      # An unbooted table means no stop can have been started through
+      # `begin_stop_epoch`, and the flag below is `uninitialized` — reading it
+      # would be reading whatever is in that static. Honour the delivery, which
+      # is what this handler did before the epoch.
+      return true unless @@stw_booted
+
+      unless @@stw_epoch_enabled
+        record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
+        return true
+      end
+
+      epoch = @@stw_booted ? @@stw_epoch.get(:acquire) : 0_u64
+      if epoch == 0
+        @@stw_stale_signals &+= 1 if @@stw_booted
+        return false
+      end
+
+      slot = sp != 0 ? record_thread_sp(LibC.pthread_self, sp, uctx) : -1
+      # No slot means a full table, which costs this thread its SP clamp and
+      # must not also cost it the stop: fall through and suspend.
+      return true if slot < 0
+
+      if @@stw_served[slot] == epoch
+        @@stw_redundant_signals &+= 1
+        return false
+      end
+      @@stw_served[slot] = epoch
+      true
     end
 
     # Record SP (+ GP regs) for the interrupted thread (signal-handler safe).
@@ -142,7 +287,10 @@ module Gcry
       @@stw_booted ? @@stw_records : 0_u64
     end
 
-    def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Nil
+    # Returns the slot this thread occupies, or -1 when the table is full. The
+    # index is what `admit_suspend_signal?` stamps its served epoch into, so
+    # the two never walk the table twice for one delivery.
+    def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Int32
       ensure_stw_table
       @@stw_records &+= 1
       claimed = @@stw_claimed.get(:acquire)
@@ -151,7 +299,7 @@ module Gcry
         if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
           @@stw_sps[i] = sp
           copy_ucontext_gregs(i, uctx)
-          return
+          return i
         end
         i += 1
       end
@@ -164,10 +312,14 @@ module Gcry
       # it, picks the same lowest free bit, and they all "claim" it: one slot,
       # several threads, last id written wins.
       #
-      # Two threads on one slot means the loser's stack is scanned from the
-      # winner's SP and its registers are the winner's registers — a missed
-      # root in the one table the conservative scan trusts to be per-thread,
-      # and nothing would have reported it.
+      # It had been latent because the slot only carried an SP and a register
+      # row — two threads sharing one meant the loser's stack was scanned from
+      # the winner's SP, a missed root nobody had a reason to look for. The
+      # stop epoch made it a hang instead: the second thread to arrive found
+      # the first one's served stamp under its own index and declined the
+      # signal, so four mutator threads on a first collection left one running
+      # and the stop waiting on it forever. Found by exactly that
+      # (`/proc/<pid>/task`: three in `rt_sigsuspend`, one spinning).
       loop do
         claimed = @@stw_claimed.get(:acquire)
         i = 0
@@ -178,14 +330,19 @@ module Gcry
             if won
               @@stw_ids[i] = id
               @@stw_sps[i] = sp
+              # A slot is reused by whichever thread claims it next, so the
+              # served stamp starts clean here as well as in `clear_thread_sps`
+              # — otherwise a thread could inherit a predecessor's epoch and
+              # decline the one signal that was meant for it.
+              @@stw_served[i] = 0_u64
               copy_ucontext_gregs(i, uctx)
-              return
+              return i
             end
             break # retry outer loop with fresh claimed
           end
           i += 1
         end
-        return if i >= MAX_STW_SP_SLOTS # table full
+        return -1 if i >= MAX_STW_SP_SLOTS # table full
       end
     end
 
@@ -266,8 +423,12 @@ module Gcry
     # peer scanning for its own id can see a slot that is claimed and still
     # carries whatever was in it before. Leaving last stop's ids there made
     # that "whatever" the scanner's **own** handle from the previous stop: it
-    # matched, and two threads shared one slot — the loser's stack scanned
-    # from the winner's SP, its registers the winner's registers. With the ids
+    # matched, and two threads shared one slot. It cost a clobbered SP and
+    # register row before the epoch — the loser's stack scanned from the
+    # winner's SP — and a hang after it, because the winner's served stamp sat
+    # under the loser's index and declined the signal meant for it.
+    # Observed on `find_block_race --child alloc` with `GCRY_INDEX_AUDIT=1`:
+    # `declined … redundant 2`, one thread never acknowledging. With the ids
     # zeroed a scanner sees either its own live slot or no match, and no
     # `pthread_t` compares equal to a cleared one.
     def self.clear_thread_sps : Nil
@@ -277,20 +438,35 @@ module Gcry
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
         @@stw_ngregs[i] = 0
+        @@stw_served[i] = 0_u64
         clear_slot_id(i)
         i += 1
       end
     end
 
+    # `PthreadT` is an integer alias on glibc and `Void*` on musl, so neither
+    # `0` nor `.new` writes it portably. Same idiom as `Heap#@mark_pthreads`.
+    private def self.clear_slot_id(i : Int32) : Nil
+      zero = uninitialized LibC::PthreadT
+      pointerof(zero).clear
+      @@stw_ids[i] = zero
+    end
+
     # Reset SP table after fork (child inherits parent bits / pthread ids).
+    #
+    # The epoch goes back to "no stop in progress" with it. A child forked by a
+    # thread that was not the collector inherits whatever the parent's epoch
+    # was, and the only thread that could have ended it does not exist here.
     def self.reset_stw_after_fork : Nil
       @@stw_installed = false
       ensure_stw_table
       @@stw_claimed.set(0_u64, :release)
+      @@stw_epoch.set(0_u64, :release)
       i = 0
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
         @@stw_ngregs[i] = 0
+        @@stw_served[i] = 0_u64
         clear_slot_id(i)
         i += 1
       end
@@ -323,21 +499,26 @@ module Gcry
       action.sa_sigaction = LibC::SigactionHandlerT.new do |_sig, _info, uctx|
         sp = Platform.sp_from_ucontext(uctx)
         Platform.note_stw_handler(sp)
-        Platform.record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
 
-        # Mirror Crystal::System::Thread suspend handler, but clear
-        # `@suspended` after SIG_RESUME so start_world can confirm wake.
-        thread = ::Thread.current
-        thread.@suspended.set(true)
+        # Every delivery is counted above; only the ones a stop in progress
+        # asked for are served. See `admit_suspend_signal?` — this branch is
+        # what makes `stop_world`'s resend safe, and without it a redundant
+        # signal suspends a thread that nothing will resume.
+        if Platform.admit_suspend_signal?(sp, uctx)
+          # Mirror Crystal::System::Thread suspend handler, but clear
+          # `@suspended` after SIG_RESUME so start_world can confirm wake.
+          thread = ::Thread.current
+          thread.@suspended.set(true)
 
-        mask = uninitialized LibC::SigsetT
-        LibC.sigfillset(pointerof(mask))
-        LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
-        # sa_mask blocks SIG_RESUME during this handler until sigsuspend
-        # atomically unblocks it — otherwise a fast resume is consumed by the
-        # empty SIG_RESUME handler and sigsuspend waits forever (GCRY_STRESS).
-        LibC.sigsuspend(pointerof(mask))
-        thread.@suspended.set(false)
+          mask = uninitialized LibC::SigsetT
+          LibC.sigfillset(pointerof(mask))
+          LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
+          # sa_mask blocks SIG_RESUME during this handler until sigsuspend
+          # atomically unblocks it — otherwise a fast resume is consumed by the
+          # empty SIG_RESUME handler and sigsuspend waits forever (GCRY_STRESS).
+          LibC.sigsuspend(pointerof(mask))
+          thread.@suspended.set(false)
+        end
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))
       # Block resume for the whole SIGPWR handler except inside sigsuspend.

@@ -956,6 +956,38 @@ module GC
     if ss = env_u64("GCRY_SUSPEND_STALL_SPINS")
       heap.suspend_stall_spins = ss
     end
+    # The suspend resend, and the epoch that makes it safe
+    # (src/gcry/platform/linux_stw.cr). Both **on** by default; the two zeros
+    # are the control arms `make stw-epoch` needs, and each is red on its own:
+    # without the resend a dropped signal hangs the stop, without the epoch a
+    # duplicate suspends a thread nothing will resume.
+    heap.suspend_resend = false if env_flag_zero?("GCRY_STW_RESEND")
+    if rs = env_u64("GCRY_STW_RESEND_SPINS")
+      heap.suspend_resend_spins = rs
+    end
+    if rl = env_u64("GCRY_STW_RESEND_LIMIT")
+      heap.suspend_resend_limit = rl.to_u32 if rl <= 1_000_000
+    end
+    {% if flag?(:linux) %}
+      Gcry::Platform.stw_epoch_enabled = false if env_flag_zero?("GCRY_STW_EPOCH")
+    {% end %}
+    # Research only: swallow this many suspend signals before sending any, so
+    # a thread that was signalled and never acknowledged can be arranged
+    # rather than waited for (src/gcry/collect_stw.cr).
+    if ds = env_u64("GCRY_STW_TEST_DROP_SUSPENDS")
+      heap.stw_test_drop_suspends = ds.to_u32 if ds <= 64
+    end
+    # Research only: swallow every signal to this many threads, resends
+    # included — a thread that never answers rather than a lost delivery.
+    if mt = env_u64("GCRY_STW_TEST_MUTE_THREADS")
+      heap.stw_test_mute_threads = mt.to_u32 if mt <= 64
+    end
+    # Research only: answer every handle probe with ESRCH, so the abandonment
+    # path can be exercised without a dead handle on Crystal's list.
+    heap.stw_test_esrch = true if env_flag_one?("GCRY_STW_TEST_ESRCH")
+    # Research only: send one more suspend signal to every thread after the
+    # world restarts — the redundant delivery the epoch exists to decline.
+    heap.stw_test_double_suspend = true if env_flag_one?("GCRY_STW_TEST_DOUBLE_SUSPEND")
     # Wait, briefly and before stopping anything, for a thread that exists but
     # has not published itself yet (src/gcry/collect_stw.cr). **On** by default.
     #

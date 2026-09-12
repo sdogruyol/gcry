@@ -636,6 +636,15 @@ jobs:
         run: |
           make find-block-race
 
+      # The suspend wait is where six aarch64 jobs died at the 20-minute job
+      # timeout, reported as *cancelled*. It can now re-send the signal, and
+      # the stop epoch is what makes that safe — three of this gate's six arms
+      # are red on purpose, including the duplicate-signal hazard that kept the
+      # resend out twice.
+      - name: STW stop epoch
+        run: |
+          make stw-epoch
+
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
       # plain-store path must be shown to lose some.
@@ -1216,6 +1225,9 @@ jobs:
           timeout 300 make thread-birth-root
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
+          # The runner the suspend hang lives on. The signal path is the
+          # thing under test, so this gate belongs here more than anywhere.
+          timeout 600 make stw-epoch
           # The harness installs this reporter after Crystal replaces the
           # process signal handlers. A rare locked-arm fault without it leaves
           # only an address, so it cannot distinguish a released large chunk
