@@ -135,7 +135,15 @@ module Gcry
           while i < MAX_STW_SP_SLOTS
             bit = 1_u64 << i
             if (claimed & bit) == 0
-              if @@stw_claimed.compare_and_set(claimed, claimed | bit)
+              # `compare_and_set` returns `{old, success}`; a tuple is always
+              # truthy, so the unchecked form claimed the bit whether or not
+              # the exchange happened. Inert here — only the collector calls
+              # this, with the world stopped — but it is the same line that
+              # made several threads share one slot on Linux, where the
+              # suspend handler calls it from every thread at once
+              # (`bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`).
+              _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
+              if won
                 @@stw_ids[i] = id
                 @@stw_sps[i] = 0_u64
                 @@stw_greg_ok[i] = false

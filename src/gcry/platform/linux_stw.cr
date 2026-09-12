@@ -103,7 +103,23 @@ module Gcry
       @@stw_handler_calls = 0_u64
       @@stw_sp_zero = 0_u64
       @@stw_records = 0_u64
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        # A claim publishes its bit before writing its id, so a peer scanning
+        # the very first stop must not be able to match whatever was left in
+        # this static.
+        clear_slot_id(i)
+        i += 1
+      end
       @@stw_booted = true
+    end
+
+    # `PthreadT` is an integer alias on glibc and `Void*` on musl, so neither
+    # `0` nor `.new` writes it portably. Same idiom as `Heap#@mark_pthreads`.
+    private def self.clear_slot_id(i : Int32) : Nil
+      zero = uninitialized LibC::PthreadT
+      pointerof(zero).clear
+      @@stw_ids[i] = zero
     end
 
     # Record SP (+ GP regs) for the interrupted thread (signal-handler safe).
@@ -140,13 +156,26 @@ module Gcry
         i += 1
       end
       # Claim a free slot via CAS on the bitmask.
+      #
+      # `Atomic#compare_and_set` returns `{old_value, success}` — a **tuple**,
+      # which is always truthy, so `if @@stw_claimed.compare_and_set(…)` took
+      # the success branch whether or not the exchange happened. Every thread
+      # signalled in the same stop reads `claimed` before any of them writes
+      # it, picks the same lowest free bit, and they all "claim" it: one slot,
+      # several threads, last id written wins.
+      #
+      # Two threads on one slot means the loser's stack is scanned from the
+      # winner's SP and its registers are the winner's registers — a missed
+      # root in the one table the conservative scan trusts to be per-thread,
+      # and nothing would have reported it.
       loop do
         claimed = @@stw_claimed.get(:acquire)
         i = 0
         while i < MAX_STW_SP_SLOTS
           bit = 1_u64 << i
           if (claimed & bit) == 0
-            if @@stw_claimed.compare_and_set(claimed, claimed | bit)
+            _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
+            if won
               @@stw_ids[i] = id
               @@stw_sps[i] = sp
               copy_ucontext_gregs(i, uctx)
@@ -231,6 +260,16 @@ module Gcry
       end
     end
 
+    # Releasing a slot **must** clear its id, not just its claimed bit.
+    #
+    # The claim publishes the bit by CAS and writes the id afterwards, so a
+    # peer scanning for its own id can see a slot that is claimed and still
+    # carries whatever was in it before. Leaving last stop's ids there made
+    # that "whatever" the scanner's **own** handle from the previous stop: it
+    # matched, and two threads shared one slot — the loser's stack scanned
+    # from the winner's SP, its registers the winner's registers. With the ids
+    # zeroed a scanner sees either its own live slot or no match, and no
+    # `pthread_t` compares equal to a cleared one.
     def self.clear_thread_sps : Nil
       return unless @@stw_booted
       @@stw_claimed.set(0_u64, :release)
@@ -238,6 +277,7 @@ module Gcry
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
         @@stw_ngregs[i] = 0
+        clear_slot_id(i)
         i += 1
       end
     end
@@ -251,6 +291,7 @@ module Gcry
       while i < MAX_STW_SP_SLOTS
         @@stw_sps[i] = 0
         @@stw_ngregs[i] = 0
+        clear_slot_id(i)
         i += 1
       end
     end

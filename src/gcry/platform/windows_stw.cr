@@ -58,7 +58,14 @@ module Gcry::Platform
       while i < MAX_STW_SP_SLOTS
         bit = 1_u64 << i
         if (claimed & bit) == 0
-          if @@stw_claimed.compare_and_set(claimed, claimed | bit)
+          # `compare_and_set` returns `{old, success}` — the unchecked form
+          # took the success branch on a failed exchange. Inert here (only
+          # the collector calls this, with the world stopped); the same line
+          # shared slots between threads on Linux, where the suspend handler
+          # runs it on every thread at once
+          # (`bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`).
+          _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
+          if won
             @@stw_ids[i] = id
             @@stw_sps[i] = 0_u64
             @@stw_greg_ok[i] = false
