@@ -143,6 +143,41 @@ module Gcry
     # initialised it on a normal thread.
     @@stw_epoch_enabled = uninitialized Bool
 
+    # ── The acknowledgement ──────────────────────────────────────────────────
+    #
+    # A suspended thread says so here, not in `Thread#@suspended`, and the
+    # reason is that the handler must not touch Crystal at all.
+    #
+    # `Thread#start` publishes before it sets its own TLS:
+    #
+    #     Thread.threads.push(self)   # on the list — `stop_world` signals it
+    #     Thread.current = self       # TLS only now
+    #
+    # A thread signalled between those two lines has no `Thread.current`, and
+    # Crystal's accessor **creates one** when the key is unset
+    # (`crystal/system/unix/pthread.cr`: `self.current_thread = ::Thread.new`).
+    # That constructor allocates a `Fiber`, allocates a `Thread`, and pushes
+    # onto `Thread.threads` — taking the list mutex the collector holds for
+    # the whole stop. Inside a signal handler, with the world stopping: the
+    # handler blocks on the collector's lock and the collector waits for the
+    # acknowledgement that handler was about to give. Neither moves again.
+    #
+    # So the ack lives in this table, the collector reserves each thread's
+    # slot *before* it signals anyone, and the handler writes one plain bool.
+    # `stw_no_tls_entries` counts the deliveries that found no Crystal TLS —
+    # the window above, measured rather than argued.
+    @@stw_acked = uninitialized StaticArray(Bool, MAX_STW_SP_SLOTS)
+    @@stw_no_tls_entries = uninitialized UInt64
+    # Deliveries with neither a slot nor a `Thread` to answer through. The
+    # thread declines to suspend rather than freezing with no way to say so:
+    # a stop that waits is recoverable and reported, one that suspends a
+    # thread nobody can see acknowledged is not.
+    @@stw_ack_unavailable = uninitialized UInt64
+    # `GCRY_STW_ACK_VIA_THREAD=1`: acknowledge through `Thread#@suspended` as
+    # this handler did before the table, `::Thread.current` and all. The
+    # control arm for the window above — it is the code that allocates.
+    @@stw_ack_via_thread = uninitialized Bool
+
     def self.stw_sp_clamp_enabled? : Bool
       @@stw_enabled
     end
@@ -166,9 +201,13 @@ module Gcry
       @@stw_stale_signals = 0_u64
       @@stw_redundant_signals = 0_u64
       @@stw_epoch_enabled = true
+      @@stw_no_tls_entries = 0_u64
+      @@stw_ack_unavailable = 0_u64
+      @@stw_ack_via_thread = false
       i = 0
       while i < MAX_STW_SP_SLOTS
         @@stw_served[i] = 0_u64
+        @@stw_acked[i] = false
         # The ids too, and for the same reason `clear_thread_sps` clears them:
         # a claim publishes its bit before its id, so a peer scanning the very
         # first stop must not be able to match whatever was in this static.
@@ -195,6 +234,31 @@ module Gcry
     def self.stw_epoch_enabled=(value : Bool) : Bool
       ensure_stw_table
       @@stw_epoch_enabled = value
+    end
+
+    def self.stw_ack_via_thread? : Bool
+      ensure_stw_table
+      @@stw_ack_via_thread
+    end
+
+    def self.stw_ack_via_thread=(value : Bool) : Bool
+      ensure_stw_table
+      @@stw_ack_via_thread = value
+    end
+
+    # Suspend deliveries that arrived on a thread with no `Thread.current`.
+    # Non-zero means the birth window above is being hit, i.e. the pre-table
+    # handler would have allocated a `Thread` and taken `Thread.lock` from
+    # inside a signal handler with the world stopping.
+    def self.stw_no_tls_entries : UInt64
+      @@stw_booted ? @@stw_no_tls_entries : 0_u64
+    end
+
+    # Deliveries that could answer through neither route and declined to
+    # suspend. Only reachable with more than `MAX_STW_SP_SLOTS` threads *and*
+    # no TLS on the one that misses out.
+    def self.stw_ack_unavailable : UInt64
+      @@stw_booted ? @@stw_ack_unavailable : 0_u64
     end
 
     def self.stw_stale_signals : UInt64
@@ -228,43 +292,98 @@ module Gcry
       @@stw_epoch.set(0_u64, :release)
     end
 
+    # Returned by `admit_suspend_signal` when the delivery does not belong to
+    # a stop this thread still owes an acknowledgement for.
+    SUSPEND_DECLINED = -1
+    # Admitted, but with no slot to answer through: the table is full.
+    SUSPEND_NO_SLOT = -2
+
     # Async-signal-safe. Answers whether this `SIG_SUSPEND` delivery belongs to
     # a stop that is in progress and that this thread has not already served,
-    # and records the SP/register snapshot when it does.
+    # and records the SP/register snapshot when it does. The return value is
+    # the slot to acknowledge in, so the handler never walks the table twice.
     #
     # The snapshot is deliberately **not** taken for a declined delivery: the
     # thread is about to return to what it was doing, so its SP is not a
     # stopped-world SP and writing it would hand the scan a stack bound from a
     # thread that is running.
-    def self.admit_suspend_signal?(sp : UInt64, uctx : Void*) : Bool
+    def self.admit_suspend_signal(sp : UInt64, uctx : Void*) : Int32
       # An unbooted table means no stop can have been started through
-      # `begin_stop_epoch`, and the flag below is `uninitialized` — reading it
-      # would be reading whatever is in that static. Honour the delivery, which
-      # is what this handler did before the epoch.
-      return true unless @@stw_booted
+      # `begin_stop_epoch`, and the flags are `uninitialized` — reading them
+      # would be reading whatever is in those statics. Honour the delivery,
+      # which is what this handler did before the epoch.
+      return SUSPEND_NO_SLOT unless @@stw_booted
+
+      slot = record_thread_sp(LibC.pthread_self, sp, uctx)
 
       unless @@stw_epoch_enabled
-        record_thread_sp(LibC.pthread_self, sp, uctx) if sp != 0
-        return true
+        return slot < 0 ? SUSPEND_NO_SLOT : slot
       end
 
-      epoch = @@stw_booted ? @@stw_epoch.get(:acquire) : 0_u64
+      epoch = @@stw_epoch.get(:acquire)
       if epoch == 0
-        @@stw_stale_signals &+= 1 if @@stw_booted
-        return false
+        @@stw_stale_signals &+= 1
+        return SUSPEND_DECLINED
       end
 
-      slot = sp != 0 ? record_thread_sp(LibC.pthread_self, sp, uctx) : -1
       # No slot means a full table, which costs this thread its SP clamp and
-      # must not also cost it the stop: fall through and suspend.
-      return true if slot < 0
+      # must not also cost it the stop: admit, and let the handler find some
+      # other way to say so.
+      return SUSPEND_NO_SLOT if slot < 0
 
       if @@stw_served[slot] == epoch
         @@stw_redundant_signals &+= 1
-        return false
+        return SUSPEND_DECLINED
       end
       @@stw_served[slot] = epoch
-      true
+      slot
+    end
+
+    # Called by the collector, under `Thread.lock`, **before** the first
+    # suspend signal goes out. Claiming here rather than from the handler is
+    # what lets the wait loop spin on one array load instead of a 64-slot scan
+    # per iteration, and it moves the claim off the concurrent path entirely:
+    # by the time any handler runs, every slot it could want already exists.
+    def self.reserve_suspend_slot(id : LibC::PthreadT) : Int32
+      slot = slot_for(id)
+      return slot if slot < 0
+      # A slot held over from the last stop keeps its SP and registers until
+      # its owner is suspended again; clear them here so a thread that is
+      # never suspended this stop cannot be scanned from a stale reading.
+      @@stw_sps[slot] = 0_u64
+      @@stw_ngregs[slot] = 0
+      @@stw_acked[slot] = false
+      slot
+    end
+
+    # The slot *id* occupies, or -1. One scan, called once per thread per
+    # stop — never from the spin.
+    def self.suspend_slot_of(id : LibC::PthreadT) : Int32
+      return -1 unless @@stw_booted
+      claimed = @@stw_claimed.get(:acquire)
+      i = 0
+      while i < MAX_STW_SP_SLOTS
+        return i if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
+        i += 1
+      end
+      -1
+    end
+
+    # One plain load. This is the collector's spin predicate.
+    def self.suspend_acked?(slot : Int32) : Bool
+      slot >= 0 && @@stw_acked[slot]
+    end
+
+    def self.set_suspend_ack(slot : Int32, value : Bool) : Nil
+      @@stw_acked[slot] = value if slot >= 0
+    end
+
+    def self.note_no_tls_entry : Nil
+      @@stw_no_tls_entries &+= 1 if @@stw_booted
+    end
+
+    def self.note_ack_unavailable : Nil
+      @@stw_ack_unavailable &+= 1 if @@stw_booted
     end
 
     # Record SP (+ GP regs) for the interrupted thread (signal-handler safe).
@@ -288,19 +407,25 @@ module Gcry
     end
 
     # Returns the slot this thread occupies, or -1 when the table is full. The
-    # index is what `admit_suspend_signal?` stamps its served epoch into, so
-    # the two never walk the table twice for one delivery.
+    # index is what `admit_suspend_signal` stamps its served epoch into and
+    # what the handler acknowledges in, so nothing walks the table twice for
+    # one delivery.
     def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Int32
+      @@stw_records &+= 1 if @@stw_booted
+      slot = slot_for(id)
+      return -1 if slot < 0
+      @@stw_sps[slot] = sp
+      copy_ucontext_gregs(slot, uctx)
+      slot
+    end
+
+    # Find this thread's slot, claiming a free one if it has none.
+    private def self.slot_for(id : LibC::PthreadT) : Int32
       ensure_stw_table
-      @@stw_records &+= 1
       claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS
-        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-          @@stw_sps[i] = sp
-          copy_ucontext_gregs(i, uctx)
-          return i
-        end
+        return i if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
         i += 1
       end
       # Claim a free slot via CAS on the bitmask.
@@ -320,6 +445,11 @@ module Gcry
       # signal, so four mutator threads on a first collection left one running
       # and the stop waiting on it forever. Found by exactly that
       # (`/proc/<pid>/task`: three in `rt_sigsuspend`, one spinning).
+      #
+      # The collector now reserves every slot before it signals anyone, so on
+      # the shipped path this loop runs once per thread on a quiet thread and
+      # never concurrently. The CAS stays because nothing structurally
+      # prevents a handler from arriving first.
       loop do
         claimed = @@stw_claimed.get(:acquire)
         i = 0
@@ -329,13 +459,15 @@ module Gcry
             _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
             if won
               @@stw_ids[i] = id
-              @@stw_sps[i] = sp
+              @@stw_sps[i] = 0_u64
+              @@stw_ngregs[i] = 0
               # A slot is reused by whichever thread claims it next, so the
-              # served stamp starts clean here as well as in `clear_thread_sps`
-              # — otherwise a thread could inherit a predecessor's epoch and
-              # decline the one signal that was meant for it.
+              # served stamp and the acknowledgement start clean here as well
+              # as in `clear_thread_sps` — otherwise a thread could inherit a
+              # predecessor's epoch and decline the signal meant for it, or
+              # inherit an acknowledgement it never gave.
               @@stw_served[i] = 0_u64
-              copy_ucontext_gregs(i, uctx)
+              @@stw_acked[i] = false
               return i
             end
             break # retry outer loop with fresh claimed
@@ -501,23 +633,64 @@ module Gcry
         Platform.note_stw_handler(sp)
 
         # Every delivery is counted above; only the ones a stop in progress
-        # asked for are served. See `admit_suspend_signal?` — this branch is
+        # asked for are served. See `admit_suspend_signal` — that check is
         # what makes `stop_world`'s resend safe, and without it a redundant
         # signal suspends a thread that nothing will resume.
-        if Platform.admit_suspend_signal?(sp, uctx)
-          # Mirror Crystal::System::Thread suspend handler, but clear
-          # `@suspended` after SIG_RESUME so start_world can confirm wake.
-          thread = ::Thread.current
-          thread.@suspended.set(true)
+        slot = Platform.admit_suspend_signal(sp, uctx)
+        unless slot == Platform::SUSPEND_DECLINED
+          # Whether this thread has a `Thread` object yet, asked with the
+          # accessor that does **not** create one.
+          #
+          # `::Thread.current` creates on a miss: a `Fiber`, a `Thread`, and
+          # a push onto `Thread.threads`, which takes the list mutex the
+          # collector holds for the whole stop. From a signal handler that is
+          # an allocation with the world stopping, and a deadlock against the
+          # collector waiting for this very acknowledgement. The window is
+          # real rather than argued: `Thread#start` pushes itself onto the
+          # list *before* it sets its TLS, so a thread can be on the list —
+          # hence signalled — with no `Thread.current` yet.
+          published = ::Thread.current?
+          Platform.note_no_tls_entry if published.nil?
 
-          mask = uninitialized LibC::SigsetT
-          LibC.sigfillset(pointerof(mask))
-          LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
-          # sa_mask blocks SIG_RESUME during this handler until sigsuspend
-          # atomically unblocks it — otherwise a fast resume is consumed by the
-          # empty SIG_RESUME handler and sigsuspend waits forever (GCRY_STRESS).
-          LibC.sigsuspend(pointerof(mask))
-          thread.@suspended.set(false)
+          # Where the acknowledgement goes, in order of preference:
+          #   the reserved slot — no Crystal at all, which is the point;
+          #   `Thread#@suspended` — only if the table was full, and only for
+          #     a thread that already has one;
+          #   nowhere — decline to suspend rather than freeze with no way to
+          #     say so. The collector then reports and resends; a thread
+          #     frozen unacknowledgeably is a stop that never ends.
+          ack_slot = -1
+          ack_thread = nil.as(::Thread?)
+          if Platform.stw_ack_via_thread?
+            # `GCRY_STW_ACK_VIA_THREAD=1` — the pre-table line, verbatim,
+            # creating accessor and all. `make stw-ack-window` needs it to
+            # wedge on a thread with no TLS, or "the table fixed something"
+            # is a claim with no control.
+            ack_thread = ::Thread.current
+          elsif slot >= 0
+            ack_slot = slot
+          elsif published
+            ack_thread = published
+          end
+
+          if ack_slot < 0 && ack_thread.nil?
+            Platform.note_ack_unavailable
+          else
+            Platform.set_suspend_ack(ack_slot, true)
+            ack_thread.@suspended.set(true) if ack_thread
+
+            mask = uninitialized LibC::SigsetT
+            LibC.sigfillset(pointerof(mask))
+            LibC.sigdelset(pointerof(mask), STW_SIG_RESUME)
+            # sa_mask blocks SIG_RESUME during this handler until sigsuspend
+            # atomically unblocks it — otherwise a fast resume is consumed by
+            # the empty SIG_RESUME handler and sigsuspend waits forever
+            # (GCRY_STRESS).
+            LibC.sigsuspend(pointerof(mask))
+
+            Platform.set_suspend_ack(ack_slot, false)
+            ack_thread.@suspended.set(false) if ack_thread
+          end
         end
       end
       LibC.sigemptyset(pointerof(action.@sa_mask))

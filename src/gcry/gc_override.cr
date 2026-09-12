@@ -970,6 +970,12 @@ module GC
     end
     {% if flag?(:linux) %}
       Gcry::Platform.stw_epoch_enabled = false if env_flag_zero?("GCRY_STW_EPOCH")
+      # Research: acknowledge the suspend through `Thread#@suspended`, as the
+      # handler did before the slot table. That path calls `::Thread.current`,
+      # which *creates* a `Thread` when the TLS key is unset — an allocation
+      # and a `Thread.lock` acquisition inside a signal handler with the world
+      # stopping (src/gcry/platform/linux_stw.cr).
+      Gcry::Platform.stw_ack_via_thread = true if env_flag_one?("GCRY_STW_ACK_VIA_THREAD")
     {% end %}
     # Research only: swallow this many suspend signals before sending any, so
     # a thread that was signalled and never acknowledged can be arranged

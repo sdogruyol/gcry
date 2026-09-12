@@ -207,21 +207,31 @@ module Gcry
           # on which collection happens to run first.
           drop_budget = @stw_test_drop_suspends
           mute_budget = @stw_test_mute_threads
+          ack_via_thread = Platform.stw_ack_via_thread?
           @stw_muted_count = 0
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
-            if mute_budget > 0
-              mute_budget -= 1
-              note_muted_suspend(thread.to_unsafe.unsafe_as(UInt64))
-              thread.@suspended.set(false)
-              next
-            end
-            if drop_budget > 0
-              drop_budget -= 1
-              @stw_suspend_dropped_for_test &+= 1
-              # Cleared by hand: `Thread#suspend` is what normally clears it,
-              # and this arm is the absence of that call.
+            # Reserve this thread's acknowledgement slot **before** its signal
+            # goes out. Two reasons, both load-bearing: the handler must not
+            # have to claim one (claiming is a CAS loop, and the handler is
+            # the one place that cannot afford to contend), and the wait below
+            # spins on a slot index rather than scanning the table.
+            # `reserve_suspend_slot` also clears the slot's stale SP and
+            # acknowledgement, which is what `Thread#suspend` used to do for
+            # the flag it no longer writes.
+            Platform.reserve_suspend_slot(thread.to_unsafe)
+            if mute_budget > 0 || drop_budget > 0
+              if mute_budget > 0
+                mute_budget -= 1
+                note_muted_suspend(thread.to_unsafe.unsafe_as(UInt64))
+              else
+                drop_budget -= 1
+                @stw_suspend_dropped_for_test &+= 1
+              end
+              # Both arms are the absence of `thread.suspend`, which is what
+              # normally clears the flag side of the acknowledgement. The slot
+              # side was cleared by the reservation above.
               thread.@suspended.set(false)
               next
             end
@@ -265,12 +275,17 @@ module Gcry
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
             id = thread.to_unsafe.unsafe_as(UInt64)
+            # Resolved once, never from inside the spin: the slot lookup walks
+            # the table and the loop below runs hundreds of millions of
+            # iterations. -1 means the table was full when the slot was
+            # reserved, and the handler falls back to `Thread#@suspended`.
+            slot = suspend_ack_slot(thread, ack_via_thread)
             StwWatchdog.note_suspend(expected, acked, id)
             spins = 0_u64
             since_resend = 0_u64
             resends = 0_u32
             abandoned = false
-            until thread.@suspended.get
+            until suspend_acknowledged?(thread, slot)
               Intrinsics.pause
               spins &+= 1
               if spins == @suspend_stall_spins
@@ -367,6 +382,51 @@ module Gcry
     # ignored sixteen signals will not answer the seventeenth, and an unbounded
     # retry is a signal storm aimed at a thread that may be mid-teardown.
     property suspend_resend_limit : UInt32 = 16_u32
+
+    # The spin predicate for both the suspend wait and the resume wait.
+    #
+    # A slot is the shipped path: one plain array load, and the handler that
+    # writes it touches no Crystal object, so a thread signalled before it has
+    # set its own TLS can still answer. `Thread#@suspended` is the fallback
+    # for a table that was full when the slot was reserved.
+    @[AlwaysInline]
+    private def suspend_acknowledged?(thread : Thread, slot : Int32) : Bool
+      slot >= 0 ? Platform.suspend_acked?(slot) : thread.@suspended.get
+    end
+
+    # Which side of the acknowledgement this stop is using for *thread*: the
+    # reserved slot, or -1 for `Thread#@suspended`.
+    #
+    # The reader and the writer **must** agree, and getting that wrong is not
+    # theoretical: the first version let the collector read the slot while
+    # `GCRY_STW_ACK_VIA_THREAD=1` had the handler writing the `Thread` flag,
+    # and the control arm hung 3 of 3 on a harness artefact that read exactly
+    # like the defect it was built to look for.
+    private def suspend_ack_slot(thread : Thread, via_thread : Bool) : Int32
+      return -1 if via_thread
+      Platform.suspend_slot_of(thread.to_unsafe)
+    end
+
+    # Suspend deliveries that arrived on a thread with no `Thread.current`,
+    # and those that could not answer at all. The first is the birth window
+    # `Thread#start` opens by publishing before it sets its TLS — non-zero
+    # means the pre-table handler would have allocated a `Thread` and taken
+    # `Thread.lock` from inside a signal handler with the world stopping.
+    def stw_suspend_no_tls : UInt64
+      {% if flag?(:linux) %}
+        Platform.stw_no_tls_entries
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    def stw_suspend_ack_unavailable : UInt64
+      {% if flag?(:linux) %}
+        Platform.stw_ack_unavailable
+      {% else %}
+        0_u64
+      {% end %}
+    end
 
     # Research: drop this many suspend signals before sending any, to stand in
     # for the delivery the aarch64 hang has never let anyone observe.
@@ -645,6 +705,7 @@ module Gcry
           # makes the resend above a repair rather than a new hang
           # (src/gcry/platform/linux_stw.cr).
           Platform.end_stop_epoch
+          ack_via_thread = Platform.stw_ack_via_thread?
           Thread.unsafe_each do |thread|
             next if thread == current_thread
             next if stw_signal_exempt?(thread)
@@ -652,9 +713,10 @@ module Gcry
             # and Crystal's `Thread#resume` panics the process when
             # `pthread_kill` fails.
             next if suspend_abandoned?(thread.to_unsafe.unsafe_as(UInt64))
+            slot = suspend_ack_slot(thread, ack_via_thread)
             thread.resume
             spins = 0
-            until !thread.@suspended.get
+            while suspend_acknowledged?(thread, slot)
               Intrinsics.pause
               spins += 1
               if spins == 10_000

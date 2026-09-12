@@ -644,6 +644,7 @@ jobs:
       - name: STW stop epoch
         run: |
           make stw-epoch
+          make stw-ack-window
 
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
@@ -1228,6 +1229,9 @@ jobs:
           # The runner the suspend hang lives on. The signal path is the
           # thing under test, so this gate belongs here more than anywhere.
           timeout 600 make stw-epoch
+          # And the birth window the acknowledgement had to move for: this is
+          # the runner where a thread that never acknowledges has been seen.
+          timeout 300 make stw-ack-window
           # The harness installs this reporter after Crystal replaces the
           # process signal handlers. A rare locked-arm fault without it leaves
           # only an address, so it cannot distinguish a released large chunk
