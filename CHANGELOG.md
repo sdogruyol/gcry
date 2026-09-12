@@ -196,6 +196,26 @@ is now the default and the flag would take you the wrong way.
   `Thread` for its whole life does not fix it, so the victim is not the
   `Thread`. The defect stays open — it now has a reproducer that fires in
   seconds.
+- **A reproducer for the live-large-object release**, `make
+  thread-churn-uaf`. The defect has been open since 2026-08-23 — a
+  large-object chunk released by the large-object path and written into
+  afterwards, with no heap object holding it — and it had *lost* its
+  reproducer: found under `wrk` against a real application at about one run
+  in eight, then silent, with the roadmap noting that until it reproduces at
+  a resolvable rate no arm means anything. It needs no application: eight
+  short-lived threads per round, one collection per round, about a second per
+  attempt, and it fires on **both** object layouts with nothing set — 14 of
+  942 headerless, 16 of 924 on block headers. `GCRY_UNMAP_GUARD=1` names the
+  chunk (212 992 bytes, large-object release, the write 48 bytes in every
+  time) and `GCRY_TRACE_LARGE=1` ties it to its allocation (mapped at
+  collection 94, released at 96, written 109 collections later). Three arms
+  per layout reporting a rate rather than gating, with the highest-rate arm
+  asserted non-zero so the reproducer cannot be lost silently a second time.
+  What it does not settle, stated because it would be easy to overclaim: a
+  failing run has usually raised something first, and Crystal's backtrace
+  printer then allocates hundreds of kilobytes, so the released block may be
+  the printer's buffer and a second symptom rather than the cause.
+  `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
 
 ## [0.25.0] - 2026-09-09
 

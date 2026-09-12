@@ -1184,6 +1184,34 @@ CI asymmetry that hid both.
       the current tree**; until the crash reproduces at a resolvable rate, no
       arm here means anything.
       `bench/log/linux/2026-08-23-acik-crash/FINDINGS.md`
+      **The baseline is re-established, and it needs no application
+      (2026-09-12).** `make thread-churn-uaf`: eight short-lived threads per
+      round, one collection per round, 240 rounds — about a second per
+      attempt. It fires on **both** layouts with nothing set, 14 of 942
+      headerless and 16 of 924 on block headers (~1.5%), and an earlier
+      reading of "0 of 40" on the same workload was underpowered rather than
+      clean. `GCRY_POISON_HOLDERS=1` raises that an order of magnitude by
+      turning a stale read into a fault, and
+      `GCRY_THREAD_UNSTAGE_ON_DEATH=1` raises it again by removing the
+      pre-stop staged wait's accidental delay — 15 of 18 with both.
+      The sighting is this defect's shape at a different size: a 212 992-byte
+      chunk released by the **large-object release** path, the write **48
+      bytes** into it every time, no heap holder, and the range present on a
+      *running* fiber's stack. `GCRY_TRACE_LARGE=1` ties it to its
+      allocation: mapped at collection 94, released at 96, written 109
+      collections later. Sizes vary across sightings (45 056, 57 344,
+      212 992), so a growing buffer rather than one structure, and the first
+      user word at release is a pointer into the binary's own mapping — a
+      buffer of pointers to static data, not a `Reference`.
+      **One ambiguity to resolve before trusting any arm**: a failing run has
+      usually raised something first, and Crystal's backtrace printer then
+      allocates hundreds of kilobytes of DWARF tables, so the released block
+      may be the *printer's* buffer and therefore a second symptom rather
+      than the cause. A sighting with no prior exception is what would settle
+      it, and the harness does not isolate one yet. The standing first
+      suspect is unchanged: `GC.realloc` growth, where the only reference
+      between the call returning and the caller storing it is a register.
+      `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**
