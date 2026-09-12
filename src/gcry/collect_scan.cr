@@ -93,6 +93,44 @@ module Gcry
           ", which is not an address. Skipped; nothing lives there to mark\n")
       end
       RawOut.flush(buf.to_unsafe, len)
+      describe_poisoned_pin_source(slot_addr & POISON_ADDR_MASK) if poisoned
+    end
+
+    # What was the block whose poison arrived here?
+    #
+    # Its payload is poison, so its `type_id` is gone — the freed block cannot
+    # say what it was. What is still readable is its geometry, from the chunk
+    # that still owns it, and *who else points at it*: the same holders search
+    # `GCRY_POISON_HOLDERS=1` runs from a fault, run from the pin site instead.
+    # A holder names the structure whose reference was lost, which is the one
+    # fact this defect has never produced.
+    private def describe_poisoned_pin_source(addr : UInt64) : Nil
+      buf = uninitialized UInt8[320]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the freed block is 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, addr)
+      size = 0_u64
+      if chunk = chunk_containing(addr)
+        len = RawOut.append(buf.to_unsafe, len, ", in a chunk of size class ")
+        len = RawOut.append_u64(buf.to_unsafe, len, chunk.value.size_class.to_u64)
+        if ChunkHeader.large?(chunk)
+          len = RawOut.append(buf.to_unsafe, len, " (large)")
+        else
+          size = SizeClasses.payload(chunk.value.size_class.to_i32).to_u64
+          len = RawOut.append(buf.to_unsafe, len, ", payload ")
+          len = RawOut.append_u64(buf.to_unsafe, len, size)
+          len = RawOut.append(buf.to_unsafe, len, " bytes")
+        end
+      else
+        len = RawOut.append(buf.to_unsafe, len, ", in no chunk gcry still owns")
+      end
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+      # `PoisonHolders` is a unix diagnostic (`skip_file unless flag?(:unix)`).
+      {% if flag?(:unix) %}
+        return unless PoisonHolders.requested? && size > 0
+        PoisonHolders.entry_sp = @collect_entry_sp
+        PoisonHolders.search(self, addr, size)
+      {% end %}
     end
 
     # An EC structure pinned by name rather than reached by scanning something

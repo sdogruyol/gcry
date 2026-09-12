@@ -106,6 +106,43 @@ being freed, and that is still open — the counter is how often it happens, and
 the freed block address is where a `GCRY_POISON_HOLDERS` search should be
 pointed next.
 
+## What the poison names: a 16-byte block nothing points at
+
+The tagged poison carries the freed block's address, so the pin site can
+describe it — and, since `GCRY_POISON_HOLDERS=1` is the arm that produces
+these, run the same holders search on it that the release path now runs:
+
+```
+gcry: an execution-context pin site cannot see its object — collect_scan.cr:209
+      computed slot address 0xdead7f9f91480848 ... the freed block is 0x7f9f91480848
+gcry: the freed block is 0x7f9f91480848, in a chunk of size class 0, payload 16 bytes
+gcry: holders — explicit roots: 0 of 5 point into it — gcry is not rooting it
+gcry: holders — heap: 0 word(s) in 0 live block(s), from 34440 block(s) in 21 chunk(s)
+gcry: holders — stack: ... all below the collector's entry SP
+```
+
+Two facts follow, and both are new.
+
+**The receiver was loaded out of that block.** `slot_addr` is
+`pointerof(obj.@ivar).address`, an address — and it *equals* the poison word.
+Only one block's payload carries its own tag, so the word holding `obj` was
+inside block `0x7f9f91480848`. The pin loop's receivers come from two places:
+`ec` from the intrusive `Thread::LinkedList(ExecutionContext)`, and `sched`
+from `ec.@schedulers`. A 16-byte payload is two words — the shape of a
+small `Array`'s buffer, which is raw `type_id 0` memory.
+
+**Nothing points at it, anywhere.** Zero explicit roots, zero live blocks,
+and every stack hit inside the collection's own frames. So at the moment the
+collector reads through it, the block is unreferenced by anything gcry can
+see — which is why it was freed, and why no coverage knob has ever moved this
+defect.
+
+**And it is 16 bytes**, which is the size of the victim the thread-death
+investigation could not name either
+(`../2026-09-12-thread-life-root/`: *"it is 16 bytes and it is not the
+`Thread`"*). Two investigations that started from different faults are
+looking at the same block.
+
 ## Where the fault goes after that
 
 Straight to the other reader of the same structure:
@@ -128,3 +165,13 @@ The Monitor is the one thread the stop never suspends
 `MonitorGate.enter` — measured 238 of 240 collections, so twice it is
 elsewhere — and its stack is scanned through `snapshotted_stack_bounds` with
 no recorded SP. That is the next thing to read.
+
+## The next step, precisely
+
+Which of the loop's two loads produced the poisoned receiver. Every pin site
+in that block reports `collect_scan.cr:209` because they are macro expansion
+attributed to one `{% if %}`, and `mark_ref_slot` takes only `__LINE__`.
+Passing a per-site tag through the macro — the ivar name is already in hand at
+expansion — separates "the EC list gave me a freed node" from "an
+`@schedulers` buffer gave me a freed element", and those are different
+defects with different owners.
