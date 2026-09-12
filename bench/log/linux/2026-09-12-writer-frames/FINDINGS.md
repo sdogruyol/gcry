@@ -265,9 +265,16 @@ the buffer's chunk in the list: true
 separately — `map_chunk` inserts into the index, `unlink_chunk` and the
 sweep's drop path remove — and `chunk_containing` reads the index while every
 *walk* reads the list. Measured with a dedicated audit
-(`GCRY_CHUNK_LIST_AUDIT=1`): **2 of 34 indexed chunks missing from the list at
-collection 65** under thread churn, 0 the other way, and no divergence at all
-on a quiescent program.
+(`GCRY_CHUNK_LIST_AUDIT=1`).
+
+The first version of that audit over-reported and its number has been
+corrected here: a chunk the sweep dropped is off `@chunks` and still in the
+index until the post-STW flush unmaps it, which is by design, and counting
+those gave 2–27 chunks depending on when the collection landed. With the
+pending-unmap chain excluded the residual is **1 chunk indexed but not listed,
+in about 6 of 14 runs** of `thread_churn_uaf --child`, **0 the other way**, and
+none at all on a quiescent program. One chunk is enough: it is one chunk's
+worth of objects that read permanently marked.
 
 From there the chain to the fault is mechanical, and every link is either
 measured here or read from the source:
@@ -294,7 +301,25 @@ a leak rather than a use-after-free and is why nothing noticed.
 Not the mark skip, and not the pin site. The invariant is that the index and
 the list describe the same set of chunks, and the fix is either to keep them
 in sync or to make the walks that carry correctness — mark clearing and the
-sweep — read the authority that `chunk_containing` reads. Which of the two
-producers diverges (`map_chunk`'s insert order, `unlink_chunk`, or the
-post-STW `@chunks` rebuild) is the next thing to find, and the audit above is
-what will confirm a fix rather than a coincidence.
+sweep — read the authority that `chunk_containing` reads.
+
+Two producers are already ruled out by reading them: `map_chunk` links the
+list **before** inserting into the index, under one lock, so it cannot leave a
+chunk indexed and unlisted; and `unlink_chunk` removes from both under that
+same lock, with a comment describing this exact hazard from the other side.
+
+**Attempted and reverted, with numbers.** The remaining suspect was the
+sweep's rebuild — `@chunks = kept` replaces the head with a list built by a
+walk that started earlier, so a `map_chunk` prepend during the walk is lost.
+Splicing the prefix between the current head and the head the walk began at
+back in front of `kept` moved nothing: **5 of 14 runs diverging before, 6 of 14
+after**. Worth recording for two reasons. The first attempt at it made things
+*worse* — 2 chunks to 27 — because when the walk drops `head_at_start` itself
+the prefix scan runs to the end of the old list and splices chunks the sweep
+had just unmapped back onto it; the splice has to require that the prefix ends
+exactly at the recorded head. And the reason it cannot help here is visible in
+the condition guarding it: this harness is multi-mutator most of the time, so
+`relink_chunks_after_world?` is false and that rebuild does not run at all.
+
+So the producer is still open, and it is not in the three places that looked
+like it. The audit is what will tell a fix from a coincidence.

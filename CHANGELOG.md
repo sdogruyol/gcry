@@ -285,8 +285,10 @@ is now the default and the flag would take you the wrong way.
   live-object release open since 2026-08-23.** `@chunk_index` and the
   `@chunks` list are maintained separately, and `chunk_containing` reads the
   index while every walk reads the list — `clear_all_marks`, the sweep, the
-  holders search. Measured under thread churn: 2 of 34 indexed chunks missing
-  from the list at collection 65, none on a quiescent program. An off-list
+  holders search. The audit excludes the pending-unmap chain, since a dropped
+  chunk is off the list and still indexed by design: the residual under thread
+  churn is 1 chunk indexed but not listed in about 6 of 14 runs, none the other
+  way, and none at all on a quiescent program. An off-list
   chunk never has its marks cleared, so its blocks read permanently marked,
   and `mark_impl` returns early on a marked block — so the object is never
   pushed onto the mark stack and its out-edges are never followed. That is how

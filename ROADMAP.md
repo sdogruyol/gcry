@@ -1222,9 +1222,12 @@ CI asymmetry that hid both.
       `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
-      reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`: **2
-      of 34 indexed chunks missing from the list at collection 65** under
-      thread churn, 0 the other way, none at all on a quiescent program. The
+      reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
+      excludes the pending-unmap chain because a dropped chunk is off the list
+      and still indexed by design: **1 chunk indexed but not listed in about 6
+      of 14 runs** under thread churn, **0** the other way, none at all on a
+      quiescent program. (The first version of the audit counted the pending
+      chunks too and reported 2–27; that number is corrected here.) The
       chain from there is mechanical and every link is measured or read from
       the source: `clear_all_marks` zeroes mark bitmaps through the list, so an
       off-list chunk's marks are never cleared → every block in it reads
@@ -1238,9 +1241,13 @@ CI asymmetry that hid both.
       swept, which is a leak and is why nothing noticed. The fix is the
       invariant, not the symptom: the two structures must describe the same
       set, or the walks that carry correctness must read the authority
-      `chunk_containing` reads. Which producer diverges — `map_chunk`'s insert
-      order, `unlink_chunk`, or the post-STW `@chunks` rebuild — is the next
-      thing to find, and the audit is what will tell a fix from a coincidence.
+      `chunk_containing` reads. Which producer diverges is still open, and it is
+      none of the three that looked like it: `map_chunk` links the list before
+      indexing, under one lock; `unlink_chunk` removes from both under that
+      lock; and splicing the sweep's rebuild so a concurrent prepend survives
+      moved nothing (**5 of 14 runs diverging before, 6 of 14 after**, and the
+      rebuild does not even run on this harness, which is multi-mutator). The
+      audit is what will tell a fix from a coincidence.
       **And it names a structure (2026-09-12).** The pin sites now carry a
       compile-time tag, because `__LINE__` cannot discriminate nine callers
       that are one `{% if %}`'s macro expansion. The refused slot is

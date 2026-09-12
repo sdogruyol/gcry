@@ -472,6 +472,8 @@ module Gcry
     getter chunk_index_only : UInt64 = 0_u64
     getter chunk_list_only : UInt64 = 0_u64
     property chunk_list_audit : Bool = false
+    # Bound for the pending-unmap chain walk in the chunk-list audit.
+    MAX_PENDING_WALK = 65536
     # The `@schedulers` array of the context being pinned when a slot was
     # refused: identity, the buffer it points at, the base that buffer was
     # allocated at, and its two sizes. Written per context per collection and

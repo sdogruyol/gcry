@@ -458,6 +458,21 @@ module Gcry
     # accounting one: see the note on `chunk_index_only`. Reported once, with
     # the first offending chunk, because the second thousand say the same
     # thing as the first.
+    # Is this chunk on the queue waiting to be unmapped? Bounded, and the bound
+    # is the answer's honesty rather than its speed: a chain longer than the
+    # heap has chunks is a corrupt chain, and saying "not pending" about it is
+    # the conservative answer.
+    private def pending_unmap_listed?(target : ChunkHeader*) : Bool
+      c = @pending_empty_chunks
+      n = 0
+      while !c.null? && n < MAX_PENDING_WALK
+        return true if c == target
+        c = c.value.next
+        n += 1
+      end
+      false
+    end
+
     protected def audit_chunk_list : Nil
       return unless @chunk_list_audit
       index_only = 0_u64
@@ -469,6 +484,12 @@ module Gcry
         unless c.null?
           listed = false
           each_chunk { |l| listed = true if l == c }
+          # A chunk the sweep dropped is off `@chunks` and still in the index
+          # until the post-STW flush unmaps it, and that is by design — the
+          # question is whether anything is off the list for a reason nobody
+          # arranged. Excluding the pending chain is what makes a non-zero
+          # count mean something.
+          listed = true if !listed && pending_unmap_listed?(c)
           unless listed
             index_only &+= 1
             first = c.address if first == 0
