@@ -211,11 +211,31 @@ is now the default and the flag would take you the wrong way.
   collection 94, released at 96, written 109 collections later). Three arms
   per layout reporting a rate rather than gating, with the highest-rate arm
   asserted non-zero so the reproducer cannot be lost silently a second time.
-  What it does not settle, stated because it would be easy to overclaim: a
-  failing run has usually raised something first, and Crystal's backtrace
-  printer then allocates hundreds of kilobytes, so the released block may be
-  the printer's buffer and a second symptom rather than the cause.
+  The ordering was initially unclear — a failing run usually raises something
+  first, and Crystal's backtrace printer then allocates hundreds of
+  kilobytes — and is now settled: on the arm without poison the fault report
+  is the **first** line of the child's stderr, so the released chunk is the
+  primary event and not the printer's buffer.
   `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
+- **The live-large-object release is localised to the post-STW sweep, and
+  this item's own hypothesis is retired.** With the reproducer above the knob
+  matrix becomes a bisect: 36 attempts per configuration, baseline 25 of 36,
+  and `GCRY_SOUND=1` — every conservatism gcry has — changes **nothing**
+  (25/36). Neither does removing the pagemap low-water skip, the SP clamp or
+  the parked-fiber lag. So it is **not** a missed stack or register root; the
+  standing reading since 2026-08-23, inferred from a mark audit reporting 0
+  edges, never followed (0 edges is exactly what a stack-rooted buffer looks
+  like). Two configurations take it to zero: `GCRY_BITMAP_ALLOC=0` (0/36) and
+  `GCRY_DISABLE_LAZY_SWEEP=1` (0/36). Both point at `sweep_after_world?`,
+  which restarts the world and then rebuilds `@chunks` and unmaps empty
+  chunks on the assumption that it is the sole mutator. Both release paths do
+  it — the large-object release and the empty size-class chunk release — and
+  the fault report is the **first** line of a failing run's stderr, so it is
+  the primary event rather than the backtrace printer's buffer.
+  `GCRY_DISABLE_LAZY_SWEEP=1` is a one-variable mitigation for anyone hitting
+  this; whether it should become the default waits on measuring the pause
+  cost of dropping it. Three fixes were attempted and withdrawn with their
+  numbers recorded so they are not re-spent.
 
 ## [0.25.0] - 2026-09-09
 

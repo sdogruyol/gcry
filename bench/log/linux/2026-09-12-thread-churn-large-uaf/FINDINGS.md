@@ -75,20 +75,94 @@ This is the 2026-08-23 shape at a different size: a large-object chunk, the
 large-object release path, no heap holder, and the range present on a
 *running* fiber's stack.
 
-## What it does not say, stated because it would be easy to overclaim
+## The ambiguity is resolved: this is primary
 
-**The ordering is ambiguous.** A run that fails has usually raised something
-first — the sibling log's `pthread_mutex_unlock: Invalid argument` — and
-Crystal's backtrace printer then allocates hundreds of kilobytes of DWARF
-tables and `Array(String)`. So the released large object may be the
-printer's buffer, i.e. a *second* symptom downstream of whatever raised, not
-the primary defect. Distinguishing them needs a sighting with no prior
-exception, and this harness does not yet isolate one.
+The first version of this file could not say whether the released chunk was
+the *cause* or the backtrace printer's buffer, since a failing run usually
+raises first. Settled by reading the whole of a failing child's stderr
+rather than grepping it: on the `guarded` arm the SIGSEGV report is the
+**first line**. Nothing precedes it. The released-chunk write is the first
+event in the run.
 
-**The missing root is a stack slot or a register**, which is what the holders
-search says and all it says. The standing first suspect from 2026-08-23 is
-unchanged: `GC.realloc` growth, where between `realloc` returning a new
-large block and the caller storing it the only reference is a register.
+That sighting also named a second release path:
+
+```
+SIGSEGV — in a chunk gcry RELEASED — base 0x…, 131072 bytes, **empty
+size-class chunk release**, at collection 18; the write is 65632 bytes into
+it. Collections since: 114.
+```
+
+So both paths do it: the large-object release *and* the empty size-class
+chunk release.
+
+## The bisect
+
+With a reproducer this fast the knob matrix is a bisect. 36 attempts per
+configuration on the header layout, amplified arm, baseline 25 of 36.
+
+| configuration | failures |
+|---|---:|
+| baseline | 25/36 |
+| `GCRY_SOUND=1` (maximal conservatism) | 25/36 |
+| `GCRY_STACK_LOW_WATER=0` | 18/24 |
+| `GCRY_FULL_SUSPENDED_STACK=1` | 20/24 |
+| `GCRY_STW_STACK_LAG=0` | 21/24 |
+| `GCRY_KEEP_CHUNKS=1` | 17/24 |
+| `GCRY_CHUNK_RADIX=0` | 16/24 |
+| `GCRY_TLAB=0` | 14/24 |
+| `GCRY_PARALLEL_MARK=0` | 20/24 |
+| `GCRY_BITMAP_ALLOC=0` | **0/36** |
+| `GCRY_DISABLE_LAZY_SWEEP=1` | **0/36** |
+
+Two readings, and the first one **retires this item's standing hypothesis**.
+
+**It is not a missed stack or register root.** `GCRY_SOUND=1` turns on every
+conservatism gcry has and changes nothing. Neither does removing the
+pagemap low-water skip, the SP clamp, or the parked-fiber lag. The 2026-08-23
+note reasoned from `GCRY_MARK_AUDIT=1` reporting 0 edges that *"the only
+holder is a stack slot or a register, and the root scan is not seeing it"* —
+but 0 edges is exactly what a stack-rooted buffer looks like, so that
+inference never followed. Maximal coverage not helping is what settles it.
+
+**It is the post-STW sweep, in the bitmap allocator.** Both zeros point at
+the same path: `sweep_after_world?` restarts the world and *then* rebuilds
+`@chunks` and unmaps empty chunks, on the stated assumption that it is the
+sole mutator, with other threads held off by `@block_other_heap` when they
+touch the heap. `GCRY_DISABLE_LAZY_SWEEP=1` removes that section and the
+defect with it, deterministically. Anyone hitting this in production has a
+one-variable mitigation.
+
+## Three fixes attempted and withdrawn, with their numbers
+
+Recorded so the next attempt does not re-spend them.
+
+1. **Hold the large in-flight root past the handover.** `alloc_large_counted`
+   clears `@large_alloc_in_flight` before returning, on the comment's
+   reasoning that *"from here `u` is in the caller's registers or frame,
+   which the scan accepts"* — which is false for a thread gcry does not
+   scan. Keeping the root until the next large allocation: **29/48**, no
+   change. The reasoning is still wrong; it is not *this* defect.
+2. **Refuse the sole-mutator sweep when gcry knows of unlisted live
+   threads.** The birth root can name threads Crystal's list lacks, so
+   `sweep_after_world?` can decline. Measured `unlisted_live_collections=0`
+   over 60 collections: the count is *always* zero, because the churned
+   threads are created **during** the post-STW section, after the
+   sole-mutator decision was correctly made. A check at the stop cannot see
+   a thread that does not exist yet.
+3. **Hold `pthread_create` while the post-STW section runs**, which is the
+   one place that window can be closed from — gcry owns the hook and it runs
+   on the creating thread. **35/48**, and the second arm hung, so it also
+   introduces a deadlock. Withdrawn.
+
+## What it still does not say
+
+Which live block the sweep loses. Both release paths decide on
+`counts.any_live` from `sweep_small_blocks`, so a live block's mark or
+occupancy is gone by the time the chunk is judged empty — and full
+conservatism says the mark was not missed by the *scan*. The bitmap
+allocator publishes `occ = mark` at sweep, so a block that is live but
+unmarked when the sweep reaches it loses its occupancy too. That is the next
+thing to instrument.
 
 ## The harness
 

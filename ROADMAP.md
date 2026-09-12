@@ -1212,6 +1212,42 @@ CI asymmetry that hid both.
       suspect is unchanged: `GC.realloc` growth, where the only reference
       between the call returning and the caller storing it is a register.
       `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
+      **The bisect, and it retires this item's own hypothesis
+      (2026-09-12).** With a one-second reproducer the knob matrix becomes a
+      bisect. 36 attempts per configuration, baseline 25 of 36:
+      `GCRY_SOUND=1` **25/36**, `GCRY_STACK_LOW_WATER=0` 18/24,
+      `GCRY_FULL_SUSPENDED_STACK=1` 20/24, `GCRY_STW_STACK_LAG=0` 21/24,
+      `GCRY_KEEP_CHUNKS=1` 17/24, `GCRY_CHUNK_RADIX=0` 16/24, `GCRY_TLAB=0`
+      14/24, `GCRY_PARALLEL_MARK=0` 20/24 — and then two zeros:
+      **`GCRY_BITMAP_ALLOC=0` 0/36** and **`GCRY_DISABLE_LAZY_SWEEP=1`
+      0/36**.
+      **It is not a missed stack or register root.** Maximal conservatism
+      changes nothing, and neither does removing the low-water skip, the SP
+      clamp or the parked-fiber lag. This item reasoned from
+      `GCRY_MARK_AUDIT=1` reporting 0 edges that the only holder must be a
+      stack slot or a register the scan is not seeing — but 0 edges is
+      exactly what a stack-rooted buffer looks like, so that never followed.
+      `GC.realloc` growth is no longer the first suspect.
+      **It is the post-STW sweep, in the bitmap allocator.**
+      `sweep_after_world?` restarts the world and *then* rebuilds `@chunks`
+      and unmaps empty chunks on the stated assumption that it is the sole
+      mutator, with peers held off by `@block_other_heap` when they touch the
+      heap. Both release paths do it — the large-object release and the empty
+      size-class chunk release — and the sighting is the **first** line of a
+      failing child's stderr, so it is the primary event and not the
+      backtrace printer's buffer. `GCRY_DISABLE_LAZY_SWEEP=1` removes the
+      section and the defect with it: a one-variable mitigation for anyone
+      hitting this, and a default worth revisiting once the pause cost of
+      dropping it is measured.
+      **Three fixes attempted and withdrawn, with numbers**, so they are not
+      re-spent: holding the large in-flight root past the handover (29/48 —
+      the clearing comment's reasoning is still wrong, but it is not this
+      defect); refusing the sole-mutator sweep when gcry knows of unlisted
+      live threads (the count is *always* zero — the churned threads are
+      created **during** the post-STW section, after the decision was
+      correctly made); and holding `pthread_create` for that section, which
+      is the only place the window can be closed from (35/48, and it
+      deadlocks).
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**
