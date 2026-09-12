@@ -72,15 +72,29 @@ SLOT = WORDS - 3
 # `bench/greg_roots.cr`.
 KEY = 0x5A5A_A5A5_5A5A_A5A5_u64
 
+# A plausible `type_id` in the first word, and `FILL` from the fifth byte on.
+#
+# Until 2026-09-12 this filled the whole block with `FILL`, whose first `Int32`
+# reads **negative** — and `type_id_plausible?` rejects a static root whose
+# first word is not a dense positive integer. So the BSS root this gate exists
+# to prove was refused by the root filter on every run, and the block stayed
+# alive on an *ungated* conservative copy instead: a callee-saved register
+# holding the address across `wipe_stack`. The gate was green for a reason it
+# does not test, and perturbing the collector's register pressure was enough
+# to flip it. `TYPE_ID` is a real instance id of this binary, so the filter
+# has no reason to refuse it.
+TYPE_ID = 174
+
 @[NoInline]
 def stash_in_bss : UInt64
   block = GC.malloc(BLOCK_SIZE)
   bytes = block.as(UInt8*)
-  i = 0_u64
+  i = 4_u64
   while i < BLOCK_SIZE
     bytes[i] = FILL
     i += 1
   end
+  block.as(Int32*).value = TYPE_ID
   StaticHolder.put(SLOT, block.address)
   block.address ^ KEY
 end
@@ -228,8 +242,9 @@ slot_holds_it = StaticHolder.get(SLOT) == block.address
 intact = alive
 if alive
   bytes = block.as(UInt8*)
-  i = 0_u64
-  while i < BLOCK_SIZE
+  intact = block.as(Int32*).value == TYPE_ID
+  i = 4_u64
+  while intact && i < BLOCK_SIZE
     if bytes[i] != FILL
       intact = false
       break
