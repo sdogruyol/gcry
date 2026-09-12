@@ -941,6 +941,41 @@ CI asymmetry that hid both.
       shipped `acked=true listed_delta=0`, restored path `acked=false
       listed_delta=1`.
       `bench/log/linux/2026-09-12-stw-ack-birth-window/FINDINGS.md`
+      **The birth window is narrower than this item has assumed, and the
+      *death* window is the real one (2026-09-12).** `Thread#start`'s first
+      statement is the push, and before it the new thread allocates nothing
+      and holds exactly one GC reference — itself, which `ThreadBirthRoot`
+      roots; once it has pushed, a stop in progress holds `Thread.lock`, so
+      it cannot run through the stopped world either. The mirror is
+      uncovered: `Thread.threads.delete(self)` runs *before*
+      `Fiber.inactive` and `detach { system_close }`, so a dying thread
+      spends its last instructions off Crystal's list — neither suspended
+      nor scanned — still dereferencing itself.
+      **It was masked by an accident**: `wait_for_staged_threads` spins 2 000
+      times before giving up, on every stop, and those spins sat between a
+      thread detaching and the world stopping around it. Dropping a dead
+      thread's staging record — obviously right, and the thing that takes
+      that wait's timeout rate from 398-of-400 to nil — removes the mask and
+      crashes: **7 of 40** runs of 960 short-lived threads, against 0 of 40
+      before, and 0 of 40 for a pure delay in the same place, so the trigger
+      is the missing wait rather than the timing. `GCRY_POISON_HOLDERS=1`
+      names a use-after-free on a 16-byte block that no holder search
+      accounts for; rooting every `Thread` for its whole life does not fix
+      it, so the victim is not the `Thread`. Kept as
+      `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default and documented as a
+      reproducer: this family has not had one that fires in seconds since
+      2026-08-16.
+      **And an unbounded leak, fixed on the way**: a birth root was released
+      only when the pre-suspend walk found its thread on Crystal's list, so a
+      thread that published and exited between two collections kept its root
+      for the life of the process — `outstanding` **3 197 of 3 203** births,
+      each pinning a `Thread`, its closure and its main `Fiber`. The root now
+      ends at the thread's death, observed through the `pthread_detach` /
+      `pthread_join` hooks with one collection of grace, or at once when
+      glibc hands the handle to a new thread. 960 short-lived threads:
+      `outstanding` 4, `overflows` 0, against 961 and 705 with the old policy
+      restored (`GCRY_THREAD_BIRTH_DEATHS=0`).
+      `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
       **And a shape to keep in view**: the stop now prints
       `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
       Crystal's list has a handle libc says names nothing. That is this

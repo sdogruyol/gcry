@@ -156,6 +156,46 @@ is now the default and the flag would take you the wrong way.
   window and is on `/gc-stats`; it is 0 on this box over 1 800 thread births,
   which is reported rather than read as safety. Whether this explains any
   aarch64 timeout is not claimed.
+- **A birth root was never released for a short-lived thread.** It ended only
+  when `stop_world`'s pre-suspend walk found its thread on Crystal's list,
+  and a thread that publishes *and exits* between two collections is never on
+  that list when the walk runs. Once 64 of those had accumulated the table
+  was full and every further birth took the overflow path, which roots and
+  can never release: over 3 203 short-lived threads, `outstanding` **3 197**
+  and `overflows` 3 133, each pinning a `Thread`, its `@func` closure and its
+  main `Fiber` for the life of the process. The root now spans the thread's
+  life — armed at `pthread_create`, released a collection after its death is
+  observed through the `pthread_detach` / `pthread_join` hooks, or at once
+  when glibc hands its handle to a new thread, which is proof the previous
+  owner is gone. The hooks mark before their real libc call, so a mark cannot
+  land on a slot a later birth has reused. The table is sized for live
+  threads (64 → 256) rather than unpublished ones. `make thread-birth-root`
+  gains a `--churn` arm: 960 short-lived threads leave `outstanding` 4 and
+  `overflows` 0, against 961 and 705 with the old policy restored via
+  `GCRY_THREAD_BIRTH_DEATHS=0`.
+  `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
+- **The staged-thread table's occupancy could drift and never recover.** It
+  was a `Bool` array beside a plain `Int32` counter maintained with `+= 1` /
+  `-= 1` from creating threads and the collector. Lost updates drifted the
+  counter upward, and `wait_for_staged_threads` loops `while staged_count >
+  0` — so a counter stuck above zero over a table with nothing in it made
+  every stop spend its whole spin budget and report a timeout. Occupancy is
+  now an atomic bitmask and the count is derived from it; a lost bit is a
+  stale entry the next drain clears, where a lost counter update was
+  permanent.
+- **A reproducer for the thread *death* window**,
+  `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default. `Thread#start` removes a
+  thread from Crystal's list before its last instructions, so a dying thread
+  is neither suspended nor scanned while still dereferencing itself. The
+  window has been masked by the staged wait's 2 000-spin timeout, which sits
+  exactly between a thread detaching and the world stopping around it;
+  dropping a dead thread's staging record removes the mask and crashes 7 of
+  40 runs of 960 short-lived threads, against 0 of 40 before and 0 of 40 for
+  a pure delay in the same place. `GCRY_POISON_HOLDERS=1` names a
+  use-after-free on a 16-byte block with no holder anywhere; rooting every
+  `Thread` for its whole life does not fix it, so the victim is not the
+  `Thread`. The defect stays open — it now has a reproducer that fires in
+  seconds.
 
 ## [0.25.0] - 2026-09-09
 
