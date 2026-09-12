@@ -48,15 +48,31 @@ module Gcry
     # occupancy should have been all along, and if that frees nothing it evicts
     # the **oldest** entry instead of refusing the newest. The oldest is the
     # birth most likely to be over already; the newest is the one in flight.
+    # Exactly 64 so occupancy fits one atomic word. See `@@staged_claimed`.
     STAGED_SLOTS = 64
 
     @@staged = uninitialized StaticArray(UInt64, STAGED_SLOTS)
-    @@staged_used = uninitialized StaticArray(Bool, STAGED_SLOTS)
+    # Occupancy as an atomic bitmask, and the count **derived** from it.
+    #
+    # It was a `Bool` array beside a plain `Int32` counter until 2026-09-12,
+    # maintained with `+= 1` / `-= 1`. That was survivable while only the
+    # creating threads and the collector touched it; once the
+    # `pthread_detach` hook started unstaging from the dying thread as well,
+    # the lost updates drifted the counter **up** and it never came back
+    # down. `wait_for_staged_threads` loops `while staged_count > 0`, so a
+    # counter stuck above zero over a table with nothing in it meant every
+    # stop spent its whole spin budget and then its whole yield budget and
+    # then reported a timeout: 0 of 60 collections at first, 194 of 240 a
+    # little later, 387 of 400 after that — a number that grew with the
+    # thread count and looked exactly like a real birth-window problem.
+    #
+    # A derived count cannot drift. A lost bit is a stale entry, which the
+    # next drain clears; a lost counter update is permanent.
+    @@staged_claimed = uninitialized Atomic(UInt64)
     # Birth order, so "oldest" is a fact rather than a slot index. Slots are
     # reused out of order, so position says nothing.
     @@staged_seq = uninitialized StaticArray(UInt64, STAGED_SLOTS)
     @@staged_next_seq = uninitialized UInt64
-    @@staged_count = uninitialized Int32
     @@staged_overflows = uninitialized UInt64
     @@staged_evictions = uninitialized UInt64
     @@staged_no_evict = uninitialized Bool
@@ -67,12 +83,11 @@ module Gcry
       i = 0
       while i < STAGED_SLOTS
         @@staged[i] = 0_u64
-        @@staged_used[i] = false
         @@staged_seq[i] = 0_u64
         i += 1
       end
+      @@staged_claimed.set(0_u64)
       @@staged_next_seq = 0_u64
-      @@staged_count = 0
       @@staged_overflows = 0_u64
       @@staged_evictions = 0_u64
       @@staged_no_evict = false
@@ -82,47 +97,71 @@ module Gcry
     # From the creating thread, right after `pthread_create` returns.
     def self.stage_thread(id : UInt64) : Nil
       return if id == 0
-      i = free_slot
+      i = claim_slot
       if i < 0
         # Full. Almost always because entries are sitting here for threads that
         # published long ago and nothing has looked since the last collection,
         # so look now.
         @@staged_overflows &+= 1
         drain_published
-        i = free_slot
+        i = claim_slot
       end
 
       if i < 0
         return if @@staged_no_evict
         i = oldest_slot
         return if i < 0
-        # Evicting keeps the count: one record replaces another.
+        # Evicting reuses a claimed slot: the bit stays set, the record
+        # changes.
         @@staged_evictions &+= 1
-      else
-        @@staged_count += 1
       end
 
       @@staged[i] = id
       @@staged_seq[i] = (@@staged_next_seq &+= 1)
-      @@staged_used[i] = true
       @@staged_total &+= 1
     end
 
-    private def self.free_slot : Int32
-      i = 0
-      while i < STAGED_SLOTS
-        return i unless @@staged_used[i]
-        i += 1
+    # Claim a free bit, publishing the slot **before** its id is written. A
+    # reader can therefore see a claimed slot holding 0, which every reader
+    # here already skips — and releasing clears the id first, so a stale one
+    # can never be matched.
+    private def self.claim_slot : Int32
+      loop do
+        claimed = @@staged_claimed.get(:acquire)
+        i = 0
+        while i < STAGED_SLOTS
+          bit = 1_u64 << i
+          if (claimed & bit) == 0
+            _, won = @@staged_claimed.compare_and_set(claimed, claimed | bit)
+            if won
+              @@staged[i] = 0_u64
+              @@staged_seq[i] = 0_u64
+              return i
+            end
+            break # retry with a fresh mask
+          end
+          i += 1
+        end
+        return -1 if i >= STAGED_SLOTS
       end
-      -1
+    end
+
+    private def self.release_slot(i : Int32) : Nil
+      @@staged[i] = 0_u64
+      @@staged_seq[i] = 0_u64
+      Atomic::Ops.atomicrmw(LLVM::AtomicRMWBinOp::And,
+        pointerof(@@staged_claimed).as(UInt64*), ~(1_u64 << i),
+        LLVM::AtomicOrdering::AcquireRelease, false)
     end
 
     private def self.oldest_slot : Int32
+      claimed = @@staged_claimed.get(:acquire)
       best = -1
       best_seq = 0_u64
       i = 0
       while i < STAGED_SLOTS
-        if @@staged_used[i] && (best < 0 || @@staged_seq[i] < best_seq)
+        if (claimed & (1_u64 << i)) != 0 && @@staged[i] != 0 &&
+           (best < 0 || @@staged_seq[i] < best_seq)
           best = i
           best_seq = @@staged_seq[i]
         end
@@ -139,19 +178,15 @@ module Gcry
     # being watched. This walk runs on the creating thread and only when the
     # table is full, which on a quiesced program is never.
     private def self.drain_published : Nil
+      claimed = @@staged_claimed.get(:acquire)
       i = 0
       while i < STAGED_SLOTS
-        if @@staged_used[i] && (id = @@staged[i]) != 0
+        if (claimed & (1_u64 << i)) != 0 && (id = @@staged[i]) != 0
           published = false
           Thread.unsafe_each do |thread|
             published = true if thread.to_unsafe.unsafe_as(UInt64) == id
           end
-          if published
-            @@staged_used[i] = false
-            @@staged[i] = 0_u64
-            @@staged_seq[i] = 0_u64
-            @@staged_count -= 1
-          end
+          release_slot(i) if published
         end
         i += 1
       end
@@ -163,16 +198,15 @@ module Gcry
       @@staged_no_evict = value
     end
 
-    # Called once the thread is in Crystal's list — the ordinary path covers it
-    # from there.
+    # Called once the thread is in Crystal's list, or once it has ended — the
+    # ordinary path covers the first and nothing needs to cover the second.
     def self.unstage_thread(id : UInt64) : Nil
+      return if id == 0
+      claimed = @@staged_claimed.get(:acquire)
       i = 0
       while i < STAGED_SLOTS
-        if @@staged_used[i] && @@staged[i] == id
-          @@staged_used[i] = false
-          @@staged[i] = 0_u64
-          @@staged_seq[i] = 0_u64
-          @@staged_count -= 1
+        if (claimed & (1_u64 << i)) != 0 && @@staged[i] == id
+          release_slot(i)
           return
         end
         i += 1
@@ -180,17 +214,29 @@ module Gcry
     end
 
     def self.each_staged(& : UInt64 ->) : Nil
+      claimed = @@staged_claimed.get(:acquire)
       i = 0
       while i < STAGED_SLOTS
-        yield @@staged[i] if @@staged_used[i] && @@staged[i] != 0
+        if (claimed & (1_u64 << i)) != 0 && (id = @@staged[i]) != 0
+          yield id
+        end
         i += 1
       end
     end
 
-    # Threads started but not yet seen in Crystal's list.
+    # Threads started but not yet seen in Crystal's list. Derived from the
+    # occupancy mask and the ids under it: a slot claimed but not yet filled
+    # is a birth in flight on another thread, and counting it would make the
+    # wait spin for a record that is not there yet.
     def self.staged_count : Int32
-      n = @@staged_count
-      n < 0 ? 0 : n
+      claimed = @@staged_claimed.get(:acquire)
+      n = 0
+      i = 0
+      while i < STAGED_SLOTS
+        n += 1 if (claimed & (1_u64 << i)) != 0 && @@staged[i] != 0
+        i += 1
+      end
+      n
     end
 
     # Births that found the table full. Not the same as a lost record since
