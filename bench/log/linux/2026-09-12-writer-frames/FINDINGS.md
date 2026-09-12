@@ -166,12 +166,42 @@ The Monitor is the one thread the stop never suspends
 elsewhere — and its stack is scanned through `snapshotted_stack_bounds` with
 no recorded SP. That is the next thing to read.
 
-## The next step, precisely
+## Which load: `sched.@name`
 
-Which of the loop's two loads produced the poisoned receiver. Every pin site
-in that block reports `collect_scan.cr:209` because they are macro expansion
-attributed to one `{% if %}`, and `mark_ref_slot` takes only `__LINE__`.
-Passing a per-site tag through the macro — the ivar name is already in hand at
-expansion — separates "the EC list gave me a freed node" from "an
-`@schedulers` buffer gave me a freed element", and those are different
-defects with different owners.
+`__LINE__` could not answer that — nine pin sites are macro expansion
+attributed to one `{% if %}`, so all of them reported `collect_scan.cr:209`.
+A compile-time site tag can, and it is free: the ivar name is in hand at
+expansion and a `String` literal is static data.
+
+```
+gcry: an execution-context pin site cannot see its object — `sched.@name`
+      computed slot address 0xdead7f5690760848 ... the freed block is 0x7f5690760848
+gcry: the freed block is 0x7f5690760848, in a chunk of size class 0, payload 16 bytes
+```
+
+`sched` comes from `ec.@schedulers.each`. `pointerof(sched.@name).address` is
+the poison word, so `sched` itself was read as poison — and since only one
+block's payload carries its own tag, the word holding `sched` was inside the
+freed block. That block is where the elements live:
+
+> **the freed 16-byte block is the `@schedulers` array's buffer** — two
+> pointer slots, freed while the `ExecutionContext` and the `Array` that owns
+> it are both live and both pinned by the walk that is reading them.
+
+That is the first time this defect has named a data structure. It also
+explains the shape of everything above it: the buffer is `type_id 0` raw
+memory with no owner gcry can see once it is unlinked, the collector reads
+elements out of it during its own root pin, and Crystal's Monitor reads the
+same elements through `each_scheduler` — which is exactly where the fault
+lands once gcry stops dereferencing it.
+
+## Still open
+
+Why the buffer is unreachable. The `Array` is pinned (`ec.@schedulers` is a
+`Reference` ivar and the walk marks it), and a heap edge to an interior
+pointer is allowed on purpose (`collect_mark.cr`: *"Heap marks must allow
+interiors (shift)"*), so marking the `Array` should mark its buffer. One of
+those two statements is not true at the moment the buffer is freed, and the
+next instrument is the one that says which: the holders search already reports
+`heap: 0 word(s) in 0 live block(s)` for the buffer, so the `Array` object
+either is not marked or is not being scanned when it is.

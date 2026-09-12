@@ -451,7 +451,10 @@ module Gcry
     # EC structure having been freed, which is open — the collector refuses the
     # dereference instead of faulting on it.
     getter ec_root_poisoned_slots : UInt64 = 0_u64
-    getter ec_root_bad_slot_line : Int32 = 0
+    # The expression the first refused slot address came from, e.g.
+    # `ec.@schedulers`. A `String` literal, so reading it costs nothing and
+    # holding it allocates nothing.
+    getter ec_root_bad_slot_site : String = ""
     # Pointer-bearing ivars of the Parallel EC structures that the pin block
     # could *not* cover. Wide ones it can — a Proc, a Tuple,
     # `(Fiber::ExecutionContext | Nil)` get every word of the slot marked — so

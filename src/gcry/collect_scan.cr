@@ -18,12 +18,15 @@ module Gcry
     # visited and found empty, and a gate that could not tell that from a slot
     # the block never looked at would be the same blind spot this counter exists
     # to remove.
-    # `line` is the caller's, filled in by the compiler. It is here because a
-    # null slot address crashed the collector and the report could not say
-    # which of the nine pin sites produced it: the faulting instruction is
-    # this one line, and every caller is inlined macro expansion attributed to
-    # its `{% if %}`.
-    private def mark_ref_slot(slot_addr : UInt64, line = __LINE__) : Nil
+    # `site` names the expression the slot address came from, and it is a
+    # `String` literal — static data, so passing it allocates nothing. It
+    # replaced `__LINE__`, which could not discriminate: every pin site in the
+    # execution-context block is macro expansion attributed to the one
+    # `{% if %}` above it, so nine callers reported the same line and the
+    # report could say where the poison was found but not what it was found
+    # in. `"ec.@schedulers"` and `"sched.@thread"` are different defects with
+    # different owners.
+    private def mark_ref_slot(slot_addr : UInt64, site : String) : Nil
       @ec_root_pins += 1
       # The slot address is computed as `pointerof(obj.@ivar)`, so it is only
       # as good as `obj` — and `obj` comes out of Crystal's own EC structures,
@@ -46,11 +49,11 @@ module Gcry
       # often it happens.
       # `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
       if slot_addr == 0
-        note_ec_root_bad_slot(line, slot_addr)
+        note_ec_root_bad_slot(site, slot_addr)
         return
       end
       if (slot_addr & POISON_TAG_MASK) == POISON_TAG || !canonical_address?(slot_addr)
-        note_ec_root_bad_slot(line, slot_addr)
+        note_ec_root_bad_slot(site, slot_addr)
         return
       end
       bits = Pointer(UInt64).new(slot_addr).value
@@ -65,7 +68,7 @@ module Gcry
       (addr >> 47) == 0
     end
 
-    private def note_ec_root_bad_slot(line : Int32, slot_addr : UInt64) : Nil
+    private def note_ec_root_bad_slot(site : String, slot_addr : UInt64) : Nil
       poisoned = (slot_addr & POISON_TAG_MASK) == POISON_TAG
       if poisoned
         @ec_root_poisoned_slots += 1
@@ -74,12 +77,12 @@ module Gcry
       end
       total = @ec_root_poisoned_slots + @ec_root_null_slots
       return unless total == 1
-      @ec_root_bad_slot_line = line
-      buf = uninitialized UInt8[320]
+      @ec_root_bad_slot_site = site
+      buf = uninitialized UInt8[384]
       len = RawOut.append(buf.to_unsafe, 0,
-        "gcry: an execution-context pin site cannot see its object — collect_scan.cr:")
-      len = RawOut.append_u64(buf.to_unsafe, len, line.to_u64)
-      len = RawOut.append(buf.to_unsafe, len, " computed slot address 0x")
+        "gcry: an execution-context pin site cannot see its object — `")
+      len = RawOut.append(buf.to_unsafe, len, site)
+      len = RawOut.append(buf.to_unsafe, len, "` computed slot address 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, slot_addr)
       if poisoned
         len = RawOut.append(buf.to_unsafe, len,
@@ -147,7 +150,7 @@ module Gcry
     # Crystal 1.21.0 — a module union carries a type_id word — so pinning "the
     # pointer word" would pin the type_id and look covered. A `Proc` is 16 bytes
     # for the same practical reason (function, then closure environment).
-    private def pin_ec_slot(slot_addr : UInt64, bytes : Int32) : Nil
+    private def pin_ec_slot(slot_addr : UInt64, bytes : Int32, site : String) : Nil
       word = sizeof(Void*)
       if bytes < word
         # Pointer-bearing and narrower than a pointer: nothing sound to mark.
@@ -157,7 +160,7 @@ module Gcry
       end
       offset = 0
       while offset + word <= bytes
-        mark_ref_slot(slot_addr + offset)
+        mark_ref_slot(slot_addr + offset, site)
         offset += word
       end
     end
@@ -178,9 +181,11 @@ module Gcry
       {% for ivar in type.resolve.instance_vars %}
         {% ty = ivar.type %}
         {% if ty < Reference %}
-          mark_ref_slot(pointerof({{obj}}.@{{ivar.name}}).address)
+          mark_ref_slot(pointerof({{obj}}.@{{ivar.name}}).address,
+            {{ (obj.stringify + ".@" + ivar.name.stringify) }})
         {% elsif ty.has_inner_pointers? %}
-          pin_ec_slot(pointerof({{obj}}.@{{ivar.name}}).address, sizeof({{ty}}))
+          pin_ec_slot(pointerof({{obj}}.@{{ivar.name}}).address, sizeof({{ty}}),
+            {{ (obj.stringify + ".@" + ivar.name.stringify) }})
         {% end %}
       {% end %}
     end
@@ -204,8 +209,8 @@ module Gcry
         # @execution_context by default; tip needs -Dexecution_context
         # (-Dpreview_mt). Flag-only gates break one of the two.
         {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
-          mark_ref_slot(pointerof(thread.@scheduler).address)
-          mark_ref_slot(pointerof(thread.@execution_context).address)
+          mark_ref_slot(pointerof(thread.@scheduler).address, "thread.@scheduler")
+          mark_ref_slot(pointerof(thread.@execution_context).address, "thread.@execution_context")
         {% end %}
       end
 
@@ -213,7 +218,7 @@ module Gcry
         # Global EC list (not thread-local) — keeps contexts that temporarily have
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|
-          mark_ref_slot(pointerof(ec).address)
+          mark_ref_slot(pointerof(ec).address, "ec (the list node itself)")
           # Pin each context's queues / event loop / schedulers explicitly. Body
           # scan alone still left residual EC4 SEGV @ …0008 under release Kemal.
           #

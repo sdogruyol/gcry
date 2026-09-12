@@ -1220,6 +1220,18 @@ CI asymmetry that hid both.
       `MonitorGate.enter` (238 of 240 collections) and its stack is scanned
       with no recorded SP. That is the next thing to read.
       `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+      **And it names a structure (2026-09-12).** The pin sites now carry a
+      compile-time tag, because `__LINE__` cannot discriminate nine callers
+      that are one `{% if %}`'s macro expansion. The refused slot is
+      `sched.@name`, from `ec.@schedulers.each`, with `sched` itself read as
+      poison — and only one block's payload carries its own tag, so the word
+      holding `sched` was inside the freed block. **The freed 16-byte block is
+      the `@schedulers` array's two-slot buffer**, freed while the
+      `ExecutionContext` and the `Array` that owns it are both live and both
+      pinned by the walk reading them. First data structure this defect has
+      ever named. What is still open is why that buffer is unreachable: the
+      `Array` is pinned and a heap edge to an interior pointer is allowed on
+      purpose, so one of those is not true when the buffer is freed.
       Original sighting:
       2026-08-23 while cutting gcry vs Boehm on acikturkiye: the gcry binary
       dies under `wrk` in about one run in eight, in a request fiber writing

@@ -281,6 +281,14 @@ is now the default and the flag would take you the wrong way.
   the block the report was about. First run, it named a three-week-old fault:
   the writer was the collector, in its own execution-context root pin.
 
+- The execution-context pin sites carry a compile-time site tag, so a refused
+  slot address names the expression it came from rather than a line nine sites
+  share. It named the structure this defect has never named: `sched.@name`,
+  from `ec.@schedulers.each`, with `sched` itself read as poison — so the
+  freed 16-byte block is the `@schedulers` array's two-slot buffer, freed
+  while the context and the array that owns it are both live. `/gc-stats`
+  reports it as `ec_root_bad_slot_site`.
+
 - **"SIGSEGV at 0x0" was a poison word, not a null.** `cr2` agreed with
   `si_addr`, but the register held `0xdead7fb15cbe0848` — tagged poison, whose
   top `0xDEAD` bits make the access non-canonical, which Linux reports as a
