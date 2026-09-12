@@ -42,20 +42,40 @@
 
 module Gcry
   module ThreadBirthRoot
-    # One slot per thread being born. A slot is freed by `release`, which runs
-    # inside `stop_world`, so what the table has to hold is not the number of
-    # **concurrent** births — it is the number of births **since the last
-    # collection**. The first version of this comment said the former and put
-    # 64 far past anything Crystal starts at once; measured, 65 `Thread.new`s
-    # with no collection between them overflow it, and 200 overflow it 137
-    # times (`bench/thread_birth_root.cr --burst`).
+    # One slot per **live** thread, not per thread being born.
     #
-    # So the table is sized for the common case and **overflow no longer costs
-    # the root**: a birth that finds no slot is rooted anyway and never
-    # released (see `arm`). What the size buys is whether that root is
-    # temporary or permanent, which is a memory question; an unrooted birth
-    # would be the use-after-free question.
-    SLOTS = 64
+    # It was per-birth until 2026-09-12, released as soon as `stop_world`'s
+    # walk found the thread on Crystal's list, on the reasoning that the list
+    # is its root from then on. The list stops being its root before the
+    # thread stops running: `Thread#start`'s `ensure` does
+    #
+    #     Thread.threads.delete(self)   # off the list — nothing scans it now
+    #     Fiber.inactive(fiber)
+    #     detach { system_close }       # still dereferencing `self`
+    #
+    # and gcry does not scan a dying thread's stack, because a thread off the
+    # list is a thread it cannot see. So between those lines the `Thread` is
+    # unreachable, gets swept, and the thread keeps using it. The dying-type
+    # audit names it exactly: *"192 bytes, type_id 171, unmarked and about to
+    # be swept; on Crystal's thread list: no — it has either not published
+    # yet or exited"*, followed by a SIGSEGV on gcry's freed-block poison.
+    #
+    # That window was latent while `GC.pthread_detach` was a bare passthrough
+    # — the dying thread crossed it in a few instructions. Giving the hook
+    # any work at all turned it into 6 crashes in 40 runs of 960 short-lived
+    # threads, against 0 in 40 before. The window was always there; the hook
+    # only made it wide enough to hit.
+    #
+    # So the root now spans the whole life: armed at `pthread_create`,
+    # released a collection after the thread's death is observed, or at once
+    # when glibc hands its handle to somebody else. The table therefore has
+    # to hold every live thread rather than every unpublished one.
+    #
+    # Overflow still **costs no root**: a birth that finds no slot is rooted
+    # anyway and never released (see `arm`). What the size buys is whether
+    # that root is temporary or permanent, which is a memory question; an
+    # unrooted birth is the use-after-free question.
+    SLOTS = 256
 
     # The recorded address is stored **masked**. This table is a class variable,
     # i.e. static memory that the conservative root scan reads, so a plain
@@ -77,6 +97,59 @@ module Gcry
     @@overflows = uninitialized UInt64
     @@outstanding = uninitialized Int32
 
+    # ── Ending a birth root ─────────────────────────────────────────────────
+    #
+    # Until 2026-09-12 a root was released only when `stop_world`'s walk found
+    # its thread on Crystal's list. A thread that published *and exited*
+    # between two collections is never on that list when the walk runs, so its
+    # root was never released — and once 64 of those had accumulated, every
+    # further birth took the overflow path, which roots and can never release.
+    # Measured on 3 203 short-lived threads: `released` 6, `overflows` 3 133,
+    # `outstanding` **3 197**. That is 3 197 `Thread` objects and everything
+    # they transitively hold, pinned for the life of the process.
+    #
+    # The end of a thread is observable: Crystal calls `GC.pthread_detach`
+    # from the dying thread's own `ensure`, and `GC.pthread_join` from a
+    # joiner. Those hooks mark the slot here, and the collector drops the
+    # root one collection later.
+    #
+    # Marking from the dying thread is safe for one reason and it is worth
+    # stating, because the first version did not believe it and paid for the
+    # disbelief. The worry was that a mark could land on a slot `arm` had
+    # already reused for a different birth — glibc recycles `pthread_t` — and
+    # unroot a thread that is still being born. It cannot: both hooks mark
+    # **before** calling the real `pthread_detach` / `pthread_join`, and a
+    # handle is not reusable until that call has returned. So the mark is
+    # strictly ordered before any `arm` that could see the same handle.
+    #
+    # The first version routed marks through a lock-free ring the collector
+    # drained, precisely to avoid that reuse. It introduced a worse race of
+    # its own: `drain_deaths` reset the producer index to 0 while a producer
+    # could be holding a claimed slot, so a store landing after the reset was
+    # read as a *fresh* notice and marked whichever thread then held that id
+    # — a live one. `make thread-birth-root --churn` crashed in
+    # `Thread::LinkedList#push` with `pthread_mutex_unlock: Invalid
+    # argument`, which is what a `Thread` freed while it is starting looks
+    # like. Direct marking has no such window and is less code.
+    @@deaths_seen = uninitialized UInt64
+    @@deaths_unmatched = uninitialized UInt64
+
+    # The collection a slot's thread was seen to end at, or 0 while it lives.
+    # A root is dropped one whole collection later: the dying thread is still
+    # running when it detaches — `Thread#start` has already removed it from
+    # Crystal's list, so nothing scans the stack it is finishing on, and that
+    # stack holds the very `Thread` being unrooted. One collection of grace
+    # costs a bounded number of slots and removes the window.
+    @@dead_at = uninitialized StaticArray(UInt64, SLOTS)
+    @@released_dead = uninitialized UInt64
+    # Slots released because glibc handed their handle to a new thread.
+    @@reclaimed = uninitialized UInt64
+    # `GCRY_THREAD_BIRTH_DEATHS=0`: ignore thread deaths and handle reuse, so
+    # a root is released only when `stop_world` finds its thread on Crystal's
+    # list — the policy before 2026-09-12, which leaked one root per
+    # short-lived thread. The control arm of `make thread-birth-root`.
+    @@track_deaths = uninitialized Bool
+
     # Called once from `GC.init`, on the main thread, before any thread exists.
     # `uninitialized` and cleared here for the same reason as the staging table:
     # a class variable with an initializer is set up lazily behind a guard, and
@@ -88,8 +161,14 @@ module Gcry
         @@ids[i] = 0_u64
         @@objects[i] = 0_u64
         @@used[i] = false
+        @@dead_at[i] = 0_u64
         i += 1
       end
+      @@deaths_seen = 0_u64
+      @@deaths_unmatched = 0_u64
+      @@released_dead = 0_u64
+      @@reclaimed = 0_u64
+      @@track_deaths = true
       @@enabled = true
       @@noroot = false
       @@overflow_unrooted = false
@@ -101,6 +180,10 @@ module Gcry
 
     def self.enabled=(value : Bool) : Bool
       @@enabled = value
+    end
+
+    def self.track_deaths=(value : Bool) : Bool
+      @@track_deaths = value
     end
 
     def self.noroot=(value : Bool) : Bool
@@ -142,12 +225,27 @@ module Gcry
       return if id == 0 || object.null?
       heap = Gcry.default_heap?
       return unless heap
+      # A handle glibc has handed out again is proof its previous owner is
+      # fully gone — `pthread_t` is not reusable until the thread has exited
+      # and been detached or joined. So the old thread's slot needs no grace:
+      # reclaim it here, on the creating thread, before claiming a new one.
+      #
+      # The first version only *cancelled* the pending death notice, on the
+      # grounds that it could not be allowed to land on the new birth. It
+      # could not — but discarding it also discarded the old thread's
+      # release, and in a churn workload almost every handle is recycled:
+      # 1 487 of 3 203 births still overflowed the table. Reclaiming keeps
+      # both properties.
+      if @@track_deaths && (stale = reclaim_handle(id))
+        heap.delete_root(stale)
+      end
       i = 0
       while i < SLOTS
         unless @@used[i]
           @@ids[i] = id
           @@objects[i] = object.address ^ TABLE_MASK
           @@used[i] = true
+          @@dead_at[i] = 0_u64
           @@armed &+= 1
           @@outstanding += 1
           # The twin walks the same table and offers nothing.
@@ -201,6 +299,109 @@ module Gcry
         i += 1
       end
       nil
+    end
+
+    # From `GC.pthread_detach` / `GC.pthread_join`, **before** either makes
+    # its real libc call: this handle's thread has ended. Runs on the dying
+    # thread or a joiner, so it must be wait-free and must not allocate.
+    #
+    # The mark is only that: a stamp. The root is dropped by the collector a
+    # collection later, because a detaching thread is still running — on a
+    # stack nothing scans, since `Thread#start` removed it from Crystal's
+    # list one line earlier — and that stack holds the object being unrooted.
+    def self.note_death(id : UInt64) : Nil
+      return if id == 0 || !@@enabled || !@@track_deaths
+      heap = Gcry.default_heap?
+      return unless heap
+      # Never 0: that is the "alive" value, and a death seen before the first
+      # collection must still be seen as a death.
+      at = heap.collections &+ 1
+      i = 0
+      while i < SLOTS
+        if @@used[i] && @@ids[i] == id && @@dead_at[i] == 0
+          @@dead_at[i] = at
+          @@deaths_seen &+= 1
+          return
+        end
+        i += 1
+      end
+      # No slot: the birth overflowed the table, or the handle was already
+      # reclaimed by a later `arm`. Both are accounted for elsewhere.
+      @@deaths_unmatched &+= 1
+    end
+
+    # Release the slot the handle's previous owner held, returning its object
+    # so the caller can un-root it. A handle glibc has handed out again is
+    # proof its previous owner is gone, so this needs no grace. Runs on a
+    # creating thread, which already writes this table.
+    private def self.reclaim_handle(id : UInt64) : Void*?
+      j = 0
+      while j < SLOTS
+        if @@used[j] && @@ids[j] == id
+          object = @@objects[j] ^ TABLE_MASK
+          @@used[j] = false
+          @@ids[j] = 0_u64
+          @@objects[j] = 0_u64
+          @@dead_at[j] = 0_u64
+          @@released &+= 1
+          @@reclaimed &+= 1
+          @@outstanding -= 1
+          return nil if @@noroot || object == TABLE_MASK || object == 0
+          return Pointer(Void).new(object)
+        end
+        j += 1
+      end
+      nil
+    end
+
+    # Release what has been dead long enough. Called from `stop_world` with
+    # `@roots_lock` held, so the block hands each pointer straight to
+    # `@roots`.
+    #
+    # `collection > at` rather than `>=`: a thread marked during the stop
+    # that is about to run must survive it. `note_death` stamps
+    # `collections + 1`, so the earliest release is the stop after the one
+    # that was in flight when the thread detached — a detaching thread is
+    # still running, on a stack nothing scans, holding the object being
+    # unrooted.
+    def self.release_dead(collection : UInt64, & : Void* ->) : Nil
+      return unless @@track_deaths
+      j = 0
+      while j < SLOTS
+        at = @@dead_at[j]
+        if @@used[j] && at != 0 && collection > at
+          object = @@objects[j] ^ TABLE_MASK
+          @@used[j] = false
+          @@ids[j] = 0_u64
+          @@objects[j] = 0_u64
+          @@dead_at[j] = 0_u64
+          @@released &+= 1
+          @@released_dead &+= 1
+          @@outstanding -= 1
+          yield Pointer(Void).new(object) unless @@noroot || object == TABLE_MASK || object == 0
+        end
+        j += 1
+      end
+    end
+
+    # Deaths the hooks matched to a slot, and deaths whose slot was already
+    # gone — an overflowed birth, or a handle a later `arm` reclaimed first.
+    # `released_dead` plus `reclaimed` against `armed` is the reading that
+    # says whether short-lived threads still accumulate roots.
+    def self.deaths_seen : UInt64
+      @@deaths_seen
+    end
+
+    def self.deaths_unmatched : UInt64
+      @@deaths_unmatched
+    end
+
+    def self.released_dead : UInt64
+      @@released_dead
+    end
+
+    def self.reclaimed : UInt64
+      @@reclaimed
     end
   end
 end

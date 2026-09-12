@@ -143,6 +143,95 @@ def wipe_stack : Nil
   Gcry::Trace.enabled? && puts(buf.to_unsafe[0])
 end
 
+# ── Churn: does a birth root ever get released? ─────────────────────────────
+#
+# The rest of this file asks whether a birth is *rooted*. This arm asks the
+# other half, which went unasked until 2026-09-12: whether the root is ever
+# given back. It was not. A root was released only by `stop_world`'s walk of
+# Crystal's list, and a thread that publishes and exits between two
+# collections is never on that list when the walk runs — so it kept its root
+# for the life of the process. Once 64 of those had piled up, every further
+# birth took the overflow path, which roots and can never release: measured
+# at `overflows` 3 133 and `outstanding` **3 197** of 3 203 births.
+#
+# Each `Thread` pins its `@func` closure, its main `Fiber` and whatever those
+# reach, so this is an unbounded leak on any thread-churning program.
+#
+# `GCRY_THREAD_BIRTH_DEATHS=0` restores that policy and is the control:
+# `--churn` must stay bounded, `--churn-leaking` must not.
+if ARGV.includes?("--churn") || ARGV.includes?("--churn-leaking")
+  leaking = ARGV.includes?("--churn-leaking")
+  rounds = 120
+  batch = 8
+  puts "=== thread-birth root ==="
+  puts "mode: #{leaking ? "churn-leaking (GCRY_THREAD_BIRTH_DEATHS=0)" : "churn"}"
+  puts "#{rounds} rounds x #{batch} short-lived threads, one collection each"
+
+  rounds.times do
+    born = [] of Thread
+    batch.times { born << Thread.new { } }
+    GC.collect
+    born.each(&.join)
+  end
+
+  births = rounds * batch
+  outstanding = Gcry::ThreadBirthRoot.outstanding
+  overflows = Gcry::ThreadBirthRoot.overflows
+  puts "  births=#{births} armed=#{Gcry::ThreadBirthRoot.armed} " \
+       "released=#{Gcry::ThreadBirthRoot.released} " \
+       "reclaimed=#{Gcry::ThreadBirthRoot.reclaimed} " \
+       "released_dead=#{Gcry::ThreadBirthRoot.released_dead}"
+  puts "  outstanding=#{outstanding} overflows=#{overflows} " \
+       "unmatched=#{Gcry::ThreadBirthRoot.deaths_unmatched}"
+
+  # Bounded means "the live ones and whatever died since the last collection",
+  # not "a few": a threshold set near the observed value would pass a fix that
+  # only halved the leak. A whole batch of grace is generous and still two
+  # orders of magnitude below the broken number.
+  bound = batch * 2
+  if leaking
+    if outstanding <= bound
+      puts "FAIL GCRY_THREAD_BIRTH_DEATHS=0 held only #{outstanding} root(s) of #{births} " \
+           "births — the old release policy is not being restored, so the arm below is " \
+           "not attributable to the fix"
+      exit 1
+    end
+    puts ""
+    puts "ok — with deaths ignored, #{outstanding} of #{births} birth roots are still held " \
+         "and #{overflows} birth(s) overflowed the table"
+    exit 0
+  end
+
+  failures = [] of String
+  if outstanding > bound
+    failures << "#{outstanding} birth roots still held after #{births} threads came and " \
+                "went (bound #{bound}) — a `Thread` and everything it reaches, per thread"
+  end
+  if overflows > 0
+    failures << "#{overflows} birth(s) overflowed a #{Gcry::ThreadBirthRoot::SLOTS}-slot " \
+                "table with at most #{batch} alive at once — releases are not keeping up, " \
+                "and an overflowed birth is rooted forever by design"
+  end
+  # A death whose slot was already gone is accounted for by `reclaimed`, but
+  # every birth must end up released by exactly one of the three routes.
+  accounted = Gcry::ThreadBirthRoot.released + outstanding
+  if accounted < births
+    failures << "#{births} births but only #{accounted} accounted for as released or " \
+                "outstanding — a birth is leaving the table by neither route"
+  end
+  if Gcry::ThreadBirthRoot.released == 0
+    failures << "nothing was ever released, so this arm is measuring a program that did not " \
+                "run the path"
+  end
+  if failures.empty?
+    puts ""
+    puts "ok — #{births} threads came and went and #{outstanding} birth root(s) are held"
+    exit 0
+  end
+  failures.each { |f| puts "FAIL #{f}" }
+  exit 1
+end
+
 heap = Gcry.default_heap
 control = ARGV.includes?("--control")
 noroot = ARGV.includes?("--noroot")

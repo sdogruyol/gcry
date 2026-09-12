@@ -171,15 +171,25 @@ module Gcry
           Thread.unsafe_each do |thread|
             listed += 1
             Platform.unstage_thread(thread.to_unsafe.unsafe_as(UInt64))
-            # On the list, so the list is its root from here on: drop the one
-            # taken at `pthread_create` (src/gcry/thread_birth_root.cr).
-            # `@roots` directly — `@roots_lock` is already held by
-            # `stop_world_quiescing_roots` and it is not reentrant.
-            if rooted = ThreadBirthRoot.release(thread.to_unsafe.unsafe_as(UInt64))
-              @roots.delete(rooted)
-            end
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
+          # The birth root is **not** released here any more.
+          #
+          # It was, on the reasoning that a thread on Crystal's list is rooted
+          # by the list. It is — until `Thread#start`'s `ensure` takes it off
+          # the list, which happens while the thread is still running and
+          # still dereferencing itself, on a stack gcry does not scan because
+          # a thread off the list is one it cannot see. The object was swept
+          # in that gap: `bench/log/linux/2026-09-12-thread-life-root/`.
+          #
+          # So the root spans the whole life now, and only death ends it —
+          # observed through the `pthread_detach` / `pthread_join` hooks, with
+          # one collection of grace so a thread still finishing keeps it, or
+          # at once when glibc hands the handle to a new thread
+          # (src/gcry/thread_birth_root.cr). `@roots` directly: `@roots_lock`
+          # is already held by `stop_world_quiescing_roots` and it is not
+          # reentrant.
+          ThreadBirthRoot.release_dead(@collections) { |rooted| @roots.delete(rooted) }
           # Does the set about to be stopped account for every thread the
           # process has? gcry learns about threads from Crystal's list, so a
           # thread that exists but has not pushed itself yet is neither

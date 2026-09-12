@@ -740,6 +740,8 @@ thread-birth-root: $(BIN)
 	GCRY_THREAD_BIRTH_ROOT=0 $(BIN)/thread_birth_root --control
 	$(BIN)/thread_birth_root --burst
 	GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
+	$(BIN)/thread_birth_root --churn
+	GCRY_THREAD_BIRTH_DEATHS=0 $(BIN)/thread_birth_root --churn-leaking
 
 # The nursery keeps the header representation under every setting, so every
 # mark clear has to gate per *chunk* like the read side does. Gating on the

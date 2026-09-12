@@ -879,6 +879,10 @@ module GC
     # Research only: a birth that finds no slot goes unrooted, which is what the
     # table used to do to every birth past the 64th between two collections.
     Gcry::ThreadBirthRoot.overflow_unrooted = true if env_flag_one?("GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED")
+    # Research only: never release a birth root on a thread's death, so a
+    # root ends only where it used to — when `stop_world` finds the thread on
+    # Crystal's list. The control arm for `make thread-birth-root --churn`.
+    Gcry::ThreadBirthRoot.track_deaths = false if env_flag_zero?("GCRY_THREAD_BIRTH_DEATHS")
     # Research only: keep the pthread stack-bounds snapshot at its initial size
     # instead of growing it, which is what a thread list longer than 64 used to
     # run into (src/gcry/platform/linux_stack.cr).
@@ -1424,12 +1428,35 @@ module GC
     end
 
     # :nodoc:
+    # Both of these mean one thing to gcry: this handle's thread has ended.
+    # Crystal calls `detach` from the dying thread's own `ensure` and `join`
+    # from a joiner, and until 2026-09-12 neither was observed — so a birth
+    # root was released only when `stop_world` found its thread on Crystal's
+    # list, and a thread that published and exited between two collections
+    # kept its root for the life of the process
+    # (src/gcry/thread_birth_root.cr).
+    #
+    # The mark happens **before** the real call, so it is written while the
+    # handle is still unambiguously this thread's: after `pthread_detach` the
+    # handle is reusable, and a mark landing then could hit a slot `arm` had
+    # already given to a new birth.
+    #
+    # What is deliberately **not** here: dropping the thread's staging
+    # record. It belongs here logically — a dead thread is not a thread being
+    # born — and it crashes. The commit after this one adds it as a
+    # reproducer rather than a behaviour.
     def self.pthread_join(thread : Gcry::OS::PthreadT)
+      {% if flag?(:gc_none) %}
+        Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
+      {% end %}
       Gcry::OS.pthread_join(thread, nil)
     end
 
     # :nodoc:
     def self.pthread_detach(thread : Gcry::OS::PthreadT)
+      {% if flag?(:gc_none) %}
+        Gcry::ThreadBirthRoot.note_death(thread.unsafe_as(UInt64))
+      {% end %}
       Gcry::OS.pthread_detach(thread)
     end
   {% end %}

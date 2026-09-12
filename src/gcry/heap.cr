@@ -1416,6 +1416,16 @@ module Gcry
       false
     end
 
+    # Tried and rejected, recorded so it is not tried again: a second phase
+    # that yielded the CPU to a staged thread once the spin budget ran out.
+    # The reasoning was sound — a thread that has not published is usually
+    # one that has not been scheduled, and `Intrinsics.pause` denies it the
+    # only thing it needs — and the measurement said no. Eight runs of 400
+    # collections each way, against 3 200 short-lived threads: 2 timeouts in
+    # 3 191 waits with a 2 ms yield budget, 2 in 3 185 without, and every
+    # time the yield phase engaged it timed out anyway. What actually moved
+    # this number from 398-of-400 to 2-of-3 191 was the occupancy drift in
+    # `Platform`'s staging table (src/gcry/platform/thread_staging.cr).
     private def wait_for_staged_threads : Nil
       @staged_seen_at_stop = Platform.staged_count.to_u64
       @staged_timed_out_at_stop = false
