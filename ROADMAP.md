@@ -915,12 +915,32 @@ CI asymmetry that hid both.
       thread can now be signalled more than once without the duplicate
       suspending it with nobody waiting, and whether a delivery is honoured is
       decided by the handler against the stop id rather than by the collector
-      getting a call site right. What is still missing to suspend a *staged*
-      thread: its acknowledgement must move off `::Thread.current` into the
-      `pthread_t`-keyed table (a thread mid-start has no Crystal TLS to read),
-      and its stack bounds must come from the creating side. Separate change,
-      separate red arms — the two earlier attempts at this family broke the
-      collector by doing it in one step.
+      getting a call site right. **The first half of that is now done
+      (2026-09-12).** The acknowledgement has moved off `Thread#@suspended`
+      into the `pthread_t`-keyed slot table, which the collector reserves for
+      every thread before it signals anyone, so the handler calls nothing
+      Crystal owns. That was not only a prerequisite — it closed a defect of
+      its own, below. What is still missing to suspend a *staged* thread: its
+      stack bounds have to come from the creating side
+      (`pthread_getattr_np` on the new handle once `pthread_create` returns)
+      and it has to be given a slot and signalled like any other. Separate
+      change, separate red arms — the two earlier attempts at this family
+      broke the collector by doing it in one step.
+      **A live defect found on the way, and fixed:** Crystal's `Thread#start`
+      pushes itself onto the list **before** it sets its TLS, so `stop_world`
+      could signal a thread with no `Thread.current` — and Crystal's accessor
+      *creates one on a miss*, allocating a `Fiber` and a `Thread` and pushing
+      it onto `Thread.threads` from inside a signal handler with the world
+      stopping. It then set `@suspended` on that **second** object, never the
+      one the collector was watching, so the stop spun forever for a thread
+      that had in fact suspended itself. That is `phase=suspend`, one thread
+      unacknowledged, handle live, handler entries incremented — the aarch64
+      shape, though whether it is *the* aarch64 hang is unknown and
+      `stw_suspend_no_tls` is the counter that will say. Driven
+      deterministically by `make stw-ack-window` against a raw pthread:
+      shipped `acked=true listed_delta=0`, restored path `acked=false
+      listed_delta=1`.
+      `bench/log/linux/2026-09-12-stw-ack-birth-window/FINDINGS.md`
       **And a shape to keep in view**: the stop now prints
       `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
       Crystal's list has a handle libc says names nothing. That is this

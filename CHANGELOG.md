@@ -131,6 +131,31 @@ is now the default and the flag would take you the wrong way.
   `GCRY_INDEX_AUDIT=1`; 0 of 3 after the fix, all four `find-block-race`
   workloads green with both control arms still crashing. Whether either
   explains an open CI sighting is not claimed.
+- **The suspend handler allocated a `Thread` — from inside a signal handler,
+  with the world stopping — and acknowledged into it.** Crystal's
+  `Thread#start` pushes itself onto `Thread.threads` *before* it sets that
+  thread's TLS, so `stop_world` can signal a thread that has no
+  `Thread.current` yet; Crystal's accessor creates one on a miss, allocating
+  a `Fiber` and a `Thread` and pushing it onto the very list the collector
+  holds the mutex for. The handler then set `@suspended` on that **second**
+  object rather than the one on the list, so the collector spun forever for a
+  thread that had already suspended itself — `phase=suspend`, one thread
+  unacknowledged, `pthread_kill(id, 0)` reporting the handle live, handler
+  entries incremented. The acknowledgement now lives in the `pthread_t`-keyed
+  slot table, which the collector reserves for every thread before it signals
+  anyone, so the handler touches nothing Crystal owns; reserving up front also
+  keeps the CAS claim off the handler and lets the wait spin on an array index
+  instead of a 64-slot scan. `Thread#@suspended` remains the fallback for a
+  table that was full *and* a thread that already has a `Thread`; a delivery
+  that can use neither declines to suspend rather than freezing with no way to
+  say so, counted in `stw_suspend_ack_unavailable`. `make stw-ack-window`
+  drives it deterministically with a raw pthread, which has no TLS by
+  construction: shipped `acked=true listed_delta=0`, the restored pre-table
+  path `acked=false listed_delta=1` — that `1` is the `Thread` the handler
+  allocated. `stw_suspend_no_tls` counts real deliveries that land in the
+  window and is on `/gc-stats`; it is 0 on this box over 1 800 thread births,
+  which is reported rather than read as safety. Whether this explains any
+  aarch64 timeout is not claimed.
 
 ## [0.25.0] - 2026-09-09
 
