@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -742,6 +742,27 @@ thread-birth-root: $(BIN)
 	GCRY_THREAD_BIRTH_OVERFLOW_UNROOTED=1 $(BIN)/thread_birth_root --burst-unrooted
 	$(BIN)/thread_birth_root --churn
 	GCRY_THREAD_BIRTH_DEATHS=0 $(BIN)/thread_birth_root --churn-leaking
+
+# The reproducer for the open "live large object released under load" item —
+# not a gate. `ROADMAP.md` has carried that defect since 2026-08-23 and lost
+# its reproducer: it was found under `wrk` against acikturkiye at about one
+# run in eight, then stopped firing, and the item says that until it
+# reproduces at a resolvable rate no arm means anything. This is that rate
+# without an application: eight short-lived threads per round, one collection
+# per round, and it fires on **both** layouts with no knob set.
+#
+# Three arms because the diagnostics surface different victims and hide each
+# other: `default` is the shipped rate, `guarded` names the released chunk
+# through `GCRY_UNMAP_GUARD=1`, `poisoned` has the highest rate and names a
+# freed small block. The last is asserted non-zero — a reproducer that has
+# silently stopped reproducing is how the previous one was lost. ~90 s for
+# both layouts.
+thread-churn-uaf: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_churn_uaf.cr -o $(BIN)/thread_churn_uaf --error-trace
+	$(BIN)/thread_churn_uaf
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/thread_churn_uaf.cr \
+	  -o $(BIN)/thread_churn_uaf_headers --error-trace
+	$(BIN)/thread_churn_uaf_headers
 
 # The nursery keeps the header representation under every setting, so every
 # mark clear has to gate per *chunk* like the read side does. Gating on the
