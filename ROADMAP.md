@@ -909,6 +909,23 @@ CI asymmetry that hid both.
       dies without the root and survives with it, 20 of 20.
       **Next**: leave the sampler running and revisit the rate once more pushes
       have accumulated; the item stays open until CI has enough runs to say so.
+      **What the stop epoch (2026-09-12, item below) changes here**: nothing
+      about the window itself — an unpublished thread is still neither
+      suspended nor scanned — but it supplies the mechanism a fix needs. A
+      thread can now be signalled more than once without the duplicate
+      suspending it with nobody waiting, and whether a delivery is honoured is
+      decided by the handler against the stop id rather than by the collector
+      getting a call site right. What is still missing to suspend a *staged*
+      thread: its acknowledgement must move off `::Thread.current` into the
+      `pthread_t`-keyed table (a thread mid-start has no Crystal TLS to read),
+      and its stack bounds must come from the creating side. Separate change,
+      separate red arms — the two earlier attempts at this family broke the
+      collector by doing it in one step.
+      **And a shape to keep in view**: the stop now prints
+      `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
+      Crystal's list has a handle libc says names nothing. That is this
+      defect's signature seen from the other side, and it is now a line in the
+      log rather than a twenty-minute timeout.
       **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
       catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
       quote.
@@ -940,14 +957,35 @@ CI asymmetry that hid both.
       second and prints whether the handle names a live thread, which is the one
       question that separates "the signal was lost" from "the handle came out of
       a freed `Thread`" — the open use-after-free is on this same runner.
-      **Not fixed and deliberately so**: the obvious symmetry is to retry the
-      suspend signal the way `start_world` retries the resume, and it is not
-      safe. A redundant `SIG_RESUME` runs an empty handler; a redundant
-      `SIG_SUSPEND` stays pending while the thread is inside its own handler and
-      is delivered *after* it resumes, suspending it again with nobody waiting.
-      Doing it properly needs a per-thread stop epoch so the handler can ignore a
-      signal it has already served, and that is a change to the stopped world's
-      protocol — which is what the last two attempts at this family got wrong.
+      **The retry now exists, and the epoch is what made it safe (2026-09-12).**
+      The symmetry with `start_world`'s resume retry had been refused twice for
+      a good reason: a redundant `SIG_RESUME` runs an empty handler, while a
+      redundant `SIG_SUSPEND` stays pending inside the handler and is delivered
+      *after* the thread resumes, suspending it again with nobody waiting.
+      `Gcry::Platform`'s stop epoch closes that — 0 when no stop is in
+      progress, the stop's id while one is, stamped per thread in the
+      `pthread_t`-keyed slot table — so the handler serves a delivery only
+      once per stop and declines every duplicate. `stop_world` then resends
+      every `GCRY_STW_RESEND_SPINS` up to `GCRY_STW_RESEND_LIMIT`, and past
+      the limit asks `pthread_kill(id, 0)`: on `ESRCH` it reports
+      `SUSPEND ABANDONED` and stops without a thread that no longer exists,
+      rather than spinning out the job timeout. `make stw-epoch` has six arms,
+      three red on purpose — no resend hangs on a dropped signal, no epoch
+      hangs on the duplicate, and a live thread that answers nothing hangs
+      either way. That last one is the honest limit: **this repairs a lost
+      delivery, not a thread that cannot run its handler.** Which of the two
+      the aarch64 runs were is what the enriched `SUSPEND STALLED` line now
+      answers — it carries resends unanswered, handler entries, and declines
+      split stale/redundant, so flat handler entries mean the signal never
+      arrived and climbing declines mean it did.
+      Two latent defects fell out of building it, both in that slot table and
+      both a **missed root** before they were a hang: the claim's
+      `compare_and_set` result was never checked (it returns a tuple, always
+      truthy, so every thread in a stop claimed the same slot), and
+      `clear_thread_sps` left the ids in place, so a peer could match a slot
+      another thread had just claimed. Two threads on one slot means one
+      thread's stack is scanned from the other's SP and registers.
+      `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
       Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
       print how many fibers arrived, how many are still parked on the context's
       global queue and what the audit had counted (`--stall` is the positive

@@ -88,6 +88,49 @@ is now the default and the flag would take you the wrong way.
   skips is an object freed while live. The mutation gate's mutant 09 is that
   perturbation; four of its ten mutants had also stopped matching the source
   and were silently unmeasured (`bench/mutations/README.md`). 10/10 killed.
+- **An unanswered suspend signal is re-sent, and a per-thread stop epoch is
+  what makes that safe.** `stop_world` spun `until thread.@suspended.get`
+  forever when a mutator never acknowledged: six of forty runs of the aarch64
+  native job ended at the 20-minute job timeout there, and a job timeout
+  reports as *cancelled* rather than failed, so none of them read as a defect
+  until the watchdog named `phase=suspend`. Re-sending is the repair
+  `start_world` already makes for resume, and it had been refused twice
+  because `SIG_SUSPEND` is blocked for the whole handler and inside
+  `sigsuspend` — a redundant one stays pending and lands *after* the thread
+  resumes, suspending it again with nobody left to wake it.
+  `Gcry::Platform`'s stop epoch closes that: 0 when no stop is in progress,
+  the stop's id while one is, stamped per thread in the `pthread_t`-keyed
+  slot table, so the handler serves each stop once and declines every
+  duplicate. The wait then resends every `GCRY_STW_RESEND_SPINS` (20 M spins,
+  ~a tenth of the stall report) up to `GCRY_STW_RESEND_LIMIT` (16), and past
+  the limit asks `pthread_kill(id, 0)`: on `ESRCH` — the handle names no live
+  thread, so nothing can mutate the heap through it — the stop prints
+  `SUSPEND ABANDONED` and proceeds instead of spinning out the job. Any other
+  answer keeps waiting, because skipping a live thread would stop a world
+  that is still running. `make stw-epoch` has six arms, three red on purpose:
+  no resend hangs on a dropped signal, `GCRY_STW_EPOCH=0` hangs on the
+  duplicate, and a thread that ignores every signal while its handle is live
+  hangs either way — the honest limit, since this repairs a lost delivery and
+  not a thread that cannot run its handler. `SUSPEND STALLED` now carries
+  resends unanswered, handler entries and declines split stale/redundant,
+  which is what tells those two apart in the next sighting.
+  `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
+- **Two threads could share one slot of the suspend-time SP and register
+  table**, so one thread's stack was scanned from another's stack pointer and
+  its registers were the other's registers — a missed root in the one table
+  the conservative scan trusts to be per-thread. Two causes, both latent since
+  the table existed, both found by the epoch turning a shared slot into a
+  hang: the claim's `Atomic#compare_and_set` result was never checked (it
+  returns `{old, success}`, a tuple, which is always truthy, so every thread
+  signalled in one stop claimed the same bit), and `clear_thread_sps` cleared
+  the claimed mask, the SPs and the register rows but left the `pthread_t`s —
+  and because a claim publishes its bit before writing its id, a peer could
+  match a slot another thread had just taken, on its own handle from the
+  previous stop. Observed as three threads in `rt_sigsuspend` and one spinning
+  on a first collection, and as `find_block_race --child alloc` hanging under
+  `GCRY_INDEX_AUDIT=1`; 0 of 3 after the fix, all four `find-block-race`
+  workloads green with both control arms still crashing. Whether either
+  explains an open CI sighting is not claimed.
 
 ## [0.25.0] - 2026-09-09
 
