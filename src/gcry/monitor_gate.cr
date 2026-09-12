@@ -38,6 +38,7 @@ module Gcry
     @@stw_wait_max_ns = 0_u64
     # Times the Monitor was held off at the gate.
     @@monitor_blocks = 0_u64
+    @@reg_spills = 0_u64
     @@site = Atomic(Int32).new(0)
 
     def self.enabled? : Bool
@@ -129,6 +130,25 @@ module Gcry
       t.join
     end
 
+    # The `setjmp` here is a **root**, and it is the only one the Monitor has
+    # for its registers.
+    #
+    # Every thread the stop suspends by signal gets its GP registers spilled
+    # into the `ucontext` and scanned (`Platform.each_thread_greg`), because a
+    # reference can live only in a register. The Monitor is deliberately
+    # never signalled — a resume race leaves it in `sigsuspend` forever — so
+    # it waits out the stop here instead, and this is the one thread whose
+    # registers nothing captured. A pointer live only in a Monitor register
+    # was invisible, which is what `GCRY_POISON_HOLDERS=1` reports on the
+    # thread-death reproducer: *"holders — none … the pointer is in a
+    # register, in thread-local storage, or in memory gcry never mapped"*.
+    #
+    # `spill_registers` + `capture_registers` is the pair the collector
+    # already uses on itself: the asm clobber forces live pointers out of
+    # registers and `setjmp` writes the callee-saved set into the buffer. The
+    # buffer is a **local**, so the Monitor's own stack scan — it is on
+    # Crystal's list and its pthread range is walked — picks them up, with no
+    # new table and no new ownership question.
     def self.enter(site : Int32 = SITE_OTHER) : Nil
       return unless @@enabled
       @@site.set(site)
@@ -140,10 +160,28 @@ module Gcry
         # would deadlock against a collector waiting for `busy` to clear.
         @@busy.set(0)
         @@monitor_blocks += 1
+        Roots.spill_registers
+        regs = uninitialized StaticArray(UInt8, Roots::REGISTER_BUFFER_SIZE)
+        Roots.capture_registers(regs.to_unsafe)
+        @@reg_spills &+= 1
         while @@stopped.get != 0
           Intrinsics.pause
         end
+        # Without a use after the spin the optimiser may drop the frame slot,
+        # and a root the compiler deleted is the defect this exists to close.
+        Roots.keep_alive(regs.to_unsafe.as(Void*))
       end
+    end
+
+    # Waits that spilled the Monitor's registers. The gate is that this is
+    # **non-zero** — 238 of 240 collections on a thread-churn workload — and
+    # not a survival A/B, for the same reason `make greg-roots` gives: whether
+    # a pointer lives only in a register is a codegen outcome no source-level
+    # test can compel. Stated plainly: this did **not** change the rate of the
+    # thread-churn reproducer (56 of 258 runs with it, 49 of 252 without), so
+    # it closes a hole rather than a known crash.
+    def self.reg_spills : UInt64
+      @@reg_spills
     end
 
     def self.leave : Nil

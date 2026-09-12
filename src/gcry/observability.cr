@@ -250,6 +250,7 @@ module Gcry
         thread_birth_reclaimed:                Gcry::ThreadBirthRoot.reclaimed,
         thread_birth_released_dead:            Gcry::ThreadBirthRoot.released_dead,
         thread_birth_deaths_unmatched:         Gcry::ThreadBirthRoot.deaths_unmatched,
+        monitor_reg_spills:                    Gcry::MonitorGate.reg_spills,
         stw_staged_waits:                      heap.stw_staged_waits,
         stw_staged_wait_timeouts:              heap.stw_staged_wait_timeouts,
         stw_suspend_resends:                   heap.stw_suspend_resends,
