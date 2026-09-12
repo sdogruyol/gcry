@@ -705,6 +705,22 @@ static-bss-roots: $(BIN)
 	$(BIN)/static_bss_roots
 	$(BIN)/static_bss_roots_huge
 
+# Is a pointer held only in thread-local storage a root? It was not, on the
+# main thread: `dl_iterate_phdr` gives the executable's writable `PT_LOAD`s -
+# every class variable - but a thread-local lives in a per-thread block that
+# is not in any of them, and for the main thread the loader puts that block
+# nowhere near the stack `pthread_getattr_np` reports. A spawned thread's sits
+# at the top of its own stack mapping and was always covered, which is why
+# this went unseen. Three arms: the shipped default must keep the block, the
+# red arm (`GCRY_TLS_ROOTS=0`, the pre-fix range) must lose it, and a control
+# that holds the pointer nowhere must lose it either way - without that last
+# one a conservative hit on a stale stack slot would pass the first two.
+tls-roots: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/tls_roots.cr -o $(BIN)/tls_roots --error-trace
+	$(BIN)/tls_roots
+	! GCRY_TLS_ROOTS=0 $(BIN)/tls_roots
+	$(BIN)/tls_roots --control
+
 # Do the executable's `.data` and BSS stay root ranges after the binary is
 # replaced on disk? A redeploy renames every maps line of the running image to
 # `… (deleted)`; a parser that matched the pathname against `/proc/self/exe`

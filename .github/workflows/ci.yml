@@ -454,6 +454,17 @@ jobs:
         run: |
           make static-bss-roots
 
+      # The root class nothing covered until 2026-09-12: a thread-local. The
+      # writable PT_LOADs above are every class variable, and PT_TLS is only
+      # the template — the live block is per thread. A spawned thread's sits
+      # at the top of its own stack mapping and was always scanned, so only
+      # the main thread's was lost, and a block held solely by a main-thread
+      # @[ThreadLocal] was collected. Three arms, one of them a control that
+      # holds the pointer nowhere: without it a stale stack slot passes.
+      - name: Thread-local storage roots
+        run: |
+          make tls-roots
+
       # Static roots come from the executable's ELF program headers, read once
       # at GC.init — not from /proc/self/maps, where a redeploy renames every
       # line of the running image to "(deleted)" and a pathname-matching

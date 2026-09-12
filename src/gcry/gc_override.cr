@@ -891,6 +891,14 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
+    # The main thread's thread-local storage is a root (2026-09-12). Off is
+    # the pre-fix behaviour, which `make tls-roots` needs as its red arm.
+    # Linux only: locating the block means finding the mapping that contains
+    # it, and that is `/proc/self/maps`. Whether the same reference is lost on
+    # Darwin and Windows is unmeasured — see `ROADMAP.md`.
+    {% if flag?(:linux) %}
+      Gcry::Platform.tls_roots = false if env_flag_zero?("GCRY_TLS_ROOTS")
+    {% end %}
     # Resolve the static roots now, on the main thread and before any other
     # thread exists: Linux reads the executable's program headers, which takes
     # the loader's lock, and Darwin walks dyld's image 0 and `realloc`s the

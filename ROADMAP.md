@@ -44,6 +44,43 @@ counter was wired to a gate and the gate was broken on purpose. The largest open
 item fits that shape too, so 0.20.0 spends its budget on root coverage and on the
 CI asymmetry that hid both.
 
+- [x] **Thread-local storage was not a root, on the main thread — fixed
+      2026-09-12.** A block whose only reference was a main-thread
+      `@[ThreadLocal]` was **collected**. `dl_iterate_phdr` gives the
+      executable's writable `PT_LOAD` segments, so every class variable is a
+      root; a thread-local is in none of them — `PT_TLS` is only the template
+      and the live block is per thread. What hid it is that the placement is
+      not uniform: glibc puts a *spawned* thread's block at the top of that
+      thread's own stack mapping, inside the bounds `pthread_getattr_np`
+      reports and above the suspend SP, so the ordinary stack scan covered
+      every thread gcry or Crystal spawns. The **main** thread's block is
+      allocated with the shared libraries, nowhere near its stack — measured,
+      tls `0x7f9db13e0770` against a stack of
+      `[0x7ffc1e8e9000, 0x7ffc1f0e6000)` — and nothing scanned it.
+      This is the third branch of the sentence `GCRY_POISON_HOLDERS=1` prints
+      on every use-after-free this heap produces ("in a register, in
+      thread-local storage, or in memory gcry never mapped"), and the only one
+      that had never been tested. Registers were closed on the same day.
+      Fixed by adding the block to the static root ranges at `GC.init`, on the
+      main thread — the only context that can take the address of its own
+      thread-local. **Sized from the executable's own `PT_TLS` `p_memsz`: 128
+      bytes, not the 824 KiB mapping that contains it.** The first version
+      took the mapping and that is ~100k words of conservative scan per
+      collection, retaining whatever they look like. `make tls-roots`, three
+      arms: shipped keeps the block, `GCRY_TLS_ROOTS=0` loses it, and a
+      control holding the pointer nowhere loses it either way — without the
+      control a stale stack slot passes the first two.
+      `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
+
+- [ ] **The same question on Darwin and Windows is unmeasured.** The fix above
+      is Linux-only because locating the block means finding the mapping that
+      contains it, and that is `/proc/self/maps`. Darwin allocates thread
+      locals lazily through `_tlv_bootstrap` into memory that is in no
+      `__DATA` section the dyld walk takes; Windows copies `.tls` per thread
+      through the TEB. Both plausibly lose the same reference and neither has
+      a host here. What is needed is `bench/tls_roots.cr` run on each — it is
+      already platform-independent apart from the stack-bounds line it prints.
+
 - [x] **A use-after-free in fiber creation — closed in v0.20.0.** The root it
       needed is the stack of a fiber that is *ending*: `Thread#dying_fiber`
       parks it, the owning `Fiber` is already out of the fiber list, and the
@@ -1248,6 +1285,17 @@ CI asymmetry that hid both.
       correctly made); and holding `pthread_create` for that section, which
       is the only place the window can be closed from (35/48, and it
       deadlocks).
+      **A fourth, also withdrawn with numbers (2026-09-12).** The remaining
+      unscanned place a reference could live was thread-local storage — the
+      third branch of the holders sentence, never tested. It turned out to be
+      a real defect (the main thread's TLS was not a root, fixed, see below)
+      and **not this one**: `GCRY_TLS_ROOTS` moves the committed harness's
+      poisoned arm 15 of 18 against 14 of 18, i.e. not at all. A first
+      version that took the whole 824 KiB containing mapping did appear to
+      halve the rate, and that was conservative retention of an extra 100k
+      words rather than a root being found — worth stating, because shipping
+      it would have read as a fix.
+      `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**

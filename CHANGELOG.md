@@ -66,6 +66,37 @@ is now the default and the flag would take you the wrong way.
 
 ### Fixed
 
+- **A pointer held only in the main thread's thread-local storage was
+  collected.** `dl_iterate_phdr` gives the executable's writable `PT_LOAD`
+  segments, which is every class variable, but a `@[ThreadLocal]` is in none
+  of them: `PT_TLS` is only the template and the live block is allocated per
+  thread. glibc puts a *spawned* thread's block at the top of that thread's
+  own stack mapping — inside the bounds `pthread_getattr_np` reports and above
+  the suspend SP — so the ordinary stack scan has always covered every thread
+  gcry or a Crystal program spawns, which is why this went unseen. The main
+  thread's block is allocated with the shared libraries, nowhere near its
+  stack, and nothing scanned it. It is now a root range, resolved at `GC.init`
+  on the main thread and sized from the executable's own `PT_TLS` `p_memsz` —
+  128 bytes on the harness, against the 824 KiB containing mapping a first
+  version took. `GCRY_TLS_ROOTS=0` restores the old behaviour as the red arm
+  of `make tls-roots`. Linux only; Darwin and Windows are unmeasured and named
+  on `ROADMAP.md`. This is the third branch of what `GCRY_POISON_HOLDERS=1`
+  reports on a use-after-free and the only one that had not been tested; it is
+  **not** the open live-large-object release, whose rate it does not move.
+  `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
+
+- **`make static-bss-roots` was green for a reason it does not test.** Its
+  victim block was filled with `0xC7`, so its first `Int32` reads negative —
+  and `type_id_plausible?` refuses a *static* root whose first word is not a
+  dense positive integer. The BSS root the gate exists to prove was therefore
+  rejected by the root filter on every run, and the block survived on an
+  ungated conservative copy instead: a callee-saved register holding the
+  address across `wipe_stack`. Adding one more static root range was enough to
+  change the register pressure and turn the gate red, which is how this was
+  found. The block now carries a real instance id in its first word and `FILL`
+  from the fifth byte on, so the accepted root is the BSS slot; the `--cap`
+  arm still goes red.
+
 - `ci/windows.ps1` gives each `crystal spec` invocation its own
   `CRYSTAL_CACHE_DIR`. Two invocations per job shared
   `<cache>/crystal-run-spec.tmp.exe`, and on the ARM64 runner the compiler's
@@ -236,6 +267,17 @@ is now the default and the flag would take you the wrong way.
   this; whether it should become the default waits on measuring the pause
   cost of dropping it. Three fixes were attempted and withdrawn with their
   numbers recorded so they are not re-spent.
+
+### Added
+
+- The unmap-guard release record answers **how many blocks the chunk still had
+  allocated** when it was released, printed by `GCRY_SEGV_REPORT=1` as
+  `Blocks still allocated at release: N`. Read from the occupancy bitmap
+  before the `mprotect`, for the same reason the first user word is: afterwards
+  the pages are `PROT_NONE`. It splits a released-chunk fault in two — an
+  accounting bug in the release decision, or a stale pointer into a block that
+  really was free — and on the open live-large-object release it reads **0**,
+  which is what retired the missing-root reading of that defect.
 
 ## [0.25.0] - 2026-09-09
 
