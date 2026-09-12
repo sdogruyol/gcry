@@ -1296,6 +1296,30 @@ CI asymmetry that hid both.
       words rather than a root being found — worth stating, because shipping
       it would have read as a fix.
       `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
+      **A fifth, and it was the obvious one (2026-09-12).** The sweep's
+      occupancy publish is a whole-word `occ[i] = mark[i]` — a
+      read-modify-write of a word the allocator writes with a lock-free atomic
+      OR, so between reading `mark[i]` and storing it a mutator's freshly
+      published block should be erased, which is one live block per race and a
+      chunk that then reads empty enough to release. It is not happening.
+      `GCRY_SWEEP_OCC_AUDIT=1` asks, per dead word, whether a cursor slot is
+      mid-allocation inside a block the pass just called dead: **0** over
+      283 259 words published with mutators live and 482 380 kept blocks
+      checked, and **0** over the 183 360 words per run of this item's own
+      reproducer — on the runs that faulted. Three things close the window and
+      none is local to the loop: cursor sets are settled inside the stop
+      (pinned if frozen mid-allocation, else retired and forced back through
+      the class lock), allocate-black marks every block handed out while
+      `@collecting`, and `@collecting` stays true through the whole post-STW
+      section. An atomic publish plus a mark-before-occupancy reordering was
+      written, measured against a knob that held each dead word open for
+      200 µs, found to fix nothing measurable, and reverted. The store's own
+      comment argued only that a *per-bit* clear would be worse, which is a
+      different claim, and has been corrected to the real one.
+      **`sweep_cursor_pinned` reads 240 per reproducer run**, so much of that
+      section's work is skipped rather than done; what a skipped chunk's
+      `live_objects` accounting does is the next thing to read.
+      `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**

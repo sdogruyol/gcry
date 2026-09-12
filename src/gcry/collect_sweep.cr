@@ -994,6 +994,8 @@ module Gcry
 
       freed, live = if @poison_freed
                       sweep_words_poisoning(chunk, class_index, occ, mark, words, payload)
+                    elsif @sweep_occ_audit && !@world_stopped
+                      sweep_words_audited(chunk, occ, mark, words)
                     else
                       @kernels.sweep_words(occ, mark, words)
                     end
@@ -1067,6 +1069,66 @@ module Gcry
         (nblocks - live) * payload)
     end
 
+    # `Kernels.sweep_words`, word at a time, with one question asked per dead
+    # word: is a mutator mid-allocation inside a block this pass just called
+    # dead? The arithmetic and the store are the kernel's, so turning this on
+    # changes what is *observed* and not what is done.
+    #
+    # `in_flight` is a cursor slot's own answer to "which block am I handing
+    # out right now": set before the occupancy store and cleared once the
+    # block is built, on both allocation paths. A dead bit it points into is a
+    # block that is occupied, live, unmarked and about to be returned to a
+    # caller — the state allocate-black exists to prevent, and the one a
+    # reader of the publish above will suspect first.
+    #
+    # Research only. It walks up to `MAX_CURSOR_SETS` × `POOL_SLOTS` slots per
+    # dead word, so `GCRY_SWEEP_OCC_AUDIT=1` has to ask for it.
+    private def sweep_words_audited(chunk : ChunkHeader*, occ : UInt64*, mark : UInt64*,
+                                    words : Int32) : {UInt64, UInt64}
+      freed = 0_u64
+      live = 0_u64
+      @sweep_occ_audit_words &+= words.to_u64
+      i = 0
+      while i < words
+        o = occ[i]
+        m = mark[i]
+        dead = o & ~m
+        freed &+= dead.popcount.to_u64
+        live &+= m.popcount.to_u64
+        audit_dead_in_flight(chunk, i, dead) if dead != 0
+        occ[i] = m
+        mark[i] = 0_u64
+        i += 1
+      end
+      {freed, live}
+    end
+
+    private def audit_dead_in_flight(chunk : ChunkHeader*, word : Int32, dead : UInt64) : Nil
+      class_index = chunk.value.size_class.to_i32
+      return unless class_index >= 0 && class_index < SIZE_CLASS_COUNT
+      data_start = ChunkHeader.data_start(chunk).address
+      block_bytes = @block_bytes[class_index]
+      return if block_bytes == 0
+      each_cursor_set do |set|
+        next if set.null?
+        j = 0
+        while j < POOL_SLOTS
+          s = CursorSet.slot(set, j)
+          j += 1
+          u = s.value.in_flight
+          next if u.null? || u == CursorSet.sentinel
+          addr = u.address &- BlockHeader::SIZE
+          next if addr < data_start
+          ordinal = (addr &- data_start) // block_bytes
+          next unless (ordinal >> 6) == word.to_u64
+          next if (dead & (1_u64 << (ordinal & 63))) == 0
+          # Same chunk, same word, same block: in flight, and this pass is
+          # about to reclaim it.
+          @sweep_occ_in_flight &+= 1
+        end
+      end
+    end
+
     # `Kernels.sweep_words` with the poison pattern written into every block it
     # reclaims — identical arithmetic, word at a time.
     #
@@ -1079,6 +1141,35 @@ module Gcry
     #
     # The whole-word store is kept, and it is not incidental: a per-bit clear
     # would race a mutator setting a different bit in the same word.
+    #
+    # That sentence says why a per-bit clear is wrong; it does not say why the
+    # store is *right*, and read alone it invites the opposite conclusion.
+    # `occ[i] = mark[i]` is a read-modify-write of a word the allocator writes
+    # with an atomic OR from a mutator holding no lock — so it looks like it
+    # must erase occupancy published since `mark[i]` was read, which is one
+    # live block per race and a chunk that then reads empty enough to release.
+    #
+    # It does not, and the argument is three parts, none of which is local to
+    # this loop:
+    #
+    #   * Cursor sets are settled inside the stop (`bitmap_settle_cursor_sets`).
+    #     One frozen mid-allocation keeps its chunks PINNED and this walk skips
+    #     them; an idle one is retired, and its owner must come back through
+    #     `bitmap_alloc_locked` — the class lock this walk also takes.
+    #   * Allocate-black. A block handed out while `@collecting` — which stays
+    #     true through the whole post-STW section, sweep included — carries
+    #     `mark=1`, so it is not in `occ & ~mark` and the store preserves it.
+    #   * A bit in `mark` but not in `occ` cannot exist: marking follows
+    #     occupancy on both allocation paths.
+    #
+    # Measured rather than argued, 2026-09-12: `GCRY_SWEEP_OCC_AUDIT=1` asks,
+    # per dead word, whether any cursor slot is mid-allocation inside a block
+    # this pass just called dead. Zero, over 71 325 words published with
+    # mutators live and twelve threads born per round
+    # (`bench/sweep_occ_race.cr`), and zero across the 240 after-world sweeps
+    # per run of `make thread-churn-uaf`'s poisoned arm while that harness's
+    # use-after-free still fired. So the open live-large-object release is not
+    # this. `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
     private def sweep_words_poisoning(chunk : ChunkHeader*, class_index : Int32,
                                       occ : UInt64*, mark : UInt64*, words : Int32,
                                       payload : UInt64) : {UInt64, UInt64}
@@ -1093,6 +1184,10 @@ module Gcry
       # cleanliness per chunk"), so the invariant is stated here rather than
       # inherited from another file.
       @freelist_clean[class_index] = false
+      # Same publish, so the same question, counted through the same pair: a
+      # run whose sweeps all went through this arm must not read as one where
+      # the audit never ran.
+      @sweep_occ_audit_words &+= words.to_u64 if @sweep_occ_audit
       data_start = ChunkHeader.data_start(chunk).address
       block_bytes = @block_bytes[class_index]
       pay = payload.to_u32!
@@ -1103,6 +1198,7 @@ module Gcry
         dead = o & ~m
         freed &+= dead.popcount.to_u64
         live &+= m.popcount.to_u64
+        audit_dead_in_flight(chunk, i, dead) if @sweep_occ_audit && dead != 0
         occ[i] = m
         mark[i] = 0_u64
         while dead != 0

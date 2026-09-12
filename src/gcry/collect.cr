@@ -252,6 +252,17 @@ module Gcry
     # moves: a `pinned` that grows while this stays zero is a chunk nobody will
     # ever release, which is what it meant until 2026-09-04.
     getter sweep_cursor_retired : UInt64 = 0_u64
+    # `GCRY_SWEEP_OCC_AUDIT=1`. Blocks a cursor slot was mid-allocation inside
+    # when the after-world sweep called them dead — occupied, live, unmarked,
+    # one step short of being handed to a caller. The publish this asks about
+    # is `occ[i] = mark[i]`, whose safety is an argument made in three other
+    # files (see the long note on `sweep_words_poisoning`); this is the number
+    # that checks it. Non-zero is a live block being reclaimed.
+    getter sweep_occ_in_flight : UInt64 = 0_u64
+    # Words the audited pass covered. Zero means the question was never asked,
+    # which is the first thing to rule out when the counter above is silent.
+    getter sweep_occ_audit_words : UInt64 = 0_u64
+    property sweep_occ_audit : Bool = false
     # Large blocks offered to the cache while already on a freelist, and blocks
     # taken off a freelist that were not FREE. Either one is the same memory
     # reaching two owners.

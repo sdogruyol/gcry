@@ -270,6 +270,20 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
+- `GCRY_SWEEP_OCC_AUDIT=1` (research): per dead word of the after-world
+  sweep, ask every cursor set whether it is mid-allocation inside a block that
+  pass just called dead — occupied, live, unmarked and about to be handed to a
+  caller. It checks the whole-word `occ[i] = mark[i]` publish, which reads like
+  a race against the allocator's lock-free atomic OR and is not one; the store
+  comment said only that a *per-bit* clear would be worse, and now states the
+  argument that actually holds. Measured 0 over 283 259 words published with
+  mutators live, and 0 over the 183 360 per run of the churn reproducer while
+  its use-after-free still fired, which is how the open live-large-object
+  release lost this hypothesis. An atomic publish plus a mark-before-occupancy
+  reordering was written, measured and reverted for fixing nothing.
+  `bench/sweep_occ_race.cr`,
+  `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
+
 - The unmap-guard release record answers **how many blocks the chunk still had
   allocated** when it was released, printed by `GCRY_SEGV_REPORT=1` as
   `Blocks still allocated at release: N`. Read from the occupancy bitmap

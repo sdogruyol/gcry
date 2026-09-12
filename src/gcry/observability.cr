@@ -292,6 +292,8 @@ module Gcry
         clear_stack_libc_bounds:               heap.clear_stack_libc_bounds,
         sweep_cursor_pinned:                   heap.sweep_cursor_pinned,
         sweep_cursor_retired:                  heap.sweep_cursor_retired,
+        sweep_occ_in_flight:                   heap.sweep_occ_in_flight,
+        sweep_occ_audit_words:                 heap.sweep_occ_audit_words,
         fiber_scrub_bytes:                     heap.fiber_scrub_bytes,
         fiber_scrub_runs:                      heap.fiber_scrub_runs,
         fiber_scrub_bytes_total:               heap.fiber_scrub_bytes_total,

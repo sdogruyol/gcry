@@ -891,6 +891,9 @@ module GC
     # what the maps parser did before 2026-08-22 and what
     # `make static-bss-roots` uses to show the block dying.
     Gcry::Platform.bss_size_cap = true if env_flag_one?("GCRY_STATIC_BSS_CAP")
+    # Research only: per dead word, ask every cursor set whether it is
+    # mid-allocation inside a block the after-world sweep just called dead.
+    heap.sweep_occ_audit = true if env_flag_one?("GCRY_SWEEP_OCC_AUDIT")
     # The main thread's thread-local storage is a root (2026-09-12). Off is
     # the pre-fix behaviour, which `make tls-roots` needs as its red arm.
     # Linux only: locating the block means finding the mapping that contains
