@@ -33,6 +33,7 @@ module Gcry
     PT_TLS       =          7_u32
     PT_GNU_RELRO = 0x6474e552_u32
     PF_W         =          2_u32
+    PF_X         =          1_u32
     PAGE_MASK    = ~4095_u64
 
     # An executable has a handful of `PT_LOAD`s; 32 is well past any linker.
@@ -163,6 +164,23 @@ module Gcry
     # The executable's `PT_TLS` geometry, read in the same walk that takes its
     # writable `PT_LOAD`s.
     @@tls_memsz = 0_u64
+    # The executable's load bias and executable segment, for the crash
+    # report's writer-frame walk. Zero until `GC.init` resolves the statics.
+    @@exe_bias = 0_u64
+    @@text_lo = 0_u64
+    @@text_hi = 0_u64
+
+    def self.exe_bias : UInt64
+      @@exe_bias
+    end
+
+    # Is *addr* a plausible return address, i.e. inside the executable's own
+    # text? A frame walk that prints every word it finds is noise; one that
+    # prints only these is a call chain.
+    def self.exe_text?(addr : UInt64) : Bool
+      @@text_hi > @@text_lo && addr >= @@text_lo && addr < @@text_hi
+    end
+
     @@tls_align = 0_u64
 
     def self.tls_roots=(value : Bool) : Bool
@@ -287,6 +305,12 @@ module Gcry
       base = info.value.addr.to_u64
       phdr = info.value.phdr
       n = info.value.phnum.to_i32
+      # The load bias and the executable segment, for the crash report. A
+      # faulting PC is only actionable as `exe + offset`: on a PIE the runtime
+      # address differs every run, and `addr2line` wants the link-time one.
+      # Taken here because this is the walk that already identifies *which*
+      # object is the executable, and it runs once at `GC.init`.
+      @@exe_bias = base
       i = 0
       while i < n
         ph = (phdr + i).value
@@ -300,6 +324,11 @@ module Gcry
         elsif ph.type == PT_GNU_RELRO
           @@relro_lo = lo & PAGE_MASK
           @@relro_hi = hi & PAGE_MASK
+        elsif ph.type == PT_LOAD && (ph.flags & PF_X) != 0 && hi > lo
+          # Executable and not writable: the text the crash report validates
+          # return addresses against.
+          @@text_lo = lo
+          @@text_hi = hi
         elsif ph.type == PT_LOAD && (ph.flags & PF_W) != 0 && hi > lo
           # `GCRY_STATIC_BSS_CAP=1`: refuse the segment above 1 MiB, as the
           # maps parser did before 2026-08-22, so `make static-bss-roots` can

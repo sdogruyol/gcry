@@ -440,6 +440,18 @@ module Gcry
     # comment on that block already records as insufficient (Kemal EC4 SEGV
     # @ …0008). Zero and "compiled out" are indistinguishable without this.
     getter ec_root_pins : UInt64 = 0_u64
+    # Pin sites whose receiver was not there: `pointerof(obj.@ivar)` of a nil
+    # `obj` whose first ivar sits at offset zero, which is a read of address 0
+    # and crashed the collector until 2026-09-12. The line is the first one
+    # seen, and it is the actionable half — a pin site that cannot see its
+    # object is a root this walk is not covering.
+    getter ec_root_null_slots : UInt64 = 0_u64
+    # Pin sites whose computed slot address was this heap's freed-block poison:
+    # the object was read out of memory already reclaimed. Non-zero is a live
+    # EC structure having been freed, which is open — the collector refuses the
+    # dereference instead of faulting on it.
+    getter ec_root_poisoned_slots : UInt64 = 0_u64
+    getter ec_root_bad_slot_line : Int32 = 0
     # Pointer-bearing ivars of the Parallel EC structures that the pin block
     # could *not* cover. Wide ones it can — a Proc, a Tuple,
     # `(Fiber::ExecutionContext | Nil)` get every word of the slot marked — so

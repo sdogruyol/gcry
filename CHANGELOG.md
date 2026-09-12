@@ -270,6 +270,30 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
+- **The crash report names the frame that faulted.** A signal-safe walk from
+  the faulting `ucontext`: the PC as `exe+offset` against the load bias
+  captured at `GC.init`, `sp`/`fp`/`cr2`, the frame-record chain, and — since
+  builds without `--release` omit the frame pointer — the words above `sp`
+  that land in this binary's text, with the `addr2line` command assembled.
+  Crystal's `CallStack` cannot be used here: it allocates its DWARF tables and
+  needs `Fiber.current`, and on this heap it produced
+  `Failed to raise an exception: END_OF_STACK` while its allocation *became*
+  the block the report was about. First run, it named a three-week-old fault:
+  the writer was the collector, in its own execution-context root pin.
+
+- **"SIGSEGV at 0x0" was a poison word, not a null.** `cr2` agreed with
+  `si_addr`, but the register held `0xdead7fb15cbe0848` — tagged poison, whose
+  top `0xDEAD` bits make the access non-canonical, which Linux reports as a
+  fault at address 0. So every such report on the churn reproducer was a
+  poison dereference. `mark_ref_slot` now refuses a slot address that is zero,
+  non-canonical or poison-tagged, counts it (`ec_root_poisoned_slots`,
+  `ec_root_null_slots`) and names the pin site and the freed block instead of
+  faulting on it: a collector must not dereference an address it did not
+  validate, and there is no object at a poisoned one to mark. What puts poison
+  there — a live EC-family object being freed — is open, and the counter is
+  how often it happens.
+  `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+
 - `GCRY_RELEASE_HOLDERS=1` (research): run the holders search at every large
   release rather than at a fault, printing only when something points into the
   block being released. The fault-time search answers about a release that

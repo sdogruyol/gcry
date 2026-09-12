@@ -61,6 +61,27 @@ module Gcry
     # Back-compat alias used by specs / samples.
     UCONTEXT_RSP_OFFSET = UCONTEXT_SP_OFFSET
 
+    # Program counter and frame pointer in the same ucontext, for the crash
+    # report's writer-frame walk (`SegvReport`). Derived from the layout above
+    # rather than from a second source: x86_64 `gregs` is indexed by the
+    # `REG_*` enum, so RBP is `[10]` and RIP is `[16]`, i.e. 40 + 80 and
+    # 40 + 128. aarch64's `sigcontext` is
+    # `{fault_address, regs[31], sp, pc, pstate}` from 176, so x29 (fp) is
+    # `regs[29]` at 184 + 232, and pc follows sp: 432 + 8.
+    {% if flag?(:x86_64) %}
+      UCONTEXT_PC_OFFSET = 168
+      UCONTEXT_FP_OFFSET = 120
+    {% elsif flag?(:aarch64) %}
+      UCONTEXT_PC_OFFSET = 440
+      UCONTEXT_FP_OFFSET = 416
+      # x30, the return address of the faulting frame when it made no frame
+      # record of its own — a leaf store faulting is exactly that case.
+      UCONTEXT_LR_OFFSET = 424
+    {% else %}
+      UCONTEXT_PC_OFFSET = 0
+      UCONTEXT_FP_OFFSET = 0
+    {% end %}
+
     MAX_STW_SP_SLOTS = 64
     MAX_STW_GREGS    = 32
 

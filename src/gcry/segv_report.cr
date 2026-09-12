@@ -59,6 +59,16 @@ module Gcry
       (fault - in_flight) < OUT_OF_SPAN_FIELD_MAX ? OutOfSpan::DescriptorField : OutOfSpan::QueryFar
     end
 
+    # Frame-walk bounds. 64 frames is more than any Crystal call chain worth
+    # printing, and 1 MiB above the faulting SP is more than any live frame
+    # can be: past either, the chain being followed is not a chain.
+    FRAME_WALK_MAX  = 64
+    FRAME_WALK_SPAN = 1_u64 << 20
+    # The conservative fallback's window and cap. 4 KiB above the faulting sp
+    # covers the frames that matter; 24 addresses is a readable chain.
+    SP_SCAN_SPAN = 4096_u64
+    SP_SCAN_MAX  =       24
+
     def self.request : Nil
       @@requested = true
     end
@@ -95,6 +105,9 @@ module Gcry
       unless @@reported
         @@reported = true
         report(sig, info.null? ? Pointer(Void).null : info.value.si_addr, ctx)
+        # After the description of the address, and outside `report`: that has
+        # several early returns and the writer is worth having on every one.
+        report_writer_frames(ctx)
       end
       if sig == LibC::SIGBUS
         LibC.sigaction(LibC::SIGBUS, pointerof(@@old_bus), Pointer(LibC::Sigaction).null)
@@ -274,6 +287,150 @@ module Gcry
       # goes one step further and asks *who still points at it* — the root set,
       # the live heap, the fiber stacks. See src/gcry/poison_holders.cr.
       PoisonHolders.search(heap, src, info[:size].to_u64) if PoisonHolders.requested?
+    end
+
+    # The frame that produced the address, and the call chain above it.
+    #
+    # Every sighting of the open live-large-object release has named *what* was
+    # written and never *who* wrote it, because the only backtrace available
+    # was Crystal's: `Exception::CallStack` allocates its DWARF tables — on a
+    # fat binary, hundreds of kilobytes — and needs `Fiber.current`, neither of
+    # which exists in a signal handler on a heap that is already broken.
+    # Measured, it produced `Failed to raise an exception: END_OF_STACK` and
+    # `Thread#current_fiber cannot be nil`, and its allocation *changed the
+    # crash*: the DWARF buffer became the released block, which cost two
+    # rounds of misattribution
+    # (`bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`).
+    #
+    # So this walks the frame records itself, from the faulting context, with
+    # no allocation and no locks. The frame record is the same shape on both
+    # architectures gcry supports — `[fp]` is the caller's fp and `[fp + 8]`
+    # its return address, x86_64 by the SysV prologue and aarch64 by AAPCS —
+    # so one loop covers both.
+    #
+    # Addresses are printed as `exe+offset` against the load bias, which is
+    # the only form that survives a PIE: the runtime address differs every
+    # run, and `addr2line -e <binary> <offset>` wants the link-time one. The
+    # report ends with that command already assembled.
+    private def self.report_writer_frames(ctx : Void*) : Nil
+      {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+        return if ctx.null?
+        pc = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_PC_OFFSET).value
+        sp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_SP_OFFSET).value
+        fp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_FP_OFFSET).value
+        bias = Platform.exe_bias
+        return if pc == 0
+
+        buf = uninitialized UInt8[1024]
+        len = 0
+        len = RawOut.append(buf.to_unsafe, len, "gcry: writer — the faulting instruction is at 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, pc)
+        if bias != 0 && Platform.exe_text?(pc)
+          len = RawOut.append(buf.to_unsafe, len, " = exe+0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, pc &- bias)
+        else
+          len = RawOut.append(buf.to_unsafe, len, ", outside the executable's own text — a libc or kernel frame")
+        end
+        len = RawOut.append(buf.to_unsafe, len, ". sp 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, sp)
+        len = RawOut.append(buf.to_unsafe, len, " fp 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, fp)
+        {% if flag?(:x86_64) %}
+          # `gregs[REG_CR2]`, the hardware faulting address. Printed beside
+          # `si_addr` and not instead of it: the two disagreeing is itself the
+          # answer, and they did — a fault inside the collector reported
+          # `si_addr == 0` while CR2 named the address the instruction actually
+          # touched.
+          len = RawOut.append(buf.to_unsafe, len, " cr2 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len,
+            Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_GREGS_OFFSET &+ 22 * 8).value)
+        {% end %}
+        len = RawOut.append(buf.to_unsafe, len, "\n")
+        RawOut.flush(buf.to_unsafe, len)
+
+        # `addr2line` takes the offsets, so they go on one line in the order it
+        # wants them. The faulting pc first: it is the frame that did the write.
+        len = 0
+        len = RawOut.append(buf.to_unsafe, len, "gcry: writer — addr2line -f -C -e <binary>")
+        emitted = 0
+        if bias != 0 && Platform.exe_text?(pc)
+          len = RawOut.append(buf.to_unsafe, len, " 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, pc &- bias)
+          emitted += 1
+        end
+        {% if flag?(:aarch64) %}
+          # A leaf store faulting has made no frame record, so its caller is
+          # only in x30. On x86_64 the return address is on the stack and the
+          # walk below finds it.
+          lr = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_LR_OFFSET).value
+          if bias != 0 && Platform.exe_text?(lr)
+            len = RawOut.append(buf.to_unsafe, len, " 0x")
+            len = RawOut.append_hex(buf.to_unsafe, len, lr &- bias)
+            emitted += 1
+          end
+        {% end %}
+
+        # Bounded on every axis a broken frame chain can run away on: a frame
+        # count, a monotonic fp, and a window above the faulting sp. A corrupt
+        # `[fp]` that points back down or far away ends the walk rather than
+        # looping on it.
+        frames = 0
+        limit = sp &+ FRAME_WALK_SPAN
+        while frames < FRAME_WALK_MAX && fp >= sp && fp < limit && (fp & 7) == 0
+          break unless Roots.page_readable?(fp & ~(Roots::PAGE_SIZE &- 1))
+          ret = Pointer(UInt64).new(fp &+ 8).value
+          nxt = Pointer(UInt64).new(fp).value
+          if bias != 0 && Platform.exe_text?(ret) && len < 900
+            len = RawOut.append(buf.to_unsafe, len, " 0x")
+            len = RawOut.append_hex(buf.to_unsafe, len, ret &- bias)
+            emitted += 1
+          end
+          break unless nxt > fp
+          fp = nxt
+          frames += 1
+        end
+
+        len = RawOut.append(buf.to_unsafe, len, "\n")
+        RawOut.flush(buf.to_unsafe, len)
+
+        # The frame chain is a bonus, not the mechanism. Crystal builds without
+        # `--release` keep locals `%rsp`-relative and omit the frame pointer for
+        # small functions, so `[fp]` is a caller's frame at best and garbage at
+        # worst — measured, the chain above emitted the faulting pc and nothing
+        # else on the very fault this exists for.
+        #
+        # What always works is what the collector already does to find roots:
+        # read the words above the stack pointer and keep the ones that land in
+        # this binary's text. Those are the return addresses, mixed with
+        # whatever else looks like one. Noise is the right trade — a call chain
+        # with three extra entries names the writer, and an empty report does
+        # not.
+        len = 0
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: writer — return addresses above sp: addr2line -f -C -e <binary>")
+        seen = 0
+        cursor = sp & ~7_u64
+        stop = cursor &+ SP_SCAN_SPAN
+        while cursor < stop && seen < SP_SCAN_MAX && len < 940
+          break if (cursor & (Roots::PAGE_SIZE &- 1)) == 0 && !Roots.page_readable?(cursor)
+          w = Pointer(UInt64).new(cursor).value
+          if bias != 0 && Platform.exe_text?(w)
+            len = RawOut.append(buf.to_unsafe, len, " 0x")
+            len = RawOut.append_hex(buf.to_unsafe, len, w &- bias)
+            seen += 1
+          end
+          cursor &+= 8
+        end
+        if seen == 0 && emitted == 0
+          len = 0
+          len = RawOut.append(buf.to_unsafe, len,
+            "gcry: writer — nothing above the faulting sp is in this binary's text, so the " \
+            "write came from libc or from a stack this walk cannot see\n")
+        else
+          len = RawOut.append(buf.to_unsafe, len, "\n")
+        end
+        RawOut.flush(buf.to_unsafe, len)
+      {% end %}
     end
 
     private def self.report(sig : Int32, addr : Void*, ctx : Void*) : Nil

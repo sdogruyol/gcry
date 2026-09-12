@@ -18,11 +18,81 @@ module Gcry
     # visited and found empty, and a gate that could not tell that from a slot
     # the block never looked at would be the same blind spot this counter exists
     # to remove.
-    private def mark_ref_slot(slot_addr : UInt64) : Nil
+    # `line` is the caller's, filled in by the compiler. It is here because a
+    # null slot address crashed the collector and the report could not say
+    # which of the nine pin sites produced it: the faulting instruction is
+    # this one line, and every caller is inlined macro expansion attributed to
+    # its `{% if %}`.
+    private def mark_ref_slot(slot_addr : UInt64, line = __LINE__) : Nil
       @ec_root_pins += 1
+      # The slot address is computed as `pointerof(obj.@ivar)`, so it is only
+      # as good as `obj` — and `obj` comes out of Crystal's own EC structures,
+      # which is where this went wrong. Measured on `make thread-churn-uaf`'s
+      # poisoned arm: `slot_addr` arrived as **0xdead7fb15cbe0848**, a tagged
+      # freed-block poison word, so `obj` had been read out of memory the
+      # collector had already reclaimed. Dereferencing it faults, and because
+      # the address is non-canonical the kernel reports the fault at 0 — which
+      # is why the report said "SIGSEGV at 0x0 ... a use-after-free" and named
+      # neither the writer nor the slot for three weeks.
+      #
+      # A collector must not dereference an address it did not validate, and
+      # this one can be validated cheaply: a real slot is canonical and is
+      # somewhere gcry knows about. Refusing the rest turns a crash into a
+      # counted, attributed diagnostic, and loses no root — there is no object
+      # at a poisoned address to mark.
+      #
+      # It does **not** fix what put poison there. That is a live EC structure
+      # being freed, it is still open, and `ec_root_poisoned_slots` is how
+      # often it happens.
+      # `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+      if slot_addr == 0
+        note_ec_root_bad_slot(line, slot_addr)
+        return
+      end
+      if (slot_addr & POISON_TAG_MASK) == POISON_TAG || !canonical_address?(slot_addr)
+        note_ec_root_bad_slot(line, slot_addr)
+        return
+      end
       bits = Pointer(UInt64).new(slot_addr).value
       return if bits == 0
       mark_root_candidate(Pointer(Void).new(bits), source: RootSource::Thread)
+    end
+
+    # x86_64 and aarch64 both leave the top 16 bits of a user address clear.
+    # A word with anything up there is not an address, whatever else it is.
+    @[AlwaysInline]
+    private def canonical_address?(addr : UInt64) : Bool
+      (addr >> 47) == 0
+    end
+
+    private def note_ec_root_bad_slot(line : Int32, slot_addr : UInt64) : Nil
+      poisoned = (slot_addr & POISON_TAG_MASK) == POISON_TAG
+      if poisoned
+        @ec_root_poisoned_slots += 1
+      else
+        @ec_root_null_slots += 1
+      end
+      total = @ec_root_poisoned_slots + @ec_root_null_slots
+      return unless total == 1
+      @ec_root_bad_slot_line = line
+      buf = uninitialized UInt8[320]
+      len = RawOut.append(buf.to_unsafe, 0,
+        "gcry: an execution-context pin site cannot see its object — collect_scan.cr:")
+      len = RawOut.append_u64(buf.to_unsafe, len, line.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " computed slot address 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, slot_addr)
+      if poisoned
+        len = RawOut.append(buf.to_unsafe, len,
+          ", which is this heap's freed-block poison: the object it belongs to was read out of " \
+          "memory the collector had already reclaimed. Skipped rather than dereferenced. The " \
+          "freed block is 0x")
+        len = RawOut.append_hex(buf.to_unsafe, len, slot_addr & POISON_ADDR_MASK)
+        len = RawOut.append(buf.to_unsafe, len, "\n")
+      else
+        len = RawOut.append(buf.to_unsafe, len,
+          ", which is not an address. Skipped; nothing lives there to mark\n")
+      end
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # An EC structure pinned by name rather than reached by scanning something

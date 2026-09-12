@@ -1199,6 +1199,27 @@ CI asymmetry that hid both.
       root. Dead stack and non-gcry memory are what is left, and the next
       instrument is a backtrace of the *writer*, not of the reader.
       `bench/log/linux/2026-09-12-release-holders/FINDINGS.md`
+      **And the writer is now named (2026-09-12).** The report never said who
+      wrote, because the only backtrace available was Crystal's — which
+      allocates DWARF tables, needs `Fiber.current`, and whose allocation
+      *became* the block the report was about. A signal-safe walk from the
+      faulting `ucontext` replaced it, and on its first run named a
+      three-week-old fault: `mark_ref_slot` ← `scan_thread_roots` ←
+      `run_collection_body`. **The writer was the collector**, in its own
+      execution-context root pin. And "SIGSEGV at 0x0" was never an address:
+      the register held `0xdead7fb15cbe0848`, a tagged poison word whose top
+      bits make the access non-canonical, which Linux reports as a fault at 0.
+      `mark_ref_slot` now refuses such a slot address, counts it and names the
+      pin site (`collect_scan.cr:174`, the `Fiber::ExecutionContext` block) and
+      the freed block. The rate does not move — the guard stops gcry faulting
+      on the damage, and the damage is upstream — and the fault relocates to
+      Crystal's `Monitor#transfer_schedulers_blocked_on_syscall` reading the
+      same poison. So a live EC-family object is being freed, both the
+      collector and the Monitor read it, and the Monitor is the one thread the
+      stop never suspends: its registers are covered only when it parks in
+      `MonitorGate.enter` (238 of 240 collections) and its stack is scanned
+      with no recorded SP. That is the next thing to read.
+      `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
       Original sighting:
       2026-08-23 while cutting gcry vs Boehm on acikturkiye: the gcry binary
       dies under `wrk` in about one run in eight, in a request fiber writing
