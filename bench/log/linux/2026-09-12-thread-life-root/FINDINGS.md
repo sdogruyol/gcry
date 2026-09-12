@@ -154,10 +154,50 @@ unidentified.
 `thread-storm-short`, `spec` (277), `spec-process` (32), `lint` (150),
 `knob-doc-check` (173). The churn arm: 0 failures in 40 runs.
 
+## The obvious fix, attempted and withdrawn
+
+With the acknowledgement no longer needing a `Thread` object
+(`../2026-09-12-stw-ack-birth-window/`) and the birth root now naming every
+thread gcry has seen created and not seen end, the invisible set is
+computable: **armed handles minus Crystal's list**. Suspend those like any
+other thread, snapshot their bounds in the same pass, scan them from their
+recorded SP. It was built — collect, suspend, wait, scan, resume, behind
+`GCRY_SCAN_UNLISTED_THREADS` — and withdrawn. Two failure modes, both
+fatal, both about the same missing fact: **there is no safe way to ask
+whether a `pthread_t` still names a thread.**
+
+1. **Asking libc segfaults.** Guarding the handle with `pthread_kill(id, 0)`
+   before touching it — which is what the abandonment path already does —
+   crashes on the *first* collection, deterministically, 3 of 3. A slot can
+   outlive its thread by the grace collection, and probing such a handle
+   dereferences a freed `struct pthread`. That is the `+0x418` shape this
+   family has been chasing, reached from the other direction: the probe is
+   not a safe guard, it is an instance of the defect.
+2. **Not asking hangs.** Dropping the probe and trusting gcry's own death
+   marks (the `pthread_detach` / `pthread_join` hooks) removes the crash —
+   and a thread that dies between the mark being read and the signal being
+   sent never acknowledges, so the stop waits out its resends and then
+   reaches the same unsafe probe. One run in three hung.
+
+The set is also empty in the workload that crashes: `unlisted_seen=0` over
+120 collections, because at a stop every thread has either published or been
+marked dead. So the mechanism cost two fatal modes and covered nothing
+measurable.
+
+What is left, and what the next attempt should start from: the dying thread
+is the only party that can safely speak for its own handle. `GC.pthread_detach`
+already runs **on** it, where `pthread_self()` is valid by construction — it
+can publish its own bounds and SP and then park cooperatively, the way the
+Monitor does, instead of being signalled. That covers `detach` to exit
+without a single stale-handle question. It does not cover
+`Thread.threads.delete` to `detach`, which is where `Fiber.inactive` runs.
+
 ## Open
 
 The death window. It now has a reproducer that fires in seconds on one box,
 which is more than this family has had since 2026-08-16, and the victim is a
-16-byte block that no holder search accounts for. Naming it is the next step;
-covering the window — scanning a dying thread's stack, or keeping it visible
-until it exits — is the fix after that.
+16-byte block that no holder search accounts for and that is **not** the
+`Thread` (rooting every `Thread` for its whole life does not fix it).
+Naming it is the next step, and it should precede any further covering
+mechanism: two of the three attempts here were aimed at objects that turned
+out not to be the victim.

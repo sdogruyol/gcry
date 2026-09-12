@@ -976,6 +976,30 @@ CI asymmetry that hid both.
       `outstanding` 4, `overflows` 0, against 961 and 705 with the old policy
       restored (`GCRY_THREAD_BIRTH_DEATHS=0`).
       `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
+      **The obvious cover was built and withdrawn, and the reason is worth
+      more than the code was.** With the acknowledgement off `Thread` objects
+      and the birth root naming every thread gcry has seen created and not
+      seen end, the invisible set is computable — armed handles minus
+      Crystal's list — so suspend and scan them like anything else. Both
+      halves are unsafe for the same missing fact: **there is no safe way to
+      ask whether a `pthread_t` still names a thread.** Guarding with
+      `pthread_kill(id, 0)` segfaults on the first collection, 3 of 3,
+      because a slot can outlive its thread by the grace collection and the
+      probe then dereferences a freed `struct pthread` — the `+0x418` shape,
+      reached from the other direction, which also makes the abandonment
+      path's use of that probe worth revisiting. Trusting gcry's own death
+      marks instead removes the crash and hangs 1 run in 3, when a thread
+      dies between the mark being read and the signal being sent. The set
+      was also empty in the workload that crashes (`unlisted_seen=0` over
+      120 collections), so it cost two fatal modes and covered nothing.
+      Where a next attempt should start: the dying thread is the only party
+      that can speak for its own handle, and `GC.pthread_detach` already
+      runs **on** it — it can publish its own bounds and park cooperatively
+      the way the Monitor does, with no stale-handle question anywhere. That
+      covers `detach` to exit, not `Thread.threads.delete` to `detach`.
+      **Name the victim first.** It is 16 bytes and it is not the `Thread`;
+      two of the three attempts here were aimed at objects that turned out
+      not to be it.
       **And a shape to keep in view**: the stop now prints
       `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
       Crystal's list has a handle libc says names nothing. That is this
