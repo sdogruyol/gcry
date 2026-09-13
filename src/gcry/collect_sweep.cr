@@ -39,6 +39,26 @@ module Gcry
       warm_budget_used = 0_u64
       dormant_budget_used = 0_u64
 
+      # Read once, not at each of the three sites below.
+      #
+      # This decides whether the walk relinks `@chunks` at all, and it reads
+      # `multi_mutator_threads?` — a number a churning program changes *while
+      # the walk runs*. Reading it three times let one walk act on two answers.
+      # The latched count (`latch_sweep_mutator_count`) already makes the three
+      # agree; this makes them the same read, which is the property the code
+      # needs rather than a coincidence it relies on.
+      #
+      # Measured with `GCRY_CHUNK_LIST_AUDIT=1` on `make thread-churn-uaf`:
+      # chunks in `@chunk_index` and not on `@chunks` in 7 of 14 runs before,
+      # 0 of 14 after — and 0 of 14 with the latch off but this read single, so
+      # this is the half that closes the divergence.
+      #
+      # `GCRY_SWEEP_MUTATOR_LATCH=0` restores the pre-fix shape in both
+      # respects, the live count and the per-site read, so the control arm of
+      # that gate is the code this replaced and not half of it.
+      relink_once = @sweep_mutator_latch
+      relink = !after_world || relink_chunks_after_world?
+
       chunk = @chunks
       while chunk
         nxt = chunk.value.next
@@ -56,7 +76,7 @@ module Gcry
             @size_class_chunk_count += 1
             note_chunk_fill(0_u64, 1_u64)
           end
-          if !after_world || relink_chunks_after_world?
+          if relink_once ? relink : sweep_relink_now?(after_world)
             ChunkHeader.set_next(chunk, kept)
             kept = chunk
           end
@@ -282,7 +302,7 @@ module Gcry
         unless drop
           # Parallel lazy: leave `@chunks` alone (map_chunk may prepend).
           # EC1 lazy: rebuild like in-STW so munmap drops are unlinked.
-          if !after_world || relink_chunks_after_world?
+          if relink_once ? relink : sweep_relink_now?(after_world)
             ChunkHeader.set_next(chunk, kept)
             kept = chunk
           end
@@ -290,7 +310,7 @@ module Gcry
         chunk = nxt
       end
 
-      if !after_world || relink_chunks_after_world?
+      if relink_once ? relink : sweep_relink_now?(after_world)
         # Only on the `after_world` path, and the distinction is not a detail.
         #
         # The first version took the lock unconditionally, on the argument that
@@ -1067,6 +1087,11 @@ module Gcry
         live * payload,
         nblocks * payload,
         (nblocks - live) * payload)
+    end
+
+    # The pre-fix read: live, and per use. Only the control arm calls it.
+    private def sweep_relink_now?(after_world : Bool) : Bool
+      !after_world || relink_chunks_after_world?
     end
 
     # `Kernels.sweep_words`, word at a time, with one question asked per dead

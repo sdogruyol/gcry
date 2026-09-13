@@ -1220,27 +1220,30 @@ CI asymmetry that hid both.
       `MonitorGate.enter` (238 of 240 collections) and its stack is scanned
       with no recorded SP. That is the next thing to read.
       `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
-      **THE FIX (2026-09-13): latch the mutator count in the stopped
-      world.** The producer was a time-of-check/time-of-use split.
-      `sweep_after_world?` reads `multi_mutator_threads?` inside the stop,
-      where the decision it drives is taken; `relink_chunks_after_world?` and
-      `munmap_empty_chunks_this_collect?` read it **again** during the sweep,
-      after `start_world` — and this workload creates eight threads in that
-      window. So the stop saw a sole mutator (after-world sweep allowed, munmap
-      allowed) and the sweep saw multi (no rebuild), which is the one
-      combination the guards are written to exclude: a chunk dropped with its
-      `next` pointed into the unmap queue while still on `@chunks`, so the live
-      list diverts into the queue and its real tail is unreachable — 2 to 30
-      mapped, ordinary chunks indexed and unlisted. Off the list is never swept
-      and never mark-cleared, so those objects read permanently marked,
-      `mark_impl` skips them, nothing follows their edges, and what they point
-      at is reclaimed while live. Fixed by `latch_sweep_mutator_count`: one
-      read inside the stop, cleared when the collection ends, and all three
-      predicates read it while a collection is in flight. **guarded 6 of 18 →
-      0 of 18, poisoned 17 of 18 → 0 of 18, index-only chunks 2–30 in 7 of 14
-      runs → 0 in 14 of 14.** `make thread-churn-uaf` is now the regression
-      gate, both layouts, each with a `--control` arm
-      (`GCRY_SWEEP_MUTATOR_LATCH=0`) that must still fault.
+      **THE FIX (2026-09-13): read the mutator count once.** In the
+      post-STW section the sweep asks `multi_mutator_threads?` about the world,
+      and it asks six times between the stop and the end of the sweep:
+      `sweep_after_world?` inside the stop, where the decision it drives is
+      taken, and `relink_chunks_after_world?` plus
+      `munmap_empty_chunks_this_collect?` again *during* the sweep, of a number
+      this workload changes eight times a round by design. Fixed on both axes —
+      `latch_sweep_mutator_count` pins it for the whole collection, and the
+      relink decision is read once per sweep rather than at each of its three
+      sites. **Measured on `make thread-churn-uaf`, five runs, both layouts:
+      guarded 7 of 24 and poisoned 17 of 24 with `GCRY_SWEEP_MUTATOR_LATCH=0`,
+      0 of 24 on every arm with it.** That harness is now the regression gate
+      instead of a reproducer, both layouts, each with a `--control` arm that
+      must still fault.
+      **And a claim retracted.** This item said on 2026-09-12 that the
+      mechanism was a chunk dropped with no rebuild to take it off `@chunks`,
+      pointing its `next` into the unmap queue. Not supported: two assertions
+      written for exactly that — `any_drop && !store`, and "linked into `kept`
+      and never published" — never fired in either arm. Chunks in
+      `@chunk_index` and not on `@chunks` go from 5 of 14 runs to 1 of 14 with
+      the fix, reduced and not eliminated, while the crash goes to zero — so
+      the divergence is correlated through the same trigger and is not the
+      crash's mechanism. Its path is still unidentified, and
+      `GCRY_CHUNK_LIST_AUDIT=1` is the instrument for it.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which
