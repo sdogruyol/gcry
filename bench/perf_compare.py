@@ -119,8 +119,17 @@ def compare(baseline, summary, gate):
         base_txt = "—" if entry is None or entry.get("value") is None else "{:g}".format(float(entry["value"]))
         tol_txt = "—" if entry is None or entry.get("tolerance") is None else "±{:g}".format(float(entry["tolerance"]))
         delta_txt = "—" if delta is None else "{:+.2f}".format(delta)
-        lines.append("  {:<24} {:>8.2f}  base {:>8}  tol {:>7}  delta {:>7}  {}".format(
-            label, value, base_txt, tol_txt, delta_txt, state))
+        # How far out this run is in the baseline's own units. The gate fires at
+        # 3.3 sd, which is ~14 pp of `/json` here, so a run at 2 sd is both
+        # inside the gate and worth seeing: a streak of those is what a
+        # sensitivity rule would act on, and printing it is what makes such a
+        # rule measurable before it is written.
+        sd = None if entry is None else entry.get("sd")
+        sd_txt = "—"
+        if delta is not None and sd:
+            sd_txt = "{:+.2f}sd".format(delta / float(sd))
+        lines.append("  {:<24} {:>8.2f}  base {:>8}  tol {:>7}  delta {:>7} {:>8}  {}".format(
+            label, value, base_txt, tol_txt, delta_txt, sd_txt, state))
         if state == REGRESSED:
             (regressions if name not in WARN_ONLY else ungated).append((name, label, value, delta))
         elif state == NO_BASELINE:
