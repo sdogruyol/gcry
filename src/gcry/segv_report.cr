@@ -30,6 +30,44 @@ module Gcry
     @@installed = false
     @@requested = false
     @@reported = false
+    # Set when a fault inside the report has already been named, so a third
+    # fault cannot turn the report into a loop of its own diagnosis.
+    @@second_fault_named = false
+    # Research only: print the alternate-stack margin on the way into and out
+    # of the report (`GCRY_SEGV_REPORT_STACK=1`). A literal, not a constant
+    # reference — a class variable whose initializer names a constant gets a
+    # lazy-init guard that faults when written from `GC.init`.
+    @@stack_probe = false
+
+    def self.probe_stack : Nil
+      @@stack_probe = true
+    end
+
+    # Where this frame sits inside the alternate signal stack, so the report's
+    # own depth is measurable rather than argued about. Signal-safe: one
+    # `sigaltstack` query, static buffer, no allocation.
+    private def self.report_stack_margin(phase : String) : Nil
+      alt = uninitialized LibC::StackT
+      return unless LibC.sigaltstack(Pointer(LibC::StackT).null, pointerof(alt)) == 0
+      base = alt.ss_sp.address.to_u64
+      return if base == 0
+      here = pointerof(alt).address.to_u64
+      buf = uninitialized UInt8[256]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: report stack — ")
+      len = RawOut.append(buf.to_unsafe, len, phase)
+      len = RawOut.append(buf.to_unsafe, len, ", alt stack 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, base)
+      len = RawOut.append(buf.to_unsafe, len, " + ")
+      len = RawOut.append_u64(buf.to_unsafe, len, alt.ss_size.to_u64)
+      len = RawOut.append(buf.to_unsafe, len, " B, used ")
+      len = RawOut.append_u64(buf.to_unsafe, len,
+        here > base ? (base &+ alt.ss_size.to_u64) &- here : 0_u64)
+      len = RawOut.append(buf.to_unsafe, len, " B, left ")
+      len = RawOut.append_u64(buf.to_unsafe, len, here > base ? here &- base : 0_u64)
+      len = RawOut.append(buf.to_unsafe, len, " B\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     @@old_segv = uninitialized LibC::Sigaction
     @@old_bus = uninitialized LibC::Sigaction
 
@@ -85,11 +123,56 @@ module Gcry
       install if @@requested && !@@installed
     end
 
+    # SIGSEGV is blocked inside its own handler, and a *synchronous* fault with
+    # the signal blocked is not a second delivery — the kernel kills the process
+    # outright. So a fault inside this report has always been a silent death:
+    # output stops at the last line that flushed and nothing says why. That is
+    # the shape `make poison-holders` went red with on the x86_64 GitHub runner
+    # three times in two days, read as "the search found nothing" each time.
+    # `SA_NODEFER` lets the handler be re-entered so it can name the section it
+    # died in, and `handle` exits immediately after naming it rather than
+    # risking a loop.
+    SA_NODEFER = {% if flag?(:darwin) || flag?(:bsd) %}0x10{% else %}0x40000000{% end %}
+
+    # The report's own stack, because Crystal's is not big enough for it and
+    # that is measured, not suspected: `GCRY_SEGV_REPORT_STACK=1` reports an
+    # 8192-byte alternate stack with **3472 bytes already used** when the
+    # handler is entered, leaving 4720 for a report that walks the root set,
+    # the heap and every fiber stack, each frame carrying a line buffer of a
+    # few hundred bytes — and then asks the same three questions again of the
+    # holder it found. Adding one call frame to that chain made
+    # `make poison-holders` fail twice on the x86_64 runner in August; it went
+    # red three more times in two days this month with the report dying inside
+    # its first walk; and re-entering the handler to *name* that death needs
+    # another 3.5 KiB, which is why the naming could not print either.
+    #
+    # BSS, so installing it allocates nothing and cannot fail. One buffer per
+    # process: a second thread faulting while the first is mid-report is
+    # already racing `@@reported`, and a crash report is single-shot by
+    # construction.
+    REPORT_STACK_BYTES = 256 * 1024
+    @@alt_stack = uninitialized UInt8[REPORT_STACK_BYTES]
+
+    # Installs the report's alternate stack for the calling thread, keeping
+    # whatever was there if it is already at least as large.
+    def self.install_alt_stack : Bool
+      current = uninitialized LibC::StackT
+      if LibC.sigaltstack(Pointer(LibC::StackT).null, pointerof(current)) == 0
+        return true if current.ss_size.to_u64 >= REPORT_STACK_BYTES.to_u64
+      end
+      want = uninitialized LibC::StackT
+      want.ss_sp = @@alt_stack.to_unsafe.as(Void*)
+      want.ss_size = LibC::SizeT.new(REPORT_STACK_BYTES)
+      want.ss_flags = 0
+      LibC.sigaltstack(pointerof(want), Pointer(LibC::StackT).null) == 0
+    end
+
     def self.install : Nil
       return if @@installed
+      install_alt_stack
       action = uninitialized LibC::Sigaction
       LibC.sigemptyset(pointerof(action.@sa_mask))
-      action.sa_flags = LibC::SA_SIGINFO | LibC::SA_ONSTACK
+      action.sa_flags = LibC::SA_SIGINFO | LibC::SA_ONSTACK | SA_NODEFER
       action.sa_sigaction = ->(sig : Int32, info : LibC::SiginfoT*, ctx : Void*) do
         SegvReport.handle(sig, info, ctx)
       end
@@ -103,11 +186,57 @@ module Gcry
     # would mean trusting its flags; this way the kernel dispatches it.
     protected def self.handle(sig : Int32, info : LibC::SiginfoT*, ctx : Void*) : Nil
       unless @@reported
+        # Research only (`GCRY_SEGV_REPORT_STACK=1`): how much alternate signal
+        # stack the report has, and how much of it the report used. The report
+        # is a chain of yielding walks that each carry a line buffer, and this
+        # file already records that adding *one* call frame made
+        # `make poison-holders` fail twice on the x86_64 runner. Whether that is
+        # an overflow or a coincidence is a number, not an argument.
+        report_stack_margin("entering") if @@stack_probe
         @@reported = true
         report(sig, info.null? ? Pointer(Void).null : info.value.si_addr, ctx)
         # After the description of the address, and outside `report`: that has
         # several early returns and the writer is worth having on every one.
         report_writer_frames(ctx)
+        report_stack_margin("leaving") if @@stack_probe
+      else
+        # A second fault means the report faulted inside itself. With
+        # `SA_NODEFER` the handler is re-entered instead of the process being
+        # killed silently, so the section can be named — and then this exits
+        # rather than returning, because returning re-executes the faulting
+        # instruction and the only thing left to do is loop.
+        unless @@second_fault_named
+          @@second_fault_named = true
+          buf = uninitialized UInt8[352]
+          len = RawOut.append(buf.to_unsafe, 0,
+            "gcry: the crash report faulted inside itself, while searching ")
+          len = RawOut.append(buf.to_unsafe, len, PoisonHolders.stage_name)
+          len = RawOut.append(buf.to_unsafe, len, ", at 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len,
+            info.null? ? 0_u64 : info.value.si_addr.address.to_u64)
+          # How much signal stack was left, because the report's own depth is
+          # the first suspect: this handler runs on the alternate stack that
+          # Crystal sized, and the report is a chain of yielding walks each
+          # carrying a several-hundred-byte line buffer. A margin near zero
+          # says the report overflowed rather than read a bad address.
+          alt = uninitialized LibC::StackT
+          sp = 0_u64
+          if LibC.sigaltstack(Pointer(LibC::StackT).null, pointerof(alt)) == 0
+            sp = pointerof(alt).address
+            len = RawOut.append(buf.to_unsafe, len, ", signal stack 0x")
+            len = RawOut.append_hex(buf.to_unsafe, len, alt.ss_sp.address.to_u64)
+            len = RawOut.append(buf.to_unsafe, len, " + ")
+            len = RawOut.append_u64(buf.to_unsafe, len, alt.ss_size.to_u64)
+            len = RawOut.append(buf.to_unsafe, len, " B, ")
+            len = RawOut.append_u64(buf.to_unsafe, len,
+              sp > alt.ss_sp.address.to_u64 ? sp &- alt.ss_sp.address.to_u64 : 0_u64)
+            len = RawOut.append(buf.to_unsafe, len, " B left below this frame")
+          end
+          len = RawOut.append(buf.to_unsafe, len,
+            ". The report is the defect here, not the crash it was describing\n")
+          RawOut.flush(buf.to_unsafe, len)
+        end
+        LibC._exit(11)
       end
       if sig == LibC::SIGBUS
         LibC.sigaction(LibC::SIGBUS, pointerof(@@old_bus), Pointer(LibC::Sigaction).null)

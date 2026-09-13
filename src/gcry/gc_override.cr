@@ -1074,6 +1074,22 @@ module GC
       {% if flag?(:unix) %} Gcry::SegvReport.request {% end %}
       {% if flag?(:unix) %} Gcry::PoisonHolders.request {% end %}
     end
+    # Research only: fault on purpose inside the holders search, at the named
+    # section, so the diagnosis path that reports *that* has a positive control.
+    # `GCRY_POISON_HOLDERS_FAULT=1|2|3` — the explicit root set, the heap walk,
+    # the fiber stacks. A digit and not a name because this is read from
+    # `GC.init`, where `ENV[]` allocates and can fault. A report that dies
+    # inside itself is indistinguishable from a search that found nothing —
+    # which is how three CI reds read as "the heap search did not name it" — so
+    # the only way to know the naming works is to break it on demand.
+    {% if flag?(:unix) %}
+      if stage = env_digit("GCRY_POISON_HOLDERS_FAULT")
+        Gcry::PoisonHolders.fault_at(stage)
+      end
+      # Research only: `GCRY_SEGV_REPORT_STACK=1` prints how much alternate
+      # signal stack the report has and how much of it the report used.
+      Gcry::SegvReport.probe_stack if env_flag_one?("GCRY_SEGV_REPORT_STACK")
+    {% end %}
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

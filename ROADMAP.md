@@ -699,6 +699,23 @@ CI asymmetry that hid both.
       first-timer means it never worked. Not yet a release blocker — never seen
       outside CI — but it is the second-most-frequent red on the board.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`
+- [x] **The crash report died inside itself, silently — fixed 2026-09-13.**
+      `make poison-holders` red three times in two days on the x86_64 runner,
+      each time printing the holders header and nothing else, which read as a
+      search that found nothing; green on a re-run of the same commit; never
+      reproducible locally in 80+ runs including single- and two-CPU ones.
+      Measured with `GCRY_SEGV_REPORT_STACK=1`: the alternate signal stack is
+      **8 192 B with 3 472 already used** on entry, leaving 4 720 for a report
+      that walks roots, heap and every fiber stack with a line buffer per frame
+      and then repeats all three for the holder it found. Nothing said so
+      because SIGSEGV is blocked inside its own handler — a synchronous fault
+      there is a silent kill, not a second delivery — and because no state
+      recorded which walk was running. Fixed with gcry's own **256 KiB**
+      alternate stack, `SA_NODEFER`, and a one-byte stage stamp;
+      `GCRY_POISON_HOLDERS_FAULT=1|2|3` is the positive control and is now a
+      gate arm (each section names itself; without the fix all three die at
+      `rc=139` naming nothing).
+      `bench/log/linux/2026-09-13-report-stack/FINDINGS.md`
 - [ ] **A crash on Darwin cannot be told from a null dereference.** The poison
       check that identifies a use-after-free reads the *faulting context's*
       registers, and that reader is `{% if flag?(:linux) %}` — Darwin's

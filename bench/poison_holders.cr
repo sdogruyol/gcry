@@ -92,8 +92,13 @@ failures = [] of String
 ["heap-holder", "stack-holder", "no-heap-holder"].each do |arm|
   env = control ? {"GCRY_SEGV_REPORT" => "1", "GCRY_POISON_TAG" => "1"} : {"GCRY_POISON_HOLDERS" => "1"}
   captured = IO::Memory.new
-  Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
+  status = Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
+  # How the child died, because a truncated report reads exactly like a search
+  # that found nothing. Three CI reds said "the heap search did not name it"
+  # when the child had gone silent after the header, and the difference is the
+  # whole diagnosis.
+  how = (sig = status.exit_signal?) ? "signal #{sig}" : "exit #{status.exit_code}"
 
   if control
     if text.includes?("holders —")
@@ -105,7 +110,17 @@ failures = [] of String
   end
 
   unless text.includes?("gcry: holders — looking for words pointing into")
-    failures << "#{arm}: the search did not run at all. What it said:\n#{text.lines.first(8).join("\n")}"
+    failures << "#{arm}: the search did not run at all (child #{how}). What it said:\n#{text.lines.first(8).join("\n")}"
+    next
+  end
+
+  # Every section prints a summary line whether or not it finds anything, so a
+  # header with no sections is a report that died rather than one that looked.
+  sections = text.lines.count(&.includes?("holders — "))
+  if sections < 2
+    failures << "#{arm}: the report stopped after its header (child #{how}) — the search died inside " \
+                "itself rather than finding nothing. What it said:\n" +
+                text.lines.select(&.includes?("gcry:")).first(6).join("\n")
     next
   end
 
@@ -137,6 +152,33 @@ failures = [] of String
       failures << "#{arm}: the heap search found something with nothing planted — it is matching the " \
                   "freed block on itself, or walking FREE blocks. What it said:\n" +
                   text.lines.select(&.includes?("holders")).join("\n")
+    end
+  end
+end
+
+# A fault *inside* the report, on purpose, at a named section. Until 2026-09-13
+# this could not be observed at all: SIGSEGV is blocked inside its own handler,
+# a synchronous fault with it blocked is a silent kill, and the report died
+# leaving only the lines it had already flushed — read three times on the
+# x86_64 runner as "the heap search did not name it". The cause was the
+# alternate signal stack: 8192 bytes with 3472 already used on entry, for a
+# report that walks roots, heap and every fiber stack and then asks again about
+# the holder. `SA_NODEFER`, gcry's own 256 KiB alternate stack, and a stage
+# stamp make the death nameable; this arm is the control that says so, and it
+# fails on a tree where any of the three is missing.
+unless control
+  {"1" => "the explicit root set", "2" => "the heap walk", "3" => "the fiber stacks"}.each do |digit, section|
+    captured = IO::Memory.new
+    Process.run(exe, ["--child=heap-holder"],
+      env: {"GCRY_POISON_HOLDERS" => "1", "GCRY_POISON_HOLDERS_FAULT" => digit},
+      output: captured, error: captured)
+    text = captured.to_s
+    named = text.includes?("faulted inside itself, while searching #{section}")
+    puts "report-faults-in-#{section}: #{named ? "named" : "NOT named"}"
+    unless named
+      failures << "a fault inside the report while searching #{section} was not named — the report " \
+                  "died silently, which is the failure mode that read as an empty search. What it " \
+                  "said:\n" + text.lines.select(&.includes?("gcry:")).last(4).join("\n")
     end
   end
 end

@@ -22,6 +22,33 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Fixed
+
+- **The crash report was dying inside itself, and had 4 720 bytes to work in.**
+  `make poison-holders` went red on the x86_64 CI runner three times in two days,
+  always printing the holders header and then nothing, which read as a search
+  that found nothing — and a re-run of the same commit was green each time. It
+  was the alternate signal stack: Crystal's is 8 192 bytes and 3 472 are already
+  spent when the handler is entered, leaving 4 720 for a report that walks the
+  explicit root set, every live block and every fiber stack, each frame carrying
+  a line buffer, and then asks the same three questions of the holder it found.
+  Two structural reasons nothing said so: SIGSEGV is blocked inside its own
+  handler, so a synchronous fault there is a silent kill rather than a second
+  delivery, and nothing recorded which section the search was in. gcry now
+  installs its own **256 KiB** alternate stack, sets `SA_NODEFER` so the handler
+  can be re-entered, and stamps the section — so a fault inside the report now
+  prints `while searching the heap walk` instead of vanishing.
+  `GCRY_POISON_HOLDERS_FAULT=1|2|3` breaks it on purpose at each section and is
+  now a `make poison-holders` arm: with the fix each names itself, and a tree
+  missing any of the three parts dies at `rc=139` naming nothing.
+  `GCRY_SEGV_REPORT_STACK=1` prints the margin that turned "it dies when you add
+  a call frame" — recorded here twice, in August and September — into a number.
+  Also: a class variable whose initializer *references a constant* gets a
+  lazy-init guard, and writing one from `GC.init` faults before the runtime can
+  print anything; the new stage byte is initialised with a literal for that
+  reason, and every knob read from `GC.init` wants the same care.
+  `bench/log/linux/2026-09-13-report-stack/FINDINGS.md`
+
 ### Changed
 
 - **The perf baseline is recorded on the layout that ships.**

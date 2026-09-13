@@ -58,6 +58,61 @@ module Gcry
     @@first_holder_size = 0_u64
     @@record_first = false
 
+    # Which section the search is inside, so a fault *in the report* can name
+    # where it died. `SegvReport`'s `@@reported` guard means a second fault
+    # skips the report and returns into Crystal's handler, which allocates DWARF
+    # tables and dies on this very defect — so the child goes silent right after
+    # the header and the run is unattributable. `make poison-holders` went red
+    # on the x86_64 GitHub runner three times in two days with exactly that
+    # shape, green on a re-run of the same commit, and never once locally in
+    # more than eighty runs including single-CPU ones. One byte of static state
+    # turns the next sighting into a named section.
+    STAGE_NONE   = 0_u8
+    STAGE_ROOTS  = 1_u8
+    STAGE_HEAP   = 2_u8
+    STAGE_STACKS = 3_u8
+    # `0_u8` and not `STAGE_NONE`, though they are the same byte. A class
+    # variable whose initializer *references a constant* gets a lazy-init
+    # guard, and writing one from `GC.init` — where the knob below is read —
+    # faults before the runtime can print anything: a plain `hello` died with
+    # no output at all until this was a literal.
+    @@stage = 0_u8
+    # Whether the search is on its second level, asking who points at the
+    # holder rather than at the freed block. Two questions with the same three
+    # sections, and a fault in one is not the other.
+    @@owner_pass = false
+    # Research only (`GCRY_POISON_HOLDERS_FAULT`): the section to fault in on
+    # purpose, so the report that names a fault inside itself has a positive
+    # control. Zero ships.
+    @@fault_stage = 0_u8
+
+    def self.fault_at(stage : Int32) : Nil
+      @@fault_stage = stage.to_u8
+    end
+
+    def self.stage : UInt8
+      @@stage
+    end
+
+    # Signal-safe: static strings, no formatting, no allocation.
+    def self.stage_name : String
+      if @@owner_pass
+        case @@stage
+        when STAGE_ROOTS  then "the explicit root set, asking who holds the holder"
+        when STAGE_HEAP   then "the heap walk, asking who holds the holder"
+        when STAGE_STACKS then "the fiber stacks, asking who holds the holder"
+        else                   "the holder's own holders"
+        end
+      else
+        case @@stage
+        when STAGE_ROOTS  then "the explicit root set"
+        when STAGE_HEAP   then "the heap walk"
+        when STAGE_STACKS then "the fiber stacks"
+        else                   "nothing — the fault is not inside the search"
+        end
+      end
+    end
+
     def self.request : Nil
       @@requested = true
     end
@@ -220,7 +275,11 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ")\n")
       RawOut.flush(buf.to_unsafe, len)
 
+      # The second level is a flag rather than a stage, because `search_at`
+      # stamps the section it is in and would overwrite one.
+      @@owner_pass = true
       owners = search_at(heap, base, bsize, "owner")
+      @@owner_pass = false
       return unless owners == 0
       len = 0
       len = RawOut.append(buf.to_unsafe, len,
@@ -235,10 +294,27 @@ module Gcry
     private def self.search_at(heap : Heap, lo : UInt64, size : UInt64, tag : String) : UInt64
       finish = lo &+ size
       found = 0_u64
+      # Stamped before each walk, cleared after the last: a plain store to
+      # static memory, which is what a signal handler is allowed to do.
+      @@stage = STAGE_ROOTS
+      fault_if_asked
       found &+= search_roots(heap, lo, finish, tag)
+      @@stage = STAGE_HEAP
+      fault_if_asked
       found &+= search_heap(heap, lo, finish, tag)
+      @@stage = STAGE_STACKS
+      fault_if_asked
       found &+= search_stacks(heap, lo, finish, tag)
+      @@stage = STAGE_NONE
       found
+    end
+
+    # Research only. A store through a non-canonical address, which is the same
+    # shape as the faults this search exists to explain: the kernel reports
+    # `si_addr` 0 and the handler re-enters with the report already begun.
+    private def self.fault_if_asked : Nil
+      return if @@fault_stage == STAGE_NONE || @@fault_stage != @@stage
+      Pointer(UInt64).new(0xdead_0000_0000_0000_u64).value = 1_u64
     end
 
     # The collector's own bookkeeping first: it is the cheapest walk, and it is
