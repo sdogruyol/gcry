@@ -453,8 +453,10 @@ is now the default and the flag would take you the wrong way.
   the leak rides *mappings* rather than uptime: a heap that has reached its
   working size stops losing chunks. Measured against `chunks_mapped` (new,
   cumulative, one increment beside the `mmap`) the shipped tree strands **0 of
-  699 171 mappings** — 95% bound 4.3 per million, under 0.6 bytes per chunk
-  mapped — and the sighting behind the open item does not survive as a rate
+  12.1 million mappings** — 699 171 in the first pass and 11 389 909 more in two
+  overnight children of 200 000 collections each, both ending at the heap size
+  they started with, so a 95% bound of 2.6 per ten million, under 0.04 bytes per
+  chunk mapped — and the sighting behind the open item does not survive as a rate
   either: 60 further runs of the identical command strand nothing, one event in
   74 runs. Restoring the pre-fix mutator-count reads strands **80-181 per 1000
   mappings** and ends with **97-99.3% of the heap in chunks no sweep will
