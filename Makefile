@@ -774,18 +774,25 @@ thread-birth-root: $(BIN)
 #
 # The regression gate for the live-object release, fixed 2026-09-13. Both
 # layouts, each with its control: the shipped arms must not fault, and
-# `--control` — which restores the per-decision mutator count the fix latched
-# — must still fault, or the harness has stopped driving the workload and the
-# clean run proves nothing. Before the fix: 5 of 18 guarded, 14 of 18
-# poisoned.
+# `--control` — which restores the pre-fix mutator-count reads — must still
+# fault, or the harness has stopped driving the workload and the clean run
+# proves nothing. Before the fix, per layout: guarded 2-7 of 24, poisoned 17-21
+# of 24.
+#
+# The control runs six attempts rather than the full count, and the reason is
+# runtime: its children *crash*, and a crashing child under
+# `GCRY_POISON_HOLDERS=1` walks the whole heap and every stack and then
+# re-faults into Crystal's backtrace printer. Twenty-four of those on a
+# two-core runner took the CI step past ten minutes. At a 70% per-attempt rate
+# six attempts miss once in about 1500 runs.
 thread-churn-uaf: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_churn_uaf.cr -o $(BIN)/thread_churn_uaf --error-trace
 	$(BIN)/thread_churn_uaf
-	$(BIN)/thread_churn_uaf --control
+	CHURN_ATTEMPTS=6 $(BIN)/thread_churn_uaf --control
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/thread_churn_uaf.cr \
 	  -o $(BIN)/thread_churn_uaf_headers --error-trace
 	$(BIN)/thread_churn_uaf_headers
-	$(BIN)/thread_churn_uaf_headers --control
+	CHURN_ATTEMPTS=6 $(BIN)/thread_churn_uaf_headers --control
 
 # The nursery keeps the header representation under every setting, so every
 # mark clear has to gate per *chunk* like the read side does. Gating on the

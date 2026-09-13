@@ -622,10 +622,13 @@ jobs:
       # Both layouts, each with a control that restores the re-evaluation and
       # must still fault — a reproducer that quietly stops reproducing is how
       # the previous one was lost. Before the fix: 5 of 18 guarded, 14 of 18
-      # poisoned; after: 0 of 18 on every arm.
+      # poisoned; after: 0 of 24 on every arm. The control arms run six attempts
+      # because their children crash, and a crashing child walks the heap and
+      # every stack before Crystal's backtrace printer runs — twenty-four of
+      # those took this step past ten minutes on a two-core runner.
       - name: Live-object release under thread churn
         run: |
-          timeout 600 make thread-churn-uaf
+          timeout 900 make thread-churn-uaf
 
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the

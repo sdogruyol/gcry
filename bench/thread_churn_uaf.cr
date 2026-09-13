@@ -174,10 +174,12 @@ driven = results.find { |r| r.name == "poisoned" }.not_nil!
 
 if control
   # The control must still reproduce. Measured on the fix's own A/B: 6 of 18
-  # guarded and 17 of 18 poisoned with the latch off.
+  # per layout: guarded 2-7 of 24 and poisoned 17-21 of 24 with the pre-fix
+  # reads. Six attempts here miss that about once in 1500 runs.
   if driven.failed == 0
     puts "FAIL the control arm did not reproduce in #{driven.runs} attempts. With the"
-    puts "mutator-count latch off this workload faulted 17 of 18 times, so a clean run"
+    puts "pre-fix mutator-count reads this workload faults about 70% of attempts, so a"
+    puts "clean run"
     puts "here means the harness has stopped driving the defect and the shipped arms"
     puts "above prove nothing. That is how the last reproducer for this was lost."
     exit 1
@@ -201,5 +203,5 @@ if total > 0
   exit 1
 end
 
-puts "ok — no arm faulted. Before the fix this was 5 of 18 guarded and 14 of 18"
-puts "poisoned; `--control` restores that and must still fail."
+puts "ok — no arm faulted. Before the fix, per layout: guarded 2-7 of 24 and"
+puts "poisoned 17-21 of 24. `--control` restores that and must still fail."
