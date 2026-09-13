@@ -1242,8 +1242,25 @@ CI asymmetry that hid both.
       `@chunk_index` and not on `@chunks` go from 5 of 14 runs to 1 of 14 with
       the fix, reduced and not eliminated, while the crash goes to zero — so
       the divergence is correlated through the same trigger and is not the
-      crash's mechanism. Its path is still unidentified, and
-      `GCRY_CHUNK_LIST_AUDIT=1` is the instrument for it.
+      crash's mechanism.
+      **Where the divergence comes from (2026-09-13).** Sampling the off-list
+      count after each step of the post-STW section — the sweep and nine
+      flushes — it grows at **the sweep and nowhere else**, cumulatively, in
+      runs whose every sweep reports `store=1, drop=0`. That leaves the
+      prepend race: the walk reads `@chunks` and follows `next` while
+      `map_chunk` prepends under a lock the walk does not hold, so a chunk
+      mapped during the walk is invisible to it and publishing `kept` over the
+      head drops it from the list while `index_insert` keeps it in the index.
+      **Splicing that prefix back in at the publish was written and withdrawn
+      for the second time**: the shipped residual stays at 1 of 14 runs and the
+      pre-fix shape goes from 5 of 14 to 14 of 14, because the walk rewrites
+      `next` in place and the prefix is not separable from the chain being
+      rebuilt. Any real fix has to stop the rebuild mutating in place — build
+      the chain aside and publish once — rather than work around it; taking
+      the list lock across the walk is the 0.21.1 hang. The residual is one
+      chunk on a workload that maps thousands, at the sweep step, and the crash
+      it was thought to explain is at zero across five gate runs on both
+      layouts.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

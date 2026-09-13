@@ -388,9 +388,59 @@ walk and the store are one operation on a list other threads can read. That is
 not a defect on its own — the store publishes the finished chain — but any
 future reasoning about this list has to start from it.
 
+## Where the divergence comes from, and one more fix withdrawn
+
+The post-STW section was sampled step by step — the off-list count taken after
+the sweep and after each of `flush_pending_empty_chunks`,
+`drain_release_quarantine`, `flush_pending_large_cache`,
+`flush_pending_large_release`, `flush_pending_dormant_chunks`,
+`flush_pending_page_release_chunks`, `flush_pending_mostly_empty_chunks`,
+`release_large_freelist_pages` and `trim_large_cache`. It grows at **the sweep
+and nowhere else**, cumulatively, in a run whose every sweep reports
+`store=1, drop=0`:
+
+```
+DBG step sweep offlist 0 -> 1      DBG step sweep offlist 19 -> 32
+DBG step sweep offlist 1 -> 4      DBG step sweep offlist 32 -> 34
+DBG step sweep offlist 4 -> 5      DBG step sweep offlist 34 -> 41
+DBG step sweep offlist 5 -> 19     DBG step sweep offlist 41 -> 49
+```
+
+With `drop=0` and the publish running, that leaves one candidate: the walk
+reads `@chunks` and follows `next` while `map_chunk` prepends under
+`@chunk_list_lock`, which the walk does not hold. A chunk mapped during the
+walk is invisible to it, and publishing `kept` over the head drops it from the
+list while `index_insert` — same lock, same moment — keeps it in the index.
+
+**And splicing that prefix back in does not fix it.** Capturing the head the
+walk started from and, under the lock, linking everything prepended since in
+front of `kept`: the shipped residual stays at **1 of 14 runs**, and the
+pre-fix shape (`GCRY_SWEEP_MUTATOR_LATCH=0`) goes from **5 of 14 to 14 of
+14** — the walk rewrites `next` in place, so in the mixed-decision shape the
+prefix scan can wander into the chain being rebuilt and the splice makes the
+list worse rather than whole. Reverted.
+
+This is the **second** time the splice has been written and withdrawn (the
+first was 2026-09-12, with the prefix-termination bug that took the count from
+2 chunks to 27). Both are recorded here so the third person to look at this
+list does not write it again: the prefix is not separable from the rebuilt
+chain while the rebuild mutates `next` in place, and any fix has to change
+that, not work around it.
+
 ## Still open
 
-The divergence path, and whether the residual 1 in 14 matters. The audit
-(`GCRY_CHUNK_LIST_AUDIT=1`) is the instrument; the next step is to snapshot the
-list length at each step of the post-STW section and find which one loses
-chunks, rather than to reason about which one could.
+The residual 1 in 14. It is one chunk, on the shipped build, in a workload that
+maps and frees thousands — and it is not known whether it is the prepend race
+at its natural rate or a benign category the audit does not exclude. What is
+known: it appears at the sweep step; the chunks are ordinary size classes,
+still mapped, plain flags; and the crash it was thought to explain is at zero
+across five gate runs on both layouts, so it is not load-bearing for the fixed
+defect.
+
+The shape of a real fix, if the residual turns out to matter: the walk's
+`set_next(chunk, kept)` mutates a list other threads read, so the walk and the
+publish are one operation on shared state without holding the lock that guards
+it. Either the rebuild stops mutating in place (build the chain in a side
+array, publish once) or it takes the list lock for the walk — and that second
+one is the 0.21.1 hang, which is why it was not done this way in the first
+place.

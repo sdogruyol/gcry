@@ -297,8 +297,13 @@ is now the default and the flag would take you the wrong way.
   that must still fault. The `@chunks`/`@chunk_index` divergence reported
   yesterday is reduced by the same change (5 of 14 runs to 1 of 14) but not
   eliminated, and with the crash at zero it cannot be the crash's mechanism —
-  its path is still unidentified, and the causal reading published yesterday is
-  retracted in the findings.
+  its path is narrowed rather than closed: sampling the off-list count after
+  every step of the post-STW section puts the growth at the sweep and nowhere
+  else, which leaves the prepend race between the walk and `map_chunk`.
+  Splicing that prefix in at the publish was written and withdrawn for the
+  second time — the shipped residual does not move and the pre-fix shape gets
+  worse, because the walk rewrites `next` in place. The causal reading
+  published yesterday is retracted in the findings.
   `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
 
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the
