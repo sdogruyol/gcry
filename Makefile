@@ -914,6 +914,25 @@ chunk-list-drift: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
 	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift
 
+# Do the process heap's counters lose updates? `note_alloc_bytes` and its
+# siblings use plain `set(get + 1)` unless `heap_counters_atomic` is set, and
+# ROADMAP has carried the counter-argument since v0.20.0: `live_objects` read
+# one below the walk in 3 runs of 40, in a program whose only threads were main
+# and the monitor. That flake was fixed as a *scope* correction — the invariant
+# is stated only of a heap that keeps its counter — which made the checker
+# honest and retired the measurement. `GCRY_INVARIANT_COUNTER_LOSS=1` states it
+# anyway and counts. Three arms: atomic and plain must both come out at zero
+# (measured, 4.6 M forced comparisons across three shapes — the loss does not
+# reproduce on this tree, so the plain default stays and the atomic path stays
+# an escape), and `--inject` drops one increment through
+# `debug_drift_live_objects` and must be caught, because without it two zeros
+# cannot be told from a comparison that never looks. ~35 s.
+counter-loss: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/counter_loss.cr -o $(BIN)/counter_loss --error-trace
+	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss
+	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --control
+	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --inject
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

@@ -873,8 +873,38 @@ CI asymmetry that hid both.
       converse in `make perf-baseline`.
       `bench/log/linux/2026-09-13-perf-baseline-headerless/FINDINGS.md`
 
-- [ ] **The process heap's counters lose updates, and the assumption that they
-      do not is written in the source.** `note_alloc_bytes` uses plain
+- [x] **The process heap's counters lose updates — both halves of the trade
+      measured 2026-09-13, and the default stays plain.**
+      The cost first: the reason the atomic path is off is a LOCK RMW on the
+      allocation hot path, and measured on `bench/micro/alloc_ns.cr` with
+      alternating pinned arms it is **not resolvable** — atomic/plain 0.9836
+      [0.9573, 1.0098] on one thread over 40 M allocations, 1.0091 [0.9877,
+      1.0304] on four over 20 M. Both CIs span 1.0. A Kemal `/json` A/B
+      (`bench/counters_ab.sh`, 12 paired trials, warm-up discarded) is ±10% on
+      this host and cannot see a few percent at all, which is worth recording:
+      end-to-end RPS is the wrong instrument for an allocation-path question.
+      Then the loss: `GCRY_INVARIANT_COUNTER_LOSS=1` states the `live_objects`
+      invariant even of a heap that may lose updates — the measurement the
+      scope correction retired — and counts instead of raising, with the
+      checker's double read still skipping a counter that *moves* between the
+      two reads. **4.6 million forced comparisons, zero losses**: 3 277 952 with
+      atomic counters and 3 278 005 with plain in the original sighting's shape
+      (main plus the monitor, nothing else), and 660 649 more with eight
+      spawned allocators. An increment dropped on purpose through
+      `debug_drift_live_objects` is caught at every walk after it, which is what
+      makes those zeros a measurement rather than a blind spot — and the first
+      attempt at this harness measured almost nothing and said so: two spawned
+      threads made `concurrent_mutators?` skip 406 300 walks against 1 636
+      comparisons.
+      So the plain counter stays, the atomic path stays an escape, and the
+      measurement is a gate: `make counter-loss`, three arms, in CI. Not
+      claimed: that the loss is impossible. It happened 3 times in 40 runs on
+      the v0.20.0 tree, and the allocation path has been rewritten twice since
+      (bitmap allocator, headerless layout); the likeliest reading is that one
+      of those removed the race. The gate is what will notice if it returns.
+      `bench/log/linux/2026-09-13-heap-counters/FINDINGS.md`
+
+- [x] **The original statement of that item, kept for provenance.** `note_alloc_bytes` uses plain
       `set(get + 1)` unless `heap_counters_atomic` is set, and `heap.cr` calls
       that safe on the grounds of "single mutator + rare SYSMON". Measured
       against: with the invariant checker on, `spec/invariant_spec.cr` reports

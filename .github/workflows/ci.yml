@@ -606,6 +606,14 @@ jobs:
         run: |
           make chunk-list-drift
 
+      # The process heap's counters, which every collection-timing decision
+      # reads. Plain `set(get + 1)` and the atomic path must both agree with a
+      # walk of the heap, and an increment dropped on purpose must be caught —
+      # two zeros and no positive control would be a gate that cannot fail.
+      - name: Heap counters agree with the walk
+        run: |
+          make counter-loss
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

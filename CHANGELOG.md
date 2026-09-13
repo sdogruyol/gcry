@@ -22,6 +22,26 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Added
+
+- **`make counter-loss`, and the decision it settles.** The process heap's
+  counters use plain `set(get + 1)` unless `GCRY_HEAP_COUNTERS_ATOMIC=1`, and
+  the roadmap has carried "3 runs of 40 read `live_objects` one below the walk"
+  since v0.20.0 as an open trade. Both halves are now measured. The cost of the
+  atomic path is **not resolvable**: 0.9836 [0.9573, 1.0098] on one thread over
+  40 M allocations and 1.0091 [0.9877, 1.0304] on four over 20 M, both CIs
+  spanning 1.0 (`bench/micro/alloc_ns.cr`, alternating pinned arms; a Kemal
+  `/json` A/B is ±10% on this host and cannot see the question at all). The loss
+  does not reproduce: `GCRY_INVARIANT_COUNTER_LOSS=1` states the invariant even
+  of a heap that may lose updates — the measurement the checker's scope
+  correction retired — and finds **zero losses in 4.6 million forced
+  comparisons** across three shapes. So the plain counter stays the default, the
+  atomic path stays an escape, and the measurement is a gate with three arms:
+  atomic and plain must both agree with a walk of the heap, and an increment
+  dropped on purpose through `debug_drift_live_objects` must be caught, because
+  two zeros with no positive control is a gate that cannot fail.
+  `bench/log/linux/2026-09-13-heap-counters/FINDINGS.md`
+
 ### Fixed
 
 - **The crash report was dying inside itself, and had 4 720 bytes to work in.**

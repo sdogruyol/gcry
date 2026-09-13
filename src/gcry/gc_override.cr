@@ -1090,6 +1090,16 @@ module GC
       # signal stack the report has and how much of it the report used.
       Gcry::SegvReport.probe_stack if env_flag_one?("GCRY_SEGV_REPORT_STACK")
     {% end %}
+    # Research only: state the `live_objects` invariant even of a heap whose
+    # counters may lose updates, and count the failures rather than raising.
+    # This is the measurement the checker's scope correction stopped making, and
+    # it is what decides whether `heap_counters_atomic` should be the default.
+    if env_flag_one?("GCRY_INVARIANT_COUNTER_LOSS")
+      Gcry::Invariant.enable
+      Gcry::Invariant.force_counters
+    end
+    {% if flag?(:unix) %}
+    {% end %}
     # Research only: stall inside the thread-stacks phase with the world stopped,
     # so the watchdog above has a positive control. Never ship non-zero — it
     # freezes every mutator for that long, on purpose.

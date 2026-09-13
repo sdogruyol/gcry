@@ -54,6 +54,32 @@ module Gcry
       @@live_object_checks
     end
 
+    # State the counter invariant even of a heap whose counters may lose
+    # updates, and count the failures instead of declining. Research only
+    # (`GCRY_INVARIANT_COUNTER_LOSS=1`).
+    #
+    # The scope correction that shipped with this checker was right — an
+    # invariant stated of a heap that cannot keep its counter is a flake, and
+    # skipping took `spec/invariant_spec.cr` from 6 failures in 25 runs to 0 in
+    # 60 — but it also stopped the one measurement that says whether the
+    # counter is wrong. That measurement is what decides
+    # `heap_counters_atomic`'s default, so it needs a way back. The double read
+    # below still guards it: a counter that *moves* between the two reads is a
+    # sampling race and is skipped, so a failure here is a genuinely lost
+    # increment and not a walk racing an allocation.
+    @@force_counters = false
+
+    def self.force_counters : Nil
+      @@force_counters = true
+    end
+
+    # Times the forced comparison found the counter below (or above) the walk.
+    @@counter_losses = 0_u64
+
+    def self.counter_losses : UInt64
+      @@counter_losses
+    end
+
     # Verify that `live_objects` matches the actual number of live (non-free)
     # blocks in the heap. This is the most important invariant: if the counter
     # drifts, every GC decision based on it is suspect.
@@ -99,7 +125,14 @@ module Gcry
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
       return if @@checking
-      if heap.concurrent_mutators? || heap.counters_may_lose_updates?
+      if heap.concurrent_mutators?
+        @@concurrent_skips += 1
+        return
+      end
+      # The counter half of the skip is what `force_counters` removes: a heap
+      # with a second thread has counters that *may* lose updates, and whether
+      # they do is the measurement.
+      if heap.counters_may_lose_updates? && !@@force_counters
         @@concurrent_skips += 1
         return
       end
@@ -122,6 +155,12 @@ module Gcry
             return
           end
           attempts += 1
+        end
+        if @@force_counters
+          # Counted, not fatal: this arm exists to produce a rate, and a rate
+          # needs the run to continue.
+          @@counter_losses += 1
+          return
         end
         fail("live_objects mismatch: actual=#{actual} reported=#{reported}")
       ensure
