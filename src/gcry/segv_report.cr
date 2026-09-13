@@ -146,12 +146,17 @@ module Gcry
     # its first walk; and re-entering the handler to *name* that death needs
     # another 3.5 KiB, which is why the naming could not print either.
     #
-    # BSS, so installing it allocates nothing and cannot fail. One buffer per
-    # process: a second thread faulting while the first is mid-report is
-    # already racing `@@reported`, and a crash report is single-shot by
-    # construction.
+    # `mmap`ed rather than static, and that is not a style choice: as a BSS
+    # array it sat inside the writable `PT_LOAD` segment, which is a
+    # **conservative static root range**, so every collection scanned 256 KiB
+    # of zeros and the segment's size crossed thresholds that depend on it.
+    # `test (aarch64 native)` then failed the same five chunk-residency specs
+    # (`dormant_revive`, `empty_chunk_grace` x2, `dormant_chunk_bytes`,
+    # `live_object_checks`) on two documentation-only commits, about one run in
+    # two, while x86_64 stayed green. An anonymous mapping is not a root, not
+    # in the segment, and not scanned.
     REPORT_STACK_BYTES = 256 * 1024
-    @@alt_stack = uninitialized UInt8[REPORT_STACK_BYTES]
+    @@alt_stack = Pointer(UInt8).null
 
     # Installs the report's alternate stack for the calling thread, keeping
     # whatever was there if it is already at least as large.
@@ -160,8 +165,15 @@ module Gcry
       if LibC.sigaltstack(Pointer(LibC::StackT).null, pointerof(current)) == 0
         return true if current.ss_size.to_u64 >= REPORT_STACK_BYTES.to_u64
       end
+      if @@alt_stack.null?
+        memory = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(REPORT_STACK_BYTES),
+          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
+        return false if Gcry.mmap_failed?(memory)
+        @@alt_stack = memory.as(UInt8*)
+      end
       want = uninitialized LibC::StackT
-      want.ss_sp = @@alt_stack.to_unsafe.as(Void*)
+      want.ss_sp = @@alt_stack.as(Void*)
       want.ss_size = LibC::SizeT.new(REPORT_STACK_BYTES)
       want.ss_flags = 0
       LibC.sigaltstack(pointerof(want), Pointer(LibC::StackT).null) == 0

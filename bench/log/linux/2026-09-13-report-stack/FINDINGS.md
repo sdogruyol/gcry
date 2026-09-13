@@ -89,3 +89,36 @@ initializer *references a constant*, which gets a lazy-init guard — and writin
 one from `GC.init`, before the runtime is up, faults. `0_u8` instead of
 `STAGE_NONE` fixes it: same byte, no guard. Worth knowing for every future knob
 read from `GC.init`, which is all of them.
+
+## The stack must not live in static data (2026-09-13, later)
+
+Shipped as a 256 KiB BSS array first, and the next two master runs — both
+**documentation-only commits** — failed `test (aarch64 native)` on the same five
+chunk-residency specs, `dormant_revive`, `empty_chunk_grace` twice,
+`dormant_chunk_bytes` and `live_object_checks`, 5 of 274, while x86_64 stayed
+green and a re-run of the same job passed. A docs commit cannot change
+behaviour, so the tree that changed was this one, and the only thing in it that
+every binary carries regardless of knobs is the array.
+
+BSS sits inside the executable's writable `PT_LOAD` segment, which gcry scans
+**conservatively as a static root range**. So the array added 256 KiB of zeros
+to every collection's root scan and moved the segment's bounds, which several
+heuristics are measured against. An anonymous mapping is none of those things:
+it is not in the segment, not a root, and not scanned. `mmap`ed at
+`install_alt_stack`, freed never (it is a crash-path buffer), and the report
+still reads:
+
+```
+gcry: report stack — entering, alt stack 0x7fdb21ca0000 + 262144 B, used 3488 B, left 258656 B
+```
+
+with all three fault stages still naming themselves. `.bss` back to 499 912
+bytes from 762 056.
+
+The mechanism behind the aarch64 specs is *not* proven — the 1 MiB segment
+refusal (`GCRY_STATIC_BSS_CAP`) is off by default, so that is not it, and two
+reds with a green re-run between them is a rate, not a diagnosis. What is
+certain is that a garbage collector should not put a quarter megabyte of dead
+weight inside its own root set, and removing it removes the only candidate this
+change introduced.
+
