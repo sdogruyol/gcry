@@ -570,6 +570,12 @@ module Gcry
     # thread being waited for. Never ship non-zero.
     property stw_test_suspend_stall_ms : UInt64 = 0_u64
 
+    # Parked-fiber scans that paid the multi-mutator lag, and the bytes between
+    # each fiber's saved `stack_top` and where its scan actually began — i.e.
+    # what the proposal to scan a fully parked fiber from its own SP would stop
+    # reading. `bench/fiber_lag_cost.cr` reports it.
+    getter fiber_lag_scans : UInt64 = 0_u64
+    getter fiber_lag_window_bytes : UInt64 = 0_u64
     getter low_water_skips : UInt64 = 0_u64
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).

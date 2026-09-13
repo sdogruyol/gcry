@@ -1142,6 +1142,15 @@ module Gcry
 
       lagged = t > lag ? t - lag : guard
       lagged = guard if lagged < guard
+      # What the lag costs, in bytes, for the item that proposes removing it.
+      # `ROADMAP.md`: "a fully parked fiber (wait queue, no owning thread) has a
+      # trustworthy SP and can be scanned from it as on EC1; only fibers in
+      # transit need the lag." The saved `stack_top` **is** that SP, so the
+      # window between it and where this scan actually starts is exactly what the
+      # proposal would stop scanning — measured per collection instead of
+      # estimated, since 8.4 ms of a 9.2 ms EC4 pause is this scan.
+      @fiber_lag_scans &+= 1
+      @fiber_lag_window_bytes &+= t > lagged ? t - lagged : 0_u64
 
       # The same skip, on the default path. The lag window is a *bound* on how
       # far below stack_top to look; it says nothing about whether those pages

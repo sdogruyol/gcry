@@ -984,6 +984,21 @@ index-lock-wedge: $(BIN)
 	$(BIN)/index_lock_wedge
 	$(BIN)/index_lock_wedge --control
 
+# What the parked-fiber lag reads, for the largest open pause item: 8.4 ms of a
+# 9.2 ms p50 EC4 pause is `roots_fibers_ns`, because under multi-mutator STW
+# every parked fiber is scanned from 256 KiB below its saved `stack_top`. The
+# proposed fix is to scan a *fully parked* fiber from its own SP, which is a
+# root-scan change — being wrong there is a use-after-free days later — so this
+# measures the payoff before anyone touches it. Measured with 256 fibers parked
+# 64 frames deep: **65.5 MB per collection**, 256 KiB per parked fiber, i.e. the
+# lag paid in full, with the pagemap low-water skip covering only ~5% of it
+# (266 skips in 5 240 scans). Counting, not timing, so it holds under load.
+# Research only; not a gate.
+fiber-lag-cost: $(BIN)
+	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
+		bench/fiber_lag_cost.cr -o $(BIN)/fiber_lag_cost --error-trace
+	$(BIN)/fiber_lag_cost
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

@@ -24,6 +24,22 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
+- **`make fiber-lag-cost`, and the number the biggest open pause item was
+  missing.** Under multi-mutator STW every parked fiber is scanned from 256 KiB
+  below its saved `stack_top`, and the roadmap proposes scanning a fully parked
+  fiber from its own SP instead. `fiber_lag_window_bytes` now counts exactly what
+  that would stop reading: with 256 fibers parked 64 frames deep on a Parallel
+  context, **65.5 MB per collection — 256.0 KiB per parked fiber, the lag paid
+  in full** — and the pagemap low-water skip that makes the lag affordable on a
+  fat app fires on only **266 of 5 240 scans**, because pooled stacks a previous
+  tenant faulted deeply are exactly where it cannot help. The fix is a root-scan
+  change, so the measurement is the argument for doing it rather than a
+  substitute: the predicate for "genuinely parked, not in transit" is still the
+  difficulty.
+  `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
+
+### Added
+
 - **`make index-lock-wedge`: the wedge that needs something this tree does not
   do.** The roadmap has carried "a mutator frozen while holding `@index_lock`
   would wedge the sweep" as a shape with no reproducer. `index_insert` and

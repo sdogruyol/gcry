@@ -396,6 +396,21 @@ CI asymmetry that hid both.
       queue, no owning thread) has a trustworthy SP and can be scanned from it
       as on EC1; only fibers in transit need the lag. A per-fiber high-water
       mark written at swap time would replace the pagemap probe.
+      **The payoff is measured now (2026-09-13).** `fiber_lag_window_bytes`
+      counts the distance between each parked fiber's saved `stack_top` and
+      where its scan actually began — exactly what the fix would stop reading.
+      With 256 fibers parked 64 frames deep on a Parallel context, 20
+      collections: **65.5 MB per collection**, 262 parked scans, **256.0 KiB
+      each — the lag paid in full**, and the pagemap low-water skip fires on
+      only **266 of 5 240 scans** (5%). That second number is the one that was
+      not obvious: the skip is what makes the lag affordable on a fat app, and
+      pooled stacks a previous tenant faulted deeply are precisely where it
+      cannot help, which is what a parked-fiber-heavy context is made of. So the
+      work is worth doing and the cost grows linearly with parked fibers.
+      What is still missing is the *predicate*: "genuinely parked, not in
+      transit" is the whole difficulty, and `Fiber#running?` only approximates
+      it. `make fiber-lag-cost` keeps the measurement.
+      `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now
