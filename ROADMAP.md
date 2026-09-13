@@ -1153,6 +1153,16 @@ CI asymmetry that hid both.
       second and prints whether the handle names a live thread, which is the one
       question that separates "the signal was lost" from "the handle came out of
       a freed `Thread`" — the open use-after-free is on this same runner.
+      **A Darwin sighting of the same gate, different shape (2026-09-13, run
+      `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
+      the audit refusing to name two planted values — `faults: 0 -> 0 (poison
+      0x7f1700000149, outside the heap)` and a live non-Fiber object where it
+      wanted a `Runnables` — while the *structure* check did name the second
+      one. Not a hang, and not attributable to the commit: the Darwin job runs
+      neither of the gates that commit touched, the five master runs before it
+      were green, and re-running the same job on the same commit passed. Kept as
+      a sighting rather than a diagnosis, which is what a Darwin sighting is
+      worth until the `__mcontext` reader exists — the item two above.
       **The retry now exists, and the epoch is what made it safe (2026-09-12).**
       The symmetry with `start_world`'s resume retry had been refused twice for
       a good reason: a redundant `SIG_RESUME` runs an empty handler, while a
