@@ -1277,7 +1277,13 @@ CI asymmetry that hid both.
       model two assertions could not confirm from the sweep, because the sweep
       is only half of it. `--control` now sets both knobs. What remains of the
       divergence is a leaked chunk 1 run in 14, an RSS question rather than a
-      soundness one.
+      soundness one — and the clear now has a gate of its own,
+      `make mark-clear-index`: the shipped walk leaves no indexed chunk holding
+      a mark (0 of 20 runs) and the control, which needs both halves of the
+      pre-fix shape, leaves some (11 of 14). Its control runs in child
+      processes because that shape crashes as readily as it leaves residue, and
+      both outcomes prove it. `chunk_index_only_bytes` gives the retained cost:
+      2.7-3.3 MB over a few hundred collections in the pre-fix shape.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

@@ -315,7 +315,13 @@ is now the default and the flag would take you the wrong way.
   nearly harmless. `GCRY_MARK_CLEAR_LIST=1` restores the old walk and
   `GCRY_MARK_CLEAR_AUDIT=1` reports mark residue; the gate's control arm sets
   both knobs. What remains of the divergence is a leaked chunk one run in
-  fourteen, which is an RSS question rather than a soundness one.
+  fourteen, which is an RSS question rather than a soundness one — and
+  `chunk_index_only_bytes` now gives its retained cost (2.7-3.3 MB over a few
+  hundred collections in the pre-fix shape). `make mark-clear-index` gates the
+  clear: the shipped walk leaves no indexed chunk holding a mark across 20
+  runs, and its control — which needs both halves of the pre-fix shape, and
+  runs in child processes because that shape crashes as readily as it leaves
+  residue — finds residue in 11 of 14.
   `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
 
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the

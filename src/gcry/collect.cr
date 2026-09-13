@@ -471,6 +471,9 @@ module Gcry
     # `GCRY_CHUNK_LIST_AUDIT=1`. O(index × list), and both are in the tens.
     getter chunk_index_only : UInt64 = 0_u64
     getter chunk_list_only : UInt64 = 0_u64
+    # Mapped bytes held by chunks the index knows about and the list does not.
+    # They are never swept, so this is the retained cost of the divergence.
+    getter chunk_index_only_bytes : UInt64 = 0_u64
     property chunk_list_audit : Bool = false
     # Indexed chunks whose mark bitmap still held a set bit after
     # `clear_all_marks`. Every block in one reads marked forever, which makes

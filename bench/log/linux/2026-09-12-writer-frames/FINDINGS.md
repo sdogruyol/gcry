@@ -504,3 +504,27 @@ than a use-after-free, since its marks are cleared like everything else the
 index knows about. Fixing it properly still means the rebuild must stop
 mutating `next` in place — the splice has been written and withdrawn twice
 above — and that is now an RSS question rather than a soundness one.
+
+## The clear now has a gate (2026-09-13)
+
+`make mark-clear-index`. Two arms, and the numbers they are built on:
+
+| arm | mark residue |
+|---|---|
+| shipped, clear walks the index | **0 of 20 runs** |
+| control, list walk + pre-fix mutator reads | **11 of 14 runs** |
+
+The control needs both halves. The list walk alone has no off-list chunk to
+miss; the mutator-count reads alone produce one but its marks get cleared
+anyway. And the control runs in **child processes**, because restoring the
+pre-fix shape restores the defect: a child can crash instead of finishing its
+report, and both outcomes prove the shape is broken. Run in-process the crash
+exited non-zero and read as a gate failure, 1 run in 12. Now 0 of 10 on both
+arms, ~4 s for the shipped arm and ~6 children for the control.
+
+It also carries the number the open item needed. `chunk_index_only_bytes` sums
+the mapped bytes of chunks the index knows about and the list does not: in the
+pre-fix shape, **22 to 26 sightings and 2.7 to 3.3 MB** accumulated over a few
+hundred collections. On the shipped build that workload reports **0** — the
+divergence needs allocation to show, which `thread_churn_uaf` has and this
+harness does not, and there it is 1 run in 14 at one chunk.

@@ -584,6 +584,17 @@ jobs:
         run: |
           make holders-find
 
+      # The other half of the live-object release: `mark_impl` reaches a chunk
+      # through `chunk_containing` (the index) while `clear_all_marks` walked
+      # the `@chunks` list, and a chunk in one and not the other keeps its
+      # marks — so its blocks read marked forever, `mark_impl` returns early on
+      # them, and nothing follows their edges. The control restores the list
+      # walk together with the pre-fix mutator-count reads, because the residue
+      # needs an off-list chunk to exist, and it must find some.
+      - name: Mark clear covers the index
+        run: |
+          make mark-clear-index
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

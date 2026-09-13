@@ -875,6 +875,22 @@ poison-holders: $(BIN)
 # `UInt64` has no inner pointers, so Crystal allocates it atomic, gcry never
 # scans it, and the target is reclaimed — the control drew the first case's own
 # address.
+# Does the mark clear cover the set the marker marks? `mark_impl` resolves a
+# candidate's chunk through `chunk_containing`, i.e. `@chunk_index`, while
+# `clear_all_marks` walked the `@chunks` list — and those differ about one run
+# in fourteen under churn, because of the prepend race between the sweep's walk
+# and `map_chunk`. A chunk the clear misses keeps its marks, every block in it
+# reads marked forever, `mark_impl` returns early on it, and nothing follows
+# its edges; that is one half of the 2026-08-23 live-object release. Two arms:
+# the shipped clear must leave no indexed chunk holding a mark, and `--control`
+# — the list walk plus the pre-fix mutator-count reads, because the residue
+# needs an off-list chunk to exist — must leave some. Measured 11 of 14 runs
+# with the control, 0 of 20 shipped. ~4 s.
+mark-clear-index: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/mark_clear_index.cr -o $(BIN)/mark_clear_index --error-trace
+	$(BIN)/mark_clear_index
+	$(BIN)/mark_clear_index --control
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

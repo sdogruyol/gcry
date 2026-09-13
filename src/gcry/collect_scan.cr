@@ -493,6 +493,10 @@ module Gcry
           listed = true if !listed && pending_unmap_listed?(c)
           unless listed
             index_only &+= 1
+            # Bytes, not just chunks: what is left of this divergence is a
+            # chunk that is never swept, so the open question it leaves is how
+            # much memory that retains.
+            @chunk_index_only_bytes &+= c.value.mapped_bytes
             first = c.address if first == 0
           end
         end
