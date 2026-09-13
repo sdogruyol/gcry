@@ -44,6 +44,11 @@ METRICS = {
 # path and its number moves for reasons `/json` does not.
 WARN_ONLY = {"pct_root"}
 
+# Standard deviations from the mean to the gate. 3.3 puts one false red per
+# ~690 runs across the three gated metrics; see `record`'s docstring for why
+# this is a constant here rather than something the recording session derives.
+TARGET_SD = 3.3
+
 PASS, REGRESSED, IMPROVED, NO_BASELINE = "ok", "REGRESSED", "improved", "no baseline"
 
 
@@ -149,12 +154,36 @@ def compare(baseline, summary, gate):
 
 
 def record(summaries, runner, commit, recorded):
-    """Median per metric, with the observed spread the tolerance is derived from.
+    """Median per metric, with a tolerance of TARGET_SD standard deviations.
 
-    Tolerance = max(half the observed range, 1.5 x IQR), floored per metric so a
-    freakishly quiet recording session cannot produce a gate nothing can pass.
-    With fewer than 3 runs there is no spread to speak of, so the tolerance is
-    left null and the baseline reports instead of gating.
+    Floored per metric, so a freakishly quiet recording session cannot produce a
+    gate nothing can pass. With fewer than 3 runs there is no spread to speak
+    of, so the tolerance is left null and the baseline reports instead of
+    gating.
+
+    The rule was `max(half the observed range, 1.5 x IQR)` until 2026-09-13, and
+    a baseline recorded that way **cannot be gated on at any sample size**. Both
+    terms are proportional to the spread, so the gate sits a fixed number of
+    standard deviations out however many runs go in — measured over normal
+    samples, 400 draws each: 2.32 sd at n=10, 2.28 at 23, 2.29 at 40, 2.51 at
+    100, 3.04 at 500, 3.24 at 1000. That is 1.0% to 0.06% false reds per metric
+    per run, and the 23-run baseline this repo shipped read 2.12-2.62 sd across
+    its gated metrics, i.e. 2.7% combined: one red every 37 runs. "Record more
+    green runs and then turn gating on" was the plan carried for a year, and it
+    needed about 1200 of them against a 30-day artifact retention.
+
+    So the tolerance is stated in the unit the false-alarm rate is computed in.
+    At 3.3 sd it is 0.048% per metric, 0.145% across the three gated ones — one
+    false red per ~690 runs — and on the 2026-09-13 recording the gates land at
+    `pct_json` 86.1 (the fixed floor is 65), `rss_x` 1.196 (floor 1.25) and
+    `pause_p50_ms` 0.98 ms (floor 2.5), so two of the three are tighter than the
+    floor they were meant to tighten and none of them is a coin toss.
+
+    What this cannot do is catch a small regression: 3.3 sd on this runner class
+    is ~14 pp of `/json` throughput, and anything under that is invisible to a
+    single run. Sensitivity at a fixed false-alarm rate needs confirmation
+    across runs rather than a narrower tolerance, and that needs state CI does
+    not keep yet.
     """
     layouts = {s.get("layout") for s in summaries if s.get("layout")}
     if len(layouts) > 1:
@@ -168,13 +197,11 @@ def record(summaries, runner, commit, recorded):
             continue
         entry = {"value": round(statistics.median(values), 4), "runs": len(values)}
         if len(values) >= 3:
-            half_range = (max(values) - min(values)) / 2.0
-            iqr = 0.0
-            if len(values) >= 4:
-                q = statistics.quantiles(values, n=4)
-                iqr = q[2] - q[0]
+            sd = statistics.stdev(values)
             entry["observed_range"] = [round(min(values), 4), round(max(values), 4)]
-            entry["tolerance"] = round(max(half_range, 1.5 * iqr, floors[name]), 4)
+            entry["sd"] = round(sd, 4)
+            entry["tolerance"] = round(max(TARGET_SD * sd, floors[name]), 4)
+            entry["sd_out"] = round(entry["tolerance"] / sd, 2) if sd > 0 else None
         else:
             entry["tolerance"] = None
             entry["note"] = "fewer than 3 runs: no spread measured, so this metric reports only"
@@ -303,6 +330,16 @@ def selftest():
     tol = rec["metrics"]["pct_json"]["tolerance"]
     if tol < 3.0:
         failures.append("recorded tolerance {} narrower than the observed ±3.0 range".format(tol))
+    # And stated in standard deviations, which is the unit the false-alarm rate
+    # is computed in. The rule this replaced — half-range or 1.5x IQR — sits at
+    # about 2.3 sd for any sample size, so a baseline recorded under it can never
+    # be gated on; a revert to it would pass every other fixture here silently.
+    sd = statistics.stdev([84.0, 85.0, 86.0, 82.0, 88.0])
+    if tol < 3.0 * sd:
+        failures.append("recorded tolerance {} is {:.2f} sd, under the 3 sd a gate needs"
+                        .format(tol, tol / sd))
+    if rec["metrics"]["pct_json"].get("sd_out") is None:
+        failures.append("recording did not report how many sd the tolerance is")
     if rec["metrics"]["rss_x"]["tolerance"] < 0.05:
         failures.append("recorded tolerance ignored the floor for a metric with zero spread")
 

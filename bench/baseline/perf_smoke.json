@@ -2,47 +2,55 @@
   "provenance": {
     "runner": "ubuntu-latest",
     "layout": "headerless",
-    "commit": "9f99142",
-    "runs": 23,
+    "commit": "04e55fd",
+    "runs": 24,
     "recorded": "2026-09-13",
-    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm. Recorded from the perf-smoke-report artifacts of the 23 green master runs on the headerless compile default (2026-09-10 e5bae04 through 2026-09-13 9f99142) \u2014 every green run since #41 flipped the layout, not the first ten. Ten was the plan and it under-sampled: a ten-run window read the spread as 96.6-105.2 on pct_json, while the thirteen runs after it ranged 93.9-108.4, which would have left the gate 0.94pp from a false alarm. At 23 runs no recording run sits outside its own tolerance on any metric (the previous recording had 1 of 10 on rss_x) and leave-one-out passes 23 of 23. The two predecessors were each invalidated by a default flip one release apart \u2014 0.24.0's allocator, 0.26.0's layout \u2014 so the layout field above is load-bearing: perf_compare.py refuses to gate across a mismatch. Re-record on the next flip."
+    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm. Recorded from the perf-smoke-report artifacts of 24 green master runs on the headerless compile default (2026-09-12/13), and the first baseline in this repo that `PERF_GATE_BASELINE=1` can be turned on against. The tolerance is 3.3 standard deviations, not half the observed range: that older rule is proportional to the spread, so it sat about 2.3 sd out at every sample size (measured over normal samples: 2.28 sd at n=23, 2.51 at 100, 3.04 at 500, 3.24 at 1000), which is a 2.7% false-red rate per run and the real reason gating stayed off for a year. In sd the margins are 3.37 / 3.57 / 3.34 on pct_json, rss_x and pause_p50_ms, i.e. 0.10% combined per run, one false red per ~1000 runs, and the gates land at 86.06 / 1.196 / 0.981 against fixed floors of 65 / 1.25 / 2.5 \u2014 tighter than the floors they were meant to tighten, on all three. Leave-one-out passes 24 of 24. What this cannot catch is a regression under 3.3 sd, about 14 pp of /json throughput on this runner class; that needs confirmation across runs, not a narrower tolerance. Re-record on the next layout or allocator flip \u2014 perf_compare.py refuses to gate across one."
   },
   "metrics": {
     "pct_json": {
-      "value": 99.7,
-      "runs": 23,
+      "value": 100.45,
+      "runs": 24,
       "observed_range": [
         93.9,
         108.4
       ],
-      "tolerance": 9.9
+      "sd": 4.3613,
+      "tolerance": 14.3922,
+      "sd_out": 3.3
     },
     "pct_root": {
-      "value": 99.5,
-      "runs": 23,
+      "value": 99.45,
+      "runs": 24,
       "observed_range": [
         91.1,
         111.0
       ],
-      "tolerance": 9.95
+      "sd": 4.7222,
+      "tolerance": 15.5832,
+      "sd_out": 3.3
     },
     "rss_x": {
-      "value": 0.947,
-      "runs": 23,
+      "value": 0.9465,
+      "runs": 24,
       "observed_range": [
-        0.77,
+        0.714,
         0.993
       ],
-      "tolerance": 0.1115
+      "sd": 0.0756,
+      "tolerance": 0.2495,
+      "sd_out": 3.3
     },
     "pause_p50_ms": {
-      "value": 0.6399,
-      "runs": 23,
+      "value": 0.6404,
+      "runs": 24,
       "observed_range": [
         0.399,
-        0.7503
+        0.9134
       ],
-      "tolerance": 0.2
+      "sd": 0.1033,
+      "tolerance": 0.3407,
+      "sd_out": 3.3
     }
   }
 }

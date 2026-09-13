@@ -1009,16 +1009,27 @@ jobs:
           # under a 70% gate. RSS×/pause catch pause-campaign regressions;
           # quiet tip ~85% @ ~0.8× @ ~0.6ms.
           # The floors below are the catastrophe net. The baseline comparison
-          # perf_smoke.sh runs at the end is the sensitive half, and it is
-          # recorded on this runner class and this layout since 2026-09-13 (23
-          # green master runs, bench/baseline/perf_smoke.json) — so it compares
-          # for real rather than printing STALE. Still report-only, and now for
-          # a measured reason: the three gated metrics sit 2.16-2.50 sd from
-          # their means, 3.2% combined per run, i.e. one false red every ~31
-          # runs. PERF_GATE_BASELINE=1 wants ~3.3 sd, which more samples buy.
+          # perf_smoke.sh runs at the end is the sensitive half, and since
+          # 2026-09-13 it **gates**: PERF_GATE_BASELINE=1.
+          #
+          # What made that possible was not more samples. The tolerance rule was
+          # max(half the observed range, 1.5 x IQR), and both terms are
+          # proportional to the spread, so the gate sat ~2.3 sd from the mean at
+          # every sample size — 2.28 sd at n=23, 2.51 at 100, 3.04 at 500, 3.24
+          # at 1000, measured over normal samples. That is a 2.7% false-red rate
+          # per run on the 23-run recording, and reaching 3.3 sd would have
+          # taken ~1200 runs against a 30-day artifact retention. Stating the
+          # tolerance in standard deviations instead puts the gates at 3.34-3.57
+          # sd: 0.10% combined per run, one false red per ~1000 runs, with
+          # leave-one-out green on 24 of 24 recording runs.
+          #
+          # And the gate is now tighter than the floors on all three metrics:
+          # 86.06% vs a 65% floor, 1.196x vs 1.25x, 0.98 ms vs 2.5 ms. What it
+          # cannot catch is a regression under 3.3 sd (~14 pp of /json here);
+          # that needs confirmation across runs rather than a narrower band.
           PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
             MIN_PCT=65 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
-            RUNNER_LABEL=ubuntu-latest \
+            RUNNER_LABEL=ubuntu-latest PERF_GATE_BASELINE=1 \
             ./bench/perf_smoke.sh
 
       - name: Kemal E2E (endpoints + 60s load)

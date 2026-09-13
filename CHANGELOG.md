@@ -22,6 +22,27 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Changed
+
+- **The perf baseline now gates, and what unblocked it was arithmetic rather
+  than more samples.** `PERF_GATE_BASELINE=1` has been "next" on the
+  benchmark-alerts item for a year, behind *record more green runs first*. The
+  tolerance rule was `max(half the observed range, 1.5 x IQR, floor)`, and both
+  of those terms scale with the spread — so the gate sat about 2.3 standard
+  deviations from the mean at any sample size (simulated: 2.28 sd at n=23, 2.51
+  at 100, 3.04 at 500, 3.24 at 1000), which is a 2.7% false-red rate per run and
+  would have needed ~1200 runs to reach 3.3 sd against a 30-day artifact
+  retention. The tolerance is now stated in standard deviations (`TARGET_SD =
+  3.3`, floored per metric), which puts the three gated metrics at 3.34-3.57 sd:
+  **0.10% combined per run, one false red per ~1000 runs**, leave-one-out green
+  on 24 of 24 recording runs, and each gate **tighter than the fixed floor it
+  was meant to tighten** — 86.06% against 65%, 1.196x against 1.25x, 0.98 ms
+  against 2.5 ms. `bench/perf_gate_margin.py` reports the margin and the
+  false-alarm rate so the next flip decision is measured too. What the gate
+  cannot see is a regression under ~14 pp of `/json` throughput on this runner
+  class; that needs confirmation across runs, not a narrower band.
+  `bench/log/linux/2026-09-13-perf-gate-flip/FINDINGS.md`
+
 ### Added
 
 - **`make counter-loss`, and the decision it settles.** The process heap's

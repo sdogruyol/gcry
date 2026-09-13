@@ -837,6 +837,31 @@ CI asymmetry that hid both.
       A human noticing that a default flip invalidated a baseline is not a
       control; this is.
 
+      **2026-09-13: gating is ON, and the blocker was the rule rather than the
+      sample size.** The tolerance was `max(half the observed range, 1.5 x IQR,
+      floor)`, and both of those terms are proportional to the spread — so the
+      gate sat a fixed number of standard deviations from the mean at every
+      sample size. Simulated over normal samples: **2.28 sd at n=23, 2.29 at 40,
+      2.51 at 100, 3.04 at 500, 3.24 at 1000**. The 23-run recording read
+      2.12-2.62 sd, i.e. 2.7% false reds per run, and "record more green runs
+      and then turn gating on" — the plan on this item for a year — needed about
+      **1200 runs** against a 30-day artifact retention. It was a treadmill, not
+      a lever.
+      The tolerance is now stated in the unit the question is asked in:
+      `TARGET_SD = 3.3`, floored per metric. On 24 green headerless runs the
+      gates land at `pct_json` **86.06** (3.37 sd), `rss_x` **1.196** (3.57 sd)
+      and `pause_p50_ms` **0.981 ms** (3.34 sd) — 0.10% combined per run, one
+      false red per ~1000 runs, leave-one-out green on 24 of 24 — and every one
+      of the three is **tighter than the fixed floor it was meant to tighten**
+      (65, 1.25, 2.5). `PERF_GATE_BASELINE=1` is set in the perf-smoke job.
+      What it cannot catch: a regression under 3.3 sd, about 14 pp of `/json`
+      here. Narrowing the band trades the false-red rate back, so sensitivity
+      needs *confirmation across runs* instead — two consecutive runs outside
+      2 sd is 0.05% per pair and would catch ~9 pp at today's false-red rate,
+      which needs state CI does not keep between runs. That is the next piece of
+      this item. `bench/perf_gate_margin.py` is how the margin is measured, and
+      `bench/log/linux/2026-09-13-perf-gate-flip/FINDINGS.md` is the record.
+
       **2026-09-13: recorded on the layout that ships, and the flip now has a
       number against it.** 23 green master runs since #41 (`e5bae04` through
       `9f99142`), from the artifacts the job already uploads. Ten was the plan
