@@ -1175,6 +1175,14 @@ module Gcry
               @low_water_skips += 1
               @low_water_skipped_bytes += lw - lagged
               lagged = lw
+            else
+              # The probe ran and found a faulted page at or below the lag
+              # floor, so there is nothing to skip. Counted separately from
+              # "the probe never ran", because the skip firing exactly once per
+              # parked fiber and never again — measured 2026-09-13, 266 skips
+              # whether the run does 1 collection or 20 — has to be one or the
+              # other, and the two have different fixes.
+              @low_water_misses += 1
             end
           end
         end

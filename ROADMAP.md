@@ -401,12 +401,17 @@ CI asymmetry that hid both.
       where its scan actually began — exactly what the fix would stop reading.
       With 256 fibers parked 64 frames deep on a Parallel context, 20
       collections: **65.5 MB per collection**, 262 parked scans, **256.0 KiB
-      each — the lag paid in full**, and the pagemap low-water skip fires on
-      only **266 of 5 240 scans** (5%). That second number is the one that was
-      not obvious: the skip is what makes the lag affordable on a fat app, and
-      pooled stacks a previous tenant faulted deeply are precisely where it
-      cannot help, which is what a parked-fiber-heavy context is made of. So the
-      work is worth doing and the cost grows linearly with parked fibers.
+      each — the lag paid in full**, and exactly linear in parked fibers (17.5 /
+      33.5 / 65.5 / 129.5 MB at 64 / 128 / 256 / 512).
+      **And the low-water skip fires once per fiber, not once per scan** — 266
+      skips whether the run does 1 collection or 20, while the scans go 262 →
+      5 240. The first scan of a parked fiber skips its whole window (261 KiB
+      each) and no scan after it skips anything, so every collection past the
+      first pays the full 256 KiB per parked fiber. That understates "pooled
+      stacks lose it over time": a fiber loses it on its own second collection.
+      `low_water_misses` is 0, so the later scans never reach the probe — with
+      `stack_low_water_scan` on and pagemap available, the `bottom > lagged`
+      precondition is the thing to instrument next, and it is one counter away.
       What is still missing is the *predicate*: "genuinely parked, not in
       transit" is the whole difficulty, and `Fiber#running?` only approximates
       it. `make fiber-lag-cost` keeps the measurement.

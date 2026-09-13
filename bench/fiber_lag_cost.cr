@@ -66,11 +66,13 @@ sleep 300.milliseconds
 scans0 = heap.fiber_lag_scans
 bytes0 = heap.fiber_lag_window_bytes
 skips0 = heap.low_water_skips
+misses0 = heap.low_water_misses
 skipped0 = heap.low_water_skipped_bytes
 COLLECTIONS.times { GC.collect }
 scans = heap.fiber_lag_scans - scans0
 bytes = heap.fiber_lag_window_bytes - bytes0
 skips = heap.low_water_skips - skips0
+misses = heap.low_water_misses - misses0
 skipped = heap.low_water_skipped_bytes - skipped0
 
 FIBERS.times { ch.send(nil) }
@@ -78,6 +80,7 @@ FIBERS.times { ch.send(nil) }
 puts "parked-fiber scans that paid the lag: #{scans}"
 puts "bytes between saved SP and scan start: #{bytes}"
 puts "low-water skips inside those windows:  #{skips}, #{skipped} bytes already skipped"
+puts "probe ran and found nothing to skip:   #{misses}"
 puts ""
 
 if scans == 0

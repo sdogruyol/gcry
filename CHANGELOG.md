@@ -30,9 +30,13 @@ is now the default and the flag would take you the wrong way.
   fiber from its own SP instead. `fiber_lag_window_bytes` now counts exactly what
   that would stop reading: with 256 fibers parked 64 frames deep on a Parallel
   context, **65.5 MB per collection — 256.0 KiB per parked fiber, the lag paid
-  in full** — and the pagemap low-water skip that makes the lag affordable on a
-  fat app fires on only **266 of 5 240 scans**, because pooled stacks a previous
-  tenant faulted deeply are exactly where it cannot help. The fix is a root-scan
+  in full** — and exactly linear in parked fibers (17.5 / 33.5 / 65.5 / 129.5 MB
+  at 64 / 128 / 256 / 512). The pagemap low-water skip that makes the lag
+  affordable on a fat app turns out to fire **once per fiber rather than once per
+  scan**: 266 skips whether the run does 1 collection or 20, while scans go 262
+  to 5 240, so every collection past a fiber's first pays the whole window.
+  `low_water_misses` (new) is 0, which says the later scans never reach the
+  probe. The fix is a root-scan
   change, so the measurement is the argument for doing it rather than a
   substitute: the predicate for "genuinely parked, not in transit" is still the
   difficulty.

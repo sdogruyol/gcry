@@ -34,16 +34,42 @@ collections:
 | per parked fiber | **256.0 KiB** — the lag, in full |
 | low-water skips inside those windows | 266 of 5 240 scans, 69.4 MB |
 
-Two readings, and the second is the one that was not obvious. The lag is paid
-**in full** per parked fiber — 256.0 KiB, the configured window, not some
-fraction of it — and the pagemap low-water skip, which is what makes the lag
-affordable on a fat app, fires on **5% of these scans**. Pooled fiber stacks
-that a previous tenant faulted deeply are exactly the case the skip cannot help
-with, and a parked-fiber-heavy context is made of them.
+Two readings, and the second is the one that was not obvious.
 
-So the proposal's payoff here is ~65 MB of reads per collection, and it grows
-linearly with the number of parked fibers: 256 KiB each, every collection, for
-fibers that are not going to move.
+**The lag is paid in full** per parked fiber — 256.0 KiB, the configured window,
+not some fraction of it — and the cost is exactly linear in the number of parked
+fibers:
+
+| parked fibers | per collection | scans per collection |
+|---|---|---|
+| 64 | 17.5 MB | 70 |
+| 128 | 33.5 MB | 134 |
+| 256 | 65.5 MB | 262 |
+| 512 | 129.5 MB | 518 |
+
+**And the pagemap low-water skip fires once per fiber, not once per scan.** The
+skip is what makes the lag affordable on a fat app, and this is what it does
+here:
+
+| collections | parked scans | low-water skips | probe ran, nothing to skip |
+|---|---|---|---|
+| 1 | 262 | 266 | 0 |
+| 2 | 524 | 266 | 0 |
+| 4 | 1 048 | 266 | 0 |
+| 20 | 5 240 | 266 | 0 |
+
+266 skips whichever it is — the *first* scan of each parked fiber skips its whole
+window (69.5 MB over 266 skips is 261 KiB each, i.e. all of it), and no scan
+after that does. So every collection past the first pays 256 KiB per parked
+fiber with no skip at all, which is why the roadmap's "pooled stacks lose it over
+time" understates it: a fiber loses it on its own second collection.
+
+The mechanism is narrowed but not closed. `low_water_misses` — added for exactly
+this — counts a probe that ran and found a faulted page at or below the lag
+floor, and it is **0**, so the later scans do not reach the probe at all;
+`stack_low_water_scan` is on and the pagemap is available, which leaves the
+`bottom > lagged` precondition as the thing to instrument next. That is one
+counter away and it is the named next step here.
 
 ## What this does not do
 

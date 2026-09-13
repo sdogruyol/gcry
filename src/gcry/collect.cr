@@ -577,6 +577,9 @@ module Gcry
     getter fiber_lag_scans : UInt64 = 0_u64
     getter fiber_lag_window_bytes : UInt64 = 0_u64
     getter low_water_skips : UInt64 = 0_u64
+    # Probe ran, found nothing skippable. `low_water_skips` alone cannot tell
+    # that from a probe that never ran.
+    getter low_water_misses : UInt64 = 0_u64
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
     getter size_class_chunk_count : UInt64 = 0_u64
