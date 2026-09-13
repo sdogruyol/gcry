@@ -22,6 +22,23 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Added
+
+- **`make pool-refill-cost`, and a retired note.** `tasks/todo.md` carried
+  "`bitmap_take_pool_chunk` walks every chunk of the class per refill:
+  O(chunks)" since the bitmap allocator landed. Measured: the walk builds a
+  sorted index of candidate addresses once per *capacity version*, each sweep
+  bumps that version, and the count is **2.0 rebuilds per collection — one per
+  active class slot — identical whether the class holds 29 chunks or 598**. The
+  cost per allocation does grow linearly with the chunk count (0.0142 to 0.292
+  chunk visits per allocation across a 20.6x growth), which is the arithmetic of
+  a constant rebuild rate rather than a regression: one visit per chunk is
+  **0.391% of what the sweep walks in the same collection**, since the sweep
+  visits every block of every chunk. The gate fails if rebuilds per collection
+  exceed one per active slot, which is the only way this becomes the per-refill
+  walk the note described.
+  `bench/log/linux/2026-09-13-pool-refill-cost/FINDINGS.md`
+
 ### Fixed
 
 - **The crash report excluded the one mechanism it was built to name.**

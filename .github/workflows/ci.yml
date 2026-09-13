@@ -624,6 +624,14 @@ jobs:
         run: |
           make released-range-report
 
+      # Refill indexing: one chunk-list walk per active class slot per
+      # collection, and the gate is that it stays one. Anything more means the
+      # index is invalidated inside a collection and its walk paid repeatedly,
+      # which is the O(chunks)-per-refill shape the note described.
+      - name: Refill indexing stays per version
+        run: |
+          make pool-refill-cost
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

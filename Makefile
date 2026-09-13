@@ -954,6 +954,21 @@ released-range-report: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/released_range_report.cr -o $(BIN)/released_range_report --error-trace
 	$(BIN)/released_range_report
 
+# Does a pool refill walk the chunk list, and how does that scale? The note this
+# retires said "walks every chunk of the class per refill: O(chunks)". Measured:
+# the walk happens once per *capacity version*, each sweep bumps that version,
+# and the count is 2.0 rebuilds per collection — one per active class slot —
+# whether the class holds 29 chunks or 598. The cost per allocation does grow
+# linearly with the chunk count, which is the arithmetic of a constant rebuild
+# rate, and it is 0.391% of what the sweep walks in the same collection (512
+# blocks per chunk at 256 B). Fails if rebuilds per collection exceed one per
+# active slot, i.e. if the index starts being invalidated mid-collection, which
+# is the only way this becomes the per-refill walk. Two arms, ~13 s.
+pool-refill-cost: $(BIN)
+	$(CRYSTAL) build --release -Dgc_none bench/pool_refill_cost.cr -o $(BIN)/pool_refill_cost --error-trace
+	$(BIN)/pool_refill_cost
+	$(BIN)/pool_refill_cost --churn
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

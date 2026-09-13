@@ -256,8 +256,10 @@ which takes `@chunk_list_lock` and not the class lock.
       tests the header-representation walk it is about.
 - [ ] Dormant-flush overshoot fixed (`finish = base + mapped_bytes` overshot by
       `data_offset`; now `chunk.address + mapped_bytes`).
-- [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
-      chunk. Wants a per-class pool list, ascending address order.
+- [x] `bitmap_take_pool_chunk` walks the chunk list — measured 2026-09-13 and
+      retired: the walk is per *capacity version*, not per exhausted chunk, and
+      the count is 2.0 rebuilds per collection (one per active class slot)
+      whether the class holds 29 chunks or 598. `make pool-refill-cost`.
 - [ ] Nursery chunks still header-based (Phase 8)
 - [ ] No measurement yet: sweep and alloc claims both unmeasured
 
@@ -276,8 +278,10 @@ null control:
   path, **−8.2%** on the default header path. null: −0.70%, flat.
 - mark-audit / property / mt-property / stw-mt / invariants all green — the
   size-trust change does not under-scan.
-- [ ] `bitmap_take_pool_chunk` walks the chunk list — O(chunks) per exhausted
-      chunk. Wants a per-class pool list, ascending address order.
+- [x] `bitmap_take_pool_chunk` walks the chunk list — measured 2026-09-13 and
+      retired: the walk is per *capacity version*, not per exhausted chunk, and
+      the count is 2.0 rebuilds per collection (one per active class slot)
+      whether the class holds 29 chunks or 598. `make pool-refill-cost`.
 - [ ] Nursery chunks still header-based (Phase 8)
 - [ ] No measurement yet: sweep and alloc claims both unmeasured
 
@@ -540,9 +544,25 @@ away:
       collection at 4 threads with mark and sweep in microseconds — whole
       thread-stack scans. Measure `scan_other_thread_stacks` and the SP
       snapshot on this box; low-water skip.
-- [ ] `bitmap_take_pool_chunk` walks every chunk of the class per refill:
-      O(chunks) at large heaps (1 125 ns/alloc at 960 MB). Per-class pool
-      list of chunks with capacity, ascending address order.
+- [x] `bitmap_take_pool_chunk` walks every chunk of the class per refill —
+      **not what it does, measured 2026-09-13.** The walk builds a sorted index
+      of candidate addresses once per capacity version, and each sweep bumps
+      that version: 163 840 allocations produce **80 rebuilds, 2.0 per
+      collection, identical at 29 / 57 / 165 / 598 chunks** in the class. The
+      per-allocation cost does grow linearly with the chunk count (0.0142 ->
+      0.292 chunk visits per allocation across a 20.6x growth) and that is the
+      arithmetic of a constant rebuild rate, not a regression: one visit per
+      chunk per slot is **0.391% of what the sweep walks in the same
+      collection**, which visits every block of every chunk. The churn arm
+      reads the same. So the item becomes a documented cost — refill indexing
+      costs one chunk-list walk per active class slot per collection — and
+      `make pool-refill-cost` fails if that ever exceeds one per slot, which is
+      the only way it becomes the per-refill walk this said.
+      If a workload ever makes 0.391% matter (many chunks per class, few blocks
+      per chunk), the fix is the sweep handing the allocator the chunks with
+      room; caching the walk cannot help, since the sweep invalidates the
+      version it is keyed on.
+      `bench/log/linux/2026-09-13-pool-refill-cost/FINDINGS.md`
 - [x] Full soak: 24 h `make soak` running on the pushed tree (eb77356) from 21:08 local 2026-09-05, output `soak_full2.out` in the session scratchpad, telemetry `/tmp/gcry-soak.log`.
 
 ## Review of PR #34 (sdogruyol, 2026-09-05 07:35Z) — done
