@@ -293,6 +293,7 @@ module Gcry
         return unless PoisonHolders.requested? && size > 0
         PoisonHolders.entry_sp = @collect_entry_sp
         PoisonHolders.search(self, base, size)
+        PoisonHolders.scanned_windows_report(self, base, size)
       {% end %}
     end
 

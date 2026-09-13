@@ -1146,7 +1146,10 @@ module Gcry
       l = RawOut.append(buf.to_unsafe, l,
         " of the stack words are above the collector's entry SP (live mutator frames)\n")
       RawOut.flush(buf.to_unsafe, l)
-      {% if flag?(:unix) %} PoisonHolders.search(self, user, size) {% end %}
+      {% if flag?(:unix) %}
+        PoisonHolders.search(self, user, size)
+        PoisonHolders.scanned_windows_report(self, user, size)
+      {% end %}
     end
 
     protected def guard_release(base : UInt64, len : UInt64, kind : UInt8) : Bool

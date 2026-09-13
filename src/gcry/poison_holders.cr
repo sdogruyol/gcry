@@ -62,15 +62,19 @@ module Gcry
       @@requested = true
     end
 
-    # Count holders without saying anything.
+    # Counting callers get their own walk, and the duplication is deliberate.
     #
     # The loud form is for one block, after a fault, when the whole process is
     # already lost. A caller that asks this question *per released chunk* —
-    # `GCRY_RELEASE_HOLDERS=1`, from the release path — needs the opposite:
-    # silence on the overwhelming majority that are genuinely dead, and a
-    # report only for the one that is not. So the walks are shared and the
-    # printing is gated.
-    @@quiet = false
+    # `GCRY_RELEASE_HOLDERS=1` and the poisoned-pin path, both from inside a
+    # collection — needs silence on the overwhelming majority that are
+    # genuinely dead. The first version got that by gating the printing of the
+    # shared walk behind a flag, which put one more call frame on every line of
+    # the crash report; `make poison-holders` then failed twice on the x86_64
+    # runner with the report truncated after its first line, never locally.
+    # Whatever that was, the crash path is the wrong place to find out: it now
+    # runs exactly the code that was green for weeks, and the counting callers
+    # walk separately.
     # The collector's entry SP, when the caller is the collector. Splits its
     # own frames from the mutator frames above them; 0 means "cannot tell",
     # which is the honest answer from a signal handler.
@@ -91,29 +95,71 @@ module Gcry
       @@live_frame_hits = 0_u64
     end
 
-    private def self.emit(buf : UInt8*, len : Int32) : Nil
-      return if @@quiet
-      RawOut.flush(buf, len)
-    end
-
     # The heap walk alone. `holders_count` sums roots, live blocks and stacks,
     # and for a question about *the heap walk* that is the wrong total: a
     # caller's own locals put the address on a stack, so every target looks
     # held. `bench/holders_find.cr` is the control that needs this.
     def self.heap_holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
       return 0_u64 if user == 0 || size == 0
-      @@quiet = true
-      found = search_heap(heap, user, user &+ size, "release")
-      @@quiet = false
-      found
+      count_heap_holders(heap, user, user &+ size)
     end
 
     def self.holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
       return 0_u64 if user == 0 || size == 0
-      @@quiet = true
-      found = search_at(heap, user, size, "release")
-      @@quiet = false
-      found
+      count_heap_holders(heap, user, user &+ size)
+    end
+
+    # `search_heap`'s walk with the reporting removed: every live block in
+    # every chunk, counting words that land in `[user, finish)`. Kept separate
+    # from the printing walk on purpose — see the note above.
+    private def self.count_heap_holders(heap : Heap, user : UInt64, finish : UInt64) : UInt64
+      hits = 0_u64
+      scanned = 0_u64
+      heap.each_chunk do |chunk|
+        next if ChunkHeader.dormant?(chunk)
+
+        if ChunkHeader.large?(chunk)
+          header = ChunkHeader.large_header(chunk)
+          scanned &+= 1
+          next unless heap.diag_allocated?(header)
+          hits &+= count_block_holders(heap, header, user, finish)
+          next
+        end
+
+        class_index = chunk.value.size_class.to_i32!
+        next if class_index < 0 || class_index >= SIZE_CLASS_COUNT
+        block_bytes = BlockHeader::SIZE.to_u64 + SizeClasses.payload(class_index).to_u64
+        next if block_bytes == 0
+
+        cursor = ChunkHeader.data_start(chunk).as(UInt8*)
+        limit = ChunkHeader.data_end(chunk).as(UInt8*)
+        while (cursor + block_bytes) <= limit
+          break if scanned >= MAX_BLOCKS
+          scanned &+= 1
+          header = cursor.as(BlockHeader*)
+          hits &+= count_block_holders(heap, header, user, finish) if heap.diag_allocated?(header)
+          cursor += block_bytes
+        end
+      end
+      hits
+    end
+
+    private def self.count_block_holders(heap : Heap, header : BlockHeader*,
+                                         user : UInt64, finish : UInt64) : UInt64
+      size = heap.diag_payload(header)
+      return 0_u64 if size < sizeof(UInt64)
+      base = heap.diag_user(header).address
+      # Never count the block on itself.
+      return 0_u64 if base == user
+      hits = 0_u64
+      words = size // sizeof(UInt64)
+      i = 0_u64
+      while i < words
+        w = Pointer(UInt64).new(base &+ i &* sizeof(UInt64)).value
+        hits &+= 1 if w >= user && w < finish
+        i += 1
+      end
+      hits
     end
 
     def self.requested? : Bool
@@ -136,7 +182,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, user &+ size)
       len = RawOut.append(buf.to_unsafe, len, "), the range gcry released\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
 
       @@first_holder_base = 0_u64
       @@first_holder_size = 0_u64
@@ -150,7 +196,7 @@ module Gcry
           "gcry: holders — none. Nothing in the root set, in a live block or on a fiber stack points " \
           "into it, so the pointer is in a register, in thread-local storage, or in memory gcry never " \
           "mapped — and those are three different defects\n")
-        emit(buf.to_unsafe, len)
+        RawOut.flush(buf.to_unsafe, len)
         return
       end
 
@@ -172,7 +218,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, base &+ bsize)
       len = RawOut.append(buf.to_unsafe, len, ")\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
 
       owners = search_at(heap, base, bsize, "owner")
       return unless owners == 0
@@ -181,7 +227,7 @@ module Gcry
         "gcry: owner — none. Nothing points at the holder either, so the collector was right to " \
         "consider it garbage and the mutator is reading an object it never published anywhere the " \
         "collector can see\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # One pass of the three walks over `[lo, lo + size)`, tagged so a second
@@ -192,9 +238,6 @@ module Gcry
       found &+= search_roots(heap, lo, finish, tag)
       found &+= search_heap(heap, lo, finish, tag)
       found &+= search_stacks(heap, lo, finish, tag)
-      # Not added to `found`: these words are a *subset* of the walk above,
-      # and the point is to say which subset.
-      search_scanned_windows(heap, lo, finish, tag)
       found
     end
 
@@ -219,7 +262,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, " of ")
       len = RawOut.append_u64(buf.to_unsafe, len, total)
       len = RawOut.append(buf.to_unsafe, len, hits == 0 ? " point into it — gcry is not rooting it\n" : " point into it\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
       hits
     end
 
@@ -311,7 +354,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, ", collections ")
       len = RawOut.append_u64(buf.to_unsafe, len, heap.collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
       hits
     end
 
@@ -375,7 +418,7 @@ module Gcry
             len = RawOut.append(buf.to_unsafe, len, " (block+")
             len = RawOut.append_u64(buf.to_unsafe, len, w &- user)
             len = RawOut.append(buf.to_unsafe, len, ")\n")
-            emit(buf.to_unsafe, len)
+            RawOut.flush(buf.to_unsafe, len)
             dump_payload(base, size)
             # The first holder is the one the caller runs the search against a
             # second time. Recorded here rather than returned: the walk is a
@@ -417,7 +460,7 @@ module Gcry
         i &+= 1
       end
       len = RawOut.append(buf.to_unsafe, len, "\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # Fiber stacks, and the faulting thread's live frames. A hit here means a
@@ -489,7 +532,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len, " word(s) across ")
       len = RawOut.append_u64(buf.to_unsafe, len, stacks)
       len = RawOut.append(buf.to_unsafe, len, " stack(s)\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
       hits
     end
 
@@ -509,6 +552,14 @@ module Gcry
     # phase read. A hit in here is a root the collector had and did not
     # follow; a hit only in the wider walk is dead space it is right to
     # ignore. The difference between the two numbers is the whole answer.
+    # Called by the collector paths after `search`, never from the crash path:
+    # the SP table it reads is only meaningful inside or just after a
+    # collection, and the crash report is not the place to add walks.
+    def self.scanned_windows_report(heap : Heap, user : UInt64, size : UInt64) : UInt64
+      return 0_u64 if user == 0 || size == 0
+      search_scanned_windows(heap, user, user &+ size, "holders")
+    end
+
     private def self.search_scanned_windows(heap : Heap, user : UInt64, finish : UInt64,
                                             tag : String) : UInt64
       # Only for a collector caller, and that is not a preference. The verdict
@@ -558,7 +609,7 @@ module Gcry
       len = RawOut.append(buf.to_unsafe, len,
         " thread(s), reading only [recorded SP, bottom) — the region the mark phase read. " \
         "Zero here with a non-zero count above means every reference is in dead stack space\n")
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
       hits
     end
 
@@ -644,7 +695,7 @@ module Gcry
       else
         len = RawOut.append(buf.to_unsafe, len, "\n")
       end
-      emit(buf.to_unsafe, len)
+      RawOut.flush(buf.to_unsafe, len)
     end
   end
 end
