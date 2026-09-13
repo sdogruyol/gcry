@@ -1310,6 +1310,19 @@ CI asymmetry that hid both.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
+- [ ] **A guarded sighting under load that nothing could attribute (2026-09-13).**
+      `make thread-churn-uaf`'s guarded arm faulted 1 of 24 on two consecutive
+      overnight runs, with an 8 h soak and two drift children loading the
+      machine: `SIGSEGV at 0x7f5ed0e69768 — outside gcry's heap span
+      [0x7f5eceebf000, 0x7f5ed0ab5000)`, i.e. 3.8 MB above the span end. The
+      guard was engaged and its ledger almost certainly held the identity, but
+      the report asked the ledger only inside the span — and releasing a chunk
+      is what moves its address out of the span. Both branches now ask one
+      helper, so the next sighting is readable; this one is not, and stays open
+      as a sighting rather than a diagnosis. The rate is also the first since
+      the 2026-09-13 latch and mark-clear fixes, and it was under load.
+      `bench/log/linux/2026-09-13-released-range-report/FINDINGS.md`
+
 - [x] **A large object is released under load on the fat app — FIXED
       2026-09-13.** The title said *live* from 2026-08-23 to
       2026-09-12; the holders search, run at the release instead of at the

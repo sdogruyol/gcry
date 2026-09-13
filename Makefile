@@ -933,6 +933,27 @@ counter-loss: $(BIN)
 	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --control
 	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --inject
 
+# `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as PROT_NONE and records
+# its identity, so a fault into it reads as "this is the memory gcry gave back"
+# — base, size, release path, collection, first user word, blocks still
+# allocated at release — instead of "some address". This faults into such a
+# chunk on purpose and requires the report to name it. ~0.2 s, 0 failures in 8.
+#
+# What it does not cover, and the reason is worth keeping: the same question
+# asked of an address *outside* the heap span. Releasing a chunk is what moves
+# its address out of the span, and until 2026-09-13 the report asked the ledger
+# only after an in-span test, so exactly those faults were reported as "never a
+# gcry allocation, so a swept object is not the explanation". Both branches now
+# ask one helper. A synthetic out-of-span release could not be built: size-class
+# chunks are bracketed by live ones, a large object goes to the large cache
+# rather than to the kernel (and the adaptive retain policy resets the budget
+# each major), and a harness that remembers the address to poke it roots the
+# object by doing so — a UInt64 in a live stack slot is a pointer to a
+# conservative scan.
+released-range-report: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/released_range_report.cr -o $(BIN)/released_range_report --error-trace
+	$(BIN)/released_range_report
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

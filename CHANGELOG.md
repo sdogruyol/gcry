@@ -22,6 +22,26 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Fixed
+
+- **The crash report excluded the one mechanism it was built to name.**
+  `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as `PROT_NONE` and records
+  base, size, release path, collection, first user word and blocks still
+  allocated at release — and the report asked that ledger only for addresses
+  *inside* the heap span. `heap_span_hi` is the top of the live chunks, so
+  releasing a chunk is precisely what moves its address out of the span, and the
+  guard then reserves that address so nothing can map over it: a fault there is
+  expected to be out of span. Those faults ended on "never a gcry allocation, so
+  a swept object is not the explanation", which excludes the mechanism by name.
+  Seen overnight on 2026-09-13 under load: `make thread-churn-uaf`'s guarded arm
+  faulted 1 of 24 on two consecutive runs, 3.8 MB above the span end, and the
+  report said that sentence both times. Both branches now ask one helper.
+  `make released-range-report` covers the half a harness can build — a fault
+  into a guarded release must be named — and the findings record why the
+  out-of-span half cannot be built synthetically, which is three facts about the
+  allocator rather than a missing test.
+  `bench/log/linux/2026-09-13-released-range-report/FINDINGS.md`
+
 ### Changed
 
 - **The perf baseline now gates, and what unblocked it was arithmetic rather

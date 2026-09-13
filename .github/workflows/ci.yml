@@ -614,6 +614,16 @@ jobs:
         run: |
           make counter-loss
 
+      # The guard's ledger, end to end: a fault into a chunk gcry released must
+      # be named — base, size, release path, collection — rather than reported
+      # as an address. That reporting is what turns one sighting a week into a
+      # diagnosis, and it had a hole until 2026-09-13: it was asked only of
+      # addresses inside the heap span, and releasing a chunk is what moves an
+      # address out of it.
+      - name: A released range is named, not described
+        run: |
+          make released-range-report
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

@@ -676,6 +676,9 @@ module Gcry
       end
 
       unless heap.in_heap_span?(addr)
+        # A released chunk shrinks the span, so the span cannot be the first
+        # question: ask the guard ledger before concluding anything from it.
+        return if report_released_range(heap, a, buf.to_unsafe, len)
         len = RawOut.append(buf.to_unsafe, len, "outside gcry's heap span [0x")
         len = RawOut.append_hex(buf.to_unsafe, len, heap.heap_span_lo)
         len = RawOut.append(buf.to_unsafe, len, ", 0x")
@@ -725,61 +728,9 @@ module Gcry
         # anything that needs the range to be reused — at the cost of certainty
         # about what is there *now*, which is why the two say different things
         # below.
-        if g = heap.guarded_release_at(a)
-          base, glen, kind, gen, tag, occ = g
-          len = RawOut.append(buf.to_unsafe, len,
-            heap.unmap_guard? ? "in a chunk gcry RELEASED — base 0x" : "in a range gcry RELEASED and unmapped — base 0x")
-          len = RawOut.append_hex(buf.to_unsafe, len, base)
-          len = RawOut.append(buf.to_unsafe, len, ", ")
-          len = RawOut.append_u64(buf.to_unsafe, len, glen)
-          len = RawOut.append(buf.to_unsafe, len, " bytes, ")
-          len = RawOut.append(buf.to_unsafe, len,
-            kind == Heap::GUARD_KIND_LARGE ? "large-object release" : "empty size-class chunk release")
-          len = RawOut.append(buf.to_unsafe, len, ", at collection ")
-          len = RawOut.append_u64(buf.to_unsafe, len, gen)
-          len = RawOut.append(buf.to_unsafe, len, "; the write is ")
-          len = RawOut.append_u64(buf.to_unsafe, len, a - base)
-          len = RawOut.append(buf.to_unsafe, len, " bytes into it. Collections since: ")
-          # Zero or one is a race inside the release window; many means the
-          # mutator has been carrying a pointer into released memory for a long
-          # time, which is a different defect with a different fix.
-          len = RawOut.append_u64(buf.to_unsafe, len, heap.collections - gen)
-          # Captured while the block was still mapped. For a Crystal reference
-          # the low 32 bits are the type_id, which is what turns "a 75 KiB
-          # something" into a name.
-          if tag != 0
-            len = RawOut.append(buf.to_unsafe, len, ". First user word at release: 0x")
-            len = RawOut.append_hex(buf.to_unsafe, len, tag)
-            len = RawOut.append(buf.to_unsafe, len, " (type_id ")
-            len = RawOut.append_u64(buf.to_unsafe, len, tag & 0xffff_ffff_u64)
-            len = RawOut.append(buf.to_unsafe, len, ")")
-          end
-          # The question the record could not answer until 2026-09-12, and the
-          # one that splits the open "live large object released under load"
-          # item in half: was the chunk released while blocks in it were still
-          # allocated — an accounting bug in the release decision — or were
-          # they genuinely free, making this a stale pointer a mutator kept?
-          # Read from the occupancy bitmap at the moment of release, before
-          # the `mprotect`.
-          if occ >= 0
-            len = RawOut.append(buf.to_unsafe, len, ". Blocks still allocated at release: ")
-            len = RawOut.append_u64(buf.to_unsafe, len, occ.to_u64)
-          end
-          # Under the ledger the mapping was handed back to the kernel, so
-          # whatever answers at this address now may belong to something else
-          # entirely. Saying otherwise would borrow the guard's certainty.
-          len = RawOut.append(buf.to_unsafe, len,
-            heap.unmap_guard? ? "\n" : ". The range was unmapped, so this address may since have " \
-                                       "been remapped by something else\n")
-          RawOut.flush(buf.to_unsafe, len)
-          # Same question the poison path asks, asked of a released range: the
-          # ledger says *what* was let go and when, never who was still holding
-          # it. Under `GCRY_UNMAP_GUARD=1` this is the sharpest form of the
-          # question — the range is still mapped, so nothing has been reissued
-          # over the evidence.
-          PoisonHolders.search(heap, base, glen) if PoisonHolders.requested?
-          return
-        end
+        # Asked through one helper, because the out-of-span branch above needs the
+        # same question and used never to get it.
+        return if report_released_range(heap, a, buf.to_unsafe, len)
         len = RawOut.append(buf.to_unsafe, len,
           "inside the heap span but in no live chunk — the chunk was unmapped, or the address " \
           "is in a hole between chunks\n")
@@ -817,6 +768,75 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, heap.heap_size)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # Did gcry release a range covering this address? Asked from two places
+    # now, and the second one is the fix: `in_heap_span?` used to gate this
+    # question, and a released chunk *shrinks the span*, so exactly the faults
+    # the guard exists to name landed in the out-of-span branch and were
+    # reported as "never a gcry allocation, so a swept object is not the
+    # explanation" — the mechanism excluded by name. Seen 2026-09-13 under load
+    # on two consecutive runs of `make thread-churn-uaf`'s guarded arm, faulting
+    # ~3.8 MB above the span end.
+    #
+    # Returns true when it printed; the caller must then stop.
+    private def self.report_released_range(heap : Heap, a : UInt64,
+                                           buf : UInt8*, len : Int32) : Bool
+      g = heap.guarded_release_at(a)
+      return false unless g
+      base, glen, kind, gen, tag, occ = g
+      len = RawOut.append(buf, len,
+        heap.unmap_guard? ? "in a chunk gcry RELEASED — base 0x" : "in a range gcry RELEASED and unmapped — base 0x")
+      len = RawOut.append_hex(buf, len, base)
+      len = RawOut.append(buf, len, ", ")
+      len = RawOut.append_u64(buf, len, glen)
+      len = RawOut.append(buf, len, " bytes, ")
+      len = RawOut.append(buf, len,
+        kind == Heap::GUARD_KIND_LARGE ? "large-object release" : "empty size-class chunk release")
+      len = RawOut.append(buf, len, ", at collection ")
+      len = RawOut.append_u64(buf, len, gen)
+      len = RawOut.append(buf, len, "; the write is ")
+      len = RawOut.append_u64(buf, len, a - base)
+      len = RawOut.append(buf, len, " bytes into it. Collections since: ")
+      # Zero or one is a race inside the release window; many means the
+      # mutator has been carrying a pointer into released memory for a long
+      # time, which is a different defect with a different fix.
+      len = RawOut.append_u64(buf, len, heap.collections - gen)
+      # Captured while the block was still mapped. For a Crystal reference
+      # the low 32 bits are the type_id, which is what turns "a 75 KiB
+      # something" into a name.
+      if tag != 0
+        len = RawOut.append(buf, len, ". First user word at release: 0x")
+        len = RawOut.append_hex(buf, len, tag)
+        len = RawOut.append(buf, len, " (type_id ")
+        len = RawOut.append_u64(buf, len, tag & 0xffff_ffff_u64)
+        len = RawOut.append(buf, len, ")")
+      end
+      # The question the record could not answer until 2026-09-12, and the
+      # one that splits the open "live large object released under load"
+      # item in half: was the chunk released while blocks in it were still
+      # allocated — an accounting bug in the release decision — or were
+      # they genuinely free, making this a stale pointer a mutator kept?
+      # Read from the occupancy bitmap at the moment of release, before
+      # the `mprotect`.
+      if occ >= 0
+        len = RawOut.append(buf, len, ". Blocks still allocated at release: ")
+        len = RawOut.append_u64(buf, len, occ.to_u64)
+      end
+      # Under the ledger the mapping was handed back to the kernel, so
+      # whatever answers at this address now may belong to something else
+      # entirely. Saying otherwise would borrow the guard's certainty.
+      len = RawOut.append(buf, len,
+        heap.unmap_guard? ? "\n" : ". The range was unmapped, so this address may since have " \
+                                   "been remapped by something else\n")
+      RawOut.flush(buf, len)
+      # Same question the poison path asks, asked of a released range: the
+      # ledger says *what* was let go and when, never who was still holding
+      # it. Under `GCRY_UNMAP_GUARD=1` this is the sharpest form of the
+      # question — the range is still mapped, so nothing has been reissued
+      # over the evidence.
+      PoisonHolders.search(heap, base, glen) if PoisonHolders.requested?
+      true
     end
   end
 end
