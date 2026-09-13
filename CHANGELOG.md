@@ -302,8 +302,20 @@ is now the default and the flag would take you the wrong way.
   else, which leaves the prepend race between the walk and `map_chunk`.
   Splicing that prefix in at the publish was written and withdrawn for the
   second time — the shipped residual does not move and the pre-fix shape gets
-  worse, because the walk rewrites `next` in place. The causal reading
-  published yesterday is retracted in the findings.
+  worse, because the walk rewrites `next` in place.
+  **The other end of it is now closed too, and it decomposes the defect.**
+  `clear_all_marks` walked the `@chunks` list while the marker reaches chunks
+  through `chunk_containing` — the index — so a chunk the index knows about and
+  the list does not kept its marks: its blocks read marked forever,
+  `mark_impl` returned early on them, and nothing followed their edges. The
+  clear now walks the index, the measured superset. Over 12 attempts of the
+  churn reproducer: shipped **0**, the mutator-count trigger alone **2**, the
+  list-based clear alone **0**, both **7** — so the trigger produces the
+  off-list chunks and the clear is what makes them fatal, and either alone is
+  nearly harmless. `GCRY_MARK_CLEAR_LIST=1` restores the old walk and
+  `GCRY_MARK_CLEAR_AUDIT=1` reports mark residue; the gate's control arm sets
+  both knobs. What remains of the divergence is a leaked chunk one run in
+  fourteen, which is an RSS question rather than a soundness one.
   `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
 
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the

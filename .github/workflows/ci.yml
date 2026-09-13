@@ -622,13 +622,16 @@ jobs:
       # Both layouts, each with a control that restores the re-evaluation and
       # must still fault — a reproducer that quietly stops reproducing is how
       # the previous one was lost. Before the fix: 5 of 18 guarded, 14 of 18
-      # poisoned; after: 0 of 24 on every arm. The control arms run six attempts
-      # because their children crash, and a crashing child walks the heap and
-      # every stack before Crystal's backtrace printer runs — twenty-four of
-      # those took this step past ten minutes on a two-core runner.
+      # poisoned; after: 0 of 24 on every arm. It took two fixes, and the
+      # control arm restores both — measured over 12 attempts each: shipped 0,
+      # the mutator-count trigger alone 2, the list-based mark clear alone 0,
+      # both 7. The control runs eight attempts rather than the full count
+      # because its children crash, and a crashing child walks the heap and
+      # every stack before Crystal's backtrace printer runs; 186 s locally for
+      # the whole target.
       - name: Live-object release under thread churn
         run: |
-          timeout 900 make thread-churn-uaf
+          timeout 1200 make thread-churn-uaf
 
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the

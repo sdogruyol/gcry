@@ -915,7 +915,7 @@ module Gcry
       # MARK) then gen=1. Large chunks use this under both representations, so
       # it runs either way.
       if @header_mark_gen >= 255_u8
-        each_chunk do |chunk|
+        clear_walk do |chunk|
           each_block_or_large(chunk) do |header|
             next if BlockHeader.free?(header)
             BlockHeader.clear_mark(header)
@@ -928,6 +928,28 @@ module Gcry
       end
       BlockHeader.mark_gen = @header_mark_gen
 
+      # Walked through the **index**, not the `@chunks` list, and both of these
+      # clears are. The marker resolves a candidate's chunk with
+      # `chunk_containing`, which reads the index — so a chunk in the index can
+      # have its blocks marked whether or not it is on the list, and a clear
+      # that walks the list can leave those marks standing. What that costs is
+      # written two comments below, for the nursery case that hit it: the block
+      # reads marked forever, `mark_impl` returns early without scanning it,
+      # and anything reachable only through it is reclaimed while live.
+      #
+      # The index is the superset. Measured over every run of `make
+      # thread-churn-uaf`: chunks on the list and not indexed, **0**; indexed
+      # and not listed, 1 in about 14 runs
+      # (`GCRY_CHUNK_LIST_AUDIT=1`). So this can only cover more, at the same
+      # element count.
+      #
+      # Latent rather than observed, and said plainly: with the list walk,
+      # `GCRY_MARK_CLEAR_AUDIT=1` finds residue in **0 of 20 runs** — the
+      # chunks that leave the list have already been swept, which clears their
+      # marks, and nothing marked into them again before the run ended. This
+      # closes the hazard and the audit is what keeps it closed.
+      # `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+      #
       # Size-class chunks on the bitmap path have no generation to bump, so
       # their marks are zeroed wholesale, one chunk at a time. Never per bit:
       # 64 blocks share a word, so clearing one block's bit is a
@@ -944,12 +966,73 @@ module Gcry
       # dormant chunks the sweep skips, chunks mapped mid-cycle — and it is not
       # worth taking before the cost shows up in a measurement.
       if @bitmap_marks
-        each_chunk do |chunk|
+        clear_walk do |chunk|
           next if ChunkHeader.large?(chunk)
           chunk_clear_marks(chunk)
         end
       end
+      audit_mark_clear if @mark_clear_audit
       {% if flag?(:gcry_hl_assert) %} hl_pushed_reset; hl_stack_seed_reset {% end %}
+    end
+
+    # Did the clear reach every chunk the marker can reach?
+    #
+    # `mark_impl` resolves a candidate's chunk through `chunk_containing`, which
+    # reads the index — so a chunk in the index can have its blocks marked
+    # whether or not it is on `@chunks`. A chunk whose marks were not cleared
+    # has blocks that read marked forever, and this file already records what
+    # that costs: "the block then read marked forever, `mark_impl` returned
+    # early without scanning it, and anything reachable only through it was
+    # reclaimed **while live**."
+    #
+    # `GCRY_MARK_CLEAR_AUDIT=1`. O(bitmap bytes) again, so research only.
+    # The set the clear covers. `GCRY_MARK_CLEAR_LIST=1` puts it back on the
+    # `@chunks` list, which is what every build did until 2026-09-13 and which
+    # misses a chunk the index knows about and the list does not.
+    private def clear_walk(& : ChunkHeader* ->) : Nil
+      if @mark_clear_list
+        each_chunk { |chunk| yield chunk }
+      else
+        each_indexed_chunk { |chunk| yield chunk }
+      end
+    end
+
+    private def audit_mark_clear : Nil
+      residue = 0_u64
+      first = 0_u64
+      each_indexed_chunk do |chunk|
+        next if ChunkHeader.large?(chunk)
+        next unless bitmap_chunk?(chunk)
+        mark = ChunkHeader.mark_bitmap(chunk)
+        next if mark.null?
+        words = chunk.value.bitmap_words.to_i32
+        i = 0
+        dirty = false
+        while i < words
+          if mark[i] != 0
+            dirty = true
+            break
+          end
+          i += 1
+        end
+        next unless dirty
+        residue &+= 1
+        first = chunk.address if first == 0
+      end
+      @mark_clear_residue &+= residue
+      return if residue == 0
+      return unless @mark_clear_residue == residue
+      buf = uninitialized UInt8[320]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: the mark clear missed ")
+      len = RawOut.append_u64(buf.to_unsafe, len, residue)
+      len = RawOut.append(buf.to_unsafe, len, " indexed chunk(s) (first 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, first)
+      len = RawOut.append(buf.to_unsafe, len,
+        ") — their blocks read marked forever, so `mark_impl` returns early on them and nothing " \
+        "follows their edges. collection ")
+      len = RawOut.append_u64(buf.to_unsafe, len, @collections)
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
     end
 
     # Minor GC: reset nursery mark bits only.

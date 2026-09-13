@@ -472,6 +472,15 @@ module Gcry
     getter chunk_index_only : UInt64 = 0_u64
     getter chunk_list_only : UInt64 = 0_u64
     property chunk_list_audit : Bool = false
+    # Indexed chunks whose mark bitmap still held a set bit after
+    # `clear_all_marks`. Every block in one reads marked forever, which makes
+    # `mark_impl` return early and leaves its edges unfollowed.
+    # `GCRY_MARK_CLEAR_AUDIT=1`.
+    getter mark_clear_residue : UInt64 = 0_u64
+    property mark_clear_audit : Bool = false
+    # Clear marks over the `@chunks` list instead of the index — the pre-2026-09-13
+    # walk, and one half of `make thread-churn-uaf`'s control arm.
+    property mark_clear_list : Bool = false
     # Bound for the pending-unmap chain walk in the chunk-list audit.
     MAX_PENDING_WALK = 65536
     # The `@schedulers` array of the context being pinned when a slot was

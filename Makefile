@@ -774,25 +774,25 @@ thread-birth-root: $(BIN)
 #
 # The regression gate for the live-object release, fixed 2026-09-13. Both
 # layouts, each with its control: the shipped arms must not fault, and
-# `--control` — which restores the pre-fix mutator-count reads — must still
-# fault, or the harness has stopped driving the workload and the clean run
-# proves nothing. Before the fix, per layout: guarded 2-7 of 24, poisoned 17-21
-# of 24.
+# `--control` — which restores the pre-fix shape, both the mutator-count reads
+# and the list-based mark clear — must still fault, or the harness has stopped
+# driving the workload and the clean run proves nothing. Measured, 12 attempts
+# each: shipped 0, trigger alone 2, consequence alone 0, both 7.
 #
-# The control runs six attempts rather than the full count, and the reason is
+# The control runs eight attempts rather than the full count, and the reason is
 # runtime: its children *crash*, and a crashing child under
 # `GCRY_POISON_HOLDERS=1` walks the whole heap and every stack and then
 # re-faults into Crystal's backtrace printer. Twenty-four of those on a
-# two-core runner took the CI step past ten minutes. At a 70% per-attempt rate
-# six attempts miss once in about 1500 runs.
+# two-core runner took the CI step past ten minutes. At the measured 58%
+# per-attempt rate eight attempts miss once in about a thousand runs.
 thread-churn-uaf: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_churn_uaf.cr -o $(BIN)/thread_churn_uaf --error-trace
 	$(BIN)/thread_churn_uaf
-	CHURN_ATTEMPTS=6 $(BIN)/thread_churn_uaf --control
+	CHURN_ATTEMPTS=8 $(BIN)/thread_churn_uaf --control
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/thread_churn_uaf.cr \
 	  -o $(BIN)/thread_churn_uaf_headers --error-trace
 	$(BIN)/thread_churn_uaf_headers
-	CHURN_ATTEMPTS=6 $(BIN)/thread_churn_uaf_headers --control
+	CHURN_ATTEMPTS=8 $(BIN)/thread_churn_uaf_headers --control
 
 # The nursery keeps the header representation under every setting, so every
 # mark clear has to gate per *chunk* like the read side does. Gating on the

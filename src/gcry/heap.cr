@@ -2263,6 +2263,32 @@ module Gcry
       end
     end
 
+    # Every chunk the **index** knows about, which is the set the marker
+    # reaches: `chunk_containing` reads the index, so a chunk in it can have
+    # its blocks marked whether or not it is on `@chunks`. Anything that has to
+    # cover what the marker can touch — mark clearing above all — walks this
+    # rather than the list.
+    #
+    # The two are the same set in every measurement but one: chunks on the list
+    # and not indexed read **0** in every run, while indexed and not listed
+    # reads 1 in about 14 (`GCRY_CHUNK_LIST_AUDIT=1`,
+    # `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`). So the index is
+    # the superset, and walking it can only cover more.
+    #
+    # Index entries are always mapped: `unlink_chunk` removes from the index
+    # before anything releases the pages, and that ordering is load-bearing
+    # here — a walk of stale entries would write into memory the kernel has
+    # taken back.
+    def each_indexed_chunk(& : ChunkHeader* ->) : Nil
+      i = 0
+      n = @chunk_index_count
+      while i < n
+        chunk = (@chunk_index + i).value
+        yield chunk unless chunk.null?
+        i += 1
+      end
+    end
+
     # Public for the invariant checker — returns the head of a size-class freelist.
     def freelist_for(class_index : Int32) : Void*
       return Pointer(Void).null if class_index < 0 || class_index >= SIZE_CLASS_COUNT

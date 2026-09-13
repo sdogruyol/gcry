@@ -897,6 +897,11 @@ module GC
     # Research only: does `@chunk_index` agree with the `@chunks` list? A chunk
     # in one and not the other is never swept and never has its marks cleared.
     heap.chunk_list_audit = true if env_flag_one?("GCRY_CHUNK_LIST_AUDIT")
+    # Research only: after the mark clear, does any chunk the *index* knows
+    # about still hold a set mark bit?
+    heap.mark_clear_audit = true if env_flag_one?("GCRY_MARK_CLEAR_AUDIT")
+    # Control arm: clear marks over the chunk list rather than the index.
+    heap.mark_clear_list = true if env_flag_one?("GCRY_MARK_CLEAR_LIST")
     # Research only: go back to re-evaluating the mutator count per decision
     # instead of latching it in the stop. The red arm of `make
     # thread-churn-uaf`.

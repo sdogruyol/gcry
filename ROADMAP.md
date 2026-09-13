@@ -1261,6 +1261,23 @@ CI asymmetry that hid both.
       chunk on a workload that maps thousands, at the sweep step, and the crash
       it was thought to explain is at zero across five gate runs on both
       layouts.
+      **The consequence closed, and the cause decomposed (2026-09-13).**
+      `clear_all_marks` walked the `@chunks` list while the marker reaches
+      chunks through `chunk_containing`, i.e. the index — so a chunk the index
+      knows about and the list does not kept its marks, its blocks read marked
+      forever, `mark_impl` returned early on them and nothing followed their
+      edges. The clear now walks the index (the measured superset: listed and
+      not indexed is 0 in every run). It was expected to close a latent hazard
+      — mark residue is 0 of 20 runs with the old walk — and instead it turned
+      the gate's control arm green, which decomposed the defect: over 12
+      attempts, shipped **0**, the mutator-count trigger alone **2**, the
+      list-based clear alone **0**, both **7**. The trigger produces off-list
+      chunks; the clear is what makes them fatal; either alone is nearly
+      harmless. So the mechanism *was* stale marks in off-list chunks — the
+      model two assertions could not confirm from the sweep, because the sweep
+      is only half of it. `--control` now sets both knobs. What remains of the
+      divergence is a leaked chunk 1 run in 14, an RSS question rather than a
+      soundness one.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

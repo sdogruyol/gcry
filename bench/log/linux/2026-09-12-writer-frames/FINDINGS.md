@@ -444,3 +444,63 @@ it. Either the rebuild stops mutating in place (build the chain in a side
 array, publish once) or it takes the list lock for the walk — and that second
 one is the 0.21.1 hang, which is why it was not done this way in the first
 place.
+
+# The consequence, closed — and the cause decomposed (2026-09-13, later)
+
+The residual divergence was not worth the risk of redesigning the sweep's list
+rebuild, so the other end was taken instead: what an off-list chunk *costs*.
+
+`clear_all_marks` walked the `@chunks` list. The marker does not: `mark_impl`
+resolves a candidate's chunk with `chunk_containing`, which reads
+`@chunk_index`. So a chunk the index knows about and the list does not keeps
+its marks — and this file's own nursery note already records what that costs:
+*"the block then read marked forever, `mark_impl` returned early without
+scanning it, and anything reachable only through it was reclaimed while
+live."*
+
+The clear now walks the index, which is the measured superset: chunks listed
+and not indexed read **0** in every run, indexed and not listed 1 in about 14.
+
+## What that turned up
+
+It was meant to close a latent hazard — `GCRY_MARK_CLEAR_AUDIT=1` finds mark
+residue in **0 of 20 runs** with the old list walk, because a chunk that
+leaves the list has already been swept and nothing marked into it again before
+the run ended. Instead the regression gate's control arm went **green**: with
+the clear walking the index, the pre-fix mutator-count shape no longer faults
+at all.
+
+Which is the answer to the question this log has been circling. Decomposed,
+12 attempts per cell:
+
+| configuration | faults |
+|---|---|
+| shipped, both fixes | **0 of 12** |
+| `GCRY_SWEEP_MUTATOR_LATCH=0` — the trigger alone | 2 of 12 |
+| `GCRY_MARK_CLEAR_LIST=1` — the consequence alone | 0 of 12 |
+| both — the pre-fix shape | **7 of 12** |
+
+* the **trigger** is the mutator count read at two instants across
+  `start_world`: it leaves chunks in the index and off the list;
+* the **consequence** is the list-based mark clear: those chunks keep their
+  marks, so their blocks read marked forever and nothing follows their edges;
+* either alone is nearly harmless, and together they are the use-after-free.
+
+That also explains every dead end in this log. The mechanism *was* stale marks
+in off-list chunks — the model two assertions were written for and could not
+confirm — but it could not be confirmed from the sweep, because the sweep is
+only half of it and the other half is in a different file and a different
+phase.
+
+The gate's `--control` arm now sets both knobs; at 58% per attempt, eight
+attempts miss about once in a thousand runs. Shipped arms 0 of 24 on both
+layouts, controls 4 of 8 and 6 of 8.
+
+## Still open, and smaller
+
+The divergence itself: 1 in 14 runs, one chunk, produced by the prepend race
+between the sweep's walk and `map_chunk`. It now costs a leaked chunk rather
+than a use-after-free, since its marks are cleared like everything else the
+index knows about. Fixing it properly still means the rebuild must stop
+mutating `next` in place — the splice has been written and withdrawn twice
+above — and that is now an RSS question rather than a soundness one.

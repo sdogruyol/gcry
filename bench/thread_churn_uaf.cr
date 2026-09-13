@@ -139,13 +139,28 @@ puts ""
 # differ in which victim they can name.
 AMP = {"GCRY_THREAD_UNSTAGE_ON_DEATH" => "1"}
 
-# `--control` restores the defect: the mutator count is re-evaluated per
-# decision instead of latched in the stop, which is what this harness
-# reproduced for three weeks. It is here because a reproducer that has been
-# fixed becomes a gate that can rot silently — if the harness stops driving
-# the workload, the shipped arms read clean for the wrong reason. The control
-# is the half that says the driving still works.
-CONTROL = {"GCRY_SWEEP_MUTATOR_LATCH" => "0"}
+# `--control` restores the defect, and it takes two knobs because the defect
+# took two things. Measured, 12 attempts each:
+#
+#   shipped                                        0/12
+#   GCRY_SWEEP_MUTATOR_LATCH=0  (the trigger)      2/12
+#   GCRY_MARK_CLEAR_LIST=1      (the consequence)  0/12
+#   both — the pre-fix shape                       7/12
+#
+# The trigger is the mutator count read at two instants across `start_world`,
+# which leaves chunks in `@chunk_index` and off the `@chunks` list. The
+# consequence is that mark clearing walked the list, so those chunks kept their
+# marks: every block in one reads marked forever, `mark_impl` returns early on
+# it, nothing follows its edges, and what it points at is reclaimed while live.
+# Either alone is nearly harmless; together they are the use-after-free.
+#
+# The control is here because a reproducer that has been fixed becomes a gate
+# that can rot silently — if the harness stops driving the workload, the
+# shipped arms read clean for the wrong reason.
+CONTROL = {
+  "GCRY_SWEEP_MUTATOR_LATCH" => "0",
+  "GCRY_MARK_CLEAR_LIST"     => "1",
+}
 
 control = ARGV.includes?("--control")
 extra = control ? CONTROL : {} of String => String
@@ -174,34 +189,33 @@ driven = results.find { |r| r.name == "poisoned" }.not_nil!
 
 if control
   # The control must still reproduce. Measured on the fix's own A/B: 6 of 18
-  # per layout: guarded 2-7 of 24 and poisoned 17-21 of 24 with the pre-fix
-  # reads. Six attempts here miss that about once in 1500 runs.
+  # per layout: poisoned 7 of 12 with the pre-fix shape. Eight attempts here
+  # miss that about once in a thousand runs.
   if driven.failed == 0
     puts "FAIL the control arm did not reproduce in #{driven.runs} attempts. With the"
-    puts "pre-fix mutator-count reads this workload faults about 70% of attempts, so a"
-    puts "clean run"
+    puts "pre-fix shape this workload faults about 58% of attempts, so a clean run"
     puts "here means the harness has stopped driving the defect and the shipped arms"
     puts "above prove nothing. That is how the last reproducer for this was lost."
     exit 1
   end
-  puts "ok — with `GCRY_SWEEP_MUTATOR_LATCH=0` the defect still reproduces, so the"
-  puts "clean shipped run is attributable to the latch and not to the harness."
+  puts "ok — with the pre-fix shape restored the defect still reproduces, so the"
+  puts "clean shipped run is attributable to the fixes and not to the harness."
   exit 0
 end
 
 total = results.sum(&.failed)
 if total > 0
-  puts "FAIL #{total} run(s) faulted. This was fixed on 2026-09-13 by latching the"
-  puts "mutator count in the stopped world (`latch_sweep_mutator_count`): the sweep's"
-  puts "relink and munmap decisions used to re-evaluate `multi_mutator_threads?` after"
-  puts "`start_world`, and a thread born in between flipped the answer — so a dropped"
-  puts "chunk's `next` was pointed into the unmap queue while the chunk was still on"
-  puts "`@chunks`, and the list's real tail became unreachable. A chunk off the list is"
-  puts "never swept and its marks are never cleared, so its objects read permanently"
-  puts "marked and nothing follows their edges."
-  puts "`GCRY_CHUNK_LIST_AUDIT=1` reports the divergence directly."
+  puts "FAIL #{total} run(s) faulted. This was fixed on 2026-09-13 in two places."
+  puts "The trigger: the sweep read `multi_mutator_threads?` at two instants across"
+  puts "`start_world` — inside the stop, where the decision it drives is taken, and"
+  puts "again during the sweep — and a thread born in between flipped the answer,"
+  puts "leaving chunks in `@chunk_index` and off the `@chunks` list. The consequence:"
+  puts "mark clearing walked the list, so those chunks kept their marks, every block"
+  puts "in one read marked forever, `mark_impl` returned early on it, and nothing"
+  puts "followed its edges. `GCRY_CHUNK_LIST_AUDIT=1` reports the first directly and"
+  puts "`GCRY_MARK_CLEAR_AUDIT=1` the second."
   exit 1
 end
 
-puts "ok — no arm faulted. Before the fix, per layout: guarded 2-7 of 24 and"
-puts "poisoned 17-21 of 24. `--control` restores that and must still fail."
+puts "ok — no arm faulted. With the pre-fix shape restored this workload faults"
+puts "about 58% of attempts; `--control` does that and must still fail."
