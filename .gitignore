@@ -37,3 +37,8 @@
 # `make thread-uaf-sample` output: evidence from a CI run, not a source file.
 bench/log/ci-samples/
 bench/log/**/raw*/
+# `perf_smoke.sh` publishes the run's own JSON here for CI to upload as the
+# `perf-smoke-report` artifact — a few KB instead of the whole checked-in
+# `bench/log` tree, which is what the upload used to carry. It is output, and a
+# local perf run should not leave a dirty tree behind.
+bench/log/_run/
