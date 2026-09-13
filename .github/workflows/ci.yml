@@ -990,9 +990,13 @@ jobs:
           # under a 70% gate. RSS×/pause catch pause-campaign regressions;
           # quiet tip ~85% @ ~0.8× @ ~0.6ms.
           # The floors below are the catastrophe net. The baseline comparison
-          # perf_smoke.sh runs at the end is the sensitive half — report-only
-          # until a baseline with a tolerance measured on this runner class is
-          # recorded and committed (bench/baseline/perf_smoke.json).
+          # perf_smoke.sh runs at the end is the sensitive half, and it is
+          # recorded on this runner class and this layout since 2026-09-13 (23
+          # green master runs, bench/baseline/perf_smoke.json) — so it compares
+          # for real rather than printing STALE. Still report-only, and now for
+          # a measured reason: the three gated metrics sit 2.16-2.50 sd from
+          # their means, 3.2% combined per run, i.e. one false red every ~31
+          # runs. PERF_GATE_BASELINE=1 wants ~3.3 sd, which more samples buy.
           PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
             MIN_PCT=65 MAX_RSS_X=1.25 MAX_PAUSE_P50_MS=2.5 \
             RUNNER_LABEL=ubuntu-latest \

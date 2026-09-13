@@ -84,6 +84,8 @@ def compare(baseline, summary, gate):
                 "NOTE: this run is on {}, the baseline was recorded on {} — "
                 "absolute numbers do not carry across runner classes".format(
                     summary["runner"], prov["runner"]))
+    else:
+        lines.append("baseline: none recorded yet")
     # A baseline recorded on another object layout or allocator default is not
     # a baseline for this run: it happened twice (0.24.0 flipped the allocator,
     # 0.26.0 the layout) and both times the file kept comparing and kept
@@ -102,8 +104,6 @@ def compare(baseline, summary, gate):
             "STALE: the baseline carries no layout, so it predates the "
             "0.26.0 flip. Re-record; reporting only.")
         stale_layout = True
-    else:
-        lines.append("baseline: none recorded yet")
 
     for name, (label, higher_better) in METRICS.items():
         if name not in summary:
@@ -282,6 +282,16 @@ def selftest():
     if code != 0 or "none recorded yet" not in text:
         failures.append("unrecorded baseline: exit {} (want 0)".format(code))
 
+    # And the converse, which no fixture covered until a baseline was finally
+    # recorded on the shipped layout: a fresh, matching baseline must not also
+    # announce that none exists. "none recorded yet" was the fall-through of the
+    # staleness chain, so it printed under every comparison that was *not*
+    # stale — and every baseline this repo had shipped was stale, which is why
+    # a report contradicting itself went unseen.
+    text, _ = compare(base, {"pct_json": 85.0, "layout": "headerless"}, gate=True)
+    if "none recorded yet" in text:
+        failures.append("a recorded baseline also reported 'none recorded yet'")
+
     # An empty baseline must say how to record one rather than passing silently.
     text, code = compare({"metrics": {}}, {"pct_json": 85.0}, gate=True)
     if code != 0 or "--record" not in text:
@@ -307,8 +317,9 @@ def selftest():
             print("SELFTEST FAIL: " + f, file=sys.stderr)
         return 1
     print("perf_compare selftest ok — {} comparison fixtures, both gate modes, "
-          "tolerance-less and empty baselines, a cross-layout and a layout-less "
-          "baseline, mixed-layout recording, and both recording paths".format(len(cases)))
+          "tolerance-less, empty, unrecorded and self-denying baselines, a "
+          "cross-layout and a layout-less baseline, mixed-layout recording, and "
+          "both recording paths".format(len(cases)))
     return 0
 
 

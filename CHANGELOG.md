@@ -24,6 +24,29 @@ is now the default and the flag would take you the wrong way.
 
 ### Changed
 
+- **The perf baseline is recorded on the layout that ships.**
+  `bench/baseline/perf_smoke.json` was taken on the header layout hours before
+  the headerless flip, so `perf_compare.py` had been printing `STALE:` and
+  refusing to gate on every run since — the control working, and the re-record
+  it asked for is here: 23 green master runs on `ubuntu-latest`, from the
+  artifacts the perf job already uploads. Not the ten the note planned, because
+  ten under-sampled the runner: the first ten read the `/json` throughput spread
+  as 96.6-105.2 and the thirteen after them ranged 93.9-108.4, which would have
+  left the gate 0.94 pp from a false alarm on a run that had already happened.
+  `pct_json` 99.7 ±9.9, `rss_x` 0.947 ±0.1115, `pause_p50_ms` 0.6399 ±0.2, no
+  metric self-firing on any of the 23 (the previous file's `rss_x` fired on 1 of
+  10) and leave-one-out green 23 of 23. Gating on it is still off, now for an
+  arithmetic reason rather than a judgement call: the three gates sit 2.16-2.50
+  sd out, 3.2% per run combined — one false red every ~31 runs.
+- **`perf_compare.py` no longer denies the baseline it just used.** `baseline:
+  none recorded yet` was the fall-through of the staleness chain, so it printed
+  under every non-stale comparison; every baseline that had shipped was stale,
+  so no green path had ever reached the line. The first fresh baseline printed
+  its own provenance and then reported none existed. `make perf-baseline` gained
+  the fixture for the converse, red against the pre-fix report.
+
+### Changed
+
 - **The headerless layout is the compile default.** Small blocks are carved
   back-to-back with no 16-byte `BlockHeader` in front of each object; size and
   kind come from the chunk, marks and occupancy from its bitmaps, and large

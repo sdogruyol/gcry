@@ -679,5 +679,10 @@ Branch `feat/headerless-default`, PR against `sdogruyol/gcry`.
 - [x] Every Linux CI gate green on the headerless default; spec suites on all
       three layout/allocator arms (`make heap-counters` control moved to the
       header layout — the only heap with a plain counter path)
-- [ ] `bench/baseline/perf_smoke.json` re-recorded after merge (ten green
-      master runs) — follow-up, per the file's provenance note
+- [x] `bench/baseline/perf_smoke.json` re-recorded after merge — 23 green
+      master runs, not ten: the first ten under-sampled the runner's spread
+      (96.6-105.2 on `pct_json` against 93.9-108.4 across all 23) and would
+      have left the gate 0.94 pp from a false alarm. 0 self-fires per metric,
+      leave-one-out 23 of 23, `PERF_GATE_BASELINE=1` still declined at a
+      measured 3.2% false-red rate per run.
+      `bench/log/linux/2026-09-13-perf-baseline-headerless/FINDINGS.md`

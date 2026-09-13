@@ -820,6 +820,42 @@ CI asymmetry that hid both.
       A human noticing that a default flip invalidated a baseline is not a
       control; this is.
 
+      **2026-09-13: recorded on the layout that ships, and the flip now has a
+      number against it.** 23 green master runs since #41 (`e5bae04` through
+      `9f99142`), from the artifacts the job already uploads. Ten was the plan
+      and ten was wrong: the first ten read the `pct_json` spread as 96.6-105.2,
+      the thirteen after them ranged 93.9-108.4, so a ten-run recording would
+      have put the gate 0.94 pp from a false alarm on a run that had already
+      happened.
+
+      | metric | baseline | tolerance | gate fires | fixed floor | self-fires |
+      |---|---|---|---|---|---|
+      | `pct_json` | 99.7 | ±9.9 | below **89.8** | 65 | 0 of 23 (min 93.9) |
+      | `rss_x` | 0.947 | ±0.1115 | above **1.058** | 1.25 | 0 of 23 (max 0.993) |
+      | `pause_p50_ms` | 0.6399 | ±0.2 | above **0.8399** | 2.5 | 0 of 23 (max 0.7503) |
+      | `pct_root` | 99.5 | ±9.95 | warn-only | — | — |
+
+      `rss_x` no longer self-fires — the condition this item set for turning
+      `PERF_GATE_BASELINE=1` on — because headerless post-GC RSS is both lower
+      and tighter (0.77-0.993 against the header layout's 0.98-1.13).
+      Leave-one-out passes 23 of 23. **And the flip still does not land**, for a
+      reason that is now arithmetic rather than judgement: the gates sit 2.16 to
+      2.50 sd from the mean, i.e. 0.62% / 1.07% / 1.55% per run, and any of the
+      three fails the run — **3.2% combined, one false red every ~31 runs** on a
+      branch that takes several pushes a day. Widening the tolerance is not the
+      answer either: at ±9.9 the `pct_json` gate already sits 24.8 pp *above*
+      the 65% floor it was meant to tighten. What earns the flip is ~3.3 sd per
+      metric (one red per ~650 runs), which more samples buy for free since the
+      tolerance is `max(half-range, 1.5x IQR, floor)`.
+      Recording the first non-stale baseline the repo has had also exposed a
+      latent defect in the comparator's report: `baseline: none recorded yet`
+      was the fall-through of the staleness chain, so it printed under every
+      non-stale comparison — and every baseline that ever shipped here was
+      stale, so no green path had reached it. The first fresh baseline printed
+      its provenance and then denied it existed. Fixed, with the fixture for the
+      converse in `make perf-baseline`.
+      `bench/log/linux/2026-09-13-perf-baseline-headerless/FINDINGS.md`
+
 - [ ] **The process heap's counters lose updates, and the assumption that they
       do not is written in the source.** `note_alloc_bytes` uses plain
       `set(get + 1)` unless `heap_counters_atomic` is set, and `heap.cr` calls
