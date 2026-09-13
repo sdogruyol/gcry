@@ -281,6 +281,25 @@ is now the default and the flag would take you the wrong way.
   the block the report was about. First run, it named a three-week-old fault:
   the writer was the collector, in its own execution-context root pin.
 
+- **A live object could be reclaimed under thread churn, open since
+  2026-08-23 — fixed.** The sweep's relink and munmap decisions read
+  `multi_mutator_threads?` again *after* `start_world`, while
+  `sweep_after_world?` had read it inside the stop. A program that creates
+  threads in the post-STW section flips the answer between those two moments,
+  and the combination that produces — a chunk dropped with no rebuild to take
+  it off `@chunks` — points that chunk's `next` into the unmap queue while it
+  is still on the live list. The list then diverts into the queue and its real
+  tail is unreachable: 2 to 30 mapped, ordinary chunks in `@chunk_index` and
+  not on `@chunks`. A chunk off the list is never swept and its marks are
+  never cleared, so its objects read permanently marked, `mark_impl` returns
+  early on them, nothing follows their edges, and what they point at is
+  reclaimed while live — an execution context's `@schedulers` buffer, in the
+  reproducer. Fixed by latching the count once in the stopped world, beside
+  the decision that depends on it. **guarded 6 of 18 → 0 of 18, poisoned 17 of
+  18 → 0 of 18.** `make thread-churn-uaf` is now a regression gate on both
+  layouts, each with a control arm (`GCRY_SWEEP_MUTATOR_LATCH=0`) that must
+  still fault. `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the
   live-object release open since 2026-08-23.** `@chunk_index` and the
   `@chunks` list are maintained separately, and `chunk_containing` reads the

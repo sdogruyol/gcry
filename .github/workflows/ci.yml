@@ -612,6 +612,21 @@ jobs:
         run: |
           make thread-birth-root
 
+      # The live-object release, open from 2026-08-23 and fixed 2026-09-13: the
+      # sweep's relink and munmap decisions re-evaluated `multi_mutator_threads?`
+      # after `start_world`, and a thread born in that window flipped the answer
+      # — so a dropped chunk's `next` was pointed into the unmap queue while the
+      # chunk was still on `@chunks`, and the list's real tail became
+      # unreachable. Off the list means never swept and never mark-cleared, so
+      # those objects read permanently marked and nothing follows their edges.
+      # Both layouts, each with a control that restores the re-evaluation and
+      # must still fault — a reproducer that quietly stops reproducing is how
+      # the previous one was lost. Before the fix: 5 of 18 guarded, 14 of 18
+      # poisoned; after: 0 of 18 on every arm.
+      - name: Live-object release under thread churn
+        run: |
+          timeout 600 make thread-churn-uaf
+
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the
       # newest one, i.e. the thread actually inside the window — so that thread

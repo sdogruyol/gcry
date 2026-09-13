@@ -139,10 +139,21 @@ puts ""
 # differ in which victim they can name.
 AMP = {"GCRY_THREAD_UNSTAGE_ON_DEATH" => "1"}
 
+# `--control` restores the defect: the mutator count is re-evaluated per
+# decision instead of latched in the stop, which is what this harness
+# reproduced for three weeks. It is here because a reproducer that has been
+# fixed becomes a gate that can rot silently — if the harness stops driving
+# the workload, the shipped arms read clean for the wrong reason. The control
+# is the half that says the driving still works.
+CONTROL = {"GCRY_SWEEP_MUTATOR_LATCH" => "0"}
+
+control = ARGV.includes?("--control")
+extra = control ? CONTROL : {} of String => String
+
 arms = [
-  {Arm.new("default", {} of String => String), "gcry:"},
-  {Arm.new("guarded", GUARD.merge(AMP)), "RELEASED"},
-  {Arm.new("poisoned", POISON.merge(AMP)), "use-after-free"},
+  {Arm.new("default", extra.dup), "gcry:"},
+  {Arm.new("guarded", GUARD.merge(AMP).merge(extra)), "RELEASED"},
+  {Arm.new("poisoned", POISON.merge(AMP).merge(extra)), "use-after-free"},
 ]
 results = arms.map { |arm, want| run_arm(self_path, arm, ATTEMPTS, want) }
 
@@ -160,20 +171,35 @@ results.each do |r|
 end
 
 driven = results.find { |r| r.name == "poisoned" }.not_nil!
-if driven.failed == 0
-  puts "FAIL the poisoned arm did not reproduce in #{driven.runs} attempts. Either the"
-  puts "defect is fixed — in which case delete this file and close the roadmap item — or"
-  puts "the harness has stopped driving it, which is how the last reproducer for this"
-  puts "defect was lost."
+
+if control
+  # The control must still reproduce. Measured on the fix's own A/B: 6 of 18
+  # guarded and 17 of 18 poisoned with the latch off.
+  if driven.failed == 0
+    puts "FAIL the control arm did not reproduce in #{driven.runs} attempts. With the"
+    puts "mutator-count latch off this workload faulted 17 of 18 times, so a clean run"
+    puts "here means the harness has stopped driving the defect and the shipped arms"
+    puts "above prove nothing. That is how the last reproducer for this was lost."
+    exit 1
+  end
+  puts "ok — with `GCRY_SWEEP_MUTATOR_LATCH=0` the defect still reproduces, so the"
+  puts "clean shipped run is attributable to the latch and not to the harness."
+  exit 0
+end
+
+total = results.sum(&.failed)
+if total > 0
+  puts "FAIL #{total} run(s) faulted. This was fixed on 2026-09-13 by latching the"
+  puts "mutator count in the stopped world (`latch_sweep_mutator_count`): the sweep's"
+  puts "relink and munmap decisions used to re-evaluate `multi_mutator_threads?` after"
+  puts "`start_world`, and a thread born in between flipped the answer — so a dropped"
+  puts "chunk's `next` was pointed into the unmap queue while the chunk was still on"
+  puts "`@chunks`, and the list's real tail became unreachable. A chunk off the list is"
+  puts "never swept and its marks are never cleared, so its objects read permanently"
+  puts "marked and nothing follows their edges."
+  puts "`GCRY_CHUNK_LIST_AUDIT=1` reports the divergence directly."
   exit 1
 end
 
-puts "reproduced. This is a rate, not a gate: the default arm fails a small"
-puts "fraction of runs and gating on that would make unrelated pushes flaky."
-puts ""
-puts "What a sighting says, and what it does not: the holders search finds the"
-puts "released range on a *running fiber's* stack and in no live heap block, so"
-puts "the missing root is a stack slot or a register the scan does not reach."
-puts "It does not say which allocation it was. `GC.realloc` growth is the"
-puts "standing first suspect — between `realloc` returning a new large block"
-puts "and the caller storing it, the only reference is a register."
+puts "ok — no arm faulted. Before the fix this was 5 of 18 guarded and 14 of 18"
+puts "poisoned; `--control` restores that and must still fail."

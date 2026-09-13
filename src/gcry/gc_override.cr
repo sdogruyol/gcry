@@ -897,6 +897,10 @@ module GC
     # Research only: does `@chunk_index` agree with the `@chunks` list? A chunk
     # in one and not the other is never swept and never has its marks cleared.
     heap.chunk_list_audit = true if env_flag_one?("GCRY_CHUNK_LIST_AUDIT")
+    # Research only: go back to re-evaluating the mutator count per decision
+    # instead of latching it in the stop. The red arm of `make
+    # thread-churn-uaf`.
+    heap.sweep_mutator_latch = false if env_flag_zero?("GCRY_SWEEP_MUTATOR_LATCH")
     # Research only: run the holders search at every large release, so a live
     # block being let go names its holder then instead of a hundred
     # collections later at the fault. Walks the heap and every stack per

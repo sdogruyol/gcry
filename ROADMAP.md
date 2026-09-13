@@ -1182,8 +1182,8 @@ CI asymmetry that hid both.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
-- [ ] **A large object is released under load on the fat app, and measured at
-      the release it was garbage.** The title said *live* from 2026-08-23 to
+- [x] **A large object is released under load on the fat app — FIXED
+      2026-09-13.** The title said *live* from 2026-08-23 to
       2026-09-12; the holders search, run at the release instead of at the
       fault (`GCRY_RELEASE_HOLDERS=1`), says otherwise. At the instant the
       chunk is let go: explicit roots **0**, one word in a 32-byte `type_id 0`
@@ -1220,6 +1220,27 @@ CI asymmetry that hid both.
       `MonitorGate.enter` (238 of 240 collections) and its stack is scanned
       with no recorded SP. That is the next thing to read.
       `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+      **THE FIX (2026-09-13): latch the mutator count in the stopped
+      world.** The producer was a time-of-check/time-of-use split.
+      `sweep_after_world?` reads `multi_mutator_threads?` inside the stop,
+      where the decision it drives is taken; `relink_chunks_after_world?` and
+      `munmap_empty_chunks_this_collect?` read it **again** during the sweep,
+      after `start_world` — and this workload creates eight threads in that
+      window. So the stop saw a sole mutator (after-world sweep allowed, munmap
+      allowed) and the sweep saw multi (no rebuild), which is the one
+      combination the guards are written to exclude: a chunk dropped with its
+      `next` pointed into the unmap queue while still on `@chunks`, so the live
+      list diverts into the queue and its real tail is unreachable — 2 to 30
+      mapped, ordinary chunks indexed and unlisted. Off the list is never swept
+      and never mark-cleared, so those objects read permanently marked,
+      `mark_impl` skips them, nothing follows their edges, and what they point
+      at is reclaimed while live. Fixed by `latch_sweep_mutator_count`: one
+      read inside the stop, cleared when the collection ends, and all three
+      predicates read it while a collection is in flight. **guarded 6 of 18 →
+      0 of 18, poisoned 17 of 18 → 0 of 18, index-only chunks 2–30 in 7 of 14
+      runs → 0 in 14 of 14.** `make thread-churn-uaf` is now the regression
+      gate, both layouts, each with a `--control` arm
+      (`GCRY_SWEEP_MUTATOR_LATCH=0`) that must still fault.
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

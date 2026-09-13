@@ -323,3 +323,89 @@ the condition guarding it: this harness is multi-mutator most of the time, so
 
 So the producer is still open, and it is not in the three places that looked
 like it. The audit is what will tell a fix from a coincidence.
+
+# The producer, and the fix (2026-09-13)
+
+`GCRY_DISABLE_LAZY_SWEEP=1` named the half: **7 of 10 runs diverging with the
+after-world sweep, 1 of 10 without it.** And the divergent chunks say what kind
+they are — all still mapped, ordinary size classes, plain flags:
+
+```
+disagree — 17 chunk(s) indexed but not listed
+  (first 0x7f7e5a7df000, still mapped, size class 9, flags 0x60, 131072 bytes)
+```
+
+Not stale index entries for unmapped memory, then. Live chunks off the list,
+and in runs of 2 to 30 — a *tail*, not individual losses. Which is exactly what
+the shape of the drop path produces:
+
+```crystal
+ChunkHeader.set_next(chunk, to_unmap)   # the dropped chunk now points into the queue
+to_unmap = chunk
+drop = true
+...
+unless drop
+  if !after_world || relink_chunks_after_world?   # the rebuild that removes it
+    ChunkHeader.set_next(chunk, kept)
+    kept = chunk
+  end
+end
+```
+
+If a chunk is dropped and the rebuild does not run, its `next` points into the
+unmap queue **while it is still on `@chunks`** — so the live list diverts into
+that queue and everything after it in the real list is unreachable from the
+head. All of it stays in the index.
+
+## Why that combination was supposed to be impossible
+
+It is guarded, and the guards are consistent — read at one instant:
+
+| predicate | multi-mutator | sole mutator |
+|---|---|---|
+| `sweep_after_world?` | only if not munmapping | yes |
+| `relink_chunks_after_world?` | no | yes |
+| `munmap_empty_chunks_this_collect?` | only with the opt-in | yes |
+
+Sole mutator: sweep after world **and** rebuild. Multi-mutator: after-world
+sweep only when nothing is being munmapped, so nothing is dropped. Neither
+gives drop-without-rebuild.
+
+**But they are not read at one instant.** `sweep_after_world?` is evaluated
+inside the stop, where the decision it drives is taken; the other two were
+evaluated again *during the sweep*, after `start_world`. Between those two
+moments this workload creates eight threads. So: at the stop the process was
+the sole mutator → after-world sweep allowed, munmap allowed; by the time the
+sweep ran, `multi_mutator_threads?` had become true → `relink_chunks_after_world?`
+answered **no** → the chunk was dropped with no rebuild to take it off the
+list. A time-of-check/time-of-use split on a number that a churning program
+changes by design.
+
+## The fix
+
+Latch the count once, in the stopped world, beside the decision that depends
+on it (`latch_sweep_mutator_count`, cleared when the collection ends). All
+three predicates read the latch while a collection is in flight and the live
+count outside one. Six reads become one.
+
+| | guarded | poisoned | index-only chunks |
+|---|---|---|---|
+| before (`GCRY_SWEEP_MUTATOR_LATCH=0`) | **6 of 18** | **17 of 18** | 2–30, in 7 of 14 runs |
+| after | **0 of 18** | **0 of 18** | **0**, in 14 of 14 runs |
+
+`make thread-churn-uaf` is now a regression gate rather than a reproducer:
+both layouts must come back clean, and each has a `--control` arm that
+restores the re-evaluation and **must still fault** — a reproducer that
+quietly stops reproducing is how the previous one for this defect was lost.
+
+## What this closes, and what it does not
+
+Closed: the release itself. The chain this log walked backwards — poisoned pin
+receiver, `sched.@name`, the `@schedulers` buffer, the array that held it while
+the heap walk could not see the edge — was all one consequence of the array's
+chunk being off the list.
+
+Not closed by this: the `@chunks`/`@chunk_index` divergence is *detectable*
+rather than *prevented*. `GCRY_CHUNK_LIST_AUDIT=1` now reads zero on this
+workload, and it is the check any future list surgery should be measured
+against.

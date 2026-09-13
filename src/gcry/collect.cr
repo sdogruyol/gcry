@@ -2327,6 +2327,11 @@ module Gcry
 
           # Lazy sweep (Parallel reclaim-off): end STW before reclaim so pause
           # excludes O(heap) phase_sweep; sweep runs under freelist locks.
+          # Latch the mutator count here, inside the stop: every decision the
+          # sweep makes about relinking and munmapping depends on it, and by
+          # the time the after-world sweep runs a churning program has created
+          # threads that change the answer. See `latch_sweep_mutator_count`.
+          latch_sweep_mutator_count
           @lazy_sweep_pending = sweep_after_world?
           StwWatchdog.enter(StwWatchdog::PHASE_SWEEP)
           unless @lazy_sweep_pending
@@ -2461,6 +2466,9 @@ module Gcry
         end
       ensure
         @collecting = false
+        # Outside a collection the live count is the right answer again; the
+        # latch exists only so the decisions inside one agree with each other.
+        clear_sweep_mutator_latch
         unlock_post_stw
       end
 

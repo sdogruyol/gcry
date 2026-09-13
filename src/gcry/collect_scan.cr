@@ -515,6 +515,23 @@ module Gcry
       if first != 0
         len = RawOut.append(buf.to_unsafe, len, " (first 0x")
         len = RawOut.append_hex(buf.to_unsafe, len, first)
+        # Mapped or not, and that is the fork in the road: an index entry for an
+        # **unmapped** chunk is a stale entry, and `chunk_containing` handing one
+        # out is a read of memory the kernel took back. A mapped one is a live
+        # chunk off the list, which is the mark-staleness path. Probed with the
+        # same readability test the stack scan uses, so asking cannot fault.
+        mapped = Roots.page_readable?(first)
+        len = RawOut.append(buf.to_unsafe, len, mapped ? ", still mapped" : ", NOT MAPPED — a stale index entry")
+        if mapped
+          fc = Pointer(ChunkHeader).new(first)
+          len = RawOut.append(buf.to_unsafe, len, ", size class ")
+          len = RawOut.append_u64(buf.to_unsafe, len, fc.value.size_class.to_u64)
+          len = RawOut.append(buf.to_unsafe, len, ", flags 0x")
+          len = RawOut.append_hex(buf.to_unsafe, len, fc.value.flags.to_u64)
+          len = RawOut.append(buf.to_unsafe, len, ", ")
+          len = RawOut.append_u64(buf.to_unsafe, len, fc.value.mapped_bytes)
+          len = RawOut.append(buf.to_unsafe, len, " bytes")
+        end
         len = RawOut.append(buf.to_unsafe, len, ")")
       end
       len = RawOut.append(buf.to_unsafe, len, ", ")
@@ -903,9 +920,58 @@ module Gcry
     # Parallel reclaim-off; escape GCRY_DISABLE_LAZY_SWEEP=1.
     property lazy_sweep : Bool = true
 
+    # The mutator count these three decisions share, answered **once**.
+    #
+    # `multi_mutator_threads?` counts Crystal's thread list, and the list moves:
+    # threads are born and joined while a collection runs, and the post-STW
+    # sweep is precisely where a churning program creates them. Asking it twice
+    # across `start_world` is a time-of-check/time-of-use split, and the three
+    # predicates below asked it six times between the stop and the end of the
+    # sweep.
+    #
+    # What that produced: at the stop the process was the sole mutator, so
+    # `sweep_after_world?` said yes and the sweep was allowed to munmap empty
+    # chunks; by the time it ran, eight threads had been born, so
+    # `relink_chunks_after_world?` said **no** and the rebuild that takes
+    # dropped chunks off `@chunks` never happened — while the drop path had
+    # already pointed the dropped chunk's `next` into the unmap queue. The live
+    # list then walks into that queue and its real tail is unreachable: measured
+    # as **2 to 30 chunks in `@chunk_index` and not on `@chunks`** in 7 of 10
+    # runs of `make thread-churn-uaf`, all still mapped, ordinary size classes,
+    # against 1 of 10 with `GCRY_DISABLE_LAZY_SWEEP=1`. A chunk off the list is
+    # never swept and its marks are never cleared, so its objects read
+    # permanently marked and nothing follows their edges.
+    #
+    # So the answer is latched in the stopped world, where the decision that
+    # depends on it is taken, and every reader inside the collection sees that
+    # one. `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
+    @sweep_multi_latch = 0_i8 # 0 unlatched, 1 single mutator, 2 multi
+
+    # `GCRY_SWEEP_MUTATOR_LATCH=0` restores the re-evaluation, which is the red
+    # arm of `make thread-churn-uaf`: without the latch that harness fails 5 of
+    # 18 guarded and 14 of 18 poisoned, with it 0 of 18 on every arm.
+    property sweep_mutator_latch : Bool = true
+
+    protected def latch_sweep_mutator_count : Nil
+      return unless @sweep_mutator_latch
+      @sweep_multi_latch = multi_mutator_threads? ? 2_i8 : 1_i8
+    end
+
+    protected def clear_sweep_mutator_latch : Nil
+      @sweep_multi_latch = 0_i8
+    end
+
+    private def sweep_multi_mutator? : Bool
+      case @sweep_multi_latch
+      when 1_i8 then false
+      when 2_i8 then true
+      else           multi_mutator_threads?
+      end
+    end
+
     private def release_empty_chunks_this_collect? : Bool
       return false unless @release_empty_chunks
-      return true unless multi_mutator_threads?
+      return true unless sweep_multi_mutator?
       @parallel_empty_chunk_dormant || @parallel_empty_chunk_munmap
     end
 
@@ -923,7 +989,7 @@ module Gcry
       return false unless @lazy_sweep
       return false if @tlab_enabled
       return false if @madvise_free_pages
-      unless multi_mutator_threads?
+      unless sweep_multi_mutator?
         return true
       end
       return false if munmap_empty_chunks_this_collect?
@@ -933,12 +999,12 @@ module Gcry
     # EC1 post-STW: rebuild `@chunks` so munmap drops leave the list (Parallel
     # after_world must not — map_chunk races).
     private def relink_chunks_after_world? : Bool
-      !multi_mutator_threads?
+      !sweep_multi_mutator?
     end
 
     private def munmap_empty_chunks_this_collect? : Bool
       return false unless @release_empty_chunks
-      !multi_mutator_threads? || @parallel_empty_chunk_munmap
+      !sweep_multi_mutator? || @parallel_empty_chunk_munmap
     end
 
     # How far below parked stack_top to scan under multi-mutator STW.

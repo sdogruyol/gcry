@@ -770,15 +770,22 @@ thread-birth-root: $(BIN)
 # Three arms because the diagnostics surface different victims and hide each
 # other: `default` is the shipped rate, `guarded` names the released chunk
 # through `GCRY_UNMAP_GUARD=1`, `poisoned` has the highest rate and names a
-# freed small block. The last is asserted non-zero — a reproducer that has
-# silently stopped reproducing is how the previous one was lost. ~90 s for
-# both layouts.
+# freed small block. ~90 s for both layouts.
+#
+# The regression gate for the live-object release, fixed 2026-09-13. Both
+# layouts, each with its control: the shipped arms must not fault, and
+# `--control` — which restores the per-decision mutator count the fix latched
+# — must still fault, or the harness has stopped driving the workload and the
+# clean run proves nothing. Before the fix: 5 of 18 guarded, 14 of 18
+# poisoned.
 thread-churn-uaf: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_churn_uaf.cr -o $(BIN)/thread_churn_uaf --error-trace
 	$(BIN)/thread_churn_uaf
+	$(BIN)/thread_churn_uaf --control
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/thread_churn_uaf.cr \
 	  -o $(BIN)/thread_churn_uaf_headers --error-trace
 	$(BIN)/thread_churn_uaf_headers
+	$(BIN)/thread_churn_uaf_headers --control
 
 # The nursery keeps the header representation under every setting, so every
 # mark clear has to gate per *chunk* like the read side does. Gating on the
