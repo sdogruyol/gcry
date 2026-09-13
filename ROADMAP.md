@@ -1439,8 +1439,12 @@ CI asymmetry that hid both.
       collections**. "Nothing in 90 000 collections" was nothing in forty
       mappings.
       Measured against mappings, with a workload whose live set grows and drops
-      so chunks are released and mapped again: **shipped strands 0 of 699 171
-      mappings** (532 716 + 160 175 in steady state, 6 280 across 200 short
+      so chunks are released and mapped again: **shipped strands 0 of 12.1
+      million mappings** — 699 171 in the first pass, then 11 389 909 more in two
+      overnight children of 200 000 collections each, both ending at the heap
+      size they started with. The 95% bound is 2.6 per ten million mappings, i.e.
+      **under 0.04 bytes retained per chunk mapped**. The earlier figure, kept
+      because it is what the first pass could say: 0 of 699 171 mappings (532 716 + 160 175 in steady state, 6 280 across 200 short
       processes), a 95% bound of 4.3 per million, i.e. under 0.6 bytes retained
       per chunk mapped. The one shipped sighting does not survive as a rate
       either: the identical command, 60 more runs, strands nothing — one event

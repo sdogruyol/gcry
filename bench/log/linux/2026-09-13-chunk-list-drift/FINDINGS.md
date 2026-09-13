@@ -106,3 +106,21 @@ Two changes, both from the measurement above:
 After: 6 of 6 children with mark residue (1-11 chunks each) and 18-91 stranded
 chunks, in ~4 s of children; `make mark-clear-index` 0 failures in 6 runs.
 
+## The bound, tightened overnight (2026-09-13/14)
+
+Two children, 200 000 collections each, on the shipped tree:
+
+| child | collections | chunks mapped | stranded | heap at the end |
+|---|---|---|---|---|
+| 1 | 199 998 | 5 328 755 | **0** | 13.8 MB |
+| 2 | 199 998 | 6 061 154 | **0** | 13.0 MB |
+
+**11,389,909 mappings, nothing stranded.** The 95% Poisson bound is
+2.6e-07 per mapping, i.e. **under 0.03 bytes retained per chunk
+mapped** — sixteen times tighter than the 4.3 per million this log opened with,
+and two orders of magnitude below the pre-fix arm's 80-181 per 1000.
+
+Both heaps ended where they started (13-14 MB against 15 MB in the shorter
+runs), which is the same statement from the other side: nothing accumulated over
+200 000 collections because nothing was lost.
+
