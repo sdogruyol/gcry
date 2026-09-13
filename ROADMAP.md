@@ -1153,6 +1153,16 @@ CI asymmetry that hid both.
       second and prints whether the handle names a live thread, which is the one
       question that separates "the signal was lost" from "the handle came out of
       a freed `Thread`" — the open use-after-free is on this same runner.
+      **And five retention specs at once on aarch64 (2026-09-13, run
+      `34770477564`).** `test (aarch64 native)` failed `dormant_revive_spec`,
+      `empty_chunk_grace_spec`, a heap-shrink assertion, `dormant_chunk_bytes`
+      and `Invariant.live_object_checks` — 5 of 274 — on a **documentation-only
+      commit** whose tree had passed the same job one run earlier, and a re-run
+      of the same job passed. Five retention specs failing together on one host
+      and on no other is host variance, not a collector change; the candidate
+      worth checking when it recurs is the runner's page size, since every one
+      of them reasons about chunk residency. Recorded because nothing else
+      would remember it.
       **A Darwin sighting of the same gate, different shape (2026-09-13, run
       `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
       the audit refusing to name two planted values — `faults: 0 -> 0 (poison
