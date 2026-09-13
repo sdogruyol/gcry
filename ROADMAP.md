@@ -1296,7 +1296,25 @@ CI asymmetry that hid both.
       (`moved=0`, and an immortal index changed nothing) and an unwritten slot
       (zero-filling changed nothing).
 
-- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep.**
+- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep —
+      and the precondition does not occur on this tree (measured 2026-09-13).**
+      `index_insert` and `index_remove` now count their sections and whether the
+      world was stopped: **1 155 sections alone and 586 with a second mutator
+      holding the lock, 0 of them inside the stop.** The sweep's placement is
+      `sweep_after_world?`, so the collector's index surgery runs with mutators
+      running, and there is no section a frozen holder can block. What a holder
+      costs instead is a *bounded* stall: a 30 s hold makes the harness kill its
+      child at 12 s, a **1.5 s hold finishes** — the collector is waiting on a
+      lock whose owner is still running, which resolves when the owner lets go.
+      And if that ever changes, the report will say so: the watchdog could only
+      say `phase=sweep`, which names no lock, and those two sections now leave a
+      breadcrumb so it names the lock and the chunk. `make index-lock-wedge`
+      fails if a section runs inside the stop without the watchdog naming it —
+      the silent-hang shape. Still open, because this is a property of the
+      current sweep placement rather than a proof, and the original note is
+      kept below.
+      `bench/log/linux/2026-09-13-index-lock-wedge/FINDINGS.md`
+      **The shape, as first written:**
       `chunk_containing` holds that spinlock for the length of a lookup, and a
       suspend signal arrives wherever it likes; the sweep's own `index_insert` /
       `index_remove` take the same lock unconditionally, so a thread frozen

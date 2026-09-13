@@ -24,6 +24,23 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
+- **`make index-lock-wedge`: the wedge that needs something this tree does not
+  do.** The roadmap has carried "a mutator frozen while holding `@index_lock`
+  would wedge the sweep" as a shape with no reproducer. `index_insert` and
+  `index_remove` now count their sections and whether the world was stopped:
+  **1 155 sections alone, 586 with a second mutator holding the lock, 0 inside
+  the stop**, because the sweep's placement is `sweep_after_world?` and the
+  collector's index surgery runs with mutators running. What a holder costs is a
+  bounded stall rather than a deadlock — a 30 s hold makes the harness kill its
+  child, a 1.5 s hold finishes, which is what "waiting on an owner that is still
+  running" looks like. And if the precondition ever appears, the watchdog now
+  names it: it could say `phase=sweep` and nothing about which lock, and those
+  two sections leave a breadcrumb carrying the lock and the chunk. The gate
+  fails if a section runs inside the stop without the watchdog naming it.
+  `bench/log/linux/2026-09-13-index-lock-wedge/FINDINGS.md`
+
+### Added
+
 - **`make pool-refill-cost`, and a retired note.** `tasks/todo.md` carried
   "`bitmap_take_pool_chunk` walks every chunk of the class per refill:
   O(chunks)" since the bitmap allocator landed. Measured: the walk builds a

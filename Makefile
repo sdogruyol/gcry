@@ -969,6 +969,21 @@ pool-refill-cost: $(BIN)
 	$(BIN)/pool_refill_cost
 	$(BIN)/pool_refill_cost --churn
 
+# The wedge ROADMAP has carried without a reproducer: `chunk_containing` holds
+# `@index_lock` for the length of a lookup, a suspend signal arrives wherever it
+# likes, and the collector's index surgery takes the same lock — so a mutator
+# frozen holding it would leave the collector spinning with the world stopped,
+# and nothing is resumed until that phase ends. Measured instead of argued: of
+# 1 155 index-lock sections alone and 586 with a second mutator holding the
+# lock, **none runs with the world stopped** on this tree, and a 1.5 s hold
+# finishes — so the cost today is a wait bounded by the holder, not a deadlock.
+# The harness fails if a section ever runs inside the stop without the watchdog
+# naming it, which is the shape that would make this a silent hang. ~15 s.
+index-lock-wedge: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/index_lock_wedge.cr -o $(BIN)/index_lock_wedge --error-trace
+	$(BIN)/index_lock_wedge
+	$(BIN)/index_lock_wedge --control
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

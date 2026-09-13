@@ -9,6 +9,12 @@ require "json"
 module Gcry
   module Observability
     # Full dogfood snapshot (same fields as historical Kemal `/gc-stats`).
+    # This tuple is **at Crystal's 300-field ceiling**. Adding two more
+    # counters (`index_lock_sections`, `index_lock_sections_in_stw`) failed to
+    # compile with "named tuple size cannot be greater than 300 (size is 302)",
+    # so a counter now has to earn its place here rather than be added by
+    # reflex: a `Heap` getter is what a harness reads, and this map is for what
+    # an operator needs. Retiring a field is the other way to make room.
     def self.json_stats(heap : Heap = Gcry.default_heap) : String
       p = PauseStats.new(
         heap.last_pause_ns,
@@ -232,8 +238,6 @@ module Gcry
         chunk_index_only_now:                  heap.chunk_index_only_now,
         chunk_index_only_now_bytes:            heap.chunk_index_only_now_bytes,
         chunks_mapped:                         heap.chunks_mapped,
-        mark_clear_residue:                    heap.mark_clear_residue,
-        ec_root_unpinned_ivars:                heap.ec_root_unpinned_ivars,
         ec_queue_audit_ring_slots:             heap.ec_queue_audit_ring_slots,
         ec_queue_audit_list_slots:             heap.ec_queue_audit_list_slots,
         ec_queue_audit_faults:                 heap.ec_queue_audit_faults,

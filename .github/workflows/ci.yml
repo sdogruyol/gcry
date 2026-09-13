@@ -632,6 +632,16 @@ jobs:
         run: |
           make pool-refill-cost
 
+      # The @index_lock wedge: a mutator frozen holding that lock could stall a
+      # collector that takes it with the world stopped. Measured rather than
+      # argued — no index-lock section runs inside the stop on this tree, and a
+      # bounded hold finishes — and the gate fails if one ever does without the
+      # watchdog naming it, which is the difference between a stall and a
+      # silent hang.
+      - name: The index-lock wedge stays unreachable
+        run: |
+          make index-lock-wedge
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

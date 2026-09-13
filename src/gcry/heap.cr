@@ -65,6 +65,23 @@ module Gcry
       @live_objects.get
     end
 
+    # Hold `@index_lock` for `ms` milliseconds, so a test can produce the one
+    # shape this collector has no defence against: a mutator frozen while
+    # holding it. Research only, and called from a bench harness rather than
+    # wired to a knob — there is no hot path to pay for it here.
+    #
+    # Busy-waits rather than sleeping: the caller holds a spinlock, and handing
+    # the CPU to the scheduler while holding one is a different bug than the one
+    # being reproduced.
+    def debug_hold_index_lock(ms : UInt64) : Nil
+      @index_lock.sync do
+        deadline = Time.instant + ms.milliseconds
+        while Time.instant < deadline
+          Intrinsics.pause
+        end
+      end
+    end
+
     # Move the counter without touching a block, so a test can show that
     # `Invariant.check_live_objects` catches a drift rather than only that it
     # passes. There is no other way to produce one on purpose: every real path
@@ -3042,7 +3059,24 @@ module Gcry
     end
 
     private def index_insert(chunk : ChunkHeader*) : Nil
+      note_index_lock_section
+      StwWatchdog.note_index_lock_wait(chunk.address)
       @index_lock.sync { index_insert_locked(chunk) }
+      StwWatchdog.note_index_lock_done
+    end
+
+    # Index-lock sections entered with the world stopped, which is the only
+    # configuration in which a mutator frozen holding that lock can wedge the
+    # collector: with the world running the holder keeps running too, so the
+    # cost is a stall bounded by whatever it is doing, not a deadlock. The
+    # roadmap has carried the wedge as a shape without a number, and this is the
+    # number — `make index-lock-wedge` reads it.
+    getter index_lock_sections_in_stw : UInt64 = 0_u64
+    getter index_lock_sections : UInt64 = 0_u64
+
+    private def note_index_lock_section : Nil
+      @index_lock_sections &+= 1
+      @index_lock_sections_in_stw &+= 1 if @world_stopped
     end
 
     # Caller holds `@index_lock`.
@@ -3098,7 +3132,18 @@ module Gcry
     end
 
     private def index_remove(chunk : ChunkHeader*) : Nil
+      # Two plain stores around a lock acquisition, and they exist because of a
+      # hang shape that has been open with no way to read it: `chunk_containing`
+      # holds `@index_lock` for the length of a lookup, a suspend signal arrives
+      # wherever it likes, and the sweep's own index surgery takes the same lock
+      # unconditionally — so a mutator frozen holding it leaves the collector
+      # spinning with the world stopped, forever. The watchdog could say
+      # `phase=sweep` and no more. Now it can say which lock, and which chunk the
+      # collector was there for. `make index-lock-wedge` is the reproducer.
+      note_index_lock_section
+      StwWatchdog.note_index_lock_wait(chunk.address)
       @index_lock.sync { index_remove_locked(chunk) }
+      StwWatchdog.note_index_lock_done
     end
 
     # Caller holds `@index_lock`.

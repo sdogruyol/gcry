@@ -136,6 +136,21 @@ module Gcry
     @@suspend_acked = 0
     @@suspend_waiting_id = 0_u64
 
+    # Which chunk the collector is taking `@index_lock` for, or 0 when it is not
+    # in one of those sections. `phase=sweep` was as much as a report could say
+    # about a collector spinning on that lock, and the lock is the interesting
+    # part: a mutator suspended while holding it wedges the sweep permanently,
+    # because the collector will not resume anyone until the sweep finishes.
+    @@index_lock_for = 0_u64
+
+    def self.note_index_lock_wait(chunk : UInt64) : Nil
+      @@index_lock_for = chunk
+    end
+
+    def self.note_index_lock_done : Nil
+      @@index_lock_for = 0_u64
+    end
+
     def self.note_suspend(expected : Int32, acked : Int32, waiting_id : UInt64) : Nil
       @@suspend_expected = expected
       @@suspend_acked = acked
@@ -257,6 +272,19 @@ module Gcry
         len = append(buf.to_unsafe, len, " of ")
         len = append_u64(buf.to_unsafe, len, @@suspend_expected.to_u64)
         len = append(buf.to_unsafe, len, " already have. Reported once per stop\n")
+      elsif @@index_lock_for != 0_u64
+        # The one wedge this collector has no defence against, and until now no
+        # words for either: `chunk_containing` holds `@index_lock` for the
+        # length of a lookup, a suspend signal arrives wherever it likes, and
+        # the collector's index surgery takes the same lock unconditionally. A
+        # mutator frozen holding it stalls the sweep forever, because nobody is
+        # resumed until the sweep finishes. "phase=sweep" was as much as this
+        # report could say; the chunk address says which section it is in.
+        len = append(buf.to_unsafe, len, "gcry: it is taking @index_lock for chunk 0x")
+        len = append_hex(buf.to_unsafe, len, @@index_lock_for)
+        len = append(buf.to_unsafe, len, " — a mutator suspended while holding that lock stalls this " \
+                                         "forever, since nothing is resumed until the phase ends. " \
+                                         "Reported once per stop\n")
       else
         len = append(buf.to_unsafe, len, "gcry: it is waiting on something a suspended thread holds; " \
                                          "reported once per stop\n")
