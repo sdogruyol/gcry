@@ -884,8 +884,14 @@ poison-holders: $(BIN)
 # its edges; that is one half of the 2026-08-23 live-object release. Two arms:
 # the shipped clear must leave no indexed chunk holding a mark, and `--control`
 # — the list walk plus the pre-fix mutator-count reads, because the residue
-# needs an off-list chunk to exist — must leave some. Measured 11 of 14 runs
-# with the control, 0 of 20 shipped. ~4 s.
+# needs an off-list chunk to exist — must leave some. The control drives
+# *mappings*, and that is the whole difference between a gate and a coin toss:
+# a chunk leaves the list only through a prepend racing the sweep's walk, a
+# prepend happens in `map_chunk`, and the born threads have to be alive and
+# allocating when that walk runs. Thread churn alone mapped ~30 chunks a child
+# and the arm passed on luck — 6 of 6 locally, **0 of 6** on the two-core CI
+# runner. With a live set that grows and drops, plus allocating threads, it is
+# 6 of 6 children with residue and 18-91 stranded chunks each. ~35 s.
 mark-clear-index: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/mark_clear_index.cr -o $(BIN)/mark_clear_index --error-trace
 	$(BIN)/mark_clear_index

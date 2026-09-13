@@ -83,3 +83,26 @@ history in that exact code. The instrument is what ships instead:
 mappings. Not zero, because the race is still open and a gate on zero would red
 CI on the real event; three orders of magnitude below the pre-fix rate, so
 reopening the race fails it. 4 of 4 runs green locally.
+
+## The same mistake was already in a shipped gate (2026-09-13, later)
+
+`make mark-clear-index` went red on CI the same day, on its **control** arm:
+"every one of 6 children walked the list, found nothing and did not crash". Not
+a regression — the arm had been passing on luck for exactly the reason this log
+is about. Its workload was thread churn and nothing else, which maps about
+thirty chunks per child, so the control was asking a 1-in-1000-mappings question
+of a 30-mapping sample. It found residue 6 of 6 times locally and 0 of 6 on the
+two-core runner.
+
+Two changes, both from the measurement above:
+
+1. **Drive mappings.** A live set that grows for 20 rounds and is dropped whole,
+   so chunks are released and mapped again.
+2. **The born threads have to allocate.** Threads that only start and stop are
+   usually gone by the time the after-world sweep walks the list, so no prepend
+   ever races it. Measured as a bimodal control before this: 82 stranded chunks
+   in one child, zero in the next two.
+
+After: 6 of 6 children with mark residue (1-11 chunks each) and 18-91 stranded
+chunks, in ~4 s of children; `make mark-clear-index` 0 failures in 6 runs.
+

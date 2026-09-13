@@ -394,6 +394,14 @@ is now the default and the flag would take you the wrong way.
   mappings. `chunk_index_only_now` and `chunk_index_only_now_bytes` report the
   divergence as a snapshot rather than a sum, which is what distinguishes one
   chunk stuck forever from a fresh one lost every collection.
+  The same measurement corrected `make mark-clear-index`, which went red on CI
+  the same day on its control arm: that arm churned threads and nothing else, so
+  it asked a one-in-a-thousand-mappings question of a thirty-mapping sample and
+  had been passing on luck (6 of 6 locally, 0 of 6 on the two-core runner). It
+  now drives mappings with a live set that grows and drops, and its born threads
+  allocate — a thread that only starts and stops is gone before the after-world
+  sweep walks the list, so nothing prepends into that walk. After: 6 of 6
+  children with residue and 18-91 stranded chunks each.
   `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`
 
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the
