@@ -989,11 +989,15 @@ index-lock-wedge: $(BIN)
 # every parked fiber is scanned from 256 KiB below its saved `stack_top`. The
 # proposed fix is to scan a *fully parked* fiber from its own SP, which is a
 # root-scan change — being wrong there is a use-after-free days later — so this
-# measures the payoff before anyone touches it. Measured with 256 fibers parked
-# 64 frames deep: **65.5 MB per collection**, 256 KiB per parked fiber, i.e. the
-# lag paid in full, with the pagemap low-water skip covering only ~5% of it
-# (266 skips in 5 240 scans). Counting, not timing, so it holds under load.
-# Research only; not a gate.
+# measures the payoff before anyone touches it. Two arms, 256 fibers on a
+# Parallel context: parked on stacks never faulted below the parked frames, the
+# pagemap low-water probe removes the **entire** window (67 858 KiB of a 67 072
+# KiB nominal window per collection) and the proposal would save nothing; with
+# `--deep`, each fiber touching 512 KiB of stack and then parking shallow, the
+# probe removes 2 470 KiB and **64 602 KiB per collection is read, 246.6 KiB per
+# parked fiber**. The second arm is "pooled stacks lose the skip" with no pool
+# and no uptime. Counting, not timing, so it holds under load. Research only;
+# not a gate.
 fiber-lag-cost: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dpreview_mt -Dexecution_context \
 		bench/fiber_lag_cost.cr -o $(BIN)/fiber_lag_cost --error-trace

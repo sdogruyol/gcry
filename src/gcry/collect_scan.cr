@@ -1169,6 +1169,14 @@ module Gcry
       {% if flag?(:linux) %}
         if @stack_low_water_scan
           bottom = fiber.@stack.bottom.address
+          # The last precondition, counted because the skip firing once per
+          # fiber and never again had to be explained by one of three things and
+          # the other two are already ruled out (`low_water_misses` is 0 and the
+          # knob is on). `lagged >= bottom` means the saved `stack_top` sits at
+          # least a lag window above the stack's high end — i.e. it does not
+          # describe this stack — so the probe is skipped and the whole window
+          # is scanned.
+          @low_water_unprobed &+= 1 unless bottom > lagged
           if bottom > lagged
             lw = Platform.stack_low_water(lagged, bottom)
             if lw > lagged

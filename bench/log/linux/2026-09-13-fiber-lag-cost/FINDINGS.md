@@ -1,87 +1,67 @@
-# The parked-fiber lag reads 65.5 MB a collection, and 95% of it is the lag
+# What the parked-fiber lag actually reads — and two wrong readings on the way
 
 Date: 2026-09-13/14 (overnight) · host: AMD Ryzen AI 9 465, Linux 7.2.4 ·
-tree: `0e37fe5` · harness `bench/fiber_lag_cost.cr`
+tree: `89529cb` · harness `bench/fiber_lag_cost.cr`
 
 The largest open pause item says 8.4 ms of a 9.2 ms p50 pause at Kemal `-c100`
-is `roots_fibers_ns`, and proposes a fix:
+is `roots_fibers_ns`, and proposes scanning a fully parked fiber from its own SP
+instead of from 256 KiB below its saved `stack_top`. That is a root-scan change,
+where being wrong is a use-after-free days later, so the payoff wanted measuring
+first. It took three attempts to measure it, and the two failures are the
+interesting part.
 
-> a fully parked fiber (wait queue, no owning thread) has a trustworthy SP and
-> can be scanned from it as on EC1; only fibers in transit need the lag
+## The measurement
 
-That is a change to the root scan, where being wrong is a use-after-free days
-later, so it should not be attempted on an estimate. This is the estimate made
-into a measurement.
+`fiber_lag_window_bytes` is the nominal window — the distance between a parked
+fiber's saved `stack_top` and where its scan starts — and
+`low_water_skipped_bytes` is what the pagemap low-water probe removes from it.
+256 fibers on a `Fiber::ExecutionContext::Parallel`, 10 collections:
 
-## Why every parked fiber pays
+| arm | nominal window | removed by the skip | **actually read** | probe found nothing to skip |
+|---|---|---|---|---|
+| parked on untouched stacks | 67 072 KiB | 67 858 KiB | **≈ 0** | 0 |
+| 512 KiB touched, then parked shallow | 67 072 KiB | 2 470 KiB | **64 602 KiB** | 2 560 |
 
-`fiber_stack_scan_top` tries `fiber_stack_sp_scan_low` first, and that function
-finds an SP only when some *suspended thread's* recorded SP lies inside the
-fiber's stack — i.e. when the fiber is running on a thread that was stopped. A
-fully parked fiber owns no thread, so it never matches, and the scan falls
-through to `stack_top - lag`.
+Per collection, per parked fiber: **nothing** in the first arm, **246.6 KiB** in
+the second. So the lag is free when the stack below the parked frames was never
+faulted, and costs essentially the whole window when it was — and the second arm
+is not exotic: one deep call followed by parking shallow is enough, on a single
+fiber, within its own lifetime. That is the roadmap's "pooled stacks lose it over
+time" without needing a pool or any time.
 
-## The number
+The proposal's payoff is therefore the deep case, and there it is real: ~64.6 MB
+of reads per collection at 256 parked fibers, linear in the count (17.5 / 33.5 /
+65.5 / 129.5 MB nominal at 64 / 128 / 256 / 512).
 
-256 fibers parked 64 frames deep on a `Fiber::ExecutionContext::Parallel`, 20
-collections:
+## The first wrong reading: the nominal window is not what is read
 
-| quantity | value |
-|---|---|
-| parked-fiber scans that paid the lag | 5 240 |
-| bytes between saved SP and scan start | 1 373 634 560 |
-| per collection | **65.5 MB** across 262 parked scans |
-| per parked fiber | **256.0 KiB** — the lag, in full |
-| low-water skips inside those windows | 266 of 5 240 scans, 69.4 MB |
+`fiber_lag_window_bytes` alone said 65.5 MB per collection and that was reported
+as the payoff. It is the *window*, not the reads: on untouched stacks the
+low-water probe moves the scan start above `stack_top` and the window is never
+touched. Removing the lag there would save nothing at all.
 
-Two readings, and the second is the one that was not obvious.
+## The second: a counter that forgets
 
-**The lag is paid in full** per parked fiber — 256.0 KiB, the configured window,
-not some fraction of it — and the cost is exactly linear in the number of parked
-fibers:
+Holding the fiber count and varying collections showed **266 low-water skips
+whether the run did 1 collection or 20**, while parked scans went 262 → 5 240.
+That reads as a skip that fires once per fiber and never again, and it was
+written up that way. It is wrong: `@low_water_skips` and
+`@low_water_skipped_bytes` are **reset every collection** in `collect.cr`'s
+per-collection reset block, so a read after N collections reports the last one.
+Summed per collection, the skip fires on essentially every parked scan.
 
-| parked fibers | per collection | scans per collection |
-|---|---|---|
-| 64 | 17.5 MB | 70 |
-| 128 | 33.5 MB | 134 |
-| 256 | 65.5 MB | 262 |
-| 512 | 129.5 MB | 518 |
+Two counters were added while chasing that, and they are what made the third
+attempt conclusive rather than another guess: `low_water_misses` (the probe ran
+and found a faulted page at or below the lag floor — 0 in the shallow arm, 2 560
+in the deep one, exactly 256 fibers x 10 collections) and `low_water_unprobed`
+(the lag floor sat above the stack's high end — 0 in both, which is what
+eliminated the last alternative).
 
-**And the pagemap low-water skip fires once per fiber, not once per scan.** The
-skip is what makes the lag affordable on a fat app, and this is what it does
-here:
+## What is still open
 
-| collections | parked scans | low-water skips | probe ran, nothing to skip |
-|---|---|---|---|
-| 1 | 262 | 266 | 0 |
-| 2 | 524 | 266 | 0 |
-| 4 | 1 048 | 266 | 0 |
-| 20 | 5 240 | 266 | 0 |
-
-266 skips whichever it is — the *first* scan of each parked fiber skips its whole
-window (69.5 MB over 266 skips is 261 KiB each, i.e. all of it), and no scan
-after that does. So every collection past the first pays 256 KiB per parked
-fiber with no skip at all, which is why the roadmap's "pooled stacks lose it over
-time" understates it: a fiber loses it on its own second collection.
-
-The mechanism is narrowed but not closed. `low_water_misses` — added for exactly
-this — counts a probe that ran and found a faulted page at or below the lag
-floor, and it is **0**, so the later scans do not reach the probe at all;
-`stack_low_water_scan` is on and the pagemap is available, which leaves the
-`bottom > lagged` precondition as the thing to instrument next. That is one
-counter away and it is the named next step here.
-
-## What this does not do
-
-It does not make the change safe. A fully parked fiber's `stack_top` is written
-at swap time and is trustworthy *if* the fiber is genuinely parked, and the
-predicate for "genuinely parked, not in transit" is the whole difficulty — the
-same distinction `Fiber#running?` only approximates, which is why the lag exists.
-The number above says the work is worth doing; the audit gates
-(`make ec-queue-audit`, `make live-graph-audit`, `make mark-audit`) are what
-would have to stay green while doing it, and a per-fiber high-water mark written
-at swap time is the alternative the item already names.
-
-`make fiber-lag-cost` keeps the measurement. It is research, not a gate: it
-reports and it refuses to pass if no parked fiber paid the lag, since then it
-has measured nothing.
+The fix itself. A fully parked fiber's `stack_top` is trustworthy *if* it is
+genuinely parked, and that predicate is the difficulty — `Fiber#running?` only
+approximates it, which is why the lag exists. The alternative the item already
+names, a per-fiber high-water mark written at swap time, would make the deep arm
+as cheap as the shallow one without needing the predicate at all, and this
+harness is how either would be measured.

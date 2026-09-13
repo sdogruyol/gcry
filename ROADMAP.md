@@ -396,25 +396,30 @@ CI asymmetry that hid both.
       queue, no owning thread) has a trustworthy SP and can be scanned from it
       as on EC1; only fibers in transit need the lag. A per-fiber high-water
       mark written at swap time would replace the pagemap probe.
-      **The payoff is measured now (2026-09-13).** `fiber_lag_window_bytes`
-      counts the distance between each parked fiber's saved `stack_top` and
-      where its scan actually began — exactly what the fix would stop reading.
-      With 256 fibers parked 64 frames deep on a Parallel context, 20
-      collections: **65.5 MB per collection**, 262 parked scans, **256.0 KiB
-      each — the lag paid in full**, and exactly linear in parked fibers (17.5 /
-      33.5 / 65.5 / 129.5 MB at 64 / 128 / 256 / 512).
-      **And the low-water skip fires once per fiber, not once per scan** — 266
-      skips whether the run does 1 collection or 20, while the scans go 262 →
-      5 240. The first scan of a parked fiber skips its whole window (261 KiB
-      each) and no scan after it skips anything, so every collection past the
-      first pays the full 256 KiB per parked fiber. That understates "pooled
-      stacks lose it over time": a fiber loses it on its own second collection.
-      `low_water_misses` is 0, so the later scans never reach the probe — with
-      `stack_low_water_scan` on and pagemap available, the `bottom > lagged`
-      precondition is the thing to instrument next, and it is one counter away.
-      What is still missing is the *predicate*: "genuinely parked, not in
-      transit" is the whole difficulty, and `Fiber#running?` only approximates
-      it. `make fiber-lag-cost` keeps the measurement.
+      **The payoff is measured, and it is the deep case only (2026-09-13).**
+      `fiber_lag_window_bytes` counts the nominal window — saved `stack_top` to
+      scan start — and `low_water_skipped_bytes` what the pagemap probe removes
+      from it. 256 fibers on a Parallel context, 10 collections: on stacks never
+      faulted below the parked frames the window is 67 072 KiB per collection
+      and the skip removes **all of it** (67 858 KiB; the probe can start above
+      `stack_top`), so the proposal would save **nothing** there. With each fiber
+      touching 512 KiB of stack and then parking shallow, the skip removes 2 470
+      KiB and **64 602 KiB per collection is actually read — 246.6 KiB per parked
+      fiber** — with `low_water_misses` at 2 560, exactly 256 fibers x 10
+      collections. That second arm is the "pooled stacks lose it over time" case
+      reproduced without a pool or any uptime: one deep call, then park shallow.
+      **Two readings retracted on the way there**, both recorded because they
+      were reported before being checked: the nominal window was taken for the
+      reads (it is not — on untouched stacks nothing in it is read), and "266
+      skips whether the run does 1 collection or 20" was taken for a skip that
+      fires once per fiber (it is not — `@low_water_skips` is reset every
+      collection, so the read reports the last one). `low_water_misses` and
+      `low_water_unprobed` were added to settle it and are what make the third
+      attempt evidence instead of a third guess.
+      The fix is still open, and the alternative the item already names — a
+      per-fiber high-water mark written at swap time — would make the deep arm
+      as cheap as the shallow one without needing the "genuinely parked"
+      predicate at all.
       `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at

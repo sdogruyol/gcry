@@ -580,6 +580,9 @@ module Gcry
     # Probe ran, found nothing skippable. `low_water_skips` alone cannot tell
     # that from a probe that never ran.
     getter low_water_misses : UInt64 = 0_u64
+    # Probe not run because the lag floor was already at or above the stack's
+    # high end, which means the saved `stack_top` does not describe that stack.
+    getter low_water_unprobed : UInt64 = 0_u64
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
     getter size_class_chunk_count : UInt64 = 0_u64

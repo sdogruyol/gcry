@@ -24,22 +24,20 @@ is now the default and the flag would take you the wrong way.
 
 ### Added
 
-- **`make fiber-lag-cost`, and the number the biggest open pause item was
-  missing.** Under multi-mutator STW every parked fiber is scanned from 256 KiB
-  below its saved `stack_top`, and the roadmap proposes scanning a fully parked
-  fiber from its own SP instead. `fiber_lag_window_bytes` now counts exactly what
-  that would stop reading: with 256 fibers parked 64 frames deep on a Parallel
-  context, **65.5 MB per collection — 256.0 KiB per parked fiber, the lag paid
-  in full** — and exactly linear in parked fibers (17.5 / 33.5 / 65.5 / 129.5 MB
-  at 64 / 128 / 256 / 512). The pagemap low-water skip that makes the lag
-  affordable on a fat app turns out to fire **once per fiber rather than once per
-  scan**: 266 skips whether the run does 1 collection or 20, while scans go 262
-  to 5 240, so every collection past a fiber's first pays the whole window.
-  `low_water_misses` (new) is 0, which says the later scans never reach the
-  probe. The fix is a root-scan
-  change, so the measurement is the argument for doing it rather than a
-  substitute: the predicate for "genuinely parked, not in transit" is still the
-  difficulty.
+- **`make fiber-lag-cost`: the parked-fiber lag is free on untouched stacks and
+  costs the whole window on faulted ones.** Under multi-mutator STW every parked
+  fiber is scanned from 256 KiB below its saved `stack_top`, and the roadmap
+  proposes scanning a fully parked fiber from its own SP instead. Measured with
+  256 fibers on a Parallel context: on stacks never faulted below the parked
+  frames the pagemap low-water probe removes the **entire** window (67 858 KiB
+  of a 67 072 KiB nominal window per collection), so the proposal would save
+  nothing there; with each fiber touching 512 KiB of stack first and then parking
+  shallow, the probe removes 2 470 KiB and **64 602 KiB per collection is read —
+  246.6 KiB per parked fiber**. That second arm is the "pooled stacks lose the
+  skip over time" case with no pool and no uptime: one deep call, then park.
+  `low_water_misses` and `low_water_unprobed` are new and are what made it
+  conclusive; the findings record two readings retracted on the way, including a
+  counter that is reset every collection and was read as a cumulative one.
   `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
 
 ### Added
