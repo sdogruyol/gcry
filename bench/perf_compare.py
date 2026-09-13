@@ -70,12 +70,36 @@ def verdict(name, value, entry):
     return (REGRESSED if delta > tol else (IMPROVED if delta < -tol else PASS)), delta
 
 
-def compare(baseline, summary, gate):
+# A single run has to be 3.3 sd out before the gate fires, which on this runner
+# class is ~14 pp of `/json` throughput: anything smaller is invisible. Two
+# runs in a row on the wrong side of 2 sd is 0.05% per pair under normality,
+# so it buys back sensitivity — ~9 pp — at a *lower* false-alarm rate than the
+# single-run gate. Measured against the 24 recording runs: 1 single excursion
+# past 2 sd in 72 metric-runs and **no consecutive pairs at all**, including
+# across the hours a shared runner pool is slow, which is the case this rule
+# could otherwise have mistaken for a regression.
+STREAK_SD = 2.0
+
+
+def deviation_sd(name, value, entry):
+    """How far out `value` is, in sd, signed so negative is always worse."""
+    if entry is None or entry.get("value") is None or not entry.get("sd"):
+        return None
+    sd = float(entry["sd"])
+    if sd <= 0:
+        return None
+    delta = (value - float(entry["value"])) / sd
+    _, higher_better = METRICS[name]
+    return delta if higher_better else -delta
+
+
+def compare(baseline, summary, gate, prev=None):
     metrics = baseline.get("metrics", {})
     prov = baseline.get("provenance", {})
     lines = []
     regressions = []
     ungated = []
+    streaks = []
 
     lines.append("=== perf vs baseline ===")
     if prov and prov.get("recorded"):
@@ -134,6 +158,17 @@ def compare(baseline, summary, gate):
             (regressions if name not in WARN_ONLY else ungated).append((name, label, value, delta))
         elif state == NO_BASELINE:
             ungated.append((name, label, value, delta))
+        # The streak: this run and the previous one both on the wrong side of
+        # STREAK_SD. One run there is ordinary host noise — 1 in 72 metric-runs
+        # of the recording set — and two in a row is 0.05% per pair, which is
+        # how a 9 pp regression becomes visible without narrowing the band that
+        # a single run is judged against.
+        if prev and name in prev and name not in WARN_ONLY:
+            now_sd = deviation_sd(name, value, entry)
+            prev_sd = deviation_sd(name, float(prev[name]), entry)
+            if now_sd is not None and prev_sd is not None \
+                    and now_sd < -STREAK_SD and prev_sd < -STREAK_SD:
+                streaks.append((name, label, now_sd, prev_sd))
 
     for name, label, value, delta in ungated:
         if name in WARN_ONLY and delta is not None:
@@ -157,8 +192,22 @@ def compare(baseline, summary, gate):
                 label, value, float(entry["value"]), delta, float(entry["tolerance"])))
         return "\n".join(lines), (1 if gate and not stale_layout else 0)
 
+    if streaks:
+        lines.append("")
+        for name, label, now_sd, prev_sd in streaks:
+            lines.append(
+                "FAIL: {} has been on the wrong side of {:g} sd for two runs in a row "
+                "({:+.2f} sd now, {:+.2f} sd before) — inside the single-run gate, "
+                "confirmed across runs".format(label, STREAK_SD, now_sd, prev_sd))
+        lines.append("A single excursion past {:g} sd happened once in 72 metric-runs of the "
+                     "recording set and never twice in a row, so this is a regression rather "
+                     "than a slow hour on the runner pool.".format(STREAK_SD))
+        return "\n".join(lines), (1 if gate and not stale_layout else 0)
+
     lines.append("")
-    lines.append("PASS — every gated metric is within tolerance of the baseline")
+    lines.append("PASS — every gated metric is within tolerance of the baseline"
+                 + (", and no metric is two runs deep on the wrong side of "
+                    "{:g} sd".format(STREAK_SD) if prev else ""))
     return "\n".join(lines), 0
 
 
@@ -235,7 +284,7 @@ def selftest():
         "provenance": {"runner": "test", "layout": "headerless", "commit": "0" * 40,
                         "runs": 5, "recorded": "1970-01-01"},
         "metrics": {
-            "pct_json": {"value": 85.0, "tolerance": 3.0},
+            "pct_json": {"value": 85.0, "tolerance": 3.0, "sd": 1.0},
             "pct_root": {"value": 80.0, "tolerance": 3.0},
             "rss_x": {"value": 0.80, "tolerance": 0.05},
             "pause_p50_ms": {"value": 0.60, "tolerance": 0.20},
@@ -328,6 +377,26 @@ def selftest():
     if "none recorded yet" in text:
         failures.append("a recorded baseline also reported 'none recorded yet'")
 
+    # The two-runs-in-a-row check. `base` has sd on every metric, so a run at
+    # 2.5 sd is inside the single-run gate (3.3 sd) and confirmed only if the
+    # run before it was out too — which is the whole point: sensitivity without
+    # narrowing the band a single run is judged against.
+    sd_json = base["metrics"]["pct_json"]["sd"]
+    bad = {"pct_json": 85.0 - 2.5 * sd_json, "layout": "headerless"}
+    ok_run = {"pct_json": 85.0, "layout": "headerless"}
+    text, code = compare(base, bad, gate=True, prev=bad)
+    if code != 1 or "two runs in a row" not in text:
+        failures.append("a confirmed two-run excursion did not fail (exit {})".format(code))
+    text, code = compare(base, bad, gate=True, prev=ok_run)
+    if code != 0:
+        failures.append("a single excursion with a clean previous run failed (exit {})".format(code))
+    text, code = compare(base, bad, gate=False, prev=bad)
+    if code != 0:
+        failures.append("a confirmed excursion failed with --gate off (exit {})".format(code))
+    text, code = compare(base, bad, gate=True, prev={"layout": "headerless"})
+    if code != 0:
+        failures.append("a previous run missing the metric was not treated as no data")
+
     # An empty baseline must say how to record one rather than passing silently.
     text, code = compare({"metrics": {}}, {"pct_json": 85.0}, gate=True)
     if code != 0 or "--record" not in text:
@@ -373,6 +442,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--baseline")
     ap.add_argument("--summary")
+    ap.add_argument("--prev", help="the previous run's summary.json, for the "
+                                   "two-runs-in-a-row check (missing or unreadable is fine: "
+                                   "the check simply does not run)")
     ap.add_argument("--gate", action="store_true",
                     help="exit 1 on a regression (default: report only)")
     ap.add_argument("--record", action="store_true")
@@ -403,7 +475,13 @@ def main():
         ap.error("need --baseline and --summary (or --record / --selftest)")
     baseline = json.load(open(args.baseline))
     summary = json.load(open(args.summary))
-    text, code = compare(baseline, summary, args.gate)
+    prev = None
+    if args.prev:
+        try:
+            prev = json.load(open(args.prev))
+        except Exception:
+            prev = None
+    text, code = compare(baseline, summary, args.gate, prev=prev)
     print(text)
     return code
 

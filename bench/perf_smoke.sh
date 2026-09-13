@@ -171,6 +171,12 @@ case "$(uname -s)" in
   Darwin) PLATFORM_DIR="macos" ;;
 esac
 RUN_DIR="$LOG/$PLATFORM_DIR/$RUN_LABEL"
+# A fixed path for this run's own JSON, so the CI artifact can carry a few KB
+# instead of the whole checked-in `bench/log` tree. That tree is ~200 MB, it is
+# in the repository already, and every consumer of the artifact — the baseline
+# recorder, `perf_gate_margin.py`, the previous-run fetcher — reads exactly one
+# file out of it. Downloading 24 of them filled a 16 GB /tmp.
+PUBLISH_DIR="$LOG/_run"
 mkdir -p "$RUN_DIR"
 
 echo ""
@@ -303,6 +309,10 @@ else
   FAIL=1
 fi
 
+# The run's own JSON where CI can upload just that.
+mkdir -p "$PUBLISH_DIR"
+cp "$RUN_DIR"/*.json "$PUBLISH_DIR"/ 2>/dev/null || true
+
 # ── baseline comparison ──────────────────────────────────────────────
 #
 # The gates above are floors, and they sit far below tip on purpose (CI host
@@ -315,8 +325,16 @@ if [ -f "$BASELINE" ]; then
   echo ""
   GATE_ARG=""
   [ "${PERF_GATE_BASELINE:-0}" = "1" ] && GATE_ARG="--gate"
+  # The previous green run's numbers, when CI has fetched them
+  # (bench/fetch_prev_perf_summary.sh). Two runs in a row on the wrong side of
+  # 2 sd is a confirmed regression at 0.05% per pair, which is how a ~9 pp
+  # change becomes visible when the single-run gate only fires at ~14 pp.
+  PREV_ARG=""
+  if [ -n "${PERF_PREV_SUMMARY:-}" ] && [ -f "${PERF_PREV_SUMMARY}" ]; then
+    PREV_ARG="--prev ${PERF_PREV_SUMMARY}"
+  fi
   if ! python3 "$ROOT/bench/perf_compare.py" --baseline "$BASELINE" \
-      --summary "$RUN_DIR/summary.json" $GATE_ARG; then
+      --summary "$RUN_DIR/summary.json" $GATE_ARG $PREV_ARG; then
     FAIL=1
   fi
 fi

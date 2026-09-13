@@ -1002,6 +1002,18 @@ jobs:
       - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
 
+      # The previous green master run's perf numbers, read out of the artifact
+      # this job already uploads. It buys the two-runs-in-a-row check, which is
+      # the only way to see a regression smaller than the single-run gate's
+      # 3.3 sd without trading the false-alarm rate back. Failure to fetch costs
+      # that check and nothing else, by construction.
+      - name: Previous run's perf summary
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./bench/fetch_prev_perf_summary.sh
+
       - name: Kemal A/B thr+RSS+pause gate
         run: |
           mkdir -p bin
@@ -1046,7 +1058,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: perf-smoke-report
-          path: bench/log/
+          # This run's own JSON, not the whole checked-in `bench/log` tree: that
+          # tree is ~200 MB and already in the repository, while every consumer
+          # of this artifact reads one summary out of it. Downloading two dozen
+          # of them to record a baseline filled a 16 GB /tmp.
+          path: bench/log/_run/
           retention-days: 30
 
   # Weekly soak (Monday 06:00 UTC — see schedule cron above), and on demand.

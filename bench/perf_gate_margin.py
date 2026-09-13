@@ -29,6 +29,7 @@ import argparse
 import json
 import math
 import pathlib
+import shutil
 import statistics
 import subprocess
 import sys
@@ -63,16 +64,46 @@ def summary_for(run_id, cache):
                               "-D", str(d)], capture_output=True, text=True)
         if out.returncode != 0:
             return None
-    best = None
-    for f in (d / "linux").glob("*/summary.json"):
+    return pick_summary(d)
+
+
+def pick_summary(d):
+    """This run's own summary, whatever artifact shape it arrived in.
+
+    Three shapes exist at once: `_run/summary.json` (since 2026-09-13, a few KB),
+    the nested `linux/<label>/summary.json` of the old whole-tree artifact, and
+    `own-summary.json` written by this tool when it trims a downloaded artifact
+    to the one file it needs — two dozen untrimmed ones filled a 16 GB /tmp.
+    """
+    cached = d / "own-summary.json"
+    if cached.exists():
         try:
-            s = json.loads(f.read_text())
+            return json.loads(cached.read_text())
         except Exception:
-            continue
-        if s.get("runner") == "ubuntu-latest" and s.get("layout"):
-            if best is None or f.stat().st_mtime > best[0].stat().st_mtime:
-                best = (f, s)
-    return best[1] if best else None
+            return None
+    best = None
+    for pattern in ("_run/summary.json", "summary.json", "linux/*/summary.json"):
+        for f in d.glob(pattern):
+            try:
+                s = json.loads(f.read_text())
+            except Exception:
+                continue
+            if s.get("runner") == "ubuntu-latest" and s.get("layout"):
+                if best is None or f.stat().st_mtime > best[0].stat().st_mtime:
+                    best = (f, s)
+        if best:
+            break
+    if not best:
+        return None
+    # Keep the one file and drop the rest, so the cache stays in kilobytes.
+    cached.write_text(best[0].read_text())
+    for child in list(d.iterdir()):
+        if child.name != "own-summary.json":
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink()
+    return best[1]
 
 
 def main():

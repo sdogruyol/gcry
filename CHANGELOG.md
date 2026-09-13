@@ -41,6 +41,17 @@ is now the default and the flag would take you the wrong way.
   false-alarm rate so the next flip decision is measured too. What the gate
   cannot see is a regression under ~14 pp of `/json` throughput on this runner
   class; that needs confirmation across runs, not a narrower band.
+  Sensitivity comes from a second observation rather than a tighter band: two
+  runs in a row on the wrong side of 2 sd is 0.05% per pair — lower than the
+  single-run gate's own rate — and catches ~9 pp. `perf_compare.py --prev` does
+  that check, `bench/fetch_prev_perf_summary.sh` feeds it the previous green
+  master run's summary out of the artifact this job already uploads (CI keeps no
+  state between runs, but it keeps artifacts), and every failure path there
+  degrades to "no previous run" rather than reddening the job. Checked against
+  the 24 recording runs: 1 single excursion past 2 sd in 72 metric-runs and no
+  consecutive pairs at all. The `perf-smoke-report` artifact also stopped
+  carrying the whole checked-in `bench/log` tree — ~200 MB a copy, of which every
+  consumer reads one file; it is now this run's own JSON under `bench/log/_run/`.
   `bench/log/linux/2026-09-13-perf-gate-flip/FINDINGS.md`
 
 ### Added

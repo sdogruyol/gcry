@@ -71,3 +71,43 @@ current layout, records a candidate baseline through `perf_compare.py` so the
 rule has one home, and prints the margin in sd with the false-alarm arithmetic
 and its verdict. It is how this was measured and how the next flip decision
 should be made rather than argued.
+
+## Sensitivity: confirmation across runs (2026-09-13, later)
+
+The gap this leaves is a regression between about 5 and 14 pp: inside the
+single-run gate, invisible. Narrowing the band trades the false-alarm rate
+straight back, so the answer is a second observation rather than a tighter one.
+
+Two runs in a row on the wrong side of **2 sd** is 0.05% per pair under
+normality — *lower* than the single-run gate's own rate — and catches ~9 pp.
+Checked against the 24 recording runs, deviations signed so negative is worse:
+
+| threshold | single excursions (of 72 metric-runs) | consecutive same-metric pairs |
+|---|---|---|
+| 1.5 sd | 2 | **0** |
+| 2.0 sd | 1 | **0** |
+| 2.5 sd | 1 | **0** |
+
+So the rule would have fired zero times across two days that include the hours a
+shared runner pool is slow — which is the case it could otherwise mistake for a
+regression.
+
+Implemented as `perf_compare.py --prev PREV_SUMMARY`, fed by
+`bench/fetch_prev_perf_summary.sh`: CI keeps no state between runs, but it keeps
+artifacts, and `perf-smoke-report` is uploaded by the very job that needs it.
+Every failure path there degrades to "no previous run" — a missing or expired
+artifact, a rate limit, a layout change — because a perf job that goes red
+because it could not download a file is worse than one that judges a single run.
+Every comparison row now also prints its deviation in sd, which is the number
+the rule acts on.
+
+## And the artifact was 200 MB of the repository
+
+Downloading two dozen `perf-smoke-report` artifacts to record a baseline filled
+a 16 GB `/tmp`. The upload was `path: bench/log/`, i.e. the whole checked-in log
+tree — already in the repository, ~200 MB a copy — while every consumer reads
+exactly one `summary.json` out of it. `perf_smoke.sh` now publishes the run's own
+JSON to `bench/log/_run/` and that is what CI uploads: a few KB. The three
+readers accept all three shapes, since 30 days of the old artifacts stay
+downloadable.
+
