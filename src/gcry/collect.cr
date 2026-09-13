@@ -474,6 +474,14 @@ module Gcry
     # Mapped bytes held by chunks the index knows about and the list does not.
     # They are never swept, so this is the retained cost of the divergence.
     getter chunk_index_only_bytes : UInt64 = 0_u64
+    # The same two numbers as of the **last** audit rather than summed over
+    # every audit. The sum cannot tell one chunk stuck off the list forever,
+    # counted again each collection, from a fresh chunk lost every collection —
+    # and those differ by whether this is 128 KiB or an unbounded leak. A lost
+    # chunk cannot come back (the rebuild walks from `@chunks`, and `map_chunk`
+    # only prepends), so the snapshot is monotone and its slope is the rate.
+    getter chunk_index_only_now : UInt64 = 0_u64
+    getter chunk_index_only_now_bytes : UInt64 = 0_u64
     property chunk_list_audit : Bool = false
     # Indexed chunks whose mark bitmap still held a set bit after
     # `clear_all_marks`. Every block in one reads marked forever, which makes
@@ -566,6 +574,9 @@ module Gcry
     getter low_water_skipped_bytes : UInt64 = 0_u64
     # Occupancy after last major (size-class chunks only).
     getter size_class_chunk_count : UInt64 = 0_u64
+    # Cumulative `map_chunk` calls, unlike the census above which is recomputed
+    # each major. The chunk-list divergence rate is measured against this.
+    getter chunks_mapped : UInt64 = 0_u64
     getter fully_free_chunk_bytes : UInt64 = 0_u64
     getter released_chunk_bytes : UInt64 = 0_u64
     # Fully free chunks past the warm budget kept mapped for one more cycle

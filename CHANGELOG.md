@@ -347,6 +347,28 @@ is now the default and the flag would take you the wrong way.
   residue — finds residue in 11 of 14.
   `bench/log/linux/2026-09-12-writer-frames/FINDINGS.md`
 
+- **What the remaining chunk-list divergence costs, and what the latch fix
+  actually prevented.** A chunk stranded off `@chunks` is never swept and can
+  never rejoin the list, so its bytes are retained for the life of the process
+  — but the strand needs a prepend, a prepend happens in `map_chunk`, and so
+  the leak rides *mappings* rather than uptime: a heap that has reached its
+  working size stops losing chunks. Measured against `chunks_mapped` (new,
+  cumulative, one increment beside the `mmap`) the shipped tree strands **0 of
+  699 171 mappings** — 95% bound 4.3 per million, under 0.6 bytes per chunk
+  mapped — and the sighting behind the open item does not survive as a rate
+  either: 60 further runs of the identical command strand nothing, one event in
+  74 runs. Restoring the pre-fix mutator-count reads strands **80-181 per 1000
+  mappings** and ends with **97-99.3% of the heap in chunks no sweep will
+  visit** (1 GiB where the shipped tree sits at 15 MB), so `latch_sweep_mutator_count`
+  closed a near-total heap leak needing nothing rarer than allocation plus
+  threads, not only the rare use-after-free it was landed for. The rebuild is
+  therefore left alone and the instrument ships instead: `make
+  chunk-list-drift`, three arms in ~35 s, capped at 5 stranded per 1000
+  mappings. `chunk_index_only_now` and `chunk_index_only_now_bytes` report the
+  divergence as a snapshot rather than a sum, which is what distinguishes one
+  chunk stuck forever from a fresh one lost every collection.
+  `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`
+
 - **`GCRY_CHUNK_LIST_AUDIT=1`, and it found the root cause of the
   live-object release open since 2026-08-23.** `@chunk_index` and the
   `@chunks` list are maintained separately, and `chunk_containing` reads the

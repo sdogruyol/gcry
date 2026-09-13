@@ -1320,6 +1320,41 @@ CI asymmetry that hid both.
       processes because that shape crashes as readily as it leaves residue, and
       both outcomes prove it. `chunk_index_only_bytes` gives the retained cost:
       2.7-3.3 MB over a few hundred collections in the pre-fix shape.
+      **AND THE RESIDUAL IS SIZED (2026-09-13): it rides mappings, not
+      uptime.** A stranded chunk is never swept and can never rejoin the list —
+      the rebuild walks from `@chunks` — so every byte in it is retained for the
+      life of the process. But the strand needs a *prepend*, and a prepend
+      happens in `map_chunk`: no mapping, no event, so a heap that has reached
+      its working size stops losing chunks. That axis took two wrong readings
+      first. Per collection: the pre-fix arm climbed 8 → 28 → 49 → 55 → 57
+      chunks with its heap tracking it 4.26 → 8.85 MB, and the plateau at
+      buckets 3000/4000 was the tell. Per uptime: three children × 30 000
+      collections stranded nothing, heap flat at 3.477 MB — which read as a
+      bound until `chunks_mapped` showed those runs mapped **32 chunks in 1200
+      collections**. "Nothing in 90 000 collections" was nothing in forty
+      mappings.
+      Measured against mappings, with a workload whose live set grows and drops
+      so chunks are released and mapped again: **shipped strands 0 of 699 171
+      mappings** (532 716 + 160 175 in steady state, 6 280 across 200 short
+      processes), a 95% bound of 4.3 per million, i.e. under 0.6 bytes retained
+      per chunk mapped. The one shipped sighting does not survive as a rate
+      either: the identical command, 60 more runs, strands nothing — one event
+      in 74 runs.
+      **And the pre-fix arm is the real finding.** With the mutator count read
+      per decision again, a workload that maps strands **80-181 per 1000
+      mappings** and ends with **97-99.3% of the heap in chunks no sweep will
+      ever visit** — 1 GiB in 1368 collections where the shipped tree sits at
+      15 MB. So the latch fix closed a near-total heap leak that needed nothing
+      rarer than allocation plus threads, not only the rare use-after-free it
+      was landed for — and that is the likeliest explanation of the fat app's
+      RSS this item has carried as a separate mystery since 2026-08-23.
+      So the rebuild stays as it is: restructuring it buys at most 0.6 bytes
+      per mapping against a hang history in that exact code. The instrument
+      ships instead — `make chunk-list-drift`, three arms in ~35 s, capped at 5
+      stranded per 1000 mappings (not zero: the race is open and a gate on zero
+      would red CI on the real event; three orders of magnitude under the
+      pre-fix rate, so reopening it fails).
+      `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`
       **ROOT CAUSE (2026-09-12): the chunk index and the chunk list are not
       the same set.** `chunk_containing` reads `@chunk_index`; every *walk*
       reads the `@chunks` list. Measured with `GCRY_CHUNK_LIST_AUDIT=1`, which

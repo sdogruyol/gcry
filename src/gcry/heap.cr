@@ -2069,6 +2069,13 @@ module Gcry
       ptr = mmap_anonymous(bytes)
       return Pointer(ChunkHeader).null if Gcry.mmap_failed?(ptr)
 
+      # The denominator for the chunk-list divergence rate. A chunk is stranded
+      # off `@chunks` only by a prepend that races the sweep's walk, so the
+      # event scales with *mappings*, not with uptime or collections: a heap
+      # that has reached its working size stops mapping and stops losing.
+      # Free beside an mmap.
+      @chunks_mapped &+= 1
+
       # Linux: disable THP on GC-managed mmaps. THP can inflate RSS by
       # rounding 128 KiB chunks up to 2 MiB huge pages — madvise on a
       # partially-filled huge page does not reclaim the full 2 MiB even

@@ -891,6 +891,23 @@ mark-clear-index: $(BIN)
 	$(BIN)/mark_clear_index
 	$(BIN)/mark_clear_index --control
 
+# What the chunk-list divergence costs, now that its marks are cleared anyway
+# and it is an RSS question rather than a soundness one. A chunk stranded off
+# `@chunks` by a prepend racing the sweep's walk is never swept and can never
+# rejoin the list, so the loss is permanent — but it rides *mappings*, not
+# uptime, and a heap that has reached its working size stops mapping. Three
+# arms in one run: the shipped tree must strand under 5 per 1000 chunks mapped
+# (measured 0 of 693 291 in steady state, 0 of 6 280 across 200 short
+# processes), `sweep_mutator_latch = false` must exceed it (measured 80-181 per
+# 1000, with 97-99% of its heap stranded — the latch fix closed a near-total
+# leak, not just a rare use-after-free), and a startup-regime arm reports the
+# short-process rate the one shipped sighting came from. The cap is not zero
+# because the race is still open; it is three orders of magnitude below the
+# pre-fix rate, so a reopened race reds it and the rare event does not. ~35 s.
+chunk-list-drift: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/chunk_list_drift.cr -o $(BIN)/chunk_list_drift --error-trace
+	CHUNK_DRIFT_ROUNDS=1200 $(BIN)/chunk_list_drift
+
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find

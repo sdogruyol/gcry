@@ -477,6 +477,7 @@ module Gcry
     protected def audit_chunk_list : Nil
       return unless @chunk_list_audit
       index_only = 0_u64
+      bytes_now = 0_u64
       first = 0_u64
       i = 0
       n = @chunk_index_count
@@ -497,6 +498,7 @@ module Gcry
             # chunk that is never swept, so the open question it leaves is how
             # much memory that retains.
             @chunk_index_only_bytes &+= c.value.mapped_bytes
+            bytes_now &+= c.value.mapped_bytes
             first = c.address if first == 0
           end
         end
@@ -510,6 +512,10 @@ module Gcry
 
       @chunk_index_only &+= index_only
       @chunk_list_only &+= list_only
+      # The snapshot, not the sum: a chunk off the list can never rejoin it, so
+      # this is monotone and its slope over collections is the leak rate.
+      @chunk_index_only_now = index_only
+      @chunk_index_only_now_bytes = bytes_now
       return if index_only == 0 && list_only == 0
       return unless @chunk_index_only == index_only && @chunk_list_only == list_only
 

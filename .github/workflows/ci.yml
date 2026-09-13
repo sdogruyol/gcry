@@ -595,6 +595,17 @@ jobs:
         run: |
           make mark-clear-index
 
+      # And what that divergence costs, since its marks are now cleared anyway:
+      # a stranded chunk is never swept and can never rejoin the list, so the
+      # leak is permanent but rides mappings rather than uptime. The shipped
+      # tree must strand under 5 per 1000 chunks mapped; restoring the pre-fix
+      # mutator-count reads must exceed it, which is also how this measured
+      # that the latch fix closed a near-total leak (97-99% of the heap) and
+      # not only the rare use-after-free it was landed for.
+      - name: Chunk-list divergence stays rare
+        run: |
+          make chunk-list-drift
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it
