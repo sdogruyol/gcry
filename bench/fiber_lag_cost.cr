@@ -96,6 +96,10 @@ scans0 = heap.fiber_lag_scans
 bytes0 = heap.fiber_lag_window_bytes
 misses0 = heap.low_water_misses
 unprobed0 = heap.low_water_unprobed
+known0 = heap.fiber_lag_sp_known
+known_b0 = heap.fiber_lag_sp_known_bytes
+unknown0 = heap.fiber_lag_sp_unknown
+unknown_b0 = heap.fiber_lag_sp_unknown_bytes
 skips = 0_u64
 skipped = 0_u64
 COLLECTIONS.times do
@@ -142,6 +146,20 @@ end
 puts "the skip cannot help here: #{(read_per_collection / 1024 / (scans / COLLECTIONS)).round(1)} KiB per parked fiber is read on every"
 puts "collection, and that is what scanning a fully parked fiber from its own saved SP"
 puts "would stop reading. probe ran and found nothing to skip: #{misses}; probe not run: #{unprobed}."
+puts ""
+known = heap.fiber_lag_sp_known - known0
+known_b = heap.fiber_lag_sp_known_bytes - known_b0
+unknown = heap.fiber_lag_sp_unknown - unknown0
+unknown_b = heap.fiber_lag_sp_unknown_bytes - unknown_b0
+puts "of those scans, the stop had an SP for every thread in #{known} and was missing one"
+puts "in #{unknown}. Only the first kind can be dropped - a nil SP lookup with a complete"
+puts "table proves the fiber is on no thread, mid-swap included. Bytes still read after"
+puts "the skip: #{(known_b / 1024.0 / COLLECTIONS).round(1)} KiB per collection provable,"
+puts "#{(unknown_b / 1024.0 / COLLECTIONS).round(1)} KiB not."
+if known == 0
+  puts "INCONCLUSIVE nothing was provable, so the predicate buys nothing on this workload"
+  exit 1
+end
 puts ""
 puts "The fix is a root-scan change — being wrong there is a use-after-free days later — so"
 puts "this is the argument for doing it, not a substitute for doing it carefully. The"

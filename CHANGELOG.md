@@ -22,6 +22,18 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+- **The parked-fiber lag scan was priced and the fix declined.** `ROADMAP.md`
+  has carried "the EC4 pause is the parked-fiber lag scan" with a proposal to
+  scan a fully parked fiber from its own saved SP. Its ceiling is a lag of ~0,
+  and `bench/lag_width_ab.sh` measures that at Kemal EC4: 0.970 ms [0.302,
+  1.638] off a ~6.4 ms pause p50, and no throughput change (0.989 [0.775,
+  1.202]). The predicate the sound version needs - an SP for every thread, so
+  that "no thread was found on this stack" means "no thread is on it" - is
+  available in **0** of 34 989 scans, because SYSMON is signal-exempt and the
+  EC Monitor therefore never records one. New counters `fiber_lag_sp_known` /
+  `fiber_lag_sp_unknown` report it. Research only; no shipped behaviour
+  changes.
+
 ### Added
 
 - **An 8-hour soak on the overnight tree, recorded.** PASS: 28 743 collections,

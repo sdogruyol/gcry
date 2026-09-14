@@ -576,6 +576,13 @@ module Gcry
     # reading. `bench/fiber_lag_cost.cr` reports it.
     getter fiber_lag_scans : UInt64 = 0_u64
     getter fiber_lag_window_bytes : UInt64 = 0_u64
+    # The same window, split by whether the stop recorded an SP for every
+    # thread in the list. `..._sp_known` is the half the proposal could drop:
+    # a nil SP lookup with a complete table proves the fiber is on no thread.
+    getter fiber_lag_sp_known : UInt64 = 0_u64
+    getter fiber_lag_sp_known_bytes : UInt64 = 0_u64
+    getter fiber_lag_sp_unknown : UInt64 = 0_u64
+    getter fiber_lag_sp_unknown_bytes : UInt64 = 0_u64
     getter low_water_skips : UInt64 = 0_u64
     # Probe ran, found nothing skippable. `low_water_skips` alone cannot tell
     # that from a probe that never ran.

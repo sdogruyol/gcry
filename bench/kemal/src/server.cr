@@ -99,5 +99,38 @@ get "/json" do |env|
   end
 end
 
+{% if flag?(:gc_none) %}
+  # Research: what the parked-fiber lag costs on this app, in bytes and in the
+  # phase timer it lands in. Sampled: `last_roots_fibers_ns` is per collection,
+  # so a poller keyed on the collection counter sees nearly every one.
+  if ENV["GCRY_LAG_DUMP"]? == "1"
+    h = Gcry.default_heap.not_nil!
+    seen = 0_u64
+    froots = 0_u64
+    pause = 0_u64
+    samples = 0_u64
+    spawn do
+      loop do
+        c = h.collections
+        if c != seen
+          seen = c
+          froots += h.last_roots_fibers_ns
+          pause += h.last_pause_ns
+          samples += 1
+        end
+        sleep 100.microseconds
+      end
+    end
+    at_exit do
+      read = h.fiber_lag_sp_known_bytes + h.fiber_lag_sp_unknown_bytes
+      m = Gcry.metrics
+      STDERR.puts "LAGDUMP collections=#{h.collections} scans=#{h.fiber_lag_scans} " \
+                  "nominal=#{h.fiber_lag_window_bytes} read=#{read} " \
+                  "samples=#{samples} froots_ns=#{froots} sampled_pause_ns=#{pause} " \
+                  "pause_p50_ns=#{m.pause_p50_ns} pause_p99_ns=#{m.pause_p99_ns}"
+    end
+  end
+{% end %}
+
 Kemal.config.port = (ENV["PORT"]? || "3001").to_i
 Kemal.run

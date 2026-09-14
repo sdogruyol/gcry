@@ -385,7 +385,8 @@ CI asymmetry that hid both.
       Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
-- [ ] **The EC4 pause is the parked-fiber lag scan, and it grows with uptime.**
+- [x] **The EC4 pause is the parked-fiber lag scan - priced, and declined
+      (2026-09-14).**
       `bench/log/linux/2026-09-08-ec4-root-phase/`: 8.4 of a 9.2 ms p50 pause
       at Kemal `-c100` is `roots_fibers_ns`. Under multi-mutator STW every
       parked fiber is scanned 256 KiB below its saved SP (a fiber in transit
@@ -416,11 +417,31 @@ CI asymmetry that hid both.
       collection, so the read reports the last one). `low_water_misses` and
       `low_water_unprobed` were added to settle it and are what make the third
       attempt evidence instead of a third guess.
-      The fix is still open, and the alternative the item already names — a
-      per-fiber high-water mark written at swap time — would make the deep arm
-      as cheap as the shallow one without needing the "genuinely parked"
-      predicate at all.
+      **The fix cannot be earned, and the arithmetic is now written down.**
+      Its ceiling is a lag of ~0, which `bench/lag_width_ab.sh` measures
+      directly at Kemal EC4: paired, arms alternating order, 8 trials, the
+      narrow lag removes **0.970 ms [0.302, 1.638] of a ~6.4 ms pause p50**
+      (7/8 trials) and moves throughput **not at all** (0.989 [0.775, 1.202]).
+      The phase is what this item always said it was - `roots_fibers_ns` is
+      80.6% of the pause with `GCRY_ROOT_PHASE_TIMING=1` - but 27.00 MiB of
+      nominal window per collection is already down to 1.53 MiB by the time
+      the pagemap skip is done with it, and the app reads 16.2 KiB per parked
+      fiber where the synthetic deep arm reads 246.6.
+      **And the predicate it needs is never available.** `fiber_lag_sp_known`
+      counts the scans where the stop had an SP for every thread, which is
+      what turns "no thread was found on this stack" into "no thread is on
+      it": **0 of 2 620** on the deep arm and **0 of 34 989** on Kemal EC4.
+      Structural, not luck - `stw_signal_exempt?` exempts SYSMON, so no SP is
+      ever recorded for the EC Monitor, in the only configuration where the
+      lag applies. Publishing the Monitor's SP at `MonitorGate.enter` reaches
+      20 of 200 stops (measured); the rest needs the SYSMON signal exemption
+      to end, which is an STW protocol change against a recorded history of
+      resume races. ~1 ms of pause does not buy that.
+      The per-fiber high-water mark this item proposed does not work either:
+      a fiber's deepest-ever SP is *below* its current one, so a scan starting
+      there is wider than the lag window, not narrower.
       `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
+      `bench/log/linux/2026-09-14-parked-fiber-lag-ceiling/FINDINGS.md`
 - [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now

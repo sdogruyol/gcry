@@ -1066,7 +1066,18 @@ module Gcry
     # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/FINDINGS.md`).
     property full_suspended_stack : Bool = false
 
+    # Set on every call to `fiber_stack_sp_scan_low`. False means the walk met
+    # a thread whose SP the stop did not record, so a nil return says "no
+    # thread was *found* on this stack", not "no thread is on it". That
+    # difference is the whole precondition of the open proposal to scan a
+    # fully parked fiber from its own saved SP (`ROADMAP.md`, the EC4 pause
+    # item): with a complete table a nil return proves the fiber is on no
+    # thread at all, mid-swap included - a thread swapping between two stacks
+    # has its SP in one of them, and that one is scanned from the SP.
+    @fiber_sp_all_known = false
+
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
+      @fiber_sp_all_known = false
       return nil if @full_suspended_stack
       return nil unless @world_stopped
 
@@ -1075,15 +1086,20 @@ module Gcry
       bottom = stack.bottom.address
       return nil unless guard < bottom
 
+      all_known = true
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
         sp = Platform.thread_sp(thread.to_unsafe)
-        next unless sp
+        unless sp
+          all_known = false
+          next
+        end
         spa = sp.address
         next unless spa >= base && spa < bottom
         return stack_scan_low(spa, guard)
       end
+      @fiber_sp_all_known = all_known
       nil
     end
 
@@ -1195,6 +1211,19 @@ module Gcry
           end
         end
       {% end %}
+
+      # What is left to decide the proposal with: of the window this scan still
+      # reads after the skip has taken what it can, how much belongs to a fiber
+      # that is provably on no thread. Only that part could be dropped by
+      # starting at the saved `stack_top`; the rest is a fiber the stop could
+      # not account for, and it keeps the lag whatever the default becomes.
+      if @fiber_sp_all_known
+        @fiber_lag_sp_known &+= 1
+        @fiber_lag_sp_known_bytes &+= t > lagged ? t - lagged : 0_u64
+      else
+        @fiber_lag_sp_unknown &+= 1
+        @fiber_lag_sp_unknown_bytes &+= t > lagged ? t - lagged : 0_u64
+      end
       lagged
     end
 
