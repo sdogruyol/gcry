@@ -482,6 +482,21 @@ CI asymmetry that hid both.
       those ivars were reached conservatively there anyway — what changed is that
       they no longer depend on it.
       `bench/log/linux/2026-08-15-ec-pin-completeness/FINDINGS.md`
+- [x] **An 8 h soak on the overnight tree: PASS, and flat (2026-09-14).**
+      28 743 collections, 28 646 010 allocations, 287 459 fibers, 2 870 315
+      finalizable objects, **0 queue faults**. RSS 7 024 kB at start, 7 956 from
+      hour 2 — every sample from hour 2 to hour 7 reads the same number — and
+      7 800 after the drain, so the +932 kB is warm-up rather than a slope. The
+      pause does not drift either: p50 1.80 ms in hour 0 against 1.76 ms in hour
+      6, p99 between 2.73 and 2.95 ms throughout, and the one 9.47 ms p99
+      maximum is in hour 0. Live objects hold at ~2 900 and collections at
+      3 593/hour, so it is a steady state rather than a run that wound down.
+      It does not speak for the EC4 pause item — that is Kemal `-c100` with many
+      parked fibers, and this workload's p50 is 1.8 ms — nor for the
+      chunk-release window found the same night, which needs the sweep's
+      single-mutator path.
+      `bench/log/linux/2026-09-13-soak-8h/FINDINGS.md`
+
 - [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
       chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
       indistinguishable from a quiet run inside a release cycle. Two handles were

@@ -22,6 +22,16 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Added
+
+- **An 8-hour soak on the overnight tree, recorded.** PASS: 28 743 collections,
+  28.6 M allocations, 287 459 fibers, **0 queue faults**, and an RSS envelope
+  that is flat — 7 956 kB from hour 2 through hour 7 without moving, 7 800 kB
+  after the drain, against 7 024 kB at start. The pause does not drift with
+  uptime either (p50 1.80 ms in hour 0, 1.76 ms in hour 6; p99 2.73-2.95 ms
+  throughout). Telemetry is kept beside the findings.
+  `bench/log/linux/2026-09-13-soak-8h/FINDINGS.md`
+
 ### Fixed
 
 - **A chunk could be released with a live block in it, and now the flush
