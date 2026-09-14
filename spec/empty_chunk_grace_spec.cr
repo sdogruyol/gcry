@@ -32,7 +32,7 @@ describe "empty chunk grace" do
         fail "no empty chunk was kept for the grace cycle — kept_before=#{kept} " \
              "kept_now=#{heap.empty_chunk_grace_kept} heap_size=#{heap.heap_size} " \
              "mapped=#{mapped} chunk_bytes=#{heap.small_chunk_bytes} " \
-             "page=#{LibC.sysconf(LibC::SC_PAGESIZE)} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
+             "page=#{Gcry::Platform::PAGE_SIZE} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
       end
       heap.collect(scan_stack: false)
       if heap.heap_size >= mapped

@@ -112,7 +112,7 @@ describe Gcry::Invariant do
           chunks = 0
           heap.each_chunk { |_| chunks += 1 }
           fail "nothing went dormant — chunks=#{chunks} heap_size=#{heap.heap_size} " \
-               "retain=#{heap.empty_chunk_retain} page=#{LibC.sysconf(LibC::SC_PAGESIZE)} " \
+               "retain=#{heap.empty_chunk_retain} page=#{Gcry::Platform::PAGE_SIZE} " \
                "compiled_page=#{Gcry::Roots::PAGE_SIZE}"
         end
         heap.live_objects.should eq(1)

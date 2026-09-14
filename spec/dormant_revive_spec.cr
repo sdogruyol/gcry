@@ -34,7 +34,7 @@ describe "bitmap pool revives dormant chunks" do
       # wrong unit returns EINVAL and dormancy then silently does not happen.
       state = "chunks=#{chunks} dormant=#{dormant} dormant_bytes=#{heap.dormant_chunk_bytes} " \
               "heap_size=#{heap.heap_size} retain=#{heap.empty_chunk_retain} " \
-              "page=#{LibC.sysconf(LibC::SC_PAGESIZE)} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
+              "page=#{Gcry::Platform::PAGE_SIZE} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
       fail "no chunk went dormant — #{state}" if dormant == 0
       dormant_bytes = heap.dormant_chunk_bytes
       fail "chunks are dormant but dormant_chunk_bytes is 0 — #{state}" if dormant_bytes == 0
