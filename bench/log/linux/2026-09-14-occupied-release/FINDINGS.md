@@ -85,3 +85,132 @@ on the host it runs on proves nothing.
 The test is the next CI sighting. Where the guarded arm printed a fault, it
 should now print `refusing to release chunk 0x… — the sweep queued it empty and
 N block(s) are allocated in it now`.
+
+---
+
+# Part 2 — the kept chunk is anonymous, and naming it smashed the stack
+
+Same day, tree `4c1e1b6` → `ab2114b`, same host.
+
+## Why the refusal needs a ledger
+
+A refused chunk goes **back on the live list**, which makes it an ordinary
+chunk again. Nothing in a later crash report distinguishes it: if it is
+released for real afterwards and a stale pointer faults on it, the report says
+`in a chunk gcry RELEASED …` like any other release, and the window this defect
+is about leaves no trace in the one document a reader gets.
+
+So each refusal records base, length, collection and occupancy into a
+sixteen-slot ring (`note_kept_release`, four stores on a path that already
+walks the chunk), and the report asks it in **both** branches a fault can land
+in — in-span with no live block, and out of span. Out of span matters for the
+same reason it did in part 1: releasing a chunk is what moves its address out
+of the span.
+
+## The control, because the window does not open here
+
+`GCRY_REFUSE_EMPTY_RELEASE=<n>` refuses the first n empty-chunk releases
+whatever the occupancy says. A budget rather than a flag: a chunk refused
+forever is never released, and the line under test is the one a *later* release
+prints. `make kept-release-report` keeps a chunk, lets it go under
+`GCRY_UNMAP_GUARD=1` (so the range stays mapped `PROT_NONE` and the read
+faults rather than silently succeeding), reads a saved address in it, and
+requires the report to name both:
+
+```
+child: victim 0x7fe1d73b7c20 kept=true
+gcry: this chunk was KEPT by a refused release - base 0x7fe1d739f000, 131072
+bytes, at collection 3 with 0 block(s) allocated in it at the time. […] 0
+blocks means the refusal was forced by GCRY_REFUSE_EMPTY_RELEASE, not the window
+gcry: SIGSEGV at 0x7fe1d73b7c20 — in a chunk gcry RELEASED — base
+0x7fe1d737f000, 524288 bytes, empty size-class chunk release, at collection 4;
+the write is 232480 bytes into it. Collections since: 20. Blocks still
+allocated at release: 0
+```
+
+The two lines are complementary rather than redundant, and the sizes say why:
+the release names a **524 288-byte run**, because `flush_release_runs`
+coalesces contiguous chunks into one `munmap`, while the refusal names the
+**131 072-byte chunk** inside it. Neither line can be derived from the other.
+
+The `0 blocks means the refusal was forced` clause exists so the control cannot
+read like a sighting: the window is defined by a mutator having taken a block,
+and this knob keeps chunks nobody touched.
+
+## The gate passed while the report was dying
+
+The first green run was false. Under the PASS line the child had printed:
+
+```
+gcry: the crash report faulted inside itself, while searching nothing — the
+fault is not inside the search, at 0x0, signal stack 0x7f61094e0000 + 262144 B,
+253672 B left below this frame. The report is the defect here, not the crash it
+was describing
+```
+
+8.5 KiB of a 256 KiB signal stack used, so not depth. `gdb` with
+`handle SIGSEGV nostop pass` and a breakpoint on `_exit`:
+
+```
+#0  _exit ()
+#1  handle () at src/gcry/segv_report.cr:251
+#3  <signal handler called>
+#4  report_kept_release () at src/gcry/segv_report.cr:810   ← RawOut.flush
+#5  0x73206b6e75686320 in ?? ()                             ← " chunk s"
+#6  0x646168206c6c6974 in ?? ()                             ← "till had"
+```
+
+Frames 5 and 6 are the message itself. `RawOut.append` stops at `LIMIT` (480 B)
+and is handed a bare pointer, so it cannot see the end of the caller's array:
+the kept-release line is **377 bytes and its buffer was 256**.
+
+What the 121 bytes past the end did, in order:
+
+| clobbered | symptom |
+|---|---|
+| `occ` | the line printed `0 block(s) allocated` and then, two clauses later, `A mutator took one` — the branch for a non-zero count |
+| return address | the report exited at `0x0` **inside itself**, with `gcry: SIGSEGV at …` still unflushed in the caller's buffer |
+
+The report lost exactly the part it exists for. Widest possible kept-release
+line is 453 bytes with every number at full width, so `UInt8[RawOut::LIMIT]`
+holds it untruncated.
+
+## The class, measured
+
+Thirty-three buffers were below the writer's limit. Two others could already
+run past their end:
+
+| site | buffer | widest line | ordinary line |
+|---|---|---|---|
+| `segv_report.cr` kept-release | 256 | 453 | **377 — observed smash** |
+| `collect_scan.cr` index/list disagreement | 352 | 417 | 349 — **three bytes of margin** |
+| `thread_list_tripwire.cr` chunk-index line | 288 | 295 | 221 |
+
+All thirty-three are `UInt8[RawOut::LIMIT]` now. `make raw-buf-check` fails the
+build on a buffer smaller than the writer that fills it, and asks the same of
+the two hand-rolled writers that predate `RawOut` — `EcQueueAudit` stops at 300
+with 320-byte buffers, `StwWatchdog` at 250 with 256, both already sound. The
+invariant is about the pair, which is why the check reads the limit out of the
+source rather than hard-coding 480.
+
+## The gate now fails on all three symptoms
+
+Observed red with the 256-byte buffer restored, green with it at `LIMIT`:
+
+```
+FAIL: the report faulted inside itself after naming the chunk. […]
+FAIL: the kept-release line printed and the report's own description of the
+      faulting address did not, so the report died between them
+FAIL: the report read a non-zero block count for a chunk the knob kept. […]
+```
+
+A gate that asks only whether a line appeared will pass a process that dies
+printing it.
+
+## Verification
+
+`make kept-release-report`, `released-range-report`, `segv-report`,
+`mark-audit`, `thread-block-audit`, `raw-buf-check`, `knob-doc-check` (186
+knobs); `make thread-churn-uaf` both layouts — shipped arms 0 of 24 including
+the new `reported` arm, both controls still reproduce (7 of 8 poisoned);
+`make spec` 277/0, `make spec-process` 32/0, ameba 150/0, format clean.
