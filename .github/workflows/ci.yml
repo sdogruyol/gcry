@@ -159,6 +159,15 @@ jobs:
       - name: Process GC specs (header layout, freelist)
         run: GCRY_BITMAP_ALLOC=0 crystal spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
 
+      # The third representation on that layout: marks in the chunk while the
+      # freelist allocator keeps handing out header-carrying blocks. Shipped,
+      # documented, and unrun until 2026-09-14 — the step above it covers
+      # marks-plus-pool, the one below covers headers-plus-freelist, and the
+      # `GCRY_BITMAP=1 ./bin/hello_env` line further down sets that knob on a
+      # binary built headerless, which ignores it.
+      - name: Marks in the chunk with the freelist allocator
+        run: make bitmap-marks-freelist
+
       - name: Sample hello (header layout)
         run: |
           crystal build -Dgc_none -Dgcry_block_headers samples/hello.cr -o bin/hello_hdr

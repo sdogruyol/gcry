@@ -22,6 +22,32 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Added
+
+- **`make bitmap-marks-freelist`: the mark representation nothing was
+  running.** On `-Dgcry_block_headers` there are three, not two — marks in the
+  block header, marks in the chunk's bitmap with the pool allocator, and marks
+  in the chunk's bitmap while the **freelist** allocator keeps handing out
+  header-carrying blocks. The third is documented, shipped as `GCRY_BITMAP=1`,
+  and had no coverage: the headerless default forces both bitmaps on,
+  `GCRY_BITMAP_ALLOC=1` covers marks-plus-pool, and the one CI line that set
+  `GCRY_BITMAP=1` set it on a binary built headerless, which ignores the knob.
+  The knob also does not mean the same thing on both sides of `-Dgc_none`: the
+  process GC defaults the pool allocator **on**, so reaching the freelist arm
+  there needs `GCRY_BITMAP_ALLOC=0` as well — measured, and now in the env
+  reference, because the first run of this gate was silently the arm CI
+  already had. The gate runs unit specs (299), process specs (32), the
+  property test at 50 000 iterations, the MT property test on 2 and 4 workers,
+  the STW property test with TLAB and nursery, and pattern fuzz, in ~36 s.
+  `spec/bitmap_marks_spec.cr`'s live-set A/B is three-way now and names the
+  arm that drifts; observed red by taking the block ordinal off
+  `chunk + ChunkHeader::SIZE` instead of `data_start`, which reports
+  `marks-only: live_objects 0, header 200`. Run at full length by hand as well
+  — property 100 000, MT 2/4/8, pattern fuzz 200 phases, thread storm, the
+  stress and json_churn samples, `GCRY_DEBUG_INVARIANTS=1` — **all green, no
+  defect found**, which is the result and not a disclaimer: the configuration
+  was untested, and it is now tested and sound.
+
 ### Fixed
 
 - **A crash-report line longer than its own buffer smashed the stack instead

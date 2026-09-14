@@ -57,8 +57,22 @@ Prior art that bounds this work — read before touching the allocator:
       `@@mark_bitmap` global, the growth/headroom machinery in `collect.cr`
       (`ensure_bitmap_covers`, `note_bitmap_growth`, `compute_bitmap_growth_avg`)
       and the `GCRY_BITMAP_RETAIN_OLD` arm that only configured it
-- [ ] Spec: same workload under both representations, same live set
-- [ ] Run every gate under `GCRY_BITMAP=1`
+- [x] Spec: same workload under both representations, same live set —
+      `spec/bitmap_marks_spec.cr`, now three-way on the header layout (header /
+      marks-only / bitmap): same chain walked, same payload checksums, same
+      `live_objects`, and a failure names the arm that drifted. Observed red by
+      taking the block ordinal off `chunk + ChunkHeader::SIZE` instead of
+      `data_start`: `marks-only: live_objects 0, header 200`.
+- [x] Run every gate under `GCRY_BITMAP=1` — `make bitmap-marks-freelist`
+      (~36 s, in CI). The arm nothing was running: marks in the chunk while the
+      *freelist* allocator keeps handing out header-carrying blocks. It needs
+      `GCRY_BITMAP_ALLOC=0` too under `-Dgc_none`, because the process GC
+      defaults the pool allocator on and `GCRY_BITMAP=1` alone there is the arm
+      CI already had. Unit specs 299, process specs 32, property 50 000
+      iterations, MT 2/4 workers, STW+TLAB+nursery, pattern fuzz — plus, run
+      once by hand at full length, property 100 000, MT 2/4/8, pattern fuzz 200
+      phases, thread storm, stress and json_churn samples, and
+      `GCRY_DEBUG_INVARIANTS=1`. All green on first run; no defect found.
 - [x] NO `occ`, NO allocator change in this phase
 - [ ] Gate: Kemal `/json` flat, RSS flat — `wrk` now installed, baseline cut in flight
 
@@ -77,9 +91,11 @@ Prior art that bounds this work — read before touching the allocator:
       every allocation, small and large (140/140 measured at c62f722), against a
       platform `max_align_t` of 16. Fixed as a side effect of ChunkHeader
       24→32; pinned by spec so it cannot silently regress.
-- [ ] Latent sibling noted, not fixed: dormant flush at `collect_sweep.cr:612`
-      computes `finish = data_start + mapped_bytes`, overshooting the chunk end
-      by `data_offset`. Harmless today only because `end_page` rounds back down.
+- [x] Latent sibling, now fixed: the dormant flush computed
+      `finish = data_start + mapped_bytes`, overshooting the chunk end by
+      `data_offset` and correct only because `end_page` rounded back down over
+      a sub-page offset. `flush_pending_dormant_chunks` takes
+      `chunk.address + mapped_bytes` now, with the reasoning at the line.
 
 ### Mark-clear design (settled by reading, not assumed)
 
@@ -254,7 +270,7 @@ which takes `@chunk_list_lock` and not the class lock.
       chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks.
       `page-release-corruption`'s arms now pin `GCRY_BITMAP_ALLOC=0` so the gate
       tests the header-representation walk it is about.
-- [ ] Dormant-flush overshoot fixed (`finish = base + mapped_bytes` overshot by
+- [x] Dormant-flush overshoot fixed (`finish = base + mapped_bytes` overshot by
       `data_offset`; now `chunk.address + mapped_bytes`).
 - [x] `bitmap_take_pool_chunk` walks the chunk list — measured 2026-09-13 and
       retired: the walk is per *capacity version*, not per exhausted chunk, and

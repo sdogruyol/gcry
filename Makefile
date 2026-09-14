@@ -3,12 +3,12 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers bitmap-marks-freelist parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
 help:
-	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
+	@echo "Targets: spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short thread-storm thread-storm-short oom-test oom-test-short fork-test finalizer-complex nursery-headers bitmap-marks-freelist parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed kernels-broken bench-kernels bench-gc-phases large-freelist-madvise segv-report soak soak-smoke format format-check lint samples"
 	@echo "Bench: bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record"
 	@echo "knobs: WRK_CONNECTIONS WRK_DURATION TRIALS COUNT GC GCRY_FLAGS CRYSTAL_FLAGS DEBUG SOFT_SOAK_N"
 	@echo "record A/B: make bench-kemal-record PREV=v0.2.0 LABEL=0.3.0"
@@ -107,6 +107,48 @@ finalizer-complex: $(BIN)
 nursery-headers: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/nursery_headers.cr -o $(BIN)/nursery_headers
 	$(BIN)/nursery_headers
+
+# The third mark representation, run: marks in the chunk's bitmap while blocks
+# keep their 16-byte headers and the *freelist* allocator keeps handing them
+# out. That is `GCRY_BITMAP=1` on `-Dgcry_block_headers`, plus
+# `GCRY_BITMAP_ALLOC=0` wherever the process GC defaults the pool allocator on
+# — without which the arm is silently the bitmap-allocator one and this gate
+# tests a thing already covered twice.
+#
+# It is documented and shipped and nothing ran it until 2026-09-14: the
+# headerless default forces both bitmaps on, `GCRY_BITMAP_ALLOC=1` covers
+# marks-plus-pool, and the one CI line that set `GCRY_BITMAP=1` set it on a
+# binary built headerless, which ignores the knob. Measured on the header
+# layout, which arm each spelling gets:
+#
+#   library  no env             marks=0 alloc=0    process  no env      1 / 1
+#   library  GCRY_BITMAP=1      marks=1 alloc=0    process  BITMAP=1    1 / 1
+#   library  BITMAP_ALLOC=1     marks=1 alloc=1    process  both, =0    1 / 0
+#
+# — the process GC defaults the pool allocator on, so `GCRY_BITMAP=1` alone
+# means something different on each side of that line, which is why the
+# recipe spells both out.
+#
+# The arm is where the two geometries meet: a chunk carrying a mark bitmap
+# whose blocks still carry headers, with the mark phase writing the bitmap
+# and allocate-black writing the header for the reader to union. A
+# `data_offset` any of those three disagrees on lands here. Observed red that
+# way - computing the block ordinal from `chunk + ChunkHeader::SIZE` instead
+# of `data_start` gives `marks-only: live_objects 0, header 200`. ~36 s, and
+# it found nothing on its first run, which is worth saying rather than
+# implying.
+bitmap-marks-freelist: $(BIN)
+	GCRY_BITMAP=1 $(CRYSTAL) spec -Dgcry_block_headers --error-trace
+	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(CRYSTAL) spec -Dgc_none -Dgcry_block_headers process_spec --error-trace
+	$(CRYSTAL) build -Dgcry_block_headers bench/property_test.cr -o $(BIN)/property_test_marks --error-trace
+	GCRY_BITMAP=1 $(BIN)/property_test_marks --seed=1 --iterations=50000
+	$(CRYSTAL) build -Dgcry_block_headers bench/mt_property_test.cr -o $(BIN)/mt_property_test_marks --error-trace
+	GCRY_BITMAP=1 $(BIN)/mt_property_test_marks --seed=1 --iterations=200 --workers=2,4
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test_marks --error-trace
+	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(BIN)/stw_mt_property_test_marks --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/pattern_fuzz.cr -o $(BIN)/pattern_fuzz_marks --error-trace
+	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(BIN)/pattern_fuzz_marks --seed=1 --phases=40 --objects-per-phase=2000
+	@echo "ok — marks in the chunk with the freelist allocator: specs, property, MT, STW+TLAB+nursery, pattern fuzz"
 
 parallel-mark-process: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/parallel_mark_process.cr -o $(BIN)/parallel_mark_process

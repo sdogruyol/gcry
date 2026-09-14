@@ -37,6 +37,41 @@ private def header_heap : Gcry::Heap
   heap
 end
 
+# The third representation, and the one `GCRY_BITMAP=1` selects on the header
+# layout: marks in the chunk's bitmap while the *freelist* allocator keeps
+# handing out header-carrying blocks. It is neither of the other two - the
+# bitmap arm retires the freelist for the pool cursor, the header arm keeps
+# marks in the block - and until 2026-09-14 nothing ran it. The headerless
+# default forces both bitmaps on, `GCRY_BITMAP_ALLOC=1` covers marks-plus-pool,
+# and the one CI line that set `GCRY_BITMAP=1` set it on a binary built
+# headerless, which ignores the knob.
+private def marks_only_heap : Gcry::Heap
+  heap = Gcry::Heap.new
+  # Both set explicitly, and the allocator first: under
+  # `GCRY_BITMAP_ALLOC=1 crystal spec` a heap left to its default already has
+  # the pool cursor, and `bitmap_marks = true` would not take it back - the
+  # arm would silently be a second bitmap arm, which is the failure this file
+  # exists to avoid.
+  heap.bitmap_alloc = false
+  heap.bitmap_marks = true # the freelist allocator stays
+  heap.nursery_enabled = false
+  heap
+end
+
+# Every representation this layout has, newest last. Compared against the
+# first arm rather than pairwise: "the same live set" is one claim about all
+# of them, and a three-way disagreement should name which arm drifted.
+private def mark_arms : Array({String, Proc(Gcry::Heap)})
+  {% if flag?(:gcry_block_headers) %}
+    [{"header", -> { header_heap }},
+     {"marks-only", -> { marks_only_heap }},
+     {"bitmap", -> { bitmap_heap }}]
+  {% else %}
+    # Headerless has one: no header to hold a mark, no freelist to run.
+    [{"bitmap", -> { bitmap_heap }}]
+  {% end %}
+end
+
 # Build a chain of `n` linked blocks rooted at the first, plus `n` unreachable
 # blocks, and return the root. Each node stores its successor in word 0 and a
 # checksum in word 1, so a collector that reclaims a live node shows up as
@@ -136,6 +171,70 @@ describe "Gcry::Heap mark bitmaps" do
     end
   {% end %}
 
+  {% if flag?(:gcry_block_headers) %}
+    # What `GCRY_BITMAP=1` actually selects, asserted rather than assumed: the
+    # gate that runs the suite under that knob is only testing a third
+    # representation if the knob still produces one. If a default flip ever
+    # made it imply the pool allocator, this fails and `make
+    # bitmap-marks-freelist` stops being about the arm it names.
+    it "is the arm GCRY_BITMAP=1 selects, freelist and all" do
+      previous = ENV["GCRY_BITMAP"]?
+      previous_alloc = ENV["GCRY_BITMAP_ALLOC"]?
+      ENV["GCRY_BITMAP"] = "1"
+      # Stated, not inherited: under `GCRY_BITMAP_ALLOC=1 crystal spec` this
+      # would otherwise read the pool allocator's arm and call it this one.
+      # `0` is also what a `-Dgc_none` caller must pass, since the process GC
+      # defaults that knob on while a library heap defaults it off.
+      ENV["GCRY_BITMAP_ALLOC"] = "0"
+      heap = Gcry::Heap.new
+      begin
+        heap.bitmap_marks?.should be_true
+        heap.bitmap_alloc?.should be_false
+      ensure
+        heap.destroy
+        previous ? (ENV["GCRY_BITMAP"] = previous) : ENV.delete("GCRY_BITMAP")
+        if previous_alloc
+          ENV["GCRY_BITMAP_ALLOC"] = previous_alloc
+        else
+          ENV.delete("GCRY_BITMAP_ALLOC")
+        end
+      end
+    end
+
+    # The geometry of that arm is both things at once, which is the reason it
+    # can fail where neither of its neighbours does: a chunk carries a mark
+    # bitmap *and* its blocks carry headers, so every site that decides where
+    # a block starts has to agree with `data_offset` while the freelist
+    # threads `next_free` through the header it still has.
+    it "carves a mark bitmap while blocks keep their headers" do
+      heap = marks_only_heap
+      begin
+        heap.bitmap_alloc?.should be_false
+        keep = heap.malloc(64)
+        heap.add_root(keep)
+        300.times { heap.malloc(64) }
+        heap.collect(scan_stack: false)
+        heap.live?(keep).should be_true
+
+        Gcry::BlockHeader::SIZE.should be > 0
+        small = 0
+        heap.each_chunk do |chunk|
+          next if Gcry::ChunkHeader.large?(chunk)
+          small += 1
+          chunk.value.bitmap_words.should be > 0_u32
+          Gcry::ChunkHeader.mark_bitmap(chunk).should_not eq(Pointer(UInt64).null)
+          chunk.value.data_offset.should be > Gcry::ChunkHeader::SIZE.to_u32
+          # The freelist allocator keeps `occ` unmaintained; the bitmap arm is
+          # the one that publishes it. Asking for it here would pass for the
+          # wrong reason on a heap that had silently switched allocators.
+        end
+        small.should be > 0
+      ensure
+        heap.destroy
+      end
+    end
+  {% end %}
+
   it "publishes survivors into occ and leaves mark clear" do
     # The sweep is `occ = mark; mark = 0` in one streaming pass, so after a
     # collection a survivor is recorded in `occ` and the mark bitmap is empty.
@@ -177,12 +276,13 @@ describe "Gcry::Heap mark bitmaps" do
     end
   end
 
-  it "decides the same live set as the header generation" do
-    # The A/B. Same graph, same roots, same collections; the only difference is
-    # where marks are recorded.
-    results = [] of Tuple(Bool, Int32, UInt64, UInt64)
-    [false, true].each do |bitmap|
-      heap = bitmap ? bitmap_heap : header_heap
+  it "decides the same live set whichever representation holds the marks" do
+    # The A/B, now three-way on the header layout. Same graph, same roots, same
+    # collections; the only difference is where marks are recorded and which
+    # allocator hands the blocks out.
+    results = [] of {String, Int32, UInt64, UInt64}
+    mark_arms.each do |name, build|
+      heap = build.call
       begin
         root = build_graph(heap, 200)
         heap.add_root(root)
@@ -197,35 +297,42 @@ describe "Gcry::Heap mark bitmaps" do
           checksum &+= (cursor.as(UInt64*) + 1).value
           cursor = cursor.as(Void**).value
         end
-        results << {bitmap, walked, checksum, heap.live_objects}
+        results << {name, walked, checksum, heap.live_objects}
       ensure
         heap.destroy
       end
     end
 
-    header_arm, bitmap_arm = results[0], results[1]
-    bitmap_arm[1].should eq(200)           # same chain length walked
-    bitmap_arm[1].should eq(header_arm[1]) # same as the header arm
-    bitmap_arm[2].should eq(header_arm[2]) # same payload checksums
-    bitmap_arm[3].should eq(header_arm[3]) # same live-object count
+    first = results.first
+    first[1].should eq(200) # the whole chain walked
+    results.each do |arm|
+      # Named in the message: a three-way comparison that fails should say
+      # which representation drifted, not just that one did.
+      fail "#{arm[0]}: walked #{arm[1]}, #{first[0]} walked #{first[1]}" if arm[1] != first[1]
+      fail "#{arm[0]}: checksum #{arm[2]}, #{first[0]} #{first[2]}" if arm[2] != first[2]
+      fail "#{arm[0]}: live_objects #{arm[3]}, #{first[0]} #{first[3]}" if arm[3] != first[3]
+    end
   end
 
-  it "reclaims garbage at the same rate under both representations" do
-    counts = [] of UInt64
-    [false, true].each do |bitmap|
-      heap = bitmap ? bitmap_heap : header_heap
+  it "reclaims garbage at the same rate under every representation" do
+    counts = [] of {String, UInt64}
+    mark_arms.each do |name, build|
+      heap = build.call
       begin
         keep = heap.malloc(64)
         heap.add_root(keep)
         500.times { heap.malloc(64) }
         heap.collect(scan_stack: false)
         heap.live?(keep).should be_true
-        counts << heap.live_objects
+        counts << {name, heap.live_objects}
       ensure
         heap.destroy
       end
     end
-    counts[1].should eq(counts[0])
+    first = counts.first
+    counts.each do |arm|
+      fail "#{arm[0]}: #{arm[1]} live, #{first[0]}: #{first[1]}" if arm[1] != first[1]
+    end
   end
 
   it "survives repeated collections without losing a rooted object" do
