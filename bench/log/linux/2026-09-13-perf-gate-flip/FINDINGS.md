@@ -111,3 +111,27 @@ JSON to `bench/log/_run/` and that is what CI uploads: a few KB. The three
 readers accept all three shapes, since 30 days of the old artifacts stay
 downloadable.
 
+## Re-recorded at 48 runs, and the gate has now run live (2026-09-14)
+
+The 18 dispatched overnight runs doubled the sample. Recorded on all 48 green
+headerless master runs:
+
+| metric | median | tolerance | gate fires | sd | sd out | P/run | self-fires |
+|---|---|---|---|---|---|---|---|
+| `pct_json` | 100.45 | ±13.607 | below **86.84** | 4.123 | 3.34 | 0.04% | 0 of 48 |
+| `rss_x` | 0.9495 | ±0.194 | above **1.143** | 0.0588 | 3.45 | 0.03% | 0 of 48 |
+| `pause_p50_ms` | 0.6361 | ±0.324 | above **0.960** | 0.0982 | 3.35 | 0.04% | 0 of 48 |
+| `pct_root` | 99.0 | ±12.906 | warn-only | 3.911 | 3.26 | — | — |
+
+0.11% combined per run, one false red per ~900. Leave-one-out **48 of 48**. The
+margins did not move when the sample doubled, which is what the sd rule
+predicts and what the old range rule could not have done — under it the
+tolerance would have widened with the extremes and the gate would have sat at
+the same ~2.3 sd it always did.
+
+And the gate is no longer only arithmetic: `PERF_GATE_BASELINE=1` has been live
+since it was turned on, across roughly twenty runs including these eighteen,
+**with no perf failure**. The single red in that window was
+`make thread-churn-uaf`, which is a different item — and the one that produced
+the first legible sighting of the live-object release.
+

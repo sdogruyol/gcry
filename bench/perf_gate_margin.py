@@ -142,12 +142,20 @@ def main():
     summaries = [str(cache / r[0]) for r in rows]
     # Record through perf_compare so the tolerance rule has exactly one home.
     root = pathlib.Path(__file__).resolve().parent
+    # `pick_summary` trims each downloaded artifact to the one file it needs and
+    # leaves it as `own-summary.json`, so the recorder reads that rather than
+    # re-globbing a tree that no longer exists. Three artifact shapes have
+    # existed this week and only this one is guaranteed after a fetch.
     files = []
     for r in rows:
-        for f in (cache / r[0] / "linux").glob("*/summary.json"):
-            s = json.loads(f.read_text())
-            if s.get("runner") == "ubuntu-latest" and s.get("layout") == layout:
-                files.append(str(f))
+        own = cache / r[0] / "own-summary.json"
+        if own.exists():
+            try:
+                d = json.loads(own.read_text())
+            except Exception:
+                continue
+            if d.get("layout") == layout:
+                files.append(str(own))
     out_path = args.out or (tempfile.gettempdir() + "/gcry-perf-baseline-candidate.json")
     sh(sys.executable, str(root / "perf_compare.py"), "--record", "--out", out_path,
        "--runner", "ubuntu-latest", "--commit", rows[0][1],
