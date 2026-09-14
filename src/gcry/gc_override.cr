@@ -1104,6 +1104,11 @@ module GC
     # counters may lose updates, and count the failures rather than raising.
     # This is the measurement the checker's scope correction stopped making, and
     # it is what decides whether `heap_counters_atomic` should be the default.
+    # Once, before any collection: the compiled page size against the kernel's.
+    # Every page-aligned decision in the collector is computed on the constant.
+    {% if flag?(:unix) %}
+      Gcry::Roots.check_page_size
+    {% end %}
     if env_flag_one?("GCRY_INVARIANT_COUNTER_LOSS")
       Gcry::Invariant.enable
       Gcry::Invariant.force_counters

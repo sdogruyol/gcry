@@ -21,10 +21,23 @@ describe "bitmap pool revives dormant chunks" do
       heap.collect(scan_stack: false, roots: [] of Void*)
 
       dormant = 0
-      heap.each_chunk { |c| dormant += 1 if Gcry::ChunkHeader.dormant?(c) }
-      dormant.should be > 0
+      chunks = 0
+      heap.each_chunk do |c|
+        chunks += 1
+        dormant += 1 if Gcry::ChunkHeader.dormant?(c)
+      end
+      # With the state, because this example and four others like it have
+      # failed together on `test (aarch64 native)` three times in about thirty
+      # runs while passing 80 of 80 locally, and "expected > 0" says nothing
+      # about which of dormancy's preconditions was missing on that host. The
+      # page size is in the line because `madvise` over a range aligned to the
+      # wrong unit returns EINVAL and dormancy then silently does not happen.
+      state = "chunks=#{chunks} dormant=#{dormant} dormant_bytes=#{heap.dormant_chunk_bytes} " \
+              "heap_size=#{heap.heap_size} retain=#{heap.empty_chunk_retain} " \
+              "page=#{LibC.sysconf(LibC::SC_PAGESIZE)} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
+      fail "no chunk went dormant — #{state}" if dormant == 0
       dormant_bytes = heap.dormant_chunk_bytes
-      dormant_bytes.should be > 0
+      fail "chunks are dormant but dormant_chunk_bytes is 0 — #{state}" if dormant_bytes == 0
 
       chunks_before = 0
       heap.each_chunk { |_| chunks_before += 1 }

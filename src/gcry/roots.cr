@@ -199,7 +199,43 @@ module Gcry
     # fiber guard pages and unmapped holes are skipped (no SIGSEGV). Use for
     # fiber/thread stacks; leave false for /proc/self/maps static ranges.
     MAX_SCAN_BYTES = 64_u64 * 1024 * 1024
-    PAGE_SIZE      = 4096_u64
+    # A compile-time constant, and the platform modules ask `sysconf` for the
+    # same number — two sources of truth for something every page-aligned
+    # decision in the collector depends on. On a kernel whose pages are 16 or
+    # 64 KiB (aarch64 ships both) this one is simply wrong, and the failures
+    # that follow are silent: `madvise` over a misaligned range returns EINVAL
+    # and dormancy quietly stops happening, the pagemap probe reads the wrong
+    # entries, and the guard-page offset lands mid-page.
+    #
+    # Keeping the constant (it is on hot paths) and checking it once at startup
+    # is the trade: `Roots.check_page_size` says so on stderr rather than
+    # leaving a host to behave differently for reasons nobody can see. Written
+    # 2026-09-14, while three CI runs in about thirty had the same five
+    # chunk-retention specs fail together on `test (aarch64 native)` and 80
+    # local runs had none.
+    PAGE_SIZE = 4096_u64
+
+    @@page_size_checked = false
+
+    # Called once from `GC.init`. Signal-safety is not a concern here — this
+    # runs before any collection — but allocation is: `RawOut` only.
+    def self.check_page_size : Nil
+      return if @@page_size_checked
+      @@page_size_checked = true
+      {% if flag?(:unix) %}
+        actual = LibC.sysconf(LibC::SC_PAGESIZE)
+        return if actual <= 0 || actual.to_u64 == PAGE_SIZE
+        buf = uninitialized UInt8[224]
+        n = RawOut.append(buf.to_unsafe, 0, "gcry: WARNING: this kernel's page size is ")
+        n = RawOut.append_u64(buf.to_unsafe, n, actual.to_u64)
+        n = RawOut.append(buf.to_unsafe, n, " and gcry is compiled for ")
+        n = RawOut.append_u64(buf.to_unsafe, n, PAGE_SIZE)
+        n = RawOut.append(buf.to_unsafe, n,
+          ". Page-aligned decisions — dormancy's madvise, the pagemap low-water probe, " \
+          "the fiber guard offset — are computed on the wrong unit here\n")
+        RawOut.flush(buf.to_unsafe, n)
+      {% end %}
+    end
 
     @@probe_rd = -1
     @@probe_wr = -1

@@ -108,7 +108,13 @@ describe Gcry::Invariant do
         8_000.times { heap.malloc(64) }
         heap.collect(scan_stack: false)
 
-        heap.dormant_chunk_bytes.should be > 0
+        if heap.dormant_chunk_bytes == 0
+          chunks = 0
+          heap.each_chunk { |_| chunks += 1 }
+          fail "nothing went dormant — chunks=#{chunks} heap_size=#{heap.heap_size} " \
+               "retain=#{heap.empty_chunk_retain} page=#{LibC.sysconf(LibC::SC_PAGESIZE)} " \
+               "compiled_page=#{Gcry::Roots::PAGE_SIZE}"
+        end
         heap.live_objects.should eq(1)
         checks = Gcry::Invariant.live_object_checks
         Gcry::Invariant.check_live_objects(heap)

@@ -25,9 +25,24 @@ describe "empty chunk grace" do
       kept = heap.empty_chunk_grace_kept
       heap.collect(scan_stack: false)
       heap.heap_size.should eq(mapped)
-      heap.empty_chunk_grace_kept.should be > kept
+      # State on failure: this assertion is one of five that fail together on
+      # aarch64 CI and nowhere else, and the grace counter alone cannot say
+      # whether the chunks were kept, released early or never emptied.
+      if heap.empty_chunk_grace_kept <= kept
+        fail "no empty chunk was kept for the grace cycle — kept_before=#{kept} " \
+             "kept_now=#{heap.empty_chunk_grace_kept} heap_size=#{heap.heap_size} " \
+             "mapped=#{mapped} chunk_bytes=#{heap.small_chunk_bytes} " \
+             "page=#{LibC.sysconf(LibC::SC_PAGESIZE)} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
+      end
       heap.collect(scan_stack: false)
-      heap.heap_size.should be < mapped
+      if heap.heap_size >= mapped
+        fail "the second collection did not release the grace-kept chunks — " \
+             "heap_size=#{heap.heap_size} mapped=#{mapped} " \
+             "grace_kept=#{heap.empty_chunk_grace_kept} " \
+             "released_bytes=#{heap.released_chunk_bytes} " \
+             "flush_considered=#{heap.release_flush_chunks} " \
+             "refused_occupied=#{heap.release_refused_occupied}"
+      end
     ensure
       heap.destroy
     end
@@ -44,7 +59,13 @@ describe "empty chunk grace" do
       before = heap.heap_size
       heap.collect(scan_stack: false, roots: [keep])
       heap.live?(keep).should be_true
-      heap.heap_size.should be < before
+      if heap.heap_size >= before
+        fail "the heap did not shrink after the live-root collection — " \
+             "heap_size=#{heap.heap_size} before=#{before} " \
+             "flush_considered=#{heap.release_flush_chunks} " \
+             "refused_occupied=#{heap.release_refused_occupied} " \
+             "released_bytes=#{heap.released_chunk_bytes}"
+      end
       heap.size_class_chunk_count.should be >= 1
     ensure
       heap.destroy
