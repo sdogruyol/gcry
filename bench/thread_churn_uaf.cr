@@ -165,8 +165,19 @@ CONTROL = {
 control = ARGV.includes?("--control")
 extra = control ? CONTROL : {} of String => String
 
+# `reported` is `default` plus the crash report and nothing else - no guard,
+# no poison, no reproducer knob, so it allocates exactly as the shipped
+# collector does. It exists because the 2026-09-14 CI sighting faulted in the
+# *default* arm with the occupied-release refusal printed in the same child,
+# and with no knobs there was no way to tell whether the fault was inside the
+# chunk the refusal kept (the refusal is not enough) or somewhere else (it is
+# a different defect). The report answers exactly that: it names a kept chunk
+# by address.
+REPORTED = {"GCRY_SEGV_REPORT" => "1"}
+
 arms = [
   {Arm.new("default", extra.dup), "gcry:"},
+  {Arm.new("reported", REPORTED.merge(extra)), "KEPT by a refused release"},
   {Arm.new("guarded", GUARD.merge(AMP).merge(extra)), "RELEASED"},
   {Arm.new("poisoned", POISON.merge(AMP).merge(extra)), "use-after-free"},
 ]

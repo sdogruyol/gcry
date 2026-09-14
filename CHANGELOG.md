@@ -22,6 +22,58 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Fixed
+
+- **A crash-report line longer than its own buffer smashed the stack instead
+  of being truncated.** `RawOut.append` stops at `LIMIT` (480 B) and is handed
+  a bare pointer, so it cannot see where the caller's array ends: a buffer
+  below `LIMIT` is not a short line, it is a write into the frame around it.
+  The report's new kept-release line is **377 bytes and its buffer was 256**,
+  and the 121 bytes past the end took out `occ` first — the line then said
+  "a mutator took one" two clauses after printing "0 block(s) allocated" — and
+  the return address next, so the report exited at 0x0 **inside itself with
+  the description of the fault it had been called for still unflushed**. One
+  ledger line printed; everything the reader needed did not. Thirty-two other
+  buffers were under `LIMIT` at that moment, two of them already able to run
+  past their end: `collect_scan.cr`'s index/list disagreement line is 417
+  bytes with every number at full width against a 352-byte buffer, and 349 on
+  an ordinary mapped chunk — three bytes of margin. All thirty-three are now
+  `UInt8[RawOut::LIMIT]`, and `make raw-buf-check` fails the build on a buffer
+  smaller than the writer that fills it, including for the two hand-rolled
+  writers that predate `RawOut` (`EcQueueAudit` 300/320, `StwWatchdog`
+  250/256, both already sound). The gate that found this passed while it was
+  happening, because it only asked for the line: it now also fails on a report
+  that faults inside itself, on a kept-release line with no fault description
+  after it, and on a block count that contradicts the knob that produced it.
+
+### Added
+
+- **A chunk a refused release kept is named in the crash report.** The flush
+  that now refuses to release an occupied chunk puts it back on the live list,
+  which makes it an ordinary chunk again — so when it is released later and a
+  stale pointer faults on it, every line of the report describes that ordinary
+  release and nothing says the chunk had been through the window the refusal
+  exists to close. A sixteen-slot ledger (`note_kept_release` /
+  `kept_release_at`, four stores on a path that already walks the chunk)
+  records base, length, collection and occupancy at the refusal, and the
+  report reads it in both branches where a fault can land — in-span with no
+  live block, and out of span, since releasing a chunk is what moves an
+  address out of the span. The real window has never opened on a developer
+  host (0 chunks considered in 120 collections with more than one mutator
+  alive), so the ledger and its line get a positive control instead of a
+  promise: `GCRY_REFUSE_EMPTY_RELEASE=<n>` refuses the first n empty-chunk
+  releases whatever the occupancy says — a budget, not a flag, because a chunk
+  refused forever is never released and the line under test is the one a
+  *later* release prints — and `make kept-release-report` faults into such a
+  chunk and requires the report to name both. The report distinguishes the
+  control from a sighting by the block count it recorded: 0 says the refusal
+  was forced, non-zero says a mutator took a block through the index entry the
+  chunk still had. `make thread-churn-uaf` grows a `reported` arm that
+  allocates exactly as the shipped collector does and carries only the report,
+  which is the arm the 2026-09-14 CI sighting had no way to answer from.
+
+### Changed
+
 - **The parked-fiber lag scan was priced and the fix declined.** `ROADMAP.md`
   has carried "the EC4 pause is the parked-fiber lag scan" with a proposal to
   scan a fully parked fiber from its own saved SP. Its ceiling is a lag of ~0,

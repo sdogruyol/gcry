@@ -225,7 +225,7 @@ module Gcry
       {% if flag?(:unix) %}
         actual = LibC.sysconf(LibC::SC_PAGESIZE)
         return if actual <= 0 || actual.to_u64 == PAGE_SIZE
-        buf = uninitialized UInt8[224]
+        buf = uninitialized UInt8[RawOut::LIMIT]
         n = RawOut.append(buf.to_unsafe, 0, "gcry: WARNING: this kernel's page size is ")
         n = RawOut.append_u64(buf.to_unsafe, n, actual.to_u64)
         n = RawOut.append(buf.to_unsafe, n, " and gcry is compiled for ")

@@ -436,7 +436,7 @@ module Gcry
 
     private def report_thread_precondition(what : String, listed : UInt64, bounded : UInt64,
                                            staged : UInt64) : Nil
-      buf = uninitialized UInt8[384]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: dying-type audit — precondition: ")
       len = RawOut.append(buf.to_unsafe, len, what)
@@ -482,7 +482,7 @@ module Gcry
         bounded &+= 1 if Platform.snapshotted_stack_bounds(thread.to_unsafe)
       end
 
-      buf = uninitialized UInt8[320]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry:   threads at that moment: ")
       len = RawOut.append_u64(buf.to_unsafe, len, listed)

@@ -1022,7 +1022,7 @@ module Gcry
       @mark_clear_residue &+= residue
       return if residue == 0
       return unless @mark_clear_residue == residue
-      buf = uninitialized UInt8[320]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: the mark clear missed ")
       len = RawOut.append_u64(buf.to_unsafe, len, residue)
       len = RawOut.append(buf.to_unsafe, len, " indexed chunk(s) (first 0x")

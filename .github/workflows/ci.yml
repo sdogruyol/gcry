@@ -111,6 +111,12 @@ jobs:
       - name: Env knob reference is complete
         run: make knob-doc-check
 
+      # A line longer than its own stack buffer is a smash, not a truncation:
+      # the crash report's kept-release line ran 121 bytes past a 256-byte
+      # buffer and killed the report inside itself.
+      - name: Raw line buffers fit their writer
+        run: make raw-buf-check
+
       # A knob the compile default cannot honour must say so. Three of them
       # became inert when headerless became the default, and their env reads
       # are compiled out on that layout, so nothing else would notice.
@@ -623,6 +629,10 @@ jobs:
       - name: A released range is named, not described
         run: |
           make released-range-report
+
+      - name: A chunk kept by a refused release is named
+        run: |
+          make kept-release-report
 
       # Refill indexing: one chunk-list walk per active class slot per
       # collection, and the gate is that it stays one. Anything more means the

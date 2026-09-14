@@ -1870,7 +1870,7 @@ module Gcry
     # must not allocate.
     private def trace_large_map(chunk : ChunkHeader*, mapped : UInt64, payload : UInt64) : Nil
       return if chunk.null?
-      buf = uninitialized UInt8[160]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       p = buf.to_unsafe
       len = RawOut.append(p, 0, "gcry: large map base=0x")
       len = RawOut.append_hex(p, len, chunk.as(Void*).address)
@@ -2961,7 +2961,7 @@ module Gcry
       return false unless release_range_hits_live?(base, len)
       @release_hit_live &+= 1
       return true unless @release_hit_live == 1
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       n = 0
       n = RawOut.append(buf.to_unsafe, n, "gcry: refusing to unmap [0x")
       n = RawOut.append_hex(buf.to_unsafe, n, base)
@@ -3009,7 +3009,7 @@ module Gcry
     # stop handing released address space back to the kernel — took the
     # acikturkiye crash from 3 of 6 to 0 of 4.
     private def report_index_overlap(base : UInt64, prev_end : UInt64) : Nil
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: chunk index — entry 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, base)
@@ -3046,7 +3046,7 @@ module Gcry
       return if linked == @chunk_index_count
       @index_count_mismatch &+= 1
       return unless @index_count_mismatch == 1
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: chunk index — ")
       len = RawOut.append_u64(buf.to_unsafe, len, @chunk_index_count.to_u64)

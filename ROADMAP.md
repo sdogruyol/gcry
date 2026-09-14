@@ -1431,7 +1431,50 @@ CI asymmetry that hid both.
       thread-birth shape a 2-vCPU runner hits about once in 24 children. The
       test is the next CI sighting: it should print the refusal instead of a
       fault.
+      **And the kept chunk is now named, because refusing made it anonymous
+      (2026-09-14).** A chunk put back on the live list is an ordinary chunk:
+      if it is released for real later and a stale pointer faults on it, every
+      line of the report describes that ordinary release and nothing says the
+      chunk had been through this window. A sixteen-slot ledger records base,
+      length, collection and occupancy at each refusal, and the report reads it
+      in both branches a fault can land in — in-span with no live block, and
+      out of span, since releasing a chunk is what moves an address out of the
+      span. The window still does not open here, so the ledger has a positive
+      control rather than a promise: `GCRY_REFUSE_EMPTY_RELEASE=<n>` refuses
+      the first n empty-chunk releases whatever the occupancy says, and `make
+      kept-release-report` faults into such a chunk and requires both lines.
+      The report tells the control from a sighting by the count it recorded —
+      0 means the knob forced it, non-zero means a mutator took a block through
+      the index entry the chunk still had. `make thread-churn-uaf` gains a
+      `reported` arm with the report and no other knob, which is what the CI
+      sighting in the *default* arm had no way to answer from.
       `bench/log/linux/2026-09-14-occupied-release/FINDINGS.md`
+
+- [x] **The crash report smashed its own stack printing a line — fixed
+      2026-09-14.** `RawOut.append` stops at `LIMIT` (480 B) and takes a bare
+      pointer, so it cannot see where the caller's array ends: a buffer below
+      `LIMIT` is not a truncated line, it is a write into the frame around it.
+      The kept-release line above is 377 bytes and its buffer was 256. The 121
+      bytes past the end took `occ` first — the line then read "a mutator took
+      one" two clauses after printing "0 block(s) allocated", which is the
+      first thing that looked wrong — and the return address next, so the
+      report exited at 0x0 **inside itself, with the description of the fault
+      it had been called for still unflushed**. `gdb` put the second fault in
+      `report_kept_release`'s own `flush` with two frames of message text on
+      the stack above it, which is the shape.
+      **Thirty-two other buffers were under the limit**, two already able to
+      run past their end on the widest line: `collect_scan.cr`'s index/list
+      disagreement is 417 bytes with every number at full width against a
+      352-byte buffer, and 349 on an ordinary mapped chunk — three bytes of
+      margin. All thirty-three are `UInt8[RawOut::LIMIT]` now, and `make
+      raw-buf-check` fails the build on a buffer smaller than the writer that
+      fills it, for the two hand-rolled writers that predate `RawOut` as well
+      (`EcQueueAudit` 300/320, `StwWatchdog` 250/256, both already sound).
+      **The gate that found it passed while it was happening**, because it
+      asked only for the line: it now also fails on a report that faults inside
+      itself, on a kept-release line with no fault description after it, and on
+      a block count that contradicts the knob that produced it — observed red
+      on all three with the 256-byte buffer restored.
 
 - [x] **A large object is released under load on the fat app — FIXED
       2026-09-13.** The title said *live* from 2026-08-23 to

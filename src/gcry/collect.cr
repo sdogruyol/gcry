@@ -598,6 +598,11 @@ module Gcry
     # purpose. `GCRY_RELEASE_OCCUPIED=1`, `GCRY_EMPTY_FLUSH_DELAY_MS`.
     property release_occupied_anyway : Bool = false
     property empty_flush_delay_ms : UInt64 = 0_u64
+    # Research only: refuse the first n empty-chunk releases whatever the
+    # occupancy says, so the kept-chunk ledger and its crash-report line are
+    # reachable on a host where the window never opens.
+    # `GCRY_REFUSE_EMPTY_RELEASE=<n>`.
+    property refuse_empty_release_budget : UInt64 = 0_u64
     getter low_water_misses : UInt64 = 0_u64
     # Probe not run because the lag floor was already at or above the stack's
     # high end, which means the saved `stack_top` does not describe that stack.
@@ -827,6 +832,51 @@ module Gcry
     # "every thread acknowledged".
     property stw_test_presuspend_stall_ms : UInt64 = 0_u64
 
+    # Chunks a post-STW flush refused to release because a mutator had taken a
+    # block out of them after the sweep queued them empty. Recorded because the
+    # refusal keeps the chunk **live**: every other line of a crash report will
+    # then describe it as an ordinary chunk in the heap span and say nothing
+    # about the window it went through, which is exactly the thing a reader of
+    # that report needs to know. Sixteen is enough for a report - the window is
+    # hit about once per faulting process - and the cost is four stores on a
+    # path that already walks the chunk.
+    KEPT_RELEASE_SLOTS = 16
+
+    @kept_base = uninitialized StaticArray(UInt64, KEPT_RELEASE_SLOTS)
+    @kept_len = uninitialized StaticArray(UInt64, KEPT_RELEASE_SLOTS)
+    @kept_gen = uninitialized StaticArray(UInt64, KEPT_RELEASE_SLOTS)
+    @kept_occ = uninitialized StaticArray(UInt64, KEPT_RELEASE_SLOTS)
+    # Total refusals. Slots below `min(count, SLOTS)` have been written, which
+    # is what makes reading an `uninitialized` array safe here.
+    @kept_count = 0_u64
+
+    protected def note_kept_release(base : UInt64, len : UInt64, occ : UInt64) : Nil
+      i = (@kept_count % KEPT_RELEASE_SLOTS).to_i32
+      @kept_base[i] = base
+      @kept_len[i] = len
+      @kept_gen[i] = @collections
+      @kept_occ[i] = occ
+      @kept_count &+= 1
+    end
+
+    # For the SIGSEGV report: did a refused release keep this address mapped?
+    # Newest first, because the ring wraps and one address can be recorded
+    # twice - a chunk kept, released for real, and the range mapped again into
+    # a chunk that is itself kept later. The reader wants the refusal that
+    # describes the chunk the fault is in, which is the last one.
+    def kept_release_at(addr : UInt64) : {UInt64, UInt64, UInt64, UInt64}?
+      n = @kept_count
+      limit = n < KEPT_RELEASE_SLOTS ? n : KEPT_RELEASE_SLOTS.to_u64
+      back = 1_u64
+      while back <= limit
+        i = ((n &- back) % KEPT_RELEASE_SLOTS).to_i32
+        base = @kept_base[i]
+        return {base, @kept_len[i], @kept_gen[i], @kept_occ[i]} if addr >= base && addr < base &+ @kept_len[i]
+        back &+= 1
+      end
+      nil
+    end
+
     UNMAP_GUARD_SLOTS = 8192
 
     @guard_base = uninitialized StaticArray(UInt64, UNMAP_GUARD_SLOTS)
@@ -1022,7 +1072,7 @@ module Gcry
       if @static_scanned_max > 0 && bytes * 2 < @static_scanned_max
         @static_scanned_drops &+= 1
         if @static_scanned_drops == 1
-          buf = uninitialized UInt8[224]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = 0
           len = RawOut.append(buf.to_unsafe, len, "gcry: static roots collapsed to ")
           len = RawOut.append_u64(buf.to_unsafe, len, bytes)
@@ -1045,7 +1095,7 @@ module Gcry
       if @rel_live[i] && @rel_base[i] == base
         @release_double &+= 1
         if @release_double == 1
-          buf = uninitialized UInt8[256]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = 0
           len = RawOut.append(buf.to_unsafe, len,
             "gcry: released base 0x")
@@ -1185,7 +1235,7 @@ module Gcry
       # Found one. Say everything about it, once: this is the sighting the
       # whole knob exists for.
       @release_live_holders &+= 1
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       l = RawOut.append(buf.to_unsafe, 0,
         "gcry: RELEASING A BLOCK SOMETHING POINTS AT — large chunk 0x")
       l = RawOut.append_hex(buf.to_unsafe, l, base)

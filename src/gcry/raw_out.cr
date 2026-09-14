@@ -7,6 +7,13 @@
 # its own for now because it is older than this module and works.
 module Gcry
   module RawOut
+    # Where every append stops — and therefore the smallest buffer any caller
+    # may pass, since the writer takes a bare pointer and cannot see the end
+    # of the array behind it. A caller with less is not truncated, it is
+    # smashed: the SIGSEGV report's kept-release line is 377 bytes, its buffer
+    # was 256, and the 121 bytes past the end took out a local and the return
+    # address (2026-09-14). Declare buffers as `UInt8[RawOut::LIMIT]`;
+    # `make raw-buf-check` fails the build if one is smaller.
     LIMIT = 480
 
     def self.append(buf : UInt8*, len : Int32, str : String) : Int32
@@ -94,7 +101,7 @@ module Gcry::RawOut
       frames = uninitialized Void*[32]
       count = LibGcryWindows.RtlCaptureStackBackTrace(0, 32, frames.to_unsafe, nil)
       count.times do |i|
-        buffer = uninitialized UInt8[32]
+        buffer = uninitialized UInt8[LIMIT]
         n = append_hex(buffer.to_unsafe, 0, frames[i].address)
         buffer[n] = 10_u8
         flush(buffer.to_unsafe, n + 1)

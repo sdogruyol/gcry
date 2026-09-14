@@ -244,7 +244,7 @@ module Gcry
 
         @@bss_lost &+= 1
         if @@bss_lost == 1
-          buf = uninitialized UInt8[160]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = RawOut.append(buf.to_unsafe, 0,
             "gcry: the executable has no writable __DATA section — no class variable is a root\n")
           RawOut.flush(buf.to_unsafe, len)

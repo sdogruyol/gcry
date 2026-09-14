@@ -540,6 +540,21 @@ darwin-typecheck: $(BIN)
 knob-doc-check:
 	@ci/knob-doc-check.sh
 
+# Every raw line buffer is at least as big as the length its writer stops at.
+# `RawOut.append` truncates at `LIMIT` and cannot see the buffer, so a smaller
+# one is a stack smash, not a short line: the SIGSEGV report's kept-release
+# line is 377 bytes, its buffer was 256, and writing it clobbered the block
+# count it had already printed and then the return address — the report died
+# at 0x0 inside itself with the fault it was called for still undescribed
+# (2026-09-14). Thirty-two other buffers were under `LIMIT` at that moment,
+# two of them already able to reach past their own end on the widest line -
+# `collect_scan.cr`'s index/list disagreement is 417 bytes against 352, and
+# 349 on an ordinary mapped chunk. The two hand-rolled writers that predate
+# `RawOut` are checked against their own bounds, because the invariant is
+# about the pair and not about one module.
+raw-buf-check:
+	@ci/raw-buf-check.py
+
 # The headerless default cannot honour three knobs, and their env reads are
 # compiled out on it, so nothing but this says they were ignored. That silence
 # is the whole defect: `GCRY_BITMAP_ALLOC=0` was the documented escape for a
@@ -953,6 +968,19 @@ counter-loss: $(BIN)
 released-range-report: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/released_range_report.cr -o $(BIN)/released_range_report --error-trace
 	$(BIN)/released_range_report
+
+# Does a fault inside a chunk a flush refused to release say so? The refusal
+# (2026-09-14) puts an occupied chunk back on the live list, so every other
+# line of a later report describes an ordinary release and nothing says the
+# chunk went through that window. Sixteen slots of ledger and one report line
+# fix that, and this is their positive control: the real window has never
+# opened on a developer host (0 chunks considered in 120 collections with more
+# than one mutator alive), so `GCRY_REFUSE_EMPTY_RELEASE=<n>` reaches it
+# without the race. Fails if the ledger misses the chunk or the report skips
+# the line. ~2 s.
+kept-release-report: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/kept_release_report.cr -o $(BIN)/kept_release_report --error-trace
+	$(BIN)/kept_release_report
 
 # Does a pool refill walk the chunk list, and how does that scale? The note this
 # retires said "walks every chunk of the class per refill: O(chunks)". Measured:

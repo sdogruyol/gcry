@@ -98,7 +98,7 @@ module Gcry
       total = @ec_root_poisoned_slots + @ec_root_null_slots
       return unless total == 1
       @ec_root_bad_slot_site = site
-      buf = uninitialized UInt8[384]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0,
         "gcry: an execution-context pin site cannot see its object — `")
       len = RawOut.append(buf.to_unsafe, len, site)
@@ -135,7 +135,7 @@ module Gcry
     private def report_ec_scheduler_array(addr : UInt64) : Nil
       arr = @ec_sched_arr
       return if arr == 0
-      buf = uninitialized UInt8[384]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: the owning array is 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, arr)
       # `live?` answers occupancy, not reachability — it asks
@@ -262,7 +262,7 @@ module Gcry
         h, c = found
         base = user_of(c, h).address
       end
-      buf = uninitialized UInt8[384]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: the freed block is 0x")
       len = RawOut.append_hex(buf.to_unsafe, len, base)
       if base != addr
@@ -519,7 +519,7 @@ module Gcry
       return if index_only == 0 && list_only == 0
       return unless @chunk_index_only == index_only && @chunk_list_only == list_only
 
-      buf = uninitialized UInt8[352]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: the chunk index and the chunk list disagree — ")
       len = RawOut.append_u64(buf.to_unsafe, len, index_only)
       len = RawOut.append(buf.to_unsafe, len, " chunk(s) indexed but not listed")
@@ -763,7 +763,7 @@ module Gcry
       if bottom <= sp
         @mutator_window_empty &+= 1
         if @mutator_window_empty == 1
-          buf = uninitialized UInt8[224]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = 0
           len = RawOut.append(buf.to_unsafe, len,
             "gcry: the collecting thread's own stack window is empty — sp 0x")

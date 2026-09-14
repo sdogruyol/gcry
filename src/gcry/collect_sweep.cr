@@ -578,6 +578,21 @@ module Gcry
     private def refuse_occupied_release(chunk : ChunkHeader*) : Bool
       occ = guard_occupied(chunk.as(Void*).address, chunk.value.mapped_bytes,
         GUARD_KIND_EMPTY_CHUNK)
+      # Research: `GCRY_REFUSE_EMPTY_RELEASE=<n>` refuses the first n
+      # empty-chunk releases whatever the occupancy says. The mirror of
+      # `GCRY_RELEASE_OCCUPIED=1`, and the only way to reach the kept-chunk
+      # ledger and its crash-report line on a host where the window does not
+      # open - measured 2026-09-14, 0 chunks considered in 120 collections
+      # with more than one mutator alive. A budget rather than a flag because
+      # a chunk refused forever is never released, and the line under test is
+      # the one a *later* release prints.
+      if @refuse_empty_release_budget > 0
+        @refuse_empty_release_budget &-= 1
+        @release_refused_occupied &+= 1
+        note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes,
+          occ > 0 ? occ.to_u64 : 0_u64)
+        return true
+      end
       # -1 is "cannot tell": no occupancy bitmap, which is the header layout.
       # There the sweep's own emptiness decision is all there is, and widening
       # this to a header walk belongs with a measurement rather than here.
@@ -588,8 +603,9 @@ module Gcry
       # behaviour reachable, and a number that says the window was hit either
       # way is what makes the shipped arm's silence attributable.
       return false if @release_occupied_anyway
+      note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes, occ.to_u64)
       if @release_refused_occupied == 1
-        buf = uninitialized UInt8[256]
+        buf = uninitialized UInt8[RawOut::LIMIT]
         n = RawOut.append(buf.to_unsafe, 0, "gcry: refusing to release chunk 0x")
         n = RawOut.append_hex(buf.to_unsafe, n, chunk.as(Void*).address)
         n = RawOut.append(buf.to_unsafe, n, " — the sweep queued it empty and ")

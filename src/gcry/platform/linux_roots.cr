@@ -138,7 +138,7 @@ module Gcry
 
         @@static_root_bss_lost &+= 1
         if @@static_root_bss_lost == 1
-          buf = uninitialized UInt8[160]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = RawOut.append(buf.to_unsafe, 0,
             "gcry: no object's writable PT_LOAD holds gcry's statics — no class variable is a root\n")
           RawOut.flush(buf.to_unsafe, len)

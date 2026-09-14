@@ -153,7 +153,7 @@ module Gcry
 
       @@hits &+= 1
       return true if @@hits > 8
-      buf = uninitialized UInt8[224]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       n = 0
       n = RawOut.append(buf.to_unsafe, n, "gcry: ")
       n = RawOut.append(buf.to_unsafe, n, site_name(site))
@@ -212,7 +212,7 @@ module Gcry
         addr = Thread.gcry_thread_list_address
         if addr != 0
           cbase = 0_u64
-          wbuf = uninitialized UInt8[192]
+          wbuf = uninitialized UInt8[RawOut::LIMIT]
           wlen = 0
           wlen = RawOut.append(wbuf.to_unsafe, wlen, "gcry: watching the thread list object at 0x")
           wlen = RawOut.append_hex(wbuf.to_unsafe, wlen, addr)
@@ -239,7 +239,7 @@ module Gcry
       @thread_list_empty &+= 1
       return unless @thread_list_empty == 1
 
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len,
         "gcry: the runtime thread list reads empty before Thread.lock — it held ")
@@ -254,7 +254,7 @@ module Gcry
     # The moment the sweep decides the watched object is garbage — the answer
     # to "why was it unmarked" has to be readable here, not at the crash.
     protected def report_thread_list_sweep(header : BlockHeader*) : Nil
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry:   at the sweep: marked ")
       # `heap_marked?`, not the static reader: under GCRY_BITMAP=1 the header
@@ -310,7 +310,7 @@ module Gcry
           base_at = i if cbase != 0 && b == cbase
           i += 1
         end
-        ibuf = uninitialized UInt8[288]
+        ibuf = uninitialized UInt8[RawOut::LIMIT]
         ilen = 0
         ilen = RawOut.append(ibuf.to_unsafe, ilen, "gcry: the thread list chunk is GONE from the chunk index — ")
         if present_at >= 0
@@ -357,7 +357,7 @@ module Gcry
       else
         @thread_list_unmarked_seen = true
       end
-      buf = uninitialized UInt8[224]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       if bad_shape
         len = RawOut.append(buf.to_unsafe, len, "gcry: the thread list block's header went bad — raw 0x")
@@ -400,7 +400,7 @@ module Gcry
                else
                  return
                end
-      buf = uninitialized UInt8[224]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: the thread list candidate will be REJECTED — ")
       len = RawOut.append(buf.to_unsafe, len, reason)
@@ -428,7 +428,7 @@ module Gcry
         i += 1
       end
       @thread_list_unindexed_seen = true
-      buf = uninitialized UInt8[192]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: ")
       len = RawOut.append(buf.to_unsafe, len, op)

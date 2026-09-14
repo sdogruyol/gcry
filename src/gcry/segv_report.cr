@@ -52,7 +52,7 @@ module Gcry
       base = alt.ss_sp.address.to_u64
       return if base == 0
       here = pointerof(alt).address.to_u64
-      buf = uninitialized UInt8[256]
+      buf = uninitialized UInt8[RawOut::LIMIT]
       len = RawOut.append(buf.to_unsafe, 0, "gcry: report stack — ")
       len = RawOut.append(buf.to_unsafe, len, phase)
       len = RawOut.append(buf.to_unsafe, len, ", alt stack 0x")
@@ -219,7 +219,7 @@ module Gcry
         # instruction and the only thing left to do is loop.
         unless @@second_fault_named
           @@second_fault_named = true
-          buf = uninitialized UInt8[352]
+          buf = uninitialized UInt8[RawOut::LIMIT]
           len = RawOut.append(buf.to_unsafe, 0,
             "gcry: the crash report faulted inside itself, while searching ")
           len = RawOut.append(buf.to_unsafe, len, PoisonHolders.stage_name)
@@ -678,6 +678,7 @@ module Gcry
       unless heap.in_heap_span?(addr)
         # A released chunk shrinks the span, so the span cannot be the first
         # question: ask the guard ledger before concluding anything from it.
+        report_kept_release(heap, a)
         return if report_released_range(heap, a, buf.to_unsafe, len)
         len = RawOut.append(buf.to_unsafe, len, "outside gcry's heap span [0x")
         len = RawOut.append_hex(buf.to_unsafe, len, heap.heap_span_lo)
@@ -730,6 +731,7 @@ module Gcry
         # below.
         # Asked through one helper, because the out-of-span branch above needs the
         # same question and used never to get it.
+        report_kept_release(heap, a)
         return if report_released_range(heap, a, buf.to_unsafe, len)
         len = RawOut.append(buf.to_unsafe, len,
           "inside the heap span but in no live chunk — the chunk was unmapped, or the address " \
@@ -768,6 +770,55 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, heap.heap_size)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # A chunk a flush refused to release, reported wherever the address is not
+    # in a live block - which is the only place a fault can land. The refusal
+    # puts the chunk back on the live list, so if it is later released for
+    # real and a stale pointer faults on it, every other line describes an
+    # ordinary release and nothing says this chunk went through the window the
+    # refusal exists to close. Sixteen slots, so it names the recent ones.
+    #
+    # Its own buffer, deliberately: both callers are mid-message with bytes
+    # not yet flushed, and writing this from offset 0 into theirs would drop
+    # the line they are building. `RawOut::LIMIT` because that is where the
+    # writer stops, and a buffer below it is a stack smash rather than a
+    # truncated line: at 256 this ran to 377 bytes, 121 past the end, which
+    # clobbered `occ` first - the trailing sentence then contradicted the
+    # block count printed two clauses earlier - and the return address next,
+    # so the report died at 0x0 inside itself with the fault it was describing
+    # still unflushed (`make kept-release-report`, 2026-09-14). Widest
+    # possible line here is 453 bytes, all numbers at full width.
+    private def self.report_kept_release(heap : Heap, addr : UInt64) : Nil
+      kept = heap.kept_release_at(addr)
+      return unless kept
+      base, klen, gen, occ = kept
+      raw = uninitialized UInt8[RawOut::LIMIT]
+      buf = raw.to_unsafe
+      len = RawOut.append(buf, 0, "gcry: this chunk was KEPT by a refused release - base 0x")
+      len = RawOut.append_hex(buf, len, base)
+      len = RawOut.append(buf, len, ", ")
+      len = RawOut.append_u64(buf, len, klen)
+      len = RawOut.append(buf, len, " bytes, at collection ")
+      len = RawOut.append_u64(buf, len, gen)
+      len = RawOut.append(buf, len, " with ")
+      len = RawOut.append_u64(buf, len, occ)
+      len = RawOut.append(buf, len,
+        " block(s) allocated in it at the time. The sweep had queued it empty and the " \
+        "flush put it back on the live list instead of unmapping it, so whatever released " \
+        "it afterwards released a chunk with that history")
+      # Zero is the research control, not the window: the window is defined by
+      # a mutator having taken a block, and `GCRY_REFUSE_EMPTY_RELEASE` keeps
+      # chunks that no one touched. Saying so here keeps the control's own
+      # output from reading like a sighting.
+      len = if occ == 0
+              RawOut.append(buf, len,
+                ". 0 blocks means the refusal was forced by GCRY_REFUSE_EMPTY_RELEASE, not the window\n")
+            else
+              RawOut.append(buf, len,
+                ". A mutator took one through the index entry the chunk still had\n")
+            end
+      RawOut.flush(buf, len)
     end
 
     # Did gcry release a range covering this address? Asked from two places

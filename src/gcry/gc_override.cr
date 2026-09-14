@@ -203,7 +203,7 @@ module GC
     # Ordering marker for `GCRY_TRACE_LARGE=1`: everything above is gcry
     # bringing itself up, everything below is the program.
     if env_flag_one?("GCRY_TRACE_LARGE")
-      buf = uninitialized UInt8[32]
+      buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
       n = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: init done\n")
       Gcry::RawOut.flush(buf.to_unsafe, n)
     end
@@ -1084,6 +1084,13 @@ module GC
       heap.empty_flush_delay_ms = ms
     end
     heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
+    # Research only: refuse the first n empty-chunk releases whatever the
+    # occupancy says. The positive control for the kept-chunk ledger and the
+    # crash-report line that names it, on a host where the real window does
+    # not open.
+    if n = env_u64("GCRY_REFUSE_EMPTY_RELEASE")
+      heap.refuse_empty_release_budget = n
+    end
     # Research only: fault on purpose inside the holders search, at the named
     # section, so the diagnosis path that reports *that* has a positive control.
     # `GCRY_POISON_HOLDERS_FAULT=1|2|3` — the explicit root set, the heap walk,
