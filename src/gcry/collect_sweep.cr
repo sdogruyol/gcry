@@ -515,6 +515,21 @@ module Gcry
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
 
+      # Research only (`GCRY_EMPTY_FLUSH_DELAY_MS`): hold the queued chunks here
+      # with the world already running. The window this widens is the one that
+      # released a chunk with a live block in it — the sweep unlinks a chunk
+      # inside the stop and its index entry survives until the `index_remove`
+      # below, so a mutator can take a block out of it in between. On CI that
+      # happens about once in twenty-four children; with a delay it happens
+      # every time, which is what a control arm needs.
+      if (delay = @empty_flush_delay_ms) > 0
+        req = uninitialized Gcry::OS::Timespec
+        req.tv_sec = typeof(req.tv_sec).new(delay // 1000)
+        req.tv_nsec = typeof(req.tv_nsec).new((delay % 1000) * 1_000_000)
+        rem = uninitialized Gcry::OS::Timespec
+        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+      end
+
       # Under `@alloc_lock`, because the teardown races readers that do hold it.
       # `update_heap_bounds_after_unmap` walks `@chunks` under the lock, from a
       # mutator's `trim_large_cache` — and `unlink_chunk` leaves the removed
@@ -536,7 +551,104 @@ module Gcry
       end
     end
 
+    # A chunk the sweep queued as empty can be occupied again by the time this
+    # flush runs, and then releasing it unmaps a live block.
+    #
+    # The window is structural: the sweep unlinks the chunk from `@chunks`
+    # inside the stop, but its entry stays in `@chunk_index` until
+    # `index_remove` below — and the allocator validates a pooled chunk address
+    # against exactly that index (`bitmap_indexed_chunk`). Under multi-mutator
+    # STW this flush runs *after* `start_world`, so a mutator is free to take a
+    # block out of a chunk that is already queued for unmapping.
+    #
+    # Seen on CI 2026-09-14 (run `34787711949`), in the first sighting the crash
+    # report could read after the release ledger was hoisted above the heap-span
+    # test: `in a chunk gcry RELEASED [...] empty size-class chunk release, at
+    # collection 206 [...] Blocks still allocated at release: 1`. That number is
+    # a popcount of the occupancy bitmap at release time, so it is not a stale
+    # mutator pointer into freed memory — it is a live block inside memory the
+    # collector was giving back.
+    #
+    # Refusing is the conservative half of the fix and it cannot lose: a chunk
+    # kept mapped costs RSS, a chunk unmapped under a live block costs the
+    # object. `refuse_live_release` does not cover this — it asks whether another
+    # *indexed chunk* lives inside the range, not whether this chunk still holds
+    # blocks — and under `GCRY_UNMAP_GUARD=1` it is not even reached, because
+    # `guard_release` short-circuits it.
+    private def refuse_occupied_release(chunk : ChunkHeader*) : Bool
+      occ = guard_occupied(chunk.as(Void*).address, chunk.value.mapped_bytes,
+        GUARD_KIND_EMPTY_CHUNK)
+      # -1 is "cannot tell": no occupancy bitmap, which is the header layout.
+      # There the sweep's own emptiness decision is all there is, and widening
+      # this to a header walk belongs with a measurement rather than here.
+      return false if occ <= 0
+      @release_refused_occupied &+= 1
+      # `GCRY_RELEASE_OCCUPIED=1` counts the refusal and releases anyway, which
+      # is what this code did before 2026-09-14. A control arm needs the old
+      # behaviour reachable, and a number that says the window was hit either
+      # way is what makes the shipped arm's silence attributable.
+      return false if @release_occupied_anyway
+      if @release_refused_occupied == 1
+        buf = uninitialized UInt8[256]
+        n = RawOut.append(buf.to_unsafe, 0, "gcry: refusing to release chunk 0x")
+        n = RawOut.append_hex(buf.to_unsafe, n, chunk.as(Void*).address)
+        n = RawOut.append(buf.to_unsafe, n, " — the sweep queued it empty and ")
+        n = RawOut.append_u64(buf.to_unsafe, n, occ.to_u64)
+        n = RawOut.append(buf.to_unsafe, n,
+          " block(s) are allocated in it now. A mutator took one after the sweep " \
+          "unlinked it and before this flush, through the index entry it still has. " \
+          "Kept mapped; reported once per process\n")
+        RawOut.flush(buf.to_unsafe, n)
+      end
+      true
+    end
+
     private def flush_pending_empty_chunks_locked(chunk : ChunkHeader*) : Nil
+      # Split the pending list before the coalescing walk below, because that
+      # walk merges neighbours into one `munmap` and a refused chunk in the
+      # middle of a run must not be merged into it. Order is preserved, which
+      # the coalescing depends on.
+      keep = Pointer(ChunkHeader).null
+      release_head = Pointer(ChunkHeader).null
+      release_tail = Pointer(ChunkHeader).null
+      c = chunk
+      while c
+        nxt = c.value.next
+        @release_flush_chunks &+= 1
+        if refuse_occupied_release(c)
+          ChunkHeader.set_next(c, keep)
+          keep = c
+        else
+          ChunkHeader.set_next(c, Pointer(ChunkHeader).null)
+          if release_tail
+            ChunkHeader.set_next(release_tail, c)
+          else
+            release_head = c
+          end
+          release_tail = c
+        end
+        c = nxt
+      end
+
+      # Back on the live list, so the chunk the mutator is allocating from is a
+      # chunk the sweep will visit again. Only on the locked path: the unlocked
+      # research arm (`GCRY_EMPTY_FLUSH_UNLOCKED=1`) holds no list lock, and
+      # publishing a head from there is the race that arm exists to study — it
+      # leaves the chunk indexed and off the list instead, which costs RSS and
+      # no soundness now that mark clearing walks the index.
+      while keep
+        nxt = keep.value.next
+        unless @empty_flush_unlocked
+          ChunkHeader.set_next(keep, @chunks)
+          Atomic::Ops.store(pointerof(@chunks), keep, :release, true)
+        end
+        keep = nxt
+      end
+
+      flush_release_runs(release_head)
+    end
+
+    private def flush_release_runs(chunk : ChunkHeader*) : Nil
       # The pending list is built by sweep in heap-walk order, so addresses
       # are already mostly monotonically increasing. Find the longest
       # monotonically-non-decreasing prefix and merge it into single munmap

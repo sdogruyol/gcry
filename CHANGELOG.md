@@ -22,6 +22,32 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Fixed
+
+- **A chunk could be released with a live block in it, and now the flush
+  refuses.** One of the overnight CI runs faulted in `make thread-churn-uaf`'s
+  guarded arm, and the report — readable for the first time, because the release
+  ledger had just been hoisted above the heap-span test — said `in a chunk gcry
+  RELEASED [...] empty size-class chunk release, at collection 206 [...]
+  **Blocks still allocated at release: 1**`, with `Collections since: 0`. That
+  count is a popcount of the occupancy bitmap at release, so it is a live block
+  inside memory the collector gave back rather than a stale pointer into
+  legitimately freed memory. The window: the sweep unlinks an empty chunk from
+  `@chunks` inside the stop and queues it, its index entry survives until the
+  post-STW flush removes it, the allocator resolves pooled chunk addresses
+  through that index, and a chunk whose blocks are all free is a legal
+  allocation target — so a mutator can take a block out of a chunk already
+  queued for unmapping. The flush now re-reads occupancy immediately before
+  releasing and keeps an occupied chunk mapped, putting it back on the live
+  list; `release_flush_chunks` and `release_refused_occupied` make the state
+  legible, and `GCRY_EMPTY_FLUSH_DELAY_MS` / `GCRY_RELEASE_OCCUPIED=1` are the
+  research knobs that widen the window and restore the old behaviour. It does
+  not reproduce on an 8-core host and the counters say why — with several
+  mutators alive the sweep queues nothing at all (0 chunks considered in 120
+  collections; 37 in 30 single-threaded ones), so the window needs both the
+  single-mutator sweep path and a mutator running at flush time.
+  `bench/log/linux/2026-09-14-occupied-release/FINDINGS.md`
+
 ### Added
 
 - **`make fiber-lag-cost`: the parked-fiber lag is free on untouched stacks and

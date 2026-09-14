@@ -579,6 +579,18 @@ module Gcry
     getter low_water_skips : UInt64 = 0_u64
     # Probe ran, found nothing skippable. `low_water_skips` alone cannot tell
     # that from a probe that never ran.
+    # Chunks the post-STW flush refused to release because a mutator had taken
+    # a block out of them after the sweep queued them empty. Non-zero is the
+    # window being hit, not a bug in the refusal.
+    # Chunks the post-STW flush considered releasing. Without it, "no chunk was
+    # occupied" cannot be told from "no chunk was released".
+    getter release_flush_chunks : UInt64 = 0_u64
+    getter release_refused_occupied : UInt64 = 0_u64
+    # Research only: release an occupied chunk anyway (the pre-2026-09-14
+    # behaviour), and hold the post-STW flush so the window is reached on
+    # purpose. `GCRY_RELEASE_OCCUPIED=1`, `GCRY_EMPTY_FLUSH_DELAY_MS`.
+    property release_occupied_anyway : Bool = false
+    property empty_flush_delay_ms : UInt64 = 0_u64
     getter low_water_misses : UInt64 = 0_u64
     # Probe not run because the lag floor was already at or above the stack's
     # high end, which means the saved `stack_top` does not describe that stack.

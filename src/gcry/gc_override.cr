@@ -1074,6 +1074,16 @@ module GC
       {% if flag?(:unix) %} Gcry::SegvReport.request {% end %}
       {% if flag?(:unix) %} Gcry::PoisonHolders.request {% end %}
     end
+    # Research only: the window that released a chunk with a live block in it.
+    # `GCRY_EMPTY_FLUSH_DELAY_MS` holds the post-STW empty-chunk flush with the
+    # world already running, so a mutator has time to take a block out of a
+    # chunk the sweep queued as empty; `GCRY_RELEASE_OCCUPIED=1` then releases
+    # it anyway, which is what this code did before 2026-09-14 and is the
+    # control arm for the refusal.
+    if ms = env_u64("GCRY_EMPTY_FLUSH_DELAY_MS")
+      heap.empty_flush_delay_ms = ms
+    end
+    heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
     # Research only: fault on purpose inside the holders search, at the named
     # section, so the diagnosis path that reports *that* has a positive control.
     # `GCRY_POISON_HOLDERS_FAULT=1|2|3` — the explicit root set, the heap walk,

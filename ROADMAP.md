@@ -1353,18 +1353,38 @@ CI asymmetry that hid both.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
-- [ ] **A guarded sighting under load that nothing could attribute (2026-09-13).**
-      `make thread-churn-uaf`'s guarded arm faulted 1 of 24 on two consecutive
-      overnight runs, with an 8 h soak and two drift children loading the
-      machine: `SIGSEGV at 0x7f5ed0e69768 — outside gcry's heap span
-      [0x7f5eceebf000, 0x7f5ed0ab5000)`, i.e. 3.8 MB above the span end. The
-      guard was engaged and its ledger almost certainly held the identity, but
-      the report asked the ledger only inside the span — and releasing a chunk
-      is what moves its address out of the span. Both branches now ask one
-      helper, so the next sighting is readable; this one is not, and stays open
-      as a sighting rather than a diagnosis. The rate is also the first since
-      the 2026-09-13 latch and mark-clear fixes, and it was under load.
-      `bench/log/linux/2026-09-13-released-range-report/FINDINGS.md`
+- [x] **The guarded sighting is attributed, and it is a live block in a released
+      chunk — fixed 2026-09-14.** The 2026-09-13 sighting could not be read
+      because the report consulted the release ledger only inside the heap span.
+      With that hoisted, the next one (CI `34787711949`, one of the 18 overnight
+      runs) said it outright: `in a chunk gcry RELEASED — base 0x7f6e5cea0000,
+      131072 bytes, empty size-class chunk release, at collection 206 [...]
+      **Blocks still allocated at release: 1**`, with `Collections since: 0`.
+      That number is a popcount of the occupancy bitmap at release, so it is not
+      a stale pointer into legitimately freed memory — it is a live block inside
+      memory the collector gave back.
+      **The window, from the code:** the sweep unlinks an empty chunk from
+      `@chunks` inside the stop and queues it, its `@chunk_index` entry survives
+      until the post-STW flush's `index_remove`, the allocator resolves pooled
+      chunk addresses through that index, and `bitmap_pool_candidate?` accepts a
+      chunk whose blocks are all free — which a queued chunk's are. The flush
+      runs after `start_world`, so a mutator can take a block out of a chunk
+      already queued for unmapping.
+      **Fixed by refusing:** the flush re-reads occupancy immediately before
+      releasing and keeps an occupied chunk mapped, putting it back on the live
+      list. Refusing cannot lose — a chunk kept costs RSS, a chunk unmapped
+      under a live block costs the object — and `refuse_live_release` did not
+      cover it (it asks about other *indexed chunks* inside the range, and under
+      `GCRY_UNMAP_GUARD=1` it is not even reached).
+      **Not reproduced locally, and the counters say why:** 0 refusals in 24
+      churn children with the flush held 20 ms, on 8 cores and pinned to 2. With
+      several mutators alive the sweep queues nothing at all (0 chunks considered
+      in 120 collections) and single-threaded it queues plenty (37 in 30) but has
+      no second mutator to take a block. The window needs both, which is the
+      thread-birth shape a 2-vCPU runner hits about once in 24 children. The
+      test is the next CI sighting: it should print the refusal instead of a
+      fault.
+      `bench/log/linux/2026-09-14-occupied-release/FINDINGS.md`
 
 - [x] **A large object is released under load on the fat app — FIXED
       2026-09-13.** The title said *live* from 2026-08-23 to
