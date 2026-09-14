@@ -20,7 +20,17 @@ Prior art that bounds this work — read before touching the allocator:
 - [x] Kernels: `sweep_words`, `popcount_words`, `all_zero`, `range_any`
 - [x] `spec/kernels_spec.cr`: scalar ≡ every tier, ~6.7e7 bit decisions. 11 green.
 - [x] IR gate: `<4 x i64>`+ctpop.v4i64 (avx2), `<8 x i64>`→`vpopcntq` (avx512)
-- [ ] aarch64 IR gate `<2 x i64>` — CI only, no local arm64 host
+- [x] aarch64 IR gate — `make kernels-ir`, and "no local arm64 host" was a
+      misreading: `--cross-compile --emit llvm-ir` runs the pipeline for a
+      target and stops before linking, so the check needs that target's
+      compiler and never its CPU. Both arches asserted from one host, ~19 s:
+      aarch64 `+neon`, `+sve`, `llvm.ctpop.v2i64`, `<2 x i64>`, `whilelo`,
+      `cnt z`; x86_64 `vpandn`, `vpshufb`, `llvm.ctpop.v4i64`,
+      `llvm.ctpop.v8i64`, `<4 x i64>`, `<8 x i64>`. Each arch also rejects the
+      other's fingerprints, since a grep for a string a file never contains
+      reads like a grep for one it should contain and does not — and that half
+      earned itself immediately: `<2 x i64>` as an "aarch64 only" pattern is
+      SSE2's type as well, and the run said `PRESENT` rather than passing.
 - [x] `make kernels-broken` purpose-broken gate, **observed red** (4 failures)
 - [x] `bench/micro/kernels.cr` + `make bench-kernels`: AVX2 sweep 66.2 GB/s L2,
       26.7 GB/s DRAM vs a bar of 20. Tiers converge at DRAM as predicted.

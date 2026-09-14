@@ -22,6 +22,24 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Added
+
+- **`make kernels-ir`: both architectures' vector kernels checked from one
+  host.** The plan carried "aarch64 IR gate — CI only, no local arm64 host"
+  as an open item, and that was a misreading: `--cross-compile --emit
+  llvm-ir` runs the whole pipeline for a target and stops before linking, so
+  the check needs the target's *compiler*, never its CPU. One gate, ~19 s,
+  asserts aarch64 `"+neon"`, `"+sve"`, `llvm.ctpop.v2i64`, `<2 x i64>`,
+  `whilelo` and `cnt z`, and x86_64 `vpandn`, `vpshufb`,
+  `llvm.ctpop.v4i64`, `llvm.ctpop.v8i64`, `<4 x i64>` and `<8 x i64>` — the
+  vector types and the hand-written asm the tiers are made of. Each arch also
+  asserts the other's fingerprints are **absent**, because a grep for a string
+  a file never contains reads exactly like a grep for one it should contain
+  and does not; that half caught its own first draft, where `<2 x i64>` was
+  asserted as aarch64-only and turned out to be SSE2's type as well. The CI
+  `test` job runs both arches through it and the aarch64 cross job keeps only
+  its object-emit smoke, so the assertions live in one place instead of two.
+
 ### Fixed
 
 - **`make page-release-corruption` had stopped testing anything, and now

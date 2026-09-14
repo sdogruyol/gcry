@@ -234,19 +234,18 @@ jobs:
           GCRY_PARALLEL_MARK=4 ./bin/hello_env
 
       # The SIMD kernels' scalar-vs-backend equivalence fuzz in the shipping
-      # optimisation mode, followed by an IR check: the AVX2 sweep asm is
-      # present, and the compiler-vectorised AVX-512 popcount really did
-      # vectorise (`llvm.ctpop.v8i64` only exists in a vector loop). Without
-      # `--release` the latter would be scalar code carrying feature flags. The
+      # optimisation mode, followed by the IR gate. `make kernels-ir` asks
+      # both architectures the question — cross-emitted IR needs the target's
+      # compiler, not its CPU — so the aarch64 assertions run here on every
+      # PR rather than only beside the aarch64 object-emit smoke, and each
+      # arch asserts the other's fingerprints are absent so a grep that can
+      # never match is not mistaken for a grep that matches. The
       # broken-backend positive control refuses to run on a scalar-only host
       # rather than passing vacuously.
       - name: SIMD kernel equivalence (release)
         run: |
           crystal spec --release spec/kernels_spec.cr --error-trace
-          crystal build --release --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_x86
-          grep -Fq 'vpandn' bin/kernels_x86.ll
-          grep -Fq 'vpshufb' bin/kernels_x86.ll
-          grep -Fq 'llvm.ctpop.v8i64' bin/kernels_x86.ll
+          make kernels-ir
           make kernels-broken
 
       - name: Sample stress under GCRY_STRESS
@@ -1219,22 +1218,20 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      # Object emit only. The aarch64 IR assertions moved into
+      # `make kernels-ir`, which the main `test` job runs: cross-emitted IR
+      # needs the target's compiler and not its CPU, so keeping them here as
+      # well would be the same greps in two places, with only one of them
+      # carrying the negative controls.
       - name: Cross-compile samples for aarch64-linux-gnu
         run: |
           mkdir -p bin
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/hello.cr -o bin/hello_aarch64
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/min.cr -o bin/min_aarch64
           crystal build -Dgc_none --cross-compile --target aarch64-linux-gnu samples/alloc.cr -o bin/alloc_aarch64
-          crystal build --release --cross-compile --target aarch64-linux-gnu --emit llvm-ir spec/kernels_spec.cr -o bin/kernels_aarch64
           test -f bin/hello_aarch64.o
           test -f bin/min_aarch64.o
           test -f bin/alloc_aarch64.o
-          test -f bin/kernels_aarch64.ll
-          grep -Fq '"target-features"="+neon"' bin/kernels_aarch64.ll
-          grep -Fq '"target-features"="+sve"' bin/kernels_aarch64.ll
-          grep -Fq 'llvm.ctpop.v2i64' bin/kernels_aarch64.ll
-          grep -Fq 'cnt z' bin/kernels_aarch64.ll
-          grep -Fq 'whilelo' bin/kernels_aarch64.ll
 
   # musl LibC ABI smoke (object emit). Catches PthreadT/Void* and similar typedef
   # mismatches that glibc hosts do not exercise (Alpine / static musl).
