@@ -137,6 +137,32 @@ The `0 blocks means the refusal was forced` clause exists so the control cannot
 read like a sighting: the window is defined by a mutator having taken a block,
 and this knob keeps chunks nobody touched.
 
+## A control must not spend the sighting's numbers
+
+The first version of the knob bumped `release_refused_occupied`, which is the
+field part 1 introduced to mean *the window was hit and the collector was
+protected*. Two costs, both silent:
+
+1. Every control run reports 64 window hits on a host where the window has
+   never opened once.
+2. The shipped one-shot diagnostic — `refusing to release chunk 0x… — the
+   sweep queued it empty and N block(s) are allocated in it now` — fires on
+   `release_refused_occupied == 1`. The control spends that on its first
+   forced refusal, so a *real* refusal later in the same process prints
+   nothing. The knob would have silenced the line it exists to sit beside.
+
+Forced refusals are counted in `release_refused_forced` instead, and the gate
+pins the split from the child:
+
+```
+child: refusals forced=64 window=0
+```
+
+Observed red by counting both in one field again: `the knob refused nothing
+(forced=0 window=64)` and `64 refusal(s) were counted as the window`. A
+non-zero `window` here is not a gate bug — it is a sighting, and the failure
+text says to go read `refusing to release chunk` above it.
+
 ## The gate passed while the report was dying
 
 The first green run was false. Under the PASS line the child had printed:

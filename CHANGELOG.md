@@ -65,12 +65,17 @@ is now the default and the flag would take you the wrong way.
   releases whatever the occupancy says — a budget, not a flag, because a chunk
   refused forever is never released and the line under test is the one a
   *later* release prints — and `make kept-release-report` faults into such a
-  chunk and requires the report to name both. The report distinguishes the
-  control from a sighting by the block count it recorded: 0 says the refusal
-  was forced, non-zero says a mutator took a block through the index entry the
-  chunk still had. `make thread-churn-uaf` grows a `reported` arm that
-  allocates exactly as the shipped collector does and carries only the report,
-  which is the arm the 2026-09-14 CI sighting had no way to answer from.
+  chunk and requires the report to name both. The control is kept out of the
+  numbers a sighting is read from: forced refusals land in
+  `release_refused_forced`, never in `release_refused_occupied`, because that
+  field means a mutator took a block and the one-shot `refusing to release
+  chunk` line fires on the first refusal counted there — a control that spent
+  either would report the window as hit and then silence the real one. The
+  report tells the two apart the same way: 0 blocks says the refusal was
+  forced, non-zero says a mutator took one through the index entry the chunk
+  still had. `make thread-churn-uaf` grows a `reported` arm that allocates
+  exactly as the shipped collector does and carries only the report, which is
+  the arm the 2026-09-14 CI sighting had no way to answer from.
 
 ### Changed
 

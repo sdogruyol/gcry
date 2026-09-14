@@ -603,6 +603,14 @@ module Gcry
     # reachable on a host where the window never opens.
     # `GCRY_REFUSE_EMPTY_RELEASE=<n>`.
     property refuse_empty_release_budget : UInt64 = 0_u64
+    # Refusals that knob forced, counted apart from the ones the window
+    # produced. Sharing `release_refused_occupied` would have cost twice: a
+    # run with the control on would report the window as hit, and the one-shot
+    # `refusing to release chunk` line - which fires on the *first* refusal -
+    # would never print for a real one, because the control had already spent
+    # it. The line a reader needs is the one about a mutator, and it has to
+    # survive the control that exists to exercise the ledger beside it.
+    getter release_refused_forced : UInt64 = 0_u64
     getter low_water_misses : UInt64 = 0_u64
     # Probe not run because the lag floor was already at or above the stack's
     # high end, which means the saved `stack_top` does not describe that stack.

@@ -62,6 +62,13 @@ if CHILD
     exit 2
   end
   STDERR.puts "child: victim 0x#{victim.to_s(16)} kept=true"
+  # The two refusals are different events and are counted apart: the knob
+  # forced these, and `release_refused_occupied` means a mutator had taken a
+  # block - the thing the whole refusal exists for. One field for both would
+  # make every control run read as a sighting, and would spend the one-shot
+  # `refusing to release chunk` line before a real refusal could print it.
+  STDERR.puts "child: refusals forced=#{heap.release_refused_forced} " \
+              "window=#{heap.release_refused_occupied}"
 
   # Now let it go for real: the budget is spent, so the next flush that finds
   # this chunk empty releases it. Under `GCRY_UNMAP_GUARD=1` the range stays
@@ -125,6 +132,29 @@ if text.includes?("KEPT by a refused release") &&
               "empty, so a count above zero means the value was corrupted between " \
               "the ledger and the line - which is what an overflowing line buffer " \
               "does to the locals beside it"
+end
+
+# A forced refusal is not a sighting. The knob's refusals must land in
+# `release_refused_forced` and leave `release_refused_occupied` - the number
+# that says a mutator took a block out of a chunk already queued for
+# unmapping - at zero, or every control run reports the window as hit and the
+# one-shot line that describes a real one is spent before it can print.
+counts = text.lines.find(&.starts_with?("child: refusals "))
+if counts.nil?
+  failures << "the child did not report its refusal counters"
+else
+  forced = counts[/forced=(\d+)/, 1].to_i
+  window = counts[/window=(\d+)/, 1].to_i
+  if forced == 0
+    failures << "the knob refused nothing (#{counts.strip}), so whatever the " \
+                "ledger holds did not come from the control"
+  end
+  if window > 0
+    failures << "#{window} refusal(s) were counted as the window - either the " \
+                "forced ones are being counted there again, or this child hit " \
+                "the real window, which is a sighting worth reading rather " \
+                "than a gate failure: check for `refusing to release chunk` above"
+  end
 end
 
 if failures.empty?

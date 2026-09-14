@@ -585,10 +585,14 @@ module Gcry
       # open - measured 2026-09-14, 0 chunks considered in 120 collections
       # with more than one mutator alive. A budget rather than a flag because
       # a chunk refused forever is never released, and the line under test is
-      # the one a *later* release prints.
+      # the one a *later* release prints. Counted in its own field:
+      # `release_refused_occupied` is read as "the window was hit", and the
+      # one-shot refusal line below fires on the first refusal, so spending
+      # either here would make the control lie about the thing it exists to
+      # exercise.
       if @refuse_empty_release_budget > 0
         @refuse_empty_release_budget &-= 1
-        @release_refused_occupied &+= 1
+        @release_refused_forced &+= 1
         note_kept_release(chunk.as(Void*).address, chunk.value.mapped_bytes,
           occ > 0 ? occ.to_u64 : 0_u64)
         return true

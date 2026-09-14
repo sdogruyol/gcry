@@ -553,7 +553,7 @@ knob-doc-check:
 # `RawOut` are checked against their own bounds, because the invariant is
 # about the pair and not about one module.
 raw-buf-check:
-	@ci/raw-buf-check.py
+	@python3 ci/raw-buf-check.py
 
 # The headerless default cannot honour three knobs, and their env reads are
 # compiled out on it, so nothing but this says they were ignored. That silence
