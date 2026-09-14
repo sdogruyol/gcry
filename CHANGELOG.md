@@ -39,6 +39,21 @@ is now the default and the flag would take you the wrong way.
   describes — 11 674-12 904 page runs unlinked, 60.3-68.7 MB released by the
   mostly-empty walk — and is clean, **0 of 24 per arm across six runs**.
 
+- **`make live-graph-audit` had rotted the same way, and a check now covers
+  the class.** Same cause — its arms pin `GCRY_BITMAP_ALLOC=0` for the same
+  walks — and the same symptom, `walk 0 B` on both walking arms while the
+  workload churned normally. Built `-Dgcry_block_headers` it engages (HOLED
+  109.8 MB, mostly-empty 87.2 MB through the walk) and passes **0 of 6 per
+  arm**: every edge and every node survived. `make layout-knob-check` now
+  fails the build when a gate pins a knob the compile default ignores
+  (`GCRY_BITMAP_ALLOC=0`, `GCRY_NURSERY`, `GCRY_TLAB` — read out of
+  `gc_override.cr`'s warning block rather than hard-coded) without building
+  the layout that honours it. Two rules, both observed red: the harness that
+  pins it in its own arms, and the recipe line that sets it before running a
+  binary built the wrong way, which is how `make heap-counters` and `make
+  poison-freed` could regress — each keeps a headerless binary beside the
+  header one.
+
 - **The open "unresolved corruption under concurrent stress" is closed by
   re-measurement.** Its two symptoms were the `mt-property-test`
   `reported=98 walked=233` counter gap and the page-release HOLED arm faulting

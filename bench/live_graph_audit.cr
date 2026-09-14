@@ -36,13 +36,27 @@
 #   GCRY_PAGE_DONTNEED=1          the HOLED walk, MADV_DONTNEED
 #   GCRY_MOSTLY_EMPTY=1 + DISABLE_PAGE_RELEASE=1   the sparse walk, MADV_FREE
 #
-#   crystal build -Dgc_none bench/live_graph_audit.cr -o bin/live_graph_audit
+#   crystal build -Dgc_none -Dgcry_block_headers bench/live_graph_audit.cr \
+#     -o bin/live_graph_audit
 #   bin/live_graph_audit
 require "../src/gcry"
 require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "live_graph_audit requires -Dgc_none (gcry as process GC)" %}
+{% end %}
+
+# Both walks under audit are freelist-allocator paths, which is why `BASE_ENV`
+# pins `GCRY_BITMAP_ALLOC=0` - and that knob is ignored on the headerless
+# compile default, because there is no freelist to return to. Built that way
+# the arms churn normally and the walk releases nothing: measured 2026-09-14,
+# `walk 0 B` on both walking arms across 6 children each, which the gate
+# reports as "the walk did not run" rather than passing. The layout is a
+# build-time requirement, so it is stated at build time.
+{% unless flag?(:gcry_block_headers) %}
+  {% raise "live_graph_audit requires -Dgcry_block_headers: the page-release walks " \
+           "it audits stand down on bitmap-allocated chunks, so on the headerless " \
+           "default both walking arms release nothing" %}
 {% end %}
 
 WORKERS =   4

@@ -117,6 +117,13 @@ jobs:
       - name: Raw line buffers fit their writer
         run: make raw-buf-check
 
+      # And a gate that pins one of those inert knobs must build the layout
+      # that honours it, or it silently measures the configuration it was
+      # avoiding: both page-release gates had rotted that way, reporting
+      # `unlinked 0` and `walk 0 B` where the walk never ran.
+      - name: Gates build the layout their knobs need
+        run: make layout-knob-check
+
       # A knob the compile default cannot honour must say so. Three of them
       # became inert when headerless became the default, and their env reads
       # are compiled out on that layout, so nothing else would notice.
