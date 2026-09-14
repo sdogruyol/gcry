@@ -236,40 +236,50 @@ Control arm now pins `GCRY_BITMAP_ALLOC=0`; loses 1967 again.
 
 (Previously: the radix disarmed `find-block-race`'s control.)
 
-### OPEN: an unresolved corruption under concurrent stress
+### CLOSED 2026-09-14: the corruption under concurrent stress
 
-Two symptoms, almost certainly one root cause, and **this is the blocker for
-Phase 3**:
+Both symptoms were re-run on the current tree and neither reproduces. The
+section is kept because "it stopped happening" is worth as much as the
+original report only if the re-measurement is written down.
 
-1. `mt-property-test-short`: `live_objects mismatch reported=98 walked=233`,
-   a consistent ~135 gap under concurrent mutators.
-2. `page-release-corruption`: the HOLED arm faults **1-3 of 4** where the
-   default arm is clean **3 of 3** (8.6-8.9 MB released, 0 faults). So it is
-   this representation's, not that arm's documented flakiness.
+1. `mt-property-test`: **0 failures** at 500 iterations on 2, 4 and 8 workers
+   (`collects=500 verifies=502 failures=0` per worker count), and the short
+   arm is green in the CI `test` job. The `reported=98 walked=233` gap is
+   gone; the counter fixes above (`occ` as the authority in `find_object` /
+   `mark_impl` / the invariant, atomic counters implied by `bitmap_alloc`,
+   and the two bench walkers' own stale-header bug) are what it was.
+2. `page-release-corruption`: **0 of 24 per arm across six runs** on the
+   layout the walks exist on, with the HOLED arm unlinking 11 674-12 904 page
+   runs and the mostly-empty arm releasing 60.3-68.7 MB. The 1-3 of 4 was the
+   `occ`-built live mask experiment, which was withdrawn: the walks stand
+   down on bitmap chunks and the arm that faulted no longer exists.
 
-Ruled out so far, each by a measurement rather than by reasoning:
+The next step this section named — "verify the size-class lock serialises the
+streaming sweep's `occ` word against every path into `bitmap_alloc_locked`" —
+was done on 2026-09-12 and the argument is at `sweep_words_poisoning`: cursor
+sets are settled inside the stop, a frozen one keeps its chunks PINNED and
+the walk skips them, an idle one is retired and its owner must re-enter
+through the class lock the walk also takes; allocate-black keeps anything
+handed out during `@collecting` in `mark`; and a bit in `mark` but not `occ`
+cannot exist. Measured with `GCRY_SWEEP_OCC_AUDIT=1`: **0** dead words with a
+cursor mid-allocation over 71 325 published words.
+`bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
 
-- Mark left set on explicit free (fixed; symptom persists)
-- Counter atomicity (forced atomic; symptom persists)
-- Free-page release: the entire path was stood down for bitmap chunks —
-  `unlinked 0`, no madvise — and the fault **persisted at 1-3 of 4**. An
-  `occ`-built live mask made the walk engage (0 B -> 1.97 MB) and corrupt;
-  declining only the madvise made it *worse* (3 of 4) because the freelist
-  unlink still ran. Page release is not the cause.
-
-What that leaves: something in the allocator/sweep pair that only shows with
-concurrent mutators. The streaming sweep read-modify-writes a whole `occ` word
-while other threads allocate into it; the size-class lock is supposed to
-serialise that, and the next step is to verify it actually does on every path
-into `bitmap_alloc_locked` — including `bitmap_take_pool_chunk`'s `map_chunk`,
-which takes `@chunk_list_lock` and not the class lock.
+What did *not* survive that re-run is the gate itself, and it is fixed here:
+`make page-release-corruption` built `-Dgc_none` alone since the headerless
+default flip, where `GCRY_BITMAP_ALLOC=0` is ignored, so all three arms
+reached nothing - `unlinked 0` in 4 of 4 runs. It builds
+`-Dgcry_block_headers` now and the harness refuses to compile any other way.
 
 ### Also owed
 
 - [ ] Free-page release is **not ported** and explicitly declines on bitmap
-      chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks.
-      `page-release-corruption`'s arms now pin `GCRY_BITMAP_ALLOC=0` so the gate
-      tests the header-representation walk it is about.
+      chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks,
+      and since the headerless flip that is *every* chunk on the default
+      layout. `page-release-corruption`'s arms pin `GCRY_BITMAP_ALLOC=0`, and
+      as of 2026-09-14 the gate is built `-Dgcry_block_headers` as well —
+      without it the knob is ignored, all three arms release nothing, and the
+      gate can only report that it never ran (`unlinked 0`, 4 of 4).
 - [x] Dormant-flush overshoot fixed (`finish = base + mapped_bytes` overshot by
       `data_offset`; now `chunk.address + mapped_bytes`).
 - [x] `bitmap_take_pool_chunk` walks the chunk list — measured 2026-09-13 and
@@ -514,7 +524,12 @@ time, so the gap is the mutator's allocation path.
       `process_spec/regression/5_pthread_create_raw_arg_spec.cr`.
 - [x] Multi-mutator coverage through the process GC:
       `process_spec/regression/6_multi_mutator_alloc_spec.cr`.
-- [ ] Run the full CI `test` job list locally (23 targets) before pushing.
+- [x] Run the full CI `test` job list locally before pushing — done again
+      2026-09-14 on the current tree, and the job is 87 shell steps now, not
+      the 23 this line was written for: **87 of 87 green in 13.6 min**, from
+      `crystal tool format --check` through the `GCRY_SOUND=1` correctness
+      suite. Two steps finish instantly and both are honest (the `GCRY_STRESS`
+      stress sample at 100 rounds, and the perf comparator's selftest).
 - [x] `make scheduler-roots` hung under load (1 in 22 contended runs; upstream
       0 in 101): SYSMON allocates its main Fiber in `Thread#start`, and the
       exemption let two threads pop one freelist head — its fiber pushed twice

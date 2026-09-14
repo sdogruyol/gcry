@@ -43,7 +43,8 @@
 # Raise `PAGE_RELEASE_ATTEMPTS` when hunting rather than guarding — four per arm
 # is a smoke test, and four cannot separate 0 % from 10 %.
 #
-#   crystal build -Dgc_none bench/page_release_corruption.cr -o bin/page_release_corruption
+#   crystal build -Dgc_none -Dgcry_block_headers bench/page_release_corruption.cr \
+#     -o bin/page_release_corruption
 #   bin/page_release_corruption
 
 require "../src/gcry"
@@ -51,6 +52,22 @@ require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "page_release_corruption requires -Dgc_none (gcry as process GC)" %}
+{% end %}
+
+# And the header layout, which is a requirement and not a preference: both
+# walks are freelist-shaped and stand down on bitmap chunks
+# (`bitmap_alloc_chunk?` in `collect_sweep.cr`'s HOLED/SPARSE decision), so the
+# arms pin `GCRY_BITMAP_ALLOC=0` to get the freelist back. Since the headerless
+# layout became the compile default that knob is ignored - there is no freelist
+# to return to - and every arm reached nothing: measured 2026-09-14, `unlinked
+# 0` on the HOLED arm in 4 of 4 runs and the mostly-empty arm at 0-11.8 MB
+# against a 16 MiB engagement floor. The harness said so rather than passing,
+# which is what its engagement checks are for, but "this gate cannot run here"
+# belongs at the build and not in a red run.
+{% unless flag?(:gcry_block_headers) %}
+  {% raise "page_release_corruption requires -Dgcry_block_headers: the free-page " \
+           "release walks are not ported to the bitmap allocator and stand down on " \
+           "its chunks, so on the headerless default every arm releases nothing" %}
 {% end %}
 
 WORKERS =    4

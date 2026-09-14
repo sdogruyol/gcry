@@ -22,6 +22,35 @@ that cares about RSS. If that is why you set it: headerless is the
 freelist's was 1.87× Boehm on the 2026-09-06 run), so the escape you wanted
 is now the default and the flag would take you the wrong way.
 
+### Fixed
+
+- **`make page-release-corruption` had stopped testing anything, and now
+  refuses to build that way.** Both free-page release walks are
+  freelist-shaped and stand down on bitmap-allocated chunks, so the gate's
+  three arms pin `GCRY_BITMAP_ALLOC=0` to get the freelist back. Since the
+  headerless layout became the compile default that knob is ignored — there is
+  no freelist to return to — and every arm reached nothing: `unlinked 0` on
+  the HOLED arm in **4 of 4** runs, the mostly-empty arm at 0-11.8 MB against
+  its 16 MiB engagement floor. The harness's own engagement checks caught it
+  (they exist because a walk that never ran looks exactly like a walk that
+  found nothing wrong), but a gate that cannot run on the layout it is built
+  for should say so at the build: it is compiled `-Dgcry_block_headers` now
+  and `{% raise %}`s otherwise. On that layout it engages as its history
+  describes — 11 674-12 904 page runs unlinked, 60.3-68.7 MB released by the
+  mostly-empty walk — and is clean, **0 of 24 per arm across six runs**.
+
+- **The open "unresolved corruption under concurrent stress" is closed by
+  re-measurement.** Its two symptoms were the `mt-property-test`
+  `reported=98 walked=233` counter gap and the page-release HOLED arm faulting
+  1-3 of 4. On the current tree the MT property test is **0 failures at 500
+  iterations on 2, 4 and 8 workers**, and the page-release faults belonged to
+  the withdrawn `occ`-built live-mask experiment — the walks stand down on
+  bitmap chunks and that arm no longer exists. The step the item asked for
+  last (does the class lock serialise the streaming sweep's `occ` word against
+  every path into `bitmap_alloc_locked`) was answered on 2026-09-12 with
+  `GCRY_SWEEP_OCC_AUDIT=1`: 0 dead words with a cursor mid-allocation over
+  71 325 published words.
+
 ### Added
 
 - **`make bitmap-marks-freelist`: the mark representation nothing was

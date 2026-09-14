@@ -959,7 +959,9 @@ jobs:
   # `GCRY_PAGE_DONTNEED=1` arm keeps a documented unsound window (the
   # mask-to-DONTNEED race) that no fix has closed — a red there would be the
   # arm's own nature, not a regression. Run it by hand; `docs/HARDENING.md`
-  # carries the numbers.
+  # carries the numbers. It builds `-Dgcry_block_headers` since 2026-09-14:
+  # both walks stand down on bitmap chunks, so on the headerless default every
+  # arm reached nothing and the gate could only report that it had not run.
   dormant-flush-race:
     runs-on: ubuntu-latest
     timeout-minutes: 30

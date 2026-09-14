@@ -677,8 +677,20 @@ monitor-gate-deadlock: $(BIN)
 #
 # Linux keeps both walks opt-in; Darwin turns the HOLED one on in GC.init and
 # walks every chunk.
+#
+# Built `-Dgcry_block_headers`, and that is load-bearing: the walks are
+# freelist-shaped and stand down on bitmap chunks, so the arms pin
+# `GCRY_BITMAP_ALLOC=0` to get the freelist back — a knob the headerless
+# compile default ignores, because there is no freelist to return to. Built
+# the old way after that flip the gate reached nothing and said so: `unlinked
+# 0` on the HOLED arm in 4 of 4 runs (2026-09-14), the mostly-empty arm
+# 0-11.8 MB against its 16 MiB engagement floor. On the header layout it
+# engages as its own history describes — 11 674-12 904 page runs unlinked
+# against 10 644-12 783 in 2026-08, and 60.3-68.7 MB released on the
+# mostly-empty arm against 64-67 MB — and it is clean: **0 of 24 per arm**
+# across six runs, 45 s each.
 page-release-corruption: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/page_release_corruption.cr -o $(BIN)/page_release_corruption --error-trace
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/page_release_corruption.cr -o $(BIN)/page_release_corruption --error-trace
 	$(BIN)/page_release_corruption
 
 # A post-STW chunk-list walk against a mutator's unmap.
