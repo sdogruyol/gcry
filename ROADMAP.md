@@ -1258,6 +1258,17 @@ CI asymmetry that hid both.
       worth checking when it recurs is the runner's page size, since every one
       of them reasons about chunk residency. Recorded because nothing else
       would remember it.
+      **The tally after a night of 32 runs (2026-09-14).** `test (aarch64
+      native)` was the only job to go red on a tree that could not have caused
+      it, and it did so four times: the same five chunk-residency specs three
+      times (runs `34770477564`, `34772210050`, `34795331109`) and
+      `make stw-epoch` once (`34801276385`, "a redundant suspend signal after
+      the resume hung the collector even with the epoch on"). Every one passed
+      on a re-run of the same commit. Locally: 0 of 80 for the specs, 0 of 6 for
+      the epoch gate. That is ~12% of aarch64 runs failing for host reasons,
+      which is high enough to hide a real regression behind a re-run habit — and
+      the five specs now fail with their state attached, including both page
+      sizes, so the next one carries evidence instead of asking for another run.
       **A Darwin sighting of the same gate, different shape (2026-09-13, run
       `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
       the audit refusing to name two planted values — `faults: 0 -> 0 (poison
