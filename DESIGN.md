@@ -16,7 +16,7 @@ Crystal’s codegen and stdlib grew up around Boehm’s **conservative, non-movi
 2. **Win in Crystal** — readable hot paths, shard-speed iteration, real HTTP dogfood.
 3. **Earn precision later** — stack maps and barriers are a compiler epic; the shard already carries everything that doesn’t need one.
 
-As of **v0.20.0**, process GC runs on **Linux and macOS** (Crystal ≥ 1.21, no compiler fork). Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
+As of **v0.25.0**, process GC runs on **Linux, macOS and Windows** (Crystal ≥ 1.21, no compiler fork) — Windows shipped in v0.25.0, native x86_64 (MSVC) and ARM64 (GNU), with no throughput numbers yet. Linux Kemal (v0.16 carry): **`/json` ~87% of Boehm thr**, post-GC RSS **~0.80×**. macOS Kemal tip: **`/json` ~84%**, RSS **~1×**. Fat-app Linux tip ~**90–96%** thr @ ~**1–1.6×** RSS (finalizer + retain=0; was ~**3.43×** at v0.17); Darwin tip ~**98%** thr @ ~**0.97×** RSS at n=9 (2026-08-14 re-cut; was ~**18×** at v0.17, and the ~**0.63×** carried before does not reproduce) — see [docs/PERF.md](docs/PERF.md), [docs/PERF-macos.md](docs/PERF-macos.md), [docs/ACIKTURKIYE.md](docs/ACIKTURKIYE.md). Stack maps ship dormant.
 
 ## Goals
 
@@ -158,7 +158,8 @@ that breaks it on purpose and requires the red.
 
 ## Where we are (v0.20)
 
-Shipped and dogfooded on Linux + macOS. **v0.20.0 closes a use-after-free in
+Shipped and dogfooded on Linux + macOS, and running on Windows since v0.25.0.
+**v0.20.0 closes a use-after-free in
 fiber creation**, and ships the instruments that found it. The missing root was
 the stack of a fiber that is *ending*: `Thread#dying_fiber` parks it, the owning
 `Fiber` is already off the fiber list, and the thread may still be running on
