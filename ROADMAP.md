@@ -782,20 +782,20 @@ CI asymmetry that hid both.
       gate arm (each section names itself; without the fix all three die at
       `rc=139` naming nothing).
       `bench/log/linux/2026-09-13-report-stack/FINDINGS.md`
-- [ ] **A crash on Darwin cannot be told from a null dereference.** The poison
-      check that identifies a use-after-free reads the *faulting context's*
-      registers, and that reader is `{% if flag?(:linux) %}` — Darwin's
-      `ucontext_t` keeps them in a different layout (`__mcontext`) and gcry has
-      none. Shown on 2026-08-17: `make ec-queue-audit` died on Darwin CI and the
-      report could only say "the kernel reported address 0 … a null dereference
-      or a pointer with garbage in its top bits", while the same crash on Linux
-      names the block, its size, its free path and its holders. The message also
-      said "On x86_64" while running on arm64.
-      Both halves of the wording are fixed — the branch is now
-      architecture-accurate and states the Linux-only limitation out loud rather
-      than implying a diagnosis it cannot make — but **the capability is still
-      missing**, and it is the reason a Darwin sighting is worth less than a
-      Linux one. A `__mcontext` reader would close it.
+- [x] **A crash on Darwin cannot be told from a null dereference — closed
+      2026-09-15.** The poison check that identifies a use-after-free reads
+      the *faulting context's* registers. Linux reads glibc
+      `ucontext_t.uc_mcontext.gregs` at the same offsets STW records.
+      Darwin STW never does — it uses `thread_get_state` — and a SIGSEGV
+      hands a `ucontext_t` whose `uc_mcontext` is a *pointer* to a
+      `__darwin_mcontext64` that prefixes those GP words with the exception
+      state. Until this, the reader was Linux-only, so a Darwin crash on a
+      poisoned pointer arrived with `si_addr == 0` and read as a null
+      dereference (2026-08-17 Darwin CI). Offsets transcribed from XNU
+      (`uc_mcontext` at 48; GP words after the 16-byte exception state).
+      Writer frames follow the same pointer, and Darwin records `__TEXT`
+      plus the dyld slide so `exe+offset` is printable. `make segv-report`
+      is the gate; the Darwin job runs it.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
       `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
@@ -1303,8 +1303,9 @@ CI asymmetry that hid both.
       one. Not a hang, and not attributable to the commit: the Darwin job runs
       neither of the gates that commit touched, the five master runs before it
       were green, and re-running the same job on the same commit passed. Kept as
-      a sighting rather than a diagnosis, which is what a Darwin sighting is
-      worth until the `__mcontext` reader exists — the item two above.
+      a sighting rather than a diagnosis, which is what a Darwin sighting was
+      worth until the `__mcontext` reader landed (2026-09-15) — the item two
+      above.
       **The retry now exists, and the epoch is what made it safe (2026-09-12).**
       The symmetry with `start_world`'s resume retry had been refused twice for
       a good reason: a redundant `SIG_RESUME` runs an empty handler, while a

@@ -1538,6 +1538,13 @@ jobs:
       - name: Thread-local storage roots
         run: make tls-roots
 
+      # A crash on Darwin used to read as a null dereference: the poison
+      # lives in the faulting registers, and Darwin's SIGSEGV ucontext
+      # keeps those in `*(uc_mcontext)`, not inline the way glibc does.
+      # Same four fault shapes the Linux job already runs.
+      - name: SIGSEGV report
+        run: make segv-report
+
       # Both representations on the platform whose page size is 16 KiB
       # against Linux's 4 KiB — every bitmap ordinal and free-page mask is
       # derived from it, so the Linux readings do not transfer. Headerless is

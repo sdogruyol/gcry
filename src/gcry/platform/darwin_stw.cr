@@ -63,8 +63,42 @@ module Gcry
       {% end %}
 
       # Back-compat names used by specs / samples (Linux ucontext era).
+      # These are `thread_get_state` offsets, **not** signal-ucontext offsets.
       UCONTEXT_SP_OFFSET  = THREAD_STATE_SP_OFFSET
       UCONTEXT_RSP_OFFSET = THREAD_STATE_SP_OFFSET
+
+      # Signal `ucontext_t`, used by the crash report. Darwin keeps the
+      # registers in `*(ucontext_t.uc_mcontext)`, a `__darwin_mcontext64`,
+      # not inline the way glibc does. STW never reads this layout — it
+      # uses `thread_get_state` — so these offsets exist only for the
+      # handler. Transcribed from XNU `_ucontext.h` / `_mcontext.h`:
+      #
+      #   ucontext: onstack+sigmask (8) + stack_t (24) + uc_link (8) +
+      #             uc_mcsize (8) = 48 to the mcontext pointer.
+      #   mcontext: 16-byte exception state, then the same GP words
+      #             `thread_get_state` returns (x0–x28+fp+lr / rax–r15).
+      UCONTEXT_MCONTEXT_PTR_OFFSET = 48
+      {% if flag?(:aarch64) %}
+        MCONTEXT_GREGS_OFFSET =  16
+        MCONTEXT_NGREGS       =  31
+        MCONTEXT_FP_OFFSET    = 248 # x29
+        MCONTEXT_LR_OFFSET    = 256 # x30
+        MCONTEXT_SP_OFFSET    = 264
+        MCONTEXT_PC_OFFSET    = 272
+      {% elsif flag?(:x86_64) %}
+        MCONTEXT_GREGS_OFFSET      =  16
+        MCONTEXT_NGREGS            =  16
+        MCONTEXT_FP_OFFSET         =  64 # rbp
+        MCONTEXT_SP_OFFSET         =  72 # rsp
+        MCONTEXT_PC_OFFSET         = 144 # rip
+        MCONTEXT_FAULTVADDR_OFFSET =   8
+      {% else %}
+        MCONTEXT_GREGS_OFFSET = 0
+        MCONTEXT_NGREGS       = 0
+        MCONTEXT_FP_OFFSET    = 0
+        MCONTEXT_SP_OFFSET    = 0
+        MCONTEXT_PC_OFFSET    = 0
+      {% end %}
 
       MAX_STW_SP_SLOTS = 64
 

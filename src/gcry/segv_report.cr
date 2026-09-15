@@ -257,33 +257,55 @@ module Gcry
       end
     end
 
-    # Does any GP register of the faulting context hold the poison? Uses the same
-    # ucontext offsets the collector already scans suspended threads with, so
-    # there is one description of where registers live rather than two.
+    # Does any GP register of the faulting context hold the poison?
     # Returns the poison word a GP register of the faulting context holds, or 0.
     # The word rather than a Bool because the tagged form (`GCRY_POISON_TAG=1`)
     # carries the freed block's address in its low 48 bits, and that is the whole
     # reason to look.
-    # Linux only. Darwin's `ucontext_t` keeps its registers in a different
-    # layout (`__mcontext`) and gcry has no reader for it, so on Darwin a crash
-    # on a poisoned pointer arrives with `si_addr == 0` and nothing to identify
-    # it — observed on Darwin CI, 2026-08-17, where the report could only offer
-    # "a null dereference". The `si_addr == 0` branch now says that limitation
-    # out loud instead of implying a diagnosis it cannot make.
+    #
+    # Linux reads glibc `ucontext_t.uc_mcontext.gregs` at the same offsets the
+    # suspend handler records. Darwin cannot: STW uses `thread_get_state`, and
+    # a SIGSEGV hands a `ucontext_t` whose `uc_mcontext` is a *pointer* to a
+    # `__darwin_mcontext64` that prefixes those GP words with the exception
+    # state. Until 2026-09-15 this was Linux-only, so a Darwin crash on a
+    # poisoned pointer arrived with `si_addr == 0` and read as a null
+    # dereference — observed on Darwin CI, 2026-08-17.
     private def self.context_poison_word(ctx : Void*) : UInt64
       return 0_u64 if ctx.null?
+      base, n = fault_gregs(ctx)
+      return 0_u64 if base.null? || n <= 0
+      i = 0
+      while i < n
+        w = base[i]
+        return w if w == Heap::POISON_WORD || (w & Heap::POISON_TAG_MASK) == Heap::POISON_TAG
+        i += 1
+      end
+      0_u64
+    end
+
+    # GP-register array of the faulting context, or `{null, 0}`.
+    private def self.fault_gregs(ctx : Void*) : {Pointer(UInt64), Int32}
       {% if flag?(:linux) %}
         n = Platform::UCONTEXT_NGREGS
-        return 0_u64 if n <= 0
-        base = Pointer(UInt64).new(ctx.address + Platform::UCONTEXT_GREGS_OFFSET)
-        i = 0
-        while i < n
-          w = base[i]
-          return w if w == Heap::POISON_WORD || (w & Heap::POISON_TAG_MASK) == Heap::POISON_TAG
-          i += 1
-        end
+        return {Pointer(UInt64).null, 0} if n <= 0
+        {Pointer(UInt64).new(ctx.address + Platform::UCONTEXT_GREGS_OFFSET), n}
+      {% elsif flag?(:darwin) && (flag?(:x86_64) || flag?(:aarch64)) %}
+        mctx = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_MCONTEXT_PTR_OFFSET).value
+        return {Pointer(UInt64).null, 0} if mctx == 0
+        n = Platform::MCONTEXT_NGREGS
+        return {Pointer(UInt64).null, 0} if n <= 0
+        {Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_GREGS_OFFSET), n}
+      {% else %}
+        {Pointer(UInt64).null, 0}
       {% end %}
-      0_u64
+    end
+
+    private def self.fault_mcontext(ctx : Void*) : UInt64
+      {% if flag?(:darwin) %}
+        Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_MCONTEXT_PTR_OFFSET).value
+      {% else %}
+        0_u64
+      {% end %}
     end
 
     # Untagged poison says a use-after-free happened. Tagged poison
@@ -328,7 +350,7 @@ module Gcry
         # that begins at the poisoned address. Say so, with the condition
         # attached, instead of giving up: a Darwin catch on 2026-08-17 landed
         # 760 bytes in and the report could otherwise name nothing, because the
-        # register reader that would carry the clean word is Linux-only.
+        # register reader that would carry the clean word used to be Linux-only.
         base = src - info[:offset]
         len = RawOut.append(buf.to_unsafe, len,
           "gcry: the poison in the fault has an offset added to it — it lands ")
@@ -454,11 +476,34 @@ module Gcry
     # run, and `addr2line -e <binary> <offset>` wants the link-time one. The
     # report ends with that command already assembled.
     private def self.report_writer_frames(ctx : Void*) : Nil
-      {% if flag?(:linux) && (flag?(:x86_64) || flag?(:aarch64)) %}
+      {% if (flag?(:linux) || flag?(:darwin)) && (flag?(:x86_64) || flag?(:aarch64)) %}
         return if ctx.null?
-        pc = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_PC_OFFSET).value
-        sp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_SP_OFFSET).value
-        fp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_FP_OFFSET).value
+        pc = 0_u64
+        sp = 0_u64
+        fp = 0_u64
+        lr = 0_u64
+        fault_va = 0_u64
+        {% if flag?(:linux) %}
+          pc = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_PC_OFFSET).value
+          sp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_SP_OFFSET).value
+          fp = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_FP_OFFSET).value
+          {% if flag?(:aarch64) %}
+            lr = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_LR_OFFSET).value
+          {% elsif flag?(:x86_64) %}
+            fault_va = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_GREGS_OFFSET &+ 22 * 8).value
+          {% end %}
+        {% elsif flag?(:darwin) %}
+          mctx = fault_mcontext(ctx)
+          return if mctx == 0
+          pc = Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_PC_OFFSET).value
+          sp = Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_SP_OFFSET).value
+          fp = Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_FP_OFFSET).value
+          {% if flag?(:aarch64) %}
+            lr = Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_LR_OFFSET).value
+          {% elsif flag?(:x86_64) %}
+            fault_va = Pointer(UInt64).new(mctx &+ Platform::MCONTEXT_FAULTVADDR_OFFSET).value
+          {% end %}
+        {% end %}
         bias = Platform.exe_bias
         return if pc == 0
 
@@ -477,14 +522,13 @@ module Gcry
         len = RawOut.append(buf.to_unsafe, len, " fp 0x")
         len = RawOut.append_hex(buf.to_unsafe, len, fp)
         {% if flag?(:x86_64) %}
-          # `gregs[REG_CR2]`, the hardware faulting address. Printed beside
-          # `si_addr` and not instead of it: the two disagreeing is itself the
-          # answer, and they did — a fault inside the collector reported
-          # `si_addr == 0` while CR2 named the address the instruction actually
-          # touched.
+          # Hardware faulting address: Linux `gregs[REG_CR2]`, Darwin
+          # `__faultvaddr`. Printed beside `si_addr` and not instead of it:
+          # the two disagreeing is itself the answer, and they did — a fault
+          # inside the collector reported `si_addr == 0` while CR2 named the
+          # address the instruction actually touched.
           len = RawOut.append(buf.to_unsafe, len, " cr2 0x")
-          len = RawOut.append_hex(buf.to_unsafe, len,
-            Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_GREGS_OFFSET &+ 22 * 8).value)
+          len = RawOut.append_hex(buf.to_unsafe, len, fault_va)
         {% end %}
         len = RawOut.append(buf.to_unsafe, len, "\n")
         RawOut.flush(buf.to_unsafe, len)
@@ -503,7 +547,6 @@ module Gcry
           # A leaf store faulting has made no frame record, so its caller is
           # only in x30. On x86_64 the return address is on the stack and the
           # walk below finds it.
-          lr = Pointer(UInt64).new(ctx.address &+ Platform::UCONTEXT_LR_OFFSET).value
           if bias != 0 && Platform.exe_text?(lr)
             len = RawOut.append(buf.to_unsafe, len, " 0x")
             len = RawOut.append_hex(buf.to_unsafe, len, lr &- bias)
@@ -658,10 +701,10 @@ module Gcry
             "A poisoned pointer can read as 0 here too, so this is a null dereference or a pointer " \
             "with garbage in its top bits")
         {% end %}
-        {% unless flag?(:linux) %}
+        {% unless flag?(:linux) || flag?(:darwin) %}
           len = RawOut.append(buf.to_unsafe, len,
             " — and gcry cannot tell which on this platform: the check that looks for the poison " \
-            "in the faulting context's registers is implemented for Linux only")
+            "in the faulting context's registers is implemented for Linux and Darwin only")
         {% end %}
         len = RawOut.append(buf.to_unsafe, len, "\n")
         RawOut.flush(buf.to_unsafe, len)

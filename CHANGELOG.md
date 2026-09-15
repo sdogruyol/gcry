@@ -42,6 +42,16 @@ is now the default and the flag would take you the wrong way.
 
 ### Fixed
 
+- **A Darwin crash on a poisoned pointer read as a null dereference, and
+  now does not.** The report looks for gcry's freed-block poison in the
+  faulting GP registers. Linux reads them from glibc
+  `ucontext_t.uc_mcontext.gregs`. Darwin STW uses `thread_get_state`, and
+  a SIGSEGV hands a `ucontext_t` whose `uc_mcontext` is a pointer to a
+  `__darwin_mcontext64` that prefixes those GP words with the exception
+  state — so the Linux offsets do not apply. Until now the reader was
+  Linux-only and `si_addr == 0` was the whole diagnosis. Offsets from
+  XNU; writer frames follow. `make segv-report` on Darwin CI.
+
 - **A pointer held only in a main-thread `@[ThreadLocal]` was collected
   on Darwin and Windows, and now is not.** Linux closed this on
   2026-09-12 by adding the live TLS block to the static roots, sized
