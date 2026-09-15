@@ -124,18 +124,27 @@ GC.collect
 
 victim = Pointer(Void).new(hidden ^ KEY)
 alive = heap.live?(victim)
-bytes = victim.as(UInt8*)
-intact = true
-i = 0
-while i < VICTIM_SIZE
-  if bytes[i] != FILL
-    intact = false
-    break
+# A collected block may no longer be mapped. Linux typically leaves the
+# page readable (`intact=true` after a free); Windows `VirtualFree`s it
+# and a payload walk is C0000005 — which is how `make tls-roots` died on
+# the Windows default variant, 2026-09-15, on both the red arm and the
+# control. `live?` is a metadata check; the fill is only meaningful on a
+# block the heap still owns.
+intact = false
+if alive
+  bytes = victim.as(UInt8*)
+  intact = true
+  i = 0
+  while i < VICTIM_SIZE
+    if bytes[i] != FILL
+      intact = false
+      break
+    end
+    i += 1
   end
-  i += 1
 end
 
-puts "victim 0x#{victim.address.to_s(16)}: live?=#{alive} intact=#{intact}"
+puts "victim 0x#{victim.address.to_s(16)}: live?=#{alive}#{alive ? " intact=#{intact}" : " (payload not read — the block is free)"}"
 puts ""
 
 if control
