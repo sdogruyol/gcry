@@ -341,7 +341,14 @@ require "../src/gcry"
   ip_bytes = sects.select(&.initprot_only_rule?).sum(&.size)
   puts
   puts "root bytes: old_rule=#{old_bytes} new_rule=#{new_bytes} initprot_only_rule=#{ip_bytes}"
-  puts "gcry reports static_root_bytes=#{Gcry::Platform.static_root_bytes}"
+  tls_lo, tls_hi = Gcry::Platform.tls_root_range
+  tls_bytes = tls_hi > tls_lo ? tls_hi - tls_lo : 0_u64
+  reported = Gcry::Platform.static_root_bytes
+  # The live TLV block is a root (2026-09-15) but it is not a Mach-O section:
+  # `_tlv_bootstrap` allocates it with libc malloc. The census above is the
+  # derived *section* rule; subtract the TLS range so a collector that added
+  # that root is not reported as having reverted the section walk.
+  puts "gcry reports static_root_bytes=#{reported} (#{tls_bytes} of them the live TLS block, not a Mach-O section)"
 
   # --- selection arm ------------------------------------------------------
   # The one assertion that makes this file a gate on the *collector* rather
@@ -360,16 +367,17 @@ require "../src/gcry"
   # Skipped in the control child, whose whole point is that
   # `GCRY_STATIC_BSS_CAP=1` has dropped a section the rule would take.
   unless control
-    reported = Gcry::Platform.static_root_bytes
-    if reported != new_bytes
-      hint = if reported == old_bytes
+    section_bytes = reported >= tls_bytes ? reported - tls_bytes : reported
+    if section_bytes != new_bytes
+      hint = if section_bytes == old_bytes
                " — that is exactly the name allow-list's total, so the derived rule has been reverted"
-             elsif reported == ip_bytes
+             elsif section_bytes == ip_bytes
                " — that is exactly the initprot-only total, so the SG_READ_ONLY term has been dropped and #{ip_bytes - new_bytes} bytes of read-only memory are being word-scanned"
              else
                ""
              end
-      failures << "selection: the collector reports static_root_bytes=#{reported} where " \
+      failures << "selection: the collector reports #{section_bytes} section-root bytes " \
+                  "(static_root_bytes=#{reported} minus #{tls_bytes} live TLS) where " \
                   "the derived rule (writable __DATA*, not SG_READ_ONLY, not TLS) selects " \
                   "#{new_bytes}#{hint}"
     end
