@@ -4,14 +4,18 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
-**Release state.** Latest release **v0.25.0** (2026-09-09); the tip is the
-**v0.26.0 candidate** — `CHANGELOG.md`'s `[Unreleased]` section is what it
-contains. The section headings below are work buckets, not release contents:
-v0.20.0 through v0.25.0 all shipped while this board was being written, and
-until 2026-09-15 the headings still called v0.20.0 "current" and v0.21.0
-"next", six releases after both had shipped. Every `[x]` carries the date it
-closed, and `CHANGELOG.md` maps dates to releases — that pairing, not the
-heading, is the record.
+**Release state.** Latest release **v0.26.0** (2026-09-15) — the headerless
+layout as the compile default, plus the main-thread TLS roots on all three
+platforms. The tip is the next candidate; `CHANGELOG.md`'s `[Unreleased]`
+section is what it holds.
+
+The headings below carry **no version numbers on purpose**. They are work
+buckets, and every attempt to number them has rotted: v0.20.0 through v0.25.0
+all shipped while this board was being written, and until 2026-09-15 the
+headings still called v0.20.0 "current" and v0.21.0 "next" — six releases
+after both had shipped. Every `[x]` carries the date it closed, and
+`CHANGELOG.md` maps dates to releases; that pairing, not a heading, is the
+record.
 
 ## Shipped (v0.19.0) — "Suspended-thread register roots, on both platforms that lacked them"
 
@@ -44,7 +48,7 @@ heading, is the record.
 
 ---
 
-## Current (v0.26.0 candidate) — "Prove root coverage, and put Darwin under the gates"
+## Current — "Prove root coverage, and put Darwin under the gates"
 
 Both defects v0.19.0 closed were the same shape: a root the caller assumed was
 scanned and the platform returned nothing for — Darwin's empty `each_thread_greg`
@@ -1429,7 +1433,7 @@ kept finding the rest.
       `live_objects` accounting does is the next thing to read.
       `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
 
-## Next (v0.27.0) — the thread family, then Darwin performance parity
+## Next — the thread family, then Darwin performance parity
 
 - [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
       of a freed block.** It faults inside `pthread_getattr_np` under
