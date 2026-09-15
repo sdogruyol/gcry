@@ -70,12 +70,14 @@ jobs:
             crystal: "1.21.0"
             arch_label: x86_64
     runs-on: ${{ matrix.os }}
-    # Measured 2026-09-15: 29m44s green, 30m05s cancelled on the last step
-    # (`GCRY_SOUND=1`, 17 s of work left). The comment used to say ~7 minutes;
-    # the gate list grew. The 30-minute cap was for a hang in
-    # `stw_mt_property_test` (glibc queried a suspended thread, 2026-08-10,
-    # six hours until GitHub's ceiling). That hang is fixed; 45 minutes still
-    # fails a hang in minutes, not hours, and leaves runner variance a margin.
+    # This job takes ~30 minutes, and the comment here claimed ~7 until
+    # 2026-09-15, when the cap it was attached to started cancelling green
+    # runs: 29m44s passing, then 30m05s killed on the last step with 17 s of
+    # work left. The gate list had grown into the cap. 30 minutes was chosen
+    # for a hang in `stw_mt_property_test` — the collector asking glibc about
+    # a thread it had suspended, 2026-08-10, six hours until GitHub's 6 h
+    # ceiling, fixed in 8f2cdad. 45 still fails a hang in minutes rather than
+    # hours, with room for runner variance.
     timeout-minutes: 45
     name: test (${{ matrix.arch_label }}, crystal ${{ matrix.crystal }})
     steps:
