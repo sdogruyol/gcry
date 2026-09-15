@@ -4,6 +4,15 @@ gcry is a conservative mark-sweep garbage collector written in Crystal, shipped 
 This roadmap shows where we are and where we're going — from a shard that replaces Boehm
 at build time, aiming toward a future where Crystal ships with its own GC.
 
+**Release state.** Latest release **v0.25.0** (2026-09-09); the tip is the
+**v0.26.0 candidate** — `CHANGELOG.md`'s `[Unreleased]` section is what it
+contains. The section headings below are work buckets, not release contents:
+v0.20.0 through v0.25.0 all shipped while this board was being written, and
+until 2026-09-15 the headings still called v0.20.0 "current" and v0.21.0
+"next", six releases after both had shipped. Every `[x]` carries the date it
+closed, and `CHANGELOG.md` maps dates to releases — that pairing, not the
+heading, is the record.
+
 ## Shipped (v0.19.0) — "Suspended-thread register roots, on both platforms that lacked them"
 
 - [x] **Suspended threads' GP registers are scanned everywhere the collector
@@ -35,14 +44,17 @@ at build time, aiming toward a future where Crystal ships with its own GC.
 
 ---
 
-## Current (v0.20.0) — "Prove root coverage, and put Darwin under the gates"
+## Current (v0.26.0 candidate) — "Prove root coverage, and put Darwin under the gates"
 
 Both defects v0.19.0 closed were the same shape: a root the caller assumed was
 scanned and the platform returned nothing for — Darwin's empty `each_thread_greg`
 stub, and Linux aarch64's `UCONTEXT_NGREGS = 0`. Neither was visible until a
 counter was wired to a gate and the gate was broken on purpose. The largest open
-item fits that shape too, so 0.20.0 spends its budget on root coverage and on the
-CI asymmetry that hid both.
+item fits that shape too, so this bucket spends its budget on root coverage and
+on the CI asymmetry that hid both. It has held that theme across v0.20.0 to
+v0.25.0 and still does: the main-thread TLS roots and the Darwin `__mcontext`
+reader closed here on 2026-09-15, and the Darwin CI asymmetry below is what
+kept finding the rest.
 
 - [x] **Thread-local storage was not a root, on the main thread — fixed
       2026-09-12.** A block whose only reference was a main-thread
@@ -797,11 +809,16 @@ CI asymmetry that hid both.
       plus the dyld slide so `exe+offset` is printable. `make segv-report`
       is the gate; the Darwin job runs it.
 - [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
-      `test-macos` runs `spec`, `process_spec`, the samples, `make greg-roots`,
-      `make scheduler-roots`, `make ivar-layout-roots`, `make ec-queue-audit`,
-      `make perf-baseline`, and — all added 2026-08-15 — **Debug invariants**
-      (exactly what hid the item above for three releases),
-      **`stw_mt_property_test`** and a **soak smoke**.
+      `test-macos` runs `spec`, `process_spec`, the samples, `make
+      chunk-search-race`, `make greg-roots`, `make scheduler-roots`, `make
+      ivar-layout-roots`, `make ec-queue-audit`, `make perf-baseline`, both
+      header-layout spec arms, the Darwin-only static-root and free-page
+      probes, and — all added 2026-08-15 — **Debug invariants** (exactly what
+      hid the item above for three releases), **`stw_mt_property_test`** and a
+      **soak smoke**. Added 2026-09-15 with the two items above: **`make
+      tls-roots`** and **`make segv-report`**, the gates for the main-thread
+      TLS roots and the `__mcontext` crash reader. Neither had a Darwin arm,
+      which is the whole reason both defects were Darwin-only.
       The soak needed a Darwin RSS reader before it could run there at all: its
       `/proc/self/status` reader returned 0 under a `rescue`, so the RSS ceiling
       compared 0 against a start of 0 and passed by measuring nothing.
@@ -1015,396 +1032,6 @@ CI asymmetry that hid both.
       path — the reason it is off — so it needs the Kemal throughput numbers
       beside it. The cheaper alternative is to make SYSMON's allocations not
       count, if they can be identified.
-
-## Next (v0.21.0) — the thread family, then Darwin performance parity
-
-- [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
-      of a freed block.** It faults inside `pthread_getattr_np` under
-      `stop_world`, on a `pthread_t` that is gcry's own tagged poison
-      (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
-      STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
-      the v0.20.0 fix in place** — so the dying-fiber stack root does not touch
-      it. The block is 192 bytes. **What the last report said about *how* it was
-      freed does not stand**: "an explicit free rather than the sweep, since
-      reissued" was decoded from `si_addr`, which was the poison **plus
-      `0x418`** and named a block five along — the same reporter bug that
-      produced a false "explicit free" from cleared flags, retracted in the
-      FINDINGS the day it was printed. Who freed it is still open.
-      **The obstacle is the observer, not the analysis.** It does not reproduce
-      locally: `ec_queue_audit` 0/20 and 0/25 in two batches, `nested_spawn_uaf`
-      never produces this shape, and the 5 h × 3 soak on 2026-08-17 did not fire
-      it either. Every sighting so far is CI, mostly aarch64.
-      **The instrument is built and wired.** `GCRY_THREAD_BLOCK_AUDIT=1`
-      (`src/gcry/thread_block_audit.cr`) asks the fiber family's question about
-      one type: after the mark and before the sweep it reads Crystal's `type_id`
-      out of every used block, names each block of the watched type the mark did
-      not reach, and hands its address to the address-space walk, which names the
-      region that holds it. The general audit could not see this defect and the
-      reason was size twice over — its trigger walks only the ≥384 B band and a
-      `Thread` is 192 B, and it fires for whichever block died first, never this
-      one. It rides on `scheduler-roots`, `ec-queue-audit` and the x86_64
-      `stw_mt_property_test` step, i.e. on all three gates that have caught the
-      defect, at +3% on the property test and no measurable cost on the others.
-      `GCRY_DYING_TYPE_ID=<n>` retargets it, which is what `make
-      thread-block-audit` uses to require it to name a death it plants and to
-      stay silent when the same objects are held — without that, a quiet CI arm
-      would say nothing.
-      **And it caught it, on the first batch: 4 of 10 aarch64 reruns.** All four
-      in `ec-queue-audit`, all at collection 2, all saying the same thing — the
-      dying 192-byte `Thread`'s address sits **six times in one 16 MiB anonymous
-      mapping that gcry can name as nothing**: no heap block, no fiber stack, no
-      pooled stack, no thread stack, at **byte-identical offsets below that
-      mapping's top in all four runs** (`0x1850 0x1800 0x1768 0x1760 0x1758
-      0x0A40`). A region mapped whole and used from the high end, with a frame
-      layout that repeats exactly, is a stack; the classifier had **4–5** thread
-      bounds against ~100 live fibers, and one of the four crashes lands in
-      `ThreadPool#attach` ← `Thread#start` ← `thread_proc`, on the new thread's
-      own start path. In one of them the poison the crash faults on is the
-      tagged form of **the same block the audit named one collection earlier**,
-      which is the first time this defect's death and its crash have been the
-      same block in the same run.
-      **And the next catch decided it — it is the birth window, and the
-      pre-stop wait giving up is what opens it.** Two more catches the same day,
-      on two runs of the same commit, both with the precondition and the death
-      in the **same collection**: `the wait for a staged thread GAVE UP — the
-      world stopped with it unpublished. 5 listed, 5 bounded, 2 staged`, then a
-      192-byte `type_id 173` block dying, off Crystal's list, held only in the
-      16 MiB stack-shaped mapping — and, in the same report, `5 on Crystal's
-      list … the kernel says 6`. One thread outside the stopped world, its
-      `Thread` object covered by no root, swept; the thread then publishes and
-      the next `stop_world` reads `@system_handle` out of the freed block. Both
-      crashes fault on the poison of exactly the block the audit named.
-      Baseline for contrast: 40 precondition sightings across 20 green runs,
-      **every one caught by the wait**, never a timeout.
-      **Still an inference**: that the dying object is that thread's. The
-      handle comparison is only consistent with it — glibc recycles `pthread_t`
-      values, measured in this repo's own runs (one id across eight collections
-      while the staged total went 4 → 11).
-      **And the fix needs none of the three options that were on the table** —
-      not an unbounded wait, not scanning a staged thread's stack, not deferring
-      the collection. The object is already in gcry's hands: Crystal calls
-      `GC.pthread_create(…, arg: self.as(Void*))`, so the `Thread` *is* the
-      argument the hook is handed. `src/gcry/thread_birth_root.cr` roots it
-      there and releases it in `stop_world`'s existing walk once the thread is
-      on the list. One `add_root` per thread created, and nothing about the
-      stopped world changes — which is the point, because two earlier attempts
-      at this defect changed collector behaviour and broke it.
-      **Gated, and the window is now reproducible on demand.** A real `Thread`
-      publishes in microseconds, so `make thread-birth-root` holds the window
-      open with a **raw** pthread created through the same hook, which never
-      joins Crystal's list: rooted the block survives, and with the twin
-      (`GCRY_THREAD_BIRTH_NOROOT=1`, same records, roots nothing) or the knob off
-      it **dies** — the defect, local and deterministic for the first time.
-      **Left open and counted**: a thread that never publishes keeps its root for
-      the life of the process, and the interval *inside* `pthread_create` is
-      still uncovered (a trampoline on the new thread was tried for the staging
-      record and crashed 8 runs in 10).
-      **And one of those "left open" lines was hiding a hole, now closed.** The
-      64-slot table was sized against concurrent births; slots are freed by
-      `release`, which runs inside `stop_world`, so what it actually holds is
-      births **since the last collection** — 65 `Thread.new`s with none in
-      between overflow it, 200 overflow it 137 times, and an overflowing birth
-      used to be rooted by nothing at all. It is now rooted and never released:
-      a leaked `Thread` instead of an uncovered one. `make thread-birth-root`
-      gained `--burst` / `--burst-unrooted`, which is the second local
-      deterministic repro of this window and the first that needs no timing.
-      `Platform`'s staging table has the same shape and overflows on the same
-      input; there it costs the pre-stop wait rather than the root, and
-      `thread_staged_overflows` counts it.
-      **The crash-rate measurement**: 9 completed reruns of the aarch64 job with
-      the fix in, all green, 0 dying-`Thread` reports (a tenth was cancelled and
-      is not counted). Stated with its weight and not more: a batch *before* the
-      fix was also 0/10, the rate is bursty on this fleet, and Fisher against
-      the 3/10 control is p ≈ 0.2. The evidence that does not depend on the rate
-      is the local gate, where the window is held open on purpose and the block
-      dies without the root and survives with it, 20 of 20.
-      **Next**: leave the sampler running and revisit the rate once more pushes
-      have accumulated; the item stays open until CI has enough runs to say so.
-      **What the stop epoch (2026-09-12, item below) changes here**: nothing
-      about the window itself — an unpublished thread is still neither
-      suspended nor scanned — but it supplies the mechanism a fix needs. A
-      thread can now be signalled more than once without the duplicate
-      suspending it with nobody waiting, and whether a delivery is honoured is
-      decided by the handler against the stop id rather than by the collector
-      getting a call site right. **The first half of that is now done
-      (2026-09-12).** The acknowledgement has moved off `Thread#@suspended`
-      into the `pthread_t`-keyed slot table, which the collector reserves for
-      every thread before it signals anyone, so the handler calls nothing
-      Crystal owns. That was not only a prerequisite — it closed a defect of
-      its own, below. What is still missing to suspend a *staged* thread: its
-      stack bounds have to come from the creating side
-      (`pthread_getattr_np` on the new handle once `pthread_create` returns)
-      and it has to be given a slot and signalled like any other. Separate
-      change, separate red arms — the two earlier attempts at this family
-      broke the collector by doing it in one step.
-      **A live defect found on the way, and fixed:** Crystal's `Thread#start`
-      pushes itself onto the list **before** it sets its TLS, so `stop_world`
-      could signal a thread with no `Thread.current` — and Crystal's accessor
-      *creates one on a miss*, allocating a `Fiber` and a `Thread` and pushing
-      it onto `Thread.threads` from inside a signal handler with the world
-      stopping. It then set `@suspended` on that **second** object, never the
-      one the collector was watching, so the stop spun forever for a thread
-      that had in fact suspended itself. That is `phase=suspend`, one thread
-      unacknowledged, handle live, handler entries incremented — the aarch64
-      shape, though whether it is *the* aarch64 hang is unknown and
-      `stw_suspend_no_tls` is the counter that will say. Driven
-      deterministically by `make stw-ack-window` against a raw pthread:
-      shipped `acked=true listed_delta=0`, restored path `acked=false
-      listed_delta=1`.
-      `bench/log/linux/2026-09-12-stw-ack-birth-window/FINDINGS.md`
-      **The birth window is narrower than this item has assumed, and the
-      *death* window is the real one (2026-09-12).** `Thread#start`'s first
-      statement is the push, and before it the new thread allocates nothing
-      and holds exactly one GC reference — itself, which `ThreadBirthRoot`
-      roots; once it has pushed, a stop in progress holds `Thread.lock`, so
-      it cannot run through the stopped world either. The mirror is
-      uncovered: `Thread.threads.delete(self)` runs *before*
-      `Fiber.inactive` and `detach { system_close }`, so a dying thread
-      spends its last instructions off Crystal's list — neither suspended
-      nor scanned — still dereferencing itself.
-      **It was masked by an accident**: `wait_for_staged_threads` spins 2 000
-      times before giving up, on every stop, and those spins sat between a
-      thread detaching and the world stopping around it. Dropping a dead
-      thread's staging record — obviously right, and the thing that takes
-      that wait's timeout rate from 398-of-400 to nil — removes the mask and
-      crashes: **7 of 40** runs of 960 short-lived threads, against 0 of 40
-      before, and 0 of 40 for a pure delay in the same place, so the trigger
-      is the missing wait rather than the timing. `GCRY_POISON_HOLDERS=1`
-      names a use-after-free on a 16-byte block that no holder search
-      accounts for; rooting every `Thread` for its whole life does not fix
-      it, so the victim is not the `Thread`. Kept as
-      `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default and documented as a
-      reproducer: this family has not had one that fires in seconds since
-      2026-08-16.
-      **And an unbounded leak, fixed on the way**: a birth root was released
-      only when the pre-suspend walk found its thread on Crystal's list, so a
-      thread that published and exited between two collections kept its root
-      for the life of the process — `outstanding` **3 197 of 3 203** births,
-      each pinning a `Thread`, its closure and its main `Fiber`. The root now
-      ends at the thread's death, observed through the `pthread_detach` /
-      `pthread_join` hooks with one collection of grace, or at once when
-      glibc hands the handle to a new thread. 960 short-lived threads:
-      `outstanding` 4, `overflows` 0, against 961 and 705 with the old policy
-      restored (`GCRY_THREAD_BIRTH_DEATHS=0`).
-      `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
-      **The obvious cover was built and withdrawn, and the reason is worth
-      more than the code was.** With the acknowledgement off `Thread` objects
-      and the birth root naming every thread gcry has seen created and not
-      seen end, the invisible set is computable — armed handles minus
-      Crystal's list — so suspend and scan them like anything else. Both
-      halves are unsafe for the same missing fact: **there is no safe way to
-      ask whether a `pthread_t` still names a thread.** Guarding with
-      `pthread_kill(id, 0)` segfaults on the first collection, 3 of 3,
-      because a slot can outlive its thread by the grace collection and the
-      probe then dereferences a freed `struct pthread` — the `+0x418` shape,
-      reached from the other direction, which also makes the abandonment
-      path's use of that probe worth revisiting. Trusting gcry's own death
-      marks instead removes the crash and hangs 1 run in 3, when a thread
-      dies between the mark being read and the signal being sent. The set
-      was also empty in the workload that crashes (`unlisted_seen=0` over
-      120 collections), so it cost two fatal modes and covered nothing.
-      Where a next attempt should start: the dying thread is the only party
-      that can speak for its own handle, and `GC.pthread_detach` already
-      runs **on** it — it can publish its own bounds and park cooperatively
-      the way the Monitor does, with no stale-handle question anywhere. That
-      covers `detach` to exit, not `Thread.threads.delete` to `detach`.
-      **Name the victim first.** It is 16 bytes and it is not the `Thread`;
-      two of the three attempts here were aimed at objects that turned out
-      not to be it.
-      **Corrected attribution (2026-09-12, later the same day).** The
-      reproducer does not crash in the dying thread. Bare — no poison — it
-      raises rather than faults, and the stack names a thread being **born**:
-      `Thread#start` → `Fiber.new` → `Fiber#initialize` →
-      `Thread::LinkedList(Fiber)#push` → `Thread::Mutex#unlock` returning
-      **EINVAL**, i.e. `Fiber.fibers`' mutex is not a valid mutex. EINVAL and
-      not EPERM, so it is not a non-owner unlock — the memory is wrong. A
-      second sighting lands in the Monitor's `every` rescue with the same
-      error and a different consumer, then SEGVs inside DWARF decoding while
-      printing, which turns the evidence into a backtrace storm. Under
-      `GCRY_POISON_FREED=1` the same defect appears as the 16-byte read
-      instead, and poison perturbs the timing enough that that arm fires
-      almost never (0 in 534) — so the bare arm is the one to drive. Sizes
-      measured and ruled out for the 16-byte block: `Thread` 184,
-      `Thread::Mutex` 48, `Fiber` 176, `Fiber::StackPool` 24,
-      `EC::ThreadPool` 48, `Thread::LinkedList` 32, `Fiber::Stack` 24 — so it
-      carries no `type_id` and the dying-type audit cannot name it.
-      **And a soundness hole closed on the way**: every thread the stop
-      suspends by signal has its GP registers scanned, because a reference
-      can live only in a register — and the Monitor is never signalled, so it
-      was the one thread whose registers nothing captured. It parks in
-      `MonitorGate.enter` on **238 of 240** collections, so the hole is on a
-      hot path. It now spills them with the same `setjmp` pair the collector
-      uses on itself, into a local its own stack scan already covers. This
-      did **not** change the reproducer's rate (56 of 258 against 49 of 252):
-      it closes a hole, not this crash, and a survival A/B cannot
-      discriminate for the reason `make greg-roots --explain` gives.
-      **And a shape to keep in view**: the stop now prints
-      `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
-      Crystal's list has a handle libc says names nothing. That is this
-      defect's signature seen from the other side, and it is now a line in the
-      log rather than a twenty-minute timeout.
-      **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
-      catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
-      quote.
-      `bench/log/linux/2026-08-20-dying-thread-holder/FINDINGS.md`
-      `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
-      `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
-
-- [ ] **The aarch64 job hangs in `ec-queue-audit`, about one run in seven, and
-      it has been reading as `cancelled`.** Six of the last forty runs of `test
-      (aarch64 native)` ended at the 20-minute job timeout — 2026-08-20 (three)
-      and 2026-08-22 — and every one checked was killed with `Terminate orphan
-      process: … (ec_queue_audit)`. A job timeout is reported as *cancelled*
-      rather than failed, so this has never been read as a defect, on the runner
-      where the `Thread` use-after-free lives and in one of the two gates that
-      has caught it.
-      **The phase is now known.** The first run with the instrumentation in
-      (2026-08-22, run `32575506486`) failed at 7m46s instead of being cancelled
-      at 20 minutes and said `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`
-      — so it is `stop_world` spinning in `until thread.@suspended.get` for a
-      mutator that never acknowledged its signal, not the harness's fiber waits
-      and not a slow runner. The spin now records which thread it is waiting on
-      and how many have acknowledged, so the next sighting names the victim;
-      `GCRY_STW_TEST_SUSPEND_STALL_MS` and `make stw-watchdog`'s `armed+suspend`
-      arm are what make that report provable rather than hoped for.
-      What is still open: why that thread does not acknowledge. Candidates worth
-      separating are a lost signal, a thread caught mid-start or mid-exit, and a
-      handler that cannot run — the id and the `n of m` count are what will tell
-      them apart. The wait now also asks `pthread_kill(id, 0)` after about a
-      second and prints whether the handle names a live thread, which is the one
-      question that separates "the signal was lost" from "the handle came out of
-      a freed `Thread`" — the open use-after-free is on this same runner.
-      **And five retention specs at once on aarch64 (2026-09-13, run
-      `34770477564`).** `test (aarch64 native)` failed `dormant_revive_spec`,
-      `empty_chunk_grace_spec`, a heap-shrink assertion, `dormant_chunk_bytes`
-      and `Invariant.live_object_checks` — 5 of 274 — on a **documentation-only
-      commit** whose tree had passed the same job one run earlier, and a re-run
-      of the same job passed. Five retention specs failing together on one host
-      and on no other is host variance, not a collector change; the candidate
-      worth checking when it recurs is the runner's page size, since every one
-      of them reasons about chunk residency. Recorded because nothing else
-      would remember it.
-      **The tally after a night of 32 runs (2026-09-14).** `test (aarch64
-      native)` was the only job to go red on a tree that could not have caused
-      it, and it did so four times: the same five chunk-residency specs three
-      times (runs `34770477564`, `34772210050`, `34795331109`) and
-      `make stw-epoch` once (`34801276385`, "a redundant suspend signal after
-      the resume hung the collector even with the epoch on"). Every one passed
-      on a re-run of the same commit. Locally: 0 of 80 for the specs, 0 of 6 for
-      the epoch gate. That is ~12% of aarch64 runs failing for host reasons,
-      which is high enough to hide a real regression behind a re-run habit — and
-      the five specs now fail with their state attached, including both page
-      sizes, so the next one carries evidence instead of asking for another run.
-      **A Darwin sighting of the same gate, different shape (2026-09-13, run
-      `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
-      the audit refusing to name two planted values — `faults: 0 -> 0 (poison
-      0x7f1700000149, outside the heap)` and a live non-Fiber object where it
-      wanted a `Runnables` — while the *structure* check did name the second
-      one. Not a hang, and not attributable to the commit: the Darwin job runs
-      neither of the gates that commit touched, the five master runs before it
-      were green, and re-running the same job on the same commit passed. Kept as
-      a sighting rather than a diagnosis, which is what a Darwin sighting was
-      worth until the `__mcontext` reader landed (2026-09-15) — the item two
-      above.
-      **The retry now exists, and the epoch is what made it safe (2026-09-12).**
-      The symmetry with `start_world`'s resume retry had been refused twice for
-      a good reason: a redundant `SIG_RESUME` runs an empty handler, while a
-      redundant `SIG_SUSPEND` stays pending inside the handler and is delivered
-      *after* the thread resumes, suspending it again with nobody waiting.
-      `Gcry::Platform`'s stop epoch closes that — 0 when no stop is in
-      progress, the stop's id while one is, stamped per thread in the
-      `pthread_t`-keyed slot table — so the handler serves a delivery only
-      once per stop and declines every duplicate. `stop_world` then resends
-      every `GCRY_STW_RESEND_SPINS` up to `GCRY_STW_RESEND_LIMIT`, and past
-      the limit asks `pthread_kill(id, 0)`: on `ESRCH` it reports
-      `SUSPEND ABANDONED` and stops without a thread that no longer exists,
-      rather than spinning out the job timeout. `make stw-epoch` has six arms,
-      three red on purpose — no resend hangs on a dropped signal, no epoch
-      hangs on the duplicate, and a live thread that answers nothing hangs
-      either way. That last one is the honest limit: **this repairs a lost
-      delivery, not a thread that cannot run its handler.** Which of the two
-      the aarch64 runs were is what the enriched `SUSPEND STALLED` line now
-      answers — it carries resends unanswered, handler entries, and declines
-      split stale/redundant, so flat handler entries mean the signal never
-      arrived and climbing declines mean it did.
-      Two latent defects fell out of building it, both in that slot table and
-      both a **missed root** before they were a hang: the claim's
-      `compare_and_set` result was never checked (it returns a tuple, always
-      truthy, so every thread in a stop claimed the same slot), and
-      `clear_thread_sps` left the ids in place, so a peer could match a slot
-      another thread had just claimed. Two threads on one slot means one
-      thread's stack is scanned from the other's SP and registers.
-      `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
-      Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
-      print how many fibers arrived, how many are still parked on the context's
-      global queue and what the audit had counted (`--stall` is the positive
-      control for that); every gate in that step is bounded with `timeout 300`
-      so it fails with its output rather than being cancelled; and the step arms
-      the STW watchdog so a stopped world that never restarts names its phase.
-      Whether the hang is inside `stop_world` at all is the first thing the next
-      sighting will settle. Not reproduced locally: 60 runs of the audit-on arm
-      on x86_64 Linux, 0 hangs.
-
-- [x] **A mutator could read the chunk index with no lock, and now cannot —
-      closed 2026-08-22.** `chunk_containing` skips `@index_lock` while
-      `@world_stopped` is set, on the documented grounds that only the collector
-      can be there; `start_world` cleared that flag after resuming every thread,
-      so between the two every mutator took the unlocked path against a peer's
-      `index_insert` / `index_remove`. `GCRY_INDEX_AUDIT=1` counts it: 173 326
-      foreign unlocked reads across 15 runs before, 0 after, gated both ways by
-      `make stw-index-race`. **Bearing on the item below**: the sighting there
-      faults in `find_block` under `tlab_alloc_small`, a mutator index lookup,
-      on the one arm where mutators make 11.5 M such lookups a run — so the
-      mechanism fits and is closed, but nothing here reproduces that crash and
-      only its absence from CI will say whether this was it.
-
-- [x] **`find_block` from a mutator handed back `@chunk_index[-1]` — closed
-      2026-08-22.** The last-chunk cache tested `@last_chunk_idx` and then read
-      it again to index with; a concurrent `invalidate_chunk_cache` between the
-      two loads made the second read index one slot *before* the array, which is
-      libc's malloc header — hence the same constant `0x91` every time, handed
-      to `ChunkHeader.large?`. One writer was unsynchronised too: a second
-      `invalidate_chunk_cache` outside `@index_lock` on the chunk-mapping path.
-      Read once, bounds-checked, and the chunk verified to contain the address;
-      the unsynchronised invalidation deleted. `live` and `realloc` 5 of 8 → **0
-      of 8**, `alloc` and `idle` 0 either way, and `index_cache_torn` shows the
-      race was firing **6 709** times in a three-run arm rather than rarely.
-      Gated both ways by `make find-block-race` on x86_64 and aarch64.
-      Two readings retired by measurement on the way: a reallocated array
-      (`moved=0`, and an immortal index changed nothing) and an unwritten slot
-      (zero-filling changed nothing).
-
-- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep —
-      and the precondition does not occur on this tree (measured 2026-09-13).**
-      `index_insert` and `index_remove` now count their sections and whether the
-      world was stopped: **1 155 sections alone and 586 with a second mutator
-      holding the lock, 0 of them inside the stop.** The sweep's placement is
-      `sweep_after_world?`, so the collector's index surgery runs with mutators
-      running, and there is no section a frozen holder can block. What a holder
-      costs instead is a *bounded* stall: a 30 s hold makes the harness kill its
-      child at 12 s, a **1.5 s hold finishes** — the collector is waiting on a
-      lock whose owner is still running, which resolves when the owner lets go.
-      And if that ever changes, the report will say so: the watchdog could only
-      say `phase=sweep`, which names no lock, and those two sections now leave a
-      breadcrumb so it names the lock and the chunk. `make index-lock-wedge`
-      fails if a section runs inside the stop without the watchdog naming it —
-      the silent-hang shape. Still open, because this is a property of the
-      current sweep placement rather than a proof, and the original note is
-      kept below.
-      `bench/log/linux/2026-09-13-index-lock-wedge/FINDINGS.md`
-      **The shape, as first written:**
-      `chunk_containing` holds that spinlock for the length of a lookup, and a
-      suspend signal arrives wherever it likes; the sweep's own `index_insert` /
-      `index_remove` take the same lock unconditionally, so a thread frozen
-      holding it leaves the collector spinning with the world stopped. Observed
-      only as far as "a thread suspended inside `SpinLock#lock`" under gdb,
-      which is the harmless half — frozen *acquiring* it costs nothing.
-      **Not the aarch64 hang**, and that is settled rather than assumed: that
-      hang names `phase=suspend`, which is before `@world_stopped` is set and
-      before any sweep runs. Left open because the fix is not small — the
-      collector cannot simply take the unlocked path, since a mutator frozen
-      mid-`index_insert` leaves the array itself half-updated — and because
-      nothing has yet been seen to hit it.
 
 - [x] **The guarded sighting is attributed, and it is a live block in a released
       chunk — fixed 2026-09-14.** The 2026-09-13 sighting could not be read
@@ -1801,6 +1428,396 @@ CI asymmetry that hid both.
       section's work is skipped rather than done; what a skipped chunk's
       `live_objects` accounting does is the next thing to read.
       `bench/log/linux/2026-09-12-sweep-occ-publish/FINDINGS.md`
+
+## Next (v0.27.0) — the thread family, then Darwin performance parity
+
+- [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
+      of a freed block.** It faults inside `pthread_getattr_np` under
+      `stop_world`, on a `pthread_t` that is gcry's own tagged poison
+      (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
+      STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
+      the v0.20.0 fix in place** — so the dying-fiber stack root does not touch
+      it. The block is 192 bytes. **What the last report said about *how* it was
+      freed does not stand**: "an explicit free rather than the sweep, since
+      reissued" was decoded from `si_addr`, which was the poison **plus
+      `0x418`** and named a block five along — the same reporter bug that
+      produced a false "explicit free" from cleared flags, retracted in the
+      FINDINGS the day it was printed. Who freed it is still open.
+      **The obstacle is the observer, not the analysis.** It does not reproduce
+      locally: `ec_queue_audit` 0/20 and 0/25 in two batches, `nested_spawn_uaf`
+      never produces this shape, and the 5 h × 3 soak on 2026-08-17 did not fire
+      it either. Every sighting so far is CI, mostly aarch64.
+      **The instrument is built and wired.** `GCRY_THREAD_BLOCK_AUDIT=1`
+      (`src/gcry/thread_block_audit.cr`) asks the fiber family's question about
+      one type: after the mark and before the sweep it reads Crystal's `type_id`
+      out of every used block, names each block of the watched type the mark did
+      not reach, and hands its address to the address-space walk, which names the
+      region that holds it. The general audit could not see this defect and the
+      reason was size twice over — its trigger walks only the ≥384 B band and a
+      `Thread` is 192 B, and it fires for whichever block died first, never this
+      one. It rides on `scheduler-roots`, `ec-queue-audit` and the x86_64
+      `stw_mt_property_test` step, i.e. on all three gates that have caught the
+      defect, at +3% on the property test and no measurable cost on the others.
+      `GCRY_DYING_TYPE_ID=<n>` retargets it, which is what `make
+      thread-block-audit` uses to require it to name a death it plants and to
+      stay silent when the same objects are held — without that, a quiet CI arm
+      would say nothing.
+      **And it caught it, on the first batch: 4 of 10 aarch64 reruns.** All four
+      in `ec-queue-audit`, all at collection 2, all saying the same thing — the
+      dying 192-byte `Thread`'s address sits **six times in one 16 MiB anonymous
+      mapping that gcry can name as nothing**: no heap block, no fiber stack, no
+      pooled stack, no thread stack, at **byte-identical offsets below that
+      mapping's top in all four runs** (`0x1850 0x1800 0x1768 0x1760 0x1758
+      0x0A40`). A region mapped whole and used from the high end, with a frame
+      layout that repeats exactly, is a stack; the classifier had **4–5** thread
+      bounds against ~100 live fibers, and one of the four crashes lands in
+      `ThreadPool#attach` ← `Thread#start` ← `thread_proc`, on the new thread's
+      own start path. In one of them the poison the crash faults on is the
+      tagged form of **the same block the audit named one collection earlier**,
+      which is the first time this defect's death and its crash have been the
+      same block in the same run.
+      **And the next catch decided it — it is the birth window, and the
+      pre-stop wait giving up is what opens it.** Two more catches the same day,
+      on two runs of the same commit, both with the precondition and the death
+      in the **same collection**: `the wait for a staged thread GAVE UP — the
+      world stopped with it unpublished. 5 listed, 5 bounded, 2 staged`, then a
+      192-byte `type_id 173` block dying, off Crystal's list, held only in the
+      16 MiB stack-shaped mapping — and, in the same report, `5 on Crystal's
+      list … the kernel says 6`. One thread outside the stopped world, its
+      `Thread` object covered by no root, swept; the thread then publishes and
+      the next `stop_world` reads `@system_handle` out of the freed block. Both
+      crashes fault on the poison of exactly the block the audit named.
+      Baseline for contrast: 40 precondition sightings across 20 green runs,
+      **every one caught by the wait**, never a timeout.
+      **Still an inference**: that the dying object is that thread's. The
+      handle comparison is only consistent with it — glibc recycles `pthread_t`
+      values, measured in this repo's own runs (one id across eight collections
+      while the staged total went 4 → 11).
+      **And the fix needs none of the three options that were on the table** —
+      not an unbounded wait, not scanning a staged thread's stack, not deferring
+      the collection. The object is already in gcry's hands: Crystal calls
+      `GC.pthread_create(…, arg: self.as(Void*))`, so the `Thread` *is* the
+      argument the hook is handed. `src/gcry/thread_birth_root.cr` roots it
+      there and releases it in `stop_world`'s existing walk once the thread is
+      on the list. One `add_root` per thread created, and nothing about the
+      stopped world changes — which is the point, because two earlier attempts
+      at this defect changed collector behaviour and broke it.
+      **Gated, and the window is now reproducible on demand.** A real `Thread`
+      publishes in microseconds, so `make thread-birth-root` holds the window
+      open with a **raw** pthread created through the same hook, which never
+      joins Crystal's list: rooted the block survives, and with the twin
+      (`GCRY_THREAD_BIRTH_NOROOT=1`, same records, roots nothing) or the knob off
+      it **dies** — the defect, local and deterministic for the first time.
+      **Left open and counted**: a thread that never publishes keeps its root for
+      the life of the process, and the interval *inside* `pthread_create` is
+      still uncovered (a trampoline on the new thread was tried for the staging
+      record and crashed 8 runs in 10).
+      **And one of those "left open" lines was hiding a hole, now closed.** The
+      64-slot table was sized against concurrent births; slots are freed by
+      `release`, which runs inside `stop_world`, so what it actually holds is
+      births **since the last collection** — 65 `Thread.new`s with none in
+      between overflow it, 200 overflow it 137 times, and an overflowing birth
+      used to be rooted by nothing at all. It is now rooted and never released:
+      a leaked `Thread` instead of an uncovered one. `make thread-birth-root`
+      gained `--burst` / `--burst-unrooted`, which is the second local
+      deterministic repro of this window and the first that needs no timing.
+      `Platform`'s staging table has the same shape and overflows on the same
+      input; there it costs the pre-stop wait rather than the root, and
+      `thread_staged_overflows` counts it.
+      **The crash-rate measurement**: 9 completed reruns of the aarch64 job with
+      the fix in, all green, 0 dying-`Thread` reports (a tenth was cancelled and
+      is not counted). Stated with its weight and not more: a batch *before* the
+      fix was also 0/10, the rate is bursty on this fleet, and Fisher against
+      the 3/10 control is p ≈ 0.2. The evidence that does not depend on the rate
+      is the local gate, where the window is held open on purpose and the block
+      dies without the root and survives with it, 20 of 20.
+      **Next**: leave the sampler running and revisit the rate once more pushes
+      have accumulated; the item stays open until CI has enough runs to say so.
+      **What the stop epoch (2026-09-12, item below) changes here**: nothing
+      about the window itself — an unpublished thread is still neither
+      suspended nor scanned — but it supplies the mechanism a fix needs. A
+      thread can now be signalled more than once without the duplicate
+      suspending it with nobody waiting, and whether a delivery is honoured is
+      decided by the handler against the stop id rather than by the collector
+      getting a call site right. **The first half of that is now done
+      (2026-09-12).** The acknowledgement has moved off `Thread#@suspended`
+      into the `pthread_t`-keyed slot table, which the collector reserves for
+      every thread before it signals anyone, so the handler calls nothing
+      Crystal owns. That was not only a prerequisite — it closed a defect of
+      its own, below. What is still missing to suspend a *staged* thread: its
+      stack bounds have to come from the creating side
+      (`pthread_getattr_np` on the new handle once `pthread_create` returns)
+      and it has to be given a slot and signalled like any other. Separate
+      change, separate red arms — the two earlier attempts at this family
+      broke the collector by doing it in one step.
+      **A live defect found on the way, and fixed:** Crystal's `Thread#start`
+      pushes itself onto the list **before** it sets its TLS, so `stop_world`
+      could signal a thread with no `Thread.current` — and Crystal's accessor
+      *creates one on a miss*, allocating a `Fiber` and a `Thread` and pushing
+      it onto `Thread.threads` from inside a signal handler with the world
+      stopping. It then set `@suspended` on that **second** object, never the
+      one the collector was watching, so the stop spun forever for a thread
+      that had in fact suspended itself. That is `phase=suspend`, one thread
+      unacknowledged, handle live, handler entries incremented — the aarch64
+      shape, though whether it is *the* aarch64 hang is unknown and
+      `stw_suspend_no_tls` is the counter that will say. Driven
+      deterministically by `make stw-ack-window` against a raw pthread:
+      shipped `acked=true listed_delta=0`, restored path `acked=false
+      listed_delta=1`.
+      `bench/log/linux/2026-09-12-stw-ack-birth-window/FINDINGS.md`
+      **The birth window is narrower than this item has assumed, and the
+      *death* window is the real one (2026-09-12).** `Thread#start`'s first
+      statement is the push, and before it the new thread allocates nothing
+      and holds exactly one GC reference — itself, which `ThreadBirthRoot`
+      roots; once it has pushed, a stop in progress holds `Thread.lock`, so
+      it cannot run through the stopped world either. The mirror is
+      uncovered: `Thread.threads.delete(self)` runs *before*
+      `Fiber.inactive` and `detach { system_close }`, so a dying thread
+      spends its last instructions off Crystal's list — neither suspended
+      nor scanned — still dereferencing itself.
+      **It was masked by an accident**: `wait_for_staged_threads` spins 2 000
+      times before giving up, on every stop, and those spins sat between a
+      thread detaching and the world stopping around it. Dropping a dead
+      thread's staging record — obviously right, and the thing that takes
+      that wait's timeout rate from 398-of-400 to nil — removes the mask and
+      crashes: **7 of 40** runs of 960 short-lived threads, against 0 of 40
+      before, and 0 of 40 for a pure delay in the same place, so the trigger
+      is the missing wait rather than the timing. `GCRY_POISON_HOLDERS=1`
+      names a use-after-free on a 16-byte block that no holder search
+      accounts for; rooting every `Thread` for its whole life does not fix
+      it, so the victim is not the `Thread`. Kept as
+      `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default and documented as a
+      reproducer: this family has not had one that fires in seconds since
+      2026-08-16.
+      **And an unbounded leak, fixed on the way**: a birth root was released
+      only when the pre-suspend walk found its thread on Crystal's list, so a
+      thread that published and exited between two collections kept its root
+      for the life of the process — `outstanding` **3 197 of 3 203** births,
+      each pinning a `Thread`, its closure and its main `Fiber`. The root now
+      ends at the thread's death, observed through the `pthread_detach` /
+      `pthread_join` hooks with one collection of grace, or at once when
+      glibc hands the handle to a new thread. 960 short-lived threads:
+      `outstanding` 4, `overflows` 0, against 961 and 705 with the old policy
+      restored (`GCRY_THREAD_BIRTH_DEATHS=0`).
+      `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
+      **The obvious cover was built and withdrawn, and the reason is worth
+      more than the code was.** With the acknowledgement off `Thread` objects
+      and the birth root naming every thread gcry has seen created and not
+      seen end, the invisible set is computable — armed handles minus
+      Crystal's list — so suspend and scan them like anything else. Both
+      halves are unsafe for the same missing fact: **there is no safe way to
+      ask whether a `pthread_t` still names a thread.** Guarding with
+      `pthread_kill(id, 0)` segfaults on the first collection, 3 of 3,
+      because a slot can outlive its thread by the grace collection and the
+      probe then dereferences a freed `struct pthread` — the `+0x418` shape,
+      reached from the other direction, which also makes the abandonment
+      path's use of that probe worth revisiting. Trusting gcry's own death
+      marks instead removes the crash and hangs 1 run in 3, when a thread
+      dies between the mark being read and the signal being sent. The set
+      was also empty in the workload that crashes (`unlisted_seen=0` over
+      120 collections), so it cost two fatal modes and covered nothing.
+      Where a next attempt should start: the dying thread is the only party
+      that can speak for its own handle, and `GC.pthread_detach` already
+      runs **on** it — it can publish its own bounds and park cooperatively
+      the way the Monitor does, with no stale-handle question anywhere. That
+      covers `detach` to exit, not `Thread.threads.delete` to `detach`.
+      **Name the victim first.** It is 16 bytes and it is not the `Thread`;
+      two of the three attempts here were aimed at objects that turned out
+      not to be it.
+      **Corrected attribution (2026-09-12, later the same day).** The
+      reproducer does not crash in the dying thread. Bare — no poison — it
+      raises rather than faults, and the stack names a thread being **born**:
+      `Thread#start` → `Fiber.new` → `Fiber#initialize` →
+      `Thread::LinkedList(Fiber)#push` → `Thread::Mutex#unlock` returning
+      **EINVAL**, i.e. `Fiber.fibers`' mutex is not a valid mutex. EINVAL and
+      not EPERM, so it is not a non-owner unlock — the memory is wrong. A
+      second sighting lands in the Monitor's `every` rescue with the same
+      error and a different consumer, then SEGVs inside DWARF decoding while
+      printing, which turns the evidence into a backtrace storm. Under
+      `GCRY_POISON_FREED=1` the same defect appears as the 16-byte read
+      instead, and poison perturbs the timing enough that that arm fires
+      almost never (0 in 534) — so the bare arm is the one to drive. Sizes
+      measured and ruled out for the 16-byte block: `Thread` 184,
+      `Thread::Mutex` 48, `Fiber` 176, `Fiber::StackPool` 24,
+      `EC::ThreadPool` 48, `Thread::LinkedList` 32, `Fiber::Stack` 24 — so it
+      carries no `type_id` and the dying-type audit cannot name it.
+      **And a soundness hole closed on the way**: every thread the stop
+      suspends by signal has its GP registers scanned, because a reference
+      can live only in a register — and the Monitor is never signalled, so it
+      was the one thread whose registers nothing captured. It parks in
+      `MonitorGate.enter` on **238 of 240** collections, so the hole is on a
+      hot path. It now spills them with the same `setjmp` pair the collector
+      uses on itself, into a local its own stack scan already covers. This
+      did **not** change the reproducer's rate (56 of 258 against 49 of 252):
+      it closes a hole, not this crash, and a survival A/B cannot
+      discriminate for the reason `make greg-roots --explain` gives.
+      **And a shape to keep in view**: the stop now prints
+      `SUSPEND ABANDONED … pthread_kill(0) says ESRCH` when a thread on
+      Crystal's list has a handle libc says names nothing. That is this
+      defect's signature seen from the other side, and it is now a line in the
+      log rather than a twenty-minute timeout.
+      **Caveats kept in the open**: the walk is `TRUNCATED` at 512 MiB in every
+      catch, and there is no no-arm control batch yet, so 4/10 is not a rate to
+      quote.
+      `bench/log/linux/2026-08-20-dying-thread-holder/FINDINGS.md`
+      `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
+      `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
+
+- [ ] **The aarch64 job hangs in `ec-queue-audit`, about one run in seven, and
+      it has been reading as `cancelled`.** Six of the last forty runs of `test
+      (aarch64 native)` ended at the 20-minute job timeout — 2026-08-20 (three)
+      and 2026-08-22 — and every one checked was killed with `Terminate orphan
+      process: … (ec_queue_audit)`. A job timeout is reported as *cancelled*
+      rather than failed, so this has never been read as a defect, on the runner
+      where the `Thread` use-after-free lives and in one of the two gates that
+      has caught it.
+      **The phase is now known.** The first run with the instrumentation in
+      (2026-08-22, run `32575506486`) failed at 7m46s instead of being cancelled
+      at 20 minutes and said `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`
+      — so it is `stop_world` spinning in `until thread.@suspended.get` for a
+      mutator that never acknowledged its signal, not the harness's fiber waits
+      and not a slow runner. The spin now records which thread it is waiting on
+      and how many have acknowledged, so the next sighting names the victim;
+      `GCRY_STW_TEST_SUSPEND_STALL_MS` and `make stw-watchdog`'s `armed+suspend`
+      arm are what make that report provable rather than hoped for.
+      What is still open: why that thread does not acknowledge. Candidates worth
+      separating are a lost signal, a thread caught mid-start or mid-exit, and a
+      handler that cannot run — the id and the `n of m` count are what will tell
+      them apart. The wait now also asks `pthread_kill(id, 0)` after about a
+      second and prints whether the handle names a live thread, which is the one
+      question that separates "the signal was lost" from "the handle came out of
+      a freed `Thread`" — the open use-after-free is on this same runner.
+      **And five retention specs at once on aarch64 (2026-09-13, run
+      `34770477564`).** `test (aarch64 native)` failed `dormant_revive_spec`,
+      `empty_chunk_grace_spec`, a heap-shrink assertion, `dormant_chunk_bytes`
+      and `Invariant.live_object_checks` — 5 of 274 — on a **documentation-only
+      commit** whose tree had passed the same job one run earlier, and a re-run
+      of the same job passed. Five retention specs failing together on one host
+      and on no other is host variance, not a collector change; the candidate
+      worth checking when it recurs is the runner's page size, since every one
+      of them reasons about chunk residency. Recorded because nothing else
+      would remember it.
+      **The tally after a night of 32 runs (2026-09-14).** `test (aarch64
+      native)` was the only job to go red on a tree that could not have caused
+      it, and it did so four times: the same five chunk-residency specs three
+      times (runs `34770477564`, `34772210050`, `34795331109`) and
+      `make stw-epoch` once (`34801276385`, "a redundant suspend signal after
+      the resume hung the collector even with the epoch on"). Every one passed
+      on a re-run of the same commit. Locally: 0 of 80 for the specs, 0 of 6 for
+      the epoch gate. That is ~12% of aarch64 runs failing for host reasons,
+      which is high enough to hide a real regression behind a re-run habit — and
+      the five specs now fail with their state attached, including both page
+      sizes, so the next one carries evidence instead of asking for another run.
+      **A Darwin sighting of the same gate, different shape (2026-09-13, run
+      `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
+      the audit refusing to name two planted values — `faults: 0 -> 0 (poison
+      0x7f1700000149, outside the heap)` and a live non-Fiber object where it
+      wanted a `Runnables` — while the *structure* check did name the second
+      one. Not a hang, and not attributable to the commit: the Darwin job runs
+      neither of the gates that commit touched, the five master runs before it
+      were green, and re-running the same job on the same commit passed. Kept as
+      a sighting rather than a diagnosis, which is what a Darwin sighting was
+      worth until the `__mcontext` reader landed (2026-09-15) — the item two
+      above.
+      **The retry now exists, and the epoch is what made it safe (2026-09-12).**
+      The symmetry with `start_world`'s resume retry had been refused twice for
+      a good reason: a redundant `SIG_RESUME` runs an empty handler, while a
+      redundant `SIG_SUSPEND` stays pending inside the handler and is delivered
+      *after* the thread resumes, suspending it again with nobody waiting.
+      `Gcry::Platform`'s stop epoch closes that — 0 when no stop is in
+      progress, the stop's id while one is, stamped per thread in the
+      `pthread_t`-keyed slot table — so the handler serves a delivery only
+      once per stop and declines every duplicate. `stop_world` then resends
+      every `GCRY_STW_RESEND_SPINS` up to `GCRY_STW_RESEND_LIMIT`, and past
+      the limit asks `pthread_kill(id, 0)`: on `ESRCH` it reports
+      `SUSPEND ABANDONED` and stops without a thread that no longer exists,
+      rather than spinning out the job timeout. `make stw-epoch` has six arms,
+      three red on purpose — no resend hangs on a dropped signal, no epoch
+      hangs on the duplicate, and a live thread that answers nothing hangs
+      either way. That last one is the honest limit: **this repairs a lost
+      delivery, not a thread that cannot run its handler.** Which of the two
+      the aarch64 runs were is what the enriched `SUSPEND STALLED` line now
+      answers — it carries resends unanswered, handler entries, and declines
+      split stale/redundant, so flat handler entries mean the signal never
+      arrived and climbing declines mean it did.
+      Two latent defects fell out of building it, both in that slot table and
+      both a **missed root** before they were a hang: the claim's
+      `compare_and_set` result was never checked (it returns a tuple, always
+      truthy, so every thread in a stop claimed the same slot), and
+      `clear_thread_sps` left the ids in place, so a peer could match a slot
+      another thread had just claimed. Two threads on one slot means one
+      thread's stack is scanned from the other's SP and registers.
+      `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
+      Three levels of instrumentation, for the record: the harness's own waits give up after 30 s and
+      print how many fibers arrived, how many are still parked on the context's
+      global queue and what the audit had counted (`--stall` is the positive
+      control for that); every gate in that step is bounded with `timeout 300`
+      so it fails with its output rather than being cancelled; and the step arms
+      the STW watchdog so a stopped world that never restarts names its phase.
+      Whether the hang is inside `stop_world` at all is the first thing the next
+      sighting will settle. Not reproduced locally: 60 runs of the audit-on arm
+      on x86_64 Linux, 0 hangs.
+
+- [x] **A mutator could read the chunk index with no lock, and now cannot —
+      closed 2026-08-22.** `chunk_containing` skips `@index_lock` while
+      `@world_stopped` is set, on the documented grounds that only the collector
+      can be there; `start_world` cleared that flag after resuming every thread,
+      so between the two every mutator took the unlocked path against a peer's
+      `index_insert` / `index_remove`. `GCRY_INDEX_AUDIT=1` counts it: 173 326
+      foreign unlocked reads across 15 runs before, 0 after, gated both ways by
+      `make stw-index-race`. **Bearing on the item below**: the sighting there
+      faults in `find_block` under `tlab_alloc_small`, a mutator index lookup,
+      on the one arm where mutators make 11.5 M such lookups a run — so the
+      mechanism fits and is closed, but nothing here reproduces that crash and
+      only its absence from CI will say whether this was it.
+
+- [x] **`find_block` from a mutator handed back `@chunk_index[-1]` — closed
+      2026-08-22.** The last-chunk cache tested `@last_chunk_idx` and then read
+      it again to index with; a concurrent `invalidate_chunk_cache` between the
+      two loads made the second read index one slot *before* the array, which is
+      libc's malloc header — hence the same constant `0x91` every time, handed
+      to `ChunkHeader.large?`. One writer was unsynchronised too: a second
+      `invalidate_chunk_cache` outside `@index_lock` on the chunk-mapping path.
+      Read once, bounds-checked, and the chunk verified to contain the address;
+      the unsynchronised invalidation deleted. `live` and `realloc` 5 of 8 → **0
+      of 8**, `alloc` and `idle` 0 either way, and `index_cache_torn` shows the
+      race was firing **6 709** times in a three-run arm rather than rarely.
+      Gated both ways by `make find-block-race` on x86_64 and aarch64.
+      Two readings retired by measurement on the way: a reallocated array
+      (`moved=0`, and an immortal index changed nothing) and an unwritten slot
+      (zero-filling changed nothing).
+
+- [ ] **A mutator frozen while holding `@index_lock` would wedge the sweep —
+      and the precondition does not occur on this tree (measured 2026-09-13).**
+      `index_insert` and `index_remove` now count their sections and whether the
+      world was stopped: **1 155 sections alone and 586 with a second mutator
+      holding the lock, 0 of them inside the stop.** The sweep's placement is
+      `sweep_after_world?`, so the collector's index surgery runs with mutators
+      running, and there is no section a frozen holder can block. What a holder
+      costs instead is a *bounded* stall: a 30 s hold makes the harness kill its
+      child at 12 s, a **1.5 s hold finishes** — the collector is waiting on a
+      lock whose owner is still running, which resolves when the owner lets go.
+      And if that ever changes, the report will say so: the watchdog could only
+      say `phase=sweep`, which names no lock, and those two sections now leave a
+      breadcrumb so it names the lock and the chunk. `make index-lock-wedge`
+      fails if a section runs inside the stop without the watchdog naming it —
+      the silent-hang shape. Still open, because this is a property of the
+      current sweep placement rather than a proof, and the original note is
+      kept below.
+      `bench/log/linux/2026-09-13-index-lock-wedge/FINDINGS.md`
+      **The shape, as first written:**
+      `chunk_containing` holds that spinlock for the length of a lookup, and a
+      suspend signal arrives wherever it likes; the sweep's own `index_insert` /
+      `index_remove` take the same lock unconditionally, so a thread frozen
+      holding it leaves the collector spinning with the world stopped. Observed
+      only as far as "a thread suspended inside `SpinLock#lock`" under gdb,
+      which is the harmless half — frozen *acquiring* it costs nothing.
+      **Not the aarch64 hang**, and that is settled rather than assumed: that
+      hang names `phase=suspend`, which is before `@world_stopped` is set and
+      before any sweep runs. Left open because the fix is not small — the
+      collector cannot simply take the unlocked path, since a mutator frozen
+      mid-`index_insert` leaves the array itself half-updated — and because
+      nothing has yet been seen to hit it.
 
 - [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
       platforms — very likely the one closed above, pending its absence.**
