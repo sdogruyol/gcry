@@ -84,11 +84,40 @@ module Gcry
         fun _dyld_get_image_vmaddr_slide(image_index : UInt32) : Int64
       end
 
+      # One-region query for the mapping that contains a thread-local. The full
+      # `each_map_region` walk is still refused in `darwin_stubs.cr` — nothing
+      # has measured it — but clipping one address is what `take_main_thread_tls`
+      # needs, and `bench/darwin_static_root_sections.cr` already uses this
+      # call for the same reason.
+      lib LibMachVM
+        alias Port = UInt32
+        alias KernReturn = Int32
+
+        $mach_task_self_ : Port
+
+        fun mach_vm_region(
+          target_task : Port,
+          address : UInt64*,
+          size : UInt64*,
+          flavor : Int32,
+          info : Int32*,
+          info_count : UInt32*,
+          object_name : Port*,
+        ) : KernReturn
+      end
+
       LC_SEGMENT_64 =       0x19_u32
       MH_MAGIC_64   = 0xfeedfacf_u32
 
       # <mach/vm_prot.h>
-      VM_PROT_WRITE = 0x2
+      VM_PROT_WRITE   = 0x2
+      VM_PROT_EXECUTE = 0x4
+
+      # <mach/vm_region.h>. Same constants `darwin_static_root_sections.cr`
+      # transcribes; a wrong count fails the call rather than returning a
+      # plausible empty region.
+      VM_REGION_BASIC_INFO_64       =      9
+      VM_REGION_BASIC_INFO_COUNT_64 = 10_u32
 
       # <mach-o/loader.h>. dyld mprotects a segment carrying this read-only
       # after applying fixups — the Mach-O `PT_GNU_RELRO`.
@@ -172,6 +201,30 @@ module Gcry
       @@bss_lost = 0_u64
       @@bss_size_cap = false
 
+      # A gcry-owned thread-local, used only for its **address**: it is inside
+      # the running thread's TLV block, which is the one thing that can locate
+      # it. `uninitialized` rather than `= 0_u64` — see the once-guard note
+      # above. The value is never read, only the address.
+      @[ThreadLocal]
+      @@tls_anchor = uninitialized UInt64
+
+      # `GCRY_TLS_ROOTS=0` drops this range; `make tls-roots` needs that arm to
+      # lose the block. `true` is a simple literal, so it is the LLVM global's
+      # own initialiser and does not go through `__crystal_once`.
+      @@tls_roots = true
+      @@tls_lo = 0_u64
+      @@tls_hi = 0_u64
+      # Sum of `__thread_data` + `__thread_bss` in the executable — the TLV
+      # *payload*, not `__thread_vars` (descriptors). The live block dyld
+      # allocates is this size; the template itself is skipped as a root.
+      @@tls_memsz = 0_u64
+      @@tls_align = 0_u64
+      # Load bias and executable segment, for the crash report's writer-frame
+      # walk. Zero until `GC.init` resolves the statics.
+      @@exe_bias = 0_u64
+      @@text_lo = 0_u64
+      @@text_hi = 0_u64
+
       def self.invalidate_static_root_cache : Nil
         @@maps_generation &+= 1
       end
@@ -228,10 +281,18 @@ module Gcry
         return if @@cached_generation == @@maps_generation && @@range_count > 0
 
         @@range_count = 0
+        @@tls_memsz = 0_u64
+        @@tls_align = 0_u64
+        @@tls_lo = 0_u64
+        @@tls_hi = 0_u64
+        @@exe_bias = 0_u64
+        @@text_lo = 0_u64
+        @@text_hi = 0_u64
         @@resolves &+= 1
         scan_dyld_static_roots do |low, high|
           push_range(low.address, high.address)
         end
+        take_main_thread_tls
 
         # Latch only on success, the same way Linux does: a resolution that
         # came back with nothing must be retried rather than remembered, or
@@ -273,17 +334,24 @@ module Gcry
         return unless mh.value.magic == MH_MAGIC_64
 
         slide = LibDyld._dyld_get_image_vmaddr_slide(0_u32).to_u64!
+        @@exe_bias = slide
         p = Pointer(UInt8).new(mh.address + sizeof(LibDyld::MachHeader64))
         cmd_i = 0_u32
         while cmd_i < mh.value.ncmds
           lc = p.as(LibDyld::LoadCommand*)
           if lc.value.cmd == LC_SEGMENT_64
             seg = p.as(LibDyld::SegmentCommand64*)
-            if segment_holds_roots?(seg)
+            note_text_segment(seg, slide)
+            # Walk every `__DATA*` section: root-holding ones are yielded,
+            # TLS payload sizes are recorded even when the segment is not a
+            # static root (`SG_READ_ONLY` / non-writable), so `PT_TLS`
+            # geometry is not lost with the template.
+            if segment_is_data?(seg.value.segname)
               sect = Pointer(LibDyld::Section64).new(p.address + sizeof(LibDyld::SegmentCommand64))
+              hold = segment_holds_roots?(seg)
               j = 0_u32
               while j < seg.value.nsects
-                maybe_yield_section(sect + j, slide) { |a, b| yield a, b }
+                maybe_yield_section(sect + j, slide, hold) { |a, b| yield a, b }
                 j += 1
               end
             end
@@ -311,17 +379,52 @@ module Gcry
           segname[5] == 'A'.ord.to_u8
       end
 
-      private def self.maybe_yield_section(sect : LibDyld::Section64*, slide : UInt64, & : Void*, Void* ->) : Nil
+      private def self.segment_is_text?(segname : StaticArray(UInt8, 16)) : Bool
+        segname[0] == '_'.ord.to_u8 &&
+          segname[1] == '_'.ord.to_u8 &&
+          segname[2] == 'T'.ord.to_u8 &&
+          segname[3] == 'E'.ord.to_u8 &&
+          segname[4] == 'X'.ord.to_u8 &&
+          segname[5] == 'T'.ord.to_u8
+      end
+
+      private def self.note_text_segment(seg : LibDyld::SegmentCommand64*, slide : UInt64) : Nil
+        return unless segment_is_text?(seg.value.segname)
+        return if (seg.value.initprot & VM_PROT_EXECUTE) == 0
+        lo = seg.value.vmaddr &+ slide
+        hi = lo &+ seg.value.vmsize
+        return unless hi > lo
+        @@text_lo = lo
+        @@text_hi = hi
+      end
+
+      def self.exe_bias : UInt64
+        @@exe_bias
+      end
+
+      def self.exe_text?(addr : UInt64) : Bool
+        @@text_hi > @@text_lo && addr >= @@text_lo && addr < @@text_hi
+      end
+
+      private def self.maybe_yield_section(sect : LibDyld::Section64*, slide : UInt64, hold : Bool, & : Void*, Void* ->) : Nil
         size = sect.value.size
         return if size == 0
 
         typ = sect.value.flags & SECTION_TYPE_MASK
         case typ
-        when S_THREAD_LOCAL_REGULAR, S_THREAD_LOCAL_ZEROFILL,
-             S_THREAD_LOCAL_VARIABLES, S_THREAD_LOCAL_VARIABLE_POINTERS,
+        when S_THREAD_LOCAL_REGULAR, S_THREAD_LOCAL_ZEROFILL
+          # Payload size of the executable's TLV block. Not a root: the
+          # template holds initialisers, not the pointer a thread is using.
+          @@tls_memsz &+= size
+          align_bytes = 1_u64 << sect.value.align.to_u64
+          @@tls_align = align_bytes if align_bytes > @@tls_align
+          return
+        when S_THREAD_LOCAL_VARIABLES, S_THREAD_LOCAL_VARIABLE_POINTERS,
              S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
           return
         end
+
+        return unless hold
 
         # `GCRY_STATIC_BSS_CAP=1`: refuse a section of 1 MiB or more, which is
         # what the Linux maps parser did to the whole BSS before 2026-08-22.
@@ -343,6 +446,95 @@ module Gcry
         @@bss_size_cap = value
         invalidate_static_root_cache
         value
+      end
+
+      def self.tls_roots=(value : Bool) : Bool
+        @@tls_roots = value
+        invalidate_static_root_cache
+        value
+      end
+
+      def self.tls_root_range : {UInt64, UInt64}
+        {@@tls_lo, @@tls_hi}
+      end
+
+      # The main thread's thread-local storage is a root, and on Darwin it was
+      # not one.
+      #
+      # The dyld walk above takes writable `__DATA*` minus `SG_READ_ONLY`
+      # minus TLS. TLS is excluded on purpose: those sections are the
+      # *template*. The live block is allocated by `_tlv_bootstrap` /
+      # `tlv_allocate_and_initialize` into memory that is in no `__DATA`
+      # section, typically a libc `malloc`, and the main thread's stack scan
+      # does not cover it either (`pthread_get_stackaddr_np` is the stack
+      # only). So a pointer whose only copy was a main-thread `@[ThreadLocal]`
+      # was collected. Linux closed the same hole on 2026-09-12; this is the
+      # Mach-O half. `make tls-roots` is the gate on both.
+      #
+      # Sized from `__thread_data` + `__thread_bss`, not from the mapping that
+      # contains the block. dyld's allocation sits in the malloc zone, and
+      # scanning that mapping would retain whatever else the zone holds —
+      # the 824 KiB first version of the Linux fix, in a different costume.
+      # The window is `memsz` either side of the anchor, clipped to the
+      # writable region `mach_vm_region` reports for it, so a window wider
+      # than the block cannot leave mapped memory.
+      #
+      # Taking `pointerof(@@tls_anchor)` materialises the block: Darwin TLV
+      # is lazy. That allocation is libc `malloc`, not `GC.malloc`, so it is
+      # not a gcry heap object. `GC.init` is the only context that can take
+      # the address of its own thread-local, and the same context this cache
+      # is already built in.
+      private def self.take_main_thread_tls : Nil
+        return unless @@tls_roots
+        @@tls_lo = 0_u64
+        @@tls_hi = 0_u64
+        return if @@tls_memsz == 0
+        anchor = pointerof(@@tls_anchor).address
+        return if anchor == 0
+        span = @@tls_memsz
+        align = @@tls_align
+        span = (span &+ align &- 1) & ~(align &- 1) if align > 1
+        lo = anchor > span ? (anchor &- span) & ~7_u64 : 0_u64
+        hi = (anchor &+ span &+ 7) & ~7_u64
+        region = writable_region_containing(anchor)
+        return unless region
+        rlo, rhi = region
+        lo = rlo if lo < rlo
+        hi = rhi if hi > rhi
+        return if hi <= lo
+        i = 0
+        while i < @@range_count
+          r = @@ranges[i]
+          return if r.low <= anchor && anchor < r.high
+          i += 1
+        end
+        push_range(lo, hi)
+        @@tls_lo = lo
+        @@tls_hi = hi
+      end
+
+      # The region containing *addr*, if it is mapped writable. `nil` if the
+      # query failed or the region is not writable — both mean "do not add a
+      # range", which is the direction that cannot scan unmapped memory.
+      private def self.writable_region_containing(addr : UInt64) : {UInt64, UInt64}?
+        address = addr
+        size = 0_u64
+        info = uninitialized Int32[16]
+        count = VM_REGION_BASIC_INFO_COUNT_64
+        object_name = 0_u32
+        kr = LibMachVM.mach_vm_region(
+          LibMachVM.mach_task_self_,
+          pointerof(address),
+          pointerof(size),
+          VM_REGION_BASIC_INFO_64,
+          info.to_unsafe,
+          pointerof(count),
+          pointerof(object_name),
+        )
+        return nil unless kr == 0
+        return nil unless address <= addr && addr < address &+ size
+        return nil unless (info[0] & VM_PROT_WRITE) != 0
+        {address, address &+ size}
       end
     {% end %}
   end

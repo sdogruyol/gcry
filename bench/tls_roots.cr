@@ -47,10 +47,6 @@ require "../src/gcry"
   {% raise "tls_roots requires -Dgc_none (gcry as process GC)" %}
 {% end %}
 
-lib LibTlsProbe
-  fun pthread_self : Gcry::OS::PthreadT
-end
-
 VICTIM_SIZE =      96
 FILL        = 0xa5_u8
 # The address is kept XOR'd everywhere except the thread-local, so a stray
@@ -105,8 +101,7 @@ end
 control = ARGV.includes?("--control")
 heap = Gcry.default_heap.not_nil!
 
-tid = LibTlsProbe.pthread_self
-bounds = Gcry::Platform.pthread_stack_bounds(tid)
+bounds = Gcry::Platform.current_pthread_stack_bounds
 tls = TlsHolder.addr
 
 puts "=== is thread-local storage a root? ==="

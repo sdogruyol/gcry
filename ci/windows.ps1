@@ -70,6 +70,20 @@ try {
         Invoke-CrystalSpec 'spec' (@('spec') + $flags + @('--error-trace', '--fail-fast'))
         Write-Host "Windows process GC specs ($Variant)"
         Invoke-CrystalSpec 'process' (@('spec', '-Dgc_none') + $flags + @('process_spec', '--error-trace', '--fail-fast'))
+        if ($Variant -eq 'default') {
+            Write-Host "Windows thread-local storage roots"
+            New-Item -ItemType Directory -Force bin | Out-Null
+            $tls = Join-Path $PWD 'bin/tls_roots_windows.exe'
+            Invoke-Checked $crystal (@('build', '-Dgc_none', 'bench/tls_roots.cr', '-o', $tls, '--error-trace'))
+            Invoke-Checked $tls @()
+            $env:GCRY_TLS_ROOTS = '0'
+            & $tls
+            if ($LASTEXITCODE -eq 0) {
+                throw 'GCRY_TLS_ROOTS=0 kept a block that must die'
+            }
+            Remove-Item Env:GCRY_TLS_ROOTS
+            Invoke-Checked $tls @('--control')
+        }
     }
 
     if ($Suite -ne 'specs') {

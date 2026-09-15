@@ -911,12 +911,14 @@ module GC
     # collections later at the fault. Walks the heap and every stack per
     # release, with the world up.
     heap.release_holders = true if env_flag_one?("GCRY_RELEASE_HOLDERS")
-    # The main thread's thread-local storage is a root (2026-09-12). Off is
-    # the pre-fix behaviour, which `make tls-roots` needs as its red arm.
-    # Linux only: locating the block means finding the mapping that contains
-    # it, and that is `/proc/self/maps`. Whether the same reference is lost on
-    # Darwin and Windows is unmeasured — see `ROADMAP.md`.
-    {% if flag?(:linux) %}
+    # The main thread's thread-local storage is a root (Linux 2026-09-12,
+    # Darwin and Windows 2026-09-15). Off is the pre-fix behaviour, which
+    # `make tls-roots` needs as its red arm. Locating the live block is
+    # platform-specific — `/proc/self/maps` on Linux, `mach_vm_region` on
+    # Darwin, `VirtualQuery` on Windows — but the question is the same: a
+    # `@[ThreadLocal]` is not in the executable's writable image, and the
+    # main thread's copy is not on its stack.
+    {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
       Gcry::Platform.tls_roots = false if env_flag_zero?("GCRY_TLS_ROOTS")
     {% end %}
     # Resolve the static roots now, on the main thread and before any other

@@ -42,6 +42,21 @@ is now the default and the flag would take you the wrong way.
 
 ### Fixed
 
+- **A pointer held only in a main-thread `@[ThreadLocal]` was collected
+  on Darwin and Windows, and now is not.** Linux closed this on
+  2026-09-12 by adding the live TLS block to the static roots, sized
+  from `PT_TLS`. The other two platforms had the same hole in different
+  costumes. Darwin: the dyld walk skips TLS sections because they are
+  the *template*, `_tlv_bootstrap` allocates the live block with libc
+  `malloc` into memory that is in no `__DATA` section, and the main
+  thread's stack scan does not cover it — sized from `__thread_data` +
+  `__thread_bss`, clipped with `mach_vm_region`. Windows: `.tls` is the
+  template and the live block is per thread through the TEB; the PE
+  walk now skips the template (so the red arm can lose it on the main
+  thread, which uses the template in place) and the live range is sized
+  from the TLS directory, clipped with `VirtualQuery`. `make tls-roots`
+  is the gate; the Darwin job and the Windows default variant run it.
+
 - **`make page-release-corruption` had stopped testing anything, and now
   refuses to build that way.** Both free-page release walks are
   freelist-shaped and stand down on bitmap-allocated chunks, so the gate's

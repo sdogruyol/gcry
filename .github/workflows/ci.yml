@@ -1530,6 +1530,14 @@ jobs:
           make ec-queue-audit
           make perf-baseline
 
+      # Same question the Linux job asks: is a pointer held only in a
+      # main-thread `@[ThreadLocal]` a root? Darwin TLV is a libc malloc,
+      # in no `__DATA` section the dyld walk takes, so the Linux fix did
+      # not cover it. Three arms, one of them a control that holds the
+      # pointer nowhere.
+      - name: Thread-local storage roots
+        run: make tls-roots
+
       # Both representations on the platform whose page size is 16 KiB
       # against Linux's 4 KiB — every bitmap ordinal and free-page mask is
       # derived from it, so the Linux readings do not transfer. Headerless is

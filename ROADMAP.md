@@ -72,14 +72,19 @@ CI asymmetry that hid both.
       control a stale stack slot passes the first two.
       `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
 
-- [ ] **The same question on Darwin and Windows is unmeasured.** The fix above
-      is Linux-only because locating the block means finding the mapping that
-      contains it, and that is `/proc/self/maps`. Darwin allocates thread
-      locals lazily through `_tlv_bootstrap` into memory that is in no
-      `__DATA` section the dyld walk takes; Windows copies `.tls` per thread
-      through the TEB. Both plausibly lose the same reference and neither has
-      a host here. What is needed is `bench/tls_roots.cr` run on each — it is
-      already platform-independent apart from the stack-bounds line it prints.
+- [x] **The same question on Darwin and Windows — closed 2026-09-15.**
+      Linux located the live block via `/proc/self/maps` and sized it from
+      `PT_TLS`. Darwin's live TLV is a libc malloc in no `__DATA` section
+      the dyld walk takes (`_tlv_bootstrap`); Windows copies `.tls` per
+      thread through the TEB, and the main thread uses the template in
+      place. Both now add the live range the same way Linux does: size
+      from the image's TLS geometry (`__thread_data`+`__thread_bss` /
+      PE TLS directory), clip with `mach_vm_region` / `VirtualQuery`,
+      skip the template as a static root. `make tls-roots` is the gate
+      (`GCRY_TLS_ROOTS=0` must lose the block; `--control` must die
+      either way). Darwin CI and the Windows default variant run it.
+      `bench/tls_roots.cr` uses `current_pthread_stack_bounds` so the
+      stack-bounds line is not Linux-only.
 
 - [x] **A use-after-free in fiber creation — closed in v0.20.0.** The root it
       needed is the stack of a fiber that is *ending*: `Thread#dying_fiber`
