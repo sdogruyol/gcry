@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-15
+
+Minor release: **the headerless small-object layout is the compile default.**
+Small blocks are carved back-to-back with no 16-byte header in front of each
+object; size and kind come from the chunk, marks and occupancy from its
+bitmaps. Measured on the paired Kemal `/json` run that decided the 0.24.0
+bitmap default: **112.6%** [106.6, 118.6] of Boehm at **1.07×** its peak RSS,
+against the header layout's 105.3% at 1.30× on the same tree.
+
+The rest is root coverage. A pointer held only in the main thread's
+thread-local storage was **collected** — on Linux first, then on Darwin and
+Windows, which each needed a different answer because the live block is a
+loader allocation, a libc `malloc` and a TEB copy respectively. A chunk could
+be released while it still held a live block. A Darwin crash on a poisoned
+pointer read as a null dereference, because the register reader that names the
+poison was Linux-only. And three gates had rotted into testing nothing, which
+is part of why those defects outlived releases.
+
 **Upgrading:** the headerless small-object layout is now the compile default.
 A plain `crystal build -Dgc_none` gets it; nothing changes in how gcry is
 required or built. `-Dgcry_block_headers` restores the 16-byte per-object
@@ -40,77 +58,6 @@ is now the default and the flag would take you the wrong way.
   `test` job runs both arches through it and the aarch64 cross job keeps only
   its object-emit smoke, so the assertions live in one place instead of two.
 
-### Fixed
-
-- **A Darwin crash on a poisoned pointer read as a null dereference, and
-  now does not.** The report looks for gcry's freed-block poison in the
-  faulting GP registers. Linux reads them from glibc
-  `ucontext_t.uc_mcontext.gregs`. Darwin STW uses `thread_get_state`, and
-  a SIGSEGV hands a `ucontext_t` whose `uc_mcontext` is a pointer to a
-  `__darwin_mcontext64` that prefixes those GP words with the exception
-  state — so the Linux offsets do not apply. Until now the reader was
-  Linux-only and `si_addr == 0` was the whole diagnosis. Offsets from
-  XNU; writer frames follow. `make segv-report` on Darwin CI.
-
-- **A pointer held only in a main-thread `@[ThreadLocal]` was collected
-  on Darwin and Windows, and now is not.** Linux closed this on
-  2026-09-12 by adding the live TLS block to the static roots, sized
-  from `PT_TLS`. The other two platforms had the same hole in different
-  costumes. Darwin: the dyld walk skips TLS sections because they are
-  the *template*, `_tlv_bootstrap` allocates the live block with libc
-  `malloc` into memory that is in no `__DATA` section, and the main
-  thread's stack scan does not cover it — sized from `__thread_data` +
-  `__thread_bss`, clipped with `mach_vm_region`. Windows: `.tls` is the
-  template and the live block is per thread through the TEB; the PE
-  walk now skips the template (so the red arm can lose it on the main
-  thread, which uses the template in place) and the live range is sized
-  from the TLS directory, clipped with `VirtualQuery`. `make tls-roots`
-  is the gate; the Darwin job and the Windows default variant run it.
-
-- **`make page-release-corruption` had stopped testing anything, and now
-  refuses to build that way.** Both free-page release walks are
-  freelist-shaped and stand down on bitmap-allocated chunks, so the gate's
-  three arms pin `GCRY_BITMAP_ALLOC=0` to get the freelist back. Since the
-  headerless layout became the compile default that knob is ignored — there is
-  no freelist to return to — and every arm reached nothing: `unlinked 0` on
-  the HOLED arm in **4 of 4** runs, the mostly-empty arm at 0-11.8 MB against
-  its 16 MiB engagement floor. The harness's own engagement checks caught it
-  (they exist because a walk that never ran looks exactly like a walk that
-  found nothing wrong), but a gate that cannot run on the layout it is built
-  for should say so at the build: it is compiled `-Dgcry_block_headers` now
-  and `{% raise %}`s otherwise. On that layout it engages as its history
-  describes — 11 674-12 904 page runs unlinked, 60.3-68.7 MB released by the
-  mostly-empty walk — and is clean, **0 of 24 per arm across six runs**.
-
-- **`make live-graph-audit` had rotted the same way, and a check now covers
-  the class.** Same cause — its arms pin `GCRY_BITMAP_ALLOC=0` for the same
-  walks — and the same symptom, `walk 0 B` on both walking arms while the
-  workload churned normally. Built `-Dgcry_block_headers` it engages (HOLED
-  109.8 MB, mostly-empty 87.2 MB through the walk) and passes **0 of 6 per
-  arm**: every edge and every node survived. `make layout-knob-check` now
-  fails the build when a gate pins a knob the compile default ignores
-  (`GCRY_BITMAP_ALLOC=0`, `GCRY_NURSERY`, `GCRY_TLAB` — read out of
-  `gc_override.cr`'s warning block rather than hard-coded) without building
-  the layout that honours it. Two rules, both observed red: the harness that
-  pins it in its own arms, and the recipe line that sets it before running a
-  binary built the wrong way, which is how `make heap-counters` and `make
-  poison-freed` could regress — each keeps a headerless binary beside the
-  header one.
-
-- **The open "unresolved corruption under concurrent stress" is closed by
-  re-measurement.** Its two symptoms were the `mt-property-test`
-  `reported=98 walked=233` counter gap and the page-release HOLED arm faulting
-  1-3 of 4. On the current tree the MT property test is **0 failures at 500
-  iterations on 2, 4 and 8 workers**, and the page-release faults belonged to
-  the withdrawn `occ`-built live-mask experiment — the walks stand down on
-  bitmap chunks and that arm no longer exists. The step the item asked for
-  last (does the class lock serialise the streaming sweep's `occ` word against
-  every path into `bitmap_alloc_locked`) was answered on 2026-09-12 with
-  `GCRY_SWEEP_OCC_AUDIT=1`: 0 dead words with a cursor mid-allocation over
-  71 325 published words.
-
-### Added
-
 - **`make bitmap-marks-freelist`: the mark representation nothing was
   running.** On `-Dgcry_block_headers` there are three, not two — marks in the
   block header, marks in the chunk's bitmap with the pool allocator, and marks
@@ -134,32 +81,6 @@ is now the default and the flag would take you the wrong way.
   stress and json_churn samples, `GCRY_DEBUG_INVARIANTS=1` — **all green, no
   defect found**, which is the result and not a disclaimer: the configuration
   was untested, and it is now tested and sound.
-
-### Fixed
-
-- **A crash-report line longer than its own buffer smashed the stack instead
-  of being truncated.** `RawOut.append` stops at `LIMIT` (480 B) and is handed
-  a bare pointer, so it cannot see where the caller's array ends: a buffer
-  below `LIMIT` is not a short line, it is a write into the frame around it.
-  The report's new kept-release line is **377 bytes and its buffer was 256**,
-  and the 121 bytes past the end took out `occ` first — the line then said
-  "a mutator took one" two clauses after printing "0 block(s) allocated" — and
-  the return address next, so the report exited at 0x0 **inside itself with
-  the description of the fault it had been called for still unflushed**. One
-  ledger line printed; everything the reader needed did not. Thirty-two other
-  buffers were under `LIMIT` at that moment, two of them already able to run
-  past their end: `collect_scan.cr`'s index/list disagreement line is 417
-  bytes with every number at full width against a 352-byte buffer, and 349 on
-  an ordinary mapped chunk — three bytes of margin. All thirty-three are now
-  `UInt8[RawOut::LIMIT]`, and `make raw-buf-check` fails the build on a buffer
-  smaller than the writer that fills it, including for the two hand-rolled
-  writers that predate `RawOut` (`EcQueueAudit` 300/320, `StwWatchdog`
-  250/256, both already sound). The gate that found this passed while it was
-  happening, because it only asked for the line: it now also fails on a report
-  that faults inside itself, on a kept-release line with no fault description
-  after it, and on a block count that contradicts the knob that produced it.
-
-### Added
 
 - **A chunk a refused release kept is named in the crash report.** The flush
   that now refuses to release an occupied chunk puts it back on the live list,
@@ -190,22 +111,6 @@ is now the default and the flag would take you the wrong way.
   exactly as the shipped collector does and carries only the report, which is
   the arm the 2026-09-14 CI sighting had no way to answer from.
 
-### Changed
-
-- **The parked-fiber lag scan was priced and the fix declined.** `ROADMAP.md`
-  has carried "the EC4 pause is the parked-fiber lag scan" with a proposal to
-  scan a fully parked fiber from its own saved SP. Its ceiling is a lag of ~0,
-  and `bench/lag_width_ab.sh` measures that at Kemal EC4: 0.970 ms [0.302,
-  1.638] off a ~6.4 ms pause p50, and no throughput change (0.989 [0.775,
-  1.202]). The predicate the sound version needs - an SP for every thread, so
-  that "no thread was found on this stack" means "no thread is on it" - is
-  available in **0** of 34 989 scans, because SYSMON is signal-exempt and the
-  EC Monitor therefore never records one. New counters `fiber_lag_sp_known` /
-  `fiber_lag_sp_unknown` report it. Research only; no shipped behaviour
-  changes.
-
-### Added
-
 - **An 8-hour soak on the overnight tree, recorded.** PASS: 28 743 collections,
   28.6 M allocations, 287 459 fibers, **0 queue faults**, and an RSS envelope
   that is flat — 7 956 kB from hour 2 through hour 7 without moving, 7 800 kB
@@ -213,34 +118,6 @@ is now the default and the flag would take you the wrong way.
   uptime either (p50 1.80 ms in hour 0, 1.76 ms in hour 6; p99 2.73-2.95 ms
   throughout). Telemetry is kept beside the findings.
   `bench/log/linux/2026-09-13-soak-8h/FINDINGS.md`
-
-### Fixed
-
-- **A chunk could be released with a live block in it, and now the flush
-  refuses.** One of the overnight CI runs faulted in `make thread-churn-uaf`'s
-  guarded arm, and the report — readable for the first time, because the release
-  ledger had just been hoisted above the heap-span test — said `in a chunk gcry
-  RELEASED [...] empty size-class chunk release, at collection 206 [...]
-  **Blocks still allocated at release: 1**`, with `Collections since: 0`. That
-  count is a popcount of the occupancy bitmap at release, so it is a live block
-  inside memory the collector gave back rather than a stale pointer into
-  legitimately freed memory. The window: the sweep unlinks an empty chunk from
-  `@chunks` inside the stop and queues it, its index entry survives until the
-  post-STW flush removes it, the allocator resolves pooled chunk addresses
-  through that index, and a chunk whose blocks are all free is a legal
-  allocation target — so a mutator can take a block out of a chunk already
-  queued for unmapping. The flush now re-reads occupancy immediately before
-  releasing and keeps an occupied chunk mapped, putting it back on the live
-  list; `release_flush_chunks` and `release_refused_occupied` make the state
-  legible, and `GCRY_EMPTY_FLUSH_DELAY_MS` / `GCRY_RELEASE_OCCUPIED=1` are the
-  research knobs that widen the window and restore the old behaviour. It does
-  not reproduce on an 8-core host and the counters say why — with several
-  mutators alive the sweep queues nothing at all (0 chunks considered in 120
-  collections; 37 in 30 single-threaded ones), so the window needs both the
-  single-mutator sweep path and a mutator running at flush time.
-  `bench/log/linux/2026-09-14-occupied-release/FINDINGS.md`
-
-### Added
 
 - **`make fiber-lag-cost`: the parked-fiber lag is free on untouched stacks and
   costs the whole window on faulted ones.** Under multi-mutator STW every parked
@@ -258,8 +135,6 @@ is now the default and the flag would take you the wrong way.
   counter that is reset every collection and was read as a cumulative one.
   `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
 
-### Added
-
 - **`make index-lock-wedge`: the wedge that needs something this tree does not
   do.** The roadmap has carried "a mutator frozen while holding `@index_lock`
   would wedge the sweep" as a shape with no reproducer. `index_insert` and
@@ -275,8 +150,6 @@ is now the default and the flag would take you the wrong way.
   fails if a section runs inside the stop without the watchdog naming it.
   `bench/log/linux/2026-09-13-index-lock-wedge/FINDINGS.md`
 
-### Added
-
 - **`make pool-refill-cost`, and a retired note.** `tasks/todo.md` carried
   "`bitmap_take_pool_chunk` walks every chunk of the class per refill:
   O(chunks)" since the bitmap allocator landed. Measured: the walk builds a
@@ -291,60 +164,6 @@ is now the default and the flag would take you the wrong way.
   exceed one per active slot, which is the only way this becomes the per-refill
   walk the note described.
   `bench/log/linux/2026-09-13-pool-refill-cost/FINDINGS.md`
-
-### Fixed
-
-- **The crash report excluded the one mechanism it was built to name.**
-  `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as `PROT_NONE` and records
-  base, size, release path, collection, first user word and blocks still
-  allocated at release — and the report asked that ledger only for addresses
-  *inside* the heap span. `heap_span_hi` is the top of the live chunks, so
-  releasing a chunk is precisely what moves its address out of the span, and the
-  guard then reserves that address so nothing can map over it: a fault there is
-  expected to be out of span. Those faults ended on "never a gcry allocation, so
-  a swept object is not the explanation", which excludes the mechanism by name.
-  Seen overnight on 2026-09-13 under load: `make thread-churn-uaf`'s guarded arm
-  faulted 1 of 24 on two consecutive runs, 3.8 MB above the span end, and the
-  report said that sentence both times. Both branches now ask one helper.
-  `make released-range-report` covers the half a harness can build — a fault
-  into a guarded release must be named — and the findings record why the
-  out-of-span half cannot be built synthetically, which is three facts about the
-  allocator rather than a missing test.
-  `bench/log/linux/2026-09-13-released-range-report/FINDINGS.md`
-
-### Changed
-
-- **The perf baseline now gates, and what unblocked it was arithmetic rather
-  than more samples.** `PERF_GATE_BASELINE=1` has been "next" on the
-  benchmark-alerts item for a year, behind *record more green runs first*. The
-  tolerance rule was `max(half the observed range, 1.5 x IQR, floor)`, and both
-  of those terms scale with the spread — so the gate sat about 2.3 standard
-  deviations from the mean at any sample size (simulated: 2.28 sd at n=23, 2.51
-  at 100, 3.04 at 500, 3.24 at 1000), which is a 2.7% false-red rate per run and
-  would have needed ~1200 runs to reach 3.3 sd against a 30-day artifact
-  retention. The tolerance is now stated in standard deviations (`TARGET_SD =
-  3.3`, floored per metric), which puts the three gated metrics at 3.34-3.57 sd:
-  **0.10% combined per run, one false red per ~1000 runs**, leave-one-out green
-  on 24 of 24 recording runs, and each gate **tighter than the fixed floor it
-  was meant to tighten** — 86.06% against 65%, 1.196x against 1.25x, 0.98 ms
-  against 2.5 ms. `bench/perf_gate_margin.py` reports the margin and the
-  false-alarm rate so the next flip decision is measured too. What the gate
-  cannot see is a regression under ~14 pp of `/json` throughput on this runner
-  class; that needs confirmation across runs, not a narrower band.
-  Sensitivity comes from a second observation rather than a tighter band: two
-  runs in a row on the wrong side of 2 sd is 0.05% per pair — lower than the
-  single-run gate's own rate — and catches ~9 pp. `perf_compare.py --prev` does
-  that check, `bench/fetch_prev_perf_summary.sh` feeds it the previous green
-  master run's summary out of the artifact this job already uploads (CI keeps no
-  state between runs, but it keeps artifacts), and every failure path there
-  degrades to "no previous run" rather than reddening the job. Checked against
-  the 24 recording runs: 1 single excursion past 2 sd in 72 metric-runs and no
-  consecutive pairs at all. The `perf-smoke-report` artifact also stopped
-  carrying the whole checked-in `bench/log` tree — ~200 MB a copy, of which every
-  consumer reads one file; it is now this run's own JSON under `bench/log/_run/`.
-  `bench/log/linux/2026-09-13-perf-gate-flip/FINDINGS.md`
-
-### Added
 
 - **`make counter-loss`, and the decision it settles.** The process heap's
   counters use plain `set(get + 1)` unless `GCRY_HEAP_COUNTERS_ATOMIC=1`, and
@@ -363,304 +182,6 @@ is now the default and the flag would take you the wrong way.
   dropped on purpose through `debug_drift_live_objects` must be caught, because
   two zeros with no positive control is a gate that cannot fail.
   `bench/log/linux/2026-09-13-heap-counters/FINDINGS.md`
-
-### Fixed
-
-- **The crash report was dying inside itself, and had 4 720 bytes to work in.**
-  `make poison-holders` went red on the x86_64 CI runner three times in two days,
-  always printing the holders header and then nothing, which read as a search
-  that found nothing — and a re-run of the same commit was green each time. It
-  was the alternate signal stack: Crystal's is 8 192 bytes and 3 472 are already
-  spent when the handler is entered, leaving 4 720 for a report that walks the
-  explicit root set, every live block and every fiber stack, each frame carrying
-  a line buffer, and then asks the same three questions of the holder it found.
-  Two structural reasons nothing said so: SIGSEGV is blocked inside its own
-  handler, so a synchronous fault there is a silent kill rather than a second
-  delivery, and nothing recorded which section the search was in. gcry now
-  installs its own **256 KiB** alternate stack, sets `SA_NODEFER` so the handler
-  can be re-entered, and stamps the section — so a fault inside the report now
-  prints `while searching the heap walk` instead of vanishing.
-  `GCRY_POISON_HOLDERS_FAULT=1|2|3` breaks it on purpose at each section and is
-  now a `make poison-holders` arm: with the fix each names itself, and a tree
-  missing any of the three parts dies at `rc=139` naming nothing.
-  `GCRY_SEGV_REPORT_STACK=1` prints the margin that turned "it dies when you add
-  a call frame" — recorded here twice, in August and September — into a number.
-  Also: a class variable whose initializer *references a constant* gets a
-  lazy-init guard, and writing one from `GC.init` faults before the runtime can
-  print anything; the new stage byte is initialised with a literal for that
-  reason, and every knob read from `GC.init` wants the same care.
-  `bench/log/linux/2026-09-13-report-stack/FINDINGS.md`
-
-### Changed
-
-- **The perf baseline is recorded on the layout that ships.**
-  `bench/baseline/perf_smoke.json` was taken on the header layout hours before
-  the headerless flip, so `perf_compare.py` had been printing `STALE:` and
-  refusing to gate on every run since — the control working, and the re-record
-  it asked for is here: 23 green master runs on `ubuntu-latest`, from the
-  artifacts the perf job already uploads. Not the ten the note planned, because
-  ten under-sampled the runner: the first ten read the `/json` throughput spread
-  as 96.6-105.2 and the thirteen after them ranged 93.9-108.4, which would have
-  left the gate 0.94 pp from a false alarm on a run that had already happened.
-  `pct_json` 99.7 ±9.9, `rss_x` 0.947 ±0.1115, `pause_p50_ms` 0.6399 ±0.2, no
-  metric self-firing on any of the 23 (the previous file's `rss_x` fired on 1 of
-  10) and leave-one-out green 23 of 23. Gating on it is still off, now for an
-  arithmetic reason rather than a judgement call: the three gates sit 2.16-2.50
-  sd out, 3.2% per run combined — one false red every ~31 runs.
-- **`perf_compare.py` no longer denies the baseline it just used.** `baseline:
-  none recorded yet` was the fall-through of the staleness chain, so it printed
-  under every non-stale comparison; every baseline that had shipped was stale,
-  so no green path had ever reached the line. The first fresh baseline printed
-  its own provenance and then reported none existed. `make perf-baseline` gained
-  the fixture for the converse, red against the pre-fix report.
-
-### Changed
-
-- **The headerless layout is the compile default.** Small blocks are carved
-  back-to-back with no 16-byte `BlockHeader` in front of each object; size and
-  kind come from the chunk, marks and occupancy from its bitmaps, and large
-  objects keep their header inside the chunk's metadata region. The
-  representation shipped opt-in (`-Dgcry_headerless`) in 0.22.0 and has run
-  its own unit, process, ASan, Darwin, aarch64 and Windows CI arms since;
-  what changes here is the polarity of the flag. Measured on the five-arm
-  paired Kemal `/json` run that decided the 0.24.0 bitmap default
-  (`bench/log/linux/2026-09-06-bitmap-default-ab/`, 20 rotated rounds,
-  identical-binary null control, Ryzen AI 9 465): headerless **112.6%**
-  [106.6, 118.6] of Boehm at **1.07×** its peak RSS, 1.1 minor faults per
-  1 000 requests, 69.0 CPU ms per 10 k requests, p99 2.21 ms — against the
-  header layout's 105.3% [99.2, 111.3] at 1.30×, 2.7 faults, 74.6 ms and
-  2.36 ms on the same binary tree. Peak RSS 31.2 against 37.5 MB (−17%),
-  post-GC the same, both flat. Darwin, same protocol
-  (`bench/log/macos/2026-09-06-bitmap-default-ab/`, Apple M2 Pro): 101.9%
-  [100.9, 103.0] at **1.50×** peak footprint and **0.99×** post-GC resident
-  against the header layout's 101.8% at 1.97× and 1.20×. The per-object
-  saving is the header itself: 1 M live 16-byte objects, chain walked after
-  the collection, 34.9 → 19.3 MB (**−44.5%**; 32 B −31.2%, 64 B −19.2%,
-  128 B −10.8%, `bench/log/linux/2026-09-03-phase7-headerless-rss/`). The
-  5-hour soak passed on the layout (+3.2 MB against a 4 MB bound, 0
-  errors). What the layout gives up, unchanged from its opt-in days: the
-  bitmap allocator is forced on (no freelist), the nursery is off and
-  `GCRY_NURSERY` ignored (it was already off by default because it is
-  unsound), `GCRY_CHUNK_BYTES` is exact to 51.2 MiB rather than 86.3, and
-  the SegvReport cannot name the free path for a swept block. CI: the plain
-  spec, process-spec, sample and gate runs on every platform now build
-  headerless; the header layout keeps arms on both allocators (Linux,
-  aarch64, Darwin, Windows x86_64 and ARM64 `headers` / `freelist`
-  variants, ASan), and the env-knob smoke exercises the nursery, freelist
-  and TLAB knobs on the layout that reads them, and the gates whose control
-  arm pins a header-layout knob — `heap-counters` (plain counters),
-  `poison-freed` (freelist arms), `darwin-bitmap-page-release` (`--headers`)
-  and the sound-profile smoke (`GCRY_NURSERY`) — build that arm with
-  `-Dgcry_block_headers`, so the knob is read rather than silently ignored. `bench/baseline/perf_smoke.json`
-  was recorded on the header layout and needs re-recording on the first ten
-  green master runs after this lands, as its provenance note says for any
-  default-allocator change.
-
-### Fixed
-
-- **A pointer held only in the main thread's thread-local storage was
-  collected.** `dl_iterate_phdr` gives the executable's writable `PT_LOAD`
-  segments, which is every class variable, but a `@[ThreadLocal]` is in none
-  of them: `PT_TLS` is only the template and the live block is allocated per
-  thread. glibc puts a *spawned* thread's block at the top of that thread's
-  own stack mapping — inside the bounds `pthread_getattr_np` reports and above
-  the suspend SP — so the ordinary stack scan has always covered every thread
-  gcry or a Crystal program spawns, which is why this went unseen. The main
-  thread's block is allocated with the shared libraries, nowhere near its
-  stack, and nothing scanned it. It is now a root range, resolved at `GC.init`
-  on the main thread and sized from the executable's own `PT_TLS` `p_memsz` —
-  128 bytes on the harness, against the 824 KiB containing mapping a first
-  version took. `GCRY_TLS_ROOTS=0` restores the old behaviour as the red arm
-  of `make tls-roots`. Linux only; Darwin and Windows are unmeasured and named
-  on `ROADMAP.md`. This is the third branch of what `GCRY_POISON_HOLDERS=1`
-  reports on a use-after-free and the only one that had not been tested; it is
-  **not** the open live-large-object release, whose rate it does not move.
-  `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
-
-- **`make static-bss-roots` was green for a reason it does not test.** Its
-  victim block was filled with `0xC7`, so its first `Int32` reads negative —
-  and `type_id_plausible?` refuses a *static* root whose first word is not a
-  dense positive integer. The BSS root the gate exists to prove was therefore
-  rejected by the root filter on every run, and the block survived on an
-  ungated conservative copy instead: a callee-saved register holding the
-  address across `wipe_stack`. Adding one more static root range was enough to
-  change the register pressure and turn the gate red, which is how this was
-  found. The block now carries a real instance id in its first word and `FILL`
-  from the fifth byte on, so the accepted root is the BSS slot; the `--cap`
-  arm still goes red.
-
-- `ci/windows.ps1` gives each `crystal spec` invocation its own
-  `CRYSTAL_CACHE_DIR`. Two invocations per job shared
-  `<cache>/crystal-run-spec.tmp.exe`, and on the ARM64 runner the compiler's
-  delete of it raced a lingering handle — failing two of four master runs on
-  2026-09-10 *after* the specs reported `0 failures`, and reporting as a
-  Crystal compiler bug.
-- The mutation gate covers the headerless layout: writing the header that no
-  longer exists, and freeing a block without clearing its occupancy bit.
-  12/12 killed; before this no mutant touched the layout that is now the
-  compile default.
-- The perf-smoke baseline is re-recorded on the bitmap allocator default
-  (`bench/baseline/perf_smoke.json`, ten green master runs). The previous one
-  was taken on the freelist default before 0.24.0, so it read every current
-  run as an RSS regression — 5 of 10 replayed runs fail `--gate` against it,
-  none for a real regression. `pct_json` now gates 23.8 pp above the fixed
-  floor; `rss_x` is documented as report-only until it has more samples.
-- The conservative root scan is asserted to visit every pointer-aligned word
-  of a range (`spec/scan_completeness_spec.cr`). Stepping its cursor two
-  words at a time passed all 291 pre-existing examples, and a root the scan
-  skips is an object freed while live. The mutation gate's mutant 09 is that
-  perturbation; four of its ten mutants had also stopped matching the source
-  and were silently unmeasured (`bench/mutations/README.md`). 10/10 killed.
-- **An unanswered suspend signal is re-sent, and a per-thread stop epoch is
-  what makes that safe.** `stop_world` spun `until thread.@suspended.get`
-  forever when a mutator never acknowledged: six of forty runs of the aarch64
-  native job ended at the 20-minute job timeout there, and a job timeout
-  reports as *cancelled* rather than failed, so none of them read as a defect
-  until the watchdog named `phase=suspend`. Re-sending is the repair
-  `start_world` already makes for resume, and it had been refused twice
-  because `SIG_SUSPEND` is blocked for the whole handler and inside
-  `sigsuspend` — a redundant one stays pending and lands *after* the thread
-  resumes, suspending it again with nobody left to wake it.
-  `Gcry::Platform`'s stop epoch closes that: 0 when no stop is in progress,
-  the stop's id while one is, stamped per thread in the `pthread_t`-keyed
-  slot table, so the handler serves each stop once and declines every
-  duplicate. The wait then resends every `GCRY_STW_RESEND_SPINS` (20 M spins,
-  ~a tenth of the stall report) up to `GCRY_STW_RESEND_LIMIT` (16), and past
-  the limit asks `pthread_kill(id, 0)`: on `ESRCH` — the handle names no live
-  thread, so nothing can mutate the heap through it — the stop prints
-  `SUSPEND ABANDONED` and proceeds instead of spinning out the job. Any other
-  answer keeps waiting, because skipping a live thread would stop a world
-  that is still running. `make stw-epoch` has six arms, three red on purpose:
-  no resend hangs on a dropped signal, `GCRY_STW_EPOCH=0` hangs on the
-  duplicate, and a thread that ignores every signal while its handle is live
-  hangs either way — the honest limit, since this repairs a lost delivery and
-  not a thread that cannot run its handler. `SUSPEND STALLED` now carries
-  resends unanswered, handler entries and declines split stale/redundant,
-  which is what tells those two apart in the next sighting.
-  `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
-- **Two threads could share one slot of the suspend-time SP and register
-  table**, so one thread's stack was scanned from another's stack pointer and
-  its registers were the other's registers — a missed root in the one table
-  the conservative scan trusts to be per-thread. Two causes, both latent since
-  the table existed, both found by the epoch turning a shared slot into a
-  hang: the claim's `Atomic#compare_and_set` result was never checked (it
-  returns `{old, success}`, a tuple, which is always truthy, so every thread
-  signalled in one stop claimed the same bit), and `clear_thread_sps` cleared
-  the claimed mask, the SPs and the register rows but left the `pthread_t`s —
-  and because a claim publishes its bit before writing its id, a peer could
-  match a slot another thread had just taken, on its own handle from the
-  previous stop. Observed as three threads in `rt_sigsuspend` and one spinning
-  on a first collection, and as `find_block_race --child alloc` hanging under
-  `GCRY_INDEX_AUDIT=1`; 0 of 3 after the fix, all four `find-block-race`
-  workloads green with both control arms still crashing. Whether either
-  explains an open CI sighting is not claimed.
-- **The suspend handler allocated a `Thread` — from inside a signal handler,
-  with the world stopping — and acknowledged into it.** Crystal's
-  `Thread#start` pushes itself onto `Thread.threads` *before* it sets that
-  thread's TLS, so `stop_world` can signal a thread that has no
-  `Thread.current` yet; Crystal's accessor creates one on a miss, allocating
-  a `Fiber` and a `Thread` and pushing it onto the very list the collector
-  holds the mutex for. The handler then set `@suspended` on that **second**
-  object rather than the one on the list, so the collector spun forever for a
-  thread that had already suspended itself — `phase=suspend`, one thread
-  unacknowledged, `pthread_kill(id, 0)` reporting the handle live, handler
-  entries incremented. The acknowledgement now lives in the `pthread_t`-keyed
-  slot table, which the collector reserves for every thread before it signals
-  anyone, so the handler touches nothing Crystal owns; reserving up front also
-  keeps the CAS claim off the handler and lets the wait spin on an array index
-  instead of a 64-slot scan. `Thread#@suspended` remains the fallback for a
-  table that was full *and* a thread that already has a `Thread`; a delivery
-  that can use neither declines to suspend rather than freezing with no way to
-  say so, counted in `stw_suspend_ack_unavailable`. `make stw-ack-window`
-  drives it deterministically with a raw pthread, which has no TLS by
-  construction: shipped `acked=true listed_delta=0`, the restored pre-table
-  path `acked=false listed_delta=1` — that `1` is the `Thread` the handler
-  allocated. `stw_suspend_no_tls` counts real deliveries that land in the
-  window and is on `/gc-stats`; it is 0 on this box over 1 800 thread births,
-  which is reported rather than read as safety. Whether this explains any
-  aarch64 timeout is not claimed.
-- **A birth root was never released for a short-lived thread.** It ended only
-  when `stop_world`'s pre-suspend walk found its thread on Crystal's list,
-  and a thread that publishes *and exits* between two collections is never on
-  that list when the walk runs. Once 64 of those had accumulated the table
-  was full and every further birth took the overflow path, which roots and
-  can never release: over 3 203 short-lived threads, `outstanding` **3 197**
-  and `overflows` 3 133, each pinning a `Thread`, its `@func` closure and its
-  main `Fiber` for the life of the process. The root now spans the thread's
-  life — armed at `pthread_create`, released a collection after its death is
-  observed through the `pthread_detach` / `pthread_join` hooks, or at once
-  when glibc hands its handle to a new thread, which is proof the previous
-  owner is gone. The hooks mark before their real libc call, so a mark cannot
-  land on a slot a later birth has reused. The table is sized for live
-  threads (64 → 256) rather than unpublished ones. `make thread-birth-root`
-  gains a `--churn` arm: 960 short-lived threads leave `outstanding` 4 and
-  `overflows` 0, against 961 and 705 with the old policy restored via
-  `GCRY_THREAD_BIRTH_DEATHS=0`.
-  `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
-- **The staged-thread table's occupancy could drift and never recover.** It
-  was a `Bool` array beside a plain `Int32` counter maintained with `+= 1` /
-  `-= 1` from creating threads and the collector. Lost updates drifted the
-  counter upward, and `wait_for_staged_threads` loops `while staged_count >
-  0` — so a counter stuck above zero over a table with nothing in it made
-  every stop spend its whole spin budget and report a timeout. Occupancy is
-  now an atomic bitmask and the count is derived from it; a lost bit is a
-  stale entry the next drain clears, where a lost counter update was
-  permanent.
-- **A reproducer for the thread *death* window**,
-  `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default. `Thread#start` removes a
-  thread from Crystal's list before its last instructions, so a dying thread
-  is neither suspended nor scanned while still dereferencing itself. The
-  window has been masked by the staged wait's 2 000-spin timeout, which sits
-  exactly between a thread detaching and the world stopping around it;
-  dropping a dead thread's staging record removes the mask and crashes 7 of
-  40 runs of 960 short-lived threads, against 0 of 40 before and 0 of 40 for
-  a pure delay in the same place. `GCRY_POISON_HOLDERS=1` names a
-  use-after-free on a 16-byte block with no holder anywhere; rooting every
-  `Thread` for its whole life does not fix it, so the victim is not the
-  `Thread`. The defect stays open — it now has a reproducer that fires in
-  seconds.
-- **A reproducer for the live-large-object release**, `make
-  thread-churn-uaf`. The defect has been open since 2026-08-23 — a
-  large-object chunk released by the large-object path and written into
-  afterwards, with no heap object holding it — and it had *lost* its
-  reproducer: found under `wrk` against a real application at about one run
-  in eight, then silent, with the roadmap noting that until it reproduces at
-  a resolvable rate no arm means anything. It needs no application: eight
-  short-lived threads per round, one collection per round, about a second per
-  attempt, and it fires on **both** object layouts with nothing set — 14 of
-  942 headerless, 16 of 924 on block headers. `GCRY_UNMAP_GUARD=1` names the
-  chunk (212 992 bytes, large-object release, the write 48 bytes in every
-  time) and `GCRY_TRACE_LARGE=1` ties it to its allocation (mapped at
-  collection 94, released at 96, written 109 collections later). Three arms
-  per layout reporting a rate rather than gating, with the highest-rate arm
-  asserted non-zero so the reproducer cannot be lost silently a second time.
-  The ordering was initially unclear — a failing run usually raises something
-  first, and Crystal's backtrace printer then allocates hundreds of
-  kilobytes — and is now settled: on the arm without poison the fault report
-  is the **first** line of the child's stderr, so the released chunk is the
-  primary event and not the printer's buffer.
-  `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
-- **The live-large-object release is localised to the post-STW sweep, and
-  this item's own hypothesis is retired.** With the reproducer above the knob
-  matrix becomes a bisect: 36 attempts per configuration, baseline 25 of 36,
-  and `GCRY_SOUND=1` — every conservatism gcry has — changes **nothing**
-  (25/36). Neither does removing the pagemap low-water skip, the SP clamp or
-  the parked-fiber lag. So it is **not** a missed stack or register root; the
-  standing reading since 2026-08-23, inferred from a mark audit reporting 0
-  edges, never followed (0 edges is exactly what a stack-rooted buffer looks
-  like). Two configurations take it to zero: `GCRY_BITMAP_ALLOC=0` (0/36) and
-  `GCRY_DISABLE_LAZY_SWEEP=1` (0/36). Both point at `sweep_after_world?`,
-  which restarts the world and then rebuilds `@chunks` and unmaps empty
-  chunks on the assumption that it is the sole mutator. Both release paths do
-  it — the large-object release and the empty size-class chunk release — and
-  the fault report is the **first** line of a failing run's stderr, so it is
-  the primary event rather than the backtrace printer's buffer.
-  `GCRY_DISABLE_LAZY_SWEEP=1` is a one-variable mitigation for anyone hitting
-  this; whether it should become the default waits on measuring the pause
-  cost of dropping it. Three fixes were attempted and withdrawn with their
-  numbers recorded so they are not re-spent.
-
-### Added
 
 - **The crash report names the frame that faulted.** A signal-safe walk from
   the faulting `ucontext`: the PC as `exe+offset` against the load bias
@@ -837,6 +358,483 @@ is now the default and the flag would take you the wrong way.
   accounting bug in the release decision, or a stale pointer into a block that
   really was free — and on the open live-large-object release it reads **0**,
   which is what retired the missing-root reading of that defect.
+
+### Changed
+
+- **The parked-fiber lag scan was priced and the fix declined.** `ROADMAP.md`
+  has carried "the EC4 pause is the parked-fiber lag scan" with a proposal to
+  scan a fully parked fiber from its own saved SP. Its ceiling is a lag of ~0,
+  and `bench/lag_width_ab.sh` measures that at Kemal EC4: 0.970 ms [0.302,
+  1.638] off a ~6.4 ms pause p50, and no throughput change (0.989 [0.775,
+  1.202]). The predicate the sound version needs - an SP for every thread, so
+  that "no thread was found on this stack" means "no thread is on it" - is
+  available in **0** of 34 989 scans, because SYSMON is signal-exempt and the
+  EC Monitor therefore never records one. New counters `fiber_lag_sp_known` /
+  `fiber_lag_sp_unknown` report it. Research only; no shipped behaviour
+  changes.
+
+- **The perf baseline now gates, and what unblocked it was arithmetic rather
+  than more samples.** `PERF_GATE_BASELINE=1` has been "next" on the
+  benchmark-alerts item for a year, behind *record more green runs first*. The
+  tolerance rule was `max(half the observed range, 1.5 x IQR, floor)`, and both
+  of those terms scale with the spread — so the gate sat about 2.3 standard
+  deviations from the mean at any sample size (simulated: 2.28 sd at n=23, 2.51
+  at 100, 3.04 at 500, 3.24 at 1000), which is a 2.7% false-red rate per run and
+  would have needed ~1200 runs to reach 3.3 sd against a 30-day artifact
+  retention. The tolerance is now stated in standard deviations (`TARGET_SD =
+  3.3`, floored per metric), which puts the three gated metrics at 3.34-3.57 sd:
+  **0.10% combined per run, one false red per ~1000 runs**, leave-one-out green
+  on 24 of 24 recording runs, and each gate **tighter than the fixed floor it
+  was meant to tighten** — 86.06% against 65%, 1.196x against 1.25x, 0.98 ms
+  against 2.5 ms. `bench/perf_gate_margin.py` reports the margin and the
+  false-alarm rate so the next flip decision is measured too. What the gate
+  cannot see is a regression under ~14 pp of `/json` throughput on this runner
+  class; that needs confirmation across runs, not a narrower band.
+  Sensitivity comes from a second observation rather than a tighter band: two
+  runs in a row on the wrong side of 2 sd is 0.05% per pair — lower than the
+  single-run gate's own rate — and catches ~9 pp. `perf_compare.py --prev` does
+  that check, `bench/fetch_prev_perf_summary.sh` feeds it the previous green
+  master run's summary out of the artifact this job already uploads (CI keeps no
+  state between runs, but it keeps artifacts), and every failure path there
+  degrades to "no previous run" rather than reddening the job. Checked against
+  the 24 recording runs: 1 single excursion past 2 sd in 72 metric-runs and no
+  consecutive pairs at all. The `perf-smoke-report` artifact also stopped
+  carrying the whole checked-in `bench/log` tree — ~200 MB a copy, of which every
+  consumer reads one file; it is now this run's own JSON under `bench/log/_run/`.
+  `bench/log/linux/2026-09-13-perf-gate-flip/FINDINGS.md`
+
+- **The perf baseline is recorded on the layout that ships.**
+  `bench/baseline/perf_smoke.json` was taken on the header layout hours before
+  the headerless flip, so `perf_compare.py` had been printing `STALE:` and
+  refusing to gate on every run since — the control working, and the re-record
+  it asked for is here: 23 green master runs on `ubuntu-latest`, from the
+  artifacts the perf job already uploads. Not the ten the note planned, because
+  ten under-sampled the runner: the first ten read the `/json` throughput spread
+  as 96.6-105.2 and the thirteen after them ranged 93.9-108.4, which would have
+  left the gate 0.94 pp from a false alarm on a run that had already happened.
+  `pct_json` 99.7 ±9.9, `rss_x` 0.947 ±0.1115, `pause_p50_ms` 0.6399 ±0.2, no
+  metric self-firing on any of the 23 (the previous file's `rss_x` fired on 1 of
+  10) and leave-one-out green 23 of 23. Gating on it is still off, now for an
+  arithmetic reason rather than a judgement call: the three gates sit 2.16-2.50
+  sd out, 3.2% per run combined — one false red every ~31 runs.
+
+- **`perf_compare.py` no longer denies the baseline it just used.** `baseline:
+  none recorded yet` was the fall-through of the staleness chain, so it printed
+  under every non-stale comparison; every baseline that had shipped was stale,
+  so no green path had ever reached the line. The first fresh baseline printed
+  its own provenance and then reported none existed. `make perf-baseline` gained
+  the fixture for the converse, red against the pre-fix report.
+
+- **The headerless layout is the compile default.** Small blocks are carved
+  back-to-back with no 16-byte `BlockHeader` in front of each object; size and
+  kind come from the chunk, marks and occupancy from its bitmaps, and large
+  objects keep their header inside the chunk's metadata region. The
+  representation shipped opt-in (`-Dgcry_headerless`) in 0.22.0 and has run
+  its own unit, process, ASan, Darwin, aarch64 and Windows CI arms since;
+  what changes here is the polarity of the flag. Measured on the five-arm
+  paired Kemal `/json` run that decided the 0.24.0 bitmap default
+  (`bench/log/linux/2026-09-06-bitmap-default-ab/`, 20 rotated rounds,
+  identical-binary null control, Ryzen AI 9 465): headerless **112.6%**
+  [106.6, 118.6] of Boehm at **1.07×** its peak RSS, 1.1 minor faults per
+  1 000 requests, 69.0 CPU ms per 10 k requests, p99 2.21 ms — against the
+  header layout's 105.3% [99.2, 111.3] at 1.30×, 2.7 faults, 74.6 ms and
+  2.36 ms on the same binary tree. Peak RSS 31.2 against 37.5 MB (−17%),
+  post-GC the same, both flat. Darwin, same protocol
+  (`bench/log/macos/2026-09-06-bitmap-default-ab/`, Apple M2 Pro): 101.9%
+  [100.9, 103.0] at **1.50×** peak footprint and **0.99×** post-GC resident
+  against the header layout's 101.8% at 1.97× and 1.20×. The per-object
+  saving is the header itself: 1 M live 16-byte objects, chain walked after
+  the collection, 34.9 → 19.3 MB (**−44.5%**; 32 B −31.2%, 64 B −19.2%,
+  128 B −10.8%, `bench/log/linux/2026-09-03-phase7-headerless-rss/`). The
+  5-hour soak passed on the layout (+3.2 MB against a 4 MB bound, 0
+  errors). What the layout gives up, unchanged from its opt-in days: the
+  bitmap allocator is forced on (no freelist), the nursery is off and
+  `GCRY_NURSERY` ignored (it was already off by default because it is
+  unsound), `GCRY_CHUNK_BYTES` is exact to 51.2 MiB rather than 86.3, and
+  the SegvReport cannot name the free path for a swept block. CI: the plain
+  spec, process-spec, sample and gate runs on every platform now build
+  headerless; the header layout keeps arms on both allocators (Linux,
+  aarch64, Darwin, Windows x86_64 and ARM64 `headers` / `freelist`
+  variants, ASan), and the env-knob smoke exercises the nursery, freelist
+  and TLAB knobs on the layout that reads them, and the gates whose control
+  arm pins a header-layout knob — `heap-counters` (plain counters),
+  `poison-freed` (freelist arms), `darwin-bitmap-page-release` (`--headers`)
+  and the sound-profile smoke (`GCRY_NURSERY`) — build that arm with
+  `-Dgcry_block_headers`, so the knob is read rather than silently ignored. `bench/baseline/perf_smoke.json`
+  was recorded on the header layout and needs re-recording on the first ten
+  green master runs after this lands, as its provenance note says for any
+  default-allocator change.
+
+### Fixed
+
+- **A Darwin crash on a poisoned pointer read as a null dereference, and
+  now does not.** The report looks for gcry's freed-block poison in the
+  faulting GP registers. Linux reads them from glibc
+  `ucontext_t.uc_mcontext.gregs`. Darwin STW uses `thread_get_state`, and
+  a SIGSEGV hands a `ucontext_t` whose `uc_mcontext` is a pointer to a
+  `__darwin_mcontext64` that prefixes those GP words with the exception
+  state — so the Linux offsets do not apply. Until now the reader was
+  Linux-only and `si_addr == 0` was the whole diagnosis. Offsets from
+  XNU; writer frames follow. `make segv-report` on Darwin CI.
+
+- **A pointer held only in a main-thread `@[ThreadLocal]` was collected
+  on Darwin and Windows, and now is not.** Linux closed this on
+  2026-09-12 by adding the live TLS block to the static roots, sized
+  from `PT_TLS`. The other two platforms had the same hole in different
+  costumes. Darwin: the dyld walk skips TLS sections because they are
+  the *template*, `_tlv_bootstrap` allocates the live block with libc
+  `malloc` into memory that is in no `__DATA` section, and the main
+  thread's stack scan does not cover it — sized from `__thread_data` +
+  `__thread_bss`, clipped with `mach_vm_region`. Windows: `.tls` is the
+  template and the live block is per thread through the TEB; the PE
+  walk now skips the template (so the red arm can lose it on the main
+  thread, which uses the template in place) and the live range is sized
+  from the TLS directory, clipped with `VirtualQuery`. `make tls-roots`
+  is the gate; the Darwin job and the Windows default variant run it.
+
+- **`make page-release-corruption` had stopped testing anything, and now
+  refuses to build that way.** Both free-page release walks are
+  freelist-shaped and stand down on bitmap-allocated chunks, so the gate's
+  three arms pin `GCRY_BITMAP_ALLOC=0` to get the freelist back. Since the
+  headerless layout became the compile default that knob is ignored — there is
+  no freelist to return to — and every arm reached nothing: `unlinked 0` on
+  the HOLED arm in **4 of 4** runs, the mostly-empty arm at 0-11.8 MB against
+  its 16 MiB engagement floor. The harness's own engagement checks caught it
+  (they exist because a walk that never ran looks exactly like a walk that
+  found nothing wrong), but a gate that cannot run on the layout it is built
+  for should say so at the build: it is compiled `-Dgcry_block_headers` now
+  and `{% raise %}`s otherwise. On that layout it engages as its history
+  describes — 11 674-12 904 page runs unlinked, 60.3-68.7 MB released by the
+  mostly-empty walk — and is clean, **0 of 24 per arm across six runs**.
+
+- **`make live-graph-audit` had rotted the same way, and a check now covers
+  the class.** Same cause — its arms pin `GCRY_BITMAP_ALLOC=0` for the same
+  walks — and the same symptom, `walk 0 B` on both walking arms while the
+  workload churned normally. Built `-Dgcry_block_headers` it engages (HOLED
+  109.8 MB, mostly-empty 87.2 MB through the walk) and passes **0 of 6 per
+  arm**: every edge and every node survived. `make layout-knob-check` now
+  fails the build when a gate pins a knob the compile default ignores
+  (`GCRY_BITMAP_ALLOC=0`, `GCRY_NURSERY`, `GCRY_TLAB` — read out of
+  `gc_override.cr`'s warning block rather than hard-coded) without building
+  the layout that honours it. Two rules, both observed red: the harness that
+  pins it in its own arms, and the recipe line that sets it before running a
+  binary built the wrong way, which is how `make heap-counters` and `make
+  poison-freed` could regress — each keeps a headerless binary beside the
+  header one.
+
+- **The open "unresolved corruption under concurrent stress" is closed by
+  re-measurement.** Its two symptoms were the `mt-property-test`
+  `reported=98 walked=233` counter gap and the page-release HOLED arm faulting
+  1-3 of 4. On the current tree the MT property test is **0 failures at 500
+  iterations on 2, 4 and 8 workers**, and the page-release faults belonged to
+  the withdrawn `occ`-built live-mask experiment — the walks stand down on
+  bitmap chunks and that arm no longer exists. The step the item asked for
+  last (does the class lock serialise the streaming sweep's `occ` word against
+  every path into `bitmap_alloc_locked`) was answered on 2026-09-12 with
+  `GCRY_SWEEP_OCC_AUDIT=1`: 0 dead words with a cursor mid-allocation over
+  71 325 published words.
+
+- **A crash-report line longer than its own buffer smashed the stack instead
+  of being truncated.** `RawOut.append` stops at `LIMIT` (480 B) and is handed
+  a bare pointer, so it cannot see where the caller's array ends: a buffer
+  below `LIMIT` is not a short line, it is a write into the frame around it.
+  The report's new kept-release line is **377 bytes and its buffer was 256**,
+  and the 121 bytes past the end took out `occ` first — the line then said
+  "a mutator took one" two clauses after printing "0 block(s) allocated" — and
+  the return address next, so the report exited at 0x0 **inside itself with
+  the description of the fault it had been called for still unflushed**. One
+  ledger line printed; everything the reader needed did not. Thirty-two other
+  buffers were under `LIMIT` at that moment, two of them already able to run
+  past their end: `collect_scan.cr`'s index/list disagreement line is 417
+  bytes with every number at full width against a 352-byte buffer, and 349 on
+  an ordinary mapped chunk — three bytes of margin. All thirty-three are now
+  `UInt8[RawOut::LIMIT]`, and `make raw-buf-check` fails the build on a buffer
+  smaller than the writer that fills it, including for the two hand-rolled
+  writers that predate `RawOut` (`EcQueueAudit` 300/320, `StwWatchdog`
+  250/256, both already sound). The gate that found this passed while it was
+  happening, because it only asked for the line: it now also fails on a report
+  that faults inside itself, on a kept-release line with no fault description
+  after it, and on a block count that contradicts the knob that produced it.
+
+- **A chunk could be released with a live block in it, and now the flush
+  refuses.** One of the overnight CI runs faulted in `make thread-churn-uaf`'s
+  guarded arm, and the report — readable for the first time, because the release
+  ledger had just been hoisted above the heap-span test — said `in a chunk gcry
+  RELEASED [...] empty size-class chunk release, at collection 206 [...]
+  **Blocks still allocated at release: 1**`, with `Collections since: 0`. That
+  count is a popcount of the occupancy bitmap at release, so it is a live block
+  inside memory the collector gave back rather than a stale pointer into
+  legitimately freed memory. The window: the sweep unlinks an empty chunk from
+  `@chunks` inside the stop and queues it, its index entry survives until the
+  post-STW flush removes it, the allocator resolves pooled chunk addresses
+  through that index, and a chunk whose blocks are all free is a legal
+  allocation target — so a mutator can take a block out of a chunk already
+  queued for unmapping. The flush now re-reads occupancy immediately before
+  releasing and keeps an occupied chunk mapped, putting it back on the live
+  list; `release_flush_chunks` and `release_refused_occupied` make the state
+  legible, and `GCRY_EMPTY_FLUSH_DELAY_MS` / `GCRY_RELEASE_OCCUPIED=1` are the
+  research knobs that widen the window and restore the old behaviour. It does
+  not reproduce on an 8-core host and the counters say why — with several
+  mutators alive the sweep queues nothing at all (0 chunks considered in 120
+  collections; 37 in 30 single-threaded ones), so the window needs both the
+  single-mutator sweep path and a mutator running at flush time.
+  `bench/log/linux/2026-09-14-occupied-release/FINDINGS.md`
+
+- **The crash report excluded the one mechanism it was built to name.**
+  `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as `PROT_NONE` and records
+  base, size, release path, collection, first user word and blocks still
+  allocated at release — and the report asked that ledger only for addresses
+  *inside* the heap span. `heap_span_hi` is the top of the live chunks, so
+  releasing a chunk is precisely what moves its address out of the span, and the
+  guard then reserves that address so nothing can map over it: a fault there is
+  expected to be out of span. Those faults ended on "never a gcry allocation, so
+  a swept object is not the explanation", which excludes the mechanism by name.
+  Seen overnight on 2026-09-13 under load: `make thread-churn-uaf`'s guarded arm
+  faulted 1 of 24 on two consecutive runs, 3.8 MB above the span end, and the
+  report said that sentence both times. Both branches now ask one helper.
+  `make released-range-report` covers the half a harness can build — a fault
+  into a guarded release must be named — and the findings record why the
+  out-of-span half cannot be built synthetically, which is three facts about the
+  allocator rather than a missing test.
+  `bench/log/linux/2026-09-13-released-range-report/FINDINGS.md`
+
+- **The crash report was dying inside itself, and had 4 720 bytes to work in.**
+  `make poison-holders` went red on the x86_64 CI runner three times in two days,
+  always printing the holders header and then nothing, which read as a search
+  that found nothing — and a re-run of the same commit was green each time. It
+  was the alternate signal stack: Crystal's is 8 192 bytes and 3 472 are already
+  spent when the handler is entered, leaving 4 720 for a report that walks the
+  explicit root set, every live block and every fiber stack, each frame carrying
+  a line buffer, and then asks the same three questions of the holder it found.
+  Two structural reasons nothing said so: SIGSEGV is blocked inside its own
+  handler, so a synchronous fault there is a silent kill rather than a second
+  delivery, and nothing recorded which section the search was in. gcry now
+  installs its own **256 KiB** alternate stack, sets `SA_NODEFER` so the handler
+  can be re-entered, and stamps the section — so a fault inside the report now
+  prints `while searching the heap walk` instead of vanishing.
+  `GCRY_POISON_HOLDERS_FAULT=1|2|3` breaks it on purpose at each section and is
+  now a `make poison-holders` arm: with the fix each names itself, and a tree
+  missing any of the three parts dies at `rc=139` naming nothing.
+  `GCRY_SEGV_REPORT_STACK=1` prints the margin that turned "it dies when you add
+  a call frame" — recorded here twice, in August and September — into a number.
+  Also: a class variable whose initializer *references a constant* gets a
+  lazy-init guard, and writing one from `GC.init` faults before the runtime can
+  print anything; the new stage byte is initialised with a literal for that
+  reason, and every knob read from `GC.init` wants the same care.
+  `bench/log/linux/2026-09-13-report-stack/FINDINGS.md`
+
+- **A pointer held only in the main thread's thread-local storage was
+  collected.** `dl_iterate_phdr` gives the executable's writable `PT_LOAD`
+  segments, which is every class variable, but a `@[ThreadLocal]` is in none
+  of them: `PT_TLS` is only the template and the live block is allocated per
+  thread. glibc puts a *spawned* thread's block at the top of that thread's
+  own stack mapping — inside the bounds `pthread_getattr_np` reports and above
+  the suspend SP — so the ordinary stack scan has always covered every thread
+  gcry or a Crystal program spawns, which is why this went unseen. The main
+  thread's block is allocated with the shared libraries, nowhere near its
+  stack, and nothing scanned it. It is now a root range, resolved at `GC.init`
+  on the main thread and sized from the executable's own `PT_TLS` `p_memsz` —
+  128 bytes on the harness, against the 824 KiB containing mapping a first
+  version took. `GCRY_TLS_ROOTS=0` restores the old behaviour as the red arm
+  of `make tls-roots`. Linux only; Darwin and Windows are unmeasured and named
+  on `ROADMAP.md`. This is the third branch of what `GCRY_POISON_HOLDERS=1`
+  reports on a use-after-free and the only one that had not been tested; it is
+  **not** the open live-large-object release, whose rate it does not move.
+  `bench/log/linux/2026-09-12-tls-not-a-root/FINDINGS.md`
+
+- **`make static-bss-roots` was green for a reason it does not test.** Its
+  victim block was filled with `0xC7`, so its first `Int32` reads negative —
+  and `type_id_plausible?` refuses a *static* root whose first word is not a
+  dense positive integer. The BSS root the gate exists to prove was therefore
+  rejected by the root filter on every run, and the block survived on an
+  ungated conservative copy instead: a callee-saved register holding the
+  address across `wipe_stack`. Adding one more static root range was enough to
+  change the register pressure and turn the gate red, which is how this was
+  found. The block now carries a real instance id in its first word and `FILL`
+  from the fifth byte on, so the accepted root is the BSS slot; the `--cap`
+  arm still goes red.
+
+- `ci/windows.ps1` gives each `crystal spec` invocation its own
+  `CRYSTAL_CACHE_DIR`. Two invocations per job shared
+  `<cache>/crystal-run-spec.tmp.exe`, and on the ARM64 runner the compiler's
+  delete of it raced a lingering handle — failing two of four master runs on
+  2026-09-10 *after* the specs reported `0 failures`, and reporting as a
+  Crystal compiler bug.
+
+- The mutation gate covers the headerless layout: writing the header that no
+  longer exists, and freeing a block without clearing its occupancy bit.
+  12/12 killed; before this no mutant touched the layout that is now the
+  compile default.
+
+- The perf-smoke baseline is re-recorded on the bitmap allocator default
+  (`bench/baseline/perf_smoke.json`, ten green master runs). The previous one
+  was taken on the freelist default before 0.24.0, so it read every current
+  run as an RSS regression — 5 of 10 replayed runs fail `--gate` against it,
+  none for a real regression. `pct_json` now gates 23.8 pp above the fixed
+  floor; `rss_x` is documented as report-only until it has more samples.
+
+- The conservative root scan is asserted to visit every pointer-aligned word
+  of a range (`spec/scan_completeness_spec.cr`). Stepping its cursor two
+  words at a time passed all 291 pre-existing examples, and a root the scan
+  skips is an object freed while live. The mutation gate's mutant 09 is that
+  perturbation; four of its ten mutants had also stopped matching the source
+  and were silently unmeasured (`bench/mutations/README.md`). 10/10 killed.
+
+- **An unanswered suspend signal is re-sent, and a per-thread stop epoch is
+  what makes that safe.** `stop_world` spun `until thread.@suspended.get`
+  forever when a mutator never acknowledged: six of forty runs of the aarch64
+  native job ended at the 20-minute job timeout there, and a job timeout
+  reports as *cancelled* rather than failed, so none of them read as a defect
+  until the watchdog named `phase=suspend`. Re-sending is the repair
+  `start_world` already makes for resume, and it had been refused twice
+  because `SIG_SUSPEND` is blocked for the whole handler and inside
+  `sigsuspend` — a redundant one stays pending and lands *after* the thread
+  resumes, suspending it again with nobody left to wake it.
+  `Gcry::Platform`'s stop epoch closes that: 0 when no stop is in progress,
+  the stop's id while one is, stamped per thread in the `pthread_t`-keyed
+  slot table, so the handler serves each stop once and declines every
+  duplicate. The wait then resends every `GCRY_STW_RESEND_SPINS` (20 M spins,
+  ~a tenth of the stall report) up to `GCRY_STW_RESEND_LIMIT` (16), and past
+  the limit asks `pthread_kill(id, 0)`: on `ESRCH` — the handle names no live
+  thread, so nothing can mutate the heap through it — the stop prints
+  `SUSPEND ABANDONED` and proceeds instead of spinning out the job. Any other
+  answer keeps waiting, because skipping a live thread would stop a world
+  that is still running. `make stw-epoch` has six arms, three red on purpose:
+  no resend hangs on a dropped signal, `GCRY_STW_EPOCH=0` hangs on the
+  duplicate, and a thread that ignores every signal while its handle is live
+  hangs either way — the honest limit, since this repairs a lost delivery and
+  not a thread that cannot run its handler. `SUSPEND STALLED` now carries
+  resends unanswered, handler entries and declines split stale/redundant,
+  which is what tells those two apart in the next sighting.
+  `bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`
+
+- **Two threads could share one slot of the suspend-time SP and register
+  table**, so one thread's stack was scanned from another's stack pointer and
+  its registers were the other's registers — a missed root in the one table
+  the conservative scan trusts to be per-thread. Two causes, both latent since
+  the table existed, both found by the epoch turning a shared slot into a
+  hang: the claim's `Atomic#compare_and_set` result was never checked (it
+  returns `{old, success}`, a tuple, which is always truthy, so every thread
+  signalled in one stop claimed the same bit), and `clear_thread_sps` cleared
+  the claimed mask, the SPs and the register rows but left the `pthread_t`s —
+  and because a claim publishes its bit before writing its id, a peer could
+  match a slot another thread had just taken, on its own handle from the
+  previous stop. Observed as three threads in `rt_sigsuspend` and one spinning
+  on a first collection, and as `find_block_race --child alloc` hanging under
+  `GCRY_INDEX_AUDIT=1`; 0 of 3 after the fix, all four `find-block-race`
+  workloads green with both control arms still crashing. Whether either
+  explains an open CI sighting is not claimed.
+
+- **The suspend handler allocated a `Thread` — from inside a signal handler,
+  with the world stopping — and acknowledged into it.** Crystal's
+  `Thread#start` pushes itself onto `Thread.threads` *before* it sets that
+  thread's TLS, so `stop_world` can signal a thread that has no
+  `Thread.current` yet; Crystal's accessor creates one on a miss, allocating
+  a `Fiber` and a `Thread` and pushing it onto the very list the collector
+  holds the mutex for. The handler then set `@suspended` on that **second**
+  object rather than the one on the list, so the collector spun forever for a
+  thread that had already suspended itself — `phase=suspend`, one thread
+  unacknowledged, `pthread_kill(id, 0)` reporting the handle live, handler
+  entries incremented. The acknowledgement now lives in the `pthread_t`-keyed
+  slot table, which the collector reserves for every thread before it signals
+  anyone, so the handler touches nothing Crystal owns; reserving up front also
+  keeps the CAS claim off the handler and lets the wait spin on an array index
+  instead of a 64-slot scan. `Thread#@suspended` remains the fallback for a
+  table that was full *and* a thread that already has a `Thread`; a delivery
+  that can use neither declines to suspend rather than freezing with no way to
+  say so, counted in `stw_suspend_ack_unavailable`. `make stw-ack-window`
+  drives it deterministically with a raw pthread, which has no TLS by
+  construction: shipped `acked=true listed_delta=0`, the restored pre-table
+  path `acked=false listed_delta=1` — that `1` is the `Thread` the handler
+  allocated. `stw_suspend_no_tls` counts real deliveries that land in the
+  window and is on `/gc-stats`; it is 0 on this box over 1 800 thread births,
+  which is reported rather than read as safety. Whether this explains any
+  aarch64 timeout is not claimed.
+
+- **A birth root was never released for a short-lived thread.** It ended only
+  when `stop_world`'s pre-suspend walk found its thread on Crystal's list,
+  and a thread that publishes *and exits* between two collections is never on
+  that list when the walk runs. Once 64 of those had accumulated the table
+  was full and every further birth took the overflow path, which roots and
+  can never release: over 3 203 short-lived threads, `outstanding` **3 197**
+  and `overflows` 3 133, each pinning a `Thread`, its `@func` closure and its
+  main `Fiber` for the life of the process. The root now spans the thread's
+  life — armed at `pthread_create`, released a collection after its death is
+  observed through the `pthread_detach` / `pthread_join` hooks, or at once
+  when glibc hands its handle to a new thread, which is proof the previous
+  owner is gone. The hooks mark before their real libc call, so a mark cannot
+  land on a slot a later birth has reused. The table is sized for live
+  threads (64 → 256) rather than unpublished ones. `make thread-birth-root`
+  gains a `--churn` arm: 960 short-lived threads leave `outstanding` 4 and
+  `overflows` 0, against 961 and 705 with the old policy restored via
+  `GCRY_THREAD_BIRTH_DEATHS=0`.
+  `bench/log/linux/2026-09-12-thread-life-root/FINDINGS.md`
+
+- **The staged-thread table's occupancy could drift and never recover.** It
+  was a `Bool` array beside a plain `Int32` counter maintained with `+= 1` /
+  `-= 1` from creating threads and the collector. Lost updates drifted the
+  counter upward, and `wait_for_staged_threads` loops `while staged_count >
+  0` — so a counter stuck above zero over a table with nothing in it made
+  every stop spend its whole spin budget and report a timeout. Occupancy is
+  now an atomic bitmask and the count is derived from it; a lost bit is a
+  stale entry the next drain clears, where a lost counter update was
+  permanent.
+
+- **A reproducer for the thread *death* window**,
+  `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default. `Thread#start` removes a
+  thread from Crystal's list before its last instructions, so a dying thread
+  is neither suspended nor scanned while still dereferencing itself. The
+  window has been masked by the staged wait's 2 000-spin timeout, which sits
+  exactly between a thread detaching and the world stopping around it;
+  dropping a dead thread's staging record removes the mask and crashes 7 of
+  40 runs of 960 short-lived threads, against 0 of 40 before and 0 of 40 for
+  a pure delay in the same place. `GCRY_POISON_HOLDERS=1` names a
+  use-after-free on a 16-byte block with no holder anywhere; rooting every
+  `Thread` for its whole life does not fix it, so the victim is not the
+  `Thread`. The defect stays open — it now has a reproducer that fires in
+  seconds.
+
+- **A reproducer for the live-large-object release**, `make
+  thread-churn-uaf`. The defect has been open since 2026-08-23 — a
+  large-object chunk released by the large-object path and written into
+  afterwards, with no heap object holding it — and it had *lost* its
+  reproducer: found under `wrk` against a real application at about one run
+  in eight, then silent, with the roadmap noting that until it reproduces at
+  a resolvable rate no arm means anything. It needs no application: eight
+  short-lived threads per round, one collection per round, about a second per
+  attempt, and it fires on **both** object layouts with nothing set — 14 of
+  942 headerless, 16 of 924 on block headers. `GCRY_UNMAP_GUARD=1` names the
+  chunk (212 992 bytes, large-object release, the write 48 bytes in every
+  time) and `GCRY_TRACE_LARGE=1` ties it to its allocation (mapped at
+  collection 94, released at 96, written 109 collections later). Three arms
+  per layout reporting a rate rather than gating, with the highest-rate arm
+  asserted non-zero so the reproducer cannot be lost silently a second time.
+  The ordering was initially unclear — a failing run usually raises something
+  first, and Crystal's backtrace printer then allocates hundreds of
+  kilobytes — and is now settled: on the arm without poison the fault report
+  is the **first** line of the child's stderr, so the released chunk is the
+  primary event and not the printer's buffer.
+  `bench/log/linux/2026-09-12-thread-churn-large-uaf/FINDINGS.md`
+
+- **The live-large-object release is localised to the post-STW sweep, and
+  this item's own hypothesis is retired.** With the reproducer above the knob
+  matrix becomes a bisect: 36 attempts per configuration, baseline 25 of 36,
+  and `GCRY_SOUND=1` — every conservatism gcry has — changes **nothing**
+  (25/36). Neither does removing the pagemap low-water skip, the SP clamp or
+  the parked-fiber lag. So it is **not** a missed stack or register root; the
+  standing reading since 2026-08-23, inferred from a mark audit reporting 0
+  edges, never followed (0 edges is exactly what a stack-rooted buffer looks
+  like). Two configurations take it to zero: `GCRY_BITMAP_ALLOC=0` (0/36) and
+  `GCRY_DISABLE_LAZY_SWEEP=1` (0/36). Both point at `sweep_after_world?`,
+  which restarts the world and then rebuilds `@chunks` and unmaps empty
+  chunks on the assumption that it is the sole mutator. Both release paths do
+  it — the large-object release and the empty size-class chunk release — and
+  the fault report is the **first** line of a failing run's stderr, so it is
+  the primary event rather than the backtrace printer's buffer.
+  `GCRY_DISABLE_LAZY_SWEEP=1` is a one-variable mitigation for anyone hitting
+  this; whether it should become the default waits on measuring the pause
+  cost of dropping it. Three fixes were attempted and withdrawn with their
+  numbers recorded so they are not re-spent.
 
 ## [0.25.0] - 2026-09-09
 
@@ -2815,7 +2813,6 @@ found by the gate written for the first, on its first CI run.
   and a crash logged without that line cannot be attributed to either arm
   afterwards. Same rule `bench/sound_profile_ab.sh` already applies to `sound`.
 
-
 - **`GCRY_SOUND=1` — root-completeness profile.** gcry's process defaults
   include a class of knobs that trade *root-scan completeness* for throughput
   or RSS: base-pointer-only ambient roots, the static-root `type_id` gate, the
@@ -2869,7 +2866,6 @@ found by the gate written for the first, on its first CI run.
   unconditionally, but the knob is inert until STW runs with more than two
   mutator threads, and at Kemal EC1 the whole profile is throughput-neutral.
 
-
 - **`bench/scrub_margin.cr` (`make scrub-margin`) — the parked-fiber scrub has
   zero margin.** The audit could close only half the scrub question: for a
   genuinely parked fiber, `@context.stack_top` is the only record of its SP, so
@@ -2891,7 +2887,6 @@ found by the gate written for the first, on its first CI run.
   it needs `multi_mutator_threads?`, which is `Thread` count > 2, and a real
   app can sit on that boundary — the fat app reported 2 threads from one build
   and 3 from another. `bench/stw_lag_pause.cr` reports them per config.
-
 
 - **`Gcry::MonitorGate` — the EC Monitor no longer runs inside the stopped
   world.** `stop_world` never signal-suspends the Monitor (resume races wedged it
@@ -2943,7 +2938,6 @@ found by the gate written for the first, on its first CI run.
   not job-level on purpose: `bench/stw_watchdog.cr` runs an unarmed child to
   prove the knob gates the print, and a job-wide env would quietly arm it.
 
-
 - **The low-water skip now applies on the `lag > 0` default path.** It was
   gated on `lag == 0`, so the default faulted in a fixed 256 KiB window per
   parked fiber without asking whether those pages had ever been written — most
@@ -2965,7 +2959,6 @@ found by the gate written for the first, on its first CI run.
   not the complete scan affordable (16.4 ms at EC4). Kemal at EC1 is unaffected
   by construction — `multi_mutator_threads?` is false at 2 threads, so the lag
   branch is unreachable. `GCRY_STACK_LOW_WATER=0` restores the old behaviour.
-
 
 - **`scrub_fibers_enabled` now defaults to `false`** (Linux and macOS process
   GC; `GCRY_SCRUB_FIBERS=1` opts back in, `GCRY_DISABLE_SCRUB_FIBERS=1` still
@@ -3001,7 +2994,6 @@ found by the gate written for the first, on its first CI run.
   with the −9.1% recorded for the opposite direction. End to end the flip is
   invisible: Kemal `/json` **81.4%** of Boehm @ **0.77×**, `/` **88.5%** @
   **0.76×** (`…-060252/`), inside this host's quiet-smoke band.
-
 
 - **The Darwin fat-app headline is re-cut, and `~0.63×` does not reproduce.**
   It is **~98.0%** of Boehm throughput @ **~0.97×** post-GC RSS, n = 9 per arm,
@@ -3163,7 +3155,6 @@ saving. This withdraws the earlier "STW lag knobs are inert at parallelism 1"
 reading — true of Kemal, false of the fat app — and it is why the defaults stay
 tuned for now.
 
-
 - **The 24 h soak's RSS gate failed on warm-up, not on a leak.** It bounded final
   RSS at 10% of the *starting* RSS — a percentage of a ~6 MB base, where gcry's
   chunk granularity is 256 KiB, so three chunks crossed it. Measured over a 4 h
@@ -3176,7 +3167,6 @@ tuned for now.
   old `--rss-limit` percentage flag is a hard error rather than reinterpreted, so
   a stale `--rss-limit=30` cannot silently become a 30 kB ceiling. `make
   soak-smoke` now runs the same ceiling as the real gate instead of a looser one.
-
 
 - **Collector hang: `pthread_getattr_np` was called with the world stopped.**
   `scan_other_thread_stacks` asked for each thread's stack bounds *after* STW had
@@ -4003,7 +3993,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/sdogruyol/gcry/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sdogruyol/gcry/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/sdogruyol/gcry/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/sdogruyol/gcry/compare/v0.23.0...v0.24.0
