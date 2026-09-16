@@ -5,6 +5,7 @@
 #   - Periodic collect: 1 Hz
 #   - Fiber spawn: ~10 Hz
 #   - Run-queue churn: opt-in, --fiber-churn=N fibers per 1 ms burst (default 0)
+#   - Worker threads: --workers=N (default 1, the only value every earlier arm ran)
 #   - Finalizer load: ~100 objects/s
 #   - WeakRef / disappearing links: ~10 Hz
 #
@@ -14,6 +15,7 @@
 # Build:  crystal build -Dgc_none bench/soak.cr -o bin/soak
 # Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit-kb=4096]
 #         ./bin/soak --fiber-churn=512 --rss-limit-kb=131072   # queue-audit arm
+#         ./bin/soak --workers=4 --fiber-churn=512 --rss-limit-kb=131072  # cross-worker arm
 
 require "../src/gcry"
 require "./bench_rss"
@@ -51,6 +53,33 @@ fiber_churn = 0
 # earlier soak ran on and the one the open 2026-08-10 SEGV is measured against.
 collect_hz = 1
 
+# Maximum parallelism of the default execution context, i.e. how many worker
+# threads may run this workload's fibers at once.
+#
+# This is the **creation** side of the product, and until 2026-09-16 it was not
+# a knob and could not be set from outside at all. Crystal's default context is
+# `Parallel` but starts at capacity **1** (`ExecutionContext.init_default_context`
+# calls `Parallel.default(1)`), and it only grows if the program calls
+# `Parallel#resize`. This harness never did. Neither `CRYSTAL_WORKERS` nor
+# `EC_PARALLELISM` changes it — the first only feeds
+# `ExecutionContext.default_workers_count`, a helper for callers that resize, and
+# the second is this repo's own name for the argument `bench/kemal/src/server.cr`
+# passes to `resize`. Measured on this tree: a plain `-Dgc_none` soak build, and
+# the same build with `-Dpreview_mt -Dexecution_context` and `EC_PARALLELISM=4`,
+# both report capacity 1 / 2 OS threads after 256 concurrent spawns.
+#
+# So every soak arm ever run had one worker, including the arm recorded as
+# "EC4 + fiber churn" in `bench/log/linux/2026-09-10-headerless-default-soak/`.
+# That matters because the fault this soak exists to catch — the 2026-08-10 SEGV
+# in `quick_dequeue?` on a partly overwritten run-queue slot — is a *cross-thread*
+# corruption, and with one worker there is no second worker to steal from a
+# `Runnables` or race it. `--fiber-churn` and `--collect-hz` raise the rate a bad
+# slot is **seen**; this is the first lever on the rate one can be **created**.
+#
+# Default **1**: the baseline every earlier arm ran, kept so a comparison against
+# any recorded run stays a comparison.
+workers = 1
+
 ARGV.each do |arg|
   case arg
   when /--duration=(\d+)/
@@ -63,6 +92,8 @@ ARGV.each do |arg|
     fiber_churn = $1.to_i
   when /--collect-hz=(\d+)/
     collect_hz = $1.to_i
+  when /--workers=(\d+)/
+    workers = $1.to_i
   when /--rss-limit=(\d+)/
     # Deliberately fatal rather than reinterpreted: the old flag was a percent,
     # so silently reading "30" as 30 kB would turn a loose bound into an
@@ -91,6 +122,17 @@ if collect_hz < 1
               "Use 1 for the baseline cadence, or a higher integer to raise it."
   exit 64
 end
+
+if workers < 1
+  STDERR.puts "--workers=#{workers} would leave the default context with no worker. " \
+              "Use 1 for the baseline, or a higher integer to raise parallelism."
+  exit 64
+end
+
+# Before any `spawn` below, and from the main fiber, which is where `resize` has
+# to be called from. Raising it after the workload starts would leave the early
+# collections at a parallelism the telemetry does not describe.
+Fiber::ExecutionContext.default.resize(workers) if workers > 1
 
 # ---- Process RSS ----
 # The RSS ceiling is one of two things this soak asserts, so a platform that
@@ -160,7 +202,7 @@ class SoakTest
   @rss_samples = 0
 
   def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64, @fiber_churn : Int32 = 0,
-                 @collect_hz : Int32 = 1)
+                 @collect_hz : Int32 = 1, @workers : Int32 = 1)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -206,10 +248,16 @@ class SoakTest
     # from the environment. A soak arm labelled "gate off" that quietly booted
     # with the gate on measures nothing, and a crash logged without this line
     # cannot be attributed to either arm afterwards.
+    # `ec_parallelism` is read from the context itself rather than from
+    # `--workers`, for the reason this whole line exists: the arm recorded as
+    # "EC4" on 2026-09-10 asked for four workers through an env var nothing
+    # read and got one. A flag is a request; this is what booted.
     telemetry.puts "config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
                    "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
                    "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
-                   "collect_hz=#{@collect_hz}"
+                   "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
+                   "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
+                   "os_threads=#{Gcry::Platform.os_thread_count}"
     # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
     # SEGV'd in the dequeue an unknown time after the write that caused it, and a
     # cumulative fault count here says which hour the slot went bad.
@@ -218,7 +266,9 @@ class SoakTest
     puts "Config: monitor_gate=#{Gcry::MonitorGate.enabled?} " \
          "stw_test_stall_ms=#{@heap.stw_test_stall_ms} " \
          "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
-         "collect_hz=#{@collect_hz}"
+         "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
+         "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
+         "os_threads=#{Gcry::Platform.os_thread_count}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -411,6 +461,8 @@ class SoakTest
     puts "  allocs=#{@total_alloc} collects=#{@total_collect} fibers=#{@total_fibers} churn=#{@total_churn}"
     puts "  queue slots seen: total=#{@queue_slots_total} max_per_collect=#{@queue_slots_max} " \
          "non_empty=#{@queue_slots_hits}/#{@total_collect} faults=#{@heap.ec_queue_audit_faults}"
+    puts "  ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
+         "(requested #{@workers}) os_threads=#{Gcry::Platform.os_thread_count}"
     puts "  finalizable=#{@total_finalizable} weakref=#{@total_weakref}"
     puts "  finalized=#{SoakFinalizable.seen}"
     puts "  RSS: #{start_rss}kB → #{rss_end}kB (+#{rss_end.to_i64 - start_rss.to_i64}kB, max #{@rss_max}kB, ceiling +#{@rss_limit_kb}kB)"
@@ -421,6 +473,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn, collect_hz)
+test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn, collect_hz, workers)
 success = test.run(duration)
 exit(1) unless success

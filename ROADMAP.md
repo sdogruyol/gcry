@@ -589,12 +589,35 @@ kept finding the rest.
       soak: `make ec-queue-audit` crashed three times in a day and the poison
       said what it was. That is the answer this item was asking for, arrived by
       another route.
+      **And the creation side had no lever, because the soak had one worker
+      (2026-09-16).** Everything above raises the rate a bad slot is *seen*. The
+      fault being hunted is a **cross-thread** run-queue corruption, and
+      `bench/soak.cr` ran the whole workload on a single worker thread: Crystal's
+      default context is `Parallel` but starts at capacity **1**
+      (`init_default_context` calls `Parallel.default(1)`) and grows only if the
+      program calls `Parallel#resize`, which this harness never did. Neither
+      `CRYSTAL_WORKERS` nor `EC_PARALLELISM` moves it — measured, capacity 1 and
+      2 OS threads on a plain `-Dgc_none` build *and* on
+      `-Dpreview_mt -Dexecution_context` with `EC_PARALLELISM=4`, which is the
+      configuration recorded as the **"EC4 + fiber churn"** arm on 2026-09-10.
+      That arm was single-worker; its record is corrected in place. Kemal's EC4
+      numbers and `soft_soak_ec4.sh` are unaffected — `server.cr` does call
+      `resize`. `--workers=N` (default **1**, the baseline every earlier arm ran)
+      is the lever, a `workflow_dispatch` input like the others, and the
+      `config:` line now carries `ec_parallelism` read from the context rather
+      than from the flag — a flag is a request, and that arm is what an
+      unhonoured request looks like six weeks later. Priced at 90 s, churn 512:
+      four workers keep occupancy where the cadence knob ate it (slots per
+      collection 69.2 → 68.2, non-empty 90.9% → 97.6%) and produce the first
+      `stw_waits` this workload has ever recorded (0 → 1), for −21% allocations
+      and +13% RSS.
+      `bench/log/linux/2026-09-16-soak-worker-count/FINDINGS.md`
       **Why the item stays open:** no soak fault has been reproduced. All of this
       raises the rate at which a run could catch one and shortens the report from
       "an hour later, in the consumer" to "the next collection"; whether that is
-      enough is the next scheduled run's answer. And note what the cadence knob
-      does *not* claim: it raises the rate a corrupt slot could be **seen**, not
-      the rate one is **created**.
+      enough is the next scheduled run's answer. Two 90 s arms are not a rate
+      measurement, and what the 2026-08-10 run's own parallelism was is recorded
+      nowhere — which is the argument for the `config:` line, not an answer.
       **And a crash explains itself** (`GCRY_SEGV_REPORT=1`, on for the CI soak):
       the faulting address is checked against the heap's own tables — in the span
       or not, which block, used or free, what its first word is — and the poison

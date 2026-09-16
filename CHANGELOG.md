@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The soak ran one worker thread, so the cross-thread corruption it
+  exists to catch could not be created.** `bench/soak.cr` hunts the
+  2026-08-10 SEGV in `quick_dequeue?` on a partly overwritten run-queue
+  slot. Crystal's default execution context is `Parallel` but starts at
+  capacity 1 (`init_default_context` calls `Parallel.default(1)`) and
+  grows only when the program calls `Parallel#resize`; the harness never
+  did, and neither `CRYSTAL_WORKERS` nor `EC_PARALLELISM` moves it — the
+  first only feeds `default_workers_count`, the second is this repo's own
+  name for the argument `bench/kemal/src/server.cr` passes to `resize`.
+  Measured: capacity 1 and 2 OS threads on a plain `-Dgc_none` build and
+  on `-Dpreview_mt -Dexecution_context` with `EC_PARALLELISM=4` — the
+  configuration recorded as the "EC4 + fiber churn" soak arm on
+  2026-09-10, which was therefore single-worker. That record is corrected
+  in place. Kemal's EC4 numbers and `bench/soft_soak_ec4.sh` are
+  unaffected: `server.cr` does call `resize`.
+  `bench/log/linux/2026-09-16-soak-worker-count/FINDINGS.md`
+
+### Added
+
+- **`bench/soak.cr --workers=N`, and the parallelism a run actually
+  booted.** Default **1** — the baseline every earlier arm ran, so a
+  comparison against a recorded run stays a comparison — with
+  `soak_workers` as a `workflow_dispatch` input like `fiber_churn` and
+  `collect_hz`. `--fiber-churn` and `--collect-hz` raise the rate a bad
+  slot is *seen*; this is the first lever on the rate one can be
+  *created*. Priced at 90 s with churn 512: four workers hold occupancy
+  where the cadence knob diluted it (slots per collection 69.2 → 68.2,
+  non-empty collections 90.9% → 97.6%) and produce the first `stw_waits`
+  this workload has recorded (0 → 1, max 89.6 µs), costing 21% of
+  allocations and 13% RSS. Workers do not replace churn: at
+  `--workers=4 --fiber-churn=0` only 1 collection of 59 sees a non-empty
+  queue. The `config:` telemetry line now carries `workers_requested`,
+  `ec_parallelism` and `os_threads`, with `ec_parallelism` read from the
+  context rather than from the flag — the 2026-09-10 arm is what a flag
+  nothing honoured looks like six weeks later. No fault was reproduced;
+  two 90 s arms are not a rate measurement.
+
 ## [0.26.0] - 2026-09-15
 
 Minor release: **the headerless small-object layout is the compile default.**
