@@ -518,8 +518,33 @@ kept finding the rest.
       item below: `Isolated#func` and `#spawn_context` are two of the 19 dropped
       ivars, so under `GCRY_AUTO_LAYOUTS=1` that closure had neither route.
       `bench/log/linux/2026-08-15-isolated-context-unpinned/FINDINGS.md`
+      **And the one state where the list and reality differ is now measured and
+      gated (2026-09-16).** Everything above covers the context *as the context
+      lists it*. `Parallel#resize` does not mutate `@schedulers`, it replaces it
+      — deliberately, so a concurrent `#steal` keeps reading a valid array — and
+      on a shrink the overflow schedulers are dropped from it and told to shut
+      down **cooperatively**: stdlib says they "won't stop until their current
+      fiber tries to switch". So a `Scheduler` is run by a live thread while the
+      context no longer lists it, and the pin block walks the new array.
+      Measured with one non-yielding fiber per worker holding the window open,
+      4 → 1: the shrink drops **24 named pins**, exactly
+      `3 x (1 object + 7 ivars)` derived from `instance_vars` on both sides, and
+      that quantity is what `bin/scheduler_roots --resize` gates on (red at 0
+      with the pin loop removed). **Nothing is swept** — and the positive control
+      says that is not because anything names it: delete
+      `thread.@scheduler`'s pin and all three removed schedulers and their
+      queues still survive, on the `Thread` body scan and the worker's own
+      stack. That is the conservative coverage the pin block exists because it
+      does not trust, in the one window where it is the only coverage. Latent,
+      not live: nothing in this tree shrinks a context — `--workers` and
+      `bench/kemal/src/server.cr` both resize once at startup, which only grows
+      — so it is under a gate before a caller reaches it. Naming it would cost
+      seven pins per thread per collection for a path nobody takes, so that is
+      recorded rather than done.
+      `bench/log/linux/2026-09-16-ec-shrink-window/FINDINGS.md`
       **Still open, and the reason this item stays unchecked:** none of this
-      explains the 2026-08-10 soak SEGV. `Isolated` is opt-in and the soak uses
+      explains the 2026-08-10 soak SEGV. Nothing called `resize` then either, so
+      the shrink window was never entered on that run. `Isolated` is opt-in and the soak uses
       plain `spawn`, so it cannot have hit that hole either. The soak sets no `GCRY_AUTO_LAYOUTS`, so
       those ivars were reached conservatively there anyway — what changed is that
       they no longer depend on it.

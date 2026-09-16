@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`make scheduler-roots` now audits the one EC state where the
+  context's scheduler list and reality differ.**
+  `Fiber::ExecutionContext::Parallel#resize` replaces `@schedulers`
+  rather than mutating it, and on a shrink the overflow schedulers are
+  dropped from it and told to shut down cooperatively — stdlib: they
+  "won't stop until their current fiber tries to switch". The collector's
+  pin block walks the new array, so for the length of that window a
+  `Scheduler` is being run by a live thread with none of its named pins.
+  The new `--resize` arm holds the window open with one non-yielding
+  fiber per worker, shrinks 4 → 1, and gates on the quantity of named
+  coverage lost: **24 pins, exactly `3 × (1 object + 7 ivars)`**, derived
+  from `instance_vars` on both the harness and the collector side. Red at
+  0 with the pin loop removed, and it refuses to pass if no removed
+  scheduler still has a live reader. Nothing is swept in that window —
+  and the positive control shows that is not because anything names it:
+  with `thread.@scheduler`'s pin deleted the removed schedulers still
+  survive, on the `Thread` body scan and the worker's own stack, which is
+  the conservative coverage the pin block exists because it does not
+  trust. Latent rather than live: nothing in this tree shrinks a context.
+  `bench/log/linux/2026-09-16-ec-shrink-window/FINDINGS.md`
+
 ### Fixed
 
 - **The soak ran one worker thread, so the cross-thread corruption it

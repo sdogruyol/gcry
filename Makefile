@@ -326,6 +326,7 @@ scheduler-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/scheduler_roots.cr -o $(BIN)/scheduler_roots --error-trace
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --control
+	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --resize
 
 # A precise layout is a claim that every pointer in the object is at one of the
 # offsets it lists. `Layout.register` had a third outcome it never named: an ivar

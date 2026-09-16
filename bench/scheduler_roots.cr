@@ -55,6 +55,29 @@
 #               fails if a type is added upstream and the collector's dispatch
 #               does not pick it up.
 #
+#   --resize    `Parallel#resize` replaces `@schedulers` outright, and a shrink
+#               drops the overflow schedulers from it after telling them to
+#               shut down — cooperatively, so "won't stop until their current
+#               fiber tries to switch". During that window a Scheduler is still
+#               being run by a live thread while the context no longer lists it,
+#               and the pin block above walks `ec.@schedulers`, i.e. the *new*
+#               array, so the removed schedulers lose every *named* pin they had:
+#               measured 53 → 29 pins, exactly 3 × (1 object + 7 ivars). That
+#               quantity, derived from `instance_vars` on both sides, is what
+#               this arm gates on. Nothing is swept in that window — but the
+#               measurement in FINDINGS shows survival does not depend on any
+#               named pin either: delete `thread.@scheduler`'s and the removed
+#               schedulers still live, because the conservative scan of the
+#               `Thread` body and of the running worker's stack reaches them.
+#               That is the coverage the pin block exists because it does not
+#               trust (Kemal EC4 SEGV @ …0008), so what this arm records is a
+#               window where EC coverage is conservative-only. Non-vacuity is
+#               asserted: one non-yielding fiber per worker holds the
+#               cooperative shutdown open, and the arm fails if no removed
+#               scheduler still has a live reader. Nothing in this tree shrinks
+#               a context today — this is a latent path put under a gate before
+#               something reaches it.
+#
 #   --control   no execution context beyond the default is ever created, and the
 #               delta across two collections must be 0. This is what stops the
 #               gate from being vacuous in the other direction: if the counter
@@ -65,6 +88,7 @@
 #   crystal build -Dgc_none bench/scheduler_roots.cr -o bin/scheduler_roots
 #   bin/scheduler_roots
 #   bin/scheduler_roots --control
+#   bin/scheduler_roots --resize
 
 require "../src/gcry"
 
@@ -132,7 +156,7 @@ def settled_pins : UInt64
   prev
 end
 
-def run(control : Bool) : Int32
+def run(control : Bool, resize_arm : Bool = false) : Int32
   {% unless Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
     puts
     puts "SKIP — this compiler does not declare Thread.@execution_context, so there"
@@ -148,7 +172,131 @@ def run(control : Bool) : Int32
     before = settled_pins
     puts "pins on a collection before any Parallel EC: #{before}"
 
-    if control
+    if resize_arm
+      ec = Fiber::ExecutionContext::Parallel.new("gcry-scheduler-roots-resize", WORKERS)
+      # Busy fibers, not parked ones. A shrink tells the overflow schedulers to
+      # shut down, but "the actual shutdown is cooperative, so running
+      # schedulers won't stop until their current fiber tries to switch to
+      # another fiber" — so a parked workload lets every removed worker stop
+      # before a collection can look, which is exactly what the first version
+      # of this arm measured (0 of 3 removed schedulers still had a reader).
+      # One non-yielding fiber per worker holds the window open instead.
+      running = Atomic(Int32).new(0)
+      release = Atomic(Int32).new(0)
+      WORKERS.times do
+        ec.spawn do
+          running.add(1)
+          while release.get == 0
+            # No yield, no allocation: the point is a fiber that never offers
+            # its worker a switch point.
+          end
+        end
+      end
+      while running.get < WORKERS
+        Fiber.yield
+      end
+
+      grown = ec.@schedulers.size
+      GC.collect
+      pins_grown = HEAP.ec_root_pins.to_i64 - before.to_i64
+      puts "schedulers before the shrink: #{grown} (asked for #{WORKERS}), pins delta #{pins_grown}"
+
+      if grown < 2
+        failures << "the context came up with #{grown} scheduler(s), so there is no overflow " \
+                    "for a shrink to remove and this arm would pass without testing anything"
+      end
+
+      # Identities of what the shrink is about to drop, held obfuscated so this
+      # frame is not what keeps them alive — same device as `hidden` above.
+      # `@runnables` is the one that matters: it is the queue a still-running
+      # worker dequeues from, and the slot the 2026-08-10 SEGV died on.
+      doomed = [] of Tuple(Int32, UInt64, UInt64, UInt64)
+      ec.@schedulers.each_with_index do |sched, i|
+        next if i == 0
+        doomed << {i, sched.object_id ^ KEY, sched.@runnables.object_id ^ KEY,
+                   sched.@main_fiber.object_id ^ KEY}
+      end
+
+      # Shrink. The removed schedulers leave `@schedulers`, are told to shut
+      # down, and keep running until their current fiber switches.
+      ec.resize(1)
+      shrunk = ec.@schedulers.size
+
+      GC.collect
+      GC.collect
+      pins_shrunk = HEAP.ec_root_pins.to_i64 - before.to_i64
+      puts "schedulers after resize(1):   #{shrunk}, pins delta #{pins_shrunk}"
+
+      unless shrunk == 1
+        failures << "resize(1) left #{shrunk} schedulers on the context, so the shrink this arm " \
+                    "measures did not happen"
+      end
+
+      # The discriminating assertion. Every removed scheduler costs one pin for
+      # the object plus one per pointer-bearing ivar, derived from the same
+      # `instance_vars` the collector pins from — so this is the *quantity* of
+      # named coverage a shrink drops, and it moves with upstream rather than
+      # being written down. Measured here: 53 -> 29, i.e. 24 = 3 x (1 + 7).
+      removed = grown - shrunk
+      expected_loss = removed * (1 + pin_slots(Fiber::ExecutionContext::Parallel::Scheduler))
+      actual_loss = pins_grown - pins_shrunk
+      puts "named pins the shrink dropped: #{actual_loss} (#{removed} schedulers x " \
+           "(1 + #{pin_slots(Fiber::ExecutionContext::Parallel::Scheduler)}) = #{expected_loss})"
+      unless actual_loss == expected_loss
+        failures << "the shrink dropped #{actual_loss} named pins where #{expected_loss} are " \
+                    "derivable from the removed schedulers' ivars — either the pin block no " \
+                    "longer walks ec.@schedulers, or a shrink no longer removes them from it, " \
+                    "and this arm's reading of what the window costs is stale either way"
+      end
+
+      # Which removed schedulers is a live thread still running? Those are the
+      # ones with a reader, and the ones sweeping would be a defect for. A
+      # removed scheduler whose thread has finished is genuinely garbage and
+      # collecting it is correct — asserting on it would make this arm wrong in
+      # the other direction.
+      #
+      # These survival checks do **not** discriminate, and the measurement that
+      # says so is in FINDINGS: with `thread.@scheduler`'s pin deleted from
+      # `scan_thread_roots`, all three removed schedulers and their queues
+      # still survive. What covers them in this window is the conservative scan
+      # of the `Thread` body and of the running worker's own stack — which is
+      # the coverage the pin block exists because it does not trust. So a green
+      # here says "nothing is lost today", not "something names them".
+      still_run = [] of UInt64
+      Thread.unsafe_each do |th|
+        if s = th.@scheduler
+          still_run << s.object_id
+        end
+      end
+
+      checked = 0
+      doomed.each do |(i, sched_x, runnables_x, main_x)|
+        sched_addr = sched_x ^ KEY
+        next unless still_run.includes?(sched_addr)
+        checked += 1
+        unless HEAP.live?(Pointer(Void).new(sched_addr))
+          failures << "scheduler[#{i}] was swept while a live thread's @scheduler still pointed " \
+                      "at it — the shrink removed it from ec.@schedulers and nothing else named it"
+        end
+        unless HEAP.live?(Pointer(Void).new(runnables_x ^ KEY))
+          failures << "scheduler[#{i}].runnables was swept while a live thread still runs that " \
+                      "scheduler — that is the queue a dequeue reads, and the shape of the " \
+                      "2026-08-10 SEGV"
+        end
+        unless HEAP.live?(Pointer(Void).new(main_x ^ KEY))
+          failures << "scheduler[#{i}].main_fiber was swept while a live thread still runs that " \
+                      "scheduler"
+        end
+      end
+      puts "removed schedulers a live thread still points at: #{checked}/#{doomed.size}"
+      if checked == 0
+        failures << "no removed scheduler still had a live thread pointing at it, so the shrink " \
+                    "window this arm exists to measure was not open and a green result here " \
+                    "would mean nothing — the busy fibers above are what hold it open"
+      end
+
+      release.set(1)
+    elsif control
       GC.collect
       after = HEAP.ec_root_pins
       delta = after.to_i64 - before.to_i64
@@ -265,7 +413,9 @@ def run(control : Bool) : Int32
 
     if failures.empty?
       puts
-      if control
+      if resize_arm
+        puts "ok — the shrink happened and nothing a live thread still runs was swept"
+      elsif control
         puts "ok — the pin count is flat with no Parallel EC, so a non-zero delta in the " \
              "other arm is attributable to the context"
       else
@@ -282,6 +432,14 @@ def run(control : Bool) : Int32
 end
 
 control = ARGV.includes?("--control")
+resize_arm = ARGV.includes?("--resize")
 puts "=== Parallel execution-context root pins ==="
-puts "mode: #{control ? "control (no Parallel EC; the counter must not move)" : "hold (Parallel EC up; pins must be counted)"}"
-exit run(control)
+mode = if control
+         "control (no Parallel EC; the counter must not move)"
+       elsif resize_arm
+         "resize (shrink 4 -> 1; a removed scheduler a thread still runs must survive)"
+       else
+         "hold (Parallel EC up; pins must be counted)"
+       end
+puts "mode: #{mode}"
+exit run(control, resize_arm)
