@@ -821,6 +821,26 @@ static-bss-roots: $(BIN)
 	# held only by the BSS did not survive".
 	! GCRY_DISABLE_STATIC_ROOTS=1 $(BIN)/static_bss_roots
 
+# Is the stack of a *terminating* fiber a root? `Thread#dead_fiber_stack` parks
+# it there because Crystal cannot release a fiber's stack until it swaps away,
+# and while it sits there the thread may still be running on it while the owning
+# `Fiber` is already off `Fiber.unsafe_each`. The v0.20.0 fix roots it (11/24
+# crashes -> 0/24 on the nested-spawn repro) and had **no gate**: its disable
+# appeared in no spec, recipe or CI step, and the one harness that touches the
+# counter only prints it. Four arms, three of which require the block to die, so
+# the red direction is built every run: `--control` never plants the address,
+# `--noroot` walks the stack and offers nothing (which needs the fix off too --
+# `offer = @dead_stack_roots`, so NOROOT alone is the fix with a flag set),
+# `--disabled` turns the walk off outright and also checks the knob still gates
+# it. ~1 s.
+.PHONY: dead-stack-root
+dead-stack-root: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/dead_stack_root.cr -o $(BIN)/dead_stack_root --error-trace
+	$(BIN)/dead_stack_root
+	$(BIN)/dead_stack_root --control
+	GCRY_DEAD_STACK_ROOTS=0 GCRY_DEAD_STACK_NOROOT=1 $(BIN)/dead_stack_root --noroot
+	GCRY_DEAD_STACK_ROOTS=0 $(BIN)/dead_stack_root --disabled
+
 # Is a pointer held only in thread-local storage a root? It was not, on the
 # main thread: the executable's writable image (`PT_LOAD` / `__DATA*` / PE
 # writable sections) is every class variable, but a thread-local lives in a

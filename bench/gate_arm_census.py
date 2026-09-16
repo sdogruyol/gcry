@@ -15,7 +15,15 @@ executes has to fail:
   * the Makefile recipe prefixes a command with `!`, or asserts on its output
     with `grep -q`; or
   * the harness forks a child with a knob or flag that breaks the thing under
-    test, and asserts on what the child did.
+    test, and asserts on what the child did; or
+  * the recipe runs the harness again under a knob or flag that restores the
+    pre-fix behaviour, and the harness judges that arm itself. `--control` does
+    not count: a control has to *pass*.
+
+The third criterion was added on 2026-09-16, when `make dead-stack-root` — whose
+three of four arms *require* the victim to die — was counted as "by hand" by the
+first two. The tool under-counted and using it is what found that; the numbers
+below moved by one gate as a result, not because anything in the tree changed.
 
 Otherwise the red direction was established once, by hand, by whoever wrote the
 gate — and that fact lives in `ROADMAP.md` prose ("broken on purpose and
@@ -75,11 +83,40 @@ def harness_constructs_red(stem: str) -> bool:
     return forks and judges and breaks
 
 
-def recipe_constructs_red(recipe: str) -> bool:
-    """The recipe requires a command to fail, or asserts on its output."""
+# Knob names that mean "restore the behaviour this gate exists to catch".
+BREAKING_KNOB = re.compile(
+    r"GCRY_[A-Z0-9_]*(NOROOT|UNROOTED|NOGROW|DISABLE|_CAP|INJECT|FROM_BASE|LIBC)"
+    r"[A-Z0-9_]*=|GCRY_[A-Z0-9_]+=0(\s|$)"
+)
+
+# Arms named by a flag rather than a knob. `--control` is deliberately absent:
+# a control has to *pass*, so it shows the harness is not the cause and not that
+# the gate can fail.
+BREAKING_FLAG = re.compile(
+    r"--(noroot|unrooted|leaking|inject|broken|disabled|stall|libc)\b"
+)
+
+
+def recipe_constructs_red(recipe: str, harnesses: list[str]) -> bool:
+    """The recipe requires a command to fail, asserts on its output, or runs the
+    harness again under a knob that restores the pre-fix behaviour."""
     must_fail = re.search(r"(^|\s|;)!\s*\S", recipe, re.M) is not None
     asserts_output = re.search(r"\|\s*grep -q", recipe) is not None
-    return must_fail or asserts_output
+    broken_arm = False
+    for line in recipe.splitlines():
+        if not (BREAKING_KNOB.search(line) or BREAKING_FLAG.search(line)):
+            continue
+        if any(harness_judges(h) for h in harnesses):
+            broken_arm = True
+    return must_fail or asserts_output or broken_arm
+
+
+def harness_judges(stem: str) -> bool:
+    """The harness decides an arm rather than only printing it."""
+    path = ROOT / "bench" / f"{stem}.cr"
+    if not path.exists():
+        return False
+    return re.search(r"failures <<|exit 1|exit\(1\)", path.read_text()) is not None
 
 
 def census() -> list[tuple[str, bool, bool, list[str]]]:
@@ -92,7 +129,7 @@ def census() -> list[tuple[str, bool, bool, list[str]]]:
         rows.append(
             (
                 name,
-                recipe_constructs_red(recipe),
+                recipe_constructs_red(recipe, harnesses),
                 any(harness_constructs_red(h) for h in harnesses),
                 harnesses,
             )

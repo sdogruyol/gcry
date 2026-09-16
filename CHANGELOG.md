@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has
+  a gate.** `Thread#dead_fiber_stack` parks a terminating fiber's stack on
+  the thread, which may still be running on it while the owning `Fiber` is
+  already off `Fiber.unsafe_each`; rooting it is credited with taking the
+  nested-spawn repro from 11/24 crashes to 0/24. Nothing gated it: the
+  disable `GCRY_DEAD_STACK_ROOTS=0` appeared in no spec, recipe or CI
+  step, `dead_stacks_walked` was printed by `bench/nested_spawn_uaf.cr`
+  and asserted nowhere, and that target is "not a gate" and absent from
+  CI — so the fix could have regressed to a no-op in silence. Four arms,
+  three requiring the victim to **die**, on Linux, aarch64 and Darwin.
+  Building it produced two corrections. The harness first allocated the
+  victim inside the dying fiber, leaving plaintext copies in that fiber's
+  own frames, and its **control arm caught** the hold arm being
+  unattributable; the victim is now allocated on the main fiber and only
+  `addr ^ KEY` crosses over. And `GCRY_DEAD_STACK_NOROOT=1` alone is not
+  the twin control it was documented as — the walk takes
+  `offer = @dead_stack_roots`, so it walks *and* offers; the twin is that
+  knob plus `GCRY_DEAD_STACK_ROOTS=0`, `docs/HARDENING.md` is corrected,
+  and the harness refuses the one-flag form rather than measuring it.
+  `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
+
+### Changed
+
+- **`bench/gate_arm_census.py` counts a third shape of red arm.** A recipe
+  that re-runs its harness under a knob or flag restoring the pre-fix
+  behaviour, with the harness judging that arm, is as much a per-run red
+  arm as a `!` prefix or a forked child — `--control` excluded, because a
+  control has to pass. The narrow criteria counted `make dead-stack-root`
+  as "by hand" while three of its four arms required a death, which is how
+  the gap was found. Same tree now reads 30 per run / 55 by hand of 85
+  against the 20/64 first reported; the definition moved, not the tree,
+  and the earlier record is corrected in place.
+
 - **`make greg-roots` and `make static-bss-roots` now construct their own
   red arm.** Both gates' ability to fail existed only as a sentence in
   `ROADMAP.md` ("broken on purpose and observed red"). The knobs that

@@ -26,6 +26,18 @@ believed:
     red direction established by hand: 64
     prose claims of a hand break:      19 (nothing re-checks these)
 
+> **Correction, later the same day.** Those two middle numbers were the tool's
+> first two criteria only — a recipe `!`/`grep -q`, or a harness that forks a
+> child. They missed a third shape that is just as much a per-run red arm: the
+> recipe running the harness again under a knob or flag that restores the
+> pre-fix behaviour, with the harness judging that arm. `make dead-stack-root`,
+> added hours later, was counted "by hand" by the narrow criteria despite three
+> of its four arms *requiring* the victim to die — which is how the gap was
+> found. With the criteria widened the same tree reads **30 per run / 55 by
+> hand** of 85. Nothing in the tree changed to move it; the definition did.
+> `../2026-09-16-orphan-break-knobs/` and this file's own argument stand — what
+> does not stand is "20".
+
 A gate's red direction is *constructed per run* when the gate itself executes
 something that has to fail — the recipe prefixes a command with `!` or asserts on
 its output with `grep -q` (`tls-roots`, `interior-only-buffer`,

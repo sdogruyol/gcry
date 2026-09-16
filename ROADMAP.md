@@ -938,6 +938,26 @@ kept finding the rest.
       no-ops but because no gate constructs the condition they break. That is
       the part that needs harnesses rather than recipe lines.
       `bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`
+      **First of those conditions built: `make dead-stack-root`.** The v0.20.0
+      dying-fiber stack root — `Thread#dead_fiber_stack`, credited with 11/24
+      crashes → 0/24 on the nested-spawn repro — had **no gate at all**: its
+      disable was in no spec, recipe or CI step, `dead_stacks_walked` was printed
+      by `nested_spawn_uaf` and asserted nowhere, and that target is explicitly
+      "not a gate" and absent from CI. So the fix could have regressed to a no-op
+      in silence. Four arms, three of which require the victim to **die**:
+      `--control` never plants the address, `--noroot` walks and offers nothing,
+      `--disabled` turns the walk off and also asserts `walked == 0` so the knob
+      is checked to still gate the walk rather than only the offer. On Linux,
+      aarch64 and Darwin. Two corrections fell out of building it: the harness's
+      first version allocated the victim *inside* the dying fiber, so its own
+      frames held plaintext and the **control arm caught** the hold arm being
+      unattributable; and `GCRY_DEAD_STACK_NOROOT=1` alone is not the twin —
+      `offer = @dead_stack_roots`, so it walks *and* offers, which
+      `docs/HARDENING.md` described as "same walk, roots nothing" and is fixed.
+      Census 84 → 85, and its criteria were widened after they miscounted this
+      very gate: **30 per run / 55 by hand**, against 20/64 reported hours
+      earlier on the same tree.
+      `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
