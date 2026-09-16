@@ -2016,14 +2016,24 @@ kept finding the rest.
       capacity check returned before the visit was counted — with 18 lookups
       falling through to `nil`; 122 threads, 58. It grows now, and the visit is
       counted first, so `read == visited` is load-bearing: 82 → 82/82, 202 →
-      202/202, zero misses. **Correction, 2026-09-16: the gate this claimed is
-      not there.** It said "gated in `process_spec` above the initial capacity
-      and broken on purpose with `GCRY_STACK_BOUNDS_NOGROW=1` (red at
-      `visited=150 read=130`)" — that break was real when it was measured, but
-      `GCRY_STACK_BOUNDS_NOGROW` appears in no `spec/`, no `bench/`, no recipe
-      and no CI step today, so nothing re-checks it and the counters it names
-      are asserted nowhere. One of eleven such knobs
-      (`bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`). **What is not measured** is whether a thread past
+      202/202, zero misses. **Correction, 2026-09-16: the gate this claimed did
+      not exist, and now does.** It said "gated in `process_spec` above the
+      initial capacity and broken on purpose with `GCRY_STACK_BOUNDS_NOGROW=1`
+      (red at `visited=150 read=130`)" — that break was real when it was
+      measured, but the knob appeared in no `spec/`, no `bench/`, no recipe and
+      no CI step, so nothing re-checked it and the counters it names were
+      asserted nowhere; one of eleven such knobs
+      (`bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`).
+      `make stack-bounds-growth` is now the gate, on Linux, aarch64 and Darwin:
+      100 threads held live must give `read == visited` with zero capacity
+      misses, `--control` stays inside the initial 64 so that equality is
+      attributable to growth, and `GCRY_STACK_BOUNDS_NOGROW=1` must make the
+      loss **show in both counters** — measured `read` 128 of 204 visited with
+      76 misses, because a frozen table that also stopped counting would read as
+      full coverage of a smaller process. What is still not measured is
+      unchanged: whether a thread past the 64th ever held the only reference to
+      something. The gate asserts the coverage, not a defect.
+      `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md` **What is not measured** is whether a thread past
       the 64th ever held the only reference to something: the loss is a
       documented half of that thread's coverage, and no arm has yet shown a
       block dying of it.

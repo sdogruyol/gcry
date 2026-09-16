@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make stack-bounds-growth`: the gate `ROADMAP.md` said already
+  existed.** The root scan cannot call `pthread_getattr_np` with the
+  world stopped — that is the 2026-08-10 six-hour hang — so bounds are
+  snapshotted before the stop and read from a table inside it, and that
+  table was a fixed 64 slots. Past it threads were visited with nowhere
+  to record them and their OS stacks went unscanned. The board claimed
+  this was "gated in `process_spec` … broken on purpose with
+  `GCRY_STACK_BOUNDS_NOGROW=1`"; the knob was in no spec, no recipe and
+  no CI step, so the gate described did not exist. Three arms on Linux,
+  aarch64 and Darwin: 100 threads held live must give
+  `stack_bounds_read == stack_bounds_visited` with zero capacity misses;
+  `--control` stays inside the initial 64 so that equality is
+  attributable to growth rather than to two counters agreeing trivially;
+  `--nogrow` freezes the table and requires the loss to show in **both**
+  counters — measured `visited=204 read=128` with 76 misses — because a
+  frozen table that also stopped counting reads as full coverage of a
+  smaller process, which is exactly what the pre-fix counters did (82
+  threads reading `visited=64 read=64`). `docs/HARDENING.md` now says
+  which counting each of those two measurements belongs to. Still not
+  claimed, unchanged from the fix: whether a thread past the 64th ever
+  held the only reference to something.
+  `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+
 - **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has
   a gate.** `Thread#dead_fiber_stack` parks a terminating fiber's stack on
   the thread, which may still be running on it while the owning `Fiber` is

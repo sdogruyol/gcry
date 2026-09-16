@@ -502,6 +502,13 @@ jobs:
       - name: Dying-fiber stack root
         run: make dead-stack-root
 
+      # The stack-bounds table past its initial 64 slots. The knob that freezes
+      # it back to the pre-fix fixed table was in no spec, recipe or CI step,
+      # while ROADMAP.md claimed this was gated in process_spec — so the gate
+      # the record described did not exist.
+      - name: Stack-bounds table growth
+        run: make stack-bounds-growth
+
       # Static roots come from the executable's ELF program headers, read once
       # at GC.init — not from /proc/self/maps, where a redeploy renames every
       # line of the running image to "(deleted)" and a pathname-matching
@@ -1404,6 +1411,7 @@ jobs:
           timeout 300 make thread-block-audit
           timeout 300 make thread-birth-root
           timeout 300 make dead-stack-root
+          timeout 300 make stack-bounds-growth
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
           # The runner the suspend hang lives on. The signal path is the
@@ -1564,6 +1572,13 @@ jobs:
 
       - name: Dying-fiber stack root
         run: make dead-stack-root
+
+      # The stack-bounds table past its initial 64 slots. The knob that freezes
+      # it back to the pre-fix fixed table was in no spec, recipe or CI step,
+      # while ROADMAP.md claimed this was gated in process_spec — so the gate
+      # the record described did not exist.
+      - name: Stack-bounds table growth
+        run: make stack-bounds-growth
 
       # A crash on Darwin used to read as a null dereference: the poison
       # lives in the faulting registers, and Darwin's SIGSEGV ucontext

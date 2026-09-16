@@ -821,6 +821,25 @@ static-bss-roots: $(BIN)
 	# held only by the BSS did not survive".
 	! GCRY_DISABLE_STATIC_ROOTS=1 $(BIN)/static_bss_roots
 
+# Does the stack-bounds snapshot still cover the 65th thread? The root scan
+# cannot call `pthread_getattr_np` with the world stopped -- that is the
+# 2026-08-10 six-hour hang -- so bounds are snapshotted before the stop and read
+# from a table inside it, and that table was a fixed 64 slots. Past it, threads
+# were visited with nowhere to record them and their OS stacks went unscanned.
+# `ROADMAP.md` claimed this was gated in `process_spec` and broken on purpose
+# with `GCRY_STACK_BOUNDS_NOGROW=1`; the knob was in no spec, recipe or CI step
+# at all, so the claim had gone stale in place. Three arms: `hold` requires
+# `read == visited` with 100 threads held, `--nogrow` freezes the table and
+# requires the loss to *show* in both counters (measured: read 128 of 204
+# visited, 76 misses), `--control` stays inside the initial capacity so the
+# equality above is attributable to growth. ~6 s.
+.PHONY: stack-bounds-growth
+stack-bounds-growth: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stack_bounds_growth.cr -o $(BIN)/stack_bounds_growth --error-trace
+	$(BIN)/stack_bounds_growth
+	$(BIN)/stack_bounds_growth --control
+	GCRY_STACK_BOUNDS_NOGROW=1 $(BIN)/stack_bounds_growth --nogrow
+
 # Is the stack of a *terminating* fiber a root? `Thread#dead_fiber_stack` parks
 # it there because Crystal cannot release a fiber's stack until it swaps away,
 # and while it sits there the thread may still be running on it while the owning
