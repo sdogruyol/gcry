@@ -17,7 +17,18 @@ first long reading on Monday.
 | arm | build | verdict | RSS | errors | finalizers |
 |---|---|---|---|---|---:|
 | single thread | `-Dgc_none` | **PASSED** | 6 804 → 7 572 kB (+768 kB, max 7 724, ceiling +4 096) | 0 | 83 705 drained |
-| EC4 + fiber churn | `-Dgc_none -Dpreview_mt -Dexecution_context`, `EC_PARALLELISM=4`, `--fiber-churn=512` | **PASSED** | 6 756 → 21 232 kB (+14 476 kB, max 90 516, ceiling +131 072) | 0 | 80 865 of 80 866 |
+| ~~EC4~~ + fiber churn | `-Dgc_none -Dpreview_mt -Dexecution_context`, `EC_PARALLELISM=4`, `--fiber-churn=512` | **PASSED** | 6 756 → 21 232 kB (+14 476 kB, max 90 516, ceiling +131 072) | 0 | 80 865 of 80 866 |
+
+> **Correction, 2026-09-16: the second arm was not EC4.** It ran **one** worker,
+> like the first. `bench/soak.cr` never called `Fiber::ExecutionContext::Parallel#resize`,
+> and Crystal's default context starts at capacity 1; `EC_PARALLELISM` is this
+> repo's own name for the argument `bench/kemal/src/server.cr` passes to
+> `resize`, and the soak harness does not read it. Measured, that exact build and
+> env: capacity 1, 2 OS threads. What separates the two arms above is
+> `--fiber-churn=512` alone. The RSS and finalizer readings stand — they were
+> never about parallelism — but nothing here is evidence about multi-worker
+> behaviour. `--workers=N` now exists and the harness records the parallelism it
+> actually booted: `../2026-09-16-soak-worker-count/FINDINGS.md`.
 
 168 telemetry samples each. The single-thread arm is flat from the first
 minute (7 648 → 7 724 kB across the whole run); the EC4 arm peaks at 90 MB
