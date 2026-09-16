@@ -890,6 +890,34 @@ kept finding the rest.
       ceiling turned out to hold: worst +3136 against +4096 is 960 kB of
       headroom, 1.28× the 752 kB spread. Darwin does re-fault ~2.9× what Linux
       does, which is why it needed measuring and not assuming.
+- [ ] **64 of 84 gates cannot be shown to fail without a hand edit.** Every gate
+      asserts something; the question that has now bitten three times is whether
+      it can still come out **red**. `make page-release-corruption` and
+      `make live-graph-audit` had rotted into testing nothing and shipped that
+      way for releases (both fixed in 0.26.0); the soak carried an arm recorded
+      as "EC4" for six weeks while running one worker; the `--resize` arm added
+      2026-09-16 passed on its first version because the window it measures was
+      never open. In each the assertion ran and only its ability to fail was
+      gone. Censused by `bench/gate_arm_census.py` so the number is re-derivable:
+      **20** gates construct their red direction per run — the recipe requires a
+      command to fail (`tls-roots`, `interior-only-buffer`,
+      `unaligned-only-buffer`), or the harness forks a child under a breaking
+      knob and judges it (`stw-watchdog` is the model: armed+stalled must print,
+      armed+not-stalled must stay silent, stalled+unarmed must stay silent). For
+      the other **64** it was established once by hand, and `ROADMAP.md` says so
+      in prose **19** times — which nothing re-checks. Three were sampled by
+      actually breaking the collector and all three went red
+      (`each_thread_greg` stubbed → `greg-roots`; `has_inner_pointers?` dropped
+      → `ivar-layout-roots`; the pin loop removed → `scheduler-roots --resize`),
+      so this is about re-verification and not about hollow gates. The reusable
+      finding from those breaks: **a survival assertion does not discriminate, a
+      counter does** — in all three the object survived the break because
+      conservative scanning reached it, and only a counter went red. The fix per
+      gate is the `tls-roots` shape, a research knob restoring the pre-fix
+      behaviour plus a recipe arm that requires it to fail; 64 of those is a
+      program, not a change, and the order should follow what a rotted gate
+      would cost rather than the alphabet.
+      `bench/log/linux/2026-09-16-gate-arm-audit/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

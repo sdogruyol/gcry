@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Which gates construct their own red arm, and which only ever had one by hand?
+
+Every gate in this repo asserts something. The question this answers is narrower
+and is the one that has bitten twice: can the gate still *fail*? Two gates had
+rotted into testing nothing and shipped that way for releases
+(`page-release-corruption`, `live-graph-audit`, both fixed in 0.26.0), and the
+soak carried an arm labelled "EC4" for six weeks that ran one worker
+(`bench/log/linux/2026-09-16-soak-worker-count/`). In each case the assertion
+still ran; what was gone was its ability to come out red.
+
+A gate's red direction is *constructed per run* when something the gate itself
+executes has to fail:
+
+  * the Makefile recipe prefixes a command with `!`, or asserts on its output
+    with `grep -q`; or
+  * the harness forks a child with a knob or flag that breaks the thing under
+    test, and asserts on what the child did.
+
+Otherwise the red direction was established once, by hand, by whoever wrote the
+gate — and that fact lives in `ROADMAP.md` prose ("broken on purpose and
+observed red"), which nothing re-checks.
+
+This is a census, not a gate: it asserts nothing and fails nothing. Its output is
+a number that FINDINGS can quote and a reader can re-derive. The classification
+is mechanical and therefore approximate in both directions — a harness that
+breaks its subject in-process without forking reads as "not constructed", and a
+`--control` arm that must *pass* is correctly not counted as a red arm, because a
+negative control shows the harness is not the cause, not that the gate can fail.
+
+  python3 bench/gate_arm_census.py            # summary
+  python3 bench/gate_arm_census.py --list     # per-gate table
+"""
+
+from __future__ import annotations
+
+import re
+import signal
+import sys
+from pathlib import Path
+
+# `| head` on a census is the obvious way to read it, and a tool that dies on
+# SIGPIPE while the subject of the day is swallowed exit statuses would be a
+# poor joke.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):  # not POSIX, or not the main thread
+    pass
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def makefile_targets() -> dict[str, list[str]]:
+    targets: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in (ROOT / "Makefile").read_text().splitlines():
+        head = re.match(r"^([A-Za-z0-9_.-]+):(?!=)", line)
+        if head:
+            current = head.group(1)
+            targets[current] = []
+        elif line.startswith("\t") and current:
+            targets[current].append(line[1:])
+    return targets
+
+
+def harness_constructs_red(stem: str) -> bool:
+    """The harness forks a child under a breaking knob/flag and judges it."""
+    path = ROOT / "bench" / f"{stem}.cr"
+    if not path.exists():
+        return False
+    src = path.read_text()
+    forks = re.search(r"Process\.run|run_child|spawn_child", src) is not None
+    judges = re.search(r"failures <<|exit 1|exit\(1\)", src) is not None
+    breaks = re.search(r'"GCRY_\w+"\s*=>|--child', src) is not None
+    return forks and judges and breaks
+
+
+def recipe_constructs_red(recipe: str) -> bool:
+    """The recipe requires a command to fail, or asserts on its output."""
+    must_fail = re.search(r"(^|\s|;)!\s*\S", recipe, re.M) is not None
+    asserts_output = re.search(r"\|\s*grep -q", recipe) is not None
+    return must_fail or asserts_output
+
+
+def census() -> list[tuple[str, bool, bool, list[str]]]:
+    rows = []
+    for name, lines in makefile_targets().items():
+        recipe = "\n".join(lines)
+        harnesses = sorted(set(re.findall(r"bench/([a-z0-9_]+)\.cr", recipe)))
+        if not harnesses:
+            continue
+        rows.append(
+            (
+                name,
+                recipe_constructs_red(recipe),
+                any(harness_constructs_red(h) for h in harnesses),
+                harnesses,
+            )
+        )
+    return sorted(rows)
+
+
+def main() -> int:
+    rows = census()
+    per_run = [r for r in rows if r[1] or r[2]]
+    by_hand = [r for r in rows if not (r[1] or r[2])]
+
+    if "--list" in sys.argv:
+        print(f"{'gate':<32}{'recipe':<8}{'harness':<9}red arm")
+        for name, mk, hz, _ in rows:
+            verdict = "per run" if (mk or hz) else "by hand, once"
+            print(f"{name:<32}{int(mk):<8}{int(hz):<9}{verdict}")
+        print()
+
+    print(f"harness-driven gates:              {len(rows)}")
+    print(f"red direction constructed per run: {len(per_run)}")
+    print(f"red direction established by hand: {len(by_hand)}")
+    prose = len(
+        re.findall(
+            r"broken on purpose|observed red",
+            (ROOT / "ROADMAP.md").read_text(),
+        )
+    )
+    print(f"prose claims of a hand break:      {prose} (nothing re-checks these)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

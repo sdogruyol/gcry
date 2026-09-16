@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bench/gate_arm_census.py`: which gates can still come out red.**
+  Every gate asserts something; what rots is its ability to fail, and
+  this repo has three instances — `make page-release-corruption` and
+  `make live-graph-audit` testing nothing for releases, the soak's "EC4"
+  arm running one worker for six weeks, and the `--resize` arm added the
+  same day passing with its window shut. The census reports **20 of 84**
+  harness-driven gates constructing their red direction per run (recipe
+  `!`/`grep -q`, or a harness that forks a child under a breaking knob
+  and judges it) against **64** that had it established once by hand,
+  plus the **19** places `ROADMAP.md` claims a hand break that nothing
+  re-checks. Three were sampled by breaking the collector for real —
+  `each_thread_greg` stubbed, `Layout.register`'s `has_inner_pointers?`
+  fallback dropped, the `ec.@schedulers` pin loop removed — and all
+  three went red, so the finding is about re-verification, not hollow
+  gates. What the breaks showed is worth more than the count: **a
+  survival assertion does not discriminate and a counter does**, because
+  in all three the object survived the break on conservative scanning
+  alone and only a counter noticed.
+  `bench/log/linux/2026-09-16-gate-arm-audit/FINDINGS.md`
+
 - **`make scheduler-roots` now audits the one EC state where the
   context's scheduler list and reality differ.**
   `Fiber::ExecutionContext::Parallel#resize` replaces `@schedulers`
