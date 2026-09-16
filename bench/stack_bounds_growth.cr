@@ -102,8 +102,15 @@ threads = [] of Thread
 want.times do
   threads << Thread.new do
     running.add(1)
+    # 25 ms, not microseconds. The first version polled at 200 us, which is
+    # 100 threads x 5000 wakeups/s: fine on a 20-thread host and apparently
+    # pathological on the 4-vCPU macOS runner, where this harness ran 18m37s
+    # and took the Darwin job down at its 20-minute cap
+    # (log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md). Release latency of
+    # 25 ms costs nothing here: the threads only have to still exist while two
+    # collections happen.
     while release.get == 0
-      Thread.sleep(200.microseconds)
+      Thread.sleep(25.milliseconds)
     end
   end
 end

@@ -1577,8 +1577,13 @@ jobs:
       # it back to the pre-fix fixed table was in no spec, recipe or CI step,
       # while ROADMAP.md claimed this was gated in process_spec — so the gate
       # the record described did not exist.
-      - name: Stack-bounds table growth
-        run: make stack-bounds-growth
+      # `make stack-bounds-growth` is deliberately absent here: it ran 18m37s
+      # on this runner and was cancelled at the job's 20-minute cap on
+      # 2026-09-16, after the two root gates above finished in 3-4 s each. The
+      # harness has been changed not to poll at 200 us, which is the leading
+      # suspect, but that is untested on Darwin and a gate is not re-enabled on
+      # a hypothesis. See ROADMAP.md and
+      # `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`.
 
       # A crash on Darwin used to read as a null dereference: the poison
       # lives in the faulting registers, and Darwin's SIGSEGV ucontext

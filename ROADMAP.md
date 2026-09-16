@@ -2033,6 +2033,22 @@ kept finding the rest.
       full coverage of a smaller process. What is still not measured is
       unchanged: whether a thread past the 64th ever held the only reference to
       something. The gate asserts the coverage, not a defect.
+      `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+- [ ] **`make stack-bounds-growth` is not enabled on Darwin.** Its first CI run
+      took the macOS job down: 18m37s, cancelled at the job's 20-minute cap,
+      after the two root gates before it finished in 3 and 4 seconds — while
+      Linux x86_64 and aarch64 Linux both passed it. Exactly the hazard recorded
+      the day before about `GCRY_DISABLE_SP_CLAMP`, in a gate written the day
+      after. The leading suspect is the harness: it held 100 threads alive on a
+      200 us poll, 5 000 wakeups per thread per second, which is unremarkable on
+      a 20-thread host and plausibly pathological on a 4-vCPU runner. The poll is
+      25 ms now, which costs the harness nothing. That fix is **untested on
+      Darwin**, so the arm stays off: what closes this is one Darwin run wrapped
+      in `timeout`, the way the aarch64 job already wraps every gate, so a hang
+      fails a step in a minute instead of cancelling twenty. If the poll turns
+      out not to be it, the next suspect is Darwin's per-thread Mach
+      `thread_suspend` / `thread_get_state` stop against Linux's signal
+      broadcast at 100 threads, which would be a finding about the collector.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md` **What is not measured** is whether a thread past
       the 64th ever held the only reference to something: the loss is a
       documented half of that thread's coverage, and no arm has yet shown a

@@ -29,7 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   threads reading `visited=64 read=64`). `docs/HARDENING.md` now says
   which counting each of those two measurements belongs to. Still not
   claimed, unchanged from the fix: whether a thread past the 64th ever
-  held the only reference to something.
+  held the only reference to something. **Linux and aarch64 only:** the
+  first Darwin run of this gate took that job down — 18m37s, cancelled at
+  its 20-minute cap — so it is not enabled there. The harness held its
+  100 threads on a 200 us poll and now uses 25 ms, which is the leading
+  suspect, but a gate is not re-enabled against a hypothesis.
   `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
 
 - **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has

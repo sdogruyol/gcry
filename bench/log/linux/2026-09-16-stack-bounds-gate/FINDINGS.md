@@ -69,6 +69,37 @@ Whether a thread past the 64th ever held the only reference to something.
 the loss was a documented hole in those threads' coverage, not an observed
 sweep. This gate asserts the coverage.
 
-On Linux, aarch64 and Darwin: `darwin_stack.cr` and `windows_stack.cr` carry the
-same three counters and the same setter, so the arms are not Linux-only.
 Census 85 → 86, 31 per run.
+
+## It took the Darwin job down, and is not enabled there
+
+`darwin_stack.cr` carries the same three counters and the same setter, so the
+arms are not Linux-only in principle. In practice the first CI run says
+otherwise: on the macOS runner this gate ran **18m37s** (17:55:14 → 18:13:51)
+and was cancelled by the job's 20-minute cap, after the two root gates before it
+finished in 3 and 4 seconds. Linux x86_64 and aarch64 Linux both passed it in
+the same run.
+
+That is the hazard recorded one day earlier about `GCRY_DISABLE_SP_CLAMP` — *"a
+red arm that hangs costs a job timeout and reports nothing, which is the failure
+mode CI job timeouts were added for"* — walked into by the gate written the next
+day.
+
+**The leading suspect is the harness, not the collector.** It held its 100
+threads alive on `Thread.sleep(200.microseconds)`, i.e. 100 threads × 5 000
+wakeups a second. That is unremarkable on a 20-thread host and plausibly
+pathological on a 4-vCPU macOS runner. The poll is now 25 ms, which costs this
+harness nothing — the threads only have to exist while two collections happen.
+
+**It is not re-enabled on Darwin.** The fix is untested there, and a gate is not
+turned back on against a hypothesis; that is the whole argument this file makes
+about the claim it was written to replace. What would settle it is one Darwin
+run of `make stack-bounds-growth` with the 25 ms poll, wrapped in `timeout` so a
+hang fails the step in a minute instead of cancelling the job — the pattern the
+aarch64 job already uses on every gate.
+
+Second possibility worth keeping in view if the poll turns out not to be it:
+Darwin's stop-the-world suspends each thread with Mach `thread_suspend` /
+`thread_get_state` rather than a signal broadcast, so 100 threads may cost
+asymmetrically more there per collection. That would be a finding about the
+collector rather than the harness, and it would be worth having.
