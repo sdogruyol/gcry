@@ -460,10 +460,12 @@ is now the default and the flag would take you the wrong way.
   arm pins a header-layout knob — `heap-counters` (plain counters),
   `poison-freed` (freelist arms), `darwin-bitmap-page-release` (`--headers`)
   and the sound-profile smoke (`GCRY_NURSERY`) — build that arm with
-  `-Dgcry_block_headers`, so the knob is read rather than silently ignored. `bench/baseline/perf_smoke.json`
-  was recorded on the header layout and needs re-recording on the first ten
-  green master runs after this lands, as its provenance note says for any
-  default-allocator change.
+  `-Dgcry_block_headers`, so the knob is read rather than silently ignored.
+  `bench/baseline/perf_smoke.json` was taken on the header layout hours before
+  this flip; the re-record it asked for happened before the release rather than
+  after it, on 48 green headerless master runs — see the perf-baseline entry
+  above. Its provenance note now carries the standing rule instead of a
+  pending obligation: re-record on the next layout or allocator flip.
 
 ### Fixed
 
