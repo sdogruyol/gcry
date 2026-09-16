@@ -307,6 +307,13 @@ greg-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/greg_roots.cr -o $(BIN)/greg_roots --error-trace
 	$(BIN)/greg_roots
 	$(BIN)/greg_roots --control
+	# The red direction, which until 2026-09-16 existed only as a sentence in
+	# ROADMAP.md ("broken on purpose and observed red"). The knob that restores
+	# the pre-v0.19.0 behaviour was already in the collector and no recipe,
+	# spec or CI step used it. Red at `register candidates ... 0`, and note
+	# what it does *not* do: the victim still survives, because the
+	# conservative stack scan reaches it. The counter is the gate.
+	! GCRY_DISABLE_GREG_ROOTS=1 $(BIN)/greg_roots
 
 # The diagnostics travel with this gate for the same reason they travel with
 # `ec-queue-audit`: it is one that dies. It caught the open use-after-free on
@@ -807,6 +814,12 @@ static-bss-roots: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dstatic_bss_huge bench/static_bss_roots.cr -o $(BIN)/static_bss_roots_huge --error-trace
 	$(BIN)/static_bss_roots
 	$(BIN)/static_bss_roots_huge
+	# The red direction. `GCRY_STATIC_BSS_CAP=1` (used inside the harness)
+	# refuses one large section; this refuses the static root scan outright,
+	# which is the stronger break and the one a reader would reach for. Also
+	# previously read by the collector and used by nothing. Red at "a block
+	# held only by the BSS did not survive".
+	! GCRY_DISABLE_STATIC_ROOTS=1 $(BIN)/static_bss_roots
 
 # Is a pointer held only in thread-local storage a root? It was not, on the
 # main thread: the executable's writable image (`PT_LOAD` / `__DATA*` / PE

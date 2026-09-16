@@ -918,6 +918,26 @@ kept finding the rest.
       program, not a change, and the order should follow what a rotted gate
       would cost rather than the alphabet.
       `bench/log/linux/2026-09-16-gate-arm-audit/FINDINGS.md`
+      **First pass, and the knobs were already there.** `make knob-doc-check`
+      enforces that every `GCRY_*` the collector reads is documented; nothing
+      enforces that one is *used*. **Eleven** root-disabling knobs are read by
+      `src/` and appear in no spec, no `bench/`, no recipe and no CI step — and
+      `ROADMAP.md`'s claim that `GCRY_STACK_BOUNDS_NOGROW` is "gated in
+      `process_spec`" is stale, it is not in `spec/` at all. Each knob was run
+      against every fast root gate and the exit statuses tabulated, which bought
+      two red arms for no collector code: `! GCRY_DISABLE_GREG_ROOTS=1` on
+      `make greg-roots` (targeted — it reddens that gate and nothing else, and
+      that gate covers the v0.19.0 shape where rot means silent sweeps) and
+      `! GCRY_DISABLE_STATIC_ROOTS=1` on `make static-bss-roots`. Census 20 → 21.
+      Not wired, with reasons: `GCRY_DISABLE_SP_CLAMP` **hangs** two gates rather
+      than failing them (124 at a 90 s timeout), and `GCRY_DISABLE_STATIC_ROOTS`
+      kills five of seven outright (exit 11). And **seven knobs no gate
+      notices** — `DEAD_STACK_NOROOT`, `POOLED_STACK_NOROOT`,
+      `MAPS_INFLIGHT_NOROOT`, `BIRTH_GRACE_NOROOT`, `STACK_BOUNDS_NOGROW`,
+      `DISABLE_SCRUB_FIBERS`, `DISABLE_AUTO_LAYOUTS` — not because they are
+      no-ops but because no gate constructs the condition they break. That is
+      the part that needs harnesses rather than recipe lines.
+      `bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
@@ -1976,9 +1996,14 @@ kept finding the rest.
       capacity check returned before the visit was counted — with 18 lookups
       falling through to `nil`; 122 threads, 58. It grows now, and the visit is
       counted first, so `read == visited` is load-bearing: 82 → 82/82, 202 →
-      202/202, zero misses. Gated in `process_spec` above the initial capacity
+      202/202, zero misses. **Correction, 2026-09-16: the gate this claimed is
+      not there.** It said "gated in `process_spec` above the initial capacity
       and broken on purpose with `GCRY_STACK_BOUNDS_NOGROW=1` (red at
-      `visited=150 read=130`). **What is not measured** is whether a thread past
+      `visited=150 read=130`)" — that break was real when it was measured, but
+      `GCRY_STACK_BOUNDS_NOGROW` appears in no `spec/`, no `bench/`, no recipe
+      and no CI step today, so nothing re-checks it and the counters it names
+      are asserted nowhere. One of eleven such knobs
+      (`bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`). **What is not measured** is whether a thread past
       the 64th ever held the only reference to something: the loss is a
       documented half of that thread's coverage, and no arm has yet shown a
       block dying of it.

@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make greg-roots` and `make static-bss-roots` now construct their own
+  red arm.** Both gates' ability to fail existed only as a sentence in
+  `ROADMAP.md` ("broken on purpose and observed red"). The knobs that
+  restore the pre-fix behaviour were already in the collector and used by
+  nothing: eleven root-disabling `GCRY_*` knobs are read by `src/` and
+  appear in no spec, no `bench/`, no recipe and no CI step —
+  `knob-doc-check` enforces that a knob is *documented*, nothing enforces
+  that it is *used*. Running each against every fast root gate bought two
+  arms for no collector code: `! GCRY_DISABLE_GREG_ROOTS=1` (targeted; it
+  reddens `greg-roots` and nothing else, and that gate covers the
+  v0.19.0 defect shape on two platforms) and
+  `! GCRY_DISABLE_STATIC_ROOTS=1`. Under the first the victim still
+  **survives** — the conservative stack scan reaches it — and what goes
+  red is `register candidates … 0`, the fourth independent case of a
+  counter discriminating where survival does not. Also recorded: two
+  knobs unsuitable as arms (`GCRY_DISABLE_SP_CLAMP` hangs two gates,
+  `GCRY_DISABLE_STATIC_ROOTS` kills five of seven outright) and seven
+  that no gate notices, because no harness builds the condition they
+  break. `ROADMAP.md`'s claim that `GCRY_STACK_BOUNDS_NOGROW` is gated in
+  `process_spec` is retracted — it is not in `spec/`.
+  `bench/log/linux/2026-09-16-orphan-break-knobs/FINDINGS.md`
+
 - **`bench/gate_arm_census.py`: which gates can still come out red.**
   Every gate asserts something; what rots is its ability to fail, and
   this repo has three instances — `make page-release-corruption` and
