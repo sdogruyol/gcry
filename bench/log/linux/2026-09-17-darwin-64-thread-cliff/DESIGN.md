@@ -24,6 +24,15 @@ folded in below, because they change the design:
 
 What is Darwin-specific is the **resume** path, and that is the hang.
 
+And a fourth correction, found while wiring the counter: the three platforms do
+**not** behave alike at the bound. Windows refuses the stop — the count is
+checked before the suspend and `raise_thread_suspension_error` already says "or
+exceeded 64 threads" — so it never suspends a thread it cannot record and
+cannot hang in resume. Linux admits the stop and loses the capture. Darwin
+hangs. That makes `stw_capture_no_slot` a structural zero on Windows today, and
+it means Half 2 has to decide what Windows does *instead* of refusing, which is
+a behaviour change on that platform and not just a table resize.
+
 ## Half 1 — the hang: make resume independent of the table
 
 ### The defect, exactly

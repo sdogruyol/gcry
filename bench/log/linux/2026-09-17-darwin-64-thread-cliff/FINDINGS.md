@@ -100,6 +100,22 @@ Made while designing the fix, and they matter:
   known and handled there — and, as far as I can find, counted nowhere. Darwin
   has no such branch at all.
 
+## One bound, three behaviours
+
+Found while wiring the counter, and it corrects a claim I had just committed
+(the comment in `windows_stw.cr` said all three platforms behaved alike):
+
+| platform | past `MAX_STW_SP_SLOTS` live threads |
+|---|---|
+| Windows | **refuses the stop.** `try_stop_world_threads` checks the count *before* suspending, breaks, and `raise_thread_suspension_error` says "or exceeded 64 threads". No silent loss, no hang — it declines to collect. |
+| Linux | **admits the stop, loses the capture.** `SUSPEND_NO_SLOT`, by an explicit decision to cost the thread its SP clamp rather than the stop. Silent root loss; measured below. |
+| Darwin | **hangs.** Suspends unconditionally, records the port only while a slot is free, resumes only what it recorded. |
+
+So the loudest platform is the one nobody worried about, and Darwin's defect is
+not that it shares a bound — it is that it is the only one whose *resume* is
+sized by the table. Windows also shows the answer Half 2 has to improve on:
+refusing to collect past 64 threads is correct and unacceptable.
+
 ## Measured on Linux, 2026-09-17: the capture ceiling is not hypothetical
 
 The design's step 1 — `stw_capture_no_slot`, a counter on every platform for a

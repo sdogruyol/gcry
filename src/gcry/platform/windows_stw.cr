@@ -22,9 +22,19 @@ module Gcry::Platform
   @@stw_installed = false
   @@stw_handles = uninitialized StaticArray(LibC::HANDLE, MAX_STW_SP_SLOTS)
   @@stw_handle_count = 0
-  # Slot claims that found the table full. Same bound and same consequence as
-  # the other two platforms — the thread is suspended and scanned without an SP
-  # clamp or registers — and until now nothing counted it. Reporting only.
+  # Slot claims that found the table full. Same bound as the other two
+  # platforms, but **not** the same consequence, and the comment here first
+  # claimed otherwise: `try_stop_world_threads` checks the count *before*
+  # suspending and fails the whole stop at the 64th thread — see
+  # `raise_thread_suspension_error`, whose message already says "or exceeded 64
+  # threads". So this platform never suspends a thread it cannot record, never
+  # scans one without an SP clamp, and cannot hang in resume. It refuses to
+  # collect instead, which is its own problem but a loud one.
+  #
+  # That makes this counter a structural zero here today. It is kept for two
+  # reasons: `/gc-stats` reads the same name on every platform, and lifting the
+  # bound has to decide what this platform does instead of refusing — at which
+  # point the counter starts being the instrument rather than the raise.
   @@stw_capture_no_slot = uninitialized UInt64
 
   def self.stw_sp_clamp_enabled? : Bool
