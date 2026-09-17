@@ -14,6 +14,16 @@ describe "bitmap pool revives dormant chunks" do
       heap.gc_threshold = UInt64::MAX
       heap.release_empty_chunks = true
       heap.empty_chunk_retain = 64_u64 * 1024 * 1024 # keep empties dormant, never munmap
+      # Warm beats dormant in the sweep's priority (`collect_sweep.cr`: warm →
+      # dormant → munmap), so an example that requires dormancy has to close
+      # the warm path rather than rely on its default. Measured: with the warm
+      # budget open this example's exact symptom appears —
+      # `chunks=8 dormant=0 dormant_bytes=0 heap_size=1048576` against
+      # `chunks=8 dormant=8 dormant_bytes=1048576` with it closed, which is the
+      # 2026-09-17 failure line byte for byte. That does **not** establish it as
+      # the cause: the property defaults to 0 here and nothing in the spec build
+      # sets it. It removes one branch of the possibility space by construction.
+      heap.empty_chunk_warm_retain = 0
 
       # Fill more than one chunk of one class, then free everything.
       ptrs = Array(Void*).new(20_000) { heap.malloc(48) }
@@ -32,8 +42,19 @@ describe "bitmap pool revives dormant chunks" do
       # about which of dormancy's preconditions was missing on that host. The
       # page size is in the line because `madvise` over a range aligned to the
       # wrong unit returns EINVAL and dormancy then silently does not happen.
+      # `fully_free`, `warm_retain` and `unmapped` are in the line because the
+      # first version could not tell three different failures apart: the chunks
+      # were never empty (so the sweep's `unless any_live` branch never ran),
+      # they were empty but kept **warm** (warm preempts dormant), or dormancy
+      # was attempted and refused. The 2026-09-17 occurrence under kcov
+      # reported `chunks=8 dormant=0 heap_size=1048576 retain=67108864
+      # page=4096 compiled_page=4096`, which rules out the page-size hypothesis
+      # above and distinguishes none of the other three.
       state = "chunks=#{chunks} dormant=#{dormant} dormant_bytes=#{heap.dormant_chunk_bytes} " \
+              "fully_free=#{heap.fully_free_chunk_bytes} unmapped=#{heap.unmapped_bytes} " \
+              "live_objects=#{heap.live_objects} " \
               "heap_size=#{heap.heap_size} retain=#{heap.empty_chunk_retain} " \
+              "warm_retain=#{heap.empty_chunk_warm_retain} " \
               "page=#{Gcry::Platform::PAGE_SIZE} compiled_page=#{Gcry::Roots::PAGE_SIZE}"
       fail "no chunk went dormant — #{state}" if dormant == 0
       dormant_bytes = heap.dormant_chunk_bytes

@@ -177,6 +177,15 @@ it "munmaps fully free size-class chunks on major" do
     heap.gc_threshold = UInt64::MAX
     heap.release_empty_chunks = true
     heap.empty_chunk_retain = 0 # force munmap (no dormant retain)
+    # And no warm retain: warm precedes both dormant and munmap in the sweep's
+    # priority (`collect_sweep.cr`), so an example that requires a release has
+    # to close that path rather than depend on its default. This example failed
+    # on 2026-09-17 under kcov with `unmapped_bytes` at 0; whether an open warm
+    # budget is what did it is **not** established — a nonzero budget
+    # reproduces the symptom exactly, but the property defaults to 0 on a fresh
+    # heap and nothing in this build sets it. The `fail` line below carries the
+    # fields that would tell the next occurrence apart.
+    heap.empty_chunk_warm_retain = 0
     heap.nursery_enabled = false
 
     keep = heap.malloc(64)
@@ -197,7 +206,10 @@ it "munmaps fully free size-class chunks on major" do
       heap.collect(scan_stack: false)
       heap.live?(keep).should be_true
     end
-    heap.unmapped_bytes.should be > 0
+    fail "nothing was unmapped — fully_free=#{heap.fully_free_chunk_bytes} " \
+         "dormant=#{heap.dormant_chunk_bytes} warm_retain=#{heap.empty_chunk_warm_retain} " \
+         "retain=#{heap.empty_chunk_retain} heap_size=#{heap.heap_size} before=#{before}" \
+      if heap.unmapped_bytes == 0
     heap.released_chunk_bytes.should eq(heap.unmapped_bytes)
     heap.fully_free_chunk_bytes.should eq(heap.released_chunk_bytes)
     heap.heap_size.should be < before
@@ -214,6 +226,7 @@ it "keeps empty chunks dormant within empty_chunk_retain" do
     heap.gc_threshold = UInt64::MAX
     heap.release_empty_chunks = true
     heap.empty_chunk_retain = UInt64::MAX
+    heap.empty_chunk_warm_retain = 0 # dormant is the path under test; warm would preempt it
     heap.nursery_enabled = false
 
     keep = heap.malloc(64)
@@ -225,7 +238,10 @@ it "keeps empty chunks dormant within empty_chunk_retain" do
     heap.live?(keep).should be_true
     heap.unmapped_bytes.should eq(0)
     heap.released_chunk_bytes.should eq(0)
-    heap.dormant_chunk_bytes.should be > 0
+    fail "nothing went dormant — fully_free=#{heap.fully_free_chunk_bytes} " \
+         "unmapped=#{heap.unmapped_bytes} warm_retain=#{heap.empty_chunk_warm_retain} " \
+         "heap_size=#{heap.heap_size} before=#{before}" \
+      if heap.dormant_chunk_bytes == 0
     heap.dontneed_bytes.should be > 0
     heap.heap_size.should eq(before)
     heap.malloc(64).should_not be_nil
