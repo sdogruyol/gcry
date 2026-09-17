@@ -44,7 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stw_threads_resumed`, both counted on `KERN_SUCCESS` only, plus every
   worker still making progress after the restart, with
   `GCRY_STW_BOUNDED_RESUME=1` restoring the pre-fix table walk as the red
-  arm.
+  arm. Measured on the runner: 142 suspends and 142 resumes with nothing
+  stalled on the fix, 142 against **128** with **7 of 70 workers frozen**
+  on the pre-fix walk — a difference of 14, which is 2 collections ×
+  (71 − 64) threads. The probe's two timing cells that had been TIMEOUT
+  at 120 s now finish, and us/thread *falls* with n as it does on Linux.
 
 - **The aarch64 spec flake family is root-caused: one extra live thread
   turns the empty-chunk release off.**

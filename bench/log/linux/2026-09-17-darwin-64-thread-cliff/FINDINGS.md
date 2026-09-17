@@ -171,3 +171,42 @@ not land together.
 the counter that has to come first, why the `@suspended` flag is the wrong
 resume record, the one hazard in the list-walk resume, and the O(n²) slot search
 that becomes the next cliff once the ceiling is lifted.
+
+
+## Verified on Darwin, 2026-09-17: run 35223283452
+
+Half 1 landed and the macOS job ran it. `make darwin-stw-resume`, three arms,
+Apple Silicon runner:
+
+| arm | threads | resume | suspended | resumed | stalled |
+|---|---|---|---|---|---|
+| hold    | 70 | shipped thread list | 142 | **142** | 0/70 |
+| bounded | 70 | pre-fix 64-entry table | 142 | **128** | **7/70** |
+| control |  8 | pre-fix 64-entry table | 18 | **18** | 0/8 |
+
+The arithmetic is the whole argument: 142 = 2 collections × 71 threads (the 70
+workers plus the one the harness holds), 128 = 2 × 64, and the difference of 14
+is 2 × 7 — exactly the 71 − 64 threads the table cannot hold. The bounded arm
+reported `suspended=142 but resumed=128: 14 thread(s) were suspended and never
+resumed` and 7 workers that made no progress in 250 ms after the world
+restarted. The control arm says the knob alone is harmless, so the hold arm's
+equality is attributable to the bound.
+
+And the probe that started this, `make thread-startup-cost`, in the same job.
+The two cells that had been **TIMEOUT at 120 s** now complete:
+
+| arm | n | before | after |
+|---|---|---|---|
+| collect | 8   | 7.6 ms      | 943.3 us/thread, 9 collections |
+| collect | 32  | 32.3 ms     | 175.8 us/thread, 9 collections |
+| collect | 64  | **TIMEOUT** | **236.2 us/thread, 7 collections** |
+| collect | 100 | **TIMEOUT** | **60.5 us/thread, 4 collections** |
+
+us/thread on the collect arm now *falls* from 943.3 at n=8 to 60.5 at n=100
+(×0.06), the same shape Linux always had. The O(n²) reading is refuted a second
+time, now with the data at n=64 and n=100 that could not be collected at all
+while the bound was there.
+
+What this does **not** establish: that Half 2 is unnecessary. `stw_capture_no_slot`
+is still non-zero past 64 threads on Linux and Darwin — the capture ceiling is
+untouched, and this gate asserts only that the world comes back.

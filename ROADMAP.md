@@ -2081,11 +2081,12 @@ kept finding the rest.
       attributable to the bound rather than to the knob. Three arms, bounded
       children, 60 s each; a wedged child counts as the red observation because
       a thread frozen holding the allocator takes the process with it.
-      **Unverified on the platform:** `thread_resume` on a thread whose suspend
-      count is zero is documented to return `KERN_FAILURE` and do nothing, which
-      is what makes a stray resume of a thread born mid-stop inert. Read from
-      the documentation, not observed — no Darwin host here. The CI gate is the
-      first execution of any of this.
+      **Verified on the runner** (run 35223283452): hold 142 suspends / 142
+      resumes / 0 stalled, bounded 142 / **128** / **7 stalled**, control 18 /
+      18 / 0. The difference of 14 is 2 collections × (71 − 64) threads, which
+      is the bound stated as arithmetic. The probe's two TIMEOUT cells also
+      filled in — collect n=64 now 236.2 us/thread and n=100 60.5 us/thread,
+      falling with n exactly as Linux does.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`
 - [ ] **The same 64-slot bound still costs SP and register capture on Linux and
       Darwin (Half 2).** `slot_for` returns −1 past the table, so those threads
