@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reporting only; the gate asserting it zero belongs with the fix that
   lifts the bound. Windows refuses any stop it cannot record, so the
   counter is a structural zero there.
+- **`stw_threads_suspended` / `stw_threads_resumed` on `Heap`**, Darwin
+  only: threads a stop suspended and resumed, counted on `KERN_SUCCESS`
+  on both sides, so their equality is the resume's contract. Not on
+  `/gc-stats` — that tuple is at Crystal's 300-field ceiling and a
+  counter has to earn its place there; these two are a gate contract and
+  `bench/darwin_stw_resume.cr` reads them off the heap.
 
 ### Fixed
 

@@ -274,16 +274,6 @@ module Gcry
         stw_suspend_no_tls:                    heap.stw_suspend_no_tls,
         stw_suspend_ack_unavailable:           heap.stw_suspend_ack_unavailable,
         stw_capture_no_slot:                   heap.stw_capture_no_slot,
-        # `stw_threads_suspended` / `stw_threads_resumed` are deliberately not
-        # here: this literal is at Crystal's hard ceiling of 300 named-tuple
-        # fields, and adding both made it 301 — a compile error, not a
-        # truncation. Of the three counters the 64-slot work added, the one
-        # worth a user's attention is the one above: it is cross-platform and
-        # names silent root loss. The Darwin pair is a gate contract, read
-        # directly off the heap by `bench/darwin_stw_resume.cr` through
-        # `Gcry.default_heap.stw_threads_suspended` / `_resumed`. The ceiling
-        # is real and carries a ROADMAP item; grouping these into sub-tuples is
-        # a change to every consumer of this shape, not a line here.
         stack_bounds_visited:                  Gcry::Platform.stack_bounds_visited,
         stack_bounds_read:                     Gcry::Platform.stack_bounds_read,
         stack_bounds_main_cached:              Gcry::Platform.stack_bounds_main_cached,

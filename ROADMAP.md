@@ -2122,17 +2122,6 @@ kept finding the rest.
       ≥64 threads on purpose, and `Parallel` defaults to capacity 1.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
       `…/DESIGN.md`
-- [ ] **`/gc-stats` is at Crystal's 300-field named-tuple ceiling.** Adding the
-      three counters of the 64-slot work made the literal in
-      `observability.cr` 301 fields, which is a **compile error** — "named tuple
-      size cannot be greater than 300" — not a truncation. `stw_capture_no_slot`
-      took the last slot because it is cross-platform and names silent root
-      loss; the Darwin `stw_threads_suspended` / `_resumed` pair is a gate
-      contract and is read off the heap instead. So the next counter anyone adds
-      does not compile. Grouping the fields into sub-tuples (`stw:`, `chunks:`,
-      `threads:`) is the fix and it changes every consumer of the shape,
-      including the HTTP renderer and whatever parses it downstream — which is
-      why it is an item rather than a line.
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered
       2026-09-17, and it was not thread startup.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:

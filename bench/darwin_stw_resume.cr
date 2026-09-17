@@ -133,15 +133,15 @@ unless child_arm
     next if result.ok == want_whole
 
     failures << if want_whole && result.timed_out
-                  "#{arm}: the child outlived its #{ARM_BUDGET.total_seconds.to_i}s budget, " \
-                  "which is what a thread frozen inside the allocator does to the process"
-                elsif want_whole
-                  "#{arm}: the world did not come back whole"
-                else
-                  "#{arm}: the pre-fix table walk resumed every thread and every worker kept " \
-                  "running, so GCRY_STW_BOUNDED_RESUME no longer restores the defect and the " \
-                  "hold arm has no red direction"
-                end
+      "#{arm}: the child outlived its #{ARM_BUDGET.total_seconds.to_i}s budget, " \
+      "which is what a thread frozen inside the allocator does to the process"
+    elsif want_whole
+      "#{arm}: the world did not come back whole"
+    else
+      "#{arm}: the pre-fix table walk resumed every thread and every worker kept " \
+      "running, so GCRY_STW_BOUNDED_RESUME no longer restores the defect and the " \
+      "hold arm has no red direction"
+    end
   end
   puts ""
   if failures.empty?
