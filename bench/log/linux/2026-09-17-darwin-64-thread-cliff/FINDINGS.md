@@ -140,14 +140,18 @@ same directory only ever showed the hang, which is the other defect.
 reserves a slot through `reserve_suspend_slot` *and* the handler claims one
 through `record_thread_sp`, so an uncovered thread fails twice.
 
-**Unexplained, and left that way:** at 71 threads the counter reads 10 from the
-automatic collections during startup and then **+0** for all three explicit
-collects, when 6 threads should go uncovered every time. The reading that fits
-is that a given stop does not suspend every thread on the list — `stw_records`
-was 138 across three collects of 71 threads, not ~213 — but I have not
-established why, and nothing in this design rests on it. It does mean the
-thread count at which capture starts being lost is not simply "list length >
-64".
+**The anomaly in the 71-thread row is explained, and it was not about slots.**
+At 71 threads the counter read 10 from startup and then **+0** for all three
+explicit collects. `Heap#collect` returns silently when `@collecting` is already
+set, and with 70 hard-allocating threads a cycle takes ~145 ms — so about 1 call
+in 14 000 does anything. Those three calls did nothing at all; the `stw_records`
+shortfall (138, not ~213) is the same fact. Measured in
+`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`.
+
+Which means the column header **"per collect" above is wrong: it is per
+window**, and peer collections land inside it. The conclusion is unaffected —
+the counter is exactly zero below the bound and non-zero above, which needs only
+that stops happen — but the attribution was mine and it was loose.
 
 ## The fix has two halves and they are not equally safe
 

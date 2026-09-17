@@ -2088,6 +2088,33 @@ kept finding the rest.
       filled in — collect n=64 now 236.2 us/thread and n=100 60.5 us/thread,
       falling with n exactly as Linux does.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`
+- [ ] **An explicit `GC.collect` is usually a no-op under thread load, and
+      returns nothing to say so.** `Heap#collect` bails on `@collecting`, which
+      is set for the whole cycle, so any explicit request made while a peer is
+      collecting returns immediately and silently. Measured on 20 hardware
+      threads, asking continuously for one wall second: at 8 threads 226 of
+      1 969 calls landed a collection, at 32 threads 58 of 571 342, at 70
+      threads **6 of 85 682** — about 1 in 14 000, because a cycle there takes
+      ~145 ms (p50) and the flag is up for all of it. The other two guards were
+      ruled out by measurement rather than by reading: the calling thread's
+      `@name` is `DEFAULT-0` and its `@current_fiber` is non-nil.
+      So `GC.collect` is not a barrier: a caller who needs a collection to have
+      completed has to poll `pause_count`. The fix is to wait for the in-flight
+      cycle instead of returning, with `@stw_owner_pthread` distinguishing "a
+      peer is collecting" from "this thread is inside a collect" so a collect
+      called from a finalizer does not deadlock. Red arm by construction: N
+      hard-allocating threads, one explicit call, assert a pause followed.
+      **Two of my own claims are retracted in that record**: a call-bounded loop
+      of 2 000 001 calls "never landing" sampled five milliseconds of a 145 ms
+      cycle, and the 32× throughput collapse from 8 to 70 threads is *not* the
+      collector — with `GCRY_DISABLE_AUTO=1` the same threads collapse the same
+      way (2470 → 74.6 MB/s), and at 32 threads the run without the collector is
+      the slower one. 70 spinning allocators on 20 hardware threads is 3.5×
+      oversubscribed and nothing on this host separates the two.
+      Also methodological: a harness that calls `collect` and reads a counter
+      measures a *window*, not a call. The `stw_capture_no_slot` table's "per
+      collect" column is corrected to "per window" in place.
+      `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
 - [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
       Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
       stack and collects twice; the block must die, which is what makes the
