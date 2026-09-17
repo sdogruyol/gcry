@@ -24,21 +24,31 @@
 # completed cycle moves it. Attribution does not matter here and asserting it
 # would be wrong — the guarantee is "a collection completed", not "yours ran".
 #
+# Each measurement is made at a moment this harness has **observed** a
+# collection to be in flight — `heap.collecting?` — and not at one it hopes for.
+# The first version of this file arranged the in-flight window with 32 threads
+# allocating hard, which works on a 20-core host and does not on a 4-vCPU CI
+# runner: there the threads allocate too slowly to keep the collector busy, so
+# the pre-fix guard let every call through and the **red arm came out green**
+# (run 35226882013). A gate whose red direction depends on the host's core count
+# is not a gate. The window is now created structurally, by a thread that does
+# nothing but collect.
+#
 # Three arms, each a bounded child:
 #
-#   busy      `CALLS` explicit collects with `THREADS` threads allocating hard.
-#             **Every** call must be followed by a higher `pause_count`. This is
-#             the gate. One call would not be: at the pre-fix rate a single call
-#             lands about one run in 14 000, so a one-call arm would have passed
-#             by luck often enough to look green.
+#   busy      `CALLS` explicit collects, each issued while a peer collection is
+#             in flight. **Every** one must be followed by a higher
+#             `pause_count`. This is the gate.
 #
 #   skip      the same with `GCRY_COLLECT_SKIP_WHEN_BUSY=1`, the pre-fix guard.
-#             At least one call must come back with **no** collection, which is
-#             the guarantee being absent. Fails if the knob stops restoring it.
+#             Calls issued in that window must come back with **no** collection
+#             completed — that is the guarantee being absent. Fails if the knob
+#             stops restoring it.
 #
-#   quiet     the same call count with no other threads. Every call must land
-#             there too — that is what stops the busy arm from passing because
-#             `pause_count` moves for some reason unrelated to the request.
+#   quiet     the same call count with nothing else running, where there is no
+#             window to be inside. Every call must land there too — that is what
+#             stops the busy arm from passing because `pause_count` moves for
+#             some reason unrelated to the request.
 #
 #   crystal build -Dgc_none bench/explicit_collect_barrier.cr -o bin/explicit_collect_barrier
 #   bin/explicit_collect_barrier
@@ -53,15 +63,21 @@ require "./bounded_child"
 
 HEAP = Gcry.default_heap.not_nil!
 
-# Enough allocating threads that a cycle is in flight nearly all the time — at
-# 32 the measured hit rate was already 1 in 9 850. Not so many that a small
-# runner spends its time scheduling.
-THREADS = 32
+# Four threads allocating, only so a collection has something to do, plus one
+# thread that calls `GC.collect` in a loop and therefore holds a cycle in flight
+# essentially all the time. The in-flight window is that thread's doing, not the
+# allocators' — which is the whole correction over the first version.
+THREADS = 4
 
-# Twenty, not one: the pre-fix behaviour is probabilistic, so a single call
-# proves nothing in either direction. Twenty consecutive successes are
-# impossible pre-fix (the rate is ~1e-4) and guaranteed post-fix.
+# Twenty, not one: the pre-fix behaviour is probabilistic in the small gap
+# between one cycle ending and the next beginning, so a single call proves
+# nothing in either direction.
 CALLS = 20
+
+# How long to wait for the collector thread to actually have a cycle in flight
+# before making a measurement. Generous: on a 4-vCPU runner a cycle of this
+# heap takes ~350 ms, so most of the wait is the *previous* cycle finishing.
+INFLIGHT_WAIT = 10.seconds
 
 ARM_BUDGET = 90.seconds
 
@@ -128,7 +144,8 @@ if skip_arm && !HEAP.collect_skip_when_busy
   exit 64
 end
 
-puts "arm #{child_arm}: #{want} allocating threads, #{CALLS} explicit collects, " \
+puts "arm #{child_arm}: #{want} allocating threads#{quiet ? "" : " + one collector thread"}, " \
+     "#{CALLS} explicit collects, " \
      "#{HEAP.collect_skip_when_busy ? "pre-fix skip-when-busy" : "shipped"} guard"
 
 stop = Atomic(Int32).new(0)
@@ -144,15 +161,40 @@ want.times do
     end
   end
 end
-while started.get < want
+
+# The window. This thread does nothing but collect, so `collecting?` is true
+# almost all of the time — on any host, which is the point. Note it works under
+# the knob too: the skipping guard only refuses a call made while *someone else*
+# is collecting, and this thread is the someone else.
+unless quiet
+  threads << Thread.new do
+    started.add(1)
+    while stop.get == 0
+      GC.collect
+    end
+  end
+end
+
+while started.get < threads.size
   Thread.sleep(1.millisecond)
 end
-# Let the peers get a cycle going, so the busy arm is actually busy when it asks.
-sleep 200.milliseconds if want > 0
 
 landed = 0
 missed = 0
+not_inflight = 0
 CALLS.times do
+  unless quiet
+    # Measure at an observed moment, not a hoped-for one.
+    deadline = Time.instant + INFLIGHT_WAIT
+    until HEAP.collecting?
+      if Time.instant >= deadline
+        not_inflight += 1
+        break
+      end
+      Thread.sleep(100.microseconds)
+    end
+  end
+
   before = HEAP.pause_count
   GC.collect
   if HEAP.pause_count > before
@@ -166,15 +208,24 @@ stop.set(1)
 threads.each(&.join)
 
 puts "landed=#{landed}/#{CALLS} missed=#{missed} " \
+     "asked_without_a_cycle_in_flight=#{not_inflight} " \
      "pause_p50=#{(HEAP.pause_percentile_ns(50.0) / 1_000_000.0).round(2)}ms"
 
 failures = [] of String
 
+# Precondition for both non-quiet arms: if the collector thread never had a
+# cycle in flight, neither reading below is about asking during one.
+if !quiet && not_inflight == CALLS
+  failures << "not one of the #{CALLS} measurements found a collection in flight within " \
+              "#{INFLIGHT_WAIT.total_seconds.to_i}s, so the collector thread is not collecting " \
+              "and this arm measures nothing"
+end
+
 if skip_arm
   if missed == 0
     failures << "all #{CALLS} calls completed a collection with the pre-fix guard in place, so " \
-                "this arm is not restoring it — with #{THREADS} threads allocating the measured " \
-                "pre-fix rate was about 1 call in 9 850"
+                "this arm is not restoring it — a call issued while a peer is collecting is " \
+                "supposed to return having done nothing"
   end
 else
   if missed > 0

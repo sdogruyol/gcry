@@ -1638,6 +1638,17 @@ module Gcry
       thread.@current_fiber.nil?
     end
 
+    # Is a collection in flight? Exposed so a harness can make its
+    # measurement *at* a moment it has observed rather than at one it hopes
+    # for: `make explicit-collect-barrier`'s control arm has to ask for a
+    # collection while another is running, and a version of it that relied on
+    # allocator contention to arrange that came out green on a CI runner whose
+    # threads allocate too slowly to keep the collector busy — a gate whose red
+    # direction depended on the host.
+    def collecting? : Bool
+      @collecting
+    end
+
     # Full major collection (resets any in-progress incremental cycle).
     # `coalesce`: if true and a peer collect already cleared the debt while we
     # waited on the post-STW mutex, skip (Parallel EC alloc storms).

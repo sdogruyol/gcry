@@ -142,3 +142,45 @@ check to avoid deadlocking a collect called from a finalizer (`@stw_owner_pthrea
 already records who is collecting). It has a red arm by construction: N
 hard-allocating threads and one explicit call, asserting a pause followed. That
 is a separate change with its own gate.
+
+
+## The first gate's red arm came out green on CI
+
+`make explicit-collect-barrier` failed on the Linux job of runs 35226651277 and
+35226882013 — not on the arm under test, but on its **control**:
+
+    arm skip: 32 allocating threads, 20 explicit collects, pre-fix skip-when-busy guard
+    landed=20/20 missed=0 pause_p50=343.28ms
+      - all 20 calls completed a collection with the pre-fix guard in place
+
+The pre-fix guard refuses a call only while *another* thread is collecting, and
+the first version of this harness arranged that by having 32 threads allocate
+hard. On a 20-core host that keeps the collector busy continuously, so the arm
+missed 20/20. On a 4-vCPU runner the same 32 threads allocate slowly enough that
+collections are *rare* — `pause_p50` was 343 ms there against 25 ms here, and
+the gaps between them are what the calls landed in. So the arm's red direction
+was a function of the host's core count, which is not a gate.
+
+Restricting this host with `taskset -c 0-3` did **not** reproduce it: four fast
+cores still keep the collector busy. The reproduction is the CI log, and the
+lesson is the same either way — the window the control needs was being *hoped*
+for rather than arranged.
+
+**Fixed structurally.** A dedicated thread now does nothing but call
+`GC.collect`, so a cycle is in flight essentially always regardless of core
+count, and every measurement is taken after `heap.collecting?` has been observed
+true (a new predicate, exposed for exactly this). The harness reports
+`asked_without_a_cycle_in_flight`, so an arm that measured outside the window
+says so instead of quietly reading zero.
+
+Verified on 20, 4, 2 and **1** CPU — the last with the collector thread and the
+prober sharing a single core:
+
+| CPUs | busy | skip | quiet |
+|---|---|---|---|
+| 20 | 20/20 landed | 0/20 landed | 20/20 landed |
+| 4  | 20/20 | 0/20 | 20/20 |
+| 2  | 20/20 | 0/20 | 20/20 |
+| 1  | 20/20 | 0/20 | 20/20 |
+
+`asked_without_a_cycle_in_flight` was 0 in all twelve arms.
