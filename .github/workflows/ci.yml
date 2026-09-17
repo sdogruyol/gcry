@@ -1577,13 +1577,18 @@ jobs:
       # it back to the pre-fix fixed table was in no spec, recipe or CI step,
       # while ROADMAP.md claimed this was gated in process_spec — so the gate
       # the record described did not exist.
-      # `make stack-bounds-growth` is deliberately absent here: it ran 18m37s
-      # on this runner and was cancelled at the job's 20-minute cap on
-      # 2026-09-16, after the two root gates above finished in 3-4 s each. The
-      # harness has been changed not to poll at 200 us, which is the leading
-      # suspect, but that is untested on Darwin and a gate is not re-enabled on
-      # a hypothesis. See ROADMAP.md and
-      # `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`.
+      # Measuring, not gating. This harness took this job down on 2026-09-16 —
+      # 18m37s, cancelled at the 20-minute cap, while Linux and aarch64 passed
+      # it — and the poll it holds its 100 threads on went from 200 us to 25 ms
+      # in response. That fix is untested here, so: `timeout` bounds a hang to
+      # three minutes instead of cancelling twenty, and `continue-on-error`
+      # stops a still-hanging arm from failing the job. Same arrangement the
+      # Darwin soak smoke used until four runs measured its bound and it was
+      # promoted. Promote this to a gate, or remove it, once a run reports —
+      # `ROADMAP.md` carries the item.
+      - name: Stack-bounds table growth (measuring, not gating)
+        continue-on-error: true
+        run: timeout 180 make stack-bounds-growth
 
       # A crash on Darwin used to read as a null dereference: the poison
       # lives in the faulting registers, and Darwin's SIGSEGV ucontext

@@ -2049,6 +2049,12 @@ kept finding the rest.
       out not to be it, the next suspect is Darwin's per-thread Mach
       `thread_suspend` / `thread_get_state` stop against Linux's signal
       broadcast at 100 threads, which would be a finding about the collector.
+      **The measurement is now scheduled rather than argued about (2026-09-17):**
+      the Darwin job runs it `continue-on-error` under `timeout 180`, so a hang
+      costs three minutes and fails nothing, and a pass or a timeout both get
+      recorded. That is the arrangement the Darwin soak smoke used until four
+      runs measured its bound and it was promoted to gating. Promote or remove
+      once a run reports.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md` **What is not measured** is whether a thread past
       the 64th ever held the only reference to something: the loss is a
       documented half of that thread's coverage, and no arm has yet shown a
