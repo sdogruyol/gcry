@@ -31,7 +31,7 @@
 # Best effort by construction: the heap may be mid-mutation, which is usually
 # what a crash means. A fault *inside* this search is caught by `SegvReport`'s
 # `@@reported` guard, which is set before any of this runs.
-{% skip_file unless flag?(:unix) %}
+{% skip_file unless flag?(:unix) || flag?(:win32) %}
 
 module Gcry
   module PoisonHolders

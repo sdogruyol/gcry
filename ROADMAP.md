@@ -2152,7 +2152,8 @@ kept finding the rest.
       `asked_without_a_cycle_in_flight` reported so an arm that measured outside
       it says so.
       `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
-- [ ] **The holders search is Unix-only, and Windows is where it is needed.**
+- [x] **The holders search was Unix-only, and Windows is where it is needed —
+      ported 2026-09-17.**
       `poison_holders.cr` opens with `{% skip_file unless flag?(:unix) %}`, so
       `Gcry::PoisonHolders` does not exist on Windows — which is the only
       platform where `make tls-roots`'s control arm has actually come out
@@ -2167,6 +2168,18 @@ kept finding the rest.
       `ci/windows.ps1` builds for both Windows targets in 8 s, because
       `darwin-typecheck` had covered that class of mistake since 2026-08-22 and
       Windows had no equivalent.
+      **The gate was conservative, not a dependency.** `Platform.thread_sp` and
+      `snapshotted_stack_bounds` exist on all three platforms, `last_stop_sp`
+      was already behind `{% if flag?(:linux) %}`, and `@system_handle` is the
+      right type per platform because each `thread_sp` takes its own. Opening
+      `skip_file` to `win32` type-checks on both Windows targets with no other
+      change, and `tls_roots.cr` now calls the search unconditionally.
+      **Compiling is not running**, and the only Windows path that reached the
+      search was the failure path it was added for — a first execution inside an
+      already-failing gate turns a bad reading into a crash. `ci/windows.ps1`
+      now also runs `bench/holders_find.cr`, whose answer is known, so the walk
+      is exercised there while green. Not verified on Windows by me: no host
+      here, and the Windows job is the first execution.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
 - [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
       Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of

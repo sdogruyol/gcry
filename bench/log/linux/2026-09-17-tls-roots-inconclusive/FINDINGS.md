@@ -90,3 +90,34 @@ Two consequences, and they are separate items:
   `bench/tls_roots.cr` — what `ci/windows.ps1` actually builds — for both
   Windows targets in 8 s. Observed red by dropping the guard: it fails with the
   runner's own line.
+
+
+## The search now compiles on Windows
+
+`{% skip_file unless flag?(:unix) %}` turned out to be a conservative gate
+rather than a dependency. The module's three sources are the explicit root set,
+every live block and every fiber stack, and everything it reaches exists on all
+three platforms:
+
+| what it calls | Linux | Darwin | Windows |
+|---|---|---|---|
+| `Platform.thread_sp` | `linux_stw.cr` | `darwin_stw.cr` | `windows_stw.cr` |
+| `Platform.snapshotted_stack_bounds` | `linux_stack.cr` | `darwin_stack.cr` | `windows_stack.cr` |
+| `Platform.last_stop_sp` | `linux_stw.cr` | — | — |
+| `Thread#@system_handle` | `pthread_t` | `pthread_t` | `HANDLE` |
+
+`last_stop_sp` was already behind `{% if flag?(:linux) %}`, and the handle types
+line up per platform because each `Platform.thread_sp` takes its own. Opening
+the gate to `win32` type-checks on both Windows targets with no other change,
+and `bench/tls_roots.cr` now calls the search unconditionally.
+
+**Compiling is not running, and the only Windows path that reached the search
+was a failure path** — the INCONCLUSIVE arm itself. A 777-line walk executing
+for the first time inside an already-failing gate would turn a bad reading into
+a crash. So `ci/windows.ps1` now also runs `bench/holders_find.cr`, the harness
+whose answer is known: every constructed holder must be found and a block with
+none must report none. That exercises the walk on Windows while it is green.
+
+**Not verified by me on Windows.** There is no Windows host here; the evidence
+available locally is that both targets type-check and that the harness
+cross-compiles. The Windows job is the first execution.

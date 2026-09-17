@@ -83,6 +83,17 @@ try {
             }
             Remove-Item Env:GCRY_TLS_ROOTS
             Invoke-Checked $tls @('--control')
+
+            # The holders search compiled on this platform for the first time
+            # in v0.27.0, and the only path that reaches it here is the arm
+            # above coming out INCONCLUSIVE — which is a failure path. Run the
+            # harness whose answer is known instead, so the walk is exercised
+            # on Windows while it is green: every constructed holder must be
+            # found and a block with none must report none.
+            Write-Host "Windows holders search"
+            $holders = Join-Path $PWD 'bin/holders_find_windows.exe'
+            Invoke-Checked $crystal (@('build', '-Dgc_none', 'bench/holders_find.cr', '-o', $holders, '--error-trace'))
+            Invoke-Checked $holders @()
         }
     }
 

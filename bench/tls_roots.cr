@@ -172,13 +172,8 @@ if control
     # instrument is missing exactly where it is needed; that gap is its own
     # ROADMAP item. Adding the call without this guard broke the Windows build
     # on two jobs (`undefined constant Gcry::PoisonHolders`, run 35224827564).
-    {% if flag?(:unix) %}
-      puts "asking the holders search where that copy is:"
-      Gcry::PoisonHolders.search(heap, victim.address, VICTIM_SIZE.to_u64)
-    {% else %}
-      puts "the holders search that would name the copy is Unix-only, so this platform"
-      puts "cannot answer the question from here — see the note in this file."
-    {% end %}
+    puts "asking the holders search where that copy is:"
+    Gcry::PoisonHolders.search(heap, victim.address, VICTIM_SIZE.to_u64)
     exit 1
   end
   puts "ok — with the pointer held nowhere the block dies, so the other arm's"
