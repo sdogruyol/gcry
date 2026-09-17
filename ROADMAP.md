@@ -2134,6 +2134,23 @@ kept finding the rest.
       85.7 ms → **3638.1 ms** with 11 collections instead of a handful. The arm
       is finally doing what it always claimed. Both affected records are
       annotated as pre-barrier baselines.
+      **New property, stated rather than softened:** the call waits, so against
+      a thread collecting in a tight loop it can wait a long time —
+      `@post_stw_mutex` is a plain `pthread_mutex_t` with no fairness, and the
+      gate's own window-holding thread starved the prober for 90 s on a 4-vCPU
+      runner before it was given a 2 ms sleep. Returning as soon as a *peer's*
+      cycle finishes would bound the wait and is the wrong guarantee: that cycle
+      may have snapshotted the heap before the call, so objects unreachable at
+      call time can be marked live by it. "Collect now" means a cycle that began
+      after the request.
+      **The gate's first two shapes both came out wrong on CI and neither
+      failure was in the collector**: a control arm that relied on allocator
+      contention to hold a collection in flight went green on a 4-vCPU runner,
+      and the tight loop that replaced it starved the thread it was measuring.
+      The window is now held structurally and observed through
+      `heap.collecting?` before each measurement, with
+      `asked_without_a_cycle_in_flight` reported so an arm that measured outside
+      it says so.
       `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
 - [ ] **The holders search is Unix-only, and Windows is where it is needed.**
       `poison_holders.cr` opens with `{% skip_file unless flag?(:unix) %}`, so

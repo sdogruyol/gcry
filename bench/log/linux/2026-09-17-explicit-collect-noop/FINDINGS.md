@@ -184,3 +184,36 @@ prober sharing a single core:
 | 1  | 20/20 | 0/20 | 20/20 |
 
 `asked_without_a_cycle_in_flight` was 0 in all twelve arms.
+
+
+## The barrier can be starved, and that is a property of it
+
+Second CI failure of the same gate (run 35229134467), and this time the arm
+under test rather than the control:
+
+    arm busy: 4 allocating threads + one collector thread, 20 explicit collects
+    bench: child exceeded 90s and was killed
+    arm skip: ... landed=0/20 missed=20   <- the control is now correctly red
+
+The window-holding thread called `GC.collect` in a loop with no sleep, so it
+re-entered `run_collection` the instant it left. `@post_stw_mutex` is a plain
+`pthread_mutex_t` with no fairness guarantee, and on the 4-vCPU runner the
+looping thread re-acquired it before the waiting prober was ever scheduled — for
+ninety seconds. Two milliseconds of sleep between cycles fixes the harness (the
+window is still open ~96% of a ~45 ms cycle) and all three arms then pass at 20,
+4, 2 and 1 CPU in about 7 s.
+
+**Not reproduced on this host**, at any core count, which is why the sleep is
+justified by the mechanism and the CI log rather than by a local red-to-green.
+
+The underlying property is worth stating plainly, because it is new: an explicit
+`GC.collect` now *waits*, so against a thread that collects in a tight loop it
+can wait for a long time. Pre-fix it returned instantly having done nothing,
+which is not better — it is the same starvation with the failure hidden.
+
+**Deliberately not softened.** The obvious mitigation is to return as soon as a
+*peer's* cycle completes, which would bound the wait to roughly one cycle. That
+is a weaker guarantee and the wrong one: a peer's cycle may have snapshotted the
+heap *before* this call, so objects that became unreachable at call time can be
+marked live by it. "Collect now" should mean a cycle that began after the
+request, so the implementation runs its own and the wait stays honest.

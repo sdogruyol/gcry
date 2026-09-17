@@ -166,11 +166,22 @@ end
 # almost all of the time — on any host, which is the point. Note it works under
 # the knob too: the skipping guard only refuses a call made while *someone else*
 # is collecting, and this thread is the someone else.
+#
+# The sleep is load-bearing. Without it this loop re-enters `run_collection` the
+# instant it leaves, and `@post_stw_mutex` is a plain `pthread_mutex_t` with no
+# fairness guarantee: on the 4-vCPU CI runner the collector re-acquired it
+# before the waiting prober was ever scheduled, and the arm was killed at its
+# 90 s budget having landed nothing (run 35229134467). Two milliseconds against
+# a ~45 ms cycle leaves the window open about 96% of the time and lets the
+# prober in. That starvation is a real property of the barrier, not just of this
+# harness — an explicit collect now waits, and against an adversarial collect
+# loop it can wait a long time. It is recorded rather than worked around.
 unless quiet
   threads << Thread.new do
     started.add(1)
     while stop.get == 0
       GC.collect
+      Thread.sleep(2.milliseconds)
     end
   end
 end
