@@ -70,6 +70,29 @@ require "./bounded_child"
 
 HEAP = Gcry.default_heap.not_nil!
 
+# Linux only, and for a reason about the mechanism rather than about the OS.
+# The pre-stop snapshot table exists because `pthread_getattr_np` cannot be
+# called with the world stopped. Darwin and Windows have no such problem —
+# `darwin_stack.cr` / `windows_stack.cr` query the thread descriptor at lookup
+# time — so `snapshot_pthread_stack_bounds` is a no-op there,
+# `stack_bounds_visited` / `read` / `capacity_misses` return **zeros by design**
+# and `stack_bounds_nogrow=` is a no-op setter. There is no table to grow, no
+# loss to produce, and nothing here to assert.
+#
+# This file claimed the opposite on 2026-09-16 — "the arms are not Linux-only" —
+# read off the fact that all three platforms *declare* the same methods. They
+# declare them returning zero, which is the Darwin `each_thread_greg` stub shape
+# that cost v0.19.0 two platforms' register roots. The Darwin CI run said so
+# plainly: `stack_bounds_visited=0 read=0 capacity_misses=0`, caught by this
+# harness's own precondition.
+{% unless flag?(:linux) %}
+  puts "=== stack-bounds table growth ==="
+  puts "SKIP — this platform queries the thread descriptor at lookup time instead of"
+  puts "snapshotting, so there is no bounds table to grow and the counters this gate"
+  puts "asserts on are zeros by design (see src/gcry/platform/darwin_stack.cr)."
+  exit 0
+{% end %}
+
 # Comfortably past `STACK_BOUNDS_INITIAL_SLOTS` (64) so the table has to double
 # at least twice, and not so many that a shared runner spends its time
 # scheduling. The control arm stays under it.

@@ -1577,21 +1577,16 @@ jobs:
       # it back to the pre-fix fixed table was in no spec, recipe or CI step,
       # while ROADMAP.md claimed this was gated in process_spec — so the gate
       # the record described did not exist.
-      # Measuring, not gating — one more run, then promote or remove.
-      #
-      # This harness took this job down on 2026-09-16 (18m37s, cancelled at the
-      # 20-minute cap) while Linux and aarch64 passed it. Two things changed:
-      # its 100 threads are held on a 25 ms poll instead of 200 us, and each arm
-      # is now a bounded child of the harness, so a hang costs the
-      # `BENCH_CHILD_TIMEOUT_S` budget and is *reported* instead of cancelling
-      # the job. The bound lives in the harness on purpose: the first attempt
-      # wrapped this step in `timeout 180`, macOS has no `timeout(1)`, the step
-      # died with exit 127 and `continue-on-error` reported it as **success** —
-      # so a continue-on-error step's conclusion is not evidence, only its log
-      # is. `ROADMAP.md` carries the item.
-      - name: Stack-bounds table growth (measuring, not gating)
-        continue-on-error: true
-        run: make stack-bounds-growth
+      # `make stack-bounds-growth` is not here, and not because it hung: this
+      # platform has no bounds table to grow. `darwin_stack.cr` queries the
+      # thread descriptor at lookup time, so the snapshot is a no-op and
+      # `stack_bounds_visited` / `read` / `capacity_misses` are zeros by design
+      # — the gate has nothing to assert. Measured on 2026-09-17 by running it
+      # here anyway: the 8-thread arm reported `visited=0 read=0` and the
+      # harness's own precondition failed it. The harness now skips
+      # non-Linux with that reason. The 100-thread arms also exceeded their
+      # 120 s budget, twice, which is a separate observation about Darwin and
+      # carries its own ROADMAP item.
 
       # A crash on Darwin used to read as a null dereference: the poison
       # lives in the faulting registers, and Darwin's SIGSEGV ucontext

@@ -2034,7 +2034,23 @@ kept finding the rest.
       unchanged: whether a thread past the 64th ever held the only reference to
       something. The gate asserts the coverage, not a defect.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
-- [ ] **`make stack-bounds-growth` is not enabled on Darwin.** Its first CI run
+- [ ] **100 threads take over 120 s to start on the Darwin runner, twice.**
+      Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:
+      `threads held: 100` never printed, so all 100 never got *running* — this
+      is thread startup, not a collection — while the same harness's 8-thread
+      arm was instantaneous and Linux does 100 in about two seconds. A ~60×
+      discrepancy, on both arms that asked for 100. Not asserted, worth
+      testing: `Thread.new` allocates, an allocation can trigger a collection,
+      and Darwin's stop-the-world suspends **each** thread with a Mach
+      `thread_suspend` / `thread_get_state` pair rather than one signal
+      broadcast, so a thread-creation storm would cost O(n²) there and not on
+      Linux. If that is it, it is a Darwin scalability finding about the
+      collector and not about the harness that tripped over it. The cheap first
+      probe is a Darwin arm that creates N threads with `GCRY_DISABLE_AUTO=1`
+      and times it against N with collections on.
+      `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+- [x] **`make stack-bounds-growth` is not enabled on Darwin — settled
+      2026-09-17, and not for the reason first given.** Its first CI run
       took the macOS job down: 18m37s, cancelled at the job's 20-minute cap,
       after the two root gates before it finished in 3 and 4 seconds — while
       Linux x86_64 and aarch64 Linux both passed it. Exactly the hazard recorded
@@ -2058,7 +2074,18 @@ kept finding the rest.
       that can hang has to carry it; at a 1 s budget the parent exits 1, so the
       bound has its own positive control. Darwin runs it `continue-on-error`
       for one more reading, and **its step conclusion is not the evidence — the
-      log is**. That is the arrangement the Darwin soak smoke used until four
+      log is**. That reading came back and closed the item the other way: the
+      poll was **not** it (100 threads still exceed 120 s at 25 ms), and the
+      gate has nothing to assert on Darwin regardless — `darwin_stack.cr`
+      queries the thread descriptor at lookup time, so there is no table to
+      grow and `stack_bounds_visited` / `read` / `capacity_misses` are **zeros
+      by design**. The claim that "the arms are not Linux-only" was read off
+      three platforms *declaring* the same methods; they declare them returning
+      zero, which is the `each_thread_greg` stub shape v0.19.0 was about. The
+      8-thread arm reported `visited=0 read=0` and the harness's precondition
+      failed on it — the part that worked. The harness skips non-Linux with
+      that reason now, the Darwin arm is removed for cause, and the 120 s hang
+      is a separate item above. That is the arrangement the Darwin soak smoke used until four
       runs measured its bound and it was promoted to gating. Promote or remove
       once a run reports.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md` **What is not measured** is whether a thread past

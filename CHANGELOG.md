@@ -42,8 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and macOS has no `timeout(1)`: the step died with exit 127, ran in 0
   seconds, and `continue-on-error` reported it as **success** — a
   continue-on-error step's conclusion is not evidence, only its log is.
-  Darwin runs it `continue-on-error` for one more reading before it is
-  promoted to a gate or removed.
+  **Linux only, by construction**: `darwin_stack.cr` and
+  `windows_stack.cr` query the thread descriptor at lookup time instead
+  of snapshotting, so there is no table to grow and
+  `stack_bounds_visited` / `read` / `capacity_misses` are zeros by
+  design — the harness now skips those platforms with that reason rather
+  than failing. The first version of this entry said the arms were not
+  Linux-only, read off all three platforms *declaring* the same methods;
+  they declare them returning zero, which is the `each_thread_greg` stub
+  shape v0.19.0 was about. A Darwin run reported `visited=0 read=0` and
+  the harness's own precondition caught it.
   `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
 
 - **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has

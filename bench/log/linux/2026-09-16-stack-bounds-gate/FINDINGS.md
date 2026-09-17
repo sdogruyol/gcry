@@ -126,8 +126,46 @@ recipe passing the old flags re-ran the *parent* three times, once with
 `GCRY_STACK_BOUNDS_NOGROW` inherited into the hold arm, and reported a failure
 that was entirely the invocation's fault. Unknown arguments now exit 64.
 
-Second possibility worth keeping in view if the poll turns out not to be it:
-Darwin's stop-the-world suspends each thread with Mach `thread_suspend` /
-`thread_get_state` rather than a signal broadcast, so 100 threads may cost
-asymmetrically more there per collection. That would be a finding about the
-collector rather than the harness, and it would be worth having.
+## The Darwin reading, and a wrong claim of mine in this file
+
+**2026-09-17.** The measurement ran, the bound held, and it answered two
+questions — one of them against what this file said.
+
+    arm hold:    bench: child exceeded 120s and was killed
+    arm control: threads held: 8
+                 stack_bounds_visited=0 read=0 capacity_misses=0
+                 FAIL: the snapshot visited no threads at all …
+    arm nogrow:  bench: child exceeded 120s and was killed
+
+**The poll hypothesis is refuted.** 25 ms instead of 200 us, and the 100-thread
+arms still exceed 120 s. So the harness's spin was not it.
+
+**And the gate has nothing to assert on Darwin at all.** This file said "the
+arms are not Linux-only" because all three platforms declare the same three
+counters and the same setter. They declare them **returning zero**:
+`darwin_stack.cr` and `windows_stack.cr` query the thread descriptor at lookup
+time rather than snapshotting, so `snapshot_pthread_stack_bounds` is a no-op,
+`stack_bounds_visited` / `read` / `capacity_misses` are zeros by design and
+`stack_bounds_nogrow=` is a no-op setter — the source says so in a comment right
+there. I read the signatures and inferred the behaviour, which is the Darwin
+`each_thread_greg` stub shape that cost v0.19.0 two platforms' register roots,
+made by the person auditing for it. The 8-thread arm reported it plainly and
+this harness's own precondition failed on it, which is the one part of the
+episode that worked as designed.
+
+The gate is Linux-only by construction, the harness now says so with that
+reason instead of failing, and the Darwin arm is removed for cause rather than
+for the hang.
+
+## The hang is a separate observation and keeps its own item
+
+Two arms of 100 threads each failed to get all 100 threads *running* inside
+120 s — `threads held: 100` never printed, so it is thread startup and not the
+collection — while the 8-thread arm was instantaneous and Linux does 100 in
+about two seconds. That is a ~60× discrepancy in thread creation on the macOS
+runner, twice, and it is no longer this gate's business. Hypothesis worth
+testing and not asserted here: `Thread.new` allocates, an allocation can
+trigger a collection, and Darwin's stop-the-world suspends each thread with a
+per-thread Mach `thread_suspend` / `thread_get_state` rather than one signal
+broadcast — so a thread-creation storm would cost O(n²) there and not on Linux.
+`ROADMAP.md` carries it.
