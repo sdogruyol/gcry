@@ -130,6 +130,10 @@ describe Gcry::Invariant do
                "compiled_page=#{Gcry::Roots::PAGE_SIZE}"
         end
         heap.live_objects.should eq(1)
+        # The walk is skipped while the process looks multi-mutator, and another
+        # example's joined-but-not-yet-unlinked worker is enough to make it look
+        # that way. Establish the precondition this assertion needs.
+        SpecSoleMutator.wait(heap)
         checks = Gcry::Invariant.live_object_checks
         Gcry::Invariant.check_live_objects(heap)
         # And it walked rather than skipped: this example exists to catch a walk
@@ -190,6 +194,10 @@ describe Gcry::Invariant do
       heap = Gcry::Heap.new
       begin
         heap.heap_counters_atomic = true
+        # Same precondition as the dormant-chunk example above: `check_live_objects`
+        # counts a concurrent skip rather than walking while Crystal's thread list
+        # still holds another example's worker.
+        SpecSoleMutator.wait(heap)
         before = Gcry::Invariant.live_object_checks
         heap.malloc(64)
         # A private heap has no other mutator, so the walk must have run to

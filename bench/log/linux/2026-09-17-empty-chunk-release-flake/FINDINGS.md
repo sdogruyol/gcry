@@ -98,3 +98,50 @@ separate question this does not touch: a process GC with more than one mutator
 thread does not release empty chunks unless `GCRY_PARALLEL_EMPTY_CHUNK_DORMANT`
 or its munmap sibling is set, which is documented behaviour and measured RSS
 policy, not a defect.
+
+
+## The fifth spec had a different predicate — 2026-09-17, after the pin
+
+The knob pin above covered four of the five specs
+`bench/log/linux/2026-09-13-report-stack/FINDINGS.md` had listed as the aarch64
+family. The fifth, `live_object_checks`, failed on the two runs *after* the pin
+landed (`6171a30`, `8ba3660` — a probe commit and the pin itself, neither
+touching the collector) with:
+
+    1) Gcry::Invariant does not count blocks in chunks the sweep made dormant
+       Expected 0 to be GreaterThan 0          # spec/invariant_spec.cr:137
+    2) Gcry::Invariant catches a live_objects drift, and says how many walks ran
+       Expected 0 to be GreaterThan 0          # spec/invariant_spec.cr:197
+
+Same *shape* as the other four — a predicate over Crystal's thread list decides
+whether a path runs — but a different predicate, which is why pinning the
+empty-chunk knobs did nothing for it. `check_live_objects` returns early and
+counts a `concurrent_skip` when `concurrent_mutators?` is true, and that is
+`multi_mutator_threads?`: a count of the thread list against a constant. Three
+threads on the list and the walk does not run, so `live_object_checks` stays
+where it was.
+
+Reproduced directly rather than waited for, on Linux x86_64:
+
+| threads on Crystal's list | `concurrent_mutators?` | `live_object_checks` | `concurrent_skips` |
+|---|---|---|---|
+| 4 (two workers running) | true  | 0 → **0** | 0 → 1 |
+| 2 (workers joined)      | false | 0 → **1** | — |
+
+The first row is the CI failure exactly. The trigger is that
+`invariant_spec.cr:150` starts two workers *on purpose* to force the skip, and
+`Thread#join` returning does not mean Crystal has unlinked them yet — in a
+randomised order the next example reads three mutators and skips. Locally the
+list drained 4 → 2 by the time `join` returned, which is why 80 local runs never
+showed it and a loaded aarch64 runner shows it one run in two.
+
+**Fixed by having the examples establish their own precondition**
+(`SpecSoleMutator.wait` in `spec/spec_helper.cr`): wait for the list to drain,
+and if it never does, say *that* instead of failing on the walk counter. Waiting
+rather than a knob or an override, because the threads are already joined — what
+lags is the unlinking, not a live mutator, so there is nothing to override.
+
+**Not proven:** that the aarch64 runs go green. The mechanism and the fix are
+measured here; the flake's rate was one run in two on a platform this host
+cannot reproduce, so only repeated CI runs can say. The `concurrent_skips`
+example at `:150` is the red direction and still asserts the skip happens.
