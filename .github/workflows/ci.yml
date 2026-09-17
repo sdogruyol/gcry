@@ -114,6 +114,14 @@ jobs:
       - name: Darwin type-check (cross-compile)
         run: make darwin-typecheck
 
+      # The same for Windows, added after a bench harness that called into
+      # `poison_holders.cr` — `{% skip_file unless flag?(:unix) %}` — compiled
+      # here and on Darwin and failed on two Windows jobs with `undefined
+      # constant Gcry::PoisonHolders`. Broken on purpose and observed red:
+      # dropping that guard fails this step with the runner's own line.
+      - name: Windows type-check (cross-compile)
+        run: make windows-typecheck
+
       # A knob nobody documented is a knob nobody can find. The env reference
       # had drifted by 33 before this step existed.
       - name: Env knob reference is complete

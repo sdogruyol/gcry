@@ -604,6 +604,26 @@ darwin-typecheck: $(BIN)
 	@rm -f $(BIN)/darwin_typecheck_stw_arm64.o $(BIN)/darwin_typecheck_stw_x86.o
 	@echo "ok — the Darwin build and its STW resume gate type-check on both targets"
 
+# The same question for Windows, and it exists because the answer was no.
+# `poison_holders.cr` is `{% skip_file unless flag?(:unix) %}`, so a bench
+# harness that called into it compiled here, compiled on Darwin, and failed on
+# two Windows jobs twenty minutes later with `undefined constant
+# Gcry::PoisonHolders` (run 35224827564). `darwin-typecheck` has covered that
+# class of mistake for the other platform since 2026-08-22; this covers it for
+# the one whose CI jobs are the slowest to tell you.
+#
+# The set mirrors what `ci/windows.ps1` actually builds: the samples, through
+# `hello.cr`, and `bench/tls_roots.cr`, which is the only bench harness that
+# job compiles.
+windows-typecheck: $(BIN)
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none samples/hello.cr -o $(BIN)/windows_typecheck_x86 >/dev/null
+	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none samples/hello.cr -o $(BIN)/windows_typecheck_arm64 >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/tls_roots.cr -o $(BIN)/windows_typecheck_tls_x86 >/dev/null
+	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none bench/tls_roots.cr -o $(BIN)/windows_typecheck_tls_arm64 >/dev/null
+	@rm -f $(BIN)/windows_typecheck_x86.obj $(BIN)/windows_typecheck_arm64.obj
+	@rm -f $(BIN)/windows_typecheck_tls_x86.obj $(BIN)/windows_typecheck_tls_arm64.obj
+	@echo "ok — the Windows build type-checks on both targets"
+
 # Every knob the source reads has a row in the env reference. The reference had
 # drifted by 33 before this existed, which is what a reference does: going stale
 # breaks nothing, so nothing says so.

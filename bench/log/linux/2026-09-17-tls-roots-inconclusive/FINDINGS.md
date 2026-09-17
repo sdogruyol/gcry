@@ -63,3 +63,30 @@ anything. What is fixed is that the next one leaves evidence instead of a
 hypothesis. No fix is attempted here: choosing between a bigger wipe and a
 harness that never materialises the pointer in a register depends on which the
 report names, and this host cannot produce the failing case.
+
+
+## The instrument does not exist on the platform that needs it
+
+Adding the `PoisonHolders.search` call broke the Windows build on two jobs —
+`undefined constant Gcry::PoisonHolders`, run 35224827564, both
+`windows x86_64, default` and `windows arm64, default`. `poison_holders.cr`
+opens with `{% skip_file unless flag?(:unix) %}`.
+
+So the holders search cannot answer the question on the only platform where this
+arm has actually come out INCONCLUSIVE. The call is guarded and the Windows
+branch says so, which leaves the diagnosis where it was on that platform: a
+stale copy somewhere, most plausibly a register, unproven.
+
+Two consequences, and they are separate items:
+
+- **Porting the search to Windows.** Its three sources are the explicit root
+  set, every live block, and every fiber stack; none of those is inherently
+  Unix. The `{% skip_file %}` is about the fault-time path it was written for —
+  it runs from a SIGSEGV handler with `RawOut` — not about the walks.
+- **A Windows cross-typecheck.** `make darwin-typecheck` has covered this exact
+  class of mistake for the other platform since 2026-08-22, and Windows had no
+  equivalent, so a five-line bench change cost two red jobs and twenty minutes.
+  `make windows-typecheck` now cross-compiles `samples/hello.cr` and
+  `bench/tls_roots.cr` — what `ci/windows.ps1` actually builds — for both
+  Windows targets in 8 s. Observed red by dropping the guard: it fails with the
+  runner's own line.

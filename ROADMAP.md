@@ -2135,6 +2135,22 @@ kept finding the rest.
       is finally doing what it always claimed. Both affected records are
       annotated as pre-barrier baselines.
       `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
+- [ ] **The holders search is Unix-only, and Windows is where it is needed.**
+      `poison_holders.cr` opens with `{% skip_file unless flag?(:unix) %}`, so
+      `Gcry::PoisonHolders` does not exist on Windows — which is the only
+      platform where `make tls-roots`'s control arm has actually come out
+      INCONCLUSIVE, and therefore the only platform that cannot say where the
+      stale copy is. Found by breaking two Windows jobs with the call (run
+      35224827564, `undefined constant Gcry::PoisonHolders`).
+      The search's three sources — the explicit root set, every live block,
+      every fiber stack — are not inherently Unix; the `skip_file` is about the
+      fault-time path it was written for, which runs out of a SIGSEGV handler
+      through `RawOut`. Porting the walks without the handler entry is the work.
+      Meanwhile `make windows-typecheck` exists, cross-compiling what
+      `ci/windows.ps1` builds for both Windows targets in 8 s, because
+      `darwin-typecheck` had covered that class of mistake since 2026-08-22 and
+      Windows had no equivalent.
+      `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
 - [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
       Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
       stack and collects twice; the block must die, which is what makes the

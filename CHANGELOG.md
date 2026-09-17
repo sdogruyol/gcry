@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counter has to earn its place there; these two are a gate contract and
   `bench/darwin_stw_resume.cr` reads them off the heap.
 
+### Added
+
+- **`make windows-typecheck`**: cross-compiles `samples/hello.cr` and
+  `bench/tls_roots.cr` — what `ci/windows.ps1` actually builds — for both
+  Windows targets in 8 s. `make darwin-typecheck` has caught
+  platform-only compile breaks for the other platform since 2026-08-22;
+  Windows had no equivalent, so a five-line bench change that reached a
+  `{% skip_file unless flag?(:unix) %}` module cost two red jobs twenty
+  minutes into the matrix.
+
 ### Fixed
 
 - **An explicit `GC.collect` usually did nothing under thread load, and
