@@ -131,6 +131,22 @@ module Gcry
       @@stw_ports = uninitialized StaticArray(LibMach::ThreadAct, MAX_STW_SP_SLOTS)
       @@stw_port_count = 0
 
+      # Slot claims that found the table full, cumulative for the life of the
+      # process. A thread with no slot is still suspended and still scanned —
+      # it just loses its SP clamp and its registers, so a reference held only
+      # in the 65th thread's registers stops being a root. Nothing counted
+      # that before, which is why `MAX_STW_SP_SLOTS` could bound the root scan
+      # in silence. Reporting only for now: on a tree that can reach more than
+      # `MAX_STW_SP_SLOTS` live threads this is *supposed* to move, so the gate
+      # that asserts it zero belongs with the fix that lifts the bound, not
+      # before it.
+      #
+      # Counts failed *claims*, not threads: `capture_thread_state` asks once
+      # for the SP and once for the registers, so one uncovered thread adds
+      # two. The distinction does not matter to a zero and would cost a second
+      # counter to remove.
+      @@stw_capture_no_slot = uninitialized UInt64
+
       def self.stw_sp_clamp_enabled? : Bool
         @@stw_enabled
       end
@@ -147,7 +163,12 @@ module Gcry
         return if @@stw_booted
         @@stw_claimed.set(0_u64)
         @@stw_port_count = 0
+        @@stw_capture_no_slot = 0_u64
         @@stw_booted = true
+      end
+
+      def self.stw_capture_no_slot : UInt64
+        @@stw_booted ? @@stw_capture_no_slot : 0_u64
       end
 
       # Slot index for *id*, claiming a free one if it has none. -1 when the
@@ -187,7 +208,10 @@ module Gcry
             end
             i += 1
           end
-          return -1 if i >= MAX_STW_SP_SLOTS
+          if i >= MAX_STW_SP_SLOTS
+            @@stw_capture_no_slot &+= 1
+            return -1
+          end
         end
       end
 

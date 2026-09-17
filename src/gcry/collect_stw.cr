@@ -486,6 +486,22 @@ module Gcry
       {% end %}
     end
 
+    # Capture slots the STW table could not hand out. Unlike the two counters
+    # above this one is real on every platform: all three size the SP/register
+    # table at `MAX_STW_SP_SLOTS` = 64 because the claim mask is an
+    # `Atomic(UInt64)`, and past that a thread is suspended and scanned with no
+    # SP clamp and no registers. A reference live only in the 65th thread's
+    # registers is then not a root, which is the `each_thread_greg` stub of
+    # v0.19.0 on a new axis
+    # (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/`).
+    def stw_capture_no_slot : UInt64
+      {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
+        Platform.stw_capture_no_slot
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
     # `ESRCH`. Spelled out rather than reached through `Errno`, which is an
     # enum lookup on a path that runs with the world stopped.
     SUSPEND_ESRCH = 3

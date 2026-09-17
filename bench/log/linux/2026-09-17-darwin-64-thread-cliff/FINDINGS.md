@@ -100,6 +100,39 @@ Made while designing the fix, and they matter:
   known and handled there — and, as far as I can find, counted nowhere. Darwin
   has no such branch at all.
 
+## Measured on Linux, 2026-09-17: the capture ceiling is not hypothetical
+
+The design's step 1 — `stw_capture_no_slot`, a counter on every platform for a
+slot claim that found the table full — is in, reporting only. Linux x86_64,
+this host, `-Dgc_none --release`, N spinning allocator threads plus the main
+one, three explicit `Gcry.collect` calls each:
+
+| threads on `Thread` list | at start | per collect | total |
+|---|---|---|---|
+| 9   | 0  | +0 +0 +0    | 0   |
+| 33  | 0  | +0 +0 +0    | 0   |
+| 71  | 10 | +0 +0 +0    | 10  |
+| 101 | 0  | +70 +70 +70 | 210 |
+
+Below the bound it is **exactly** zero, every collect. Above it, non-zero. That
+is a counter that discriminates rather than one that survives, and it is the
+first measurement of the capture ceiling on Linux — the Darwin probe in this
+same directory only ever showed the hang, which is the other defect.
+
+`+70` on 101 threads is about two per uncovered thread (101 − 1 current − 64 =
+36), which fits the counter's documented multiplicity: on Linux the collector
+reserves a slot through `reserve_suspend_slot` *and* the handler claims one
+through `record_thread_sp`, so an uncovered thread fails twice.
+
+**Unexplained, and left that way:** at 71 threads the counter reads 10 from the
+automatic collections during startup and then **+0** for all three explicit
+collects, when 6 threads should go uncovered every time. The reading that fits
+is that a given stop does not suspend every thread on the list — `stw_records`
+was 138 across three collects of 71 threads, not ~213 — but I have not
+established why, and nothing in this design rests on it. It does mean the
+thread count at which capture starts being lost is not simply "list length >
+64".
+
 ## The fix has two halves and they are not equally safe
 
 1. **Resume must not depend on the table.** `start_world_threads` already walks

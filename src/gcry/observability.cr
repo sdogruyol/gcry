@@ -273,6 +273,7 @@ module Gcry
         stw_suspend_redundant_signals:         heap.stw_suspend_redundant_signals,
         stw_suspend_no_tls:                    heap.stw_suspend_no_tls,
         stw_suspend_ack_unavailable:           heap.stw_suspend_ack_unavailable,
+        stw_capture_no_slot:                   heap.stw_capture_no_slot,
         stack_bounds_visited:                  Gcry::Platform.stack_bounds_visited,
         stack_bounds_read:                     Gcry::Platform.stack_bounds_read,
         stack_bounds_main_cached:              Gcry::Platform.stack_bounds_main_cached,

@@ -150,6 +150,13 @@ module Gcry
     # claim.
     @@stw_stale_signals = uninitialized UInt64
     @@stw_redundant_signals = uninitialized UInt64
+    # Slot claims that found the table full. `SUSPEND_NO_SLOT` has named this
+    # case since the stop epoch went in — "admitted, but with no slot to answer
+    # through" — and deliberately costs that thread its SP clamp rather than
+    # the stop. What it never did was count it, so `MAX_STW_SP_SLOTS` bounded
+    # the root scan with nothing to read. Reporting only: past 64 live threads
+    # this is supposed to move.
+    @@stw_capture_no_slot = uninitialized UInt64
     # `GCRY_STW_EPOCH=0`: honour every delivery, as this handler did before the
     # epoch. The red arm for `make stw-epoch` — with it the double-signal arm
     # wedges, which is the behaviour the resend would have shipped.
@@ -224,6 +231,7 @@ module Gcry
       @@stw_epoch_enabled = true
       @@stw_no_tls_entries = 0_u64
       @@stw_ack_unavailable = 0_u64
+      @@stw_capture_no_slot = 0_u64
       @@stw_ack_via_thread = false
       i = 0
       while i < MAX_STW_SP_SLOTS
@@ -288,6 +296,10 @@ module Gcry
 
     def self.stw_redundant_signals : UInt64
       @@stw_booted ? @@stw_redundant_signals : 0_u64
+    end
+
+    def self.stw_capture_no_slot : UInt64
+      @@stw_booted ? @@stw_capture_no_slot : 0_u64
     end
 
     # Called by `stop_world` **before** the first suspend signal. A signal sent
@@ -495,7 +507,10 @@ module Gcry
           end
           i += 1
         end
-        return -1 if i >= MAX_STW_SP_SLOTS # table full
+        if i >= MAX_STW_SP_SLOTS # table full
+          @@stw_capture_no_slot &+= 1
+          return -1
+        end
       end
     end
 

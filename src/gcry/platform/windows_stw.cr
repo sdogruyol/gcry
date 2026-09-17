@@ -22,6 +22,10 @@ module Gcry::Platform
   @@stw_installed = false
   @@stw_handles = uninitialized StaticArray(LibC::HANDLE, MAX_STW_SP_SLOTS)
   @@stw_handle_count = 0
+  # Slot claims that found the table full. Same bound and same consequence as
+  # the other two platforms — the thread is suspended and scanned without an SP
+  # clamp or registers — and until now nothing counted it. Reporting only.
+  @@stw_capture_no_slot = uninitialized UInt64
 
   def self.stw_sp_clamp_enabled? : Bool
     @@stw_enabled
@@ -39,7 +43,12 @@ module Gcry::Platform
     return if @@stw_booted
     @@stw_claimed.set(0_u64)
     @@stw_handle_count = 0
+    @@stw_capture_no_slot = 0_u64
     @@stw_booted = true
+  end
+
+  def self.stw_capture_no_slot : UInt64
+    @@stw_booted ? @@stw_capture_no_slot : 0_u64
   end
 
   private def self.slot_for(id : LibC::HANDLE) : Int32
@@ -75,7 +84,10 @@ module Gcry::Platform
         end
         i += 1
       end
-      return -1 if i >= MAX_STW_SP_SLOTS
+      if i >= MAX_STW_SP_SLOTS
+        @@stw_capture_no_slot &+= 1
+        return -1
+      end
     end
   end
 
