@@ -2088,6 +2088,28 @@ kept finding the rest.
       filled in — collect n=64 now 236.2 us/thread and n=100 60.5 us/thread,
       falling with n exactly as Linux does.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`
+- [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
+      Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
+      stack and collects twice; the block must die, which is what makes the
+      other arm's survival attributable to the thread-local instead of to the
+      harness. On run 35223760476 it survived — `victim live?=true intact=true`
+      — and the harness failed the job, correctly: an arm that cannot
+      discriminate has proven nothing. Not caused by the commit it failed on
+      (a spec-helper change) and the same job was green an hour earlier, so it
+      is a probabilistic control rather than a regression.
+      Windows is the likely platform for it because `wipe_stack` cannot reach
+      the **register file** and that platform's STW capture scans more of it
+      than any other: `GREG_WORDS = 80` there is RAX-R15 *plus* the 512-byte
+      FP/XMM save area, against 16 GP words on Linux x86_64 — and a fill loop
+      is what a compiler vectorises. A reading, not a measurement.
+      So the arm now calls `Gcry::PoisonHolders.search` when it comes out
+      INCONCLUSIVE: the next occurrence names the slot (the wipe is too small)
+      or says `holders — none`, which for this arm leaves the register file,
+      where no wipe can help and the harness would have to stop materialising
+      the pointer in a register at all. Verified locally against a deliberate
+      stack holder: 8 words across 4 stacks, exact fiber and slot addresses,
+      roots and heap explicitly clean. The fix waits on which one it names.
+      `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
 - [ ] **The same 64-slot bound still costs SP and register capture on Linux and
       Darwin (Half 2).** `slot_for` returns −1 past the table, so those threads
       are suspended with no SP clamp and no registers — a reference live only in

@@ -152,6 +152,21 @@ if control
     puts "INCONCLUSIVE — the control block survived with nothing holding it, so this"
     puts "host's conservative scan is finding a stale copy somewhere and neither arm"
     puts "can discriminate. The wipe above is what usually prevents that."
+    puts ""
+    # Which is not a thing to guess at. The holders search walks the root set,
+    # every live block and every fiber stack, so it either names the word that
+    # is keeping this block or narrows the answer to the three places it cannot
+    # look. On this arm the TLS slot is null and the address was never stored
+    # anywhere else, so "none" means the copy is in a **register** — and that is
+    # the one place a stack wipe cannot reach. Windows makes that likelier than
+    # the other platforms by design: its STW capture scans the 512-byte FP/XMM
+    # save area as well as the GP words, and the fill loop is exactly the shape
+    # a compiler vectorises.
+    #
+    # The search's own wording says "the range gcry released". Here the block is
+    # still live; the search is being borrowed to ask who is keeping it.
+    puts "asking the holders search where that copy is:"
+    Gcry::PoisonHolders.search(heap, victim.address, VICTIM_SIZE.to_u64)
     exit 1
   end
   puts "ok — with the pointer held nowhere the block dies, so the other arm's"
