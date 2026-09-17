@@ -165,8 +165,20 @@ if control
     #
     # The search's own wording says "the range gcry released". Here the block is
     # still live; the search is being borrowed to ask who is keeping it.
-    puts "asking the holders search where that copy is:"
-    Gcry::PoisonHolders.search(heap, victim.address, VICTIM_SIZE.to_u64)
+    #
+    # And it is **Unix-only** — `poison_holders.cr` opens with
+    # `{% skip_file unless flag?(:unix) %}`, so on Windows the constant does not
+    # exist. Which is the platform this arm has actually failed on, so the
+    # instrument is missing exactly where it is needed; that gap is its own
+    # ROADMAP item. Adding the call without this guard broke the Windows build
+    # on two jobs (`undefined constant Gcry::PoisonHolders`, run 35224827564).
+    {% if flag?(:unix) %}
+      puts "asking the holders search where that copy is:"
+      Gcry::PoisonHolders.search(heap, victim.address, VICTIM_SIZE.to_u64)
+    {% else %}
+      puts "the holders search that would name the copy is Unix-only, so this platform"
+      puts "cannot answer the question from here — see the note in this file."
+    {% end %}
     exit 1
   end
   puts "ok — with the pointer held nowhere the block dies, so the other arm's"
