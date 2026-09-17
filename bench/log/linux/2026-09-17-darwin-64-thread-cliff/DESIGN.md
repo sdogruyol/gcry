@@ -190,3 +190,29 @@ And the release question this unblocks: Half 1 is the first change since v0.26.0
 that a user would notice — every commit since has been gates, harnesses and
 records, with `src/` byte-identical. 0.26.1 is worth cutting when Half 1 lands,
 not before.
+
+
+## Postscript: what Half 2 actually needed
+
+Two of this document's premises were assumptions, and checking them before
+writing any code changed the plan:
+
+- **"Those threads are suspended with no SP and no registers captured"** — the
+  SP half is conservative. `scan_pthread_stack(bounds, nil)` walks the whole
+  stack, so a missing clamp costs time, not roots.
+- **"It is cross-platform"** — the *register* half is not. Linux reads its
+  registers from a signal `ucontext`, the handler carries no `SA_ONSTACK`, and
+  that ucontext therefore lives on the interrupted thread's own stack where the
+  unclamped walk finds it. Only Darwin, whose registers exist solely in the
+  table, actually loses a root. Windows loses the whole collection instead.
+
+So Half 2 shipped for Darwin and Windows and **not** for Linux, and the two
+pieces of machinery this document prescribed for the general case turned out to
+be unnecessary for the platforms that changed: no `Atomic(UInt8)` and no
+never-freed table, because `slot_for` there runs only on the collector. Both are
+still what Linux would need, which is the other half of why Linux was left
+alone: its table is the one a signal handler claims from, and a stale handler
+from a previous stop touches it *before* the epoch check declines the delivery.
+
+`LibC.realloc` became `LibC.malloc` + free for the same reason the copy was
+dropped: every slot is per-STW, so growth has nothing to preserve.

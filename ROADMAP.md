@@ -2207,8 +2207,8 @@ kept finding the rest.
       stack holder: 8 words across 4 stacks, exact fiber and slot addresses,
       roots and heap explicitly clean. The fix waits on which one it names.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
-- [ ] **The same 64-slot bound still costs SP and register capture on Linux and
-      Darwin (Half 2).** `slot_for` returns −1 past the table, so those threads
+- [x] **The 64-slot bound cost Darwin its register capture and Windows its
+      collection — fixed 2026-09-17 (Half 2).** `slot_for` returns −1 past the table, so those threads
       are suspended with no SP clamp and no registers — a reference live only in
       the 65th thread's registers is not a root, which is the v0.19.0
       `each_thread_greg` shape on a new axis. Now instrumented rather than read
@@ -2240,6 +2240,41 @@ kept finding the rest.
       of 71), and nothing in the design rests on why.
       No user-visible sighting: every observation is from a harness asking for
       ≥64 threads on purpose, and `Parallel` defaults to capacity 1.
+      **Two premises were checked before any code changed, and both moved the
+      work.** A missing SP clamp is *conservative*: `scan_pthread_stack` with a
+      nil SP walks the whole stack. And on Linux the registers are on the
+      interrupted thread's own stack — the suspend handler is installed with
+      `SA_SIGINFO` and **no `SA_ONSTACK`**, so its `ucontext` is there and the
+      unclamped walk covers it. So Linux loses precision, not roots, and the
+      claim that it loses roots (made here, in the design, and in v0.26.1's
+      CHANGELOG) is retracted.
+      **Shipped for Darwin and Windows.** Both tables now grow at collection
+      entry via `LibC.malloc`, doubling from 64, sized from
+      `Thread.unsafe_each` plus eight slots of slack, before the first suspend —
+      never inside the stopped world. No copy, since every slot is per-STW. If
+      the allocator refuses, the old table stays and `stw_capture_no_slot`
+      counts the shortfall rather than the collection being failed, which is
+      exactly the trade Windows used to make in the other direction: it
+      *refused the stop* at the 64th thread, so a 65-thread process could not
+      collect at all. The 64-bit claim mask — which **was** the bound, a
+      `UInt64` cannot address a 65th slot — is one plain byte per slot, with no
+      CAS, because on these two platforms `slot_for` runs only on the collector,
+      one thread at a time. Both stop loops hand the slot index down, so the
+      linear `slot_for` runs once per thread instead of twice.
+      **Linux is left alone deliberately**, not for convenience: its loss is
+      precision, and its table is the one a suspend handler claims from — a
+      stale handler touches it *before* the epoch declines the delivery, so
+      growing it needs atomics on `malloc`ed memory and a table that is never
+      freed. That is a separate change with a different risk profile.
+      `make stw-capture-coverage`: 80 threads with zero failed claims, the same
+      pinned by `GCRY_STW_FIXED_SLOTS=1` where they must be non-zero, 8 threads
+      under that knob where they must be zero; capacity growth asserted so a
+      zero cannot be a table that never had to cover anyone, and
+      `thread_greg_words_total` required to move so an arm that captured
+      nothing fails its precondition. **Not verified on either platform by me**
+      — no host here; four cross-targets type-check, the Linux suites and every
+      STW gate still pass, and the Darwin and Windows CI jobs are the first
+      execution.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
       `…/DESIGN.md`
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered

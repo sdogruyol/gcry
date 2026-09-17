@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Darwin lost a thread's registers past 64 threads, and Windows lost
+  the whole collection.** The STW capture table was a fixed 64 slots
+  because its claim mask is a `UInt64`, and `slot_for` returned −1 past
+  it. On Darwin that thread was then scanned with no registers, and
+  `thread_get_state` is their only copy, so a reference held only in the
+  65th thread's registers was not a root. On Windows the stop was
+  *refused* at the 64th thread — loud and correct, and it meant a process
+  with 65 threads could never collect. Both tables now grow with the
+  thread count at collection entry, via `LibC.malloc` before the first
+  suspend (never inside the stopped world), and the claim mask is one
+  byte per slot with no CAS, because `slot_for` runs only on the
+  collector there. Each stop loop hands the slot index down, so the
+  linear scan runs once per thread instead of twice. Gated by
+  `make stw-capture-coverage`, with `GCRY_STW_FIXED_SLOTS=1` pinning the
+  old bound as the red arm.
+  **Linux is unchanged on purpose**: its suspend handler carries no
+  `SA_ONSTACK`, so the `ucontext` its registers come from is on the
+  interrupted thread's own stack and the unclamped full-stack scan still
+  walks it. The 0.26.1 note below says otherwise and is retracted — that
+  platform loses precision, not roots.
+
 ## [0.26.1] - 2026-09-17
 
 ### Added
@@ -16,7 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the claim mask is an `Atomic(UInt64)`, and past it Linux and
   Darwin suspend the thread and scan it with no SP clamp and no
   registers — so a reference live only in the 65th thread's registers is
-  not a root. Nothing counted that before. Measured on Linux: exactly
+  not a root. (Corrected 2026-09-17: only on **Darwin**. Linux reads its
+  registers from a signal `ucontext` that sits on the interrupted
+  thread's own stack, which the unclamped scan walks in full, so the
+  loss there is precision.) Nothing counted that before. Measured on Linux: exactly
   zero every collect at 9 and 33 threads, +70 per collect at 101.
   Reporting only; the gate asserting it zero belongs with the fix that
   lifts the bound. Windows refuses any stop it cannot record, so the

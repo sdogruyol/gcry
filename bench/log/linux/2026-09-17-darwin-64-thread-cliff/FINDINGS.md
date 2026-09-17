@@ -260,3 +260,72 @@ later. That is a discriminating pair, and it was not available before the
 barrier landed — with unlanded collects the same arms read +0 either way, which
 is how the earlier table came to say "+0" for a case that loses five threads'
 registers every stop.
+
+
+## Half 2, and the claim it corrected first
+
+Before touching the tables I checked the two things the design had assumed
+rather than measured. Both answers changed the work.
+
+**1. A missing SP clamp is conservative, not a loss.** `scan_pthread_stack`
+takes `sp : Void*?`, and with `nil` the `if sp` branch is skipped, so `low`
+stays at the snapshotted bounds and the **whole** stack is scanned. A thread
+with no slot is therefore scanned more, not less.
+
+**2. On Linux the registers are on the thread's own stack.** The suspend handler
+is installed with `action.sa_flags = LibC::SA_SIGINFO` and **no `SA_ONSTACK`**,
+so the `ucontext_t` the handler reads its registers out of sits on the
+interrupted thread's stack, below the interrupted SP. An unclamped full-stack
+walk covers it. So Linux's no-slot case loses **precision, not roots**.
+
+That retracts a claim I had made in the design, in the ROADMAP and in v0.26.1's
+CHANGELOG — "past it Linux and Darwin suspend the thread and scan it with no SP
+clamp and no registers, so a reference live only in the 65th thread's registers
+is not a root". True on Darwin, where `thread_get_state` is the only copy. Not
+true on Linux.
+
+**What Half 2 therefore is:**
+
+| platform | before | after |
+|---|---|---|
+| Darwin  | past 64 threads: no SP clamp, **no registers** — a real missed root | table grows with the thread count |
+| Windows | past 64 threads: **the stop is refused**, so a 65-thread process cannot collect at all | table grows; a thread it cannot hold is suspended and scanned unclamped, counted, not refused |
+| Linux   | past 64 threads: unclamped full-stack scan, registers still covered via the on-stack ucontext | **unchanged, deliberately** |
+
+Linux is left alone because its loss is precision and its table is the one
+shared with a signal handler that claims from every thread at once — the part of
+the original design that needed `Atomic::Ops` on malloc'd memory and a
+never-freed table to survive a stale handler. Neither is needed on the two
+platforms that changed: there `slot_for` runs only on the collector, one thread
+at a time, so the 64-bit claim mask — which *was* the bound, since a `UInt64`
+cannot address a 65th slot — became one plain byte per slot.
+
+**How the tables grow:** `LibC.malloc`, doubling from 64, at collection entry
+before the first suspend, sized from `Thread.unsafe_each` plus eight slots of
+slack for threads born during the stop. No copy: every slot is per-STW. If the
+allocator refuses, the old table stays and `stw_capture_no_slot` counts what
+does not fit — the collection is not failed, because refusing to collect is the
+behaviour this replaces. Static arrays could not do this: the greg row is
+GREG_WORDS wide per slot, and a table for a thousand threads is a quarter to
+three quarters of a megabyte of BSS, which on these platforms is a
+**conservative static root range** — the same property that made a 256 KiB
+report buffer shift chunk residency on the aarch64 runner.
+
+**And the O(n²) the design flagged:** `slot_for` is a linear scan and was called
+twice per thread per stop. Both stop loops now hand the index down —
+`capture_thread_state(port, id, slot)` on Darwin, `record_thread_context_at` on
+Windows — so it is once.
+
+**Gated by `make stw-capture-coverage`**, three bounded arms: 80 threads with
+`stw_capture_no_slot == 0`, the same pinned by `GCRY_STW_FIXED_SLOTS=1` where it
+must be non-zero, and 8 threads under that knob where it must be zero. The
+harness also reports `stw_slot_capacity` and asserts it grew, so a zero cannot
+be read as coverage when the table was never asked for more, and requires
+`thread_greg_words_total` to have moved so an arm that captured nothing fails
+its own precondition rather than passing.
+
+**Not verified on either platform by me.** No Darwin or Windows host here. What
+is verified locally: all four cross-targets type-check, the Linux suites and
+every STW gate still pass (`greg-roots`, `scheduler-roots`, `dead-stack-root`,
+`tls-roots`, `stw-epoch`, 277 + 32 examples), and the harness skips on Linux
+with its reason. The Darwin and Windows CI jobs are the first execution.

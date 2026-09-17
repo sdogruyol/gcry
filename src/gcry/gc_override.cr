@@ -1032,6 +1032,14 @@ module GC
     # anything with 70 allocating threads — and it is the red arm for
     # `make explicit-collect-barrier` (src/gcry/collect.cr).
     heap.collect_skip_when_busy = true if env_flag_one?("GCRY_COLLECT_SKIP_WHEN_BUSY")
+    {% if flag?(:darwin) || flag?(:win32) %}
+      # Research: pin the STW capture table at its initial 64 slots, which is
+      # the bound that cost the 65th thread its SP clamp and its registers on
+      # Darwin, and cost this platform the whole collection on Windows. The red
+      # arm for `make stw-capture-coverage`
+      # (src/gcry/platform/darwin_stw.cr, src/gcry/platform/windows_stw.cr).
+      Gcry::Platform.stw_fixed_slots = true if env_flag_one?("GCRY_STW_FIXED_SLOTS")
+    {% end %}
     # Research only: swallow this many suspend signals before sending any, so
     # a thread that was signalled and never acknowledged can be arranged
     # rather than waited for (src/gcry/collect_stw.cr).
