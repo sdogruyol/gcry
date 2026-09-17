@@ -486,17 +486,38 @@ module Gcry
       {% end %}
     end
 
-    # Capture slots the STW table could not hand out. Unlike the two counters
-    # above this one is real on every platform: all three size the SP/register
-    # table at `MAX_STW_SP_SLOTS` = 64 because the claim mask is an
-    # `Atomic(UInt64)`, and past that a thread is suspended and scanned with no
-    # SP clamp and no registers. A reference live only in the 65th thread's
-    # registers is then not a root, which is the `each_thread_greg` stub of
-    # v0.19.0 on a new axis
+    # Capture slots the STW table could not hand out. All three platforms size
+    # the SP/register table at `MAX_STW_SP_SLOTS` = 64 because the claim mask
+    # is an `Atomic(UInt64)`, but they do not behave alike past it: on Linux
+    # and Darwin the thread is suspended and scanned with no SP clamp and no
+    # registers, so a reference live only in the 65th thread's registers is not
+    # a root — the `each_thread_greg` stub of v0.19.0 on a new axis. Windows
+    # refuses the stop instead, which makes this a structural zero there
     # (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/`).
     def stw_capture_no_slot : UInt64
       {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
         Platform.stw_capture_no_slot
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    # Threads suspended and resumed for a stop, `KERN_SUCCESS`-only on both
+    # sides. Darwin only: it is the platform that suspends by API and resumes
+    # by its own record, so the two can disagree. Linux resumes by the
+    # suspended thread returning from `sigsuspend` and Windows refuses any stop
+    # it cannot record, which are real zeros rather than missing fields.
+    def stw_threads_suspended : UInt64
+      {% if flag?(:darwin) %}
+        Platform.stw_threads_suspended
+      {% else %}
+        0_u64
+      {% end %}
+    end
+
+    def stw_threads_resumed : UInt64
+      {% if flag?(:darwin) %}
+        Platform.stw_threads_resumed
       {% else %}
         0_u64
       {% end %}

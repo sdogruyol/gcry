@@ -1017,6 +1017,15 @@ module GC
       # stopping (src/gcry/platform/linux_stw.cr).
       Gcry::Platform.stw_ack_via_thread = true if env_flag_one?("GCRY_STW_ACK_VIA_THREAD")
     {% end %}
+    {% if flag?(:darwin) %}
+      # Research: resume the world from the 64-entry port table, as this
+      # platform did before the thread list became the record. The stop
+      # suspends every thread unconditionally, so past 64 threads that table is
+      # short and the rest are never resumed — the red arm for
+      # `make darwin-stw-resume`
+      # (src/gcry/platform/darwin_stw.cr).
+      Gcry::Platform.stw_bounded_resume = true if env_flag_one?("GCRY_STW_BOUNDED_RESUME")
+    {% end %}
     # Research only: swallow this many suspend signals before sending any, so
     # a thread that was signalled and never acknowledged can be arranged
     # rather than waited for (src/gcry/collect_stw.cr).

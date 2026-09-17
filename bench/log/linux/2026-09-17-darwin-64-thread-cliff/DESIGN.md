@@ -1,5 +1,14 @@
 # Design: the 64-slot STW ceiling, in two halves
 
+**Status, 2026-09-17.** Step 1 (`stw_capture_no_slot`) and Half 1 (the Darwin
+resume) are in; Half 2 (the capture ceiling) is not. Half 1 has never run on
+Darwin — no host here — so the macOS CI job is its first execution, and what it
+runs is `make darwin-stw-resume` plus the two `thread_startup_cost` cells that
+have been timing out. Two things below were corrected while implementing: the
+port table is kept for the control arm rather than for the error path, and
+Windows turned out to behave differently at the bound than this document first
+assumed.
+
 Companion to `FINDINGS.md` in this directory. That file establishes the
 defects; this one is the plan, and the point of separating them is that the two
 halves have very different blast radii.
@@ -66,10 +75,12 @@ Symmetry is the argument: the stop suspends *every* non-current thread whose
 `pthread_mach_thread_np` is non-zero, so the resume resumes exactly that
 predicate. One suspend, one resume, no bound.
 
-`@@stw_ports` and `@@stw_port_count` stay, for one reason only: the error path.
-`stop_world_threads` calls `resume_suspended_ports` when a `thread_suspend`
-fails mid-loop, and that path must also stop being bounded — it becomes the
-same list walk, resuming whatever the loop had already flagged.
+`@@stw_ports` and `@@stw_port_count` stay, but **not** for the error path as
+this first said: that path takes the list walk too, since a thread the loop had
+not reached yet is not suspended and its stray resume is inert. What the table
+is kept for is the control arm — `GCRY_STW_BOUNDED_RESUME=1` restores the
+bounded walk so the gate has a red direction — and it is written only when that
+knob is set, so the shipped stop carries no bound at all.
 
 ### Why not the `@suspended` flag as the record
 

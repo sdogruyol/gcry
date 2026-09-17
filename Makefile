@@ -594,8 +594,15 @@ heap-counters: $(BIN)
 darwin-typecheck: $(BIN)
 	$(CRYSTAL) build --cross-compile --target aarch64-apple-darwin -Dgc_none samples/hello.cr -o $(BIN)/darwin_typecheck_arm64 >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-apple-darwin -Dgc_none samples/hello.cr -o $(BIN)/darwin_typecheck_x86 >/dev/null
+# A gate whose subject is a Darwin-only code path is written on a Linux box and
+# first runs 20 minutes later on the macOS job. `hello.cr` above does not reach
+# `Gcry::Platform.stw_bounded_resume?` or the Mach resume walk, so this one is
+# type-checked here as well.
+	$(CRYSTAL) build --cross-compile --target aarch64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o $(BIN)/darwin_typecheck_stw_arm64 >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-apple-darwin -Dgc_none bench/darwin_stw_resume.cr -o $(BIN)/darwin_typecheck_stw_x86 >/dev/null
 	@rm -f $(BIN)/darwin_typecheck_arm64.o $(BIN)/darwin_typecheck_x86.o
-	@echo "ok — the Darwin build type-checks on both targets"
+	@rm -f $(BIN)/darwin_typecheck_stw_arm64.o $(BIN)/darwin_typecheck_stw_x86.o
+	@echo "ok — the Darwin build and its STW resume gate type-check on both targets"
 
 # Every knob the source reads has a row in the env reference. The reference had
 # drifted by 33 before this existed, which is what a reference does: going stale
@@ -837,6 +844,26 @@ static-bss-roots: $(BIN)
 thread-startup-cost: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_startup_cost.cr -o $(BIN)/thread_startup_cost --error-trace
 	$(BIN)/thread_startup_cost
+
+# Does the world come back whole past 64 threads? Darwin suspends every thread
+# with `thread_suspend` but recorded the port only while a slot was free, and
+# resumed from that 64-entry table -- so the 65th thread and up were suspended
+# and never resumed. A frozen mutator, from a collection that reported success.
+# Found from the TIMEOUT cells of `thread-startup-cost` above.
+#
+# The contract is an equality: `stw_threads_suspended == stw_threads_resumed`,
+# both counted on KERN_SUCCESS only, plus every worker still making progress
+# after the restart. Three arms as bounded children -- 70 threads on the
+# shipped resume, 70 with `GCRY_STW_BOUNDED_RESUME=1` (which must *not* come
+# back whole, and a wedged child counts: a thread frozen holding the allocator
+# takes the process with it), and 8 with the same knob, which must come back
+# whole so the red arm is attributable to the bound and not to the knob.
+# Skips off Darwin: Linux threads resume themselves out of `sigsuspend` and
+# Windows refuses any stop it cannot record.
+.PHONY: darwin-stw-resume
+darwin-stw-resume: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/darwin_stw_resume.cr -o $(BIN)/darwin_stw_resume --error-trace
+	$(BIN)/darwin_stw_resume
 
 # Does the stack-bounds snapshot still cover the 65th thread? The root scan
 # cannot call `pthread_getattr_np` with the world stopped -- that is the

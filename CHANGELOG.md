@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`stw_capture_no_slot` on `/gc-stats`**: claims on the STW SP/register
+  table that found it full. All three platforms bound that table at 64
+  because the claim mask is an `Atomic(UInt64)`, and past it Linux and
+  Darwin suspend the thread and scan it with no SP clamp and no
+  registers — so a reference live only in the 65th thread's registers is
+  not a root. Nothing counted that before. Measured on Linux: exactly
+  zero every collect at 9 and 33 threads, +70 per collect at 101.
+  Reporting only; the gate asserting it zero belongs with the fix that
+  lifts the bound. Windows refuses any stop it cannot record, so the
+  counter is a structural zero there.
+
 ### Fixed
+
+- **Darwin: every thread past the 64th was suspended and never resumed.**
+  `stop_world_threads` suspends every thread with a Mach port
+  unconditionally, but recorded that port only while a slot was free in a
+  64-entry table, and the resume walked the table — so a process with
+  more than `MAX_STW_SP_SLOTS` threads came back from a collection with
+  the rest frozen forever, and the collection reported success. The
+  resume now walks Crystal's thread list and resumes on the same
+  predicate the stop suspends on, so the two cover the same set with no
+  bound between them. Found from the other end: `make
+  thread-startup-cost` measured 7.6 ms for 8 threads, 32.3 ms for 32 and
+  **120 s TIMEOUT** for 64 and 100, against 31.6/65.1/41.3/85.7 ms on
+  Linux — a cliff on the constant, not the O(n²) curve first suspected.
+  Gated by `make darwin-stw-resume`: `stw_threads_suspended ==
+  stw_threads_resumed`, both counted on `KERN_SUCCESS` only, plus every
+  worker still making progress after the restart, with
+  `GCRY_STW_BOUNDED_RESUME=1` restoring the pre-fix table walk as the red
+  arm.
 
 - **The aarch64 spec flake family is root-caused: one extra live thread
   turns the empty-chunk release off.**

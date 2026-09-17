@@ -1593,6 +1593,16 @@ jobs:
         continue-on-error: true
         run: make thread-startup-cost
 
+      # The bound behind those TIMEOUT cells, and the gate for it. The stop
+      # suspends every thread with a Mach port; the resume used to walk a
+      # 64-entry table of the ones it had room to record, so past 64 threads
+      # the rest were suspended and never resumed — a frozen mutator from a
+      # collection that reported success. Not `continue-on-error`: this is a
+      # gate, and it bounds its own arms (`BoundedChild`, 60 s each) because
+      # the arm that must fail is one where the process can wedge.
+      - name: STW resume coverage past the slot table
+        run: make darwin-stw-resume
+
       # `make stack-bounds-growth` is not here, and not because it hung: this
       # platform has no bounds table to grow. `darwin_stack.cr` queries the
       # thread descriptor at lookup time, so the snapshot is a no-op and

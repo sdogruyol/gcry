@@ -127,9 +127,23 @@ module Gcry
       @@stw_enabled = true
       @@stw_installed = false
 
-      # Ports suspended in the current STW (for matched resume).
+      # Ports suspended in the current STW. **Not** the shipped resume path any
+      # more — see `resume_suspended_threads` — and written only when
+      # `GCRY_STW_BOUNDED_RESUME=1` asks for the pre-fix behaviour, which is the
+      # red arm for `make darwin-stw-resume`.
       @@stw_ports = uninitialized StaticArray(LibMach::ThreadAct, MAX_STW_SP_SLOTS)
       @@stw_port_count = 0
+      @@stw_bounded_resume = uninitialized Bool
+
+      # Threads this process has suspended and resumed for a stop, cumulative
+      # and `KERN_SUCCESS`-only on both sides. The stop and the resume walk the
+      # same predicate, so these are equal after every restarted world, and the
+      # two ways that can break are both defects: fewer resumes means a thread
+      # left frozen (the bounded-table bug), more means gcry resumed a thread
+      # something else had suspended. `make darwin-stw-resume` asserts equality
+      # for that reason rather than `resumed >= suspended`.
+      @@stw_threads_suspended = uninitialized UInt64
+      @@stw_threads_resumed = uninitialized UInt64
 
       # Slot claims that found the table full, cumulative for the life of the
       # process. A thread with no slot is still suspended and still scanned —
@@ -164,11 +178,34 @@ module Gcry
         @@stw_claimed.set(0_u64)
         @@stw_port_count = 0
         @@stw_capture_no_slot = 0_u64
+        @@stw_threads_suspended = 0_u64
+        @@stw_threads_resumed = 0_u64
+        @@stw_bounded_resume = false
         @@stw_booted = true
       end
 
       def self.stw_capture_no_slot : UInt64
         @@stw_booted ? @@stw_capture_no_slot : 0_u64
+      end
+
+      def self.stw_threads_suspended : UInt64
+        @@stw_booted ? @@stw_threads_suspended : 0_u64
+      end
+
+      def self.stw_threads_resumed : UInt64
+        @@stw_booted ? @@stw_threads_resumed : 0_u64
+      end
+
+      # `GCRY_STW_BOUNDED_RESUME=1`: resume from the 64-entry port table, as
+      # this platform did until the thread list became the record. Boots the
+      # table first, so the knob survives being set before the first stop.
+      def self.stw_bounded_resume=(value : Bool) : Bool
+        ensure_stw_table
+        @@stw_bounded_resume = value
+      end
+
+      def self.stw_bounded_resume? : Bool
+        @@stw_booted && @@stw_bounded_resume
       end
 
       # Slot index for *id*, claiming a free one if it has none. -1 when the
@@ -365,11 +402,15 @@ module Gcry
 
           kr = LibMach.thread_suspend(port)
           if kr != KERN_SUCCESS
-            resume_suspended_ports
+            resume_suspended_threads(current)
             raise "gcry: thread_suspend failed (kr=#{kr})"
           end
+          @@stw_threads_suspended &+= 1
 
-          if @@stw_port_count < MAX_STW_SP_SLOTS
+          # Only the control arm needs the table: the shipped resume walks the
+          # thread list. Recording unconditionally would keep a bound in the
+          # stop that nothing reads.
+          if @@stw_bounded_resume && @@stw_port_count < MAX_STW_SP_SLOTS
             @@stw_ports[@@stw_port_count] = port
             @@stw_port_count += 1
           end
@@ -381,21 +422,51 @@ module Gcry
       end
 
       def self.start_world_threads(current : ::Thread) : Nil
-        resume_suspended_ports
+        if @@stw_bounded_resume
+          resume_suspended_ports
+          # Clear Crystal suspended flags for threads we stopped.
+          ::Thread.unsafe_each do |thread|
+            next if thread == current
+            thread.@suspended.set(false)
+          end
+          return
+        end
 
-        # Clear Crystal suspended flags for threads we stopped.
+        resume_suspended_threads(current)
+      end
+
+      # Resume by walking the thread list rather than a table of ports.
+      #
+      # `stop_world_threads` suspends **every** non-current thread whose Mach
+      # port is non-zero, so that predicate is the record and the two walks
+      # cover the same set by construction — with no fixed bound between an
+      # unbounded stop and a 64-entry resume. That mismatch left the 65th thread
+      # and up suspended forever, which is a hang rather than a slow collection
+      # (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/`).
+      #
+      # Only a `KERN_SUCCESS` is counted. `thread_resume` on a thread whose
+      # suspend count is already zero returns `KERN_FAILURE` and does nothing,
+      # so a thread born during the stop costs an inert call rather than a
+      # spurious wake; and if something outside gcry had suspended it, the
+      # resume *would* succeed and show up as `stw_threads_resumed` overtaking
+      # `stw_threads_suspended`.
+      private def self.resume_suspended_threads(current : ::Thread) : Nil
         ::Thread.unsafe_each do |thread|
           next if thread == current
+          port = LibC.pthread_mach_thread_np(thread.to_unsafe)
+          next if port == 0
+          @@stw_threads_resumed &+= 1 if LibMach.thread_resume(port) == KERN_SUCCESS
           thread.@suspended.set(false)
         end
       end
 
+      # Pre-fix resume, reachable only through `GCRY_STW_BOUNDED_RESUME=1`.
       private def self.resume_suspended_ports : Nil
         i = 0
         while i < @@stw_port_count
           port = @@stw_ports[i]
           if port != 0
-            LibMach.thread_resume(port)
+            @@stw_threads_resumed &+= 1 if LibMach.thread_resume(port) == KERN_SUCCESS
             @@stw_ports[i] = 0
           end
           i += 1

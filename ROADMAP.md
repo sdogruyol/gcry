@@ -2053,48 +2053,86 @@ kept finding the rest.
       on the multi-mutator branch. Pinned at eight sites across six files, every
       spec that enables `release_empty_chunks` rather than the five that failed.
       `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
-- [ ] **Darwin: a process with more than 64 threads loses them on the first
-      collection.** `MAX_STW_SP_SLOTS = 64` in `darwin_stw.cr` backs the SP,
-      greg, id and Mach-port tables. `stop_world_threads` suspends **every**
-      thread unconditionally but records the port only `if @@stw_port_count <
-      MAX_STW_SP_SLOTS`, and `resume_suspended_ports` resumes only what the
-      table holds — so **every thread past the 64th is suspended and never
-      resumed**. Measured by `make thread-startup-cost` on the Darwin runner:
-      with a collection every 2 ms through the storm, n=32 finishes in 32.3 ms
-      and n=64 and n=100 both exceed a 120 s budget, while the same arms with
-      collections off do 100 threads in **2.3 ms**. A cliff on the constant, not
-      a curve. This is also what took the Darwin job down through
+- [x] **Darwin: a process with more than 64 threads never got them back —
+      fixed 2026-09-17 (Half 1).** `MAX_STW_SP_SLOTS = 64` in `darwin_stw.cr`
+      backs the SP, greg, id and Mach-port tables. `stop_world_threads` suspends
+      **every** thread unconditionally but recorded the port only `if
+      @@stw_port_count < MAX_STW_SP_SLOTS`, and `resume_suspended_ports` resumed
+      only what the table held — so **every thread past the 64th was suspended
+      and never resumed**, from a collection that reported success. Measured by
+      `make thread-startup-cost` on the Darwin runner: with a collection every
+      2 ms through the storm, n=32 finishes in 32.3 ms and n=64 and n=100 both
+      exceed a 120 s budget, while the same arms with collections off do 100
+      threads in **2.3 ms**. A cliff on the constant, not a curve — the O(n²)
+      reading was refuted. This is also what took the Darwin job down through
       `stack_bounds_growth` at 100 threads on 2026-09-16.
-      **And a second defect sits on the same bound:** `slot_for` returns −1 past
-      the table, so those threads are suspended with no SP and no registers
-      captured — a reference live only in the 65th thread's registers is not a
-      root, which is the v0.19.0 `each_thread_greg` shape on a new axis. Not
-      demonstrated collecting a live object; read off the path, and the counter
-      that would prove it is the instrument this has been missing.
+      The resume now walks `Thread.unsafe_each` and resumes every non-current
+      thread with a non-zero Mach port — the same predicate the stop suspends
+      on, so the two walks cover the same set by construction with no bound
+      between them. `thread.@suspended` was rejected as the record on purpose:
+      it is Crystal's ivar, and if Crystal's own suspend protocol ever writes it
+      the record becomes shared state. `stw_threads_suspended` /
+      `stw_threads_resumed` count `KERN_SUCCESS` on both sides, so the contract
+      is an equality that breaks in two directions — fewer resumes is a frozen
+      thread, more is gcry resuming a thread something else suspended — and
+      `make darwin-stw-resume` asserts it with 70 threads plus per-worker
+      progress. Its red arm is `GCRY_STW_BOUNDED_RESUME=1`, the pre-fix table
+      walk, with an 8-thread arm under the same knob so the failure is
+      attributable to the bound rather than to the knob. Three arms, bounded
+      children, 60 s each; a wedged child counts as the red observation because
+      a thread frozen holding the allocator takes the process with it.
+      **Unverified on the platform:** `thread_resume` on a thread whose suspend
+      count is zero is documented to return `KERN_FAILURE` and do nothing, which
+      is what makes a stray resume of a thread born mid-stop inert. Read from
+      the documentation, not observed — no Darwin host here. The CI gate is the
+      first execution of any of this.
+      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`
+- [ ] **The same 64-slot bound still costs SP and register capture on Linux and
+      Darwin (Half 2).** `slot_for` returns −1 past the table, so those threads
+      are suspended with no SP clamp and no registers — a reference live only in
+      the 65th thread's registers is not a root, which is the v0.19.0
+      `each_thread_greg` shape on a new axis. Now instrumented rather than read
+      off the code: `stw_capture_no_slot` counts a claim that found the table
+      full, and on Linux x86_64 it is **exactly 0 every collect at 9 and 33
+      threads and +70 per collect at 101** — about two per uncovered thread,
+      since the collector reserves a slot and the handler claims one. Not
+      demonstrated collecting a live object; the loss is in the coverage.
+      One bound, three behaviours, which was the surprise: **Windows refuses the
+      stop** (the count is checked before the suspend and
+      `raise_thread_suspension_error` already says "or exceeded 64 threads"), so
+      it never suspends a thread it cannot record — the counter is a structural
+      zero there. **Linux admits the stop and loses the capture**, by the
+      explicit `SUSPEND_NO_SLOT` decision to cost the thread its clamp rather
+      than the stop. **Darwin hung**, which was Half 1.
+      The design: the claim bitmask has to go (an `Atomic(UInt64)` cannot
+      address past 64 slots — a per-slot `Atomic(UInt8)` replaces it), the table
+      grows at collection entry via `LibC.realloc` and never inside the stop
+      (malloc under a stopped world is the 2026-08-10 six-hour hang), Darwin
+      hands the slot index through instead of re-deriving it because `slot_for`
+      is a linear scan called twice per thread and is the next cliff once the
+      ceiling lifts, and Windows has to be given something to do other than
+      refuse. The gate asserting `stw_capture_no_slot == 0` lands with the fix,
+      not before: on a tree that can reach 64 threads it is supposed to be
+      non-zero today. **Unexplained and recorded as such:** at 71 threads the
+      counter reads 10 from startup and then +0 for three explicit collects,
+      when 6 threads should go uncovered each time — a given stop appears not to
+      suspend every thread on the list (`stw_records` 138 across three collects
+      of 71), and nothing in the design rests on why.
       No user-visible sighting: every observation is from a harness asking for
       ≥64 threads on purpose, and `Parallel` defaults to capacity 1.
-      **Both halves are designed** in
-      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`, in three
-      steps and deliberately not as one change:
-      **(1)** `stw_capture_no_slot`, reporting only, on all three platforms —
-      nothing counts the −1 today, and a gate asserting zero would be red on
-      master before the fix. **(2)** Half 1: Darwin resume by walking the thread
-      list instead of the port table, symmetric with a stop that suspends every
-      thread with a non-zero Mach port, plus a `stw_threads_suspended` /
-      `stw_threads_resumed` pair asserted **equal** — an invariant that cannot
-      pass by being fast. Its positive control already exists and is already
-      red: `thread_startup_cost`'s collect arm at n=64 and n=100. **(3)** Half 2:
-      the claim bitmask has to go (a `UInt64` cannot address past 64 slots — a
-      per-slot `Atomic(UInt8)` replaces it), the table grows at collection entry
-      via `LibC.realloc` and never inside the stop, and Darwin hands the slot
-      index through instead of re-deriving it, because `slot_for` is a linear
-      scan called twice per thread and is the next cliff once the ceiling
-      lifts. Three corrections to the first reading are folded into the
-      findings: slots *are* recycled per STW, the 64 is structural on all three
-      platforms rather than Darwin's, and Linux already names the condition as
-      `SUSPEND_NO_SLOT` without counting it.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
       `…/DESIGN.md`
+- [ ] **`/gc-stats` is at Crystal's 300-field named-tuple ceiling.** Adding the
+      three counters of the 64-slot work made the literal in
+      `observability.cr` 301 fields, which is a **compile error** — "named tuple
+      size cannot be greater than 300" — not a truncation. `stw_capture_no_slot`
+      took the last slot because it is cross-platform and names silent root
+      loss; the Darwin `stw_threads_suspended` / `_resumed` pair is a gate
+      contract and is read off the heap instead. So the next counter anyone adds
+      does not compile. Grouping the fields into sub-tuples (`stw:`, `chunks:`,
+      `threads:`) is the fix and it changes every consumer of the shape,
+      including the HTTP renderer and whatever parses it downstream — which is
+      why it is an item rather than a line.
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered
       2026-09-17, and it was not thread startup.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:
