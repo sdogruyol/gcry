@@ -226,3 +226,37 @@ now complete a collection each. The same Linux cells moved from 31.6 / 65.1 /
 41.3 / 85.7 ms of join time to 179.6 / 367.8 / 267.4 / 3638.1 ms, with 11-13
 collections per cell instead of a handful. Nothing measured after that change is
 comparable to the numbers above.
+
+
+## Re-measured after the explicit-collect barrier: the counter is arithmetic
+
+The table further up measures windows, because most of its explicit collects
+did nothing (`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`).
+With that guard narrowed, every call lands and the counter becomes exact. Same
+host, gentle workers (16 bytes every 5 ms, so nothing else is collecting),
+five explicit collects each:
+
+| threads on Crystal's list | need a slot | `stw_capture_no_slot` per collect |
+|---|---|---|
+| 9   | 7  | +0 +0 +0 +0 +0 |
+| 33  | 31 | +0 +0 +0 +0 +0 |
+| 65  | 63 | +0 +0 +0 +0 +0 |
+| 71  | 69 | +10 +10 +10 +10 +9 |
+| 101 | 99 | +68 +70 +68 +70 +69 |
+
+"Need a slot" is the list minus the collector itself and minus `SYSMON`, the two
+threads `stop_world` skips. The relationship is
+
+    no_slot per collect  =  2 x max(0, needing_a_slot - MAX_STW_SP_SLOTS)
+
+— 69 − 64 = 5 → 10, and 99 − 64 = 35 → 70 — where the 2 is the documented
+multiplicity on Linux: `reserve_suspend_slot` fails once before the signal and
+`record_thread_sp` fails again inside the handler. The odd rows (+9, +68) are a
+thread that had not finished starting when that stop began.
+
+**The 65-thread row is the one that matters for Half 2's gate**: exactly at the
+bound, nothing is lost, so a gate can assert zero there and non-zero one thread
+later. That is a discriminating pair, and it was not available before the
+barrier landed — with unlanded collects the same arms read +0 either way, which
+is how the earlier table came to say "+0" for a case that loses five threads'
+registers every stop.
