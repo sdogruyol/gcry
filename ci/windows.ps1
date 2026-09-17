@@ -94,17 +94,6 @@ try {
             $holders = Join-Path $PWD 'bin/holders_find_windows.exe'
             Invoke-Checked $crystal (@('build', '-Dgc_none', 'bench/holders_find.cr', '-o', $holders, '--error-trace'))
             Invoke-Checked $holders @()
-
-            # This platform used to answer a full capture table by refusing
-            # the whole stop — `raise_thread_suspension_error` said "or
-            # exceeded 64 threads" — so a process with 65 threads could not
-            # collect at all. The table grows now; this is the gate that says
-            # every suspended thread got a slot, with the pre-fix bound pinned
-            # back by GCRY_STW_FIXED_SLOTS=1 as the arm that must fail.
-            Write-Host "Windows STW capture coverage"
-            $coverage = Join-Path $PWD 'bin/stw_capture_coverage_windows.exe'
-            Invoke-Checked $crystal (@('build', '-Dgc_none', 'bench/stw_capture_coverage.cr', '-o', $coverage, '--error-trace'))
-            Invoke-Checked $coverage @()
         }
     }
 

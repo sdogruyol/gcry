@@ -502,21 +502,6 @@ module Gcry
       {% end %}
     end
 
-    # Slots the STW capture table currently holds. Darwin and Windows size it
-    # from the thread count at collection entry; Linux's is a fixed 64 on
-    # purpose — its no-slot case is conservative rather than unsound, because
-    # the registers it would lose are in a `ucontext` on the interrupted
-    # thread's own stack, which the unclamped scan walks in full. Reported so a
-    # harness can tell a zero `stw_capture_no_slot` that means "every thread
-    # was covered" from one that means "the table never grew".
-    def stw_slot_capacity : Int32
-      {% if flag?(:darwin) || flag?(:win32) %}
-        Platform.stw_slot_capacity
-      {% else %}
-        Platform::MAX_STW_SP_SLOTS
-      {% end %}
-    end
-
     # Threads suspended and resumed for a stop, `KERN_SUCCESS`-only on both
     # sides. Darwin only: it is the platform that suspends by API and resumes
     # by its own record, so the two can disagree. Linux resumes by the

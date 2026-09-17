@@ -431,6 +431,18 @@ module Gcry
     # empty stub while this scan called it). The two readings are worth
     # separating from the outside, so `bench/greg_roots.cr` gates on it.
     getter thread_greg_candidates : UInt64 = 0_u64
+    # "No other thread can reach this heap." Only `Invariant.check_live_objects`
+    # reads it, and only to stop `concurrent_mutators?` — a count of the
+    # *process*'s thread list — from vetoing a walk over a heap that is private
+    # to the caller. Defaults false, and the collector never sets it: the only
+    # callers are specs holding their own `Gcry::Heap.new`.
+    #
+    # Unsound if set on a heap another thread does allocate into, which is why
+    # it is a property and not a knob: the walk would then compare a count and
+    # a traversal taken at two different instants. The confirm loop in the
+    # checker still catches that and skips, so the failure mode is a skip
+    # rather than a false mismatch.
+    property invariant_sole_mutator : Bool = false
     # Execution-context structures pinned explicitly by `scan_thread_roots`
     # (schedulers, run queues, event loop, stack pool), last collect. Same
     # reading problem as the counter above, and a sharper one: the whole pin

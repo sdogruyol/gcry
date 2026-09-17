@@ -901,24 +901,6 @@ explicit-collect-barrier: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/explicit_collect_barrier.cr -o $(BIN)/explicit_collect_barrier --error-trace
 	$(BIN)/explicit_collect_barrier
 
-# Does the STW capture table cover every thread it suspends? `slot_for`
-# returned -1 past 64 slots, and a thread with no slot is suspended and
-# scanned with no SP clamp and no registers. The SP half is conservative -- an
-# unclamped scan walks the whole stack -- but the registers are not on Darwin,
-# where `thread_get_state` is their only copy, and Windows answered the same
-# bound by refusing the stop entirely, so a process with 65 threads could not
-# collect. Both tables now grow at collection entry via LibC.malloc, never
-# inside the stopped world, and the 64-bit claim mask (which *was* the bound)
-# is one byte per slot. Three arms as bounded children: 80 threads with no
-# failed claims, the same pinned by GCRY_STW_FIXED_SLOTS=1 where claims must
-# fail, and 8 threads under the same knob where they must not. Skips on Linux,
-# whose fixed table is deliberate: its registers live in a ucontext on the
-# interrupted thread's own stack, which the unclamped scan still walks.
-.PHONY: stw-capture-coverage
-stw-capture-coverage: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/stw_capture_coverage.cr -o $(BIN)/stw_capture_coverage --error-trace
-	$(BIN)/stw_capture_coverage
-
 # Does the stack-bounds snapshot still cover the 65th thread? The root scan
 # cannot call `pthread_getattr_np` with the world stopped -- that is the
 # 2026-08-10 six-hour hang -- so bounds are snapshotted before the stop and read

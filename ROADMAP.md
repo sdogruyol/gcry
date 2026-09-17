@@ -2207,8 +2207,8 @@ kept finding the rest.
       stack holder: 8 words across 4 stacks, exact fiber and slot addresses,
       roots and heap explicitly clean. The fix waits on which one it names.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
-- [x] **The 64-slot bound cost Darwin its register capture and Windows its
-      collection — fixed 2026-09-17 (Half 2).** `slot_for` returns −1 past the table, so those threads
+- [ ] **The 64-slot bound costs Darwin its register capture and Windows its
+      collection (Half 2) — attempted and reverted 2026-09-17.** `slot_for` returns −1 past the table, so those threads
       are suspended with no SP clamp and no registers — a reference live only in
       the 65th thread's registers is not a root, which is the v0.19.0
       `each_thread_greg` shape on a new axis. Now instrumented rather than read
@@ -2275,8 +2275,22 @@ kept finding the rest.
       — no host here; four cross-targets type-check, the Linux suites and every
       STW gate still pass, and the Darwin and Windows CI jobs are the first
       execution.
+      **Reverted the same day.** `29b74f0` crashed the Darwin job —
+      `Process terminated because of an invalid memory access` in
+      `make chunk-search-race`, a step that was green on the commit before — and
+      with no Darwin host here a second blind push was not worth another red
+      tree. The measurements stand; the code is out. The likely cause and what a
+      re-land has to do differently are written down: `grow_stw_table` **frees**
+      the old tables, and static arrays tolerated concurrency that
+      malloc'ed-and-freed ones do not — an unsynchronised `@@stw_booted` lets
+      two threads boot and one free the other's table, `Platform.thread_sp` runs
+      outside any stopped world for library heaps (which is what
+      `chunk_search_race` builds), and `@@stw_capacity` is published in a
+      separate store from the pointers, so aarch64 can pair a new capacity with
+      an old pointer. Never freeing, and publishing capacity and arrays as one
+      allocation behind a single pointer store, is the shape to try next.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
-      `…/DESIGN.md`
+      `…/DESIGN.md`, `…/HALF2-REVERT.md`
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered
       2026-09-17, and it was not thread startup.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:

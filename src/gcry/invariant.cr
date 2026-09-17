@@ -125,7 +125,20 @@ module Gcry
     def self.check_live_objects(heap : Heap) : Nil
       return unless enabled?
       return if @@checking
-      if heap.concurrent_mutators?
+      # `concurrent_mutators?` is `multi_mutator_threads?`: a count of Crystal's
+      # thread list against a small constant. It answers a question about the
+      # *process*, and for a heap no other thread can reach — a spec's own
+      # `Gcry::Heap.new` — it answers the wrong one. A heap that says it has a
+      # single mutator is taken at its word here; the two-instant race the skip
+      # exists for is still caught below, where a `reported != after` mismatch
+      # skips rather than reports.
+      #
+      # This replaces waiting for the thread list to drain, which is what
+      # `spec/invariant_spec.cr` did between 06fb325 and this: `Thread#join`
+      # returning does not mean Crystal has unlinked the thread, and on the
+      # aarch64 runner three threads were still listed **5 s** after the join,
+      # so the wait turned a flake into a deterministic failure.
+      if heap.concurrent_mutators? && !heap.invariant_sole_mutator
         @@concurrent_skips += 1
         return
       end

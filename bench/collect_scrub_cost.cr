@@ -38,6 +38,21 @@ require "../src/gcry"
 FIBERS   = (ENV["SCRUB_COST_FIBERS"]? || "4000").to_i
 COLLECTS = 20
 
+# The thread this file was required on, which is the process's initial thread
+# because nothing has waited yet. It matters for the cost half of this harness:
+# glibc answers `pthread_getattr_np` from a pool thread's own mmap and parses
+# `/proc/self/maps` only for the **initial** thread, so the µs figure below is
+# about a maps parse only while the main fiber is still there. Crystal 1.21's
+# execution-context monitor hands a scheduler whose thread it catches inside a
+# syscall to a pool thread and the main fiber carries on there — and this
+# harness makes syscalls (`File.read_lines("/proc/self/maps")`).
+#
+# Measured: 1 779 µs and 3 447 µs at ~8 060 mappings on a 20-core Linux box,
+# against **1.0 µs at 8 070 mappings** on the CI runner of run 35240604177,
+# which failed this harness's cost precondition. One microsecond cannot be an
+# 8 000-line parse, so that run was not on the initial thread.
+INITIAL_PTHREAD = Gcry::Platform.current_thread_id
+
 # One libc lookup must stay under this at any mapping count for the old code
 # to have been cheap. It does not: the numbers below are milliseconds.
 BUDGET_US = 100.0
@@ -109,10 +124,23 @@ if loaded_lines - quiet_lines < FIBERS
 end
 failures << "the scrub never ran" if runs == 0
 failures << "nothing was wiped, so the run is not about the scrub" if heap.collect_scrub_bytes_total == 0
+on_initial = Gcry::Platform.current_thread_id == INITIAL_PTHREAD
 if loaded_libc <= BUDGET_US
-  failures << "one libc lookup cost #{loaded_libc.round(1)} µs at #{loaded_lines} " \
-              "mappings, under the #{BUDGET_US} µs budget — on this host the old " \
-              "path was cheap and neither arm means anything"
+  if on_initial
+    failures << "one libc lookup cost #{loaded_libc.round(1)} µs at #{loaded_lines} " \
+                "mappings, under the #{BUDGET_US} µs budget, on the initial thread — " \
+                "where glibc parses /proc/self/maps per call. The old path was cheap " \
+                "here and neither arm means anything"
+  else
+    # Not a failure, and not silence either: the structural assertion below is
+    # unaffected — it counts whether the collector asked libc at all — while the
+    # cost figure is simply not the initial thread's to report.
+    puts "  NOTE: #{loaded_libc.round(1)} µs is not a /proc/self/maps parse, and this run is no"
+    puts "  longer on the initial thread (0x#{Gcry::Platform.current_thread_id.to_s(16)} vs " \
+         "0x#{INITIAL_PTHREAD.to_s(16)}). glibc answers a pool thread's bounds from its own"
+    puts "  mmap, so the cost half of this harness has nothing to say on this run. The"
+    puts "  property below is asserted regardless."
+  end
 end
 
 if libc_arm

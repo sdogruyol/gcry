@@ -145,3 +145,37 @@ lags is the unlinking, not a live mutator, so there is nothing to override.
 measured here; the flake's rate was one run in two on a platform this host
 cannot reproduce, so only repeated CI runs can say. The `concurrent_skips`
 example at `:150` is the red direction and still asserts the skip happens.
+
+
+## Waiting for the thread list was the wrong fix — corrected same day
+
+`SpecSoleMutator.wait` (06fb325) assumed the list drains after `Thread#join`
+returns, because it did here: 4 → 2 immediately. On the aarch64 runner it does
+not. Run 35240604177, `test (aarch64 native)`, two errors:
+
+    3 threads are still on Crystal's list after 5.0s, so check_live_objects will
+    count a concurrent skip instead of walking.
+
+So the helper turned an intermittent failure into a deterministic one on the
+platform that had the flake. The premise was wrong and the mechanism with it:
+`join` returning says the thread finished, not that Crystal has unlinked it, and
+`multi_mutator_threads?` trips above **two** threads — a spec process that keeps
+an extra pool thread alive sits over that line permanently.
+
+**Replaced with a predicate instead of a wait.** `Heap#invariant_sole_mutator`
+says "no other thread can reach this heap", and `check_live_objects` then does
+not let `concurrent_mutators?` — a count of the *process*'s threads — veto a
+walk over a heap that is private to the caller. Both examples own a
+`Gcry::Heap.new`, so it is true by construction. The two-instant race the skip
+exists for is still caught: the confirm loop skips on `reported != after`.
+
+Reproduced and verified locally, five threads on the list so
+`concurrent_mutators?` is true either way:
+
+| heap | `live_object_checks` across one malloc + one explicit check |
+|---|---|
+| without the predicate | **+0** — the aarch64 failure exactly |
+| with the predicate    | **+2** |
+
+No waiting, no host dependence, and `invariant_spec` passes five runs in a row
+locally.
