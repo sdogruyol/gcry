@@ -118,6 +118,20 @@ a crash. So `ci/windows.ps1` now also runs `bench/holders_find.cr`, the harness
 whose answer is known: every constructed holder must be found and a block with
 none must report none. That exercises the walk on Windows while it is green.
 
-**Not verified by me on Windows.** There is no Windows host here; the evidence
-available locally is that both targets type-check and that the harness
-cross-compiles. The Windows job is the first execution.
+**Verified on Windows** by that step, run 35234720654,
+`test (windows x86_64, default)`:
+
+    Windows holders search
+    === does the holders search find a word that is certainly there? ===
+    3 holder(s), each holding one target address in its @slot ivar
+    ok   small   target 0x2475dad08b0 16 bytes — heap holders found: 1
+    ok   medium  target 0x2475ec20060 512 bytes — heap holders found: 1
+    ok   large   target 0x2475ec40030 98304 bytes — heap holders found: 1
+    control  target 0x2475dad0820 held by nothing — heap holders found: 0
+    ok — every constructed holder was found, and a block with none reports none
+
+So the walk works there, not merely compiles: every constructed holder found at
+three size classes, and the control block correctly reports none. What remains
+unverified on Windows is the *stack* half of the search — `holders_find` builds
+its holders in the heap — and the INCONCLUSIVE path itself, which needs the arm
+to fail again.

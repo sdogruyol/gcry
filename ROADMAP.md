@@ -2178,8 +2178,12 @@ kept finding the rest.
       search was the failure path it was added for — a first execution inside an
       already-failing gate turns a bad reading into a crash. `ci/windows.ps1`
       now also runs `bench/holders_find.cr`, whose answer is known, so the walk
-      is exercised there while green. Not verified on Windows by me: no host
-      here, and the Windows job is the first execution.
+      is exercised there while green. **Verified on Windows** by that step (run
+      35234720654): holders found at all three size classes and none for the
+      control, so the walk works there rather than merely compiling. Still
+      unverified on that platform: the *stack* half of the search, since
+      `holders_find` builds its holders in the heap, and the INCONCLUSIVE path
+      itself, which needs the arm to fail again.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
 - [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
       Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
