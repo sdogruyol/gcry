@@ -2045,9 +2045,23 @@ kept finding the rest.
       `thread_suspend` / `thread_get_state` pair rather than one signal
       broadcast, so a thread-creation storm would cost O(n²) there and not on
       Linux. If that is it, it is a Darwin scalability finding about the
-      collector and not about the harness that tripped over it. The cheap first
-      probe is a Darwin arm that creates N threads with `GCRY_DISABLE_AUTO=1`
-      and times it against N with collections on.
+      collector and not about the harness that tripped over it.
+      **The probe is built and the Linux baseline is in (2026-09-17):**
+      `make thread-startup-cost`, three arms over n = 8/32/64/100, each (arm, n)
+      pair its own bounded child so a hang at large n does not cost the small-n
+      data. Linux: 100 threads reach running in **2.8 ms** and per-thread cost
+      *falls* with n on every arm (x0.16 to x0.22) — nothing quadratic here. A
+      collection during the storm costs about **30x per thread**, and the
+      collect arm's cost per collection rises 2.6 → 7 ms as the live thread
+      count goes 8 → 100, which is the O(n) per stop any collector owes; what
+      is open is Darwin's constant. The probe also had to grow a third arm to
+      be worth anything: `auto=on` and `auto=off` both report
+      **`collections=0`**, because 100 `Thread.new` calls never reach the
+      threshold, so the knob separating them does nothing and the two rows are
+      one measurement twice — only the forced-collection arm bears on the
+      prediction. It runs `continue-on-error` on Darwin, and **the evidence is
+      its log, not its step conclusion**.
+      `bench/log/linux/2026-09-17-thread-startup-cost/FINDINGS.md`,
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
 - [x] **`make stack-bounds-growth` is not enabled on Darwin — settled
       2026-09-17, and not for the reason first given.** Its first CI run

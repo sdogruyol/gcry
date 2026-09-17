@@ -509,6 +509,12 @@ jobs:
       - name: Stack-bounds table growth
         run: make stack-bounds-growth
 
+      # Baseline for the Darwin probe below, on the platform where the same
+      # harness does 100 threads in under 3 ms. Reports numbers; the only thing
+      # it fails on is producing none.
+      - name: Thread startup cost (probe)
+        run: make thread-startup-cost
+
       # Static roots come from the executable's ELF program headers, read once
       # at GC.init — not from /proc/self/maps, where a redeploy renames every
       # line of the running image to "(deleted)" and a pathname-matching
@@ -1577,6 +1583,16 @@ jobs:
       # it back to the pre-fix fixed table was in no spec, recipe or CI step,
       # while ROADMAP.md claimed this was gated in process_spec — so the gate
       # the record described did not exist.
+      # The probe for the 120 s thread-startup observation that came out of
+      # `stack-bounds-growth` taking this job down. Every (arm, n) pair is a
+      # bounded child, so a pair that hangs is reported as TIMEOUT and the
+      # sweep continues — a hang here is the datum, not an accident.
+      # `continue-on-error` because it is a probe: slowness is what it is
+      # measuring, and its evidence is the log rather than its conclusion.
+      - name: Thread startup cost (probe)
+        continue-on-error: true
+        run: make thread-startup-cost
+
       # `make stack-bounds-growth` is not here, and not because it hung: this
       # platform has no bounds table to grow. `darwin_stack.cr` queries the
       # thread descriptor at lookup time, so the snapshot is a no-op and

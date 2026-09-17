@@ -821,6 +821,23 @@ static-bss-roots: $(BIN)
 	# held only by the BSS did not survive".
 	! GCRY_DISABLE_STATIC_ROOTS=1 $(BIN)/static_bss_roots
 
+# What does starting the Nth thread cost, and does a collection make it worse?
+# A **probe, not a gate**: it asserts only that its own arms ran and otherwise
+# reports numbers. It exists because `stack_bounds_growth` asked for 100 live
+# threads and the macOS runner never got all 100 running inside 120 s, twice,
+# while Linux does it in under 3 ms. Three arms over a sweep of N, each (arm, n)
+# pair its own bounded child so a hang at large N does not lose the small-N
+# data: `auto=on`, `auto=off` (`GCRY_DISABLE_AUTO=1`, no stop-the-world at all)
+# and `collect` (a thread calling `GC.collect` every 2 ms through the storm).
+# The third arm is there because the first two measure the same thing on Linux
+# -- both report `collections=0`, since 100 `Thread.new` calls never reach the
+# threshold. Linux baseline: us/thread *falls* with n on every arm (x0.16 to
+# x0.22), so not quadratic; collections cost about 30x per thread. ~7 s.
+.PHONY: thread-startup-cost
+thread-startup-cost: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_startup_cost.cr -o $(BIN)/thread_startup_cost --error-trace
+	$(BIN)/thread_startup_cost
+
 # Does the stack-bounds snapshot still cover the 65th thread? The root scan
 # cannot call `pthread_getattr_np` with the world stopped -- that is the
 # 2026-08-10 six-hour hang -- so bounds are snapshotted before the stop and read

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`make thread-startup-cost`: what starting the Nth thread costs, and
+  whether a collection makes it worse.** A probe, not a gate — it
+  asserts only that its own arms ran. It exists because
+  `stack_bounds_growth` asked for 100 live threads and the macOS runner
+  never got all 100 running inside 120 s, twice, while Linux does it in
+  **2.8 ms**. Three arms over n = 8/32/64/100, each (arm, n) pair its own
+  bounded child so a hang at large n does not lose the small-n data.
+  Linux baseline: per-thread cost *falls* with n on every arm (×0.16 to
+  ×0.22), so nothing quadratic; a collection during the storm costs about
+  30× per thread, and cost per collection rises 2.6 → 7 ms as live
+  threads go 8 → 100 — the O(n) per stop any collector owes, with
+  Darwin's constant the open question. The probe needed a third arm to
+  mean anything: `auto=on` and `auto=off` both report `collections=0`,
+  because 100 `Thread.new` calls never reach the threshold, so the knob
+  separating them does nothing and the two rows are one measurement
+  twice; only the arm that forces collections bears on the prediction.
+  Runs `continue-on-error` on Darwin, where the evidence is the log and
+  not the step conclusion.
+  `bench/log/linux/2026-09-17-thread-startup-cost/FINDINGS.md`
+
 - **`make stack-bounds-growth`: the gate `ROADMAP.md` said already
   existed.** The root scan cannot call `pthread_getattr_np` with the
   world stopped — that is the 2026-08-10 six-hour hang — so bounds are
