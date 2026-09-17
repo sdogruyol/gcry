@@ -2049,10 +2049,16 @@ kept finding the rest.
       out not to be it, the next suspect is Darwin's per-thread Mach
       `thread_suspend` / `thread_get_state` stop against Linux's signal
       broadcast at 100 threads, which would be a finding about the collector.
-      **The measurement is now scheduled rather than argued about (2026-09-17):**
-      the Darwin job runs it `continue-on-error` under `timeout 180`, so a hang
-      costs three minutes and fails nothing, and a pass or a timeout both get
-      recorded. That is the arrangement the Darwin soak smoke used until four
+      **The measurement is now scheduled rather than argued about (2026-09-17),
+      and the first attempt at it failed the same way everything else here
+      has.** `timeout 180` in the Darwin step: macOS has no `timeout(1)`, so the
+      step died with exit 127 in 0 seconds and `continue-on-error` reported it
+      `success` — a measurement that measured nothing and said green. The bound
+      is in the harness now, each arm a `BoundedChild`, which is where a gate
+      that can hang has to carry it; at a 1 s budget the parent exits 1, so the
+      bound has its own positive control. Darwin runs it `continue-on-error`
+      for one more reading, and **its step conclusion is not the evidence — the
+      log is**. That is the arrangement the Darwin soak smoke used until four
       runs measured its bound and it was promoted to gating. Promote or remove
       once a run reports.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md` **What is not measured** is whether a thread past

@@ -98,6 +98,34 @@ run of `make stack-bounds-growth` with the 25 ms poll, wrapped in `timeout` so a
 hang fails the step in a minute instead of cancelling the job — the pattern the
 aarch64 job already uses on every gate.
 
+## The bound now lives in the harness, because the CI one did not exist
+
+**2026-09-17.** The first attempt to bound this from CI was `timeout 180 make
+stack-bounds-growth` in the Darwin step. macOS has no `timeout(1)`:
+
+    /Users/runner/.../.sh: line 1: timeout: command not found
+    ##[error]Process completed with exit code 127
+
+The step ran in **0 seconds** and the API reported it `success`, because
+`continue-on-error: true` was on it. So the measurement measured nothing and
+said green — the fourth instance in two days of the failure class this whole
+line of work is about, this time in the arm whose only job was to produce
+evidence. Two rules fall out, and both are now written where they will be read:
+
+- **A gate that can hang must bound itself**, in the harness, on every platform.
+  `BoundedChild` already existed for this — it was written after a hung arm took
+  an aarch64 job down for 13 minutes — and each arm is now a bounded child of
+  the harness, driven by one invocation. `BENCH_CHILD_TIMEOUT_S` moves the
+  budget; at 1 s the parent prints `hold (exceeded its budget)` and exits 1,
+  which is the positive control for the bound itself.
+- **A `continue-on-error` step's conclusion is not evidence.** Only its log is.
+
+One more thing the restructure caught: the three arms used to be selected by
+`--control` / `--nogrow` on the parent. After they became child arms, the stale
+recipe passing the old flags re-ran the *parent* three times, once with
+`GCRY_STACK_BOUNDS_NOGROW` inherited into the hold arm, and reported a failure
+that was entirely the invocation's fault. Unknown arguments now exit 64.
+
 Second possibility worth keeping in view if the poll turns out not to be it:
 Darwin's stop-the-world suspends each thread with Mach `thread_suspend` /
 `thread_get_state` rather than a signal broadcast, so 100 threads may cost

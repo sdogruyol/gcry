@@ -48,12 +48,21 @@
 # coverage; whether anything fell into it is unmeasured, and `ROADMAP.md` says
 # so. This gate asserts the coverage, not a defect.
 #
+# Each arm runs as a **bounded child of this process** (`BoundedChild`, the
+# module written after a hung arm took an aarch64 job down for 13 minutes). This
+# harness did the same thing to the Darwin job on 2026-09-16 — 18m37s, cancelled
+# at the 20-minute cap — and the first attempt at bounding it from CI used
+# `timeout 180`, which macOS does not have: the step died with
+# `timeout: command not found`, exit 127, and `continue-on-error` reported it as
+# success. A gate that can hang has to bound itself, in the harness, on every
+# platform. `BENCH_CHILD_TIMEOUT_S` moves the budget.
+#
 #   crystal build -Dgc_none bench/stack_bounds_growth.cr -o bin/stack_bounds_growth
-#   bin/stack_bounds_growth
-#   GCRY_STACK_BOUNDS_NOGROW=1 bin/stack_bounds_growth --nogrow
-#   bin/stack_bounds_growth --control
+#   bin/stack_bounds_growth            # drives all three arms as bounded children
+#   bin/stack_bounds_growth --child=hold
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   {% raise "stack_bounds_growth requires -Dgc_none (gcry as process GC)" %}
@@ -67,11 +76,59 @@ HEAP = Gcry.default_heap.not_nil!
 THREADS         = 100
 CONTROL_THREADS =   8
 
-control = ARGV.includes?("--control")
-nogrow = ARGV.includes?("--nogrow")
+child_arm = ARGV.find(&.starts_with?("--child=")).try(&.split('=', 2)[1])
+
+# An unrecognised argument is fatal, not ignored. The three arms used to be
+# selected by `--control` / `--nogrow` on the parent; after they became child
+# arms a stale recipe passing the old flags ran the *parent* three more times,
+# once with GCRY_STACK_BOUNDS_NOGROW inherited into the hold arm, and reported a
+# failure that was entirely the invocation's fault.
+ARGV.each do |arg|
+  next if arg.starts_with?("--child=")
+  STDERR.puts "unknown argument #{arg.inspect}: this harness takes no arguments (it drives " \
+              "its three arms as bounded children) or exactly one --child=hold|control|nogrow."
+  exit 64
+end
+
+# ── Parent: drive each arm as a bounded child ─────────────────────────────────
+unless child_arm
+  exe = Process.executable_path.not_nil!
+  arms = [
+    {"hold", {} of String => String},
+    {"control", {} of String => String},
+    {"nogrow", {"GCRY_STACK_BOUNDS_NOGROW" => "1"}},
+  ]
+  failed = [] of String
+  puts "=== stack-bounds table growth ==="
+  arms.each do |(arm, env)|
+    result = BoundedChild.run(exe, ["--child=#{arm}"], env)
+    result.output.each_line do |line|
+      puts "  #{line.rstrip}" unless line.strip.empty?
+    end
+    unless result.ok
+      failed << (result.timed_out ? "#{arm} (exceeded its budget)" : arm)
+    end
+  end
+  puts ""
+  if failed.empty?
+    puts "ok — all three arms inside their budget: the table grows past its initial " \
+         "capacity, the loss shows in both counters when it is frozen, and neither " \
+         "reading comes from a run that hung."
+    exit 0
+  end
+  STDERR.puts "FAIL: #{failed.join(", ")}"
+  exit 1
+end
+
+unless child_arm.in?("hold", "control", "nogrow")
+  STDERR.puts "unknown arm #{child_arm.inspect}: expected hold, control or nogrow."
+  exit 64
+end
+
+control = child_arm == "control"
+nogrow = child_arm == "nogrow"
 want = control ? CONTROL_THREADS : THREADS
 
-puts "=== stack-bounds table growth ==="
 mode = if control
          "control (#{CONTROL_THREADS} threads, inside the initial capacity)"
        elsif nogrow
@@ -79,7 +136,7 @@ mode = if control
        else
          "hold (#{THREADS} threads, past the initial capacity)"
        end
-puts "mode: #{mode}"
+puts "arm #{child_arm}: #{mode}"
 
 if nogrow && !control
   # The knob is read once at boot into the platform module; there is no getter
@@ -87,8 +144,8 @@ if nogrow && !control
   # below rather than here. What can be checked here is that the arm was not
   # asked for without the knob, which would measure the shipped fix.
   unless ENV["GCRY_STACK_BOUNDS_NOGROW"]? == "1"
-    STDERR.puts "--nogrow needs GCRY_STACK_BOUNDS_NOGROW=1; without it this arm would run the " \
-                "shipped growing table and require a loss that cannot happen."
+    STDERR.puts "the nogrow arm needs GCRY_STACK_BOUNDS_NOGROW=1; without it this arm would " \
+                "run the shipped growing table and require a loss that cannot happen."
     exit 64
   end
 end

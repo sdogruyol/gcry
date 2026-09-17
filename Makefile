@@ -829,16 +829,18 @@ static-bss-roots: $(BIN)
 # `ROADMAP.md` claimed this was gated in `process_spec` and broken on purpose
 # with `GCRY_STACK_BOUNDS_NOGROW=1`; the knob was in no spec, recipe or CI step
 # at all, so the claim had gone stale in place. Three arms: `hold` requires
-# `read == visited` with 100 threads held, `--nogrow` freezes the table and
+# `read == visited` with 100 threads held, `nogrow` freezes the table and
 # requires the loss to *show* in both counters (measured: read 128 of 204
-# visited, 76 misses), `--control` stays inside the initial capacity so the
-# equality above is attributable to growth. ~6 s.
+# visited, 76 misses), `control` stays inside the initial capacity so the
+# equality above is attributable to growth. Each arm is a **bounded child** of
+# the harness: this gate hung the Darwin job for 18m37s on 2026-09-16, and a
+# gate that can hang must bound itself rather than lean on a `timeout(1)` macOS
+# does not have. `BENCH_CHILD_TIMEOUT_S` moves the budget; at 1 s the parent
+# reports "exceeded its budget" and exits 1. ~4 s.
 .PHONY: stack-bounds-growth
 stack-bounds-growth: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stack_bounds_growth.cr -o $(BIN)/stack_bounds_growth --error-trace
 	$(BIN)/stack_bounds_growth
-	$(BIN)/stack_bounds_growth --control
-	GCRY_STACK_BOUNDS_NOGROW=1 $(BIN)/stack_bounds_growth --nogrow
 
 # Is the stack of a *terminating* fiber a root? `Thread#dead_fiber_stack` parks
 # it there because Crystal cannot release a fiber's stack until it swaps away,

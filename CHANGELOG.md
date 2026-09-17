@@ -33,7 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first Darwin run of this gate took that job down — 18m37s, cancelled at
   its 20-minute cap — so it is not enabled there. The harness held its
   100 threads on a 200 us poll and now uses 25 ms, which is the leading
-  suspect, but a gate is not re-enabled against a hypothesis.
+  suspect. Each arm is a **bounded child** of the harness now
+  (`BoundedChild`, the module written after a hung arm took an aarch64 job
+  down for 13 minutes), so a hang costs `BENCH_CHILD_TIMEOUT_S` and is
+  reported instead of cancelling the job; at a 1 s budget the parent
+  exits 1, which is the bound's own positive control. The bound is in the
+  harness rather than in CI because the first attempt used `timeout 180`
+  and macOS has no `timeout(1)`: the step died with exit 127, ran in 0
+  seconds, and `continue-on-error` reported it as **success** — a
+  continue-on-error step's conclusion is not evidence, only its log is.
+  Darwin runs it `continue-on-error` for one more reading before it is
+  promoted to a gate or removed.
   `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
 
 - **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has
