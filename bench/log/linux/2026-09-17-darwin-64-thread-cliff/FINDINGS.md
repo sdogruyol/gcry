@@ -214,3 +214,15 @@ while the bound was there.
 What this does **not** establish: that Half 2 is unnecessary. `stw_capture_no_slot`
 is still non-zero past 64 threads on Linux and Darwin — the capture ceiling is
 untouched, and this gate asserts only that the world comes back.
+
+
+## Baseline note: the collect arm's numbers predate the explicit-collect barrier
+
+Every `collect`-arm figure above was measured while `Heap#collect` returned
+immediately whenever any thread was already collecting, so most of the harness's
+2 ms requests did nothing. That guard was narrowed on 2026-09-17
+(`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`) and those calls
+now complete a collection each. The same Linux cells moved from 31.6 / 65.1 /
+41.3 / 85.7 ms of join time to 179.6 / 367.8 / 267.4 / 3638.1 ms, with 11-13
+collections per cell instead of a handful. Nothing measured after that change is
+comparable to the numbers above.

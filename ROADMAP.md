@@ -2088,8 +2088,8 @@ kept finding the rest.
       filled in — collect n=64 now 236.2 us/thread and n=100 60.5 us/thread,
       falling with n exactly as Linux does.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`
-- [ ] **An explicit `GC.collect` is usually a no-op under thread load, and
-      returns nothing to say so.** `Heap#collect` bails on `@collecting`, which
+- [x] **An explicit `GC.collect` was usually a no-op under thread load, and
+      returned nothing to say so — fixed 2026-09-17.** `Heap#collect` bails on `@collecting`, which
       is set for the whole cycle, so any explicit request made while a peer is
       collecting returns immediately and silently. Measured on 20 hardware
       threads, asking continuously for one wall second: at 8 threads 226 of
@@ -2114,6 +2114,26 @@ kept finding the rest.
       Also methodological: a harness that calls `collect` and reads a counter
       measures a *window*, not a call. The `stw_capture_no_slot` table's "per
       collect" column is corrected to "per window" in place.
+      **Fixed by narrowing the guard, not by adding a wait:** `run_collection`
+      already acquires `@post_stw_mutex` at entry, so the early return was the
+      only thing preventing the wait. It now fires only when the calling thread
+      is inside its *own* cycle — `@collecting` *and* `@collector_pthread ==
+      pthread_self()`, read together because neither is sufficient alone — which
+      keeps a `collect` from a before-collect callback from deadlocking on a
+      mutex that is not recursive. The allocation path is `maybe_collect` and is
+      untouched; `collect_a_little` keeps its early return, because a slice that
+      blocked would stop being a slice.
+      `make explicit-collect-barrier`: 20 consecutive calls with 32 threads
+      allocating land 20/20, the same 20 under
+      `GCRY_COLLECT_SKIP_WHEN_BUSY=1` land **0/20**, and 20 on an idle process
+      land 20/20 so the gate is not passing on movement it did not cause.
+      Twenty rather than one because the pre-fix behaviour is probabilistic
+      (~1 in 9 850 at this thread count) and one call would pass by luck.
+      **It costs what it should:** `thread-startup-cost`'s collect arm asks
+      every 2 ms and those calls now collect, so its join time at n=100 went
+      85.7 ms → **3638.1 ms** with 11 collections instead of a handful. The arm
+      is finally doing what it always claimed. Both affected records are
+      annotated as pre-barrier baselines.
       `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
 - [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
       Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of

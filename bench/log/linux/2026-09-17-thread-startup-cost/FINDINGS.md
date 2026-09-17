@@ -72,3 +72,15 @@ It is a probe and not a gate: it asserts nothing about the numbers. On Darwin it
 runs `continue-on-error`, and its evidence is the log rather than its step
 conclusion — the distinction that cost a wasted measurement on 2026-09-17,
 when `timeout 180` on a macOS runner exited 127 in 0 s and was reported green.
+
+
+## Baseline note: the collect arm's numbers predate the explicit-collect barrier
+
+Every `collect`-arm figure above was measured while `Heap#collect` returned
+immediately whenever any thread was already collecting, so most of the harness's
+2 ms requests did nothing. That guard was narrowed on 2026-09-17
+(`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`) and those calls
+now complete a collection each. The same Linux cells moved from 31.6 / 65.1 /
+41.3 / 85.7 ms of join time to 179.6 / 367.8 / 267.4 / 3638.1 ms, with 11-13
+collections per cell instead of a handful. Nothing measured after that change is
+comparable to the numbers above.

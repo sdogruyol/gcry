@@ -1026,6 +1026,12 @@ module GC
       # (src/gcry/platform/darwin_stw.cr).
       Gcry::Platform.stw_bounded_resume = true if env_flag_one?("GCRY_STW_BOUNDED_RESUME")
     {% end %}
+    # Research: make an explicit `GC.collect` return the moment any thread is
+    # collecting, as it did before the guard told a peer's cycle apart from this
+    # thread's own. Under load that is a silent no-op — 6 of 85 682 calls did
+    # anything with 70 allocating threads — and it is the red arm for
+    # `make explicit-collect-barrier` (src/gcry/collect.cr).
+    heap.collect_skip_when_busy = true if env_flag_one?("GCRY_COLLECT_SKIP_WHEN_BUSY")
     # Research only: swallow this many suspend signals before sending any, so
     # a thread that was signalled and never acknowledged can be arranged
     # rather than waited for (src/gcry/collect_stw.cr).

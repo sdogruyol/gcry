@@ -806,6 +806,7 @@ module Gcry
       @stw_owner_pthread = 0_u64
       @block_other_heap = false
       @collecting = false
+      @collector_pthread = 0_u64
       @running_finalizers = false
       @incremental_marking = false
       @inc_active = false

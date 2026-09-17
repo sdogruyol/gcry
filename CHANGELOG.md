@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An explicit `GC.collect` usually did nothing under thread load, and
+  said nothing.** `Heap#collect` opened with `return if @collecting`, a
+  flag set for a whole cycle, so a request made while *any* thread was
+  collecting returned immediately. Measured on 20 hardware threads,
+  asking continuously for one wall second: 226 of 1 969 calls landed a
+  collection at 8 threads, 58 of 571 342 at 32, and **6 of 85 682** at
+  70 — about 1 in 14 000, since a cycle there takes ~145 ms. The guard
+  now fires only when the calling thread is inside its *own* cycle, and
+  a peer's cycle is waited for in `run_collection`, which already takes
+  `@post_stw_mutex` at entry. So `GC.collect` now means what a caller
+  reads it to mean: when it returns, a collection has completed. The
+  allocation path (`maybe_collect`) and the incremental slice
+  (`collect_a_little`) are untouched. Gated by
+  `make explicit-collect-barrier`, with `GCRY_COLLECT_SKIP_WHEN_BUSY=1`
+  restoring the old guard as the red arm.
 - **Darwin: every thread past the 64th was suspended and never resumed.**
   `stop_world_threads` suspends every thread with a Mach port
   unconditionally, but recorded that port only while a slot was free in a

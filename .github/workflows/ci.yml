@@ -515,6 +515,15 @@ jobs:
       - name: Thread startup cost (probe)
         run: make thread-startup-cost
 
+      # Does an explicit GC.collect collect? It used to return the moment any
+      # thread was in a cycle, which under load is a silent no-op — 6 of 85 682
+      # calls did anything with 70 allocating threads. The arm that must fail
+      # restores that guard with GCRY_COLLECT_SKIP_WHEN_BUSY=1; all three are
+      # bounded children, so a collect that waits forever is reported rather
+      # than taking the job down.
+      - name: Explicit collect barrier
+        run: make explicit-collect-barrier
+
       # Static roots come from the executable's ELF program headers, read once
       # at GC.init — not from /proc/self/maps, where a redeploy renames every
       # line of the running image to "(deleted)" and a pathname-matching

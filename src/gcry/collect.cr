@@ -648,6 +648,27 @@ module Gcry
     @finalizers = Finalizers::Registry.new
     @before_collect_callbacks = [] of -> Nil
     @collecting = false
+    # Who is inside a collection, while `@collecting` says one is happening.
+    #
+    # The two are read together and neither is enough alone: `@collecting` says
+    # a cycle is in flight but not whose, and this word can be stale from a
+    # previous cycle — so a check that means "this thread is inside a
+    # collection" has to require both. `@collecting`'s lifecycle is the
+    # trustworthy half: it is cleared in an `ensure` on every path.
+    #
+    # It exists because an explicit `collect` used to return the moment any
+    # thread was collecting, which made `GC.collect` a silent no-op under load
+    # — 6 of 85 682 calls did anything with 70 allocating threads, since a cycle
+    # there takes ~145 ms and the flag is up for all of it
+    # (`bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`). Waiting
+    # for a **peer** is the fix; waiting for *ourselves* would deadlock on
+    # `@post_stw_mutex`, which is not recursive.
+    @collector_pthread = 0_u64
+    # **Control arm** (`GCRY_COLLECT_SKIP_WHEN_BUSY=1`): return from an explicit
+    # `collect` the moment any thread is collecting, which is what shipped until
+    # the guard learned to tell a peer from itself. `make explicit-collect-barrier`
+    # needs this arm to lose the guarantee.
+    property collect_skip_when_busy : Bool = false
     @running_finalizers = false
     @incremental_marking = false
     @inc_active = false
@@ -1630,7 +1651,13 @@ module Gcry
     def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false,
                 release_warm : Bool = false) : Nil
       return if @destroyed
-      return if @collecting
+      # Only a re-entrant call returns here: a `collect` from inside this
+      # thread's own cycle — a before-collect callback — cannot take
+      # `@post_stw_mutex` again. A **peer's** cycle is waited for instead, in
+      # `run_collection`, which blocks on that mutex and then runs the
+      # collection this caller asked for. Returning early there is what made
+      # `GC.collect` do nothing under load.
+      return if @collecting && (@collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id)
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
@@ -1654,7 +1681,7 @@ module Gcry
     # (no compiler write barrier required).
     def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
-      return if @collecting
+      return if @collecting && (@collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id)
       return if monitor_thread?
       return if thread_not_ready_for_collect?
       return unless @nursery_enabled
@@ -1689,6 +1716,7 @@ module Gcry
       finished = false
       begin
         @collecting = true
+        @collector_pthread = Gcry::Platform.current_thread_id
         @incremental_marking = true
         begin
           lock_write
@@ -2246,6 +2274,7 @@ module Gcry
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
         started = monotonic_ns
         @collecting = true
+        @collector_pthread = Gcry::Platform.current_thread_id
         # Generational mark skips old objects; old→young edges come from
         # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
         # old walk). Finalizers/WeakRef must not treat unmarked old as dead
@@ -2744,6 +2773,7 @@ module Gcry
       end
 
       @collecting = true
+      @collector_pthread = Gcry::Platform.current_thread_id
       @incremental_marking = true
       @inc_active = true
       @minor_only = false

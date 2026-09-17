@@ -865,6 +865,22 @@ darwin-stw-resume: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/darwin_stw_resume.cr -o $(BIN)/darwin_stw_resume --error-trace
 	$(BIN)/darwin_stw_resume
 
+# Does an explicit GC.collect actually collect while other threads allocate?
+# `Heap#collect` used to open with `return if @collecting`, so a request made
+# while *any* thread was in a cycle returned immediately and silently: with 70
+# allocating threads, 6 of 85 682 calls did anything, because a cycle there
+# takes ~145 ms and the flag is up for all of it. The guarantee gated here is
+# the one a caller is entitled to -- when it returns, a collection has
+# completed. Three arms as bounded children: 20 consecutive calls with 32
+# threads allocating must each land one, the same with
+# GCRY_COLLECT_SKIP_WHEN_BUSY=1 (the pre-fix guard) must lose at least one, and
+# 20 calls on an idle process must land too, so the gate is not passing because
+# pause_count moves on its own.
+.PHONY: explicit-collect-barrier
+explicit-collect-barrier: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/explicit_collect_barrier.cr -o $(BIN)/explicit_collect_barrier --error-trace
+	$(BIN)/explicit_collect_barrier
+
 # Does the stack-bounds snapshot still cover the 65th thread? The root scan
 # cannot call `pthread_getattr_np` with the world stopped -- that is the
 # 2026-08-10 six-hour hang -- so bounds are snapshotted before the stop and read

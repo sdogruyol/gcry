@@ -86,7 +86,55 @@ place.
 every 5 ms, so `@collecting` is almost never up when it asks, and its counters
 showed exactly two stops for two calls (142 = 2 × 71).
 
-## Not fixed here
+## Fixed, and what it cost
+
+`Heap#collect` now returns early only when the **calling thread** is inside its
+own cycle — `@collecting` *and* `@collector_pthread == pthread_self()`, read
+together because `@collecting` alone does not say whose cycle it is and the
+identity alone can be stale. A peer's cycle is waited for in `run_collection`,
+which already acquires `@post_stw_mutex` at entry; the early return was the only
+thing that had prevented that wait. So this is a narrowed guard, not a new wait
+loop.
+
+Blast radius is exactly the explicit path: the allocation path is
+`maybe_collect`, which has its own `return if @collecting` and is untouched, and
+the public `collect` has two callers — `Gcry.collect` and `GC.collect`
+(`gc_override.cr`). `collect_a_little` keeps its own early return, because an
+incremental *slice* that blocked would stop being a slice.
+
+Gated by `make explicit-collect-barrier`, three bounded arms:
+
+| arm | threads | calls | landed |
+|---|---|---|---|
+| busy  | 32 | 20 | **20/20** |
+| skip (`GCRY_COLLECT_SKIP_WHEN_BUSY=1`) | 32 | 20 | **0/20** |
+| quiet |  0 | 20 | **20/20** |
+
+The `skip` arm is the pre-fix guard and it loses the guarantee completely at this
+thread count, which is what makes the `busy` arm's 20/20 mean something. Twenty
+calls rather than one on purpose: the pre-fix behaviour is probabilistic (~1 in
+9 850 at 32 threads), so a single call would have passed by luck often enough to
+look green.
+
+**The cost is real and shows up in an existing harness.**
+`make thread-startup-cost`'s collect arm asks for a collection every 2 ms, and
+those calls now actually collect:
+
+| arm | n | join_ms before | join_ms after | collections after |
+|---|---|---|---|---|
+| collect | 8   | 31.6  | 179.6  | 13 |
+| collect | 32  | 65.1  | 367.8  | 12 |
+| collect | 64  | 41.3  | 267.4  | 12 |
+| collect | 100 | 85.7  | **3638.1** | 11 |
+
+40× at n=100, and it is the arm doing what it always said it did — "a dedicated
+thread calling `GC.collect` every 2 ms through the storm" — rather than being
+skipped. Well inside the harness's 120 s per-cell budget. The pre-fix numbers in
+`bench/log/linux/2026-09-17-thread-startup-cost/FINDINGS.md` and in the
+Darwin cliff record are not comparable to anything measured after this change,
+and both are annotated.
+
+## Not designed here
 
 Making `collect` a barrier — wait for an in-flight cycle rather than returning
 — is a change to a public API's behaviour under load, and it needs the owner
