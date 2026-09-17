@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-09-17
+
 ### Added
 
 - **`stw_capture_no_slot` on `/gc-stats`**: claims on the STW SP/register
@@ -19,14 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reporting only; the gate asserting it zero belongs with the fix that
   lifts the bound. Windows refuses any stop it cannot record, so the
   counter is a structural zero there.
+
 - **`stw_threads_suspended` / `stw_threads_resumed` on `Heap`**, Darwin
   only: threads a stop suspended and resumed, counted on `KERN_SUCCESS`
   on both sides, so their equality is the resume's contract. Not on
   `/gc-stats` — that tuple is at Crystal's 300-field ceiling and a
   counter has to earn its place there; these two are a gate contract and
   `bench/darwin_stw_resume.cr` reads them off the heap.
-
-### Added
 
 - **`make windows-typecheck`**: cross-compiles `samples/hello.cr` and
   `bench/tls_roots.cr` — what `ci/windows.ps1` actually builds — for both
@@ -35,70 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows had no equivalent, so a five-line bench change that reached a
   `{% skip_file unless flag?(:unix) %}` module cost two red jobs twenty
   minutes into the matrix.
-
-### Fixed
-
-- **An explicit `GC.collect` usually did nothing under thread load, and
-  said nothing.** `Heap#collect` opened with `return if @collecting`, a
-  flag set for a whole cycle, so a request made while *any* thread was
-  collecting returned immediately. Measured on 20 hardware threads,
-  asking continuously for one wall second: 226 of 1 969 calls landed a
-  collection at 8 threads, 58 of 571 342 at 32, and **6 of 85 682** at
-  70 — about 1 in 14 000, since a cycle there takes ~145 ms. The guard
-  now fires only when the calling thread is inside its *own* cycle, and
-  a peer's cycle is waited for in `run_collection`, which already takes
-  `@post_stw_mutex` at entry. So `GC.collect` now means what a caller
-  reads it to mean: when it returns, a collection has completed. The
-  allocation path (`maybe_collect`) and the incremental slice
-  (`collect_a_little`) are untouched. Gated by
-  `make explicit-collect-barrier`, with `GCRY_COLLECT_SKIP_WHEN_BUSY=1`
-  restoring the old guard as the red arm.
-- **Darwin: every thread past the 64th was suspended and never resumed.**
-  `stop_world_threads` suspends every thread with a Mach port
-  unconditionally, but recorded that port only while a slot was free in a
-  64-entry table, and the resume walked the table — so a process with
-  more than `MAX_STW_SP_SLOTS` threads came back from a collection with
-  the rest frozen forever, and the collection reported success. The
-  resume now walks Crystal's thread list and resumes on the same
-  predicate the stop suspends on, so the two cover the same set with no
-  bound between them. Found from the other end: `make
-  thread-startup-cost` measured 7.6 ms for 8 threads, 32.3 ms for 32 and
-  **120 s TIMEOUT** for 64 and 100, against 31.6/65.1/41.3/85.7 ms on
-  Linux — a cliff on the constant, not the O(n²) curve first suspected.
-  Gated by `make darwin-stw-resume`: `stw_threads_suspended ==
-  stw_threads_resumed`, both counted on `KERN_SUCCESS` only, plus every
-  worker still making progress after the restart, with
-  `GCRY_STW_BOUNDED_RESUME=1` restoring the pre-fix table walk as the red
-  arm. Measured on the runner: 142 suspends and 142 resumes with nothing
-  stalled on the fix, 142 against **128** with **7 of 70 workers frozen**
-  on the pre-fix walk — a difference of 14, which is 2 collections ×
-  (71 − 64) threads. The probe's two timing cells that had been TIMEOUT
-  at 120 s now finish, and us/thread *falls* with n as it does on Linux.
-
-- **The aarch64 spec flake family is root-caused: one extra live thread
-  turns the empty-chunk release off.**
-  `release_empty_chunks_this_collect?` returns false under
-  `sweep_multi_mutator?` unless `parallel_empty_chunk_dormant` or
-  `parallel_empty_chunk_munmap` is set, and
-  `munmap_empty_chunks_this_collect?` is gated the same way.
-  `sweep_multi_mutator?` counts Crystal's thread list, so a thread left
-  running by another example switches the whole release path off — which
-  is why five examples across three files failed together ~3 in 30 runs
-  on aarch64, passed 80 of 80 locally, and also showed up under kcov: all
-  three are "how long another example's thread is still alive". The
-  widened state dump added hours earlier is what identified it, ruling
-  out empties never seen free (`fully_free=1048576`), live objects
-  (`live_objects=0`), warm preemption (`warm_retain=0`), budget
-  (`retain=67108864`), munmap (`unmapped=0`) and `madvise` alignment
-  (`page=4096 compiled_page=4096`). Reproduced with one extra thread:
-  `dormant=8 → 0` and `unmapped=393216 → 0`, restored exactly by the
-  knobs. Fixed at **eight sites** across six files — every spec that
-  enables `release_empty_chunks`, not just the five that failed — and it
-  changes nothing they measure, since the knobs are only read on the
-  multi-mutator branch.
-  `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
-
-### Added
 
 - **`make thread-startup-cost`: what starting the Nth thread costs, and
   whether a collection makes it worse.** A probe, not a gate — it
@@ -193,6 +130,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the harness refuses the one-flag form rather than measuring it.
   `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
 
+- **`bench/soak.cr --workers=N`, and the parallelism a run actually
+  booted.** Default **1** — the baseline every earlier arm ran, so a
+  comparison against a recorded run stays a comparison — with
+  `soak_workers` as a `workflow_dispatch` input like `fiber_churn` and
+  `collect_hz`. `--fiber-churn` and `--collect-hz` raise the rate a bad
+  slot is *seen*; this is the first lever on the rate one can be
+  *created*. Priced at 90 s with churn 512: four workers hold occupancy
+  where the cadence knob diluted it (slots per collection 69.2 → 68.2,
+  non-empty collections 90.9% → 97.6%) and produce the first `stw_waits`
+  this workload has recorded (0 → 1, max 89.6 µs), costing 21% of
+  allocations and 13% RSS. Workers do not replace churn: at
+  `--workers=4 --fiber-churn=0` only 1 collection of 59 sees a non-empty
+  queue. The `config:` telemetry line now carries `workers_requested`,
+  `ec_parallelism` and `os_threads`, with `ec_parallelism` read from the
+  context rather than from the flag — the 2026-09-10 arm is what a flag
+  nothing honoured looks like six weeks later. No fault was reproduced;
+  two 90 s arms are not a rate measurement.
+
 ### Changed
 
 - **`bench/gate_arm_census.py` counts a third shape of red arm.** A recipe
@@ -270,6 +225,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An explicit `GC.collect` usually did nothing under thread load, and
+  said nothing.** `Heap#collect` opened with `return if @collecting`, a
+  flag set for a whole cycle, so a request made while *any* thread was
+  collecting returned immediately. Measured on 20 hardware threads,
+  asking continuously for one wall second: 226 of 1 969 calls landed a
+  collection at 8 threads, 58 of 571 342 at 32, and **6 of 85 682** at
+  70 — about 1 in 14 000, since a cycle there takes ~145 ms. The guard
+  now fires only when the calling thread is inside its *own* cycle, and
+  a peer's cycle is waited for in `run_collection`, which already takes
+  `@post_stw_mutex` at entry. So `GC.collect` now means what a caller
+  reads it to mean: when it returns, a collection has completed. The
+  allocation path (`maybe_collect`) and the incremental slice
+  (`collect_a_little`) are untouched. Gated by
+  `make explicit-collect-barrier`, with `GCRY_COLLECT_SKIP_WHEN_BUSY=1`
+  restoring the old guard as the red arm.
+
+- **Darwin: every thread past the 64th was suspended and never resumed.**
+  `stop_world_threads` suspends every thread with a Mach port
+  unconditionally, but recorded that port only while a slot was free in a
+  64-entry table, and the resume walked the table — so a process with
+  more than `MAX_STW_SP_SLOTS` threads came back from a collection with
+  the rest frozen forever, and the collection reported success. The
+  resume now walks Crystal's thread list and resumes on the same
+  predicate the stop suspends on, so the two cover the same set with no
+  bound between them. Found from the other end: `make
+  thread-startup-cost` measured 7.6 ms for 8 threads, 32.3 ms for 32 and
+  **120 s TIMEOUT** for 64 and 100, against 31.6/65.1/41.3/85.7 ms on
+  Linux — a cliff on the constant, not the O(n²) curve first suspected.
+  Gated by `make darwin-stw-resume`: `stw_threads_suspended ==
+  stw_threads_resumed`, both counted on `KERN_SUCCESS` only, plus every
+  worker still making progress after the restart, with
+  `GCRY_STW_BOUNDED_RESUME=1` restoring the pre-fix table walk as the red
+  arm. Measured on the runner: 142 suspends and 142 resumes with nothing
+  stalled on the fix, 142 against **128** with **7 of 70 workers frozen**
+  on the pre-fix walk — a difference of 14, which is 2 collections ×
+  (71 − 64) threads. The probe's two timing cells that had been TIMEOUT
+  at 120 s now finish, and us/thread *falls* with n as it does on Linux.
+
+- **The aarch64 spec flake family is root-caused: one extra live thread
+  turns the empty-chunk release off.**
+  `release_empty_chunks_this_collect?` returns false under
+  `sweep_multi_mutator?` unless `parallel_empty_chunk_dormant` or
+  `parallel_empty_chunk_munmap` is set, and
+  `munmap_empty_chunks_this_collect?` is gated the same way.
+  `sweep_multi_mutator?` counts Crystal's thread list, so a thread left
+  running by another example switches the whole release path off — which
+  is why five examples across three files failed together ~3 in 30 runs
+  on aarch64, passed 80 of 80 locally, and also showed up under kcov: all
+  three are "how long another example's thread is still alive". The
+  widened state dump added hours earlier is what identified it, ruling
+  out empties never seen free (`fully_free=1048576`), live objects
+  (`live_objects=0`), warm preemption (`warm_retain=0`), budget
+  (`retain=67108864`), munmap (`unmapped=0`) and `madvise` alignment
+  (`page=4096 compiled_page=4096`). Reproduced with one extra thread:
+  `dormant=8 → 0` and `unmapped=393216 → 0`, restored exactly by the
+  knobs. Fixed at **eight sites** across six files — every spec that
+  enables `release_empty_chunks`, not just the five that failed — and it
+  changes nothing they measure, since the knobs are only read on the
+  multi-mutator branch.
+  `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
+
 - **The soak ran one worker thread, so the cross-thread corruption it
   exists to catch could not be created.** `bench/soak.cr` hunts the
   2026-08-10 SEGV in `quick_dequeue?` on a partly overwritten run-queue
@@ -286,26 +302,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in place. Kemal's EC4 numbers and `bench/soft_soak_ec4.sh` are
   unaffected: `server.cr` does call `resize`.
   `bench/log/linux/2026-09-16-soak-worker-count/FINDINGS.md`
-
-### Added
-
-- **`bench/soak.cr --workers=N`, and the parallelism a run actually
-  booted.** Default **1** — the baseline every earlier arm ran, so a
-  comparison against a recorded run stays a comparison — with
-  `soak_workers` as a `workflow_dispatch` input like `fiber_churn` and
-  `collect_hz`. `--fiber-churn` and `--collect-hz` raise the rate a bad
-  slot is *seen*; this is the first lever on the rate one can be
-  *created*. Priced at 90 s with churn 512: four workers hold occupancy
-  where the cadence knob diluted it (slots per collection 69.2 → 68.2,
-  non-empty collections 90.9% → 97.6%) and produce the first `stw_waits`
-  this workload has recorded (0 → 1, max 89.6 µs), costing 21% of
-  allocations and 13% RSS. Workers do not replace churn: at
-  `--workers=4 --fiber-churn=0` only 1 collection of 59 sees a non-empty
-  queue. The `config:` telemetry line now carries `workers_requested`,
-  `ec_parallelism` and `os_threads`, with `ec_parallelism` read from the
-  context rather than from the flag — the 2026-09-10 arm is what a flag
-  nothing honoured looks like six weeks later. No fault was reproduced;
-  two 90 s arms are not a rate measurement.
 
 ## [0.26.0] - 2026-09-15
 
