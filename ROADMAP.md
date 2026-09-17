@@ -2073,13 +2073,28 @@ kept finding the rest.
       that would prove it is the instrument this has been missing.
       No user-visible sighting: every observation is from a harness asking for
       ≥64 threads on purpose, and `Parallel` defaults to capacity 1.
-      **The two halves should not land together.** Resume can stop depending on
-      the table — `start_world_threads` already walks `Thread.unsafe_each` —
-      which fixes the hang with no allocation inside the stop. Capture needs a
-      table sized to the thread count, grown *outside* the stop (malloc under a
-      stopped world is the 2026-08-10 hang), plus a "suspended without a slot"
-      counter asserted at zero.
-      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`
+      **Both halves are designed** in
+      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/DESIGN.md`, in three
+      steps and deliberately not as one change:
+      **(1)** `stw_capture_no_slot`, reporting only, on all three platforms —
+      nothing counts the −1 today, and a gate asserting zero would be red on
+      master before the fix. **(2)** Half 1: Darwin resume by walking the thread
+      list instead of the port table, symmetric with a stop that suspends every
+      thread with a non-zero Mach port, plus a `stw_threads_suspended` /
+      `stw_threads_resumed` pair asserted **equal** — an invariant that cannot
+      pass by being fast. Its positive control already exists and is already
+      red: `thread_startup_cost`'s collect arm at n=64 and n=100. **(3)** Half 2:
+      the claim bitmask has to go (a `UInt64` cannot address past 64 slots — a
+      per-slot `Atomic(UInt8)` replaces it), the table grows at collection entry
+      via `LibC.realloc` and never inside the stop, and Darwin hands the slot
+      index through instead of re-deriving it, because `slot_for` is a linear
+      scan called twice per thread and is the next cliff once the ceiling
+      lifts. Three corrections to the first reading are folded into the
+      findings: slots *are* recycled per STW, the 64 is structural on all three
+      platforms rather than Darwin's, and Linux already names the condition as
+      `SUSPEND_NO_SLOT` without counting it.
+      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
+      `…/DESIGN.md`
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered
       2026-09-17, and it was not thread startup.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:

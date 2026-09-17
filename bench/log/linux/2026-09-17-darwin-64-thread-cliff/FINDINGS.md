@@ -82,6 +82,24 @@ new references — but the first collection that crosses the bound scans the
 - Defect 2 has not been demonstrated collecting a live object. It is read off
   the code path, with the counters to prove it not yet wired.
 
+## Three corrections to the first reading
+
+Made while designing the fix, and they matter:
+
+- **Slots are recycled per STW.** `clear_thread_sps` zeroes `@@stw_claimed` and
+  every `@@stw_greg_ok`. An earlier reading of mine had them accumulating for
+  the process's life, which would have meant 64 *distinct* threads were enough
+  to lose capture permanently. Wrong, and withdrawn.
+- **The 64 is not Darwin's.** `@@stw_claimed` is an `Atomic(UInt64)` — a 64-bit
+  bitmask — and `linux_stw.cr` and `windows_stw.cr` carry the identical scheme.
+  Capture past 64 concurrent threads is lost on **every** platform. Defect 2
+  above is cross-platform; only Defect 1 is Darwin's.
+- **Linux already names the condition.** `SUSPEND_NO_SLOT = -2`, "Admitted, but
+  with no slot to answer through: the table is full", with a deliberate choice
+  to cost that thread its SP clamp rather than the stop. So the ceiling is
+  known and handled there — and, as far as I can find, counted nowhere. Darwin
+  has no such branch at all.
+
 ## The fix has two halves and they are not equally safe
 
 1. **Resume must not depend on the table.** `start_world_threads` already walks
@@ -99,3 +117,8 @@ new references — but the first collection that crosses the bound scans the
 Half 1 is a contained change to a hang. Half 2 touches the root scan on a
 platform whose STW is already the most fragile path in the tree. They should
 not land together.
+
+**Both are designed in `DESIGN.md` beside this file**, including the sequencing,
+the counter that has to come first, why the `@suspended` flag is the wrong
+resume record, the one hazard in the list-walk resume, and the O(n²) slot search
+that becomes the next cliff once the ceiling is lifted.
