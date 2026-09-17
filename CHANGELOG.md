@@ -7,38 +7,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.26.1] - 2026-09-17
 
-- **`make tls-roots`'s control arm no longer fails the job for a stale
-  stack word.** That arm allocates a block, holds it nowhere and requires
-  it to die; on Windows it survived, and the holders search — which now
-  returns its count — named why: 8 words across 5 stacks, roots and heap
-  clean, five of them in *live* frames of the running fiber, which
-  `wipe_stack` cannot overwrite. Keeping a pointer out of memory is a
-  codegen outcome no source-level test can compel, the same fact
-  `bench/greg_roots.cr` records about its own end-to-end arm. The arm now
-  reports that and exits 0 when a holder is found, and still fails when
-  none is — which would mean something the search cannot see keeps the
-  block alive. The arms that gate the behaviour are unchanged.
-- **`spec/invariant_spec.cr` no longer waits for Crystal's thread list.**
-  `check_live_objects` skips when `concurrent_mutators?` — a count of the
-  *process*'s threads — is true, and two examples assert the walk ran.
-  Waiting for the count to fall was wrong: `Thread#join` returning does
-  not mean Crystal has unlinked the thread, and the aarch64 runner still
-  listed three of them 5 s later, so the wait turned a flake into a
-  deterministic failure. A heap those examples own now says
-  `invariant_sole_mutator`, and the checker takes it at its word; the
-  two-instant race the skip exists for is still caught by the confirm
-  loop. Measured with five threads on the list: the walk runs +0 times
-  without the predicate and +2 with it.
-- **`make collect-scrub-cost` no longer fails when its cost figure is not
-  the initial thread's.** glibc parses `/proc/self/maps` for
-  `pthread_getattr_np` only on the initial thread and answers a pool
-  thread from its own mmap, and Crystal 1.21 can move the main fiber to a
-  pool thread — so the runner measured **1.0 µs at 8 070 mappings**,
-  against 1 779 µs here, and the harness failed its own precondition. It
-  now attributes that instead of failing, and the structural assertion
-  (the collector never asks libc) is unaffected.
+### Added
+
+- **`stw_capture_no_slot` on `/gc-stats`**: claims on the STW SP/register
+  table that found it full. All three platforms bound that table at 64
+  because the claim mask is an `Atomic(UInt64)`, and past it Linux and
+  Darwin suspend the thread and scan it with no SP clamp and no
+  registers — so a reference live only in the 65th thread's registers is
+  not a root. (Corrected 2026-09-17: only on **Darwin**. Linux reads its
+  registers from a signal `ucontext` that sits on the interrupted
+  thread's own stack, which the unclamped scan walks in full, so the loss
+  there is precision.) Nothing counted that before. Measured on Linux: exactly
+  zero every collect at 9 and 33 threads, +70 per collect at 101.
+  Reporting only; the gate asserting it zero belongs with the fix that
+  lifts the bound. Windows refuses any stop it cannot record, so the
+  counter is a structural zero there.
+
+- **`stw_threads_suspended` / `stw_threads_resumed` on `Heap`**, Darwin
+  only: threads a stop suspended and resumed, counted on `KERN_SUCCESS`
+  on both sides, so their equality is the resume's contract. Not on
+  `/gc-stats` — that tuple is at Crystal's 300-field ceiling and a
+  counter has to earn its place there; these two are a gate contract and
+  `bench/darwin_stw_resume.cr` reads them off the heap.
+
+- **`make windows-typecheck`**: cross-compiles `samples/hello.cr` and
+  `bench/tls_roots.cr` — what `ci/windows.ps1` actually builds — for both
+  Windows targets in 8 s. `make darwin-typecheck` has caught
+  platform-only compile breaks for the other platform since 2026-08-22;
+  Windows had no equivalent, so a five-line bench change that reached a
+  `{% skip_file unless flag?(:unix) %}` module cost two red jobs twenty
+  minutes into the matrix.
+
+- **`make thread-startup-cost`: what starting the Nth thread costs, and
+  whether a collection makes it worse.** A probe, not a gate — it
+  asserts only that its own arms ran. It exists because
+  `stack_bounds_growth` asked for 100 live threads and the macOS runner
+  never got all 100 running inside 120 s, twice, while Linux does it in
+  **2.8 ms**. Three arms over n = 8/32/64/100, each (arm, n) pair its own
+  bounded child so a hang at large n does not lose the small-n data.
+  Linux baseline: per-thread cost *falls* with n on every arm (×0.16 to
+  ×0.22), so nothing quadratic; a collection during the storm costs about
+  30× per thread, and cost per collection rises 2.6 → 7 ms as live
+  threads go 8 → 100 — the O(n) per stop any collector owes, with
+  Darwin's constant the open question. The probe needed a third arm to
+  mean anything: `auto=on` and `auto=off` both report `collections=0`,
+  because 100 `Thread.new` calls never reach the threshold, so the knob
+  separating them does nothing and the two rows are one measurement
+  twice; only the arm that forces collections bears on the prediction.
+  Runs `continue-on-error` on Darwin, where the evidence is the log and
+  not the step conclusion. **It found a defect on its first Darwin run**,
+  and not the one it was looking for: startup there is not slow (100
+  threads in 2.3 ms with collections off), but a collection during the
+  storm hangs at exactly 64 threads — `MAX_STW_SP_SLOTS` in
+  `darwin_stw.cr`. `stop_world_threads` suspends every thread but records
+  the Mach port only while the table has room, and resume walks only the
+  table, so every thread past the 64th is suspended and never resumed.
+  Not fixed here; see `ROADMAP.md` and
+  `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`.
+
+- **`make stack-bounds-growth`: the gate `ROADMAP.md` said already
+  existed.** The root scan cannot call `pthread_getattr_np` with the
+  world stopped — that is the 2026-08-10 six-hour hang — so bounds are
+  snapshotted before the stop and read from a table inside it, and that
+  table was a fixed 64 slots. Past it threads were visited with nowhere
+  to record them and their OS stacks went unscanned. The board claimed
+  this was "gated in `process_spec` … broken on purpose with
+  `GCRY_STACK_BOUNDS_NOGROW=1`"; the knob was in no spec, no recipe and
+  no CI step, so the gate described did not exist. Three arms on Linux,
+  aarch64 and Darwin: 100 threads held live must give
+  `stack_bounds_read == stack_bounds_visited` with zero capacity misses;
+  `--control` stays inside the initial 64 so that equality is
+  attributable to growth rather than to two counters agreeing trivially;
+  `--nogrow` freezes the table and requires the loss to show in **both**
+  counters — measured `visited=204 read=128` with 76 misses — because a
+  frozen table that also stopped counting reads as full coverage of a
+  smaller process, which is exactly what the pre-fix counters did (82
+  threads reading `visited=64 read=64`). `docs/HARDENING.md` now says
+  which counting each of those two measurements belongs to. Still not
+  claimed, unchanged from the fix: whether a thread past the 64th ever
+  held the only reference to something. **Linux and aarch64 only:** the
+  first Darwin run of this gate took that job down — 18m37s, cancelled at
+  its 20-minute cap — so it is not enabled there. The harness held its
+  100 threads on a 200 us poll and now uses 25 ms, which is the leading
+  suspect. Each arm is a **bounded child** of the harness now
+  (`BoundedChild`, the module written after a hung arm took an aarch64 job
+  down for 13 minutes), so a hang costs `BENCH_CHILD_TIMEOUT_S` and is
+  reported instead of cancelling the job; at a 1 s budget the parent
+  exits 1, which is the bound's own positive control. The bound is in the
+  harness rather than in CI because the first attempt used `timeout 180`
+  and macOS has no `timeout(1)`: the step died with exit 127, ran in 0
+  seconds, and `continue-on-error` reported it as **success** — a
+  continue-on-error step's conclusion is not evidence, only its log is.
+  **Linux only, by construction**: `darwin_stack.cr` and
+  `windows_stack.cr` query the thread descriptor at lookup time instead
+  of snapshotting, so there is no table to grow and
+  `stack_bounds_visited` / `read` / `capacity_misses` are zeros by
+  design — the harness now skips those platforms with that reason rather
+  than failing. The first version of this entry said the arms were not
+  Linux-only, read off all three platforms *declaring* the same methods;
+  they declare them returning zero, which is the `each_thread_greg` stub
+  shape v0.19.0 was about. A Darwin run reported `visited=0 read=0` and
+  the harness's own precondition caught it.
+  `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+
+- **`make dead-stack-root`: the v0.20.0 dying-fiber stack root finally has
+  a gate.** `Thread#dead_fiber_stack` parks a terminating fiber's stack on
+  the thread, which may still be running on it while the owning `Fiber` is
+  already off `Fiber.unsafe_each`; rooting it is credited with taking the
+  nested-spawn repro from 11/24 crashes to 0/24. Nothing gated it: the
+  disable `GCRY_DEAD_STACK_ROOTS=0` appeared in no spec, recipe or CI
+  step, `dead_stacks_walked` was printed by `bench/nested_spawn_uaf.cr`
+  and asserted nowhere, and that target is "not a gate" and absent from
+  CI — so the fix could have regressed to a no-op in silence. Four arms,
+  three requiring the victim to **die**, on Linux, aarch64 and Darwin.
+  Building it produced two corrections. The harness first allocated the
+  victim inside the dying fiber, leaving plaintext copies in that fiber's
+  own frames, and its **control arm caught** the hold arm being
+  unattributable; the victim is now allocated on the main fiber and only
+  `addr ^ KEY` crosses over. And `GCRY_DEAD_STACK_NOROOT=1` alone is not
+  the twin control it was documented as — the walk takes
+  `offer = @dead_stack_roots`, so it walks *and* offers; the twin is that
+  knob plus `GCRY_DEAD_STACK_ROOTS=0`, `docs/HARDENING.md` is corrected,
+  and the harness refuses the one-flag form rather than measuring it.
+  `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
+
+- **`bench/soak.cr --workers=N`, and the parallelism a run actually
+  booted.** Default **1** — the baseline every earlier arm ran, so a
+  comparison against a recorded run stays a comparison — with
+  `soak_workers` as a `workflow_dispatch` input like `fiber_churn` and
+  `collect_hz`. `--fiber-churn` and `--collect-hz` raise the rate a bad
+  slot is *seen*; this is the first lever on the rate one can be
+  *created*. Priced at 90 s with churn 512: four workers hold occupancy
+  where the cadence knob diluted it (slots per collection 69.2 → 68.2,
+  non-empty collections 90.9% → 97.6%) and produce the first `stw_waits`
+  this workload has recorded (0 → 1, max 89.6 µs), costing 21% of
+  allocations and 13% RSS. Workers do not replace churn: at
+  `--workers=4 --fiber-churn=0` only 1 collection of 59 sees a non-empty
+  queue. The `config:` telemetry line now carries `workers_requested`,
+  `ec_parallelism` and `os_threads`, with `ec_parallelism` read from the
+  context rather than from the flag — the 2026-09-10 arm is what a flag
+  nothing honoured looks like six weeks later. No fault was reproduced;
+  two 90 s arms are not a rate measurement.
+
+### Changed
 
 - **The holders search (`GCRY_POISON_HOLDERS=1`) now compiles on
   Windows.** `poison_holders.cr` opened with
@@ -127,6 +240,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bench/log/linux/2026-09-16-ec-shrink-window/FINDINGS.md`
 
 ### Fixed
+
+- **`make tls-roots`'s control arm no longer fails the job for a stale
+  stack word.** That arm allocates a block, holds it nowhere and requires
+  it to die; on Windows it survived, and the holders search — which now
+  returns its count — named why: 8 words across 5 stacks, roots and heap
+  clean, five of them in *live* frames of the running fiber, which
+  `wipe_stack` cannot overwrite. Keeping a pointer out of memory is a
+  codegen outcome no source-level test can compel, the same fact
+  `bench/greg_roots.cr` records about its own end-to-end arm. The arm now
+  reports that and exits 0 when a holder is found, and still fails when
+  none is — which would mean something the search cannot see keeps the
+  block alive. The arms that gate the behaviour are unchanged.
+- **`spec/invariant_spec.cr` no longer waits for Crystal's thread list.**
+  `check_live_objects` skips when `concurrent_mutators?` — a count of the
+  *process*'s threads — is true, and two examples assert the walk ran.
+  Waiting for the count to fall was wrong: `Thread#join` returning does
+  not mean Crystal has unlinked the thread, and the aarch64 runner still
+  listed three of them 5 s later, so the wait turned a flake into a
+  deterministic failure. A heap those examples own now says
+  `invariant_sole_mutator`, and the checker takes it at its word; the
+  two-instant race the skip exists for is still caught by the confirm
+  loop. Measured with five threads on the list: the walk runs +0 times
+  without the predicate and +2 with it.
+- **`make collect-scrub-cost` no longer fails when its cost figure is not
+  the initial thread's.** glibc parses `/proc/self/maps` for
+  `pthread_getattr_np` only on the initial thread and answers a pool
+  thread from its own mmap, and Crystal 1.21 can move the main fiber to a
+  pool thread — so the runner measured **1.0 µs at 8 070 mappings**,
+  against 1 779 µs here, and the harness failed its own precondition. It
+  now attributes that instead of failing, and the structural assertion
+  (the collector never asks libc) is unaffected.
 
 - **An explicit `GC.collect` usually did nothing under thread load, and
   said nothing.** `Heap#collect` opened with `return if @collecting`, a
