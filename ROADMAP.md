@@ -2034,6 +2034,25 @@ kept finding the rest.
       unchanged: whether a thread past the 64th ever held the only reference to
       something. The gate asserts the coverage, not a defect.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+- [x] **The aarch64 spec flake family — root-caused 2026-09-17.** Five
+      examples across three files had failed together ~3 in 30 runs on
+      `test (aarch64 native)` while passing 80 of 80 locally, and the spec
+      carrying the note said "expected > 0 says nothing about which of
+      dormancy's preconditions was missing". The widened state dump answered it
+      on the next occurrence: the empties *were* seen fully free
+      (`fully_free=1048576`), nothing was live, warm retain was pinned to 0, the
+      dormant budget was 64 MiB against 1 MiB, nothing was unmapped and the page
+      sizes agreed — so the release path had not run at all.
+      `release_empty_chunks_this_collect?` returns false under
+      `sweep_multi_mutator?` unless a parallel reclaim knob is on, and
+      `sweep_multi_mutator?` counts Crystal's thread list: **one thread left
+      running by another example turns the empty-chunk release off**. Randomised
+      order and host speed decide whether that happens, which is the whole
+      flake. Reproduced with a single extra live thread — `dormant=8 → 0`,
+      `unmapped=393216 → 0`, restored exactly by the knobs, which are only read
+      on the multi-mutator branch. Pinned at eight sites across six files, every
+      spec that enables `release_empty_chunks` rather than the five that failed.
+      `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
 - [ ] **100 threads take over 120 s to start on the Darwin runner, twice.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:
       `threads held: 100` never printed, so all 100 never got *running* — this

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The aarch64 spec flake family is root-caused: one extra live thread
+  turns the empty-chunk release off.**
+  `release_empty_chunks_this_collect?` returns false under
+  `sweep_multi_mutator?` unless `parallel_empty_chunk_dormant` or
+  `parallel_empty_chunk_munmap` is set, and
+  `munmap_empty_chunks_this_collect?` is gated the same way.
+  `sweep_multi_mutator?` counts Crystal's thread list, so a thread left
+  running by another example switches the whole release path off — which
+  is why five examples across three files failed together ~3 in 30 runs
+  on aarch64, passed 80 of 80 locally, and also showed up under kcov: all
+  three are "how long another example's thread is still alive". The
+  widened state dump added hours earlier is what identified it, ruling
+  out empties never seen free (`fully_free=1048576`), live objects
+  (`live_objects=0`), warm preemption (`warm_retain=0`), budget
+  (`retain=67108864`), munmap (`unmapped=0`) and `madvise` alignment
+  (`page=4096 compiled_page=4096`). Reproduced with one extra thread:
+  `dormant=8 → 0` and `unmapped=393216 → 0`, restored exactly by the
+  knobs. Fixed at **eight sites** across six files — every spec that
+  enables `release_empty_chunks`, not just the five that failed — and it
+  changes nothing they measure, since the knobs are only read on the
+  multi-mutator branch.
+  `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
+
 ### Added
 
 - **`make thread-startup-cost`: what starting the Nth thread costs, and

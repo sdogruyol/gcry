@@ -12,6 +12,20 @@ describe "explicit collect releases warm chunks" do
       heap.nursery_enabled = false
       heap.gc_threshold = UInt64::MAX
       heap.release_empty_chunks = true
+      # The empty-chunk release is gated on the *process* having one mutator
+      # thread: `release_empty_chunks_this_collect?` returns false under
+      # `sweep_multi_mutator?` unless one of these knobs is on, and
+      # `munmap_empty_chunks_this_collect?` the same. A spec process's thread count
+      # is not this example's to control — one thread left running by another
+      # example turns the whole release path off, and every assertion here then
+      # fails for a reason that has nothing to do with what it tests. Measured
+      # 2026-09-17: one extra live thread reproduces the aarch64/kcov failure line
+      # byte for byte (`chunks=8 dormant=0 fully_free=1048576 unmapped=0`), and
+      # these two restore it exactly. They only affect the multi-mutator branch —
+      # single-mutator returns true before reading them — so what this example
+      # measures is unchanged.
+      heap.parallel_empty_chunk_dormant = true
+      heap.parallel_empty_chunk_munmap = true
       # Runtime worker threads can trip the parallel release gate, even though
       # only this example uses the heap. Keep its release policy explicit.
       heap.parallel_empty_chunk_munmap = true
