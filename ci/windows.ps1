@@ -85,7 +85,7 @@ try {
             Invoke-Checked $tls @('--control')
 
             # The holders search compiled on this platform for the first time
-            # in v0.27.0, and the only path that reaches it here is the arm
+            # in v0.26.1, and the only path that reaches it here is the arm
             # above coming out INCONCLUSIVE — which is a failure path. Run the
             # harness whose answer is known instead, so the walk is exercised
             # on Windows while it is green: every constructed holder must be

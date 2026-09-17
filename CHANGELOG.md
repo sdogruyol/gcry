@@ -7,22 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The holders search (`GCRY_POISON_HOLDERS=1`) now compiles on
-  Windows.** `poison_holders.cr` opened with
-  `{% skip_file unless flag?(:unix) %}`, which turned out to be a
-  conservative gate rather than a dependency: `Platform.thread_sp` and
-  `snapshotted_stack_bounds` exist on all three platforms and
-  `last_stop_sp` was already Linux-guarded. That mattered because
-  Windows is the only platform where `make tls-roots`'s control arm has
-  actually come out INCONCLUSIVE — the case the search exists to
-  explain — so the instrument was missing exactly where it was needed.
-  `ci/windows.ps1` also runs `bench/holders_find.cr` now, so the walk is
-  exercised there on a path whose answer is known rather than first
-  executing inside a failing gate.
-
-## [0.27.0] - 2026-09-17
+## [0.26.1] - 2026-09-17
 
 ### Added
 
@@ -164,6 +149,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two 90 s arms are not a rate measurement.
 
 ### Changed
+
+- **The holders search (`GCRY_POISON_HOLDERS=1`) now compiles on
+  Windows.** `poison_holders.cr` opened with
+  `{% skip_file unless flag?(:unix) %}`, which turned out to be a
+  conservative gate rather than a dependency: `Platform.thread_sp` and
+  `snapshotted_stack_bounds` exist on all three platforms and
+  `last_stop_sp` was already Linux-guarded. That mattered because
+  Windows is the only platform where `make tls-roots`'s control arm has
+  actually come out INCONCLUSIVE — the case the search exists to
+  explain — so the instrument was missing exactly where it was needed.
+  `ci/windows.ps1` also runs `bench/holders_find.cr` now, so the walk is
+  exercised there on a path whose answer is known rather than first
+  executing inside a failing gate.
 
 - **`bench/gate_arm_census.py` counts a third shape of red arm.** A recipe
   that re-runs its harness under a knob or flag restoring the pre-fix
