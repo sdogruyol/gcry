@@ -2053,7 +2053,35 @@ kept finding the rest.
       on the multi-mutator branch. Pinned at eight sites across six files, every
       spec that enables `release_empty_chunks` rather than the five that failed.
       `bench/log/linux/2026-09-17-empty-chunk-release-flake/FINDINGS.md`
-- [ ] **100 threads take over 120 s to start on the Darwin runner, twice.**
+- [ ] **Darwin: a process with more than 64 threads loses them on the first
+      collection.** `MAX_STW_SP_SLOTS = 64` in `darwin_stw.cr` backs the SP,
+      greg, id and Mach-port tables. `stop_world_threads` suspends **every**
+      thread unconditionally but records the port only `if @@stw_port_count <
+      MAX_STW_SP_SLOTS`, and `resume_suspended_ports` resumes only what the
+      table holds — so **every thread past the 64th is suspended and never
+      resumed**. Measured by `make thread-startup-cost` on the Darwin runner:
+      with a collection every 2 ms through the storm, n=32 finishes in 32.3 ms
+      and n=64 and n=100 both exceed a 120 s budget, while the same arms with
+      collections off do 100 threads in **2.3 ms**. A cliff on the constant, not
+      a curve. This is also what took the Darwin job down through
+      `stack_bounds_growth` at 100 threads on 2026-09-16.
+      **And a second defect sits on the same bound:** `slot_for` returns −1 past
+      the table, so those threads are suspended with no SP and no registers
+      captured — a reference live only in the 65th thread's registers is not a
+      root, which is the v0.19.0 `each_thread_greg` shape on a new axis. Not
+      demonstrated collecting a live object; read off the path, and the counter
+      that would prove it is the instrument this has been missing.
+      No user-visible sighting: every observation is from a harness asking for
+      ≥64 threads on purpose, and `Parallel` defaults to capacity 1.
+      **The two halves should not land together.** Resume can stop depending on
+      the table — `start_world_threads` already walks `Thread.unsafe_each` —
+      which fixes the hang with no allocation inside the stop. Capture needs a
+      table sized to the thread count, grown *outside* the stop (malloc under a
+      stopped world is the 2026-08-10 hang), plus a "suspended without a slot"
+      counter asserted at zero.
+      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`
+- [x] **100 threads take over 120 s to start on the Darwin runner — answered
+      2026-09-17, and it was not thread startup.**
       Measured 2026-09-17 by `bench/stack_bounds_growth.cr`'s bounded arms:
       `threads held: 100` never printed, so all 100 never got *running* — this
       is thread startup, not a collection — while the same harness's 8-thread
@@ -2082,6 +2110,13 @@ kept finding the rest.
       its log, not its step conclusion**.
       `bench/log/linux/2026-09-17-thread-startup-cost/FINDINGS.md`,
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+      **Darwin answered it:** startup is *not* slow there — 100 threads reach
+      running in **2.3 ms** with collections off, the same order as Linux. What
+      hangs is a collection during the storm, and it hangs at exactly 64
+      threads, which is `MAX_STW_SP_SLOTS`. The O(n²) hypothesis is therefore
+      **refuted**: it is not a cost that grows, it is a bound that is crossed.
+      The item above carries the defect.
+      `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`
 - [x] **`make stack-bounds-growth` is not enabled on Darwin — settled
       2026-09-17, and not for the reason first given.** Its first CI run
       took the macOS job down: 18m37s, cancelled at the job's 20-minute cap,

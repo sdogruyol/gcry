@@ -51,8 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separating them does nothing and the two rows are one measurement
   twice; only the arm that forces collections bears on the prediction.
   Runs `continue-on-error` on Darwin, where the evidence is the log and
-  not the step conclusion.
-  `bench/log/linux/2026-09-17-thread-startup-cost/FINDINGS.md`
+  not the step conclusion. **It found a defect on its first Darwin run**,
+  and not the one it was looking for: startup there is not slow (100
+  threads in 2.3 ms with collections off), but a collection during the
+  storm hangs at exactly 64 threads — `MAX_STW_SP_SLOTS` in
+  `darwin_stw.cr`. `stop_world_threads` suspends every thread but records
+  the Mach port only while the table has room, and resume walks only the
+  table, so every thread past the 64th is suspended and never resumed.
+  Not fixed here; see `ROADMAP.md` and
+  `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`.
 
 - **`make stack-bounds-growth`: the gate `ROADMAP.md` said already
   existed.** The root scan cannot call `pthread_getattr_np` with the
