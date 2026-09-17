@@ -2185,8 +2185,8 @@ kept finding the rest.
       `holders_find` builds its holders in the heap, and the INCONCLUSIVE path
       itself, which needs the arm to fail again.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
-- [ ] **`make tls-roots`'s control arm can come out INCONCLUSIVE, and did on
-      Windows.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
+- [x] **`make tls-roots`'s control arm came out INCONCLUSIVE on Windows —
+      explained and settled 2026-09-17.** The arm allocates a block, holds it nowhere, wipes 16 KiB of
       stack and collects twice; the block must die, which is what makes the
       other arm's survival attributable to the thread-local instead of to the
       harness. On run 35223760476 it survived — `victim live?=true intact=true`
@@ -2205,7 +2205,20 @@ kept finding the rest.
       where no wipe can help and the harness would have to stop materialising
       the pointer in a register at all. Verified locally against a deliberate
       stack holder: 8 words across 4 stacks, exact fiber and slot addresses,
-      roots and heap explicitly clean. The fix waits on which one it names.
+      roots and heap explicitly clean.
+      **It named a stack, not a register** (run 35243383054): roots 0, heap 0,
+      **8 words across 5 stacks**, five of them above the running fiber's
+      `stack_top` — live frames, which `wipe_stack` cannot reach because it
+      overwrites the dead ones below the current SP. That is the codegen fact
+      `bench/greg_roots.cr` already records for its end-to-end arm, so the
+      register hypothesis is retracted and no wipe can fix it.
+      The arm therefore reports instead of failing **when the search finds a
+      holder**, and still fails when it finds none — which would mean something
+      keeps the block alive that the search cannot see, with the TLS slot on
+      that arm null. The two arms that gate the behaviour, TLS-only survival and
+      `GCRY_TLS_ROOTS=0` losing the block, are unchanged. `PoisonHolders.search`
+      returns its holder count now so the decision rests on evidence rather than
+      on the survival alone.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
 - [ ] **The 64-slot bound costs Darwin its register capture and Windows its
       collection (Half 2) — attempted and reverted 2026-09-17.** `slot_for` returns −1 past the table, so those threads

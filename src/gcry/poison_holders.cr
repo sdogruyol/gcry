@@ -227,8 +227,14 @@ module Gcry
     # `[user, user + size)` — interior and not just equal, because a `Deque`
     # holds `@buffer` at the base while its elements are read at an offset, and
     # reporting only exact matches would miss the second case entirely.
-    def self.search(heap : Heap, user : UInt64, size : UInt64) : Nil
-      return if user == 0 || size == 0
+    # Returns the number of holder words the three walks found, so a caller can
+    # act on it and not only read it. `SegvReport` ignores the value; the
+    # `tls-roots` control arm uses it to tell "a stale word on a stack keeps this
+    # block alive, and this host's conservative scan will always find it" from
+    # "nothing the search can see keeps it alive", which are a non-discriminating
+    # arm and a real defect respectively.
+    def self.search(heap : Heap, user : UInt64, size : UInt64) : UInt64
+      return 0_u64 if user == 0 || size == 0
 
       buf = uninitialized UInt8[512]
       len = 0
@@ -252,7 +258,7 @@ module Gcry
           "into it, so the pointer is in a register, in thread-local storage, or in memory gcry never " \
           "mapped — and those are three different defects\n")
         RawOut.flush(buf.to_unsafe, len)
-        return
+        return 0_u64
       end
 
       # One level up, and this is the question the first level opened rather than
@@ -265,7 +271,7 @@ module Gcry
       # mutator publishing an object the collector cannot see — Crystal's.
       base = @@first_holder_base
       bsize = @@first_holder_size
-      return if base == 0 || bsize == 0
+      return found if base == 0 || bsize == 0
 
       len = 0
       len = RawOut.append(buf.to_unsafe, len, "gcry: owner — and who points at that holder? [0x")
@@ -280,13 +286,14 @@ module Gcry
       @@owner_pass = true
       owners = search_at(heap, base, bsize, "owner")
       @@owner_pass = false
-      return unless owners == 0
+      return found unless owners == 0
       len = 0
       len = RawOut.append(buf.to_unsafe, len,
         "gcry: owner — none. Nothing points at the holder either, so the collector was right to " \
         "consider it garbage and the mutator is reading an object it never published anywhere the " \
         "collector can see\n")
       RawOut.flush(buf.to_unsafe, len)
+      found
     end
 
     # One pass of the three walks over `[lo, lo + size)`, tagged so a second

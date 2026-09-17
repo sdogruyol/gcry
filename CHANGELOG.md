@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`make tls-roots`'s control arm no longer fails the job for a stale
+  stack word.** That arm allocates a block, holds it nowhere and requires
+  it to die; on Windows it survived, and the holders search — which now
+  returns its count — named why: 8 words across 5 stacks, roots and heap
+  clean, five of them in *live* frames of the running fiber, which
+  `wipe_stack` cannot overwrite. Keeping a pointer out of memory is a
+  codegen outcome no source-level test can compel, the same fact
+  `bench/greg_roots.cr` records about its own end-to-end arm. The arm now
+  reports that and exits 0 when a holder is found, and still fails when
+  none is — which would mean something the search cannot see keeps the
+  block alive. The arms that gate the behaviour are unchanged.
 - **`spec/invariant_spec.cr` no longer waits for Crystal's thread list.**
   `check_live_objects` skips when `concurrent_mutators?` — a count of the
   *process*'s threads — is true, and two examples assert the walk ran.

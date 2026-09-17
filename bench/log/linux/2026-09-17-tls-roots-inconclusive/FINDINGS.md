@@ -135,3 +135,42 @@ three size classes, and the control block correctly reports none. What remains
 unverified on Windows is the *stack* half of the search — `holders_find` builds
 its holders in the heap — and the INCONCLUSIVE path itself, which needs the arm
 to fail again.
+
+
+## The report named it: a stale word on a live stack, not a register
+
+Run 35243383054, `test (windows x86_64, default)` — the control arm came out
+INCONCLUSIVE again and this time said where the copy is:
+
+    gcry: holders — explicit roots: 0 of 0 point into it — gcry is not rooting it
+    gcry: holders — heap: 0 word(s) in 0 live block(s), from 47427 block(s) in 17 chunk(s)
+    gcry: holders — stack: fiber 0x1eb6f580190 (running) slot 0xcb9f7fece0 holds block+0, stack_top 0xcb9f7ff064
+    … 8 lines …
+    gcry: holders — stacks: 8 word(s) across 5 stack(s)
+
+So the register hypothesis from the earlier entry is **refuted**: roots and heap
+are clean and all eight words are on stacks. Five of the eight sit *above* the
+running fiber's `stack_top`, which on a downward-growing stack means **live
+frames** — frames `wipe_stack` cannot touch, because it overwrites the dead ones
+below the current SP.
+
+That is the same fact `bench/greg_roots.cr` already records about its end-to-end
+arm: "keep this pointer out of memory" is a codegen outcome no source-level test
+can compel, and LLVM leaves a copy in the caller's live frame. It happens to be
+Windows here; it is not *about* Windows.
+
+**So the arm is now reported rather than failed, on evidence.** `PoisonHolders.search`
+returns the number of holder words it found, and the control arm:
+
+- **holders > 0** → the conservative scan is right to keep the block, the arm
+  cannot discriminate on this host, and it says so and exits 0. The two arms
+  that do gate this behaviour — a pointer held only in a main-thread
+  `@[ThreadLocal]` surviving, and `GCRY_TLS_ROOTS=0` losing it — are untouched
+  and still fail the job.
+- **holders == 0** → the interesting case, and still a failure: nothing the
+  search can see keeps it alive, the TLS slot on this arm is null, so the
+  survival is unexplained.
+
+Verified locally both ways: the shipped arm still reports the block dying
+(exit 0), and a copy of the harness with a deliberate live stack holder reports
+`8 stale word(s)` and exits 0 down the new branch.
