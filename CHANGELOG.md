@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`GCRY_DISABLE_SP_CLAMP=1` wedged the collector and dropped register
+  roots.** Its documented effect is "full pthread range on other
+  threads"; it also skipped `install_stw_sp_capture`, which on Linux is
+  what installs the `SIG_SUSPEND` handler a stop collects its
+  acknowledgements through — so setting it meant a stop waiting forever
+  (60 s of no progress in `make greg-roots`) — and it disabled **register
+  roots**, because `with_thread_gregs` was gated on the same flag. That
+  is the v0.19.0 missed-root shape, reachable from a knob advertised as a
+  precision trade. The capture install is unconditional now and the
+  register path gates on the table being booted, so the knob does only
+  what its row says. `samples/stw_sp_clamp` also passed with `hits=0` —
+  a state where the clamp did nothing — and now requires `hits > 0` on
+  Linux, with the knob wired as its red arm.
+
 ### Changed
 
 - **The race gates name what they faulted on.**

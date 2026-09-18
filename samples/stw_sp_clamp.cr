@@ -33,4 +33,22 @@ worker.join
 puts "installed=#{installed} hits=#{hits} fallbacks=#{fallbacks}"
 abort "STW SP capture not installed" unless installed
 abort "expected hits or fallbacks from other-thread scan" if hits == 0 && fallbacks == 0
+
+# And on Linux, that the clamp *clamped*. The assertion above passes in a state
+# where it did nothing: with `GCRY_DISABLE_SP_CLAMP=1` this sample read
+# `hits=0 fallbacks=2` and called it ok, because a fallback counts a scan that
+# had no SP to clamp with. `hits > 0` is the difference, and it is Linux-only
+# on purpose — Darwin's Mach stop reports `hits=0 fallbacks=0` by design, which
+# is why the weaker assertion above exists at all.
+#
+# This is also what makes the knob a red arm instead of an orphan: it was read
+# by `src/` and exercised by nothing, and it used to hang every harness it was
+# set on (`bench/log/linux/2026-09-18-sp-clamp-knob/FINDINGS.md`).
+{% if flag?(:linux) %}
+  if hits == 0
+    abort "the SP clamp recorded no hits: other-thread scans are running the full " \
+          "pthread range, which is what GCRY_DISABLE_SP_CLAMP=1 asks for and not " \
+          "what this build should do"
+  end
+{% end %}
 puts "ok"

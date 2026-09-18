@@ -16,9 +16,18 @@ module GC
   def self.init : Nil
     Crystal::System::Thread.init_suspend_resume
     # Capture SP in the suspend handler so other-thread scans skip below-SP.
-    unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
-      Gcry::Platform.install_stw_sp_capture
-    end
+    #
+    # Installed unconditionally, and that is a fix rather than a tidy-up:
+    # `GCRY_DISABLE_SP_CLAMP=1` used to skip this, and on Linux this call is
+    # what installs the `SIG_SUSPEND` handler — the mechanism the stop gets its
+    # acknowledgements through. Setting the knob therefore did not trade
+    # precision for speed, it **wedged the collector**: `bench/greg_roots.cr`
+    # made no progress in 60 s with it, and the orphan-knob census recorded the
+    # same hang on two harnesses without knowing why
+    # (`bench/log/linux/2026-09-18-sp-clamp-knob/FINDINGS.md`). The knob now
+    # disables only the clamp, which is what `docs/HARDENING.md` always said it
+    # did.
+    Gcry::Platform.install_stw_sp_capture
 
     Gcry::Platform.init_staging
     Gcry::Platform.note_main_thread
@@ -249,9 +258,7 @@ module GC
     if @@handle_fork
       Gcry.default_heap.after_fork_child_reinit
       @@after_fork_child = false
-      unless env_flag_one?("GCRY_DISABLE_SP_CLAMP")
-        Gcry::Platform.install_stw_sp_capture
-      end
+      Gcry::Platform.install_stw_sp_capture
     else
       @@after_fork_child = true
     end

@@ -1425,6 +1425,13 @@ jobs:
           ./bin/hello
           crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
           ./bin/stw_sp_clamp
+          # The clamp's red arm, and the first use of this knob anywhere: with it
+          # the sample must fail, because other-thread scans then run the full
+          # pthread range and `sp_clamp_hits` stays 0. It used to *hang* instead —
+          # the knob skipped installing the suspend handler as well, so the stop
+          # never got its acknowledgements. Linux-only: Darwin reports hits=0 by
+          # design, so the sample asserts this half there and the arm would invert.
+          ! GCRY_DISABLE_SP_CLAMP=1 ./bin/stw_sp_clamp
           crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
           timeout 300 make greg-roots

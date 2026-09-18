@@ -570,7 +570,16 @@ module Gcry
     # Yield the raw glibc gregs snapshot for *id* (x86_64: REG_R8=0 … REG_RIP=16).
     # Used by StackMaps to resolve DWARF register locations at the suspend PC.
     def self.with_thread_gregs(id : LibC::PthreadT, & : Pointer(UInt64), Int32 ->) : Nil
-      return unless @@stw_enabled && @@stw_booted
+      # `@@stw_booted`, and deliberately **not** `@@stw_enabled`: that flag is
+      # the SP clamp, and gating the registers on it too made
+      # `GCRY_DISABLE_SP_CLAMP=1` drop register roots — the v0.19.0 defect shape
+      # that `make greg-roots` exists to catch, reintroduced by a knob whose
+      # documented effect is "full pthread range on other threads". Measured
+      # with the knob set: `register candidates from suspended threads: 0`.
+      # The registers are captured by `copy_ucontext_gregs` regardless of the
+      # clamp, so there was never a reason for them to disappear with it
+      # (`bench/log/linux/2026-09-18-sp-clamp-knob/FINDINGS.md`).
+      return unless @@stw_booted
       claimed = @@stw_claimed.get(:acquire)
       i = 0
       while i < MAX_STW_SP_SLOTS

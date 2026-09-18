@@ -2152,6 +2152,26 @@ kept finding the rest.
       `asked_without_a_cycle_in_flight` reported so an arm that measured outside
       it says so.
       `bench/log/linux/2026-09-17-explicit-collect-noop/FINDINGS.md`
+- [x] **`GCRY_DISABLE_SP_CLAMP` was three effects in one knob, two of them
+      undocumented — fixed 2026-09-18.** The orphan-knob census set it aside
+      because it *hung* `greg_roots` and `scheduler_roots` rather than failing
+      them, and the reason turns out not to be the clamp: the knob also skipped
+      `install_stw_sp_capture`, which on Linux installs the `SIG_SUSPEND`
+      handler the stop collects its acknowledgements through. 60 s of no
+      progress, twice. And it disabled **register roots**, because
+      `with_thread_gregs` gated on the same flag — the v0.19.0 missed-root shape
+      reachable from a knob whose documented effect is "full pthread range on
+      other threads". Measured with the clamp disabled in code rather than by
+      env, which isolates that effect: `register candidates from suspended
+      threads: 0`.
+      The install is unconditional now and the register path gates on
+      `@@stw_booted` alone, so the same command that hung exits 0 instantly with
+      23 candidates. And the knob stops being an orphan: `samples/stw_sp_clamp`
+      passed with `hits=0 fallbacks=2` — a state where the clamp did nothing,
+      because its assertion allows a fallback — so it now requires `hits > 0` on
+      Linux (Darwin reports zeros by design) and the knob is its red arm in the
+      aarch64 job, verified in both directions.
+      `bench/log/linux/2026-09-18-sp-clamp-knob/FINDINGS.md`
 - [x] **The holders search was Unix-only, and Windows is where it is needed —
       ported 2026-09-17.**
       `poison_holders.cr` opens with `{% skip_file unless flag?(:unix) %}`, so
