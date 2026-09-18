@@ -180,3 +180,65 @@ split is inside that one file, one bit per round:
 runs on a path a library build can reach, and walking Crystal's thread list from
 a process that is shutting down is exactly the shape a fault on a pool thread
 would take.
+
+
+## Found: a class variable with an initializer, read inside `GC.init`
+
+2026-09-18, after eight probe rounds on a branch. The whole hunt turned on
+reading one line properly.
+
+**The message was never the crashing process's.** `Process terminated because of
+an invalid memory access` is `Process::Status#description`, and the only thing
+that prints it is `crystal` itself —
+`compiler/crystal/command.cr:356`, `STDERR.puts status.description`, when a
+program it *ran* dies abnormally. So it was not `chunk_search_race`'s parent
+dying at exit, which is what four rounds of markers and `_exit` had me
+believing: the step's *next* command is `crystal spec -Dgc_none process_spec`,
+and that binary was dying **at startup, before printing anything**. Every
+earlier attribution in this file is retracted, and this is why `_exit(0)`,
+a 16 KiB pad and restored statics all stayed red — none of them touched the
+thing that was broken.
+
+**The defect.** `Gcry::StwSlots` declared its class variables with
+initializers:
+
+    @@table = Pointer(UInt8).null
+    @@greg_words = 0
+    @@no_slot = 0_u64
+    @@pinned = false
+
+A class variable with an initializer is set up **lazily behind `Crystal.once`**,
+and Darwin's `install_stw_sp_capture` boots the table from `GC.init` — before
+`Crystal.main` has set that machinery up. So the first `-Dgc_none` binary on that
+platform faulted immediately. `linux_stw.cr` carries this exact rule in a
+comment, for this exact reason, and I did not follow it:
+
+> `uninitialized`, and defaulted in `ensure_stw_table`, for the reason the rest
+> of this table is: a class variable with an initializer is set up lazily behind
+> `Crystal.once`, and the **first** read of this one is inside the suspend
+> handler.
+
+**The fix** is the pattern the platform files already use: `uninitialized`
+declarations, a plain `@@booted = false` literal as the gate, defaults assigned
+in `configure`, and every reader gated on it. Darwin green with the full wiring
+on the next round.
+
+## The eight rounds, for whoever reads this next
+
+| probe | Darwin | what it said |
+|---|---|---|
+| re-land, report in the child arms only | red | one line, nothing else |
+| report in the parent + `all arms returned` / `exiting 0` markers | red | *looked* like the parent dying at exit — wrong |
+| 16 KiB BSS pad in `Gcry::Platform` | red | layout refuted |
+| module present, platform files at master's | green | the module and its spec are innocent |
+| re-land + legacy statics restored | red | read as "follows the code" — too strong, the layout changed again |
+| re-land + parent `LibC._exit(0)` | red | not Crystal's teardown |
+| master + 16 KiB statics, no Half 2 code | **green** | "any perturbation" refuted |
+| master + `StwSlots` present and touched | **green** | presence and lazy init of the module alone are fine |
+| `uninitialized` + `@@booted` gate | **green** | the once-guard was the defect |
+
+Two lessons worth more than the fix. **Read the message's provenance before
+reasoning from its content** — four rounds were spent on a process that was not
+crashing. And **a rule the tree already documents is a rule to follow**: the
+comment in `linux_stw.cr` describes this failure precisely, three files away from
+where I reintroduced it.

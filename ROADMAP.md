@@ -2240,8 +2240,8 @@ kept finding the rest.
       returns its holder count now so the decision rests on evidence rather than
       on the survival alone.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
-- [ ] **The 64-slot bound costs Darwin its register capture and Windows its
-      collection (Half 2) — attempted and reverted 2026-09-17.** `slot_for` returns −1 past the table, so those threads
+- [x] **The 64-slot bound cost Darwin its register capture and Windows its
+      collection (Half 2) — two reverts, then landed 2026-09-18.** `slot_for` returns −1 past the table, so those threads
       are suspended with no SP clamp and no registers — a reference live only in
       the 65th thread's registers is not a root, which is the v0.19.0
       `each_thread_greg` shape on a new axis. Now instrumented rather than read
@@ -2363,6 +2363,32 @@ kept finding the rest.
       per round, and the first one to try is the pre-suspend
       `Thread.unsafe_each` count the re-land added, since it is the only new
       code on a path a library build can reach.
+      **Found, and it was one line of declarations.** The message that cost two
+      reverts and eight probe rounds — `Process terminated because of an invalid
+      memory access` — is `Process::Status#description`, printed by the
+      `crystal` driver (`command.cr:356`) about a program *it ran*. So it was
+      never `chunk_search_race`'s parent dying at exit: the step's next command
+      is `crystal spec -Dgc_none process_spec`, and that binary died **at
+      startup, before any output**. Every attribution before that is retracted,
+      and it is why `_exit(0)`, a 16 KiB pad and restored statics all stayed
+      red.
+      The defect: `Gcry::StwSlots` declared its class variables with
+      initializers, and a class variable with an initializer is set up lazily
+      behind `Crystal.once` — while Darwin's `install_stw_sp_capture` boots the
+      table from `GC.init`, before `Crystal.main` sets that machinery up.
+      `linux_stw.cr` documents exactly this rule, three files away. Fixed with
+      the pattern the platform files already use: `uninitialized` declarations,
+      a plain `@@booted` literal as the gate, defaults in `configure`, every
+      reader gated. Darwin green with the full wiring.
+      **So Half 2 is in**: one shared `Gcry::StwSlots` for Darwin and Windows,
+      one `LibC.malloc` block published by one pointer store, grown at
+      collection entry and never freed, the claim mask gone, the slot index
+      handed down so the linear scan runs once per thread, Windows' refusal at
+      the 64th thread gone, and Linux unchanged for the measured reason.
+      `make stw-capture-coverage` gates it on both platforms with
+      `GCRY_STW_FIXED_SLOTS=1` as the red arm, and `spec/stw_slots_spec.cr`
+      covers the table on every platform — including a reader-during-grow
+      example that faults 3 of 3 if the growth frees its predecessor.
       **The next step was a report, not a third attempt, and it is in.** That
       harness is a library build, so gcry installed no SIGSEGV handler in it, and
       two runs of a deterministic fault produced one line with no address, no

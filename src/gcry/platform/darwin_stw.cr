@@ -100,29 +100,51 @@ module Gcry
         MCONTEXT_PC_OFFSET    = 0
       {% end %}
 
-      MAX_STW_SP_SLOTS = 64
+      # The capture table lives in `Gcry::StwSlots`, shared with Windows and
+      # covered by `spec/stw_slots_spec.cr` — it used to be four static arrays
+      # and a 64-bit claim mask here, and the mask *was* the bound: past 64
+      # threads `slot_for` returned -1 and the thread was suspended with **no
+      # registers captured**, which on this platform loses them outright
+      # because `thread_get_state` is their only copy. Growing it in place here
+      # crashed CI once and could not be debugged from this host; that is why
+      # the table moved somewhere a spec can reach it
+      # (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`).
+      #
+      # `collect_scan` marks those registers because a suspended thread's
+      # register may hold the only live copy of a reference, and the stack scan
+      # cannot see a value the compiler never spilled.
 
+      # The pre-fix resume table, reachable only through
+      # `GCRY_STW_BOUNDED_RESUME=1`, and fixed at what shipped.
+      STW_BOUNDED_RESUME_SLOTS = 64
+
+      # PROBE ONLY. The exact declarations the growable table removed, back in
+      # their original module, types and order — the same-size pad round did not
+      # reproduce them byte for byte. Kept alive by `legacy_touch` so the linker
+      # cannot drop them. Green here means the Darwin crash follows the missing
+      # statics (layout), not the table's code.
+      MAX_STW_SP_SLOTS = 64
       @@stw_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
       @@stw_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
-      # GP registers of each suspended thread, slot-parallel to @@stw_ids.
-      # `collect_scan` marks these because a suspended thread's register may hold
-      # the only live copy of a reference — the stack scan cannot see a value the
-      # compiler never spilled. Linux gets them from the signal ucontext; here
-      # they come from the same `thread_get_state` that already reads SP.
-      # StaticArray's length argument will not take an expression, so the
-      # product is spelled out per arch: 64 slots × GREG_WORDS.
       {% if flag?(:aarch64) %}
-        @@stw_gregs = uninitialized StaticArray(UInt64, 1984) # 64 × 31
+        @@stw_gregs = uninitialized StaticArray(UInt64, 1984)
       {% elsif flag?(:x86_64) %}
-        @@stw_gregs = uninitialized StaticArray(UInt64, 1024) # 64 × 16
+        @@stw_gregs = uninitialized StaticArray(UInt64, 1024)
       {% else %}
         @@stw_gregs = uninitialized StaticArray(UInt64, 64)
       {% end %}
-      # Per slot: were gregs actually captured this STW? Distinguishes "no
-      # registers held anything" from "never recorded", which would otherwise
-      # both read as a slot full of stale words from a previous collection.
       @@stw_greg_ok = uninitialized StaticArray(Bool, MAX_STW_SP_SLOTS)
       @@stw_claimed = uninitialized Atomic(UInt64)
+
+      def self.legacy_touch : UInt64
+        @@stw_ids[0] = LibC.pthread_self
+        @@stw_sps[0] = @@stw_sps[0] &+ 1
+        @@stw_gregs[0] = @@stw_gregs[0] &+ 1
+        @@stw_greg_ok[0] = true
+        @@stw_claimed.set(0_u64)
+        @@stw_sps[0]
+      end
+
       @@stw_booted = false
       @@stw_enabled = true
       @@stw_installed = false
@@ -131,7 +153,7 @@ module Gcry
       # more — see `resume_suspended_threads` — and written only when
       # `GCRY_STW_BOUNDED_RESUME=1` asks for the pre-fix behaviour, which is the
       # red arm for `make darwin-stw-resume`.
-      @@stw_ports = uninitialized StaticArray(LibMach::ThreadAct, MAX_STW_SP_SLOTS)
+      @@stw_ports = uninitialized StaticArray(LibMach::ThreadAct, STW_BOUNDED_RESUME_SLOTS)
       @@stw_port_count = 0
       @@stw_bounded_resume = uninitialized Bool
 
@@ -144,22 +166,6 @@ module Gcry
       # for that reason rather than `resumed >= suspended`.
       @@stw_threads_suspended = uninitialized UInt64
       @@stw_threads_resumed = uninitialized UInt64
-
-      # Slot claims that found the table full, cumulative for the life of the
-      # process. A thread with no slot is still suspended and still scanned —
-      # it just loses its SP clamp and its registers, so a reference held only
-      # in the 65th thread's registers stops being a root. Nothing counted
-      # that before, which is why `MAX_STW_SP_SLOTS` could bound the root scan
-      # in silence. Reporting only for now: on a tree that can reach more than
-      # `MAX_STW_SP_SLOTS` live threads this is *supposed* to move, so the gate
-      # that asserts it zero belongs with the fix that lifts the bound, not
-      # before it.
-      #
-      # Counts failed *claims*, not threads: `capture_thread_state` asks once
-      # for the SP and once for the registers, so one uncovered thread adds
-      # two. The distinction does not matter to a zero and would cost a second
-      # counter to remove.
-      @@stw_capture_no_slot = uninitialized UInt64
 
       def self.stw_sp_clamp_enabled? : Bool
         @@stw_enabled
@@ -175,17 +181,31 @@ module Gcry
 
       private def self.ensure_stw_table : Nil
         return if @@stw_booted
-        @@stw_claimed.set(0_u64)
         @@stw_port_count = 0
-        @@stw_capture_no_slot = 0_u64
         @@stw_threads_suspended = 0_u64
         @@stw_threads_resumed = 0_u64
         @@stw_bounded_resume = false
         @@stw_booted = true
+        StwSlots.configure(GREG_WORDS)
       end
 
       def self.stw_capture_no_slot : UInt64
-        @@stw_booted ? @@stw_capture_no_slot : 0_u64
+        StwSlots.no_slot
+      end
+
+      def self.stw_slot_capacity : Int32
+        StwSlots.capacity
+      end
+
+      # `GCRY_STW_FIXED_SLOTS=1`: pin the capture table at the 64 slots that
+      # shipped, which is the red arm for `make stw-capture-coverage`.
+      def self.stw_fixed_slots=(value : Bool) : Bool
+        ensure_stw_table
+        StwSlots.pinned = value
+      end
+
+      def self.stw_fixed_slots? : Bool
+        StwSlots.pinned?
       end
 
       def self.stw_threads_suspended : UInt64
@@ -209,83 +229,26 @@ module Gcry
       end
 
       # Slot index for *id*, claiming a free one if it has none. -1 when the
-      # table is full. Factored out of record_thread_sp so the SP and the GP
-      # registers land in the same slot without claiming it twice.
+      # table is full, which now means the allocator refused to grow it or
+      # `GCRY_STW_FIXED_SLOTS=1` pinned it.
+      #
+      # `pthread_t` is an opaque pointer here, so its address is its identity —
+      # which is what `pthread_equal` compares — and the shared table keys on a
+      # plain `UInt64`.
       private def self.slot_for(id : LibC::PthreadT) : Int32
         ensure_stw_table
-        claimed = @@stw_claimed.get(:acquire)
-        i = 0
-        while i < MAX_STW_SP_SLOTS
-          if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-            return i
-          end
-          i += 1
-        end
-        loop do
-          claimed = @@stw_claimed.get(:acquire)
-          i = 0
-          while i < MAX_STW_SP_SLOTS
-            bit = 1_u64 << i
-            if (claimed & bit) == 0
-              # `compare_and_set` returns `{old, success}`; a tuple is always
-              # truthy, so the unchecked form claimed the bit whether or not
-              # the exchange happened. Inert here — only the collector calls
-              # this, with the world stopped — but it is the same line that
-              # made several threads share one slot on Linux, where the
-              # suspend handler calls it from every thread at once
-              # (`bench/log/linux/2026-09-12-stw-stop-epoch/FINDINGS.md`).
-              _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
-              if won
-                @@stw_ids[i] = id
-                @@stw_sps[i] = 0_u64
-                @@stw_greg_ok[i] = false
-                return i
-              end
-              break
-            end
-            i += 1
-          end
-          if i >= MAX_STW_SP_SLOTS
-            @@stw_capture_no_slot &+= 1
-            return -1
-          end
-        end
+        StwSlots.slot_for(id.address.to_u64)
       end
 
       def self.record_thread_sp(id : LibC::PthreadT, sp : UInt64, uctx : Void* = Pointer(Void).null) : Nil
-        i = slot_for(id)
-        return if i < 0
-        @@stw_sps[i] = sp
-      end
-
-      # Copy the GP words of a just-read thread state into *id*'s slot.
-      # *state* is the raw arm_thread_state64_t / x86_thread_state64_t buffer.
-      private def self.record_thread_gregs(id : LibC::PthreadT, state : UInt32*) : Nil
-        i = slot_for(id)
-        return if i < 0
-        src = state.as(UInt64*)
-        base = i * GREG_WORDS
-        j = 0
-        while j < GREG_WORDS
-          @@stw_gregs[base + j] = src[j]
-          j += 1
-        end
-        @@stw_greg_ok[i] = true
+        StwSlots.record_sp(slot_for(id), sp)
       end
 
       def self.thread_sp(id : LibC::PthreadT) : Void*?
         return nil unless @@stw_enabled && @@stw_booted
-        claimed = @@stw_claimed.get(:acquire)
-        i = 0
-        while i < MAX_STW_SP_SLOTS
-          if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-            sp = @@stw_sps[i]
-            return nil if sp == 0
-            return Pointer(Void).new(sp)
-          end
-          i += 1
-        end
-        nil
+        sp = StwSlots.sp(id.address.to_u64)
+        return nil if sp == 0
+        Pointer(Void).new(sp)
       end
 
       # GP registers captured for *id* at suspend. Yields nothing when the slot
@@ -293,45 +256,25 @@ module Gcry
       # unfilled one must not read as "no roots".
       def self.each_thread_greg(id : LibC::PthreadT, & : Void* ->) : Nil
         return unless @@stw_booted
-        claimed = @@stw_claimed.get(:acquire)
-        i = 0
-        while i < MAX_STW_SP_SLOTS
-          if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-            return unless @@stw_greg_ok[i]
-            base = i * GREG_WORDS
-            j = 0
-            while j < GREG_WORDS
-              word = @@stw_gregs[base + j]
-              yield Pointer(Void).new(word) unless word == 0
-              j += 1
-            end
-            return
-          end
-          i += 1
+        StwSlots.each_greg(id.address.to_u64) do |word|
+          yield Pointer(Void).new(word)
         end
       end
 
       def self.clear_thread_sps : Nil
         return unless @@stw_booted
-        @@stw_claimed.set(0_u64, :release)
-        i = 0
-        while i < MAX_STW_SP_SLOTS
-          @@stw_sps[i] = 0
-          # Registers are per-STW like the SPs. Leaving them behind would let
-          # the next collection mark a dead thread's stale words as roots.
-          @@stw_greg_ok[i] = false
-          i += 1
-        end
+        # Registers are per-STW like the SPs. Leaving them behind would let the
+        # next collection mark a dead thread's stale words as roots.
+        StwSlots.clear
       end
 
       def self.reset_stw_after_fork : Nil
         @@stw_installed = false
         ensure_stw_table
-        @@stw_claimed.set(0_u64, :release)
+        StwSlots.clear
         @@stw_port_count = 0
         i = 0
-        while i < MAX_STW_SP_SLOTS
-          @@stw_sps[i] = 0
+        while i < STW_BOUNDED_RESUME_SLOTS
           @@stw_ports[i] = 0
           i += 1
         end
@@ -362,11 +305,13 @@ module Gcry
       # `GCRY_DISABLE_SP_CLAMP` trades precision for speed, whereas skipping the
       # registers drops roots, so it is captured whatever the clamp says.
       private def self.capture_thread_state(port : LibMach::ThreadAct,
-                                            id : LibC::PthreadT) : Nil
+                                            id : LibC::PthreadT,
+                                            slot : Int32) : Nil
         {% unless flag?(:x86_64) || flag?(:aarch64) %}
           return
         {% end %}
         return if port == 0
+        return if slot < 0
 
         state = uninitialized StaticArray(UInt32, 68)
         count = THREAD_STATE_COUNT
@@ -378,11 +323,15 @@ module Gcry
         )
         return unless kr == KERN_SUCCESS
 
-        record_thread_gregs(id, state.to_unsafe)
+        # Both halves land in the slot the caller already claimed. They used to
+        # re-derive it through a linear scan each — twice per thread per stop,
+        # which is O(n^2) inside the pause and the next cliff once the 64-slot
+        # bound came off.
+        StwSlots.record_gregs(slot, state.to_unsafe.as(UInt64*), GREG_WORDS)
 
         if @@stw_enabled
           sp = (state.to_unsafe.as(UInt8*) + THREAD_STATE_SP_OFFSET).as(UInt64*).value
-          record_thread_sp(id, sp) if sp != 0
+          StwSlots.record_sp(slot, sp) if sp != 0
         end
       end
 
@@ -390,6 +339,14 @@ module Gcry
       def self.stop_world_threads(current : ::Thread) : Nil
         ensure_stw_table
         @@stw_port_count = 0
+
+        # Size the capture table **before** suspending anyone: `malloc` with the
+        # world stopped is the 2026-08-10 six-hour hang, and here nothing is
+        # frozen yet. The slack covers threads born during the stop — the list
+        # does move, which is why `birth_grace.cr` exists.
+        n = 0
+        ::Thread.unsafe_each { n += 1 }
+        StwSlots.reserve(n + 8)
 
         ::Thread.unsafe_each do |thread|
           next if thread == current
@@ -410,12 +367,12 @@ module Gcry
           # Only the control arm needs the table: the shipped resume walks the
           # thread list. Recording unconditionally would keep a bound in the
           # stop that nothing reads.
-          if @@stw_bounded_resume && @@stw_port_count < MAX_STW_SP_SLOTS
+          if @@stw_bounded_resume && @@stw_port_count < STW_BOUNDED_RESUME_SLOTS
             @@stw_ports[@@stw_port_count] = port
             @@stw_port_count += 1
           end
 
-          capture_thread_state(port, pthread)
+          capture_thread_state(port, pthread, slot_for(pthread))
 
           thread.@suspended.set(true)
         end
