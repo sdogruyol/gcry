@@ -76,6 +76,16 @@ module Gcry::StwSlots
   # A plain literal, like `linux_stw.cr`'s `@@stw_booted`: nothing above may be
   # read before `configure` has run, and this is what says whether it has.
   @@booted = false
+  # Research only, and the red arm of `make stw-slots-grow-race`: free the
+  # predecessor when the table grows. That is rule 2 of this module inverted —
+  # a reader that has already loaded the old pointer is walking freed memory —
+  # and it is the one property of this design that no serial test can show.
+  # A plain literal for the reason above.
+  @@free_old = false
+
+  def self.free_old=(on : Bool) : Nil
+    @@free_old = on
+  end
 
   # *greg_words* is the number of 64-bit words a thread's register row needs,
   # which is a per-platform, per-architecture constant.
@@ -147,7 +157,10 @@ module Gcry::StwSlots
     # The predecessor is deliberately not freed — see rule 2 above. Publishing
     # last is rule 1: nothing reads the new block until this store lands, and
     # nothing that has read the old pointer can be hurt by it.
+    old = @@table
     @@table = base
+    # Research arm only: this is the bug, kept switchable so a gate can show it.
+    LibC.free(old.as(Void*)) if @@free_old && !old.null?
     true
   end
 

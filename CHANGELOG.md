@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/stw_slots_spec.cr` on every platform — including a
   reader-during-grow example that faults 3 of 3 if the growth frees its
   predecessor.
+  The property that no serial test can show — a reader inside the old
+  block when a grow replaces it — is gated separately by
+  `make stw-slots-grow-race`: four readers flat out across 12 doublings
+  survive 3/3, and `GCRY_STW_SLOTS_FREE_OLD=1` kills them 3/3. It was
+  first written as a spec example, where it held the two-vCPU Windows
+  runner for that job's entire 20-minute budget; lightened enough to fit
+  there it stopped discriminating (5/5 green with the predecessor freed),
+  so it moved to a gate with a deadline instead.
   Two earlier attempts were reverted after crashing the Darwin job, and
   the cause was neither the table nor the layout: the module declared its
   class variables **with initializers**, which Crystal sets up lazily

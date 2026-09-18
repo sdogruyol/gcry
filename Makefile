@@ -932,6 +932,21 @@ explicit-collect-barrier: $(BIN)
 # 8 threads under the same knob where they must not. Skips on Linux, whose
 # fixed table is deliberate: its registers live in a ucontext on the
 # interrupted thread's own stack, which the unclamped scan still walks.
+# The one property of the STW capture table that no serial test can show: a
+# reader inside the old block when a grow replaces it. The table never frees its
+# predecessor, which is why a suspend handler on Darwin or the stop loop on
+# Windows can load the pointer and keep walking while another thread grows it.
+# Two arms as bounded children -- the shipped table, which must carry its
+# readers across 12 doublings, and GCRY_STW_SLOTS_FREE_OLD=1, which frees the
+# predecessor and must kill them. Lives here rather than in
+# spec/stw_slots_spec.cr because it needs four readers flat out: in the spec
+# suite it held the two-vCPU Windows runner for that job's whole 20-minute
+# budget.
+.PHONY: stw-slots-grow-race
+stw-slots-grow-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stw_slots_grow_race.cr -o $(BIN)/stw_slots_grow_race --error-trace
+	$(BIN)/stw_slots_grow_race
+
 .PHONY: stw-capture-coverage
 stw-capture-coverage: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_capture_coverage.cr -o $(BIN)/stw_capture_coverage --error-trace

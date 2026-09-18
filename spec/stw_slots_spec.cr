@@ -118,37 +118,17 @@ describe Gcry::StwSlots do
   # still walking them faulted — which is how the first attempt crashed the
   # Darwin job on a step that had been green. Here the readers run flat out
   # while the table doubles under them.
-  it "survives readers walking the table while it grows" do
-    Gcry::StwSlots.configure(4)
-    128.times { |i| Gcry::StwSlots.slot_for(0xc000_u64 + i) }
-
-    stop = Atomic(Int32).new(0)
-    reads = Atomic(Int64).new(0_i64)
-    readers = Array(Thread).new(4) do
-      Thread.new do
-        while stop.get == 0
-          128.times do |i|
-            Gcry::StwSlots.sp(0xc000_u64 + i)
-            Gcry::StwSlots.each_greg(0xc000_u64 + i) { }
-          end
-          reads.add(1_i64)
-        end
-      end
-    end
-
-    want = Gcry::StwSlots::INITIAL_SLOTS
-    12.times do
-      want *= 2
-      Gcry::StwSlots.reserve(want)
-      Thread.sleep(2.milliseconds)
-    end
-
-    stop.set(1)
-    readers.each(&.join)
-
-    # The assertion is that the process is still here and the readers made
-    # progress across the growth; a freed table would have faulted instead.
-    reads.get.should be > 0
-    Gcry::StwSlots.capacity.should be >= want
-  end
+  # The property this table exists for — a reader walking the old block while a
+  # grow replaces it — is not here, and deliberately. It needs threads reading
+  # flat out, a block big enough that the allocator unmaps it instead of
+  # recycling it, and a crash as the observable; every example above passes with
+  # the predecessor freed, because nothing is reading it. It is a gate with a
+  # deadline instead: `make stw-slots-grow-race`, where the shipped table
+  # carries its readers 3/3 and `GCRY_STW_SLOTS_FREE_OLD=1` kills them 3/3.
+  #
+  # The first attempt put that busy loop in this file. `crystal spec` runs it on
+  # every platform, and on the two-vCPU Windows runner four flat-out readers held
+  # the spec binary for the job's entire 20-minute budget, where it was killed as
+  # an orphan process (run `35361339084`). A spec suite is not the place for a
+  # race that needs to starve a machine to be visible.
 end

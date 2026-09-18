@@ -242,3 +242,58 @@ reasoning from its content** — four rounds were spent on a process that was no
 crashing. And **a rule the tree already documents is a rule to follow**: the
 comment in `linux_stw.cr` describes this failure precisely, three files away from
 where I reintroduced it.
+
+
+## Then Windows: the spec that starved the runner
+
+2026-09-18, master `e032438`. Every job green except the six Windows ones, which
+came out **cancelled** — twice, on a push run and a dispatch run. Cancelled, not
+failed, is an infrastructure shape, so I read one job instead of guessing:
+
+    15:15:52  job started
+    15:16:16  Windows library specs (default)
+    ...       nothing at all for twenty minutes
+    15:36:10  Cleaning up orphan processes
+    15:36:11  Terminate orphan process: pid (8008) (crystal-run-spec.tmp)
+
+The job's `timeout-minutes: 20` expired while the **library spec binary** was
+still running. So the new file in that suite is the suspect:
+`spec/stw_slots_spec.cr`'s "survives readers walking the table while it grows",
+four threads reading 128 slots flat out while the main thread doubles the table
+twelve times. On this 20-core host that example is 170 ms. On a two-vCPU Windows
+runner four spinning readers and a main thread that has to be scheduled between
+`Thread.sleep(2.milliseconds)` steps is a different machine entirely.
+
+**The obvious fix made the example worthless, and that is measurable.** Two
+readers, a 200 µs sleep per pass, six doublings and a deadline — then the
+red arm: `LibC.free` the predecessor on growth, which is the bug the design
+exists to avoid.
+
+| spec variant | freeing the predecessor |
+|---|---|
+| 4 readers flat out, 12 doublings (original) | faults 3/3 |
+| 2 readers with 200 µs sleeps, 6 doublings | **passes 5/5** |
+
+A gentle race gate is a survival assertion. The first variant works because at
+twelve doublings the block is ~13 MB, which the allocator unmaps instead of
+recycling, and because a flat-out reader is nearly always inside it — take away
+either and freeing the old table is invisible.
+
+**So it moved instead of shrinking**: `bench/stw_slots_grow_race.cr`, run by
+`make stw-slots-grow-race` in the Linux job, two arms as bounded children —
+
+    hold 1/3: ok child: grown=12 capacity=262144 reader_passes=158
+    hold 2/3: ok child: grown=12 capacity=262144 reader_passes=155
+    hold 3/3: ok child: grown=12 capacity=262144 reader_passes=158
+    free 1/3: died
+    free 2/3: died
+    free 3/3: died
+
+with `GCRY_STW_SLOTS_FREE_OLD=1` as the arm that must kill its children, and the
+gate failing if fewer than 2 of 3 die. 3.3 s total. `spec/stw_slots_spec.cr`
+keeps the seven deterministic examples, all of which pass with the bug present —
+which is the point: they cover shape, and the gate covers the property.
+
+The lesson is about where a test lives. A race that has to starve a machine to
+be visible does not belong in a suite that every platform runs on whatever
+runner it was given; it belongs in a gate with a deadline and a red arm.

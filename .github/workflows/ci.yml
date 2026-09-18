@@ -780,6 +780,18 @@ jobs:
         run: |
           make stw-index-race
 
+      # The STW capture table that Darwin and Windows share grows while suspend
+      # handlers and stop loops are reading it, which is why it publishes with a
+      # single store and never frees the predecessor. This is the only gate that
+      # can see that: the shipped table carries four flat-out readers across 12
+      # doublings, and GCRY_STW_SLOTS_FREE_OLD=1 kills them 3/3. Runs here
+      # rather than on those platforms because the property is the allocator's
+      # and the module's, not the platform's — and because in `crystal spec`,
+      # where it started, it held the Windows runner for a whole job budget.
+      - name: STW slots grow race
+        run: |
+          make stw-slots-grow-race
+
       # The allocator hands out large chunks under @alloc_lock while the cache
       # trim walks the same list. Deterministic both ways: the old behaviour
       # faults 5 of 5, serialised 0 of 5 — until the v0.24.0 tag run
