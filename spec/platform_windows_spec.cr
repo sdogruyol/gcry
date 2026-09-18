@@ -154,7 +154,18 @@ require "./spec_helper"
       other.should_not eq 0
     end
 
-    it "resumes threads and releases collector locks when suspension capacity is exceeded" do
+    it "stops and resumes a world with more threads than the table shipped with" do
+      # This example used to assert the opposite: `expect_raises(Exception,
+      # /Windows thread suspension/)`, because the capture table was a fixed 64
+      # slots and this platform answered the 65th thread by refusing the stop —
+      # so a process with 65 threads could not collect at all, which trades a
+      # bounded loss of precision for an unbounded heap.
+      #
+      # Pinning that behaviour cost three CI rounds when the table grew: the
+      # stop now succeeds, so `expect_raises` failed **with the world stopped**,
+      # and the `ensure` below then joined 65 suspended threads. Every Windows
+      # job hung there for its whole 20-minute budget. A test that pins a bound
+      # the collector is trying to remove has to move with it.
       heap = Gcry::Heap.new
       ready = Atomic(Int32).new(0)
       finish = Atomic(Int32).new(0)
@@ -172,19 +183,24 @@ require "./spec_helper"
         until ready.get == workers.size
           Thread.yield
         end
-        expect_raises(Exception, /Windows thread suspension/) { heap.stop_world }
-      ensure
-        finish.set(1)
-        workers.each(&.join)
-      end
-      begin
-        # A second suspension proves the failed attempt released Thread.lock
-        # and reset ownership, rather than leaving the collector half stopped.
+
+        before = Gcry::Platform.stw_capture_no_slot
+        heap.stop_world
+        heap.start_world
+        # Every thread it suspended got a slot: on this platform a thread
+        # without one is suspended with no SP clamp and no registers, and
+        # `GetThreadContext` is their only copy.
+        Gcry::Platform.stw_capture_no_slot.should eq(before)
+        Gcry::Platform.stw_slot_capacity.should be > workers.size
+
+        # And the collector's locks came back: a second stop, and an allocation
+        # after it, rather than a half-stopped world.
         heap.stop_world
         heap.start_world
         heap.malloc(16).null?.should be_false
       ensure
-        heap.start_world
+        finish.set(1)
+        workers.each(&.join)
         heap.destroy
       end
     end

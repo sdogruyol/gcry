@@ -402,3 +402,42 @@ Worth writing down twice: **`uninitialized` in these files is not a style
 choice, and a comment saying so was not enough.** The cost of finding this out
 by CI was three reverts, a red master for most of a day, and eighteen Windows
 jobs that told me nothing except *where* they stopped.
+
+
+## The actual wedge: a spec that pinned the bound
+
+`--verbose` on the Windows spec run named it in one round. The last example to
+finish was `Windows platform > uses distinct thread IDs instead of the
+current-thread pseudo handle`; the next one is
+`spec/platform_windows_spec.cr:157`:
+
+```crystal
+it "resumes threads and releases collector locks when suspension capacity is exceeded" do
+  ...
+  65.times { workers << Thread.new { ... } }
+  expect_raises(Exception, /Windows thread suspension/) { heap.stop_world }
+```
+
+That example **asserted the bound Half 2 removes**. With the table growing,
+`stop_world` succeeds, so `expect_raises` fails — *with the world stopped* — and
+the `ensure` immediately joins 65 threads the collector has suspended. Nothing
+resumes them and nothing can print: the process hangs holding the world, which
+is a spec suite that stops mid-example and burns the job's whole budget.
+Deterministic, identical every run, and reached only in this one file — which is
+why the dot count never moved and why Linux and Darwin never saw it.
+
+The once-guard fix committed before this is still right — a lazily-initialized
+class variable read inside the stopped world is a live deadlock waiting for a
+suspended holder — but it was **not** this failure. Retracted as the cause.
+
+Both halves of the lesson are about where the evidence was:
+
+* The wedge was named by one `--verbose` run costing 25 minutes, after three
+  full rounds of reasoning from dot counts. `crystal spec --verbose` on the
+  platform that hangs should have been round one.
+* A Windows-only spec file is compiled by **no** local check: its body sits
+  inside `{% if flag?(:win32) %}`, so `crystal spec` here never sees it. It is
+  now cross-compiled by `make windows-typecheck` — along with the three other
+  spec files that carry win32 branches — which at least makes a typo in that
+  file a local failure rather than a 25-minute one. The semantic pin needed a
+  human; the compile gap did not.
