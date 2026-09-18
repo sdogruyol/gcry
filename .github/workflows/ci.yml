@@ -122,6 +122,18 @@ jobs:
       - name: Windows type-check (cross-compile)
         run: make windows-typecheck
 
+      # Two of these cost a red master. A class variable declared with a
+      # non-literal initializer is set up lazily behind Crystal.once, whose
+      # mutex the collector cannot wait on: not from GC.init, which runs before
+      # that machinery exists (Darwin died at startup), and not inside the
+      # stopped world, where a suspended thread can be holding it (all six
+      # Windows jobs wedged for their full 20-minute budget, three runs
+      # running). The rule was already in the comments of all three platform
+      # files; this makes it mechanical. Observed red on the offender it was
+      # written for.
+      - name: Once-initializer guard
+        run: make once-guard
+
       # A knob nobody documented is a knob nobody can find. The env reference
       # had drifted by 33 before this step existed.
       - name: Env knob reference is complete

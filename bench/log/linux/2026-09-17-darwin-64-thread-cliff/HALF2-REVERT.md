@@ -352,3 +352,53 @@ test's table must not be visible through `Gcry::StwSlots`.
 Three rounds, three different mistakes, one shape: **a test that reaches into
 live collector state is not a test of it.** `crystal spec` runs every file on
 every platform, so any module a spec configures has to be one a spec can own.
+
+
+## Third time, same rule: `Crystal.once` inside the stopped world
+
+The value-type refactor did not fix Windows either — run `35373643054`, all six
+jobs cancelled at the cap again, the suite stuck at the *same* place (217–218
+examples in the `default` variant, 238–239 in `headers` and `freelist`, which
+run a different number of examples before it). Same example every time, so not a
+race: something deterministic, and reached only once a spec collects with other
+threads running. The local ordering puts that region at the multithreaded
+collection specs (`Gcry MT alloc storm (TLAB)`,
+`counters while lazy sweep runs beside mutators`).
+
+Reading the whole diff of the one platform file against the last green revision
+found it in the declarations, again:
+
+```
+-  @@stw_handles = uninitialized StaticArray(LibC::HANDLE, MAX_STW_SP_SLOTS)
++  @@stw_handles = Pointer(LibC::HANDLE).null
+```
+
+`Pointer(LibC::HANDLE).null` is a **method call**, so that class variable is set
+up lazily behind `Crystal.once` — and `Crystal.once` takes a process-wide mutex.
+The first read of `@@stw_handles` is in `resume_suspended_threads`, which runs
+**inside the stopped world**. Windows suspends threads asynchronously, so a
+suspended thread can be holding the once mutex, and the collector then waits for
+a lock that nothing will release: the process hangs with the world stopped,
+forever, which is exactly a spec suite that stops printing mid-example and burns
+the job's whole budget.
+
+It is the same expression that crashed Darwin at startup two attempts ago
+(`@@table = Pointer(UInt8).null`), where the first read is in `GC.init` instead.
+The rule was already written in the comments of all three platform files. I
+broke it twice.
+
+**So it is mechanical now.** `ci/once-guard.py` (`make once-guard`, and a CI
+step) fails when any class variable in `stw_slots.cr` or the three
+`*_stw.cr` files is declared with anything but `uninitialized` or a literal.
+Observed red on the offender it was written for:
+
+    FAIL: class variables the stopped world reads, declared with a lazy initializer:
+      src/gcry/platform/windows_stw.cr:23: @@stw_handles = Pointer(LibC::HANDLE).null
+
+and green after the declaration became `uninitialized LibC::HANDLE*` with its
+default assigned in `ensure_stw_table`.
+
+Worth writing down twice: **`uninitialized` in these files is not a style
+choice, and a comment saying so was not enough.** The cost of finding this out
+by CI was three reverts, a red master for most of a day, and eighteen Windows
+jobs that told me nothing except *where* they stopped.

@@ -20,7 +20,17 @@ module Gcry::Platform
   # Handles suspended in the current STW, for the matched resume. Grown with the
   # capture table so a stop is never bounded by it either.
   STW_INITIAL_HANDLES = 64
-  @@stw_handles = Pointer(LibC::HANDLE).null
+  # `uninitialized`, not `Pointer(LibC::HANDLE).null`, and `ci/once-guard.py`
+  # enforces that now. A class variable declared with a non-literal initializer
+  # is set up lazily behind `Crystal.once`, which takes a process-wide mutex —
+  # and the first read of this one is in `resume_suspended_threads`, **inside
+  # the stopped world**, where a suspended thread can be holding that mutex and
+  # nothing will ever resume it. Written the obvious way it wedged all six
+  # Windows jobs for their entire 20-minute budget, three runs in a row, with
+  # the spec suite stuck mid-example. The same expression crashed Darwin at
+  # startup in `stw_slots.cr` two attempts earlier: there the first read is in
+  # `GC.init`, before `Crystal.main` sets the once machinery up.
+  @@stw_handles = uninitialized LibC::HANDLE*
   @@stw_handle_capacity = 0
   @@stw_handle_count = 0
   @@stw_booted = false
@@ -41,6 +51,10 @@ module Gcry::Platform
 
   private def self.ensure_stw_table : Nil
     return if @@stw_booted
+    # Defaults first, and every `uninitialized` one of them: until this runs
+    # they hold whatever was in that memory.
+    @@stw_handles = Pointer(LibC::HANDLE).null
+    @@stw_handle_capacity = 0
     @@stw_handle_count = 0
     @@stw_booted = true
     StwSlots.configure(GREG_WORDS)

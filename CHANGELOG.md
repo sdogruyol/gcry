@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/stw_slots_spec.cr` on every platform — including a
   reader-during-grow example that faults 3 of 3 if the growth frees its
   predecessor.
+  Both platforms' capture state is declared `uninitialized` and defaulted
+  in a method, which `make once-guard` now enforces: a class variable
+  with a non-literal initializer is set up behind `Crystal.once`, whose
+  mutex cannot be waited on from `GC.init` (Darwin died at startup) or
+  inside the stopped world (`@@stw_handles`, read from
+  `resume_suspended_threads`, wedged every Windows job for its full
+  20-minute budget, three runs running).
   The table is a value type (`Gcry::StwSlots::Table`) so that a spec can
   own one: the first version was module-level state, and reconfiguring it
   from `spec/stw_slots_spec.cr` — invisible on Linux, which keeps its own

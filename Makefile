@@ -638,6 +638,20 @@ windows-typecheck: $(BIN)
 knob-doc-check:
 	@ci/knob-doc-check.sh
 
+# A class variable declared with a non-literal initializer is set up lazily
+# behind Crystal.once, which takes a process-wide mutex. The collector reads
+# some of them from GC.init, before Crystal.main has set that machinery up, and
+# some inside the stopped world, where a suspended thread can be holding the
+# mutex. `@@table = Pointer(UInt8).null` crashed every -Dgc_none binary on
+# Darwin at startup; `@@stw_handles = Pointer(LibC::HANDLE).null`, read from
+# resume_suspended_threads, wedged all six Windows jobs for their whole
+# 20-minute budget three runs running. Two violations of a rule that was
+# already written in the comments of all three platform files, so it is
+# mechanical now.
+.PHONY: once-guard
+once-guard:
+	@python3 ci/once-guard.py
+
 # A gate that pins a knob the compile default ignores must build the layout
 # that honours it. `GCRY_BITMAP_ALLOC=0`, `GCRY_NURSERY` and `GCRY_TLAB` are
 # inert on the headerless default: they warn on stderr and change nothing, so
