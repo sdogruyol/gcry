@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separates a non-zero exit from a timeout. `dormant-flush-race`,
   `large-cache-race` and `find-block-race` get the variable too: all are
   gates whose failure mode is a fault.
+- **`make windows-typecheck` covers the harnesses a spec builds.** Its
+  file list mirrored `ci/windows.ps1` and missed
+  `bench/chunk_search_race.cr`, which `spec/cached_bitmap_pool_race_spec.cr`
+  compiles — so a `Gcry::SegvReport.install` call in that harness broke
+  all six Windows jobs, three days after the identical mistake with
+  `poison_holders.cr` broke two. A harness a spec builds is a harness
+  every platform compiles.
 
 ## [0.26.1] - 2026-09-17
 

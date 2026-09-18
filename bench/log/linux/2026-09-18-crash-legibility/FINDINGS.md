@@ -64,3 +64,26 @@ arms still pass.
 It does not explain the Darwin crash — that needs the next occurrence. It makes
 the next occurrence say which arm, on what address, and what gcry knows about
 that address, which is the difference between an hour and a round trip.
+
+
+## And it broke Windows — the same mistake, three days apart
+
+`Gcry::SegvReport` is Unix-only (`{% skip_file unless flag?(:unix) %}`, like
+`poison_holders.cr`), and `spec/cached_bitmap_pool_race_spec.cr` **builds this
+harness**. So the unguarded install broke all six Windows jobs:
+
+    Failure/Error: build.ok.should be_true, build.output
+      Error: undefined constant Gcry::SegvReport
+
+Three days earlier the identical mistake — a bench harness reaching a Unix-only
+module — broke two Windows jobs, and `make windows-typecheck` was written for
+exactly that. It did not catch this one because its file list was wrong: it
+mirrored what `ci/windows.ps1` compiles and missed that **a harness a spec
+builds is a harness every platform compiles**. `chunk_search_race.cr` is in the
+list now, and the target comes out red on the unguarded call with the runner's
+own line:
+
+    Error: undefined constant Gcry::SegvReport
+    make: *** [Makefile:628: windows-typecheck] Error 1
+
+The call is guarded, and the guard says why.

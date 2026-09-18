@@ -227,7 +227,14 @@ if ARGV.first? == "--child"
   # nothing (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`).
   # Same one-liner as `large_cache_race.cr` and `dormant_flush_race.cr`, and the
   # recipe sets the variable so CI gets the report without anyone remembering to.
-  Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
+  # Unix-only: `segv_report.cr` opens with `{% skip_file unless flag?(:unix) %}`,
+  # and `spec/cached_bitmap_pool_race_spec.cr` builds this harness — so an
+  # unguarded call breaks all six Windows jobs, which is what it did on the
+  # commit that added it. Same shape as the `poison_holders.cr` break two days
+  # earlier; `make windows-typecheck` now covers this file for that reason.
+  {% if flag?(:unix) %}
+    Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
+  {% end %}
   heap = Gcry::Heap.new
   heap.bitmap_alloc = mode != "header-dormant"
   heap.gc_threshold = UInt64::MAX

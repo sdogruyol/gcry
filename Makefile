@@ -612,16 +612,24 @@ darwin-typecheck: $(BIN)
 # class of mistake for the other platform since 2026-08-22; this covers it for
 # the one whose CI jobs are the slowest to tell you.
 #
-# The set mirrors what `ci/windows.ps1` actually builds: the samples, through
-# `hello.cr`, and `bench/tls_roots.cr`, which is the only bench harness that
-# job compiles.
+# The set mirrors what the Windows jobs actually build: the samples, through
+# `hello.cr`; `bench/tls_roots.cr`, which `ci/windows.ps1` compiles; and
+# `bench/chunk_search_race.cr`, which a **spec** compiles
+# (`spec/cached_bitmap_pool_race_spec.cr`) — that one was missing from this list
+# and a `Gcry::SegvReport.install` call in it broke all six Windows jobs on
+# 2026-09-18, the second time in three days that a bench harness reached a
+# `{% skip_file unless flag?(:unix) %}` module. A harness a spec builds is a
+# harness every platform compiles.
 windows-typecheck: $(BIN)
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none samples/hello.cr -o $(BIN)/windows_typecheck_x86 >/dev/null
 	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none samples/hello.cr -o $(BIN)/windows_typecheck_arm64 >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/tls_roots.cr -o $(BIN)/windows_typecheck_tls_x86 >/dev/null
 	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none bench/tls_roots.cr -o $(BIN)/windows_typecheck_tls_arm64 >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc bench/chunk_search_race.cr -o $(BIN)/windows_typecheck_csr_x86 >/dev/null
+	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc bench/chunk_search_race.cr -o $(BIN)/windows_typecheck_csr_arm64 >/dev/null
 	@rm -f $(BIN)/windows_typecheck_x86.obj $(BIN)/windows_typecheck_arm64.obj
 	@rm -f $(BIN)/windows_typecheck_tls_x86.obj $(BIN)/windows_typecheck_tls_arm64.obj
+	@rm -f $(BIN)/windows_typecheck_csr_x86.obj $(BIN)/windows_typecheck_csr_arm64.obj
 	@echo "ok — the Windows build type-checks on both targets"
 
 # Every knob the source reads has a row in the env reference. The reference had
