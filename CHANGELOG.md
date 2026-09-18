@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Darwin lost a thread's registers past 64 threads, and Windows lost
+  the whole collection.** The STW capture table was a fixed 64 slots
+  because its claim mask was an `Atomic(UInt64)`, which cannot address a
+  65th, and `slot_for` returned −1 past it. On Darwin that thread was
+  then scanned with **no registers**, and `thread_get_state` is their
+  only copy, so a reference held only in the 65th thread's registers was
+  not a root. On Windows the stop was *refused* at the 64th thread —
+  loud and correct, and it meant a process with 65 threads could never
+  collect. Both now use one shared, growable table
+  (`Gcry::StwSlots`): a single `LibC.malloc` block published by a single
+  pointer store, grown at collection entry before the first suspend and
+  never inside the stopped world, and never freeing its predecessor so a
+  reader walking it during a grow cannot fault. Each stop loop hands the
+  claimed slot index down to the capture, so the linear scan runs once
+  per thread instead of twice. Gated by `make stw-capture-coverage` with
+  `GCRY_STW_FIXED_SLOTS=1` pinning the old bound as the red arm, and
+  covered by `spec/stw_slots_spec.cr` on every platform — including a
+  reader-during-grow example that faults 3 of 3 if the growth frees its
+  predecessor, which is the crash a first attempt shipped.
+  **Linux is unchanged on purpose**: its suspend handler carries no
+  `SA_ONSTACK`, so the `ucontext` its registers come from sits on the
+  interrupted thread's own stack and the unclamped full-stack scan walks
+  it — a missing slot there costs precision, not roots.
+
 ## [0.26.1] - 2026-09-17
 
 ### Added
