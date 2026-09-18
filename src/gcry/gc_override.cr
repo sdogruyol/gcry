@@ -1047,6 +1047,13 @@ module GC
       # `make stw-capture-coverage` (src/gcry/stw_slots.cr).
       Gcry::Platform.stw_fixed_slots = true if env_flag_one?("GCRY_STW_FIXED_SLOTS")
     {% end %}
+    {% if flag?(:win32) %}
+      # Research: refuse the stop as though `SuspendThread` had failed, which is
+      # the only way left to reach that path now that a full capture table grows
+      # instead of failing the collection
+      # (`process_spec/regression/9_windows_suspension_capacity_spec.cr`).
+      Gcry::Platform.stw_test_fail_suspend = true if env_flag_one?("GCRY_STW_TEST_FAIL_SUSPEND")
+    {% end %}
     # Research only: swallow this many suspend signals before sending any, so
     # a thread that was signalled and never acknowledged can be arranged
     # rather than waited for (src/gcry/collect_stw.cr).

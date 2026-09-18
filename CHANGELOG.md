@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/stw_slots_spec.cr` on every platform — including a
   reader-during-grow example that faults 3 of 3 if the growth frees its
   predecessor.
+  Two tests pinned the bound this removes and had to move with it:
+  `spec/platform_windows_spec.cr` asserted that 65 threads make
+  `stop_world` raise — with the table growing it succeeds, so the
+  assertion failed *with the world stopped* and then joined 65 suspended
+  threads, hanging every Windows job for its full 20-minute budget — and
+  `process_spec/regression/9_windows_suspension_capacity_spec.cr`
+  asserted the same for both `GC` entry points. The success path is now
+  asserted directly (65 threads stop, resume and collect with
+  `stw_capture_no_slot` unchanged), and the failure path keeps its
+  original coverage through `GCRY_STW_TEST_FAIL_SUSPEND=1`, which
+  refuses a stop as though `SuspendThread` had failed.
   Both platforms' capture state is declared `uninitialized` and defaulted
   in a method, which `make once-guard` now enforces: a class variable
   with a non-literal initializer is set up behind `Crystal.once`, whose

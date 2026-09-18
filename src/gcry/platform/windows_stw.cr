@@ -102,6 +102,25 @@ module Gcry::Platform
     StwSlots.pinned?
   end
 
+  # `GCRY_STW_TEST_FAIL_SUSPEND=1`: refuse the stop as if `SuspendThread` had
+  # failed. The only way left to reach the failure path from a test. Until the
+  # capture table grew, 65 threads reached it — this platform answered a full
+  # table by refusing the whole collection — and
+  # `process_spec/regression/9_windows_suspension_capacity_spec.cr` used that to
+  # cover the thing the failure path exists for: allocating the exception and
+  # its backtrace **without** recursing into a collection, and restoring
+  # `Thread.lock`, the STW ownership and `@suppress_collect` on the way out.
+  # That was a real bug. The trigger is a knob now instead of a thread count.
+  @@stw_test_fail_suspend = false
+
+  def self.stw_test_fail_suspend=(value : Bool) : Bool
+    @@stw_test_fail_suspend = value
+  end
+
+  def self.stw_test_fail_suspend? : Bool
+    @@stw_test_fail_suspend
+  end
+
   private def self.slot_for(id : LibC::HANDLE) : Int32
     ensure_stw_table
     StwSlots.slot_for(id.address.to_u64)
@@ -208,8 +227,9 @@ module Gcry::Platform
     grow_handles(n + 8)
 
     @@stw_handle_count = 0
-    error = false
+    error = @@stw_test_fail_suspend
     Thread.unsafe_each do |thread|
+      break if error
       next if thread == current
       # No bound check here any more. This platform used to fail the whole stop
       # at the 64th thread — correct, loud, and it meant a process with 65

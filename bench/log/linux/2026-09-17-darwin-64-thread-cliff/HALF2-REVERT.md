@@ -441,3 +441,35 @@ Both halves of the lesson are about where the evidence was:
   spec files that carry win32 branches — which at least makes a typo in that
   file a local failure rather than a 25-minute one. The semantic pin needed a
   human; the compile gap did not.
+
+
+## And a second test pinned the same bound
+
+With the library suite unwedged — **278 examples, 0 failures, 7.06 s**, which is
+the proof that the hang was that one example — the process specs failed in
+1.5 minutes instead of hanging for 20:
+
+    1) Windows suspension failure under process GC allocates failure exceptions
+       without recursive collection and recovers both entry points
+       Expected: nil not to be nil
+       # process_spec/regression/9_windows_suspension_capacity_spec.cr:4
+
+Same shape, different file: 65 threads, and an assertion that both entry points
+**raise**. But this one guards something the success path cannot: allocating the
+failure exception and its backtrace without recursing into a collection, and
+restoring `Thread.lock`, the STW ownership and `@suppress_collect` on the way
+out. That was a real bug, so deleting the example would have thrown away the
+coverage with the bound.
+
+It is two examples now. The success case is the new contract — 65 threads stop,
+resume and collect, `stw_capture_no_slot` unchanged, capacity past the thread
+count. The failure case keeps the original assertions and gets a trigger that
+does not depend on a bound the collector no longer has:
+`GCRY_STW_TEST_FAIL_SUSPEND=1` (`Gcry::Platform.stw_test_fail_suspend`), which
+refuses the stop as though `SuspendThread` had failed.
+
+**Every Windows-only spec file now cross-compiles in `make windows-typecheck`**,
+including this process spec. It would not have caught either pin — both compiled
+fine — but it is the same class of blind spot that let an unguarded
+`Gcry::SegvReport.install` break all six jobs on 2026-09-16, and it costs ten
+seconds.
