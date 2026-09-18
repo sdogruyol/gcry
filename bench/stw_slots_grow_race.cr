@@ -37,13 +37,19 @@ module StwSlotsGrowRace
   MIN_FAULTS   =  2
   CHILD_BUDGET = 60.seconds
 
+  # Its own table, not the collector's: on Darwin and Windows
+  # `Gcry::StwSlots`' instance is the one the suspend loop reads inside the
+  # stopped world, and a harness that reconfigures it takes register roots away
+  # from the process it is running in.
+  @@table = uninitialized Gcry::StwSlots::Table
+
   def self.child : Int32
-    Gcry::StwSlots.free_old = true if ENV["GCRY_STW_SLOTS_FREE_OLD"]? == "1"
-    Gcry::StwSlots.reset_for_test
-    Gcry::StwSlots.configure(8)
+    @@table = Gcry::StwSlots::Table.new
+    @@table.free_old = true if ENV["GCRY_STW_SLOTS_FREE_OLD"]? == "1"
+    @@table.configure(8)
 
     base = 0xc000_u64
-    IDS.times { |i| Gcry::StwSlots.slot_for(base + i) }
+    IDS.times { |i| @@table.slot_for(base + i) }
 
     stop = Atomic(Int32).new(0)
     passes = Atomic(Int64).new(0_i64)
@@ -53,8 +59,8 @@ module StwSlotsGrowRace
         # "read through it" is what this gate is trying to be inside of.
         while stop.get == 0
           IDS.times do |i|
-            Gcry::StwSlots.sp(base + i)
-            Gcry::StwSlots.each_greg(base + i) { |_| }
+            @@table.sp(base + i)
+            @@table.each_greg(base + i) { |_| }
           end
           passes.add(1_i64)
         end
@@ -65,7 +71,7 @@ module StwSlotsGrowRace
     grown = 0
     DOUBLINGS.times do
       want *= 2
-      break unless Gcry::StwSlots.reserve(want)
+      break unless @@table.reserve(want)
       grown += 1
       # Long enough for every reader to be somewhere inside the block that the
       # next step replaces.
@@ -75,7 +81,7 @@ module StwSlotsGrowRace
     stop.set(1)
     readers.each(&.join)
 
-    puts "child: grown=#{grown} capacity=#{Gcry::StwSlots.capacity} reader_passes=#{passes.get}"
+    puts "child: grown=#{grown} capacity=#{@@table.capacity} reader_passes=#{passes.get}"
     return 1 if grown < DOUBLINGS
     return 1 if passes.get <= 0
     0

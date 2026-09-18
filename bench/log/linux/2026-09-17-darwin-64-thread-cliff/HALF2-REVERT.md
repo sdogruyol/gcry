@@ -297,3 +297,58 @@ which is the point: they cover shape, and the gate covers the property.
 The lesson is about where a test lives. A race that has to starve a machine to
 be visible does not belong in a suite that every platform runs on whatever
 runner it was given; it belongs in a gate with a deadline and a red arm.
+
+
+## And then the spec reconfigured the collector's table
+
+Moving the race out did not fix Windows: run `35369782659`, all six jobs
+cancelled again at the 20-minute cap, with the library spec suite stuck at
+**218 of 270 examples**. (The `Entering debug mode. Use h or ? for help.` and
+`At ci\windows.ps1:37` in that log are the runner's cancellation breaking into
+the PowerShell debugger, not a cause — worth knowing before it costs another
+round.)
+
+The green run two hours earlier says how much headroom there was: the same step,
+**16 seconds**, 270 examples. It also carries the same
+`GCRY INVARIANT FAILURE: live_objects mismatch: actual=1 reported=2` line, so
+that message is expected output from an example and not a regression — checking
+it against a green run cost one API call and would otherwise have been the next
+wrong lead.
+
+**What was left in the file was worse than the race.** `spec/stw_slots_spec.cr`
+reconfigured the *process-wide* table:
+
+    around_each do |example|
+      saved_words = 8          # invented, not read from anywhere
+      Gcry::StwSlots.reset_for_test
+      ...
+
+On Linux that mutates dead state — this platform keeps its own fixed table. On
+Windows it is the table the collector reads inside the stopped world. Measured
+on this host with the platform's own width:
+
+| step | register words the scan can see |
+|---|---|
+| collector configures its table (`GREG_WORDS = 80`) | 80 / 80 |
+| a spec example runs `configure(4)` | **4 / 80** — 76 register roots dropped per thread |
+
+and the "turns a thread away once the table is full" example fills all 64 slots
+with fake ids, so the next real thread's claim lands on `no_slot` and is
+suspended with no SP clamp and no registers at all. A spec suite that runs 270
+examples under gcry, with 76 of every thread's 80 register words dropped, is
+collecting live objects out from under itself.
+
+First guess was a buffer overflow — `record_gregs` writing an 80-word row into a
+slot sized for 4 — and it was wrong: that method clamps to the configured width.
+It is root loss, not corruption of the table.
+
+**The fix is a value type.** `Gcry::StwSlots::Table` is a struct holding the
+scalars and the one `malloc`ed block; the collector owns one in `@@process`
+(still `uninitialized` + a plain `Bool` gate, for the `Crystal.once` reason
+above) and every spec and gate builds its own on the stack. `reset_for_test` is
+gone, and a new example asserts the isolation directly: a capture recorded into a
+test's table must not be visible through `Gcry::StwSlots`.
+
+Three rounds, three different mistakes, one shape: **a test that reaches into
+live collector state is not a test of it.** `crystal spec` runs every file on
+every platform, so any module a spec configures has to be one a spec can own.

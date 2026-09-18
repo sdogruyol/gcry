@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `spec/stw_slots_spec.cr` on every platform — including a
   reader-during-grow example that faults 3 of 3 if the growth frees its
   predecessor.
+  The table is a value type (`Gcry::StwSlots::Table`) so that a spec can
+  own one: the first version was module-level state, and reconfiguring it
+  from `spec/stw_slots_spec.cr` — invisible on Linux, which keeps its own
+  table — left the Windows collector recording 4 of each thread's 80
+  register words and wedged that job's whole spec suite.
   The property that no serial test can show — a reader inside the old
   block when a grow replaces it — is gated separately by
   `make stw-slots-grow-race`: four readers flat out across 12 doublings

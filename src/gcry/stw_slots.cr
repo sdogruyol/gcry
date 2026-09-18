@@ -8,10 +8,9 @@
 # crashed the Darwin job with an invalid memory access and had to be reverted,
 # and the reason it could not be debugged is that the code was reachable only
 # from a platform nobody here can run
-# (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`). This
-# module compiles and runs everywhere, so `spec/stw_slots_spec.cr` exercises the
-# growth, the claiming and — the part that crashed — a reader running while the
-# table grows, on whatever platform the suite happens to run on.
+# (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`). Here it
+# compiles and runs everywhere, so `spec/stw_slots_spec.cr` exercises the
+# growth, the claiming and the refusals on whatever platform the suite runs on.
 #
 # **The 64 was the claim mask.** `@@stw_claimed` was an `Atomic(UInt64)`, and a
 # `UInt64` cannot address a 65th slot. Past it `slot_for` returned −1 and the
@@ -33,9 +32,20 @@
 # 2. **Never freed.** Growth leaks its predecessor, so a reader still inside the
 #    old block reads valid — if stale — memory instead of faulting. Doubling
 #    bounds the leak by the final size: 64 → 128 → 256 sums to less than 512
-#    slots' worth.
+#    slots' worth. `make stw-slots-grow-race` is the gate for this one.
 # 3. **Grown outside the stop.** Callers size the table before they suspend
 #    anyone. `malloc` with the world stopped is the 2026-08-10 six-hour hang.
+#
+# **A `Table` is a value, and the collector owns exactly one.** That is not
+# tidiness either. The first version was one module of class variables, and
+# `spec/stw_slots_spec.cr` reconfigured it — which on Linux touches nothing,
+# because this platform keeps its own table, and on Windows reconfigured the
+# table the collector was *using*: 4 register words per slot instead of 80, so
+# the next capture dropped 76 of every thread's 80 register roots, and an
+# example that fills the table to test the refusal made a real thread's claim
+# fail. The suite wedged there and took the job's whole 20-minute budget (run
+# `35369782659`, all six Windows jobs). Specs and gates now build their own
+# `Table`; the collector's lives in `@@process` and nothing else can reach it.
 #
 # Ids are stored as `UInt64` and compared by value. That is what
 # `pthread_equal` does on both platforms that use this — Darwin's `pthread_t` is
@@ -57,272 +67,309 @@ module Gcry::StwSlots
   #        greg_ok  : UInt8  * cap
   HEADER_BYTES = 8
 
-  # `uninitialized`, with a plain `Bool` as the gate, and that is not a style
-  # choice. A class variable **with an initializer** is set up lazily behind
-  # `Crystal.once`, and the first read of these is inside `GC.init` — Darwin's
-  # `install_stw_sp_capture` boots the table there, before `Crystal.main` has
-  # set up the once machinery. Written the obvious way, every `-Dgc_none` binary
-  # on that platform died at startup before printing anything, which the
-  # `crystal` driver reports as "Process terminated because of an invalid memory
-  # access" — the message that cost this change two reverts and eight probe
-  # rounds (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`).
-  # `linux_stw.cr` carries the same rule for the same reason.
-  @@table = uninitialized UInt8*
-  @@greg_words = uninitialized Int32
-  # Slot claims that found the table full: the allocator refused a bigger block,
-  # or the table is pinned. Cumulative, and expected to stay zero.
-  @@no_slot = uninitialized UInt64
-  @@pinned = uninitialized Bool
-  # A plain literal, like `linux_stw.cr`'s `@@stw_booted`: nothing above may be
-  # read before `configure` has run, and this is what says whether it has.
-  @@booted = false
-  # Research only, and the red arm of `make stw-slots-grow-race`: free the
-  # predecessor when the table grows. That is rule 2 of this module inverted —
-  # a reader that has already loaded the old pointer is walking freed memory —
-  # and it is the one property of this design that no serial test can show.
-  # A plain literal for the reason above.
-  @@free_old = false
+  # A capture table. A `struct` with nothing but scalars and one `malloc`ed
+  # block, so the collector's copy can live in a class variable that `GC.init`
+  # touches and a spec's copy can live on the stack, with no allocation and no
+  # lazy initialization anywhere near either.
+  struct Table
+    getter greg_words : Int32
+    # Slot claims that found the table full: the allocator refused a bigger
+    # block, or the table is pinned. Cumulative, and expected to stay zero.
+    getter no_slot : UInt64
 
-  def self.free_old=(on : Bool) : Nil
-    @@free_old = on
+    def initialize
+      @block = Pointer(UInt8).null
+      @greg_words = 0
+      @no_slot = 0_u64
+      @pinned = false
+      @free_old = false
+    end
+
+    # *greg_words* is the number of 64-bit words a thread's register row needs,
+    # which is a per-platform, per-architecture constant.
+    def configure(greg_words : Int32) : Nil
+      @greg_words = greg_words < 1 ? 1 : greg_words
+      reserve(INITIAL_SLOTS)
+    end
+
+    def configured? : Bool
+      !@block.null?
+    end
+
+    def capacity : Int32
+      b = @block
+      b.null? ? 0 : b.as(Int64*).value.to_i32
+    end
+
+    # `GCRY_STW_FIXED_SLOTS=1`. Reading it back is what lets a harness say
+    # whether a zero `no_slot` means "covered" or "never grew".
+    def pinned=(value : Bool) : Bool
+      @pinned = value
+    end
+
+    def pinned? : Bool
+      @pinned
+    end
+
+    # Research only, and the red arm of `make stw-slots-grow-race`: free the
+    # predecessor when the table grows. That is rule 2 inverted — a reader that
+    # has already loaded the old pointer is then walking freed memory — and it
+    # is the one property of this design that no serial test can show.
+    def free_old=(on : Bool) : Bool
+      @free_old = on
+    end
+
+    # Grows to at least *want* slots, doubling. False when the allocator
+    # refuses, leaving the previous table in place — the caller does **not**
+    # fail the collection for that. It captures what fits and `no_slot` counts
+    # the rest, which is the trade the other direction cost Windows every
+    # collection past 64 threads.
+    def reserve(want : Int32) : Bool
+      return true if @pinned && configured?
+      have = capacity
+      return true if want <= have
+      return false if @greg_words == 0
+
+      cap = have < INITIAL_SLOTS ? INITIAL_SLOTS : have
+      while cap < want
+        cap *= 2
+      end
+
+      bytes = block_bytes(cap)
+      fresh = LibC.malloc(LibC::SizeT.new(bytes))
+      return false if fresh.null?
+
+      base = fresh.as(UInt8*)
+      # Zeroed whole: the claim and greg-ok flags must start clear, and a
+      # captured word left behind in fresh memory would be scanned as a root.
+      base.clear(bytes)
+      base.as(Int64*).value = cap.to_i64
+
+      # The predecessor is deliberately not freed — see rule 2 above.
+      # Publishing last is rule 1: nothing reads the new block until this store
+      # lands, and nothing that has read the old pointer can be hurt by it.
+      old = @block
+      @block = base
+      LibC.free(old.as(Void*)) if @free_old && !old.null?
+      true
+    end
+
+    # Per-STW. Clears the claims, the SPs and the register rows; the ids are
+    # left, because a slot is only ever read through a claimed one.
+    def clear : Nil
+      b = @block
+      return if b.null?
+      cap = b.as(Int64*).value.to_i32
+      claimed_at(b, cap).clear(cap.to_u64)
+      greg_ok_at(b, cap).clear(cap.to_u64)
+      sps_at(b, cap).clear(cap.to_u64)
+      gregs_at(b, cap).clear(cap.to_u64 * @greg_words.to_u64)
+    end
+
+    # Only the collector calls this, from its own suspend loop, one thread at a
+    # time — which is why there is no CAS here. Linux is the platform whose
+    # handler claims from every thread at once, and it keeps its own table.
+    def slot_for(id : UInt64) : Int32
+      b = @block
+      return note_no_slot if b.null?
+      cap = b.as(Int64*).value.to_i32
+      ids = ids_at(b)
+      claimed = claimed_at(b, cap)
+
+      i = 0
+      while i < cap
+        return i if claimed[i] != 0 && ids[i] == id
+        i += 1
+      end
+
+      i = 0
+      while i < cap
+        if claimed[i] == 0
+          claimed[i] = 1_u8
+          ids[i] = id
+          sps_at(b, cap)[i] = 0_u64
+          greg_ok_at(b, cap)[i] = 0_u8
+          return i
+        end
+        i += 1
+      end
+
+      note_no_slot
+    end
+
+    def record_sp(slot : Int32, sp : UInt64) : Nil
+      b = @block
+      return if b.null? || slot < 0
+      cap = b.as(Int64*).value.to_i32
+      return if slot >= cap
+      sps_at(b, cap)[slot] = sp
+    end
+
+    # *src* is the raw thread-state buffer; *words* words are copied into the
+    # slot's row, capped by the configured width.
+    def record_gregs(slot : Int32, src : UInt64*, words : Int32) : Nil
+      b = @block
+      return if b.null? || slot < 0
+      cap = b.as(Int64*).value.to_i32
+      return if slot >= cap
+
+      n = words < @greg_words ? words : @greg_words
+      row = gregs_at(b, cap) + slot.to_u64 * @greg_words.to_u64
+      j = 0
+      while j < n
+        row[j] = src[j]
+        j += 1
+      end
+      greg_ok_at(b, cap)[slot] = 1_u8
+    end
+
+    # The SP captured for *id* this STW, or zero when it has no slot or no SP.
+    def sp(id : UInt64) : UInt64
+      b = @block
+      return 0_u64 if b.null?
+      cap = b.as(Int64*).value.to_i32
+      ids = ids_at(b)
+      claimed = claimed_at(b, cap)
+      i = 0
+      while i < cap
+        return sps_at(b, cap)[i] if claimed[i] != 0 && ids[i] == id
+        i += 1
+      end
+      0_u64
+    end
+
+    # Register words captured for *id*. Yields nothing when the slot was never
+    # filled this STW: a stale row must not be marked, and an unfilled one must
+    # not read as "no roots".
+    def each_greg(id : UInt64, & : UInt64 ->) : Nil
+      b = @block
+      return if b.null?
+      cap = b.as(Int64*).value.to_i32
+      ids = ids_at(b)
+      claimed = claimed_at(b, cap)
+      i = 0
+      while i < cap
+        if claimed[i] != 0 && ids[i] == id
+          return if greg_ok_at(b, cap)[i] == 0
+          row = gregs_at(b, cap) + i.to_u64 * @greg_words.to_u64
+          j = 0
+          while j < @greg_words
+            word = row[j]
+            yield word unless word == 0
+            j += 1
+          end
+          return
+        end
+        i += 1
+      end
+    end
+
+    private def note_no_slot : Int32
+      @no_slot &+= 1
+      -1
+    end
+
+    private def block_bytes(cap : Int32) : UInt64
+      c = cap.to_u64
+      HEADER_BYTES.to_u64 +
+        c * 8 +                      # ids
+        c * 8 +                      # sps
+        c * @greg_words.to_u64 * 8 + # gregs
+        c +                          # claimed
+        c                            # greg_ok
+    end
+
+    private def ids_at(b : UInt8*) : UInt64*
+      (b + HEADER_BYTES).as(UInt64*)
+    end
+
+    private def sps_at(b : UInt8*, cap : Int32) : UInt64*
+      (b + HEADER_BYTES + cap.to_u64 * 8).as(UInt64*)
+    end
+
+    private def gregs_at(b : UInt8*, cap : Int32) : UInt64*
+      (b + HEADER_BYTES + cap.to_u64 * 16).as(UInt64*)
+    end
+
+    private def claimed_at(b : UInt8*, cap : Int32) : UInt8*
+      b + HEADER_BYTES + cap.to_u64 * 16 + cap.to_u64 * @greg_words.to_u64 * 8
+    end
+
+    private def greg_ok_at(b : UInt8*, cap : Int32) : UInt8*
+      claimed_at(b, cap) + cap.to_u64
+    end
   end
 
-  # *greg_words* is the number of 64-bit words a thread's register row needs,
-  # which is a per-platform, per-architecture constant.
+  # The collector's one table, and `@@booted` is the only thing read before it
+  # exists. `uninitialized` with a plain `Bool` gate is not a style choice: a
+  # class variable **with an initializer** is set up lazily behind
+  # `Crystal.once`, and the first read of this one is inside `GC.init` —
+  # Darwin's `install_stw_sp_capture` boots the table there, before
+  # `Crystal.main` has set up the once machinery. Written the obvious way,
+  # every `-Dgc_none` binary on that platform died at startup before printing
+  # anything, which the `crystal` driver reports as "Process terminated because
+  # of an invalid memory access" — the message that cost this change two
+  # reverts and eight probe rounds. `linux_stw.cr` carries the same rule.
+  @@process = uninitialized Table
+  @@booted = false
+
   def self.configure(greg_words : Int32) : Nil
-    # Defaults first, and every one of them: with `uninitialized` declarations
-    # these hold whatever was in that memory until this runs.
     unless @@booted
-      @@table = Pointer(UInt8).null
-      @@no_slot = 0_u64
-      @@pinned = false
+      @@process = Table.new
       @@booted = true
     end
-    @@greg_words = greg_words < 1 ? 1 : greg_words
-    reserve(INITIAL_SLOTS)
+    @@process.configure(greg_words)
   end
 
   def self.configured? : Bool
-    @@booted && !@@table.null?
+    @@booted && @@process.configured?
   end
 
   def self.capacity : Int32
-    return 0 unless @@booted
-    t = @@table
-    t.null? ? 0 : t.as(Int64*).value.to_i32
+    @@booted ? @@process.capacity : 0
   end
 
   def self.no_slot : UInt64
-    @@booted ? @@no_slot : 0_u64
+    @@booted ? @@process.no_slot : 0_u64
   end
 
-  # `GCRY_STW_FIXED_SLOTS=1`. Reading it back is what lets a harness say whether
-  # a zero `no_slot` means "covered" or "never grew".
   def self.pinned=(value : Bool) : Bool
     return false unless @@booted
-    @@pinned = value
+    @@process.pinned = value
   end
 
   def self.pinned? : Bool
-    @@booted && @@pinned
+    @@booted && @@process.pinned?
   end
 
-  # Grows to at least *want* slots, doubling. False when the allocator refuses,
-  # leaving the previous table in place — the caller does **not** fail the
-  # collection for that. It captures what fits and `no_slot` counts the rest,
-  # which is the trade the other direction cost Windows every collection past
-  # 64 threads.
   def self.reserve(want : Int32) : Bool
     return false unless @@booted
-    return true if @@pinned && configured?
-    have = capacity
-    return true if want <= have
-    return false if @@greg_words == 0
-
-    cap = have < INITIAL_SLOTS ? INITIAL_SLOTS : have
-    while cap < want
-      cap *= 2
-    end
-
-    bytes = block_bytes(cap)
-    fresh = LibC.malloc(LibC::SizeT.new(bytes))
-    return false if fresh.null?
-
-    base = fresh.as(UInt8*)
-    # Zeroed whole: the claim and greg-ok flags must start clear, and a captured
-    # word left behind in fresh memory would be scanned as a root.
-    base.clear(bytes)
-    base.as(Int64*).value = cap.to_i64
-
-    # The predecessor is deliberately not freed — see rule 2 above. Publishing
-    # last is rule 1: nothing reads the new block until this store lands, and
-    # nothing that has read the old pointer can be hurt by it.
-    old = @@table
-    @@table = base
-    # Research arm only: this is the bug, kept switchable so a gate can show it.
-    LibC.free(old.as(Void*)) if @@free_old && !old.null?
-    true
+    @@process.reserve(want)
   end
 
-  # Per-STW. Clears the claims, the SPs and the register rows; the ids are left,
-  # because a slot is only ever read through a claimed one.
   def self.clear : Nil
-    return unless @@booted
-    t = @@table
-    return if t.null?
-    cap = t.as(Int64*).value.to_i32
-    claimed_at(t, cap).clear(cap.to_u64)
-    greg_ok_at(t, cap).clear(cap.to_u64)
-    sps_at(t, cap).clear(cap.to_u64)
-    gregs_at(t, cap).clear(cap.to_u64 * @@greg_words.to_u64)
+    @@process.clear if @@booted
   end
 
-  # Only the collector calls this, from its own suspend loop, one thread at a
-  # time — which is why there is no CAS here. Linux is the platform whose
-  # handler claims from every thread at once, and it keeps its own table.
   def self.slot_for(id : UInt64) : Int32
     return -1 unless @@booted
-    t = @@table
-    return note_no_slot if t.null?
-    cap = t.as(Int64*).value.to_i32
-    ids = ids_at(t)
-    claimed = claimed_at(t, cap)
-
-    i = 0
-    while i < cap
-      return i if claimed[i] != 0 && ids[i] == id
-      i += 1
-    end
-
-    i = 0
-    while i < cap
-      if claimed[i] == 0
-        claimed[i] = 1_u8
-        ids[i] = id
-        sps_at(t, cap)[i] = 0_u64
-        greg_ok_at(t, cap)[i] = 0_u8
-        return i
-      end
-      i += 1
-    end
-
-    note_no_slot
+    @@process.slot_for(id)
   end
 
   def self.record_sp(slot : Int32, sp : UInt64) : Nil
-    return unless @@booted
-    t = @@table
-    return if t.null? || slot < 0
-    cap = t.as(Int64*).value.to_i32
-    return if slot >= cap
-    sps_at(t, cap)[slot] = sp
+    @@process.record_sp(slot, sp) if @@booted
   end
 
-  # *src* is the raw thread-state buffer; *words* words are copied into the
-  # slot's row, capped by the configured width.
   def self.record_gregs(slot : Int32, src : UInt64*, words : Int32) : Nil
-    return unless @@booted
-    t = @@table
-    return if t.null? || slot < 0
-    cap = t.as(Int64*).value.to_i32
-    return if slot >= cap
-
-    n = words < @@greg_words ? words : @@greg_words
-    row = gregs_at(t, cap) + slot.to_u64 * @@greg_words.to_u64
-    j = 0
-    while j < n
-      row[j] = src[j]
-      j += 1
-    end
-    greg_ok_at(t, cap)[slot] = 1_u8
+    @@process.record_gregs(slot, src, words) if @@booted
   end
 
-  # The SP captured for *id* this STW, or nil when it has no slot or no SP.
   def self.sp(id : UInt64) : UInt64
-    return 0_u64 unless @@booted
-    t = @@table
-    return 0_u64 if t.null?
-    cap = t.as(Int64*).value.to_i32
-    ids = ids_at(t)
-    claimed = claimed_at(t, cap)
-    i = 0
-    while i < cap
-      return sps_at(t, cap)[i] if claimed[i] != 0 && ids[i] == id
-      i += 1
-    end
-    0_u64
+    @@booted ? @@process.sp(id) : 0_u64
   end
 
-  # Register words captured for *id*. Yields nothing when the slot was never
-  # filled this STW: a stale row must not be marked, and an unfilled one must
-  # not read as "no roots".
   def self.each_greg(id : UInt64, & : UInt64 ->) : Nil
     return unless @@booted
-    t = @@table
-    return if t.null?
-    cap = t.as(Int64*).value.to_i32
-    ids = ids_at(t)
-    claimed = claimed_at(t, cap)
-    i = 0
-    while i < cap
-      if claimed[i] != 0 && ids[i] == id
-        return if greg_ok_at(t, cap)[i] == 0
-        row = gregs_at(t, cap) + i.to_u64 * @@greg_words.to_u64
-        j = 0
-        while j < @@greg_words
-          word = row[j]
-          yield word unless word == 0
-          j += 1
-        end
-        return
-      end
-      i += 1
-    end
-  end
-
-  # Research only, and the reason `spec/stw_slots_spec.cr` can test the growth
-  # at all: forget the table without freeing it, so a fresh `configure` starts
-  # from the initial capacity.
-  def self.reset_for_test : Nil
-    @@table = Pointer(UInt8).null
-    @@greg_words = 0
-    @@no_slot = 0_u64
-    @@pinned = false
-    @@booted = true
-  end
-
-  private def self.note_no_slot : Int32
-    @@no_slot &+= 1
-    -1
-  end
-
-  private def self.block_bytes(cap : Int32) : UInt64
-    c = cap.to_u64
-    HEADER_BYTES.to_u64 +
-      c * 8 +                       # ids
-      c * 8 +                       # sps
-      c * @@greg_words.to_u64 * 8 + # gregs
-      c +                           # claimed
-      c                             # greg_ok
-  end
-
-  private def self.ids_at(t : UInt8*) : UInt64*
-    (t + HEADER_BYTES).as(UInt64*)
-  end
-
-  private def self.sps_at(t : UInt8*, cap : Int32) : UInt64*
-    (t + HEADER_BYTES + cap.to_u64 * 8).as(UInt64*)
-  end
-
-  private def self.gregs_at(t : UInt8*, cap : Int32) : UInt64*
-    (t + HEADER_BYTES + cap.to_u64 * 16).as(UInt64*)
-  end
-
-  private def self.claimed_at(t : UInt8*, cap : Int32) : UInt8*
-    t + HEADER_BYTES + cap.to_u64 * 16 + cap.to_u64 * @@greg_words.to_u64 * 8
-  end
-
-  private def self.greg_ok_at(t : UInt8*, cap : Int32) : UInt8*
-    claimed_at(t, cap) + cap.to_u64
+    @@process.each_greg(id) { |word| yield word }
   end
 end
