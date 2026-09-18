@@ -2389,6 +2389,35 @@ kept finding the rest.
       `GCRY_STW_FIXED_SLOTS=1` as the red arm, and `spec/stw_slots_spec.cr`
       covers the table on every platform — including a reader-during-grow
       example that faults 3 of 3 if the growth frees its predecessor.
+      **Verified on both platforms, in situ** (run `35381875960`, 20 jobs
+      green). `make stw-capture-coverage` on the runners:
+
+      | platform | threads on list | capacity | no_slot |
+      |---|---|---|---|
+      | Darwin | 82 | 128 | 0 |
+      | Darwin, `GCRY_STW_FIXED_SLOTS=1` | 82 | 64 | **34** |
+      | Windows | 83 | 128 | 0 |
+      | Windows, `GCRY_STW_FIXED_SLOTS=1` | 83 | 64 | **36** |
+
+      and the same knob inside the table's capacity (10–11 threads) loses
+      none, so the zero is about the growth and not about the knob.
+      `make stw-slots-grow-race` in the Linux job carries 4 flat-out readers
+      across 12 doublings 3/3 and kills them 3/3 with
+      `GCRY_STW_SLOTS_FREE_OLD=1`.
+
+      **Three more things had to be fixed to get there, and none was the
+      table.** A `Crystal.once` initializer on `@@stw_handles`, read inside
+      the stopped world, where a suspended thread can hold that mutex —
+      `make once-guard` is mechanical about that rule now, in the four files
+      the collector reads from `GC.init` or a stopped world. And two tests
+      that pinned the bound: `spec/platform_windows_spec.cr` asserted that 65
+      threads make `stop_world` raise, so when it succeeded the assertion
+      failed **with the world stopped** and then joined 65 suspended threads —
+      every Windows job hung for its full 20-minute budget, three runs — and
+      the same pin in
+      `process_spec/regression/9_windows_suspension_capacity_spec.cr`, whose
+      failure-path coverage is kept by `GCRY_STW_TEST_FAIL_SUSPEND=1` instead.
+      Windows-only spec files cross-compile in `make windows-typecheck` now.
       **The next step was a report, not a third attempt, and it is in.** That
       harness is a library build, so gcry installed no SIGSEGV handler in it, and
       two runs of a deterministic fault produced one line with no address, no

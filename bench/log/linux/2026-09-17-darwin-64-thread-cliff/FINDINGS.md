@@ -329,3 +329,34 @@ is verified locally: all four cross-targets type-check, the Linux suites and
 every STW gate still pass (`greg-roots`, `scheduler-roots`, `dead-stack-root`,
 `tls-roots`, `stw-epoch`, 277 + 32 examples), and the harness skips on Linux
 with its reason. The Darwin and Windows CI jobs are the first execution.
+
+
+## Half 2, measured on the runners (2026-09-18, run 35381875960)
+
+`make stw-capture-coverage`, in the job for each platform:
+
+| platform | threads on list | slot capacity | `no_slot` | register words offered |
+|---|---|---|---|---|
+| Darwin | 82 | 128 | 0 | 2843 |
+| Darwin, `GCRY_STW_FIXED_SLOTS=1` | 82 | 64 | **34** | 2297 |
+| Darwin, pinned, 10 threads | 10 | 64 | 0 | 318 |
+| Windows | 83 | 128 | 0 | 1663 |
+| Windows, `GCRY_STW_FIXED_SLOTS=1` | 83 | 64 | **36** | 1288 |
+| Windows, pinned, 11 threads | 11 | 64 | 0 | 208 |
+
+Two things worth reading off that table. The pinned arm loses 34 and 36 threads
+respectively — those are threads suspended with no SP clamp and **no registers**,
+and 546 / 375 fewer register words reach the mark as a result. And the third row
+on each platform is what makes the first row mean anything: the same knob, inside
+the table's capacity, turns nobody away.
+
+`make stw-slots-grow-race` in the Linux job, which covers the rule that the
+growth never frees its predecessor:
+
+    hold 1/3: ok child: grown=12 capacity=262144 reader_passes=89
+    hold 2/3: ok child: grown=12 capacity=262144 reader_passes=97
+    hold 3/3: ok child: grown=12 capacity=262144 reader_passes=93
+    free 1/3: died   free 2/3: died   free 3/3: died
+
+Windows' library suite, which had been wedging for the whole 20-minute job
+budget: **278 examples, 0 failures, 7.06 s.**
