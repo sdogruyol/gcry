@@ -100,3 +100,42 @@ handler in it, which is why two runs of a deterministic fault produced one line
 and no address, no backtrace and no release ledger. Making it say what it faults
 on is the prerequisite for the third attempt, and it is worth having whether or
 not the table ever grows.
+
+
+## Third round: the crash is bisected, on a branch, with master green
+
+Master carries neither attempt. The hunt moved to `half2-darwin-probe`, which
+CI runs in full because the workflow has no branch filter — so Darwin answers
+without the tree going red.
+
+Four rounds, each one question:
+
+| probe | Darwin |
+|---|---|
+| the re-land, with the report installed only in the child arms | **red**, one line |
+| report installed in the parent too, plus `all arms returned` / `exiting 0` markers | **red**, and the markers moved the question |
+| ~17 KiB BSS pad in `Gcry::Platform`, restoring what the change removed | **red** — layout refuted |
+| `stw_slots.cr` and its spec present, platform files back at master's | **green** |
+
+What that establishes:
+
+- **The parent crashes, and it crashes after `exit 0`.** Its last two lines are
+  `parent: all arms returned` and `parent: exiting 0`; all nine children print
+  their own `ok`, and the parent prints no `FAIL` line, so nothing in the loop
+  failed. The fault is in the parent's own exit.
+- **It is not the ~17 KiB of static arrays** the change removes from
+  `Gcry::Platform`. A pad of the same size in the same module, kept alive by a
+  touch from the harness, changed nothing.
+- **It is not the shared table.** With `stw_slots.cr` compiled in and the
+  platform files restored, the job is green — so the module, its spec and the
+  requires are innocent, and the trigger is the **Darwin STW wiring**.
+- **No `gcry:` report line appears**, even with the handler installed in the
+  parent. The most likely reading is a fault on a thread that never got an
+  alternate stack: the report needs ~4.7 KiB and `install_alt_stack` is
+  per-thread, so on a pool thread it would smash what it is trying to describe.
+  That is a reading, not a measurement.
+
+Next round, already pushed: `darwin_stw.cr` back at the re-land's version and the
+parent calling `LibC._exit(0)` after flushing. Green means the fault is in
+Crystal's exit path; red means it is before it. Either way the answer is one bit
+and the tree stays green while it arrives.

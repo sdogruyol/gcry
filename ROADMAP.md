@@ -2339,6 +2339,22 @@ kept finding the rest.
       arrays the change removes from `Gcry::Platform` moves the writable segment
       this platform scans as conservative static roots, or the harness has a
       latent teardown fault the layout change reaches.
+      **Bisected on a branch, 2026-09-18, with master green.** `on: push:` has
+      no branch filter, so `half2-darwin-probe` gets the full matrix without the
+      tree going red. Four rounds: the re-land red with one line; the report
+      installed in the parent plus boundary markers, which showed the **parent**
+      crashing *after* `exit 0`, with every child printing `ok` and no `FAIL`
+      line; a ~17 KiB BSS pad restoring what the change removed from
+      `Gcry::Platform`, still red — **layout refuted**; and `stw_slots.cr`
+      present with the platform files back at master's, **green** — so the
+      module, its spec and the requires are innocent and the **Darwin wiring**
+      is the trigger. No `gcry:` report line appears even with the handler
+      installed in the parent, which reads as a fault on a thread that never got
+      an alternate stack (the report needs ~4.7 KiB and `install_alt_stack` is
+      per-thread) — a reading, not a measurement. Next round pushed:
+      `darwin_stw.cr` at the re-land's version with the parent calling
+      `LibC._exit(0)`, which separates Crystal's exit path from everything
+      before it.
       **The next step was a report, not a third attempt, and it is in.** That
       harness is a library build, so gcry installed no SIGSEGV handler in it, and
       two runs of a deterministic fault produced one line with no address, no
