@@ -2319,10 +2319,18 @@ kept finding the rest.
       arrays the change removes from `Gcry::Platform` moves the writable segment
       this platform scans as conservative static roots, or the harness has a
       latent teardown fault the layout change reaches.
-      **The next step is a report, not a third attempt.** That harness is a
-      library build, so gcry installs no SIGSEGV handler in it, and two runs of a
-      deterministic fault produced one line with no address, no backtrace and no
-      release ledger.
+      **The next step was a report, not a third attempt, and it is in.** That
+      harness is a library build, so gcry installed no SIGSEGV handler in it, and
+      two runs of a deterministic fault produced one line with no address, no
+      backtrace and no release ledger — and no way to tell which of nine arms
+      died, since each prints its own `ok` before exiting. Both are fixed:
+      the harness installs the report (the one-liner `large_cache_race.cr` and
+      `dormant_flush_race.cr` already had) with the recipe setting
+      `GCRY_SEGV_REPORT=1`, and the parent names the failing arm and separates a
+      non-zero exit from a timeout. The same variable is now set for
+      `dormant-flush-race`, `large-cache-race` and `find-block-race`, which were
+      printing one line for a fault as well.
+      `bench/log/linux/2026-09-18-crash-legibility/FINDINGS.md`
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
       `…/DESIGN.md`, `…/HALF2-REVERT.md`
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered

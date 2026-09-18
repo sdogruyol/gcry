@@ -219,6 +219,15 @@ end
 
 if ARGV.first? == "--child"
   mode = ARGV[1]
+  # This is a library build — gcry is not the process GC here, so `GC.init`
+  # never runs and nothing installs the SIGSEGV report. A deterministic fault in
+  # this harness therefore printed exactly one line on the Darwin runner, twice:
+  # `Process terminated because of an invalid memory access`, with no address,
+  # no backtrace and no release ledger, which cost two CI rounds and settled
+  # nothing (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/HALF2-REVERT.md`).
+  # Same one-liner as `large_cache_race.cr` and `dormant_flush_race.cr`, and the
+  # recipe sets the variable so CI gets the report without anyone remembering to.
+  Gcry::SegvReport.install if ENV["GCRY_SEGV_REPORT"]? == "1"
   heap = Gcry::Heap.new
   heap.bitmap_alloc = mode != "header-dormant"
   heap.gc_threshold = UInt64::MAX
@@ -255,11 +264,23 @@ if ARGV.first? == "--child"
 end
 
 exe = Process.executable_path.not_nil!
-failed = false
+failures = [] of String
 ["pool", "cached-pool", "bitmap-dormant", "header-dormant", "stopped",
  "handoff-cached", "handoff-overflow", "handoff-dormant", "handoff-fresh"].each do |mode|
   result = BoundedChild.run(exe, ["--child", mode], timeout: 10.seconds)
   puts result.output
-  failed ||= !result.ok
+  next if result.ok
+
+  # Name the arm. Every child prints its own `ok` line and exits 0, so a crash
+  # at exit — after that line — is indistinguishable from the parent dying,
+  # which is exactly how two Darwin runs of a deterministic fault could not say
+  # which of nine arms produced it.
+  failures << (result.timed_out ? "#{mode} (exceeded its 10s budget)" : mode)
 end
-exit(failed ? 1 : 0)
+
+unless failures.empty?
+  STDERR.puts "FAIL: #{failures.join(", ")} — the output above is that child's, " \
+              "stdout and stderr together"
+  exit 1
+end
+exit 0

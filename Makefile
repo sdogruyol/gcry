@@ -771,7 +771,9 @@ page-release-corruption: $(BIN)
 # proves nothing.
 dormant-flush-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/dormant_flush_race.cr -o $(BIN)/dormant_flush_race --error-trace
-	$(BIN)/dormant_flush_race
+# A gate whose failure mode is a fault should name the address it faulted on.
+# Without this the crash is one line from Crystal's handler.
+	GCRY_SEGV_REPORT=1 $(BIN)/dormant_flush_race
 
 # Running out of address space must produce an error, not a hang.
 #
@@ -786,12 +788,16 @@ oom-no-hang: $(BIN)
 
 large-cache-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/large_cache_race.cr -o $(BIN)/large_cache_race --error-trace
-	$(BIN)/large_cache_race
+# A gate whose failure mode is a fault should name the address it faulted on.
+# Without this the crash is one line from Crystal's handler.
+	GCRY_SEGV_REPORT=1 $(BIN)/large_cache_race
 
 .PHONY: chunk-search-race
 chunk-search-race: $(BIN)
 	$(CRYSTAL) build bench/chunk_search_race.cr -o $(BIN)/chunk_search_race --error-trace
-	$(BIN)/chunk_search_race
+# A library build installs no SIGSEGV handler of its own, so a fault here used
+# to print one line with no address. The children inherit this.
+	GCRY_SEGV_REPORT=1 $(BIN)/chunk_search_race
 
 # A mutator inside `find_block` while collections run.
 #
@@ -804,7 +810,9 @@ chunk-search-race: $(BIN)
 # something. `FIND_BLOCK_RACE_RUNS` sets the sample (default 4).
 find-block-race: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/find_block_race.cr -o $(BIN)/find_block_race --error-trace
-	$(BIN)/find_block_race
+# A gate whose failure mode is a fault should name the address it faulted on.
+# Without this the crash is one line from Crystal's handler.
+	GCRY_SEGV_REPORT=1 $(BIN)/find_block_race
 
 # Does a mutator ever read the chunk index without the lock?
 #

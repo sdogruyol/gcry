@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The race gates name what they faulted on.**
+  `bench/chunk_search_race.cr` is a library build on purpose, so nothing
+  installed gcry's SIGSEGV report in it, and a deterministic fault on the
+  Darwin runner produced one line — `Process terminated because of an
+  invalid memory access` — with no address, no backtrace, and no way to
+  tell which of its nine arms died, because each prints its own `ok`
+  before exiting. It installs the report now, the recipe sets
+  `GCRY_SEGV_REPORT=1`, and the parent names the failing arm and
+  separates a non-zero exit from a timeout. `dormant-flush-race`,
+  `large-cache-race` and `find-block-race` get the variable too: all are
+  gates whose failure mode is a fault.
+
 ## [0.26.1] - 2026-09-17
 
 ### Added
