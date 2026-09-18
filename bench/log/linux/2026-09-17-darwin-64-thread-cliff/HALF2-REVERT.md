@@ -53,52 +53,50 @@ The measurements, which are unaffected by the revert and are in `FINDINGS.md`:
   threads on the list, `2 x (needing_a_slot - 64)` past it.
 
 
-## Re-landed 2026-09-18, and this time the crash is reproducible here
+## Second attempt, 2026-09-18: also reverted, and it moved the question
 
-The lesson of the revert was not about pointers, it was about **where the code
-lived**: a table reachable only from Darwin and Windows cannot be debugged on a
-host that runs neither. So the table moved to `src/gcry/stw_slots.cr`, one
-implementation shared by both platforms, and `spec/stw_slots_spec.cr` covers it
-wherever the suite runs — eight examples: initial capacity, distinct slots, the
-65th thread being turned away and counted, coverage past the initial capacity
-after a reserve, SP and register round-trips across a grow, an unfilled slot
-yielding nothing, `clear` forgetting a collection, the pin knob, and the one
-that matters.
+The re-land put the table in one shared module — `src/gcry/stw_slots.cr`, used
+by both platforms — and added `spec/stw_slots_spec.cr`, eight examples that run
+wherever the suite does. That part worked, and it did what the first attempt
+could not:
 
-**The one that matters, and it comes out red.** Four threads walk the table
-(`sp` and `each_greg` over 128 ids) while the main thread doubles it twelve
-times. Shipped design: 8 of 8 green, three runs. Restore the reverted design —
-`LibC.free` the predecessor at the publish — and it faults **3 of 3**, with libc
-backtraces through the reader:
+**The first attempt's crash now reproduces on this host in under two seconds.**
+Four threads walk the table (`sp` and `each_greg` over 128 ids) while the main
+thread doubles it twelve times. Shipped design — one `LibC.malloc` block
+published by a single pointer store, never freed — **8 of 8 green, three runs**.
+Restore the reverted design, freeing the predecessor at the publish, and it
+faults **3 of 3** with libc backtraces through the reader. So that crash was
+never Darwin-specific: it was a use-after-free only Darwin's job executed.
 
-    [0x7f42a48acfb1] ?? in /usr/lib/libc.so.6
-    [0x0] GC_call_with_stack_base +41 in /usr/lib/libgc.so.1
+**And Darwin failed anyway — the same step, deterministically.**
+`make chunk-search-race` died with `Process terminated because of an invalid
+memory access` after all nine of its arms printed their own `ok`, on the run and
+on a rerun of the same commit. The unit suite on that job, including the eight
+new examples, passed.
 
-That is the Darwin crash, on this host, in under two seconds. It was never
-Darwin-specific — it was a use-after-free that only Darwin's job happened to
-execute.
+**What that rules out.** The harness is built **without** `-Dgc_none`:
 
-**The three rules the re-land is built on**, in the module's own words:
+    crystal build bench/chunk_search_race.cr -o bin/chunk_search_race
 
-1. **One allocation, one pointer.** Capacity and every array live in a single
-   `LibC.malloc` block published by a single store, so a reader can never pair a
-   new capacity with an old base. The reverted version had capacity and five
-   pointers in six separate stores.
-2. **Never freed.** Growth leaks its predecessor, so a reader still inside the
-   old block reads stale-but-valid memory. Doubling bounds the leak: 64 → 128 →
-   256 sums to less than 512 slots' worth.
-3. **Grown outside the stop.** Both stop loops size the table from
-   `Thread.unsafe_each` plus eight slots of slack *before* suspending anyone.
+`install_stw_sp_capture` is called only from `gc_override.cr`, which is required
+only under that flag, and every entry point into the table — `slot_for`,
+`clear_thread_sps`, `thread_sp`, `each_thread_greg` — returns early unless
+`@@stw_booted`. Its probes fake the stopped world (`@world_stopped = true`)
+instead of suspending anyone, so `stop_world_threads` is never reached either.
+**The changed code cannot execute in that binary**, and the crash is still
+deterministic on it and absent on the commit before.
 
-Also folded in: both stop loops hand the claimed slot index down to the capture
-(`capture_thread_state(port, id, slot)` on Darwin, `record_thread_context_at` on
-Windows), so the linear `slot_for` runs once per thread per stop instead of
-twice; Windows' handle list grows the same way and its refusal at the 64th
-thread is gone; ids are keyed as `UInt64`, which is what `pthread_equal`
-compares on a platform whose `pthread_t` is an opaque pointer.
+That leaves an indirect mechanism, and the honest answer is that this host cannot
+see it. Two candidates worth instrumenting rather than arguing about: the ~17 KiB
+of static arrays the change removes from `Gcry::Platform`, which moves the
+writable segment this platform scans as conservative static roots and which is
+documented to shift chunk residency elsewhere in this tree
+(`segv_report.cr`'s 256 KiB report-buffer note); and a latent fault in that
+harness's own teardown, which the layout change makes reachable.
 
-**Verified here:** 285 examples (277 + the 8 new) and 32 process specs green,
-all four cross-targets type-check, and `greg-roots`, `stw-epoch`, `tls-roots`,
-`scheduler-roots`, `dead-stack-root`, `holders-find` and `poison-holders` all
-still pass. **Not verified here:** the Darwin and Windows jobs, which are the
-first execution of the platform wiring — but no longer of the table's logic.
+**So the code is out again and the next step is not a third blind attempt.** It
+is a report: that harness is a library build, so gcry installs no SIGSEGV
+handler in it, which is why two runs of a deterministic fault produced one line
+and no address, no backtrace and no release ledger. Making it say what it faults
+on is the prerequisite for the third attempt, and it is worth having whether or
+not the table ever grows.

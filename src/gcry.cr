@@ -29,7 +29,6 @@ end
 require "./gcry/metrics"
 require "./gcry/monitor_gate"
 require "./gcry/observability"
-require "./gcry/stw_slots"
 require "./gcry/stw_watchdog"
 require "./gcry/raw_out"
 require "./gcry/ec_queue_audit"

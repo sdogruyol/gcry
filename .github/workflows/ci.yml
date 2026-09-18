@@ -1620,16 +1620,6 @@ jobs:
       - name: STW resume coverage past the slot table
         run: make darwin-stw-resume
 
-      # The other half of the same bound. The resume gate above says the world
-      # comes back; this one says every thread it suspended got a capture slot,
-      # which on this platform is the difference between a register root being
-      # seen and being swept: `thread_get_state` is the only copy. The red arm
-      # pins the table back to 64 with GCRY_STW_FIXED_SLOTS=1. The table itself
-      # is spec-covered on every platform now (`spec/stw_slots_spec.cr`), after
-      # a first attempt that grew it in place crashed this job.
-      - name: STW capture coverage
-        run: make stw-capture-coverage
-
       # `make stack-bounds-growth` is not here, and not because it hung: this
       # platform has no bounds table to grow. `darwin_stack.cr` queries the
       # thread descriptor at lookup time, so the snapshot is a no-op and

@@ -2220,8 +2220,8 @@ kept finding the rest.
       returns its holder count now so the decision rests on evidence rather than
       on the survival alone.
       `bench/log/linux/2026-09-17-tls-roots-inconclusive/FINDINGS.md`
-- [x] **The 64-slot bound cost Darwin its register capture and Windows its
-      collection (Half 2) — reverted once, re-landed 2026-09-18.** `slot_for` returns −1 past the table, so those threads
+- [ ] **The 64-slot bound costs Darwin its register capture and Windows its
+      collection (Half 2) — attempted and reverted 2026-09-17.** `slot_for` returns −1 past the table, so those threads
       are suspended with no SP clamp and no registers — a reference live only in
       the 65th thread's registers is not a root, which is the v0.19.0
       `each_thread_greg` shape on a new axis. Now instrumented rather than read
@@ -2302,28 +2302,27 @@ kept finding the rest.
       separate store from the pointers, so aarch64 can pair a new capacity with
       an old pointer. Never freeing, and publishing capacity and arrays as one
       allocation behind a single pointer store, is the shape to try next.
-      **Re-landed on 2026-09-18 with the table moved out of the platform
-      files.** The lesson of the revert was where the code lived, not what it
-      did with pointers: `src/gcry/stw_slots.cr` is now one implementation
-      shared by Darwin and Windows, and `spec/stw_slots_spec.cr` covers it on
-      whatever platform runs the suite. **The crash reproduces here in under
-      two seconds**: four threads walking the table while the main thread
-      doubles it twelve times is 8 of 8 green on the shipped design and faults
-      **3 of 3** when the growth is made to free its predecessor again. It was
-      never Darwin-specific — only Darwin's job executed it.
-      Built on three rules: one allocation published by one pointer store (the
-      reverted version published a capacity and five pointers separately, so a
-      reader could pair a new capacity with an old base); never freed, so a
-      stale reader reads valid memory and doubling bounds the leak by the final
-      size; and grown before the first suspend, from `Thread.unsafe_each` plus
-      eight slots of slack. Both stop loops now hand the claimed index down to
-      the capture, so the linear `slot_for` runs once per thread instead of
-      twice, Windows' handle list grows the same way, and its refusal at the
-      64th thread is gone.
-      Verified here: 285 examples and 32 process specs, four cross-targets
-      type-checking, and every STW gate still green. Not verified here: the
-      Darwin and Windows jobs, which are the first execution of the platform
-      wiring — but no longer of the table's logic.
+      **Second attempt, 2026-09-18, also reverted — and it moved the
+      question.** The table went into one shared module (`stw_slots.cr`) with
+      eight specs that run on any platform, and that reproduced the *first*
+      attempt's crash here in under two seconds: readers walking the table while
+      it doubles are 8 of 8 green as shipped and fault **3 of 3** when the growth
+      frees its predecessor. So that crash was never Darwin-specific.
+      Darwin failed anyway, deterministically — `make chunk-search-race`, an
+      invalid memory access after all nine arms printed `ok`, on the run and on a
+      rerun, with the unit suite (including the new specs) passing. **And the
+      changed code cannot execute in that binary**: the harness is built without
+      `-Dgc_none`, `install_stw_sp_capture` is reachable only from
+      `gc_override.cr`, every table entry point returns early unless
+      `@@stw_booted`, and its probes fake the stopped world rather than
+      suspending anyone. So the mechanism is indirect — the ~17 KiB of static
+      arrays the change removes from `Gcry::Platform` moves the writable segment
+      this platform scans as conservative static roots, or the harness has a
+      latent teardown fault the layout change reaches.
+      **The next step is a report, not a third attempt.** That harness is a
+      library build, so gcry installs no SIGSEGV handler in it, and two runs of a
+      deterministic fault produced one line with no address, no backtrace and no
+      release ledger.
       `bench/log/linux/2026-09-17-darwin-64-thread-cliff/FINDINGS.md`,
       `…/DESIGN.md`, `…/HALF2-REVERT.md`
 - [x] **100 threads take over 120 s to start on the Darwin runner — answered
