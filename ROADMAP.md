@@ -2354,7 +2354,15 @@ kept finding the rest.
       per-thread) — a reading, not a measurement. Next round pushed:
       `darwin_stw.cr` at the re-land's version with the parent calling
       `LibC._exit(0)`, which separates Crystal's exit path from everything
-      before it.
+      before it — and it came back **red**, so it is not the teardown either:
+      `_exit` never ran, or the process would have died silently with status 0.
+      What every round is consistent with is a fault on a thread other than the
+      main one as the parent finishes, which is also why no `gcry:` line
+      appears. Parked there, with master green and the branch holding the
+      instrumented harness; the next split is inside `darwin_stw.cr`, one bit
+      per round, and the first one to try is the pre-suspend
+      `Thread.unsafe_each` count the re-land added, since it is the only new
+      code on a path a library build can reach.
       **The next step was a report, not a third attempt, and it is in.** That
       harness is a library build, so gcry installed no SIGSEGV handler in it, and
       two runs of a deterministic fault produced one line with no address, no

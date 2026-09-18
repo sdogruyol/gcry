@@ -139,3 +139,44 @@ Next round, already pushed: `darwin_stw.cr` back at the re-land's version and th
 parent calling `LibC._exit(0)` after flushing. Green means the fault is in
 Crystal's exit path; red means it is before it. Either way the answer is one bit
 and the tree stays green while it arrives.
+
+
+## Fifth round: not the exit path either
+
+`darwin_stw.cr` back at the re-land's version, parent calling `LibC._exit(0)`
+after flushing both streams. **Still red**, and the log is the same two markers
+followed by the fault:
+
+    parent: all arms returned
+    parent: exiting 0
+    Process terminated because of an invalid memory access
+
+`_exit` does not run `at_exit`, and if it had executed the process would have
+died with status 0 and printed nothing further. So the fault arrives **before**
+`_exit` runs — between the last flush and the syscall — which rules out
+Crystal's teardown as well.
+
+What that leaves, and it is consistent with every round so far: a **fault on a
+thread other than the main one**, around the moment the parent finishes. The
+parent has scheduler/event-loop threads (`BoundedChild` sleeps between polls),
+the message is Crystal's handler rather than gcry's, and gcry's report needs an
+alternate stack that only the installing thread has — so a fault on a pool
+thread would print exactly this: one line, no address.
+
+## Where this is parked
+
+Master carries neither attempt and is green. The branch `half2-darwin-probe`
+holds the instrumented harness and the re-land's `darwin_stw.cr`, and the next
+split is inside that one file, one bit per round:
+
+1. growable table but the old `capture_thread_state(port, id)` signature — does
+   handing the slot index down matter?
+2. growable table but `ensure_stw_table` not calling `StwSlots.configure`, so
+   the table never allocates — does the `LibC.malloc` at boot matter?
+3. the old static tables with only `stop_world_threads`' pre-suspend
+   `Thread.unsafe_each` count added — does *that* walk matter?
+
+(3) is the one I would try first: it is the only thing the re-land added that
+runs on a path a library build can reach, and walking Crystal's thread list from
+a process that is shutting down is exactly the shape a fault on a pool thread
+would take.
