@@ -1033,6 +1033,35 @@ dead-stack-root: $(BIN)
 	GCRY_DEAD_STACK_ROOTS=0 GCRY_DEAD_STACK_NOROOT=1 $(BIN)/dead_stack_root --noroot
 	GCRY_DEAD_STACK_ROOTS=0 $(BIN)/dead_stack_root --disabled
 
+# `GCRY_THREAD_CENSUS=1` could say how many threads were outside Crystal's list
+# and never which. On `test (aarch64 native)` that is a gap of exactly one on
+# every collection of `scheduler_roots --control` — an arm that starts nothing —
+# in 40 of 40 green runs, and it has been read as the open unscanned-mutator
+# defect for a month with no way to confirm it. The census now walks
+# /proc/self/task on a gap and names each task by tid and `comm`.
+#
+# It also had a false positive of gcry's own making: parallel-mark helpers are
+# raw pthreads by construction, so `GCRY_PARALLEL_MARK=4` alone reported
+# `gap=3`. They are named `gcry-mark` now and subtracted.
+#
+# Five arms, two of them the red twins. The two `grep` arms are the ones the
+# counters cannot make: a counter says the walk classified something, only the
+# output says it was *named*. ~3 s.
+.PHONY: thread-census-names
+thread-census-names: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_census_names.cr -o $(BIN)/thread_census_names --error-trace
+	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --control
+	GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names
+	GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 $(BIN)/thread_census_names --mark
+	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	echo "$$out" | grep -q "OS tasks:.*gcry-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
+	echo "ok — the thread Crystal never listed is named in the census line"
+	@out=$$(GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname 2>&1); \
+	echo "$$out" | grep -q "OS tasks:" && { echo "FAIL: the twin still printed names, so the arm above proves nothing"; exit 1; }; \
+	echo "ok — with the walk off the same gap is counted and unnamed"
+
 # Is a pointer held only in thread-local storage a root? It was not, on the
 # main thread: the executable's writable image (`PT_LOAD` / `__DATA*` / PE
 # writable sections) is every class variable, but a thread-local lives in a

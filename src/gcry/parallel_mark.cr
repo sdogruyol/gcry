@@ -68,6 +68,18 @@ module Gcry
 
     # Entry for `gcry_mark_worker_main` (raw pthread).
     def self.run_mark_worker(arg : Void*) : Nil
+      # First thing this thread does, before it can appear in any report.
+      #
+      # These helpers are raw `pthread_create` threads on purpose, so they are
+      # outside Crystal's list by construction — and `GCRY_THREAD_CENSUS=1`
+      # read that as "thread(s) are outside Crystal's list … at least one is
+      # unrecorded", i.e. as the open unscanned-mutator defect. Measured
+      # 2026-09-19 on this tree: `GCRY_PARALLEL_MARK=4` and no other thread at
+      # all reports `gap=3`, which is exactly the three helpers. They touch
+      # mark state and block headers only — no Fiber, no managed allocation —
+      # so they can hold no mutator reference and are not that defect.
+      # The name is what lets the census say so instead of counting them.
+      Gcry::Platform.name_own_thread
       arg.as(Heap).mark_worker_loop
     end
 

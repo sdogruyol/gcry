@@ -15,6 +15,15 @@ module Gcry
     # so a counter now has to earn its place here rather than be added by
     # reflex: a `Heap` getter is what a harness reads, and this map is for what
     # an operator needs. Retiring a field is the other way to make room.
+    #
+    # 2026-09-19: the last free slot went to `thread_census_unexplained`, and
+    # it earned it by correcting a field already here. `thread_census_gaps`
+    # counts gcry's own parallel-mark helpers — raw pthreads, outside
+    # Crystal's list by construction, holding no mutator state — so an
+    # operator reading it alone reads threads that are not the defect it looks
+    # like. Two counters added beside it (`thread_census_own`,
+    # `thread_census_unwalked`) stayed `Heap` getters for exactly the reason
+    # above. **The tuple is now full at 300**: the next one has to retire a field.
     def self.json_stats(heap : Heap = Gcry.default_heap) : String
       p = PauseStats.new(
         heap.last_pause_ns,
@@ -249,6 +258,7 @@ module Gcry
         thread_census_gap_max:                 heap.thread_census_gap_max,
         thread_census_unanswered:              heap.thread_census_unanswered,
         thread_census_staged_covered:          heap.thread_census_staged_covered,
+        thread_census_unexplained:             heap.thread_census_unexplained,
         thread_staged_now:                     Gcry::Platform.staged_count,
         thread_staged_total:                   Gcry::Platform.staged_total,
         thread_staged_overflows:               Gcry::Platform.staged_overflows,

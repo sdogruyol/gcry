@@ -1497,6 +1497,14 @@ module Gcry
     # `GCRY_THREAD_CENSUS=1`. See src/gcry/platform/linux_thread_census.cr.
     property thread_census : Bool = false
 
+    # `GCRY_THREAD_CENSUS_NAMES=0` — the twin. Count the gap and do not walk
+    # `/proc/self/task` for the names, which is what this census did until
+    # 2026-09-19. It is the arm that says the names are what produced the
+    # evidence: without it a gap is a number, and a gap of exactly one on
+    # every aarch64 collection stayed an open question for a month because
+    # nothing could say which thread it was.
+    property thread_census_names : Bool = true
+
     # Collections where the OS reported more threads than Crystal's list
     # yielded, and the largest such difference. A gap is a thread running
     # through the stopped world.
@@ -1508,6 +1516,22 @@ module Gcry
     getter thread_census_unanswered : UInt64 = 0_u64
     # Gaps gcry's own staging record accounted for.
     getter thread_census_staged_covered : UInt64 = 0_u64
+    # Tasks the walk found wearing gcry's own helper name, summed over the
+    # collections that had a gap. A mark helper is a raw pthread by
+    # construction, so it is outside Crystal's list on every collection it is
+    # alive for and the raw gap counts it as an unscanned mutator.
+    getter thread_census_own : UInt64 = 0_u64
+    # Collections whose gap is still unexplained once gcry's own threads are
+    # taken out. **This** is the soundness number; `thread_census_gaps` is the
+    # raw difference and has counted gcry's mark helpers since it was written.
+    getter thread_census_unexplained : UInt64 = 0_u64
+    # Gaps the walk could not name because `/proc/self/task` would not open.
+    # The same rule `_unanswered` exists for, one level down: without it a
+    # naming arm passes when the walk is dead, because "nothing was
+    # attributed" and "nothing could be looked at" produce identical counts.
+    # Measured while breaking this gate on purpose — the plant arm went green
+    # with the walk stubbed out until this counter existed.
+    getter thread_census_unwalked : UInt64 = 0_u64
 
     private def census_threads(listed : Int32) : Nil
       @thread_census_checks &+= 1
@@ -1522,7 +1546,36 @@ module Gcry
       return if gap <= 0
       @thread_census_gaps &+= 1
       @thread_census_gap_max = gap if gap > @thread_census_gap_max
-      return if @thread_census_gaps > 4
+      # Only the first five collections print, so a run that gaps on every one
+      # of them stays readable. The walk itself keeps running: the counters
+      # below are the ones a gate reads, and capping them would make a long run
+      # look cleaner than a short one.
+      report = @thread_census_gaps <= 4
+
+      names = uninitialized UInt8[RawOut::LIMIT]
+      nlen = 0
+      name_them = @thread_census_names
+      nlen = RawOut.append(names.to_unsafe, nlen, "gcry: thread census — OS tasks:") if report && name_them
+      own = 0
+      walked = false
+      if name_them
+        walked = Platform.each_os_thread do |tid, comm, comm_len|
+          if Platform.own_thread_comm?(comm, comm_len)
+            own += 1
+          end
+          if report
+            nlen = RawOut.append(names.to_unsafe, nlen, " ")
+            nlen = RawOut.append_u64(names.to_unsafe, nlen, tid.to_u64)
+            nlen = RawOut.append(names.to_unsafe, nlen, ":")
+            nlen = RawOut.append_bytes(names.to_unsafe, nlen, comm, comm_len)
+          end
+        end
+      end
+      @thread_census_own &+= own.to_u64
+      @thread_census_unwalked &+= 1 if name_them && !walked
+      unexplained = gap - own
+      @thread_census_unexplained &+= 1 if unexplained > 0
+      return unless report
 
       buf = uninitialized UInt8[512]
       len = 0
@@ -1540,6 +1593,28 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)
+
+      # The second line is the one that can be acted on. Without it a gap of
+      # one is a month-old open question; with it the task is named, and a
+      # helper gcry created itself is told apart from a mutator it has never
+      # heard of.
+      return unless name_them
+      if walked
+        nlen = RawOut.append(names.to_unsafe, nlen, " — ")
+        nlen = RawOut.append_u64(names.to_unsafe, nlen, own.to_u64)
+        nlen = RawOut.append(names.to_unsafe, nlen,
+          own == 1 ? " is gcry's own mark helper" : " are gcry's own mark helpers")
+        nlen = RawOut.append(names.to_unsafe, nlen, ", leaving ")
+        nlen = RawOut.append_u64(names.to_unsafe, nlen, (unexplained > 0 ? unexplained : 0).to_u64)
+        nlen = RawOut.append(names.to_unsafe, nlen, " unexplained\n")
+      else
+        # A fresh line: the buffer holds a half-written "OS tasks:" header that
+        # never got a task, and appending to it produced one run-on line.
+        nlen = 0
+        nlen = RawOut.append(names.to_unsafe, nlen,
+          "gcry: thread census — /proc/self/task could not be walked, so the gap is unnamed\n")
+      end
+      RawOut.flush(names.to_unsafe, nlen)
     end
 
     # Opt-in on top of `@poison_freed`: it makes every freed block's payload

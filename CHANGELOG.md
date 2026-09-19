@@ -38,6 +38,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `make stw-capture-coverage` (which no longer skips here) and for
   the new `make stw-slot-precision`.
 
+- **The thread census counted gcry's own mark helpers as unscanned
+  mutators.** `parallel_mark.cr` creates its helpers with raw
+  `pthread_create` on purpose — a `Crystal::Thread` would freeze in
+  `stop_world` — so they are outside Crystal's list **by construction**,
+  and `GCRY_THREAD_CENSUS=1` reported each of them as a thread running
+  through the stopped world unscanned. With nothing else in the process,
+  `GCRY_PARALLEL_MARK=4` reported `gap=3`. They touch mark state and
+  block headers only, no `Fiber` and no managed allocation, so they can
+  hold no mutator reference. They are named `gcry-mark` now and
+  subtracted; `thread_census_unexplained` is the number
+  `thread_census_gaps` was being read to mean, and it is the one that
+  replaced it on `/gc-stats`.
+
+- **`make knob-doc-check` was locale-dependent and reddened a green
+  tree.** `sort` orders by collation and `comm` compares bytes; glibc's
+  UTF-8 collation ignores `_`, so `sort` emits
+  `GCRY_PRECISE_FIBER_LEAF` before `GCRY_PRECISE_FIBERS` while `comm`
+  wants the reverse (`S` 0x53 < `_` 0x5F). `comm` exits 1 with "input is
+  not in sorted order" and `set -e` fails the gate — on an
+  `en_US.UTF-8` host, while passing on CI. The harmless direction; the
+  same mismatch can walk `comm` past a genuinely missing knob. Pinned to
+  `LC_ALL=C`.
+
 ### Changed
 
 - **A fault outside gcry's span now names the mapping it happened in.**
@@ -55,6 +78,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RawOut::LIMIT` is 480 bytes and the readings already run close to it.
   `make segv-region-report` checks the numbers rather than the words and
   fails in all three arms without it.
+
+- **The thread census names the threads outside Crystal's list.** It
+  could say how many since 2026-08-17 and never which, and a count is
+  not actionable: `test (aarch64 native)` reports a difference of
+  exactly one on **every** collection of `scheduler_roots --control` —
+  an arm that builds no execution context and starts no worker — in 40
+  of 40 green runs, while the same binary on x86_64 reports none. That
+  line reads as the open unscanned-mutator defect and has been
+  unattributable for a month. On a gap the census now walks
+  `/proc/self/task` and prints each task's kernel thread id and `comm`
+  (raw `getdents64` plus the `comm` read into stack buffers — no
+  allocation, callable inside the pause), with how many are gcry's own
+  helpers and how many are left. Linux only; Darwin and Windows answer
+  "could not look" rather than walking nothing and calling it empty.
+  `GCRY_THREAD_CENSUS_NAMES=0` is the twin that restores the count-only
+  census, and `make thread-census-names` runs both directions on five
+  arms — including a planted raw pthread that must be named and must
+  stay unexplained. Building it caught the gate twice: the plant arm
+  passed with the `/proc` walk stubbed out until `thread_census_unwalked`
+  existed, and the output assertion was matching the harness's own
+  banner instead of the census line.
 
 ## [Unreleased]
 

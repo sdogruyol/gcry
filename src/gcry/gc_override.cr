@@ -876,6 +876,9 @@ module GC
     # every stop_world (src/gcry/platform/linux_thread_census.cr). Off by
     # default: it reads /proc inside the pause.
     heap.thread_census = true if env_flag_one?("GCRY_THREAD_CENSUS")
+    # The twin: count the gap and do not name it, which is what the census did
+    # until 2026-09-19. `make thread-census-names` runs both directions.
+    heap.thread_census_names = false if env_flag_zero?("GCRY_THREAD_CENSUS_NAMES")
     # Root the `Thread` object from `pthread_create` until the thread publishes
     # itself (src/gcry/thread_birth_root.cr). **On** by default: it closes a
     # use-after-free, and it is one `add_root` per thread created.

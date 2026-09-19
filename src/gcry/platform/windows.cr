@@ -117,6 +117,21 @@ module Gcry::Platform
     nil
   end
 
+  # Same contract as `each_map_region`. `Thread32First` could enumerate this;
+  # `os_thread_count` answers `nil` here, so the census never reaches the walk.
+  def self.each_os_thread(& : Int32, UInt8*, Int32 ->) : Bool
+    false
+  end
+
+  def self.own_thread_comm?(name : UInt8*, len : Int32) : Bool
+    false
+  end
+
+  # A no-op: the name exists to be read back by the census, and there is none
+  # on this platform to read it.
+  def self.name_own_thread : Nil
+  end
+
   def self.each_map_region(& : UInt64, UInt64, UInt8*, UInt8*, Int32 ->) : Bool
     false
   end

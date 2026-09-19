@@ -112,6 +112,25 @@ module Gcry
       nil
     end
 
+    # Same contract as `each_map_region`: false is "could not look", not
+    # "walked everything and found nothing". `task_threads` could enumerate
+    # this, but `os_thread_count` already answers `nil` here, so the census
+    # never reaches the walk and an unmeasured implementation would be a claim
+    # rather than a measurement.
+    def self.each_os_thread(& : Int32, UInt8*, Int32 ->) : Bool
+      false
+    end
+
+    def self.own_thread_comm?(name : UInt8*, len : Int32) : Bool
+      false
+    end
+
+    # A no-op rather than `pthread_setname_np`: the name exists to be read back
+    # out of `/proc/self/task/<tid>/comm` by the census, and there is no census
+    # on this platform to read it.
+    def self.name_own_thread : Nil
+    end
+
     # Same contract as `linux_address_space.cr`: false means "could not look",
     # which is not the same answer as "walked everything and found nothing".
     # `mach_vm_region` could enumerate this, but nothing has needed it yet and

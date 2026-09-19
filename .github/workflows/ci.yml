@@ -529,6 +529,19 @@ jobs:
       - name: Stack-bounds table growth
         run: make stack-bounds-growth
 
+      # `GCRY_THREAD_CENSUS=1` could say how many threads were outside
+      # Crystal's list and never which, so a gap of exactly one on every
+      # collection of the aarch64 job's quietest arm has been unattributable
+      # for a month. The census now names each task by tid and `comm`.
+      #
+      # This runner is the control: the same binaries report no gap here, so a
+      # green arm on x86_64 beside a named task on aarch64 is what localises
+      # it. The `--mark` arm is not host-dependent — it plants gcry's own
+      # parallel-mark helpers, which the raw gap counted as unscanned mutators
+      # on every platform.
+      - name: Threads outside Crystal's list are named
+        run: make thread-census-names
+
       # Baseline for the Darwin probe below, on the platform where the same
       # harness does 100 threads in under 3 ms. Reports numbers; the only thing
       # it fails on is producing none.
@@ -1487,6 +1500,13 @@ jobs:
           timeout 300 make thread-birth-root
           timeout 300 make dead-stack-root
           timeout 300 make stack-bounds-growth
+          # This is the runner the question came from. `scheduler_roots
+          # --control` reports one thread outside Crystal's list on every
+          # collection here and none on x86_64, in 40 of 40 green runs, and
+          # until now nothing could say which thread it was. The gate proves
+          # the naming works; the `scheduler-roots` step above, which already
+          # runs with `GCRY_THREAD_CENSUS=1`, is what will print the answer.
+          timeout 300 make thread-census-names
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
           # The runner the suspend hang lives on. The signal path is the

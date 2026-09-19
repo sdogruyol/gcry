@@ -790,6 +790,41 @@ kept finding the rest.
       on `Fiber#makecontext` while the `pthread_getattr_np` shape disappears,
       which would mean two windows and one closed.
       `bench/log/linux/2026-08-17-thread-birth-window/FINDINGS.md`
+      **The census counted and could not name, and one of the things it was
+      counting was gcry (2026-09-19).** Two findings, both from reading what CI
+      already prints. First: the "gap" fires on **40 of 40** green
+      `test (aarch64 native)` runs, eleven times each, and one of the places it
+      fires is `scheduler_roots --control` — the arm that builds no execution
+      context and starts no worker — at `gap = 1`, `staged 0`, on *every*
+      collection from 0 on. That is not "one collection in a thousand during
+      worker startup"; the same binary and arm on x86_64 reports 0. Second, and
+      the reason the number could not be trusted at all: `parallel_mark.cr`
+      creates its helpers with raw `pthread_create` on purpose, so they are
+      outside Crystal's list **by construction** and the census counted each of
+      them as a thread running unscanned through the stopped world —
+      `GCRY_PARALLEL_MARK=4` with nothing else in the process reports `gap=3`.
+      They touch mark state and block headers only, so they can hold no mutator
+      reference and are not this defect.
+      **Both are now addressed and gated.** The census walks `/proc/self/task`
+      on a gap (raw `getdents64` plus `comm` into stack buffers — no
+      allocation, callable inside the pause) and names each task by kernel
+      thread id; gcry names its own helpers `gcry-mark` so they are subtracted;
+      `thread_census_unexplained` is the number `thread_census_gaps` was being
+      read to mean, and it is the one on `/gc-stats`.
+      `make thread-census-names` has five arms, two of them the twin
+      (`GCRY_THREAD_CENSUS_NAMES=0` restores the count-only census): a planted
+      raw pthread must be named and left unexplained, and `GCRY_PARALLEL_MARK=4`
+      must leave **nothing** unexplained where the twin leaves all six
+      collections. Breaking it on purpose caught the gate twice — the plant arm
+      passed with the walk stubbed out until `thread_census_unwalked` existed,
+      and the output assertion was matching the harness's own banner instead of
+      the census line.
+      **Still open: which thread aarch64 is reporting.** It does not reproduce
+      on x86_64, so the name has to come from the runner; the `scheduler-roots`
+      step already carries `GCRY_THREAD_CENSUS=1`, so the next job prints it.
+      Naming it is also not showing that anything is reachable only from it —
+      that half of this item is untouched.
+      `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
       green on re-run); it recurred four hours later in run `31950823605`
@@ -969,6 +1004,17 @@ kept finding the rest.
       refused claims to appear there.
       Said out loud because this number is meant to shrink by building arms,
       not by loosening what counts as one.
+      **2026-09-19, later: 96 gates, 31 per run / 65 by hand.**
+      `make thread-census-names` is the one added, and it is counted per run
+      because its twin (`GCRY_THREAD_CENSUS_NAMES=0`) is a recipe arm rather
+      than a claim. Worth recording beyond the arithmetic: writing it *found*
+      two hollow arms in itself before either shipped — the planted-thread arm
+      passed with the `/proc` walk stubbed out, because "attributed nothing"
+      and "could not look" produce identical counters, and the output check
+      was satisfied by the harness's own banner rather than the census line.
+      Both were caught by breaking the collector on purpose, which is the
+      practice this item asks for, applied to a gate on the day it was written
+      instead of a year later.
       `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
@@ -1803,6 +1849,25 @@ kept finding the rest.
       rather than failed, so this has never been read as a defect, on the runner
       where the `Thread` use-after-free lives and in one of the two gates that
       has caught it.
+      **Retracted for this tree (2026-09-19): the job is not hanging any more,
+      and the rate above describes the tree before the `timeout` wrappers.**
+      Every `test (aarch64 native)` job of the last 300 CI runs, 2026-08-24 →
+      2026-09-19 — **299 jobs: 282 success, 13 failure, 4 cancelled** — with
+      durations min 30 s, p50 355 s, p90 405 s, **max 443 s**. None reached the
+      20-minute deadline, and the four `cancelled` are 208–239 s, the
+      concurrency group killing a superseded push. The last failure of any kind
+      is 2026-09-17T15:29Z; the 36 jobs since are 33 green and 3
+      concurrency-cancelled. The `timeout 300` / `timeout 600` wrappers did what
+      they were added for — a hang is now a red job with its output — so the
+      thing to watch for is a gate exiting 2 near its bound, not a cancellation.
+      **And the markers in a green run are not sightings.** 40 consecutive green
+      jobs print `SUSPEND STALLED` 3×, `SUSPEND ABANDONED` 6×,
+      `STOP-THE-WORLD STALLED` 2–3×, `EC QUEUE SLOT CORRUPT` 2× and
+      `EC STRUCTURE CORRUPT` 1× — *every* run, identical counts, because they
+      are `stw-epoch`'s three deliberate red arms and `ec-queue-audit`'s two
+      planted values. A constant is not evidence. What varies: the staged wait
+      `GAVE UP` in 3 of 40, and a dying-`Thread` report in **0 of 40**.
+      `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
       **The phase is now known.** The first run with the instrumentation in
       (2026-08-22, run `32575506486`) failed at 7m46s instead of being cancelled
       at 20 minutes and said `STOP-THE-WORLD STALLED 10009 ms in phase=suspend`
@@ -1840,6 +1905,20 @@ kept finding the rest.
       which is high enough to hide a real regression behind a re-run habit — and
       the five specs now fail with their state attached, including both page
       sizes, so the next one carries evidence instead of asking for another run.
+      **The evidence arrived, and the page-size candidate is wrong
+      (2026-09-19).** The next recurrence (2026-09-17, run `35219192363`)
+      carried its state, and it reads `page=4096 compiled_page=4096` — the
+      runner's page size is the compiled one and x86_64's. The cause was found
+      the same day and is already on master: **one live thread left over from
+      an earlier example turns the empty-chunk release path off entirely**
+      (`release_empty_chunks_this_collect?` and
+      `munmap_empty_chunks_this_collect?` both return false under
+      `sweep_multi_mutator?`), so all five assert against a collector branch
+      that never ran — `8ba3660`, then `e75d362`. The specs now set
+      `invariant_sole_mutator` and the two `parallel_empty_chunk_*` knobs, and
+      the reproducer is one extra live thread, not a host. **No recurrence in
+      the 36 aarch64 jobs since 2026-09-17T15:29Z**, so the ~12% host-reason
+      rate above is also retired rather than merely unobserved.
       **A Darwin sighting of the same gate, different shape (2026-09-13, run
       `34769097853`).** `test (darwin native)` failed in `ec-queue-audit` with
       the audit refusing to name two planted values — `faults: 0 -> 0 (poison
