@@ -814,6 +814,17 @@ jobs:
         run: |
           make stw-slots-grow-race
 
+      # And what the fixed 64-slot table this platform keeps on purpose costs.
+      # An uncovered thread has no recorded SP, so the fiber window for its own
+      # OS stack falls back to the guard page and walks all 8 MiB including dead
+      # frames: 34 of 96 unreachable blocks stayed allocated across three
+      # collections at 98 threads, zero at 62. The gate asserts the mechanism --
+      # retention equals the uncovered thread count -- so it goes to zero on
+      # both sides if the table ever grows here.
+      - name: STW capture slot precision
+        run: |
+          make stw-slot-precision
+
       # The allocator hands out large chunks under @alloc_lock while the cache
       # trim walks the same list. Deterministic both ways: the old behaviour
       # faults 5 of 5, serialised 0 of 5 — until the v0.24.0 tag run

@@ -957,6 +957,17 @@ kept finding the rest.
       Census 84 → 85, and its criteria were widened after they miscounted this
       very gate: **30 per run / 55 by hand**, against 20/64 reported hours
       earlier on the same tree.
+      **2026-09-19: 95 gates, 30 per run / 65 by hand.** Five were added since —
+      `stw-capture-coverage`, `stw-slots-grow-race`, `segv-region-report`,
+      `once-guard` and `stw-slot-precision` — and every one of them has a red
+      direction that was observed, but the census only recognises the shape
+      where a child is forked under a breaking knob. Two of them do it
+      otherwise and are counted by hand on purpose: `once-guard` fails on a
+      declaration pattern (red on the offender it was written for) and
+      `stw-slot-precision` asserts a correlation (red when
+      `stw_slot_capacity` was made to report 1024 while the table held 64).
+      Said out loud because this number is meant to shrink by building arms,
+      not by loosening what counts as one.
       `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
@@ -2034,6 +2045,28 @@ kept finding the rest.
       unchanged: whether a thread past the 64th ever held the only reference to
       something. The gate asserts the coverage, not a defect.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
+      **Answered 2026-09-19, and it is the other direction.** A thread past the
+      64th does not lose a reference — it **keeps** one, and keeps it forever.
+      That is the *STW capture* table's 64 slots, not this one: an uncovered
+      thread has no recorded SP, so `fiber_stack_sp_scan_low` finds none for
+      its own stack (a Crystal thread's main fiber's stack *is* its OS stack)
+      and `fiber_stack_scan_top` falls back to the guard page — all 8 MiB, dead
+      frames included, where `GC.malloc`'s call chain left a plaintext pointer
+      below the parked SP. Measured: 98 threads and 96 unreachable blocks
+      leaves **34 still allocated after one, two and three collections**, and
+      they are exactly the blocks the threads past the 64th allocated (indices
+      62..95); 62 threads leaves 0. Neither the pthread-mapping path
+      (`GCRY_STW_PTHREAD_LAG=65536`) nor the register scan
+      (`GCRY_DISABLE_GREG_ROOTS=1`) changes it. So the fixed table's cost is a
+      leak proportional to each uncovered thread's dead-frame history, plus an
+      8 MiB conservative walk per uncovered thread per collection — not
+      "precision" in the abstract. `make stw-slot-precision` gates the
+      mechanism rather than the defect: retention must equal the uncovered
+      thread count, zero under the cap, and a block an uncovered thread holds
+      must still be a root. It needs no edit when the table grows — both
+      numbers go to zero — and it was observed red by making
+      `stw_slot_capacity` report 1024 while the table held 64.
+      `bench/log/linux/2026-09-19-stw-slot-retention/FINDINGS.md`
 - [x] **The aarch64 spec flake family — root-caused 2026-09-17.** Five
       examples across three files had failed together ~3 in 30 runs on
       `test (aarch64 native)` while passing 80 of 80 locally, and the spec

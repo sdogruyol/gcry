@@ -939,6 +939,25 @@ explicit-collect-barrier: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/explicit_collect_barrier.cr -o $(BIN)/explicit_collect_barrier --error-trace
 	$(BIN)/explicit_collect_barrier
 
+# What a thread with no STW capture slot costs. Linux keeps its table at a fixed
+# 64 on purpose, and the argument -- registers arrive in a ucontext on the
+# interrupted thread's own stack, which the unclamped scan still walks -- is
+# about roots. The cost was never measured, and it is not precision in the
+# abstract: an uncovered thread has no recorded SP, so the fiber window for its
+# stack (a Crystal thread's main fiber's stack *is* its OS stack) falls back to
+# the guard page and walks all 8 MiB including dead frames. The pointer left in
+# GC.malloc's dead frames is then a root forever. 98 threads: 34 unreachable
+# blocks still allocated after three collections, and they are exactly the ones
+# the threads past the 64th allocated; 62 threads: zero. Narrowed by knob:
+# GCRY_STW_PTHREAD_LAG and GCRY_DISABLE_GREG_ROOTS both change nothing.
+# This gate encodes the mechanism rather than the defect -- retention must
+# equal the number of threads the table could not cover -- so it stays green
+# and keeps discriminating when the table grows, with both numbers at zero.
+.PHONY: stw-slot-precision
+stw-slot-precision: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stw_slot_precision.cr -o $(BIN)/stw_slot_precision --error-trace
+	$(BIN)/stw_slot_precision
+
 # Does the STW capture table cover every thread it suspends? `slot_for`
 # returned -1 past 64 slots -- the claim mask was a UInt64 and could not address
 # a 65th -- and a thread with no slot is suspended and scanned with no SP clamp
