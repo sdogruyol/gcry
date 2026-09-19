@@ -185,15 +185,62 @@ With both fixed, the two breaks are red where they should be:
                                  FAIL: 6 gap(s) left unexplained with only gcry's own
                                        helpers running
 
+## The answer, from the first CI run that carried the instrument
+
+Run `35448312165`, job `105910998136`, `test (aarch64 native)`, commit
+`ed86d2c`. `thread_census_names --control` — a process that plants nothing:
+
+    gcry: thread census — OS tasks: 7009:thread_census_n 7010:SYSMON
+      7011:thread_census_n — 0 are gcry's own mark helpers, leaving 1 unexplained
+
+and `scheduler_roots`, the arm this question came from:
+
+    gcry: thread census — OS tasks: 4062:scheduler_roots 4063:SYSMON
+      4064:scheduler_roots — 0 are gcry's own mark helpers, leaving 1 unexplained
+
+**Three tasks: the main thread, `SYSMON`, and a third carrying the process's
+own `comm`.** A raw pthread inherits its creator's `comm`, so a task with the
+program's own name that Crystal's list never yields is an unnamed raw thread —
+the shape predicted above from break 2, now observed. It is present at
+collection 0, before the harness creates anything, on every binary, and it is
+not gcry's: `attributed = 0`. Not a birth window, not a mark helper, and not
+reproducible on this x86_64 host.
+
+That is as far as naming goes. What it is *for* — and whether anything is
+reachable only from it — is the next question, and it now has a tid to ask
+about rather than a count.
+
+## The control arm was wrong, and the runner said so
+
+The first version asserted `gaps == 0` in `--control`, i.e. that a host has no
+thread outside Crystal's list. aarch64 does, so the gate went red on its first
+run for a correct reason it had no way to express. An absolute is the wrong
+assertion for a property of the host.
+
+Rewritten to measure a **delta** in one process — `COLLECTS` collections of
+baseline, then plant, then `COLLECTS` more — and a relationship that carries
+the baseline in both terms: `attributed = gap_max - unexplained_max` is the
+number of threads the walk credited to gcry, whatever else the host is
+running. Verified against a copy of the harness with a simulated
+pre-existing unlisted thread:
+
+| arm | gap_max | unexplained_max | attributed | verdict |
+|---|---|---|---|---|
+| `--control` | 1 | 1 | 0 | baseline reported, nothing miscredited |
+| plant | 1 → **2** | 1 → **2** | 0 | the planted thread widened both |
+| `--noname` | 1 → 2 | 1 → 2 | 0 | same gap, no names |
+| `--mark` | 4 | **1** | **3** | the three helpers subtracted, the host's one left |
+| `--mark --noname` | 4 | **4** | 0 | pre-fix: all four unexplained |
+
+The `--mark` row is the one worth reading twice: on a host that already has an
+unlisted thread, the walk subtracts exactly gcry's three and leaves the host's
+one standing. That is the discrimination the raw gap could never make.
+
 ## What is still open
 
-**Which thread aarch64 is reporting.** This host cannot reproduce the gap, so
-the answer has to come from the runner. The gate proves the naming works; the
-`scheduler-roots` step already runs with `GCRY_THREAD_CENSUS=1`, so the next
-aarch64 job prints the name. Worth noting from break 2's output: when the mark
-helpers went unnamed they showed as `thread_census_n` — the parent's `comm`,
-inherited by a raw pthread — which is the shape to expect if aarch64's extra
-task is also an unnamed raw thread rather than something with a name of its own.
+**What the aarch64 task is.** Named, not identified. The tid is in the log and
+the `comm` is the program's own, so the next step is what created it — nothing
+in gcry did, and nothing in the harness did.
 
 **Whether the gap matters.** Naming a thread is not showing that anything is
 reachable only from it. That half of the item is untouched.

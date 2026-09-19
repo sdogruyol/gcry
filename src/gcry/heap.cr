@@ -1525,6 +1525,14 @@ module Gcry
     # taken out. **This** is the soundness number; `thread_census_gaps` is the
     # raw difference and has counted gcry's mark helpers since it was written.
     getter thread_census_unexplained : UInt64 = 0_u64
+    # The largest unexplained gap, as `_gap_max` is for the raw one. A count
+    # of collections cannot discriminate on a host that already has an
+    # unlisted thread — `_unexplained` then increments on every collection
+    # whether or not a gate planted anything, which is how the first version
+    # of `make thread-census-names` came out red on aarch64 for a correct
+    # reason it could not express. Magnitudes subtract; collection counts do
+    # not.
+    getter thread_census_unexplained_max : Int32 = 0
     # Gaps the walk could not name because `/proc/self/task` would not open.
     # The same rule `_unanswered` exists for, one level down: without it a
     # naming arm passes when the walk is dead, because "nothing was
@@ -1575,6 +1583,7 @@ module Gcry
       @thread_census_unwalked &+= 1 if name_them && !walked
       unexplained = gap - own
       @thread_census_unexplained &+= 1 if unexplained > 0
+      @thread_census_unexplained_max = unexplained if unexplained > @thread_census_unexplained_max
       return unless report
 
       buf = uninitialized UInt8[512]

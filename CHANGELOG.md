@@ -99,6 +99,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed with the `/proc` walk stubbed out until `thread_census_unwalked`
   existed, and the output assertion was matching the harness's own
   banner instead of the census line.
+  The first CI run carrying it answered the question: on
+  `test (aarch64 native)`, in a process that plants nothing, the tasks
+  are `7009:thread_census_n 7010:SYSMON 7011:thread_census_n` — main,
+  the monitor, and a third wearing the process's own `comm`, which is
+  what a raw pthread inherits. Present at collection 0, on every binary,
+  and not gcry's. Named, not yet identified.
+  That run also showed the gate's own control arm to be wrong: it
+  asserted `gaps == 0`, i.e. that a host has no thread outside Crystal's
+  list, which is an absolute where the property belongs to the host.
+  Every arm now measures a delta in one process and
+  `attributed = gap_max - unexplained_max`, which carries the host's
+  baseline in both terms — against a simulated pre-existing unlisted
+  thread, `--mark` subtracts exactly gcry's three helpers and leaves the
+  host's one standing.
 
 ## [Unreleased]
 

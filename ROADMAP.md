@@ -819,9 +819,27 @@ kept finding the rest.
       passed with the walk stubbed out until `thread_census_unwalked` existed,
       and the output assertion was matching the harness's own banner instead of
       the census line.
-      **Still open: which thread aarch64 is reporting.** It does not reproduce
-      on x86_64, so the name has to come from the runner; the `scheduler-roots`
-      step already carries `GCRY_THREAD_CENSUS=1`, so the next job prints it.
+      **And the first CI run with it named the thread (run `35448312165`).**
+      `test (aarch64 native)`, in a process that plants nothing:
+      `OS tasks: 7009:thread_census_n 7010:SYSMON 7011:thread_census_n — 0 are
+      gcry's own mark helpers, leaving 1 unexplained`, and the same shape in
+      `scheduler_roots` (`4062 / 4063:SYSMON / 4064`). **Three tasks: main,
+      SYSMON, and a third carrying the process's own `comm`** — which is what
+      a raw pthread inherits, so the extra task is an unnamed raw thread that
+      is present at collection 0, on every binary, and is not gcry's
+      (`attributed = 0`). Not the birth window this item describes, and not a
+      mark helper. Named, **not identified**: what creates it is the next
+      question, and it is now a tid rather than a count.
+      **The control arm was wrong, and the runner proved it.** It asserted
+      `gaps == 0` — that a host has no thread outside Crystal's list — so the
+      gate went red on its first aarch64 run for a correct reason it could not
+      express. Absolutes are the wrong assertion for a property of the host.
+      Each arm now measures a **delta in one process** (baseline collections,
+      plant, more collections) plus `attributed = gap_max - unexplained_max`,
+      which carries the baseline in both terms. Verified against a copy of the
+      harness with a simulated pre-existing unlisted thread: `--mark` subtracts
+      exactly gcry's three helpers and leaves the host's one standing, which is
+      the discrimination the raw gap could never make.
       Naming it is also not showing that anything is reachable only from it —
       that half of this item is untouched.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`

@@ -141,8 +141,27 @@ puts "mode: #{mode}"
 puts "census=#{heap.thread_census} names=#{heap.thread_census_names} " \
      "parallel_mark_workers=#{heap.parallel_mark_workers}"
 
+# Two phases in one process. The first measures **this host's** baseline,
+# because a host can already have a thread outside Crystal's list and the
+# first version of this harness asserted it could not — `--control` came out
+# red on `test (aarch64 native)` for a correct reason it had no way to say.
+# The aarch64 runner has exactly one such task, carrying the process's own
+# `comm`, present before anything is planted:
+#
+#   OS tasks: 7009:thread_census_n 7010:SYSMON 7011:thread_census_n
+#             — 0 are gcry's own mark helpers, leaving 1 unexplained
+#
+# So nothing here asserts an absolute. What it asserts is a **delta** the
+# planted thread caused, and a relationship between the raw gap and the
+# unexplained one that holds whatever the host brought with it.
+COLLECTS.times { GC.collect }
+base_gap_max = heap.thread_census_gap_max
+base_unexplained_max = heap.thread_census_unexplained_max
+puts "baseline (nothing planted): gap_max=#{base_gap_max} " \
+     "unexplained_max=#{base_unexplained_max}"
+
 probe = control || mark_arm ? nil : start_probe_thread
-# The planted thread has to be running before the first collection, or the arm
+# The planted thread has to be running before the next collection, or the arm
 # measures a window it did not open.
 sleep 100.milliseconds
 
@@ -159,8 +178,17 @@ own = heap.thread_census_own
 unexplained = heap.thread_census_unexplained
 unanswered = heap.thread_census_unanswered
 unwalked = heap.thread_census_unwalked
+gap_max = heap.thread_census_gap_max
+unexplained_max = heap.thread_census_unexplained_max
+# How many threads the walk subtracted at the widest gap. With the naming on
+# and mark helpers running this is the helper count; with the naming off, or
+# with no helper, it is zero. Independent of what the host already had,
+# because the baseline is in both terms.
+attributed = gap_max - unexplained_max
+helpers = mark_arm ? heap.parallel_mark_workers - 1 : 0
 
-puts "checks=#{checks} gaps=#{gaps} gap_max=#{heap.thread_census_gap_max} " \
+puts "checks=#{checks} gaps=#{gaps} gap_max=#{gap_max} " \
+     "unexplained_max=#{unexplained_max} attributed=#{attributed} " \
      "own=#{own} unexplained=#{unexplained} unanswered=#{unanswered} unwalked=#{unwalked}"
 
 failures = [] of String
@@ -185,31 +213,37 @@ if unwalked > 0
 end
 
 if control
-  failures << "control saw #{gaps} gap(s): something in this process is outside " \
-              "Crystal's list and the other arms cannot attribute their gap" if gaps > 0
-  failures << "control explained nothing but counted #{unexplained} unexplained" if unexplained > 0
+  # No assertion that the host is quiet — it may not be, and that is a finding
+  # rather than a failure. What must hold is that nothing was subtracted when
+  # gcry created no helper: an `attributed` above zero here would mean the
+  # walk is crediting gcry with a thread it did not make.
+  failures << "#{attributed} task(s) were attributed to gcry with no mark helper " \
+              "running, so the subtraction is matching something else" if attributed != 0
+  puts "host baseline: #{gap_max} thread(s) outside Crystal's list, none of them gcry's"
 elsif mark_arm
   failures << "no gap with #{heap.parallel_mark_workers} mark workers — the helper " \
               "pthreads did not outlive a collection, so this arm measured nothing" if gaps == 0
   if noname
-    # The twin: with the walk off nothing is subtracted, so every gap stands.
+    # The twin: with the walk off nothing is subtracted, so every thread the
+    # helpers add stays in the unexplained count.
     failures << "naming is off and #{own} task(s) were still counted as gcry's own" if own > 0
-    failures << "naming is off yet #{unexplained} of #{gaps} gaps were explained" if unexplained != gaps
+    failures << "naming is off yet #{attributed} task(s) were subtracted from the gap" if attributed != 0
   else
     failures << "the walk found no gcry-mark helper, so the gap was not attributed" if own == 0
-    failures << "#{unexplained} gap(s) left unexplained with only gcry's own helpers " \
-                "running — the helpers are still being counted as unscanned mutators" if unexplained > 0
+    failures << "#{attributed} of the #{helpers} mark helper(s) were subtracted — the " \
+                "rest are still counted as unscanned mutators" if attributed != helpers
   end
 else
-  failures << "the planted raw pthread produced no census gap" if gaps == 0
-  if noname
-    failures << "naming is off yet #{own} task(s) were counted as gcry's own" if own > 0
-    failures << "naming is off yet #{unexplained} of #{gaps} gaps were explained" if unexplained != gaps
-  else
-    failures << "the planted thread was explained away; it is a thread gcry cannot " \
-                "account for and must not subtract" if unexplained != gaps
-    failures << "the walk counted #{own} gcry-mark helper(s) with parallel mark off" if own > 0
-  end
+  # The planted thread is **not** gcry's, so it must widen both the raw gap and
+  # the unexplained one. Against this process's own baseline, so a host that
+  # already has an unlisted thread neither hides the plant nor fakes it.
+  failures << "the planted raw pthread did not widen the gap " \
+              "(#{base_gap_max} -> #{gap_max})" if gap_max <= base_gap_max
+  failures << "the planted raw pthread did not widen the unexplained gap " \
+              "(#{base_unexplained_max} -> #{unexplained_max}); it is a thread gcry " \
+              "cannot account for and must not subtract" if unexplained_max <= base_unexplained_max
+  failures << "#{attributed} task(s) were attributed to gcry with parallel mark off" if attributed != 0
+  failures << "the walk counted #{own} gcry-mark helper(s) with parallel mark off" if own > 0
 end
 
 if failures.empty?
