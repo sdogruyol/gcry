@@ -212,6 +212,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every binary, 40 of 40 runs — was measuring gcry's watchdog, not the
   birth window it was read as. `thread_census_unexplained` now reads 0
   there.
+  And the verdict line was contradicting the one below it: it compared
+  `staged` against the **raw** gap, so it printed "at least one is
+  unrecorded" directly above "1 is gcry's own, leaving 0 unexplained".
+  A gap made entirely of gcry's raw threads needs no staging record to
+  be accounted for, so both `thread_census_staged_covered` and the
+  wording run against the unexplained gap now — "every one of them is
+  gcry's own, so none is unrecorded", and with a real unlisted mutator
+  beside the watchdog, "1 of them is not gcry's and it has staged 0,
+  fewer — at least one is unrecorded".
 
 ## [Unreleased]
 

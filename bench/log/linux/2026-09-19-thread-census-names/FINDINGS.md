@@ -472,6 +472,36 @@ with the knob and exactly zero without. Removing the watchdog's name:
     FAIL: 0 task(s) were attributed to gcry with no mark helper running and the
           watchdog armed, where 1 is right
 
+## And the verdict line was still contradicting itself
+
+With the watchdog named, the aarch64 run reads **31 of 33** census reports
+at `leaving 0 unexplained` — the two that remain are the gate's own planted
+`census-probe`, which is the point of it. But the *first* line still said:
+
+    … 1 thread(s) are outside Crystal's list; gcry has staged 0, fewer than
+      the gap — at least one is unrecorded. collection 0
+    … OS tasks: 4097:scheduler_roots 4098:SYSMON 4099:gcry-watch
+      — 1 is gcry's own, leaving 0 unexplained
+
+Two lines of one report, one collection, disagreeing. The verdict compared
+`staged` against the **raw** gap, which does not know about gcry's own
+threads — and that first line is the one a reader greps for. A gap made
+entirely of gcry's raw threads needs no staging record to be accounted for,
+so `thread_census_staged_covered` and the wording both run against
+`unexplained` now:
+
+    … 1 thread(s) are outside Crystal's list; every one of them is gcry's
+      own, so none is unrecorded. collection 0
+
+and with a real unlisted mutator planted beside the watchdog:
+
+    … 2 thread(s) are outside Crystal's list; 1 of them is not gcry's and it
+      has staged 0, fewer — at least one is unrecorded. collection 6
+
+Gated both directions: the armed-watchdog control arm requires the first
+form and requires "at least one is unrecorded" to be **absent**. Reverting
+the verdict to the raw gap is red.
+
 ## What is still open
 
 **Nothing about the aarch64 census gap.** It was gcry's own thread. The

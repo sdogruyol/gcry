@@ -946,6 +946,15 @@ kept finding the rest.
       at about one collection in a thousand on a churn workload at 16 workers.
       That is this item, and it is untouched. What is retired is the aarch64
       CI evidence, which was never it.
+      **And the verdict line was contradicting the one below it.** It compared
+      `staged` against the **raw** gap, so a fully attributed gap still
+      printed `at least one is unrecorded` directly above `1 is gcry's own,
+      leaving 0 unexplained` — and the first line is the one a reader greps
+      for. A gap made entirely of gcry's raw threads needs no staging record
+      to be accounted for, so `thread_census_staged_covered` and the wording
+      both run against the unexplained gap now. With the watchdog named the
+      aarch64 job reads **31 of 33** reports at `leaving 0 unexplained`, and
+      the two that remain are the gate's own planted `census-probe`.
       Naming, placing and walking a thread is also still not showing that
       anything is reachable only from it.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`

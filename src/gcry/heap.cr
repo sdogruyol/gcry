@@ -1577,7 +1577,6 @@ module Gcry
       gap = os - listed
       gap = 0 if gap < 0
       staged = Platform.staged_count
-      @thread_census_staged_covered &+= 1 if gap > 0 && staged >= gap
       # Updated on every check, including the ones with no gap: a host that
       # stops gapping has said something, and a reader that only sees the
       # maxima cannot tell that from a host that never did.
@@ -1628,6 +1627,14 @@ module Gcry
       @thread_census_unexplained &+= 1 if unexplained > 0
       @thread_census_unexplained_max = unexplained if unexplained > @thread_census_unexplained_max
       @thread_census_unexplained_now = unexplained
+      # Against the **unexplained** gap, not the raw one. A gap made entirely
+      # of gcry's own raw threads needs no staging record to be accounted
+      # for, and measuring it against the raw gap made this line contradict
+      # the one below it on `test (aarch64 native)`: "at least one is
+      # unrecorded" printed directly above "1 is gcry's own, leaving 0
+      # unexplained". The verdict a reader acts on has to be the corrected
+      # one.
+      @thread_census_staged_covered &+= 1 if unexplained > 0 && staged >= unexplained
       return unless report
 
       buf = uninitialized UInt8[512]
@@ -1638,11 +1645,18 @@ module Gcry
       len = RawOut.append_u64(buf.to_unsafe, len, listed.to_u64)
       len = RawOut.append(buf.to_unsafe, len, ", so ")
       len = RawOut.append_u64(buf.to_unsafe, len, gap.to_u64)
-      len = RawOut.append(buf.to_unsafe, len,
-        " thread(s) are outside Crystal's list; gcry has staged ")
-      len = RawOut.append_u64(buf.to_unsafe, len, staged.to_u64)
-      len = RawOut.append(buf.to_unsafe, len,
-        staged >= gap ? " of them, so it knows they exist. collection " : ", fewer than the gap — at least one is unrecorded. collection ")
+      len = RawOut.append(buf.to_unsafe, len, " thread(s) are outside Crystal's list; ")
+      if unexplained == 0
+        len = RawOut.append(buf.to_unsafe, len,
+          "every one of them is gcry's own, so none is unrecorded. collection ")
+      else
+        len = RawOut.append_u64(buf.to_unsafe, len, unexplained.to_u64)
+        len = RawOut.append(buf.to_unsafe, len,
+          unexplained == 1 ? " of them is not gcry's and it has staged " : " of them are not gcry's and it has staged ")
+        len = RawOut.append_u64(buf.to_unsafe, len, staged.to_u64)
+        len = RawOut.append(buf.to_unsafe, len,
+          staged >= unexplained ? ", so it knows they exist. collection " : ", fewer — at least one is unrecorded. collection ")
+      end
       len = RawOut.append_u64(buf.to_unsafe, len, @collections)
       len = RawOut.append(buf.to_unsafe, len, "\n")
       RawOut.flush(buf.to_unsafe, len)

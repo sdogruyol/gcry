@@ -1063,6 +1063,11 @@ thread-census-names: $(BIN)
 	# here and exactly zero without the knob, so an unnamed watchdog is red.
 	GCRY_THREAD_CENSUS=1 GCRY_STW_WATCHDOG_MS=10000 $(BIN)/thread_census_names --control
 	GCRY_THREAD_CENSUS=1 GCRY_STW_WATCHDOG_MS=10000 $(BIN)/thread_census_names
+	@out=$$(GCRY_THREAD_CENSUS=1 GCRY_STW_WATCHDOG_MS=10000 $(BIN)/thread_census_names --control 2>&1); \
+	echo "$$out" | grep -q "every one of them is gcry's own, so none is unrecorded" \
+	  || { echo "FAIL: a gap made entirely of gcry's own threads still reads as unrecorded"; echo "$$out" | grep "the OS reports" | head -2; exit 1; }; \
+	echo "$$out" | grep -q "at least one is unrecorded" && { echo "FAIL: the verdict line still claims an unrecorded thread with the gap fully attributed"; exit 1; }; \
+	echo "ok — a gap that is all gcry's own stops claiming an unrecorded mutator"
 	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
 	echo "$$out" | grep -q "OS tasks:.*census-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
 	echo "ok — the thread Crystal never listed is named in the census line"
