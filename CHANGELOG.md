@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-09-19
+
 ### Fixed
 
 - **Darwin lost a thread's registers past 64 threads, and Windows lost
@@ -103,6 +105,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all six Windows jobs, three days after the identical mistake with
   `poison_holders.cr` broke two. A harness a spec builds is a harness
   every platform compiles.
+- **`make windows-typecheck` also covers the specs only Windows runs.**
+  A spec body inside `{% if flag?(:win32) %}` is compiled by no local
+  check, so the only place a mistake in it appears is a Windows job —
+  which is where two of them appeared this cycle. `spec/platform_windows_spec.cr`,
+  the three spec files with win32 branches and
+  `process_spec/regression/9_windows_suspension_capacity_spec.cr` now
+  cross-compile for both Windows targets, in ten seconds.
 
 ## [0.26.1] - 2026-09-17
 
@@ -4435,7 +4444,9 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.26.2...HEAD
+[0.26.2]: https://github.com/sdogruyol/gcry/compare/v0.26.1...v0.26.2
+[0.26.1]: https://github.com/sdogruyol/gcry/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sdogruyol/gcry/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sdogruyol/gcry/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/sdogruyol/gcry/compare/v0.24.0...v0.24.1
