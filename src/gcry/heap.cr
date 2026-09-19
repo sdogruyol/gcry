@@ -1540,6 +1540,16 @@ module Gcry
     # Measured while breaking this gate on purpose — the plant arm went green
     # with the walk stubbed out until this counter existed.
     getter thread_census_unwalked : UInt64 = 0_u64
+    # Printing budget, and the last gap printed. A flat "first N gaps" cap is
+    # wrong on a host that gaps on *every* collection: aarch64 has one thread
+    # outside Crystal's list from the start, so the budget was spent on that
+    # before anything interesting happened and a planted thread was never
+    # printed at all (run `35449252433`, "the census did not name the planted
+    # raw pthread", with the counters correct in the same run). A changed gap
+    # is news; a repeat of the same one is noise.
+    CENSUS_REPORT_LIMIT = 32
+    @thread_census_last_gap : Int32 = -1
+    @thread_census_reports : Int32 = 0
 
     private def census_threads(listed : Int32) : Nil
       @thread_census_checks &+= 1
@@ -1554,11 +1564,16 @@ module Gcry
       return if gap <= 0
       @thread_census_gaps &+= 1
       @thread_census_gap_max = gap if gap > @thread_census_gap_max
-      # Only the first five collections print, so a run that gaps on every one
-      # of them stays readable. The walk itself keeps running: the counters
-      # below are the ones a gate reads, and capping them would make a long run
-      # look cleaner than a short one.
-      report = @thread_census_gaps <= 4
+      # The first few unconditionally — so a short run says something even if
+      # its gap never changes — and after that only when the shape changes,
+      # bounded by `CENSUS_REPORT_LIMIT`. The walk itself keeps running: the
+      # counters below are what a gate reads, and capping them would make a
+      # long run look cleaner than a short one.
+      shape_changed = gap != @thread_census_last_gap
+      @thread_census_last_gap = gap
+      report = (@thread_census_gaps <= 4 || shape_changed) &&
+               @thread_census_reports < CENSUS_REPORT_LIMIT
+      @thread_census_reports &+= 1 if report
 
       names = uninitialized UInt8[RawOut::LIMIT]
       nlen = 0

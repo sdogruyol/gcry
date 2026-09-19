@@ -854,6 +854,17 @@ kept finding the rest.
       at once. x86_64 never showed it; four cores and a slower spawn on the
       runner widen the window enough to be sampled, which is the third thing
       in this note that only CI could have said.
+      **And a fourth, same source (run `35449252433`).** All five arms then
+      passed and the *output* assertion failed: the census printed "the first
+      five gaps and then nothing", which is the right budget only on a host
+      that does not gap. aarch64 gaps on every collection, so the baseline
+      spent the budget on its own thread and the planted one was never
+      printed — while `gap_max=2 unexplained_max=2` in the same run shows the
+      counters saw it. Now: the first few, then only when the gap **changes**,
+      to a ceiling of 32. Worth stating plainly, because it is the point of
+      this whole item — **three of those four defects were in the gate, not
+      the instrument**, none of them reproduced on x86_64, and the counters
+      were right in every one of the runs that went red.
       Naming it is also not showing that anything is reachable only from it —
       that half of this item is untouched.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`

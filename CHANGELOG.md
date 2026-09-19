@@ -122,6 +122,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `thread_staging.cr`'s record — which closes the window instead of
   narrowing it: the creator is the collector and cannot be inside
   `ensure_mark_pthreads` and inside a stop at once.
+  And a fourth, also only visible on a gapping host: the census printed
+  the first five gaps and then nothing, so on aarch64 the budget went to
+  the host's own thread and a planted one was never printed even though
+  the counters saw it. It now prints the first few and after that only
+  when the gap **changes**, to a ceiling of 32 — a repeat is noise, a
+  different gap is news. Three of the four were in the gate rather than
+  the instrument; the counters were right in every one of those runs.
 
 ## [Unreleased]
 

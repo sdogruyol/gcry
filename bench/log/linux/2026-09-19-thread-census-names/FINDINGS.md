@@ -261,6 +261,35 @@ so it cannot be inside `ensure_mark_pthreads` and inside a stop at the same
 time. `--mark` now reads `unexplained_max=0` from the first collection
 instead of 2 then 1.
 
+## And a fourth: the print budget was spent before the interesting collection
+
+With the race closed, all five arms went green on aarch64 and the *output*
+assertion failed instead (run `35449252433`): `the census did not name the
+planted raw pthread`, with `gap_max=2 unexplained_max=2` in the very same run.
+The counters saw the plant; the log never showed it.
+
+The census printed "the first five gaps and then nothing", which is the right
+budget only on a host that does not gap. aarch64 gaps on **every** collection,
+so the baseline phase spent the whole budget on its own thread and the planted
+one was never printed. x86_64 has a baseline of 0, so its first five gaps were
+the interesting ones — the cap was wrong everywhere and only wrong *visibly*
+on the host that has something to say.
+
+Now: the first few unconditionally, and after that whenever the gap **changes**,
+to a ceiling of 32 reports. A repeat of the same gap is noise; a different one
+is news. Reproduced and fixed locally against the simulated baseline —
+
+    OS tasks: 246883:tcn_noise 246884:SYSMON 246885:tcn_noise — … leaving 1 unexplained
+    OS tasks: 246883:tcn_noise 246884:SYSMON 246885:tcn_noise 246886:gcry-probe
+              — 0 are gcry's own mark helpers, leaving 2 unexplained
+
+— where the second line is printed only because the gap moved 1 → 2.
+
+Three of the four defects in this note were found by CI and could not have
+been found here, and all three were in the *gate*, not the instrument: an
+absolute assertion about the host, a self-naming race, and a print budget.
+The instrument's own numbers were right in every one of those runs.
+
 ## What is still open
 
 **What the aarch64 task is.** Named, not identified. The tid is in the log and
