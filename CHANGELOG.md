@@ -181,6 +181,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   load base. `pc_mapping` now uses the lowest mapping of the same
   pathname, and the harness checks it against its own independent parse
   of `/proc/self/maps`.
+  `make thread-census-symbolize` closes the loop: it resolves the
+  offsets the census printed and fails when `addr2line` is absent
+  rather than skipping. On this runner it reads
+  `0x1e69ab -> sleep crystal/system/unix/pthread.cr:111`; on the aarch64
+  job it resolves the callers of the task that host has outside
+  Crystal's list, whose frames are **different from `SYSMON`'s** — so
+  whatever it is, it is not a second monitor.
 
 ## [Unreleased]
 

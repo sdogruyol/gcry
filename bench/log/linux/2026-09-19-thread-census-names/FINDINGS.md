@@ -408,6 +408,26 @@ the gate prints both numbers.
 | fault-safe read dead | `the stack walk never reached the program's own code` |
 | load base → segment | `put a known address … at +0xbe20, and it is at +0xace20` |
 
+## The frames, from aarch64 (run `35459614638`)
+
+| binary | tid | comm | frames in the binary |
+|---|---|---|---|
+| `scheduler_roots` | 4113 | `SYSMON` | `+0x1e4cb0 +0x1d164c` |
+| `scheduler_roots` | 4114 | `scheduler_roots` | `+0x1e7c48 +0xb31f0` |
+| `thread_census_names` | 7057 | `SYSMON` | `+0x1d7d78 +0x1c476c` |
+| `thread_census_names` | 7058 | `thread_census_n` | `+0x1da884 +0xab860` |
+
+Both libc prefixes are identical (`+0xc60bc +0x854b0`), because both threads
+sleep. **The frames in the program's own code are not**, in either binary. So
+the unlisted task is not a second `SYSMON` and not a copy of it — it is
+something else that sleeps, and the offsets say where.
+
+`make thread-census-symbolize` resolves them. It fails when `addr2line` is
+missing rather than skipping, because a resolution step that quietly does
+nothing is the exact rot this gate family exists to catch. Locally it reads:
+
+    0x1e69ab -> sleep crystal/system/unix/pthread.cr:111
+
 ## What is still open
 
 **What creates the aarch64 task.** It is now named, placed, and its callers

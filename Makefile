@@ -1077,6 +1077,33 @@ thread-census-names: $(BIN)
 	echo "$$out" | grep -q "OS tasks:" && { echo "FAIL: the twin still printed names, so the arm above proves nothing"; exit 1; }; \
 	echo "ok — with the walk off the same gap is counted and unnamed"
 
+# The offsets the census prints are the answer only if something turns them
+# into source. This is that step, and it runs where the interesting thread
+# actually is: on `test (aarch64 native)` every binary has one task outside
+# Crystal's list, and its callers are printed beside `SYSMON`'s — different
+# frames, so it is not a second monitor, and until this target existed the
+# difference was two hex numbers nobody could read.
+#
+# Fails if `addr2line` is absent rather than skipping: a resolution step that
+# quietly does nothing is the rot this gate family exists to prevent.
+.PHONY: thread-census-symbolize
+thread-census-symbolize: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/thread_census_names.cr -o $(BIN)/thread_census_names --error-trace
+	@command -v addr2line >/dev/null 2>&1 || { echo "FAIL: addr2line is missing, so the reported offsets cannot be resolved"; exit 1; }
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	echo "$$out" | grep -a "returns through" | sed 's/^/  /' | sort -u; \
+	frames=$$(echo "$$out" | grep -ao "thread_census_names+0x[0-9a-f]*" | sed 's/.*+0x//' | sort -u); \
+	[ -n "$$frames" ] || { echo "FAIL: no frame landed in this binary, so there is nothing to resolve"; exit 1; }; \
+	resolved=0; total=0; \
+	for f in $$frames; do \
+	  total=$$((total+1)); \
+	  line=$$(addr2line -e $(BIN)/thread_census_names -f -C "0x$$f" 2>/dev/null | tr '\n' ' '); \
+	  echo "  0x$$f -> $$line"; \
+	  case "$$line" in *'??'*) ;; *) resolved=$$((resolved+1));; esac; \
+	done; \
+	[ "$$resolved" -gt 0 ] || { echo "FAIL: none of the $$total frame(s) resolved — the offsets are not load-base relative"; exit 1; }; \
+	echo "ok — $$resolved of $$total reported frames resolve to a symbol and a source line"
+
 # Is a pointer held only in thread-local storage a root? It was not, on the
 # main thread: the executable's writable image (`PT_LOAD` / `__DATA*` / PE
 # writable sections) is every class variable, but a thread-local lives in a

@@ -1111,6 +1111,15 @@ kept finding the rest.
       Both were caught by breaking the collector on purpose, which is the
       practice this item asks for, applied to a gate on the day it was written
       instead of a year later.
+      **And 97 / 31 / 66 by the end of the day**, with
+      `make thread-census-symbolize` added: it resolves the offsets the gate
+      above prints and fails when `addr2line` is absent rather than skipping,
+      because a resolution step that quietly does nothing is this item's own
+      disease. Counted by hand, since its red direction is a missing tool or
+      an unresolvable offset rather than a forked child under a knob.
+      Running total for the census family: **seven** defects found by
+      breaking it on purpose or by CI, and **six of the seven were in the
+      gate**, not in the collector.
       `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that

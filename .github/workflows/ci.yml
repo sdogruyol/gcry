@@ -542,6 +542,13 @@ jobs:
       - name: Threads outside Crystal's list are named
         run: make thread-census-names
 
+      # Turns the offsets that gate prints into symbols and source lines.
+      # Here it resolves `SYSMON`'s sleep; on the aarch64 job it resolves the
+      # callers of the task that runner has outside Crystal's list, which is
+      # the open half of the unscanned-thread item.
+      - name: Threads outside Crystal's list are symbolized
+        run: make thread-census-symbolize
+
       # Baseline for the Darwin probe below, on the platform where the same
       # harness does 100 threads in under 3 ms. Reports numbers; the only thing
       # it fails on is producing none.
@@ -1507,6 +1514,9 @@ jobs:
           # the naming works; the `scheduler-roots` step above, which already
           # runs with `GCRY_THREAD_CENSUS=1`, is what will print the answer.
           timeout 300 make thread-census-names
+          # The payoff: this runner has a task outside Crystal's list in every
+          # binary, and this is what turns its callers into source lines.
+          timeout 300 make thread-census-symbolize
           # This arch is where the crash was first seen, so it gates here too.
           FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
           # The runner the suspend hang lives on. The signal path is the
