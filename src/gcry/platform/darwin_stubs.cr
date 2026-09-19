@@ -138,11 +138,19 @@ module Gcry
       0
     end
 
-    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64}?
+    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64, UInt64}?
       nil
     end
 
     def self.pc_mapping(pc : UInt64, & : UInt8*, Int32, UInt64 ->) : Bool
+      false
+    end
+
+    def self.read_self_memory(remote : UInt64, dst : Void*, bytes : Int32) : Int32
+      0
+    end
+
+    def self.each_stack_code_address(sp : UInt64, max_hits : Int32, & : UInt64 ->) : Bool
       false
     end
 

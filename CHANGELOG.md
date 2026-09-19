@@ -157,6 +157,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_unexplained_now`, the last sample rather than the largest, replaced
   the maxima in every assertion.
 
+- **And it walks one frame further, because the pc named the sleep and
+  not the sleeper.** On aarch64 the unlisted task and `SYSMON` report
+  the *same* libc offset in the same syscall (`clock_nanosleep`, 115
+  there and 230 on x86_64 — the reader agreeing with itself across two
+  syscall tables), which says the task sleeps and nothing about who
+  asked it to. The caller is one frame up. The census now scans the
+  words at or above a parked thread's SP, keeps the ones that land in an
+  executable mapping, and names them: `returns through:
+  libc.so.6+0xa030c … bin/thread_census_names+0x1e2aeb`, and that last
+  offset feeds `addr2line` straight to `crystal/system/unix/pthread.cr:111`.
+  Conservative and reported as such — stale words count, so it is the
+  set of frames a thread returns through and not a backtrace.
+  **The read cannot fault.** This collector has been killed once by a
+  plain load on memory a dying thread owned (`pthread_kill(id, 0)` on a
+  freed `struct pthread`, 3 of 3), so the stack is read with
+  `process_vm_readv` against our own pid, which answers `EFAULT` instead
+  of signalling — safe by construction rather than by timing.
+  A sixth defect fixed on the way: the offsets were measured from the
+  mapping the pc happened to be in, and a PIE's executable segment does
+  not start at the load base, so nothing `addr2line` could resolve. The
+  same anchor reads +0xbe20 from the text segment and +0xace20 from the
+  load base. `pc_mapping` now uses the lowest mapping of the same
+  pathname, and the harness checks it against its own independent parse
+  of `/proc/self/maps`.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

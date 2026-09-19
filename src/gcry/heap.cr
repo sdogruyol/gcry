@@ -1704,7 +1704,7 @@ module Gcry
         return
       end
 
-      nr, pc = site
+      nr, sp, pc = site
       if nr < 0
         len = RawOut.append(p, len, " is in the kernel outside a syscall")
       else
@@ -1726,6 +1726,58 @@ module Gcry
       # "No mapping holds it" and "an anonymous one holds it" are different
       # answers, and the second is not the absence of the first.
       len = RawOut.append(p, len, " — no mapping holds that pc") unless held
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
+      report_task_callers(tid, sp)
+    end
+
+    # Frames above a sleeping thread's SP, named.
+    #
+    # The pc is the libc wrapper the thread is asleep in — on aarch64 the
+    # unlisted task and `SYSMON` report the *same* offset in the *same*
+    # library, which says both are sleeping and nothing about who asked them
+    # to. The callers are on the stack, and the one that lands in the main
+    # binary is the thing that created the thread's work.
+    #
+    # Conservative and reported as such: any stale word that happens to point
+    # into an executable mapping is included, so this is the set of frames the
+    # thread returns through and not a backtrace. Every read goes through
+    # `process_vm_readv`, so a stack being unmapped underneath it answers
+    # EFAULT rather than killing the collector.
+    CENSUS_CALLER_FRAMES = 4
+
+    private def report_task_callers(tid : Int32, sp : UInt64) : Nil
+      return if sp == 0
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: thread census — task ")
+      len = RawOut.append_u64(p, len, tid.to_u64)
+      len = RawOut.append(p, len, " returns through:")
+      found = 0
+      last = 0_u64
+      walked = Platform.each_stack_code_address(sp, CENSUS_CALLER_FRAMES) do |addr|
+        # A return address repeated in adjacent slots is one frame seen twice.
+        unless addr == last
+          last = addr
+          found += 1
+          len = RawOut.append(p, len, " ")
+          named = Platform.pc_mapping(addr) do |name, name_len, offset|
+            if name_len > 0
+              len = RawOut.append_bytes(p, len, name, name_len)
+            else
+              len = RawOut.append(p, len, "anon")
+            end
+            len = RawOut.append(p, len, "+0x")
+            len = RawOut.append_hex(p, len, offset)
+          end
+          len = RawOut.append_hex(p, len, addr) unless named
+        end
+      end
+      if !walked
+        len = RawOut.append(p, len, " the stack could not be walked")
+      elsif found == 0
+        len = RawOut.append(p, len, " nothing above its SP points into code")
+      end
       len = RawOut.append(p, len, "\n")
       RawOut.flush(p, len)
     end

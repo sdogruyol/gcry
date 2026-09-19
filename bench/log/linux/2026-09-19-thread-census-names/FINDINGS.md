@@ -344,14 +344,79 @@ cannot inflate a last sample. The maxima are still printed; nothing asserts on
 them. 12 of 12 stable on the plant arm, 15 of 15 on its twin, and the
 simulated-baseline table above reproduces unchanged.
 
+## The pc names the sleep, not the sleeper
+
+The placement above put both `SYSMON` and aarch64's unlisted task at the
+**same** libc offset, in the same syscall:
+
+    task 4088:SYSMON          parked in syscall 115 → …/libc.so.6+0xbbd94
+    task 4089:scheduler_roots parked in syscall 115 → …/libc.so.6+0xbbd94
+
+(aarch64 115 and x86_64 230 are both `clock_nanosleep`, which is the reader
+agreeing with itself across two syscall tables.) That says the task is a
+*sleeper*, which already rules out a transient birth window — but a libc
+wrapper offset is the same for everything that sleeps, so it cannot say who
+asked. The caller is one frame up, on the thread's stack.
+
+**Reading a running thread's stack cannot be allowed to fault.** This
+collector has already been killed once by exactly that shape —
+`pthread_kill(id, 0)` dereferencing a freed `struct pthread`, 3 of 3 — so a
+plain load is not an option. `process_vm_readv` against our own pid answers
+**EFAULT** instead of signalling, measured here on a deliberately unmapped
+address, and that makes the read safe by construction rather than by timing.
+
+The scan is conservative and reported as such: words at or above the SP that
+land in an executable mapping, bounded by the stack's own mapping, 512 words,
+first 4 hits. Stale words are included, so it is "the frames this thread
+returns through", not a backtrace.
+
+    task 437953 returns through: libc.so.6+0xa030c libc.so.6+0xf5af2
+                                 libc.so.6+0x103707 bin/thread_census_names+0x1e2aeb
+
+    $ addr2line -e bin/thread_census_names -f -C 0x1e2aeb
+      sleep
+      crystal/system/unix/pthread.cr:111
+
+The last entry is the program's own code and it resolves to a source line.
+That is the difference between a diagnostic and a number.
+
+## A sixth: the offset was measured from the wrong base
+
+The first version reported `pc - containing_mapping_start`, and that is not
+an address `addr2line` accepts. A PIE has several LOAD segments and the
+executable one does not begin at the load base, so the text-relative offset
+names nothing. Measured on this binary: the same anchor reads **+0xbe20**
+from the text segment and **+0xace20** from the load base — 0xa1000 apart,
+and only the second resolves.
+
+`pc_mapping` now takes the lowest mapping of the same pathname as the base,
+which is how `dladdr` and `perf` reach it. Gated by an independent
+computation: the harness finds its own load base by parsing `/proc/self/maps`
+in Crystal and requires the collector's raw walk to agree for a known address
+inside itself. Two implementations, one answer — and with the fix reverted
+the gate prints both numbers.
+
+## Every red direction, measured
+
+| break | the gate says |
+|---|---|
+| helper naming removed | `the walk found no gcry-mark helper…` |
+| task walk dead | `/proc/self/task could not be walked on 6 of 6 gaps` |
+| mapping lookup dead | `no task was located…` |
+| syscall site dead | `no task was located…` |
+| stack scan dead | `the stack walk never reached the program's own code` |
+| fault-safe read dead | `the stack walk never reached the program's own code` |
+| load base → segment | `put a known address … at +0xbe20, and it is at +0xace20` |
+
 ## What is still open
 
-**What creates the aarch64 task.** It is now named and placeable; the next
-run prints its syscall and the mapping its pc lands in, which is the first
-fact about it that is not a count or a name.
+**What creates the aarch64 task.** It is now named, placed, and its callers
+are printed with load-base offsets. The next aarch64 run carries the frames;
+`addr2line` against the job's own binary turns them into source lines.
 
-**Whether the gap matters.** Naming and placing a thread is not showing that
-anything is reachable only from it. That half of the item is untouched.
+**Whether the gap matters.** Naming, placing and walking a thread is still
+not showing that anything is reachable only from it. That half of the item is
+untouched.
 
 ## A locale bug in a gate, found by running it
 

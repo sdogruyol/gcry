@@ -72,6 +72,34 @@ COLLECTS   = 6
 # lazy initializer on a thread that has not finished starting.
 RAW_RUN = Pointer(Int32).malloc(1)
 
+# A code address in this binary, and this harness's own answer for where it
+# sits. `Platform.pc_mapping` must agree.
+#
+# Not decoration: the offset it reports is only useful if `addr2line` can
+# resolve it, and that needs the distance from the file's **load base**. A PIE
+# has several LOAD segments and the executable one is not the first, so an
+# offset measured from the mapping the pc happens to be in names nothing —
+# which is what the first version reported. Both sides compute the base
+# independently here: the collector from its raw `/proc/self/maps` walk, this
+# harness from Crystal's, and a mismatch is the bug.
+def census_anchor : Int32
+  42
+end
+
+ANCHOR = ->census_anchor
+
+def expected_load_base : UInt64?
+  exe = File.realpath("/proc/self/exe")
+  lowest = nil.as(UInt64?)
+  File.each_line("/proc/self/maps") do |line|
+    fields = line.split
+    next unless fields.size >= 6 && fields[5] == exe
+    lo = fields[0].split('-').first.to_u64(16)
+    lowest = lo if lowest.nil? || lo < lowest.not_nil!
+  end
+  lowest
+end
+
 def start_probe_thread : LibC::PthreadT
   tid = uninitialized LibC::PthreadT
   RAW_RUN.value = 1
@@ -217,6 +245,25 @@ end
 if unwalked > 0
   failures << "/proc/self/task could not be walked on #{unwalked} of #{gaps} gaps, " \
               "so an unattributed gap here is a dead walk and not a finding"
+end
+
+# Every arm checks this: the offsets the census prints are only actionable if
+# they are measured from the file's load base, and nothing else here would
+# notice if they were not.
+anchor = ANCHOR.pointer.address.to_u64
+if base = expected_load_base
+  reported = nil.as(UInt64?)
+  named = Gcry::Platform.pc_mapping(anchor) { |_n, _l, off| reported = off }
+  if !named
+    failures << "pc_mapping found no mapping for an address inside this binary"
+  elsif reported != anchor - base
+    failures << "pc_mapping put a known address of this binary at +0x#{reported.try(&.to_s(16))}, " \
+                "and it is at +0x#{(anchor - base).to_s(16)} from the load base — an offset " \
+                "measured from the containing segment is not one addr2line can resolve"
+  end
+else
+  failures << "could not find this binary's own mappings in /proc/self/maps, " \
+              "so the offset check below would pass by not looking"
 end
 
 if control

@@ -26,6 +26,8 @@
 # `darwin_thread_census.cr` answers `nil` rather than a number nobody measured.
 {% skip_file unless flag?(:linux) %}
 
+require "c/sys/uio"
+
 lib LibC
   # glibc ≥ 2.30 and musl both export this; the alternative is a raw
   # `syscall(SYS_getdents64, …)` with a per-architecture number, and a wrong
@@ -33,6 +35,15 @@ lib LibC
   fun getdents64(fd : Int, dirp : Void*, count : UInt) : Int
   fun gettid : Int
   fun pthread_setname_np(thread : PthreadT, name : Char*) : Int
+
+  # Reading another thread's stack means reading memory that thread can be
+  # unmapping. A plain load there is the shape that has already crashed this
+  # collector once — `pthread_kill(id, 0)` dereferencing a freed
+  # `struct pthread`, 3 of 3. `process_vm_readv` against our own pid answers
+  # **EFAULT** instead of signalling, so however wrong the address is the
+  # question cannot fault. glibc ≥ 2.15.
+  fun process_vm_readv(pid : PidT, local_iov : Iovec*, liovcnt : ULong,
+                       remote_iov : Iovec*, riovcnt : ULong, flags : ULong) : SSizeT
 end
 
 module Gcry
@@ -101,22 +112,138 @@ module Gcry
       LibC.gettid
     end
 
-    # The mapping a program counter lands in, as `name, name_len, offset` from
-    # that mapping's base. Returns false when no mapping holds it, which is a
-    # different answer from an anonymous one (`name_len == 0`) and is reported
-    # as such — the rule `segv_region_report` already follows.
+    # The mapping a program counter lands in, as `name, name_len, offset`.
+    # Returns false when no mapping holds it, which is a different answer from
+    # an anonymous one (`name_len == 0`) and is reported as such — the rule
+    # `segv_region_report` already follows.
     #
-    # The same `/proc/self/maps` walk the SEGV reporter uses, so a pc here is
-    # named the way a faulting address is.
+    # The offset is from the file's **load base**, not from the mapping the pc
+    # happens to be in. That distinction is the difference between a number
+    # `addr2line` resolves and one it does not: a PIE has several LOAD
+    # segments and the executable one does not start at the base, so
+    # `pc - text_start` names nothing. The lowest mapping of the same
+    # pathname is the base, which is how `dladdr` and `perf` reach it too.
     def self.pc_mapping(pc : UInt64, & : UInt8*, Int32, UInt64 ->) : Bool
+      hold = uninitialized UInt8[192]
+      hold_len = 0
+      base = 0_u64
       found = false
       each_map_region do |lo, hi, _perms, name, name_len|
         if !found && pc >= lo && pc < hi
           found = true
-          yield name, name_len, pc - lo
+          base = lo
+          hold_len = name_len < 192 ? name_len : 192
+          i = 0
+          while i < hold_len
+            hold[i] = name[i]
+            i += 1
+          end
         end
       end
-      found
+      return false unless found
+
+      if hold_len > 0
+        each_map_region do |lo, _hi, _perms, name, name_len|
+          if name_len == hold_len && lo < base && same_bytes?(name, hold.to_unsafe, hold_len)
+            base = lo
+          end
+        end
+      end
+      # `hold` rather than the walk's buffer: that one is reused per line, and
+      # the second walk has already overwritten the name by now.
+      yield hold.to_unsafe, hold_len, pc - base
+      true
+    end
+
+    private def self.same_bytes?(a : UInt8*, b : UInt8*, len : Int32) : Bool
+      i = 0
+      while i < len
+        return false if a[i] != b[i]
+        i += 1
+      end
+      true
+    end
+
+    # Fault-safe read of this process's own memory. Returns bytes read, 0 on
+    # any refusal — see the `process_vm_readv` note above for why a plain load
+    # is not an option here.
+    def self.read_self_memory(remote : UInt64, dst : Void*, bytes : Int32) : Int32
+      return 0 if bytes <= 0 || remote == 0
+      local = LibC::Iovec.new(iov_base: dst, iov_len: LibC::SizeT.new(bytes))
+      far = LibC::Iovec.new(iov_base: Pointer(Void).new(remote), iov_len: LibC::SizeT.new(bytes))
+      n = LibC.process_vm_readv(LibC.getpid, pointerof(local), 1_u64, pointerof(far), 1_u64, 0_u64)
+      n <= 0 ? 0 : n.to_i32
+    end
+
+    # Executable mappings this process has. More than this many and the tail
+    # is dropped, which can only lose a candidate, never invent one.
+    MAX_CODE_RANGES = 48
+
+    # Words of a thread's stack to look at, from its SP upward.
+    STACK_SCAN_WORDS = 512
+
+    # Yields each word at or above `sp` that lands in an executable mapping,
+    # up to `max_hits`. A return address is such a word; so is any stale copy
+    # of one, which is why this is a *conservative* read and is reported as a
+    # set of frames the thread returns through rather than a backtrace.
+    #
+    # The pc from `/proc/self/task/<tid>/syscall` names the libc wrapper a
+    # thread is sleeping in and nothing above it. These words are the callers,
+    # and the one that lands in the main binary is the thing that created the
+    # frame.
+    #
+    # Bounded by the stack mapping the SP is in, so the scan cannot wander
+    # into an unrelated region, and every read is fault-safe regardless.
+    def self.each_stack_code_address(sp : UInt64, max_hits : Int32, & : UInt64 ->) : Bool
+      return false if sp == 0
+
+      code_lo = uninitialized UInt64[MAX_CODE_RANGES]
+      code_hi = uninitialized UInt64[MAX_CODE_RANGES]
+      ranges = 0
+      stack_end = 0_u64
+      walked = each_map_region do |lo, hi, perms, _name, _name_len|
+        stack_end = hi if sp >= lo && sp < hi
+        if perms[2] == 'x'.ord.to_u8 && ranges < MAX_CODE_RANGES
+          code_lo[ranges] = lo
+          code_hi[ranges] = hi
+          ranges += 1
+        end
+      end
+      return false unless walked && ranges > 0 && stack_end > sp
+
+      words = uninitialized UInt64[64]
+      addr = sp
+      seen = 0
+      hits = 0
+      while seen < STACK_SCAN_WORDS && hits < max_hits && addr < stack_end
+        want = 64
+        left = ((stack_end - addr) // 8).to_i32
+        want = left if left < want
+        budget = STACK_SCAN_WORDS - seen
+        want = budget if budget < want
+        break if want <= 0
+
+        got = read_self_memory(addr, words.to_unsafe.as(Void*), want * 8)
+        break if got < 8
+
+        i = 0
+        while i < got // 8 && hits < max_hits
+          word = words[i]
+          j = 0
+          while j < ranges
+            if word >= code_lo[j] && word < code_hi[j]
+              hits += 1
+              yield word
+              break
+            end
+            j += 1
+          end
+          i += 1
+        end
+        addr &+= got.to_u64
+        seen += got // 8
+      end
+      true
     end
 
     # Yields `tid, comm, comm_len` for every task in this process. `comm` points

@@ -126,7 +126,7 @@ module Gcry
     # address-space walk turns that into a library and an offset. The census
     # named a thread on aarch64 that nothing in gcry or Crystal creates, and a
     # name alone cannot go further.
-    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64}?
+    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64, UInt64}?
       path = uninitialized UInt8[64]
       len = build_syscall_path(path.to_unsafe, tid)
       return nil if len == 0
@@ -142,7 +142,10 @@ module Gcry
       return nil unless nr
       pc = parse_syscall_pc(buf.to_unsafe, n.to_i32)
       return nil unless pc
-      {nr, pc}
+      # The sp comes from the same line and the same read: asking twice would
+      # be two snapshots of a thread that is free to move between them.
+      sp = parse_syscall_sp(buf.to_unsafe, n.to_i32)
+      {nr, sp || 0_u64, pc}
     end
 
     # Leading decimal field. `-1` is a thread in the kernel but not in a

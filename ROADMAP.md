@@ -894,8 +894,32 @@ kept finding the rest.
       replaced the maxima everywhere, and `attributed` is now
       `gap_now - unexplained_now`. 12/12 and 15/15 stable on the two arms that
       flaked.
-      Naming and placing it is still not showing that anything is reachable
-      only from it — that half of this item is untouched.
+      **The pc named the sleep and not the sleeper, so it walks one frame
+      further now.** aarch64's unlisted task and `SYSMON` report the *same*
+      libc offset in the same syscall — `clock_nanosleep`, 115 there and 230
+      on x86_64, the reader agreeing with itself across two syscall tables.
+      That rules out a transient birth window (a sleeper is not a thread
+      mid-birth) and says nothing about who asked it to sleep, because a libc
+      wrapper offset is identical for everything that sleeps. The caller is
+      one frame up. The census now scans the words at or above a parked
+      thread's SP, keeps those landing in an executable mapping and names
+      them — `returns through: libc.so.6+0xa030c … bin/thread_census_names
+      +0x1e2aeb`, and that offset feeds `addr2line` straight to
+      `crystal/system/unix/pthread.cr:111`. Conservative and said so: stale
+      words count, so it is the frames a thread returns through and not a
+      backtrace. **The read cannot fault** — this collector has been killed
+      once by a plain load on memory a dying thread owned, so the stack goes
+      through `process_vm_readv` on our own pid, which answers EFAULT instead
+      of signalling.
+      **A sixth defect on the way, and the gate now catches it:** the offsets
+      were measured from the mapping the pc was in, and a PIE's executable
+      segment does not start at the load base — the same anchor reads
+      `+0xbe20` from the text segment and `+0xace20` from the base, and only
+      the second resolves. `pc_mapping` takes the lowest mapping of the same
+      pathname now, checked against the harness's own independent parse of
+      `/proc/self/maps`. Seven breaks, seven reds.
+      Naming, placing and walking it is still not showing that anything is
+      reachable only from it — that half of this item is untouched.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,

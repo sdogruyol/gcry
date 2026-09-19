@@ -1066,6 +1066,10 @@ thread-census-names: $(BIN)
 	echo "$$out" | grep -q "is the collector, stopped here to ask" \
 	  || { echo "FAIL: the collector did not exclude itself, so it is reporting the read it is making"; exit 1; }; \
 	echo "ok — the collector names itself instead of reporting its own /proc read"
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	echo "$$out" | grep -qE "returns through:.*thread_census_names\+0x[0-9a-f]+" \
+	  || { echo "FAIL: the stack walk never reached the program's own code — a pc in libc names the sleep, not the caller"; echo "$$out" | grep "returns through" | head -2; exit 1; }; \
+	echo "ok — a sleeping task's callers reach this binary, at an offset addr2line resolves"
 	@out=$$(GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname 2>&1); \
 	echo "$$out" | grep -q "gcry: thread census — task " && { echo "FAIL: the twin located tasks with the walk off"; exit 1; }; \
 	echo "ok — with the walk off nothing is located either"
