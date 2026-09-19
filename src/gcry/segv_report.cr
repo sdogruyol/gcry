@@ -312,6 +312,102 @@ module Gcry
     # (`GCRY_POISON_TAG=1`) says which block's free wrote it, and the block is
     # then described against the heap's own tables exactly as a faulting address
     # would be — so "of what" is answered in the same terms as "where".
+    # Which mapping is the faulting address in?
+    #
+    # "never a gcry allocation" says where the address is **not**, and until
+    # 2026-09-19 that was the whole of what a sighting outside the span
+    # carried. On that day the churn gate's poisoned arm faulted at
+    # `0x55816aff0` on a CI runner, 1 of 24, and the report could say only
+    # that gcry never allocated it
+    # (`bench/log/linux/2026-09-19-churn-out-of-span-sighting/FINDINGS.md`).
+    # The kernel knows what it is. `Platform.each_map_region` already walks
+    # every mapping with its name, with raw syscalls into its own stack buffer
+    # — the address-space audit names a dying block's holder with it — so the
+    # faulting address gets the same treatment: the mapping, its permissions,
+    # its size, and how far below its top the address sits.
+    #
+    # That last number is not decoration. A region mapped whole and used from
+    # the high end, at byte-identical offsets below its top across runs, is how
+    # this repo recognised a stack it could name as nothing
+    # (`2026-08-27-thread-list-tripwire`), and it is the difference between a
+    # sighting that costs a rerun and one that leaves evidence behind.
+    #
+    # Its own line and its own buffer: `RawOut::LIMIT` is 480 bytes and the
+    # readings above already run close to it.
+    private def self.report_faulting_region(addr : UInt64) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = 0
+      lo = 0_u64
+      hi = 0_u64
+      perms = uninitialized UInt8[4]
+      name = uninitialized UInt8[96]
+      name_len = 0
+      found = false
+
+      # The walker's `name` pointer is into a buffer it reuses, so the name is
+      # copied here rather than held.
+      walked = Platform.each_map_region do |rlo, rhi, rperms, rname, rlen|
+        unless found || addr < rlo || addr >= rhi
+          found = true
+          lo = rlo
+          hi = rhi
+          4.times { |i| perms[i] = rperms[i] }
+          n = rlen > 96 ? 96 : rlen
+          i = 0
+          while i < n
+            name[i] = rname[i]
+            i += 1
+          end
+          name_len = n
+        end
+      end
+
+      unless walked
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: the mapping that holds that address could not be read on this platform, " \
+          "so what it is stays open\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+
+      unless found
+        len = RawOut.append(buf.to_unsafe, len,
+          "gcry: no mapping holds that address — it is not in this process's address space at " \
+          "all, so it is a wild pointer rather than a stale one\n")
+        RawOut.flush(buf.to_unsafe, len)
+        return
+      end
+
+      len = RawOut.append(buf.to_unsafe, len, "gcry: that address is in a mapping [0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, lo)
+      len = RawOut.append(buf.to_unsafe, len, ", 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, hi)
+      len = RawOut.append(buf.to_unsafe, len, ") ")
+      i = 0
+      while i < 4 && len < RawOut::LIMIT
+        buf[len] = perms[i]
+        len += 1
+        i += 1
+      end
+      len = RawOut.append(buf.to_unsafe, len, ", ")
+      len = RawOut.append_u64(buf.to_unsafe, len, hi - lo)
+      len = RawOut.append(buf.to_unsafe, len, " bytes, 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, hi - addr)
+      len = RawOut.append(buf.to_unsafe, len, " below its top, ")
+      if name_len == 0
+        len = RawOut.append(buf.to_unsafe, len, "anonymous")
+      else
+        i = 0
+        while i < name_len && len < RawOut::LIMIT
+          buf[len] = name[i]
+          len += 1
+          i += 1
+        end
+      end
+      len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
     private def self.report_poison_source(word : UInt64) : Nil
       buf = uninitialized UInt8[512]
       len = 0
@@ -757,6 +853,9 @@ module Gcry
             ") — never a gcry allocation, so a swept object is not the explanation\n")
         end
         RawOut.flush(buf.to_unsafe, len)
+        # And then what it *is*: the span answers "not mine", the kernel
+        # answers "this mapping".
+        report_faulting_region(addr.address)
         return
       end
 

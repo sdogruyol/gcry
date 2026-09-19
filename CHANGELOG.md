@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A fault outside gcry's span now names the mapping it happened in.**
+  The crash report's three out-of-span readings say what the address is
+  *not* — not a gcry allocation, and whether a swept object is excluded —
+  which was the whole of a 2026-09-19 sighting from the thread-churn
+  gate: `SIGSEGV at 0x55816aff0`, one child in 24 on a CI runner, and
+  nothing to compare with the next one. The report asks the kernel now:
+  the mapping's range, its permissions, its size, how far below its top
+  the address sits (the signature that identified a stack this collector
+  could name as nothing on 2026-08-27) and its pathname when it has one —
+  or "no mapping holds that address", because a stale pointer into a live
+  mapping and a wild pointer are different defects. One extra line from
+  `Platform.each_map_region`, allocation-free, on its own buffer because
+  `RawOut::LIMIT` is 480 bytes and the readings already run close to it.
+  `make segv-region-report` checks the numbers rather than the words and
+  fails in all three arms without it.
+
+## [Unreleased]
+
 ## [0.26.2] - 2026-09-19
 
 ### Fixed

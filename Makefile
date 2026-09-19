@@ -632,6 +632,7 @@ windows-typecheck: $(BIN)
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stw_sp_spec.cr -o $(BIN)/windows_typecheck_spec_stw >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/stack_scrub_spec.cr -o $(BIN)/windows_typecheck_spec_scrub >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc spec/cached_bitmap_pool_race_spec.cr -o $(BIN)/windows_typecheck_spec_pool >/dev/null
+	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none bench/segv_region_report.cr -o $(BIN)/windows_typecheck_srr >/dev/null
 	$(CRYSTAL) build --cross-compile --target x86_64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_x86 >/dev/null
 	$(CRYSTAL) build --cross-compile --target aarch64-windows-msvc -Dgc_none process_spec/regression/9_windows_suspension_capacity_spec.cr -o $(BIN)/windows_typecheck_proc_arm64 >/dev/null
 	@rm -f $(BIN)/windows_typecheck_x86.obj $(BIN)/windows_typecheck_arm64.obj
@@ -1242,6 +1243,24 @@ counter-loss: $(BIN)
 	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss
 	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --control
 	COUNTER_LOSS_ROUNDS=120 $(BIN)/counter_loss --inject
+
+# What a fault outside gcry's span actually *is*. The three readings there say
+# what it is not — not a gcry allocation, and whether a swept object is
+# excluded — and that was the whole of the 2026-09-19 churn sighting: an
+# address, 1 of 24 children on a CI runner, nothing to compare with the next
+# one. The kernel knows: `Platform.each_map_region` names every mapping,
+# allocation-free, so the report names the one the address is in, with its
+# permissions, its size and how far below its top it sits — which is how a
+# region gcry could name as nothing was read as a stack on 2026-08-27. Three
+# arms, and the numbers are checked rather than the words: an anonymous
+# PROT_NONE mapping, a file-backed one that must be named by path, and an
+# address in no mapping, which must be reported as wild rather than attributed
+# to the nearest region. Drop the report line and all three fail.
+.PHONY: segv-region-report
+segv-region-report: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/segv_region_report.cr -o $(BIN)/segv_region_report --error-trace
+	$(BIN)/segv_region_report
+
 
 # `GCRY_UNMAP_GUARD=1` keeps a released chunk mapped as PROT_NONE and records
 # its identity, so a fault into it reads as "this is the memory gcry gave back"

@@ -703,6 +703,16 @@ jobs:
         run: |
           make released-range-report
 
+      # And what a fault *outside* the span is. The churn gate's poisoned arm
+      # faulted at 0x55816aff0 on 2026-09-19, 1 of 24 children, and the report
+      # could say only that gcry never allocated it. It names the mapping now —
+      # range, permissions, size, distance below its top, pathname — and an
+      # address in no mapping is reported as wild rather than attributed to the
+      # nearest region. Three arms, numbers checked, ~4 s.
+      - name: A fault outside the span names its mapping
+        run: |
+          make segv-region-report
+
       - name: A chunk kept by a refused release is named
         run: |
           make kept-release-report
