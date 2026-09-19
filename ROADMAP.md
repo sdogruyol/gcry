@@ -964,8 +964,9 @@ kept finding the rest.
       where a child is forked under a breaking knob. Two of them do it
       otherwise and are counted by hand on purpose: `once-guard` fails on a
       declaration pattern (red on the offender it was written for) and
-      `stw-slot-precision` asserts a correlation (red when
-      `stw_slot_capacity` was made to report 1024 while the table held 64).
+      `stw-slot-precision` drives its own pinned arm through
+      `GCRY_STW_FIXED_SLOTS=1` and requires the guard-page fallbacks and the
+      refused claims to appear there.
       Said out loud because this number is meant to shrink by building arms,
       not by loosening what counts as one.
       `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
@@ -2045,27 +2046,34 @@ kept finding the rest.
       unchanged: whether a thread past the 64th ever held the only reference to
       something. The gate asserts the coverage, not a defect.
       `bench/log/linux/2026-09-16-stack-bounds-gate/FINDINGS.md`
-      **Answered 2026-09-19, and it is the other direction.** A thread past the
-      64th does not lose a reference — it **keeps** one, and keeps it forever.
-      That is the *STW capture* table's 64 slots, not this one: an uncovered
-      thread has no recorded SP, so `fiber_stack_sp_scan_low` finds none for
-      its own stack (a Crystal thread's main fiber's stack *is* its OS stack)
-      and `fiber_stack_scan_top` falls back to the guard page — all 8 MiB, dead
-      frames included, where `GC.malloc`'s call chain left a plaintext pointer
-      below the parked SP. Measured: 98 threads and 96 unreachable blocks
-      leaves **34 still allocated after one, two and three collections**, and
-      they are exactly the blocks the threads past the 64th allocated (indices
-      62..95); 62 threads leaves 0. Neither the pthread-mapping path
-      (`GCRY_STW_PTHREAD_LAG=65536`) nor the register scan
-      (`GCRY_DISABLE_GREG_ROOTS=1`) changes it. So the fixed table's cost is a
-      leak proportional to each uncovered thread's dead-frame history, plus an
-      8 MiB conservative walk per uncovered thread per collection — not
-      "precision" in the abstract. `make stw-slot-precision` gates the
-      mechanism rather than the defect: retention must equal the uncovered
-      thread count, zero under the cap, and a block an uncovered thread holds
-      must still be a root. It needs no edit when the table grows — both
-      numbers go to zero — and it was observed red by making
-      `stw_slot_capacity` report 1024 while the table held 64.
+      **Answered 2026-09-19, and the answer is about the scan window rather
+      than about a missing root.** A thread past the 64th slot of the *STW
+      capture* table (not this one) has no recorded SP, so
+      `fiber_stack_sp_scan_low` finds none for its own stack — a Crystal
+      thread's main fiber's stack *is* its OS stack — and
+      `fiber_stack_scan_top` falls back to `guard`: the whole 8 MiB mapping
+      instead of the frames above the SP. Measured at 98 threads over 8
+      collections: **264 guard-page fallbacks and ~535 ms per collection**
+      pinned at 64, against **8 and ~29 ms** with the table grown — one
+      fallback per collection is the collector's own fiber — and a block held
+      only in an uncovered thread's stack survives either way, so the
+      "precision, not roots" half of the old argument does hold.
+      **Retracted in place**: the first reading of this said the cost was
+      *retention* — 34 unreachable blocks still allocated at 98 threads, 0 at
+      62 — and that was lazy sweep. `GCRY_DISABLE_LAZY_SWEEP=1` reclaims all
+      96 either way, and `34 = 98 - 64` was a coincidence; after the table grew
+      the count stayed 34 while the survivors' identities moved. Commit
+      `9d1b051` carried that reading.
+      **Fixed**: Linux uses the shared growable table now
+      (`reserve_stw_slots(listed + 8)` from `stop_world`, under `Thread.lock`,
+      before the first signal), so three copies of the quartet are one. It took
+      a CAS claim in the shared table — this platform's handler keeps a
+      fallback claim and those run on every thread at once — plus the per-slot
+      served epoch, the acknowledgement byte and a register *count* rather than
+      a flag, because `with_thread_gregs` hands the raw row and its length to
+      `StackMaps`. `GCRY_STW_FIXED_SLOTS=1` works here now, which is what gives
+      `make stw-capture-coverage` (Linux arm: 0 refused claims against 62
+      pinned) and `make stw-slot-precision` their red direction.
       `bench/log/linux/2026-09-19-stw-slot-retention/FINDINGS.md`
 - [x] **The aarch64 spec flake family — root-caused 2026-09-17.** Five
       examples across three files had failed together ~3 in 30 runs on

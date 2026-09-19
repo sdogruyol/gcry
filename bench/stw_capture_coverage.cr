@@ -9,10 +9,14 @@
 #   Linux    registers come from the signal `ucontext`, and the handler is
 #            installed with `SA_SIGINFO` and **not** `SA_ONSTACK`, so that
 #            ucontext sits on the interrupted thread's own stack. An unclamped
-#            full-stack walk therefore still finds them. The table stays a fixed
-#            64 there deliberately: the loss is precision, not soundness, and
-#            the table is shared with a signal handler that claims from every
-#            thread at once.
+#            full-stack walk therefore still finds them — which is why the table
+#            stayed a fixed 64 here for two weeks longer than on the other two.
+#            What that walk costs was then measured: a thread with no recorded
+#            SP costs its own stack the SP window, so the scan starts at the
+#            guard page and covers the whole 8 MiB mapping. 98 threads, 8
+#            collections: 264 guard-page fallbacks and ~535 ms per collection
+#            pinned at 64, against 8 and ~29 ms with the table grown
+#            (`make stw-slot-precision`). It grows here too now.
 #   Darwin   registers come from `thread_get_state` into the table and nowhere
 #            else. Past 64 threads they were **gone** — a reference held only in
 #            the 65th thread's registers was not a root, which is the v0.19.0
@@ -63,12 +67,9 @@ require "./bounded_child"
   {% raise "stw_capture_coverage requires -Dgc_none (gcry as process GC)" %}
 {% end %}
 
-{% unless flag?(:darwin) || flag?(:win32) %}
+{% unless flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
   puts "=== STW capture coverage ==="
-  puts "SKIP — this platform keeps a fixed 64-slot table on purpose. Its registers come"
-  puts "from a signal ucontext on the interrupted thread's own stack, which the unclamped"
-  puts "full-stack scan still walks, so a missing slot costs precision and not a root"
-  puts "(src/gcry/platform/linux_stw.cr, and the SA_ONSTACK-less handler there)."
+  puts "SKIP — no capture table on this platform."
   exit 0
 {% end %}
 
@@ -79,7 +80,7 @@ HEAP = Gcry.default_heap.not_nil!
 # platform guard still type-checks on the others — the mistake that broke two
 # Windows jobs when `tls_roots.cr` reached a Unix-only module.
 def fixed_slots? : Bool
-  {% if flag?(:darwin) || flag?(:win32) %}
+  {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
     Gcry::Platform.stw_fixed_slots?
   {% else %}
     false

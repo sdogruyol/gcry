@@ -139,6 +139,85 @@ describe Gcry::StwSlots::Table do
     Gcry::StwSlots.each_greg(id) { raise "the collector's table saw a test's capture" }
   end
 
+  it "keeps a slot's epoch and acknowledgement, and starts them clean on a reclaim" do
+    # Linux's suspend handler answers through these two, and it must not be
+    # able to inherit a predecessor's: a thread that read someone else's served
+    # epoch declines the signal meant for it, which is the hang the stop epoch
+    # was built to prevent.
+    table = Gcry::StwSlots::Table.new
+    table.configure(2)
+    id = 0xe001_u64
+    slot = table.slot_for(id)
+    table.served(slot).should eq(0_u64)
+    table.acked?(slot).should be_false
+
+    table.set_served(slot, 7_u64)
+    table.set_acked(slot, true)
+    table.served(slot).should eq(7_u64)
+    table.acked?(slot).should be_true
+
+    table.release_slot(slot)
+    # The id goes with the claim: a released slot that kept its id is one
+    # another thread can match on.
+    table.slot_of(id).should eq(-1)
+    reclaimed = table.slot_for(0xe002_u64)
+    reclaimed.should eq(slot)
+    table.served(reclaimed).should eq(0_u64)
+    table.acked?(reclaimed).should be_false
+  end
+
+  it "hands back the register row and how many words of it are real" do
+    # `with_thread_gregs` gives `StackMaps` the raw row and its length, and
+    # DWARF register locations are resolved by index — so a filtered view or a
+    # bare "has registers" flag is not enough.
+    table = Gcry::StwSlots::Table.new
+    table.configure(8)
+    id = 0xe003_u64
+    slot = table.slot_for(id)
+    table.greg_row(id).should be_nil
+
+    words = uninitialized UInt64[3]
+    words[0] = 0x11_u64
+    words[1] = 0_u64
+    words[2] = 0x33_u64
+    table.record_gregs(slot, words.to_unsafe, 3)
+
+    row = table.greg_row(id)
+    row.should_not be_nil
+    row = row.not_nil!
+    row[1].should eq(3)
+    row[0][0].should eq(0x11_u64)
+    row[0][1].should eq(0_u64)
+    row[0][2].should eq(0x33_u64)
+    # The zero in the middle keeps its index here and is skipped as a root.
+    offered = [] of UInt64
+    table.each_greg(id) { |w| offered << w }
+    offered.should eq([0x11_u64, 0x33_u64])
+  end
+
+  it "retires a stop into the retained copy and clears the live table" do
+    # `clear_thread_sps` runs at resume, and the release-time diagnostic needs
+    # what the mark phase read: a word pointing at a released block matters
+    # only if it sits in [recorded SP, bottom).
+    table = Gcry::StwSlots::Table.new
+    table.configure(2)
+    id = 0xe004_u64
+    slot = table.slot_for(id)
+    table.record_sp(slot, 0xbeef_u64)
+    table.sp(id).should eq(0xbeef_u64)
+    table.last_sp(id).should eq(0_u64)
+
+    table.retire_stop
+    table.sp(id).should eq(0_u64)
+    table.slot_of(id).should eq(-1)
+    table.last_sp(id).should eq(0xbeef_u64)
+
+    # And `forget` drops the retained copy too, which is what `fork` needs:
+    # the child inherits the parent's ids and they name nothing.
+    table.forget
+    table.last_sp(id).should eq(0_u64)
+  end
+
   # The property this table exists for — a reader walking the old block while a
   # grow replaces it — is not here, and deliberately. It needs threads reading
   # flat out, a block big enough that the allocator unmaps it instead of

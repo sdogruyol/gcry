@@ -1,102 +1,106 @@
-# Past the 64th thread, Linux never collects that thread's garbage again
+# What Linux's fixed 64-slot capture table cost
 
 2026-09-19, this host (20 cores, Linux 7.2.4, Crystal 1.21.0), `-Dgc_none`,
 headerless default.
 
-`ROADMAP.md` has said, in three places, that Linux keeps its STW capture table
-at a fixed `MAX_STW_SP_SLOTS = 64` deliberately, because a thread with no slot
-loses **precision and not roots**: its registers arrive in a signal `ucontext`
-that sits on its own stack, and the scan of that stack runs unclamped, so it
-still walks them. The stack-bounds gate's own note says what was left open —
-"whether a thread past the 64th ever held the only reference to something".
+`ROADMAP.md` said in three places that Linux keeps its STW capture table at a
+fixed `MAX_STW_SP_SLOTS = 64` deliberately, because a thread with no slot loses
+**precision and not roots**: its registers arrive in a signal `ucontext` that
+sits on its own stack, and the scan of that stack runs unclamped, so it still
+walks them. That is true, and it is now checked (`held` arm below). What nobody
+had measured was what the unclamped scan *costs*.
 
-It is the other direction, and it is not small.
+## Retraction first
 
-## The measurement
+The first version of this note claimed the cost was **retention**: 98 threads
+and 96 unreachable blocks left 34 still allocated after one, two and three
+collections, 62 threads left zero, and the survivors were the blocks the threads
+past the 64th had allocated. The numbers were real; the attribution was wrong.
 
-A probe with *N* raw threads; each allocates one 96-byte block, keeps only
-`addr ^ KEY` (so no conservative scan can find it through the harness), parks,
-and the main thread collects. Nothing anywhere holds the blocks, so every one of
-them should go.
+    GCRY_DISABLE_LAZY_SWEEP=1, 98 threads, 96 unreachable blocks   → 0 still allocated
+    default (lazy sweep),      98 threads, 96 unreachable blocks   → 34 still allocated
+    default (lazy sweep),      62 threads, 60 unreachable blocks   → 0 still allocated
 
-| threads on list | unreachable blocks | still allocated after 1 collection | after 2 | after 3 |
-|---|---|---|---|---|
-| 98 | 96 | **34** | 34 | 34 |
-| 62 | 60 | 0 | 0 | 0 |
+It is **lazy sweep**: one collection's eager pass had not reached those chunks
+yet, and `34 = 98 - 64` was a coincidence — which the follow-up made obvious,
+because after the capture table grew the count stayed 34 while the *identity* of
+the survivors moved (`first_still_allocated` 62 → 57, and 62..95 → a scattered
+set under `GCRY_ALLOC_BATCH=1`). A number that matches a hypothesis and an
+identity that does not is not a measurement of that hypothesis.
 
-The survivors are indices 62..95 — exactly the blocks allocated by the threads
-that came after the 64th entry on Crystal's list (the main thread and the
-monitor take the first two). `98 - 64 = 34`. Deterministic: 3 of 3 runs, same
-number, same indices.
+Commit `9d1b051` carried the wrong reading, and `make stw-slot-precision` was
+built around it. Both are corrected here rather than deleted: the harness
+measures the mechanism below, and the roadmap entry is rewritten in place.
 
-## The route, narrowed by knob rather than by reading
+## The cost, measured
 
-| arm | still allocated |
-|---|---|
-| default | 34 |
-| `GCRY_STW_PTHREAD_LAG=65536` (clamp the pthread-map path to the top 64 KiB) | 34 |
-| `GCRY_DISABLE_GREG_ROOTS=1` (no register roots at all) | 34 |
+The mechanism is real and it is the scan window. With no capture slot there is
+no recorded SP, so `fiber_stack_sp_scan_low` finds none for that thread's own
+stack — a Crystal thread's main fiber's stack **is** its OS stack — and
+`fiber_stack_scan_top` falls back to `guard`: the whole 8 MiB mapping, instead
+of the live frames above the SP.
 
-So it is neither the pthread-mapping scan nor the register scan. It is the
-**fiber** window:
+98 threads parked, 8 collections, same binary, the table pinned by
+`GCRY_STW_FIXED_SLOTS=1` in the second row:
 
-    fiber_stack_sp_scan_low(fiber, guard)
-      → asks Platform.thread_sp(thread) for the thread whose SP lies in this stack
-      → no capture slot ⇒ no SP ⇒ nil
-    fiber_stack_scan_top(...)
-      → fiber.running? && stw_multi ⇒ return guard
+| table | capacity | claims refused | stacks scanned from an SP | from the guard page | per collection |
+|---|---|---|---|---|---|
+| growing | 128 | 0 | 768 | 8 | **23–29 ms** |
+| pinned at 64 | 64 | 493–672 | 512 | 264 | **506–672 ms** |
 
-A Crystal thread's main fiber's stack **is** its OS stack, so the window for an
-uncovered thread's own stack collapses to `guard` — the whole 8 MiB, dead frames
-included. `GC.malloc`'s call chain is deeper than a parked `nanosleep` chain, so
-the plaintext pointer it left behind sits *below* the parked SP: a clamped scan
-skips it, the guard-page fallback walks it, and the block is a root for as long
-as that thread lives.
+Read off the counters: 8 guard-page fallbacks across 8 collections is one per
+collection — the collector's own running fiber — against 33 per collection when
+34 threads have no slot. The pause goes up about **twentyfold**, and it is the
+same work every collection for the life of the process.
 
-Two costs, then, and neither is "precision":
+Repeatability: the two counter pairs are identical across runs (768/8 and
+512/264 at 8 collections); only the millisecond figures move.
 
-* **Retention.** Garbage allocated by every thread past the 64th is never
-  reclaimed. The size is that thread's dead-frame history, not one block.
-* **Pause time.** Each uncovered thread is an 8 MiB conservative walk inside the
-  stopped world, every collection.
+The half that was already argued does hold, and the `held` arm checks it: with
+the table pinned, 96 blocks whose only pointer sits in the allocating thread's
+own stack all survive. An uncovered thread does not lose roots. It pays for them
+with the whole mapping.
 
-The half that was already argued does hold, and is now checked: a block an
-uncovered thread *holds* in its own stack survives (96 of 96). The uncovered
-thread does not lose roots — it gains them.
+## The fix
 
-## The gate
+Linux now uses the same growable table as Darwin and Windows
+(`Gcry::StwSlots`), sized from the thread count at collection entry —
+`reserve_stw_slots(listed + 8)` from `stop_world`, under `Thread.lock`, before
+the first suspend signal, so `malloc` never happens in a handler or inside the
+stopped world, and the table never frees its predecessor.
 
-`make stw-slot-precision`, three arms as bounded children, and it asserts the
-**mechanism** rather than the defect:
+Three copies of the same quartet are now one. Linux needed three things the
+shared table did not have, and they are in it rather than beside it:
 
-    covered    56 threads, all garbage: still_allocated must be 0
-    uncovered  96 threads, all garbage: still_allocated must equal listed - capacity
-    held       96 threads, each holding its block: all must survive
+* a **CAS claim**, because this platform's suspend handler keeps a fallback
+  claim for a thread that appeared after the reservation loop, and those run on
+  every thread at once. A plain store gave two threads one slot: latent while a
+  slot held only an SP and a register row, a hang once the stop epoch stamped a
+  served epoch under the loser's index.
+* a per-slot **served epoch** and **acknowledgement byte**, which is where they
+  already lived on Linux — the handler must not touch Crystal at all, because a
+  thread signalled between `Thread.threads.push(self)` and
+  `Thread.current = self` has no TLS and Crystal's accessor *creates* one,
+  allocating and taking the list mutex the collector holds.
+* a **register count** per slot rather than a flag, because
+  `with_thread_gregs` hands the raw row and its length to `StackMaps`, which
+  resolves DWARF register locations by index.
 
-    arm covered:   threads_on_list=58 slot_capacity=64 uncovered=0  still_allocated=0
-    arm uncovered: threads_on_list=98 slot_capacity=64 uncovered=34 still_allocated=34 first=62
-    arm held:      threads_on_list=98 slot_capacity=64 uncovered=34 still_allocated=96
+`GCRY_STW_FIXED_SLOTS=1` works here now too, which is what gives both gates on
+this platform a red direction: `make stw-capture-coverage` (80 threads, 0
+refused claims against 62 pinned) and `make stw-slot-precision` (the table above).
 
-That correlation is true of the fixed table today and of a grown table tomorrow,
-where both numbers are zero, so the gate needs no edit when the table changes —
-and it fails if retention ever appears under the cap (the mechanism is not the
-table), exceeds the uncovered count (something else retains), or if a held
-pointer stops being a root.
+## Method notes
 
-## What this changes about the plan
+Two mistakes worth keeping.
 
-Half 2 grew the Darwin and Windows tables and left Linux's fixed "for a measured
-reason". The reason was about soundness and it still stands; what it did not
-cover is this. Growing Linux's table needs what the other two did not: the
-claims come from the **suspend signal handler** on every thread at once, so the
-one-byte-per-slot claim needs a CAS, and the growth has to happen at stop entry
-before the first signal — `malloc` in the handler is not an option. The epoch
-bookkeeping (`@@stw_served`, `@@stw_acked`) and the diagnostics
-(`@@last_stop_ids/sps`) are per-slot too, so they grow with it.
+**The first version of the harness was written over `bench/stack_bounds_growth.cr`**
+— a tracked file, a different gate for a different table, built three days
+earlier — because the name matched what I was measuring. Restored from `HEAD`
+with no loss. `git log --oneline -1 -- <path>` before writing a bench file.
 
-## Method note
-
-The first version of this harness was written over `bench/stack_bounds_growth.cr`
-— a tracked file, a different gate for a different table, built on 2026-09-16 —
-because the name matched what I was measuring. Restored from `HEAD` with no loss.
-`git log --oneline -1 -- <path>` before writing a bench file, every time.
+**And the retention story survived three measurements before it died**: the
+count, the index range, and the knob A/Bs that ruled out the pthread-mapping
+path and the register scan all agreed with it. What killed it was the one arm I
+had not run — the collector's own sweep knob. A hypothesis that explains the
+number it was built from is not yet a measurement; the arm that can refute it is.

@@ -939,20 +939,19 @@ explicit-collect-barrier: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/explicit_collect_barrier.cr -o $(BIN)/explicit_collect_barrier --error-trace
 	$(BIN)/explicit_collect_barrier
 
-# What a thread with no STW capture slot costs. Linux keeps its table at a fixed
-# 64 on purpose, and the argument -- registers arrive in a ucontext on the
-# interrupted thread's own stack, which the unclamped scan still walks -- is
-# about roots. The cost was never measured, and it is not precision in the
-# abstract: an uncovered thread has no recorded SP, so the fiber window for its
-# stack (a Crystal thread's main fiber's stack *is* its OS stack) falls back to
-# the guard page and walks all 8 MiB including dead frames. The pointer left in
-# GC.malloc's dead frames is then a root forever. 98 threads: 34 unreachable
-# blocks still allocated after three collections, and they are exactly the ones
-# the threads past the 64th allocated; 62 threads: zero. Narrowed by knob:
-# GCRY_STW_PTHREAD_LAG and GCRY_DISABLE_GREG_ROOTS both change nothing.
-# This gate encodes the mechanism rather than the defect -- retention must
-# equal the number of threads the table could not cover -- so it stays green
-# and keeps discriminating when the table grows, with both numbers at zero.
+# What a thread with no STW capture slot costs. Linux kept its table at a fixed
+# 64 on the argument that the loss is precision and not roots -- the registers
+# arrive in a ucontext on the interrupted thread's own stack, which the
+# unclamped scan still walks, and the held arm here checks exactly that. The
+# cost is the unclamped scan: with no recorded SP, the fiber window for that
+# thread's own stack (a Crystal thread's main fiber's stack *is* its OS stack)
+# falls back to the guard page, so the scan covers the whole 8 MiB mapping. 98
+# threads over 8 collections: 264 guard-page fallbacks and ~535 ms per
+# collection pinned at 64, against 8 (the collector's own fiber) and ~29 ms
+# with the table grown. Retracted along the way: the first version of this gate
+# claimed the cost was retention, and that was lazy sweep -- see the FINDINGS.
+# Three arms as bounded children, with GCRY_STW_FIXED_SLOTS=1 as the arm that
+# must show the fallbacks and the refused claims.
 .PHONY: stw-slot-precision
 stw-slot-precision: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_slot_precision.cr -o $(BIN)/stw_slot_precision --error-trace

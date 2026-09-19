@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Linux's stop-the-world capture table grows too, and the fixed 64
+  cost about twentyfold on the pause.** A thread past the 64th slot had
+  no recorded SP; since a Crystal thread's main fiber's stack *is* its OS
+  stack, `fiber_stack_sp_scan_low` then found no SP for that stack and
+  the scan window fell back to the guard page — the whole 8 MiB mapping
+  instead of the frames above the SP, every collection. Measured at 98
+  threads over 8 collections: **264 guard-page fallbacks and ~535 ms per
+  collection** with the table pinned at 64, against **8 and ~29 ms** with
+  it grown (one fallback per collection is the collector's own fiber).
+  Roots were never lost there — the registers arrive in a signal
+  `ucontext` on the thread's own stack and the unclamped scan walks them,
+  which the gate's `held` arm checks — so this is pause time and scan
+  work, not soundness.
+  Linux now uses the same growable table as Darwin and Windows
+  (`Gcry::StwSlots`), sized from the thread count at collection entry —
+  under `Thread.lock`, before the first suspend signal, never freeing its
+  predecessor — so the three copies of that quartet are one. The shared
+  table gained what Linux needed: a **CAS claim**, because this
+  platform's suspend handler keeps a fallback claim and those run on
+  every thread at once (a plain store gave two threads one slot, which
+  the stop epoch turned into a hang); a per-slot **served epoch** and
+  **acknowledgement byte**, which is where they already lived, because
+  the handler must not touch Crystal at all; and a register **count**
+  rather than a flag, because `with_thread_gregs` hands the raw row and
+  its length to `StackMaps`, which resolves DWARF register locations by
+  index. `GCRY_STW_FIXED_SLOTS=1` works on Linux now and is the red arm
+  for `make stw-capture-coverage` (which no longer skips here) and for
+  the new `make stw-slot-precision`.
+
 ### Changed
 
 - **A fault outside gcry's span now names the mapping it happened in.**

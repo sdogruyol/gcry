@@ -173,6 +173,18 @@ module Gcry
             Platform.unstage_thread(thread.to_unsafe.unsafe_as(UInt64))
             Platform.snapshot_pthread_stack_bounds(thread.to_unsafe)
           end
+          # Size the capture table before the first suspend signal, and with
+          # slack for a thread that joins the list between the count and the
+          # loop below. Here rather than in the handler because this is where
+          # allocating is safe: `Thread.lock` is held, nothing is frozen yet,
+          # and the table never frees its predecessor, so a handler that has
+          # already loaded the old pointer keeps reading valid memory. Until
+          # 2026-09-19 this platform held it at 64 and paid for it in garbage
+          # it could never collect again
+          # (`bench/log/linux/2026-09-19-stw-slot-retention/FINDINGS.md`).
+          {% if flag?(:linux) %}
+            Platform.reserve_stw_slots(listed + 8)
+          {% end %}
           # The birth root is **not** released here any more.
           #
           # It was, on the reasoning that a thread on Crystal's list is rooted
@@ -486,14 +498,11 @@ module Gcry
       {% end %}
     end
 
-    # Capture slots the STW table could not hand out. All three platforms size
-    # the SP/register table at `MAX_STW_SP_SLOTS` = 64 because the claim mask
-    # is an `Atomic(UInt64)`, but they do not behave alike past it: on Linux
-    # and Darwin the thread is suspended and scanned with no SP clamp and no
-    # registers, so a reference live only in the 65th thread's registers is not
-    # a root — the `each_thread_greg` stub of v0.19.0 on a new axis. Windows
-    # refuses the stop instead, which makes this a structural zero there
-    # (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/`).
+    # Capture slots the STW table could not hand out. Expected to stay zero on
+    # all three platforms now that the table grows on all three; it moves only
+    # when the allocator refuses a bigger block, or when the table is pinned by
+    # `GCRY_STW_FIXED_SLOTS=1`, which is how the gates construct the pre-fix
+    # bound (`bench/log/linux/2026-09-17-darwin-64-thread-cliff/`).
     def stw_capture_no_slot : UInt64
       {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
         Platform.stw_capture_no_slot
@@ -502,18 +511,20 @@ module Gcry
       {% end %}
     end
 
-    # Slots the STW capture table currently holds. Darwin and Windows size it
-    # from the thread count at collection entry (`Gcry::StwSlots`); Linux keeps
-    # a fixed 64 on purpose — its no-slot case is conservative rather than
-    # unsound, because the registers it would lose sit in a `ucontext` on the
-    # interrupted thread's own stack, which the unclamped scan walks in full.
-    # Reported so a harness can tell a zero `stw_capture_no_slot` that means
-    # "every thread was covered" from one that means "the table never grew".
+    # Slots the STW capture table currently holds. All three platforms size it
+    # from the thread count at collection entry (`Gcry::StwSlots`), Linux since
+    # 2026-09-19: its no-slot case is not unsound — the registers it loses sit
+    # in a `ucontext` on the interrupted thread's own stack, which the unclamped
+    # scan walks — but the unclamped scan is the cost, because it walks that
+    # thread's dead frames too and retains whatever they point at, for as long
+    # as the thread lives. Reported so a harness can tell a zero
+    # `stw_capture_no_slot` that means "every thread was covered" from one that
+    # means "the table never grew".
     def stw_slot_capacity : Int32
-      {% if flag?(:darwin) || flag?(:win32) %}
+      {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
         Platform.stw_slot_capacity
       {% else %}
-        Platform::MAX_STW_SP_SLOTS
+        0
       {% end %}
     end
 

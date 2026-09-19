@@ -1039,7 +1039,7 @@ module GC
     # anything with 70 allocating threads — and it is the red arm for
     # `make explicit-collect-barrier` (src/gcry/collect.cr).
     heap.collect_skip_when_busy = true if env_flag_one?("GCRY_COLLECT_SKIP_WHEN_BUSY")
-    {% if flag?(:darwin) || flag?(:win32) %}
+    {% if flag?(:linux) || flag?(:darwin) || flag?(:win32) %}
       # Research: pin the STW capture table at the 64 slots that shipped. That
       # bound cost Darwin the 65th thread's registers — `thread_get_state` is
       # their only copy — and cost Windows the whole collection, which it

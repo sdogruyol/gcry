@@ -82,18 +82,29 @@ module Gcry
       UCONTEXT_FP_OFFSET = 0
     {% end %}
 
-    MAX_STW_SP_SLOTS = 64
-    MAX_STW_GREGS    = 32
+    MAX_STW_GREGS = 32
 
-    # Async-signal-safe SP + GP-register table (no Hash / Array growth).
-    @@stw_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
-    @@stw_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
-    @@stw_gregs = uninitialized StaticArray(StaticArray(UInt64, MAX_STW_GREGS), MAX_STW_SP_SLOTS)
-    @@stw_ngregs = uninitialized StaticArray(Int32, MAX_STW_SP_SLOTS)
-    # Bitmask of occupied slots. Must be `uninitialized` — a class-var
-    # `Atomic(...).new` goes through Crystal.once and SIGSEGVs in GC.init
-    # before Thread/Fiber exist. Atomic-in-StaticArray also fails (CAS on copy).
-    @@stw_claimed = uninitialized Atomic(UInt64)
+    # The SP + GP-register table lives in `Gcry::StwSlots`, shared with Darwin
+    # and Windows, and it **grows**. It used to be four statics and a 64-bit
+    # claim mask here, and the bound was that mask: a `UInt64` cannot address a
+    # 65th slot. Keeping it was argued as a trade — a thread with no slot loses
+    # its SP clamp, and its registers still arrive in a `ucontext` on its own
+    # stack, which the unclamped scan walks, so the loss was called precision
+    # rather than roots. That half is true. What it cost, measured 2026-09-19,
+    # was the other direction: with no recorded SP,
+    # `fiber_stack_sp_scan_low` finds none for that thread's own stack — a
+    # Crystal thread's main fiber's stack *is* its OS stack — so the window
+    # falls back to the guard page and walks all 8 MiB, dead frames included.
+    # 98 threads, 96 unreachable blocks: **34 still allocated after three
+    # collections**, exactly the ones the threads past the 64th allocated; 62
+    # threads, zero
+    # (`bench/log/linux/2026-09-19-stw-slot-retention/FINDINGS.md`).
+    #
+    # Growth is the collector's: `reserve_stw_slots` runs from `stop_world`
+    # under `Thread.lock` before the first signal, so `malloc` never happens in
+    # a handler or inside the stopped world, and the table never frees its
+    # predecessor — a handler that has already loaded the old pointer keeps
+    # reading valid memory (`make stw-slots-grow-race`).
     # Handler bookkeeping. A thread that reports no registers is either one the
     # handler never ran for, or one it ran for and could not record — and those
     # are different defects. Plain `UInt64`, set in `ensure_stw_table`: a class
@@ -143,20 +154,12 @@ module Gcry
     # It rides in the slot table this file already keys by `pthread_t`.
     @@stw_epoch = uninitialized Atomic(UInt64)
     @@stw_next_epoch = uninitialized UInt64
-    @@stw_served = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
     # Deliveries the epoch declined, split by which case they were. Both are
     # expected to be zero on a quiet run and non-zero the moment the collector
     # resends, which is what makes "the resend is safe" a reading rather than a
     # claim.
     @@stw_stale_signals = uninitialized UInt64
     @@stw_redundant_signals = uninitialized UInt64
-    # Slot claims that found the table full. `SUSPEND_NO_SLOT` has named this
-    # case since the stop epoch went in — "admitted, but with no slot to answer
-    # through" — and deliberately costs that thread its SP clamp rather than
-    # the stop. What it never did was count it, so `MAX_STW_SP_SLOTS` bounded
-    # the root scan with nothing to read. Reporting only: past 64 live threads
-    # this is supposed to move.
-    @@stw_capture_no_slot = uninitialized UInt64
     # `GCRY_STW_EPOCH=0`: honour every delivery, as this handler did before the
     # epoch. The red arm for `make stw-epoch` — with it the double-signal arm
     # wedges, which is the behaviour the resend would have shipped.
@@ -194,7 +197,6 @@ module Gcry
     # slot *before* it signals anyone, and the handler writes one plain bool.
     # `stw_no_tls_entries` counts the deliveries that found no Crystal TLS —
     # the window above, measured rather than argued.
-    @@stw_acked = uninitialized StaticArray(Bool, MAX_STW_SP_SLOTS)
     @@stw_no_tls_entries = uninitialized UInt64
     # Deliveries with neither a slot nor a `Thread` to answer through. The
     # thread declines to suspend rather than freezing with no way to say so:
@@ -220,7 +222,6 @@ module Gcry
 
     private def self.ensure_stw_table : Nil
       return if @@stw_booted
-      @@stw_claimed.set(0_u64)
       @@stw_handler_calls = 0_u64
       @@stw_sp_zero = 0_u64
       @@stw_records = 0_u64
@@ -231,19 +232,34 @@ module Gcry
       @@stw_epoch_enabled = true
       @@stw_no_tls_entries = 0_u64
       @@stw_ack_unavailable = 0_u64
-      @@stw_capture_no_slot = 0_u64
       @@stw_ack_via_thread = false
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        @@stw_served[i] = 0_u64
-        @@stw_acked[i] = false
-        # The ids too, and for the same reason `clear_thread_sps` clears them:
-        # a claim publishes its bit before its id, so a peer scanning the very
-        # first stop must not be able to match whatever was in this static.
-        clear_slot_id(i)
-        i += 1
-      end
       @@stw_booted = true
+      # Last: `configure` allocates the table, and every reader above is gated
+      # on `@@stw_booted`.
+      StwSlots.configure(MAX_STW_GREGS)
+    end
+
+    # Sized by the collector before it signals anyone. Never called from a
+    # handler: this is the only place the table allocates.
+    def self.reserve_stw_slots(want : Int32) : Bool
+      ensure_stw_table
+      StwSlots.reserve(want)
+    end
+
+    def self.stw_slot_capacity : Int32
+      StwSlots.capacity
+    end
+
+    # `GCRY_STW_FIXED_SLOTS=1`: pin the table at the 64 slots that shipped,
+    # which is the red arm for `make stw-slot-precision` and for
+    # `make stw-capture-coverage` on this platform.
+    def self.stw_fixed_slots=(value : Bool) : Bool
+      ensure_stw_table
+      StwSlots.pinned = value
+    end
+
+    def self.stw_fixed_slots? : Bool
+      StwSlots.pinned?
     end
 
     # The stop in progress, or 0. Read by the suspend handler on every
@@ -284,7 +300,7 @@ module Gcry
     end
 
     # Deliveries that could answer through neither route and declined to
-    # suspend. Only reachable with more than `MAX_STW_SP_SLOTS` threads *and*
+    # suspend. Only reachable with more threads than the table holds *and*
     # no TLS on the one that misses out.
     def self.stw_ack_unavailable : UInt64
       @@stw_booted ? @@stw_ack_unavailable : 0_u64
@@ -299,7 +315,7 @@ module Gcry
     end
 
     def self.stw_capture_no_slot : UInt64
-      @@stw_booted ? @@stw_capture_no_slot : 0_u64
+      @@stw_booted ? StwSlots.no_slot : 0_u64
     end
 
     # Called by `stop_world` **before** the first suspend signal. A signal sent
@@ -364,11 +380,11 @@ module Gcry
       # other way to say so.
       return SUSPEND_NO_SLOT if slot < 0
 
-      if @@stw_served[slot] == epoch
+      if StwSlots.served(slot) == epoch
         @@stw_redundant_signals &+= 1
         return SUSPEND_DECLINED
       end
-      @@stw_served[slot] = epoch
+      StwSlots.set_served(slot, epoch)
       slot
     end
 
@@ -383,9 +399,9 @@ module Gcry
       # A slot held over from the last stop keeps its SP and registers until
       # its owner is suspended again; clear them here so a thread that is
       # never suspended this stop cannot be scanned from a stale reading.
-      @@stw_sps[slot] = 0_u64
-      @@stw_ngregs[slot] = 0
-      @@stw_acked[slot] = false
+      StwSlots.record_sp(slot, 0_u64)
+      StwSlots.clear_gregs(slot)
+      StwSlots.set_acked(slot, false)
       slot
     end
 
@@ -393,22 +409,16 @@ module Gcry
     # stop — never from the spin.
     def self.suspend_slot_of(id : LibC::PthreadT) : Int32
       return -1 unless @@stw_booted
-      claimed = @@stw_claimed.get(:acquire)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        return i if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-        i += 1
-      end
-      -1
+      StwSlots.slot_of(id.unsafe_as(UInt64))
     end
 
     # One plain load. This is the collector's spin predicate.
     def self.suspend_acked?(slot : Int32) : Bool
-      slot >= 0 && @@stw_acked[slot]
+      slot >= 0 && StwSlots.acked?(slot)
     end
 
     def self.set_suspend_ack(slot : Int32, value : Bool) : Nil
-      @@stw_acked[slot] = value if slot >= 0
+      StwSlots.set_acked(slot, value) if slot >= 0
     end
 
     def self.note_no_tls_entry : Nil
@@ -447,113 +457,63 @@ module Gcry
       @@stw_records &+= 1 if @@stw_booted
       slot = slot_for(id)
       return -1 if slot < 0
-      @@stw_sps[slot] = sp
+      StwSlots.record_sp(slot, sp)
       copy_ucontext_gregs(slot, uctx)
       slot
     end
 
     # Find this thread's slot, claiming a free one if it has none.
+    #
+    # The claim is a CAS inside `StwSlots`, and the reason it has to be lives
+    # here: this is reachable from the **suspend handler**, on every thread at
+    # once, for a thread that appeared after `stop_world`'s reservation loop.
+    # A plain store gave two threads one slot — every thread signalled in the
+    # same stop read the mask before any of them wrote it, picked the same
+    # lowest free bit and all "claimed" it. It was latent while a slot carried
+    # only an SP and a register row (the loser's stack scanned from the
+    # winner's SP, a missed root nobody had a reason to look for) and the stop
+    # epoch turned it into a hang: the second thread found the first one's
+    # served stamp under its own index, declined the signal, and four mutator
+    # threads on a first collection left one running with the stop waiting on
+    # it forever (`/proc/<pid>/task`: three in `rt_sigsuspend`, one spinning).
+    #
+    # On the shipped path the collector has already reserved every slot before
+    # it signals anyone, so the claim runs once per thread on a quiet thread.
+    # The CAS stays because nothing structurally prevents a handler arriving
+    # first — and it never allocates, so a full table costs this thread its
+    # slot and not the stop.
     private def self.slot_for(id : LibC::PthreadT) : Int32
       ensure_stw_table
-      claimed = @@stw_claimed.get(:acquire)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        return i if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-        i += 1
-      end
-      # Claim a free slot via CAS on the bitmask.
-      #
-      # `Atomic#compare_and_set` returns `{old_value, success}` — a **tuple**,
-      # which is always truthy, so `if @@stw_claimed.compare_and_set(…)` took
-      # the success branch whether or not the exchange happened. Every thread
-      # signalled in the same stop reads `claimed` before any of them writes
-      # it, picks the same lowest free bit, and they all "claim" it: one slot,
-      # several threads, last id written wins.
-      #
-      # It had been latent because the slot only carried an SP and a register
-      # row — two threads sharing one meant the loser's stack was scanned from
-      # the winner's SP, a missed root nobody had a reason to look for. The
-      # stop epoch made it a hang instead: the second thread to arrive found
-      # the first one's served stamp under its own index and declined the
-      # signal, so four mutator threads on a first collection left one running
-      # and the stop waiting on it forever. Found by exactly that
-      # (`/proc/<pid>/task`: three in `rt_sigsuspend`, one spinning).
-      #
-      # The collector now reserves every slot before it signals anyone, so on
-      # the shipped path this loop runs once per thread on a quiet thread and
-      # never concurrently. The CAS stays because nothing structurally
-      # prevents a handler from arriving first.
-      loop do
-        claimed = @@stw_claimed.get(:acquire)
-        i = 0
-        while i < MAX_STW_SP_SLOTS
-          bit = 1_u64 << i
-          if (claimed & bit) == 0
-            _, won = @@stw_claimed.compare_and_set(claimed, claimed | bit)
-            if won
-              @@stw_ids[i] = id
-              @@stw_sps[i] = 0_u64
-              @@stw_ngregs[i] = 0
-              # A slot is reused by whichever thread claims it next, so the
-              # served stamp and the acknowledgement start clean here as well
-              # as in `clear_thread_sps` — otherwise a thread could inherit a
-              # predecessor's epoch and decline the signal meant for it, or
-              # inherit an acknowledgement it never gave.
-              @@stw_served[i] = 0_u64
-              @@stw_acked[i] = false
-              return i
-            end
-            break # retry outer loop with fresh claimed
-          end
-          i += 1
-        end
-        if i >= MAX_STW_SP_SLOTS # table full
-          @@stw_capture_no_slot &+= 1
-          return -1
-        end
-      end
+      StwSlots.slot_for(id.unsafe_as(UInt64))
     end
 
+    # Straight out of the `ucontext` into the slot's row: the words are already
+    # contiguous there, so this copies once and stores the count.
+    #
+    # The count, not a flag — `with_thread_gregs` hands the raw row and its
+    # length to `StackMaps`, which resolves DWARF register locations by index.
+    # A history worth keeping: an earlier version wrote through
+    # `@@stw_gregs[slot][i] = …`, and `StaticArray` is a value type, so the
+    # inner subscript returned a **copy** of the row, the assignment landed in
+    # the copy and the copy was discarded. The table stayed zero and the mark
+    # was handed 23 zero words per thread — a register was never a root on this
+    # path, so any value LLVM kept only in a callee-saved register was
+    # collected. Found by dumping every thread's captured registers at the
+    # moment a live object was about to be swept
+    # (`bench/log/linux/2026-08-26-debug-build-own-stack-root/`).
     private def self.copy_ucontext_gregs(slot : Int32, uctx : Void*) : Nil
-      @@stw_ngregs[slot] = 0
+      StwSlots.clear_gregs(slot)
       return if uctx.null? || UCONTEXT_NGREGS <= 0
       n = UCONTEXT_NGREGS
       n = MAX_STW_GREGS if n > MAX_STW_GREGS
-      # Through a pointer, not `@@stw_gregs[slot][i] = …`. `StaticArray` is a
-      # value type: the inner subscript returns a **copy** of the row, the
-      # assignment lands in that copy, and the copy is discarded. The table
-      # therefore stayed zero and `each_thread_greg` handed the mark 23 zero
-      # words per thread — a register was never a root on this path, so any
-      # value LLVM kept only in a callee-saved register was collected.
-      #
-      # Found by dumping the captured registers of every thread at the moment a
-      # live object was about to be swept: all zeros, for every thread that
-      # reported any (`bench/log/linux/2026-08-26-debug-build-own-stack-root/`).
-      # The SP was right the whole time because it is read straight from the
-      # `ucontext` by `sp_from_ucontext`, never through this table.
-      row = (@@stw_gregs.to_unsafe + slot).as(UInt64*)
-      i = 0
-      while i < n
-        row[i] = (uctx + UCONTEXT_GREGS_OFFSET + i * 8).as(UInt64*).value
-        i += 1
-      end
-      @@stw_ngregs[slot] = n
+      StwSlots.record_gregs(slot, (uctx + UCONTEXT_GREGS_OFFSET).as(UInt64*), n)
     end
 
     # Lookup SP captured at last suspend for *id*.
     def self.thread_sp(id : LibC::PthreadT) : Void*?
       return nil unless @@stw_enabled && @@stw_booted
-      claimed = @@stw_claimed.get(:acquire)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-          sp = @@stw_sps[i]
-          return nil if sp == 0
-          return Pointer(Void).new(sp)
-        end
-        i += 1
-      end
-      nil
+      sp = StwSlots.sp(id.unsafe_as(UInt64))
+      sp == 0 ? nil : Pointer(Void).new(sp)
     end
 
     # Yield each GP register word saved at suspend for *id* (may be empty).
@@ -580,91 +540,42 @@ module Gcry
       # clamp, so there was never a reason for them to disappear with it
       # (`bench/log/linux/2026-09-18-sp-clamp-knob/FINDINGS.md`).
       return unless @@stw_booted
-      claimed = @@stw_claimed.get(:acquire)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@stw_ids[i], id) != 0
-          n = @@stw_ngregs[i]
-          return if n <= 0
-          # StaticArray(StaticArray) is contiguous — cast slot to UInt64*.
-          yield (@@stw_gregs.to_unsafe + i).as(UInt64*), n
-          return
-        end
-        i += 1
-      end
+      row = StwSlots.greg_row(id.unsafe_as(UInt64))
+      return unless row
+      yield row[0], row[1]
     end
 
-    # Releasing a slot **must** clear its id, not just its claimed bit.
-    #
-    # The claim publishes the bit by CAS and writes the id afterwards, so a
-    # peer scanning for its own id can see a slot that is claimed and still
-    # carries whatever was in it before. Leaving last stop's ids there made
-    # that "whatever" the scanner's **own** handle from the previous stop: it
-    # matched, and two threads shared one slot. It cost a clobbered SP and
-    # register row before the epoch — the loser's stack scanned from the
-    # winner's SP — and a hang after it, because the winner's served stamp sat
-    # under the loser's index and declined the signal meant for it.
-    # Observed on `find_block_race --child alloc` with `GCRY_INDEX_AUDIT=1`:
-    # `declined … redundant 2`, one thread never acknowledging. With the ids
-    # zeroed a scanner sees either its own live slot or no match, and no
-    # `pthread_t` compares equal to a cleared one.
-    # Retained copy of the last stop's SP table, for the post-STW section.
-    #
+    # The retained copy of the last stop's SP table lives in the shared table
+    # too (`retire_stop` / `last_sp`), for the reason it existed here:
     # `clear_thread_sps` runs at resume, so by the time the after-world sweep
-    # releases anything there is no record of what the mark phase read. That is
-    # the one thing a release-time diagnostic needs: a word pointing at a
-    # released block matters only if it sits in `[recorded SP, bottom)`, and
-    # every other hit is dead stack space the collector is right to ignore
-    # (`GCRY_RELEASE_HOLDERS`). Copied rather than kept live, because the live
-    # table has to read zero before the next stop claims slots in it.
-    @@last_stop_ids = uninitialized StaticArray(LibC::PthreadT, MAX_STW_SP_SLOTS)
-    @@last_stop_sps = uninitialized StaticArray(UInt64, MAX_STW_SP_SLOTS)
-    @@last_stop_claimed = 0_u64
-
+    # releases anything there is no record of what the mark phase read. A word
+    # pointing at a released block matters only if it sits in `[recorded SP,
+    # bottom)`, and every other hit is dead stack space the collector is right
+    # to ignore (`GCRY_RELEASE_HOLDERS`).
+    #
     # The SP this thread was stopped at during the most recent stop, or nil.
     # Valid through the post-STW section; after that it describes a stop that
     # has since been superseded.
     def self.last_stop_sp(id : LibC::PthreadT) : Void*?
       return nil unless @@stw_booted
-      claimed = @@last_stop_claimed
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        if (claimed & (1_u64 << i)) != 0 && LibC.pthread_equal(@@last_stop_ids[i], id) != 0
-          sp = @@last_stop_sps[i]
-          return nil if sp == 0
-          return Pointer(Void).new(sp)
-        end
-        i += 1
-      end
-      nil
+      sp = StwSlots.last_sp(id.unsafe_as(UInt64))
+      sp == 0 ? nil : Pointer(Void).new(sp)
     end
 
+    # Releasing a slot **must** clear its id, not just its claimed bit, and
+    # `retire_stop` does both. The claim publishes the bit by CAS and writes the
+    # id afterwards, so a peer scanning for its own id can see a slot that is
+    # claimed and still carries whatever was in it before. Leaving last stop's
+    # ids there made that "whatever" the scanner's **own** handle from the
+    # previous stop: it matched, and two threads shared one slot. It cost a
+    # clobbered SP and register row before the epoch — the loser's stack scanned
+    # from the winner's SP — and a hang after it, because the winner's served
+    # stamp sat under the loser's index and declined the signal meant for it.
+    # Observed on `find_block_race --child alloc` with `GCRY_INDEX_AUDIT=1`:
+    # `declined … redundant 2`, one thread never acknowledging.
     def self.clear_thread_sps : Nil
       return unless @@stw_booted
-      @@last_stop_claimed = @@stw_claimed.get(:acquire)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        @@last_stop_ids[i] = @@stw_ids[i]
-        @@last_stop_sps[i] = @@stw_sps[i]
-        i += 1
-      end
-      @@stw_claimed.set(0_u64, :release)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        @@stw_sps[i] = 0
-        @@stw_ngregs[i] = 0
-        @@stw_served[i] = 0_u64
-        clear_slot_id(i)
-        i += 1
-      end
-    end
-
-    # `PthreadT` is an integer alias on glibc and `Void*` on musl, so neither
-    # `0` nor `.new` writes it portably. Same idiom as `Heap#@mark_pthreads`.
-    private def self.clear_slot_id(i : Int32) : Nil
-      zero = uninitialized LibC::PthreadT
-      pointerof(zero).clear
-      @@stw_ids[i] = zero
+      StwSlots.retire_stop
     end
 
     # Reset SP table after fork (child inherits parent bits / pthread ids).
@@ -675,16 +586,10 @@ module Gcry
     def self.reset_stw_after_fork : Nil
       @@stw_installed = false
       ensure_stw_table
-      @@stw_claimed.set(0_u64, :release)
       @@stw_epoch.set(0_u64, :release)
-      i = 0
-      while i < MAX_STW_SP_SLOTS
-        @@stw_sps[i] = 0
-        @@stw_ngregs[i] = 0
-        @@stw_served[i] = 0_u64
-        clear_slot_id(i)
-        i += 1
-      end
+      # The retained copy goes too: it holds the parent's `pthread_t` values,
+      # and in the child they name nothing.
+      StwSlots.forget
     end
 
     def self.sp_from_ucontext(uctx : Void*) : UInt64
