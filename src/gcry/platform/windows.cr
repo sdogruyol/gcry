@@ -129,7 +129,7 @@ module Gcry::Platform
 
   # A no-op: the name exists to be read back by the census, and there is none
   # on this platform to read it.
-  def self.name_own_thread : Nil
+  def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
   end
 
   def self.each_map_region(& : UInt64, UInt64, UInt8*, UInt8*, Int32 ->) : Bool

@@ -68,18 +68,6 @@ module Gcry
 
     # Entry for `gcry_mark_worker_main` (raw pthread).
     def self.run_mark_worker(arg : Void*) : Nil
-      # First thing this thread does, before it can appear in any report.
-      #
-      # These helpers are raw `pthread_create` threads on purpose, so they are
-      # outside Crystal's list by construction — and `GCRY_THREAD_CENSUS=1`
-      # read that as "thread(s) are outside Crystal's list … at least one is
-      # unrecorded", i.e. as the open unscanned-mutator defect. Measured
-      # 2026-09-19 on this tree: `GCRY_PARALLEL_MARK=4` and no other thread at
-      # all reports `gap=3`, which is exactly the three helpers. They touch
-      # mark state and block headers only — no Fiber, no managed allocation —
-      # so they can hold no mutator reference and are not that defect.
-      # The name is what lets the census say so instead of counting them.
-      Gcry::Platform.name_own_thread
       arg.as(Heap).mark_worker_loop
     end
 
@@ -117,6 +105,24 @@ module Gcry
           self.as(Void*),
         )
         break if rc != 0
+        # Name it here, on the handle, before this loop hands control back.
+        #
+        # These helpers are raw `pthread_create` threads on purpose, so they
+        # are outside Crystal's list by construction — and
+        # `GCRY_THREAD_CENSUS=1` read that as "thread(s) are outside Crystal's
+        # list … at least one is unrecorded", i.e. as the open
+        # unscanned-mutator defect. Measured 2026-09-19: `GCRY_PARALLEL_MARK=4`
+        # with no other thread reports `gap=3`, exactly the three helpers.
+        # They touch mark state and block headers only — no Fiber, no managed
+        # allocation — so they can hold no mutator reference.
+        #
+        # From the creating side rather than from the helper itself: a thread
+        # that names itself is unnamed for a moment, and the census caught one
+        # in that state on aarch64 (run `35448782491`, `2 are gcry's own …
+        # leaving 2 unexplained`, then `3 … leaving 1` one collection later).
+        # The creator is the collector, so it cannot be here and in a stop at
+        # once, which closes the window rather than narrowing it.
+        Gcry::Platform.name_own_thread(tid)
         @mark_pthreads[@mark_pthread_count] = tid
         @mark_pthread_count += 1
       end

@@ -236,6 +236,31 @@ The `--mark` row is the one worth reading twice: on a host that already has an
 unlisted thread, the walk subtracts exactly gcry's three and leaves the host's
 one standing. That is the discrimination the raw gap could never make.
 
+## And a third thing the runner caught: the helper named itself too late
+
+With the control arm fixed, the next aarch64 run (`35448782491`) failed on
+`--mark` instead, and the log says why on its own:
+
+    OS tasks: … 7743:gcry-mark 7744:gcry-mark 7745:thread_census_n
+              — 2 are gcry's own mark helpers, leaving 2 unexplained
+    OS tasks: … 7743:gcry-mark 7744:gcry-mark 7745:gcry-mark
+              — 3 are gcry's own mark helpers, leaving 1 unexplained
+
+The third helper existed and had not yet run `pthread_setname_np` **on
+itself**, so it still wore the `comm` it inherited from its creator — and for
+that one collection it was counted as a mutator gcry had never heard of. A
+thread that names itself is unnamed for a window, and the census lands in it.
+x86_64 never showed this: four cores and a slower spawn on the runner widen
+the window enough to be sampled.
+
+Naming moved to the **creating** side — `pthread_setname_np` takes a handle,
+and `ensure_mark_pthreads` has it the instant `pthread_create` returns. That
+is the same placement, for the same reason, as `thread_staging.cr`'s record.
+It closes the window rather than narrowing it: the creator is the collector,
+so it cannot be inside `ensure_mark_pthreads` and inside a stop at the same
+time. `--mark` now reads `unexplained_max=0` from the first collection
+instead of 2 then 1.
+
 ## What is still open
 
 **What the aarch64 task is.** Named, not identified. The tid is in the log and

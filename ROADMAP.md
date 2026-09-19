@@ -840,6 +840,20 @@ kept finding the rest.
       harness with a simulated pre-existing unlisted thread: `--mark` subtracts
       exactly gcry's three helpers and leaves the host's one standing, which is
       the discrimination the raw gap could never make.
+      **And a real race the runner caught next (run `35448782491`).** With the
+      control arm fixed, `--mark` failed, and the log explains itself: the
+      newest helper existed and had not yet run `pthread_setname_np` **on
+      itself**, so for one collection it still wore its creator's inherited
+      `comm` and was counted as a mutator gcry had never heard of — `2 are
+      gcry's own … leaving 2 unexplained`, then `3 … leaving 1`. A thread that
+      names itself is unnamed for a window. The naming moved to the creating
+      side, which has the handle the instant `pthread_create` returns — the
+      same placement, for the same reason, as `thread_staging.cr`'s record —
+      and that closes the window rather than narrowing it, because the creator
+      is the collector and cannot be in `ensure_mark_pthreads` and in a stop
+      at once. x86_64 never showed it; four cores and a slower spawn on the
+      runner widen the window enough to be sampled, which is the third thing
+      in this note that only CI could have said.
       Naming it is also not showing that anything is reachable only from it —
       that half of this item is untouched.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`

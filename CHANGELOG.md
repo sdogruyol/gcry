@@ -113,6 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline in both terms — against a simulated pre-existing unlisted
   thread, `--mark` subtracts exactly gcry's three helpers and leaves the
   host's one standing.
+  A helper naming itself was a third defect the runner caught: for one
+  collection the newest helper still wore the `comm` it inherited from
+  its creator and was counted as a mutator gcry had never heard of
+  (`2 are gcry's own … leaving 2 unexplained`, then `3 … leaving 1`).
+  `pthread_setname_np` takes a handle, so the naming moved to the
+  creating side — the same placement, for the same reason, as
+  `thread_staging.cr`'s record — which closes the window instead of
+  narrowing it: the creator is the collector and cannot be inside
+  `ensure_mark_pthreads` and inside a stop at once.
 
 ## [Unreleased]
 

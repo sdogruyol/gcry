@@ -128,7 +128,7 @@ module Gcry
     # A no-op rather than `pthread_setname_np`: the name exists to be read back
     # out of `/proc/self/task/<tid>/comm` by the census, and there is no census
     # on this platform to read it.
-    def self.name_own_thread : Nil
+    def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
     end
 
     # Same contract as `linux_address_space.cr`: false means "could not look",

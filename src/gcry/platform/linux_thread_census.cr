@@ -69,9 +69,23 @@ module Gcry
     # write it.
     OWN_THREAD_COMM = "gcry-mark"
 
-    # Called by a mark helper on itself, before it touches any mark state.
-    def self.name_own_thread : Nil
-      LibC.pthread_setname_np(LibC.pthread_self, OWN_THREAD_COMM.to_unsafe.as(LibC::Char*))
+    # Called by the **creating** thread on the handle `pthread_create` just
+    # returned, not by the helper on itself. The same placement, and the same
+    # reason, as `thread_staging.cr`: a thread naming itself leaves a window
+    # between `pthread_create` returning and the name landing, and the census
+    # lands in it. Measured on `test (aarch64 native)`, run `35448782491`, with
+    # the helper naming itself —
+    #
+    #   OS tasks: … 7743:gcry-mark 7744:gcry-mark 7745:thread_census_n
+    #             — 2 are gcry's own mark helpers, leaving 2 unexplained
+    #
+    # then `3 … leaving 1` on the next collection: the third helper existed,
+    # still wearing its creator's inherited `comm`, and was counted as a
+    # mutator gcry had never heard of. From the creating side the window
+    # cannot be observed, because the creator is the collector and it cannot
+    # be inside `ensure_mark_pthreads` and inside a stop at the same time.
+    def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
+      LibC.pthread_setname_np(handle, OWN_THREAD_COMM.to_unsafe.as(LibC::Char*))
     end
 
     def self.own_thread_comm?(name : UInt8*, len : Int32) : Bool
