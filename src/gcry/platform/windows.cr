@@ -129,7 +129,7 @@ module Gcry::Platform
 
   # A no-op: the name exists to be read back by the census, and there is none
   # on this platform to read it.
-  def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
+  def self.name_own_thread(handle : Gcry::OS::PthreadT, name : String) : Nil
   end
 
   # Same contract as the Linux pair; `os_thread_count` answers `nil` here, so

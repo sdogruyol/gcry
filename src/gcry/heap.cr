@@ -1656,7 +1656,7 @@ module Gcry
         nlen = RawOut.append(names.to_unsafe, nlen, " — ")
         nlen = RawOut.append_u64(names.to_unsafe, nlen, own.to_u64)
         nlen = RawOut.append(names.to_unsafe, nlen,
-          own == 1 ? " is gcry's own mark helper" : " are gcry's own mark helpers")
+          own == 1 ? " is gcry's own" : " are gcry's own")
         nlen = RawOut.append(names.to_unsafe, nlen, ", leaving ")
         nlen = RawOut.append_u64(names.to_unsafe, nlen, (unexplained > 0 ? unexplained : 0).to_u64)
         nlen = RawOut.append(names.to_unsafe, nlen, " unexplained\n")

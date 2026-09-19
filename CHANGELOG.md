@@ -189,6 +189,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Crystal's list, whose frames are **different from `SYSMON`'s** — so
   whatever it is, it is not a second monitor.
 
+- **And the thread aarch64 had been reporting for a month is gcry's own
+  STW watchdog.** Symbolizing its callers on `test (aarch64 native)`
+  resolved `0x1da884 -> watch_loop src/gcry/stw_watchdog.cr:223`, beside
+  `SYSMON`'s `sleep` at a different offset. `stw_watchdog.cr` says it in
+  its own first lines — "a raw `Gcry::OS.pthread_create` thread, not a
+  `Crystal::Thread`" — so it is outside Crystal's list by construction,
+  exactly like the parallel-mark helpers, and was counted as an
+  unscanned mutator for the same reason. The arch asymmetry is in the
+  workflow, not the collector: the aarch64 job sets
+  `GCRY_STW_WATCHDOG_MS` as step-level env for its whole step, so every
+  binary there has a watchdog, while x86_64 sets it on eight individual
+  steps and none of the census ones.
+  The watchdog is named `gcry-watch` now and the matcher takes any
+  `gcry-` prefix, so the next raw thread gcry adds is covered by naming
+  it rather than by editing the census. The test probe was renamed
+  `census-probe`: a stand-in for a mutator must not wear the prefix that
+  means "mine". Two arms run under `GCRY_STW_WATCHDOG_MS=10000` and
+  require the credit to be exactly one with the knob and zero without.
+  **What this retires**: the `thread_census_gaps` figure quoted for that
+  runner — one thread outside Crystal's list on every collection of
+  every binary, 40 of 40 runs — was measuring gcry's watchdog, not the
+  birth window it was read as. `thread_census_unexplained` now reads 0
+  there.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

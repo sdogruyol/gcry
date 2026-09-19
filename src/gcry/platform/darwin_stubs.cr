@@ -128,7 +128,7 @@ module Gcry
     # A no-op rather than `pthread_setname_np`: the name exists to be read back
     # out of `/proc/self/task/<tid>/comm` by the census, and there is no census
     # on this platform to read it.
-    def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
+    def self.name_own_thread(handle : Gcry::OS::PthreadT, name : String) : Nil
     end
 
     # No `/proc` here either. `thread_info` could answer the first and

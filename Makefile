@@ -1055,8 +1055,16 @@ thread-census-names: $(BIN)
 	GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname
 	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 $(BIN)/thread_census_names --mark
 	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
+	# The aarch64 shape, reproduced on purpose. That job sets
+	# `GCRY_STW_WATCHDOG_MS` for its whole step, and the watchdog is a raw
+	# pthread — which is the thread the census reported as unrecorded on every
+	# collection of every binary there, 11 times a run in 40 of 40 green runs,
+	# until it was named. `--control` requires the credit to be exactly one
+	# here and exactly zero without the knob, so an unnamed watchdog is red.
+	GCRY_THREAD_CENSUS=1 GCRY_STW_WATCHDOG_MS=10000 $(BIN)/thread_census_names --control
+	GCRY_THREAD_CENSUS=1 GCRY_STW_WATCHDOG_MS=10000 $(BIN)/thread_census_names
 	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
-	echo "$$out" | grep -q "OS tasks:.*gcry-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
+	echo "$$out" | grep -q "OS tasks:.*census-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
 	echo "ok — the thread Crystal never listed is named in the census line"
 	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
 	echo "$$out" | grep -qE "task [0-9]+:.* is parked in syscall [0-9]+, returning to 0x[0-9a-f]+ in /.*\+0x[0-9a-f]+" \

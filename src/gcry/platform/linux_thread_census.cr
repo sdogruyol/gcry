@@ -78,7 +78,19 @@ module Gcry
     # miscounted; nothing in Crystal does, and the alternative — a tid table the
     # helpers register into — has to be read from inside the stop while they
     # write it.
-    OWN_THREAD_COMM = "gcry-mark"
+    # Every raw thread gcry creates is named `gcry-<what>`, and the census
+    # subtracts anything wearing that prefix. Two of them exist: the
+    # parallel-mark helpers and the STW watchdog — and the watchdog is what
+    # `test (aarch64 native)` had been reporting as an unrecorded mutator on
+    # every collection of every binary since the census was written. That job
+    # sets `GCRY_STW_WATCHDOG_MS` on the whole step; x86_64 sets it per step
+    # and never on the census ones, which is the entire difference between the
+    # two runners.
+    #
+    # A prefix rather than a list: a gcry thread that forgets to be named is a
+    # false unrecorded-mutator report, and the next one should be covered by
+    # naming it rather than by editing this file too.
+    OWN_THREAD_PREFIX = "gcry-"
 
     # Called by the **creating** thread on the handle `pthread_create` just
     # returned, not by the helper on itself. The same placement, and the same
@@ -95,13 +107,13 @@ module Gcry
     # mutator gcry had never heard of. From the creating side the window
     # cannot be observed, because the creator is the collector and it cannot
     # be inside `ensure_mark_pthreads` and inside a stop at the same time.
-    def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
-      LibC.pthread_setname_np(handle, OWN_THREAD_COMM.to_unsafe.as(LibC::Char*))
+    def self.name_own_thread(handle : Gcry::OS::PthreadT, name : String) : Nil
+      LibC.pthread_setname_np(handle, name.to_unsafe.as(LibC::Char*))
     end
 
     def self.own_thread_comm?(name : UInt8*, len : Int32) : Bool
-      return false unless len == OWN_THREAD_COMM.bytesize
-      matches?(name, OWN_THREAD_COMM, len)
+      return false if len < OWN_THREAD_PREFIX.bytesize
+      matches?(name, OWN_THREAD_PREFIX, OWN_THREAD_PREFIX.bytesize)
     end
 
     # This thread's kernel id. Used to keep the report honest about itself:

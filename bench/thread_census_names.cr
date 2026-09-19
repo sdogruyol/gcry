@@ -26,9 +26,9 @@
 #   control      No extra thread. The census must find no gap and print no
 #                names — an instrument that reports on a quiet process is
 #                reporting noise.
-#   (default)    A **raw pthread**, named `gcry-probe`, that Crystal has never
+#   (default)    A **raw pthread**, named `census-probe`, that Crystal has never
 #                heard of. The gap must appear, the report must contain
-#                `gcry-probe`, and it must be left unexplained: this is a
+#                `census-probe`, and it must be left unexplained: this is a
 #                thread gcry cannot account for and must not pretend to.
 #   noname       RED twin. `GCRY_THREAD_CENSUS_NAMES=0` restores the count-only
 #                census. Same planted thread, so the gap is identical — and no
@@ -63,7 +63,9 @@ lib LibRawThread
   fun pthread_self : LibC::PthreadT
 end
 
-PROBE_COMM = "gcry-probe"
+# Deliberately **not** `gcry-`: that prefix is how the census recognises a
+# thread gcry created, and a probe standing in for a mutator must not wear it.
+PROBE_COMM = "census-probe"
 COLLECTS   = 6
 
 # The planted thread spins on this word and touches nothing else: it stands in
@@ -192,7 +194,15 @@ puts "census=#{heap.thread_census} names=#{heap.thread_census_names} " \
 COLLECTS.times { GC.collect }
 base_gap = heap.thread_census_gap_now
 base_unexplained = heap.thread_census_unexplained_now
+# What the walk already credits to gcry before this arm plants anything. On a
+# host with the STW watchdog armed that is 1 — the watchdog is a raw pthread
+# and gcry's own — and `test (aarch64 native)` arms it for its whole step, so
+# an arm that demanded zero here would be asserting an absolute about the
+# host all over again.
+base_attributed = base_gap - base_unexplained
+expected_own = Gcry::StwWatchdog.armed? ? 1 : 0
 puts "baseline (nothing planted): gap=#{base_gap} unexplained=#{base_unexplained} " \
+     "attributed=#{base_attributed} watchdog_armed=#{Gcry::StwWatchdog.armed?} " \
      "(peaks #{heap.thread_census_gap_max}/#{heap.thread_census_unexplained_max})"
 
 probe = control || mark_arm ? nil : start_probe_thread
@@ -267,13 +277,21 @@ else
 end
 
 if control
-  # No assertion that the host is quiet — it may not be, and that is a finding
-  # rather than a failure. What must hold is that nothing was subtracted when
-  # gcry created no helper: an `attributed` above zero here would mean the
-  # walk is crediting gcry with a thread it did not make.
-  failures << "#{attributed} task(s) were attributed to gcry with no mark helper " \
-              "running, so the subtraction is matching something else" if attributed != 0
-  puts "host baseline: #{gap_now} thread(s) outside Crystal's list, none of them gcry's"
+  # No assertion that the host is quiet — it may not be, and that is a
+  # finding rather than a failure. What must hold is that the threads
+  # credited to gcry are exactly the ones gcry has: with the watchdog armed
+  # that is one, with it off it is none. This is the arm that gates the
+  # watchdog's own name, and without it that thread reads as an unrecorded
+  # mutator, which is what `test (aarch64 native)` reported on every
+  # collection of every binary.
+  if attributed != expected_own
+    failures << "#{attributed} task(s) were attributed to gcry with no mark helper " \
+                "running and the watchdog #{Gcry::StwWatchdog.armed? ? "armed" : "off"}, " \
+                "where #{expected_own} is right — an unnamed gcry thread reads as an " \
+                "unrecorded mutator, and a miscredited one hides a real gap"
+  end
+  puts "host baseline: #{gap_now} thread(s) outside Crystal's list, " \
+       "#{attributed} of them gcry's own"
 elsif mark_arm
   failures << "no gap with #{heap.parallel_mark_workers} mark workers — the helper " \
               "pthreads did not outlive a collection, so this arm measured nothing" if gaps == 0
@@ -283,9 +301,15 @@ elsif mark_arm
     failures << "naming is off and #{own} task(s) were still counted as gcry's own" if own > 0
     failures << "naming is off yet #{attributed} task(s) were subtracted from the gap" if attributed != 0
   else
-    failures << "the walk found no gcry-mark helper, so the gap was not attributed" if own == 0
-    failures << "#{attributed} of the #{helpers} mark helper(s) were subtracted — the " \
-                "rest are still counted as unscanned mutators" if attributed != helpers
+    failures << "the walk found no gcry thread, so the gap was not attributed" if own == 0
+    # The helpers exist for the baseline phase too — this arm plants nothing
+    # in the second one — so the expectation is absolute in gcry's own terms:
+    # the watchdog, if this host arms one, plus every mark helper.
+    if attributed != expected_own + helpers
+      failures << "#{attributed} task(s) credited to gcry where #{expected_own + helpers} " \
+                  "is right (#{helpers} mark helper(s) + #{expected_own} watchdog) — the " \
+                  "rest are still counted as unscanned mutators"
+    end
   end
 else
   # The planted thread is **not** gcry's, so it must widen both the raw gap and
@@ -296,8 +320,10 @@ else
   failures << "the planted raw pthread did not widen the unexplained gap " \
               "(#{base_unexplained} -> #{unexplained_now}); it is a thread gcry " \
               "cannot account for and must not subtract" if unexplained_now <= base_unexplained
-  failures << "#{attributed} task(s) were attributed to gcry with parallel mark off" if attributed != 0
-  failures << "the walk counted #{own} gcry-mark helper(s) with parallel mark off" if own > 0
+  if attributed != base_attributed
+    failures << "the plant moved what is credited to gcry (#{base_attributed} -> " \
+                "#{attributed}); a probe named outside the `gcry-` prefix must not be"
+  end
 end
 
 if failures.empty?

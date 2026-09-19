@@ -122,7 +122,7 @@ module Gcry
         # leaving 2 unexplained`, then `3 … leaving 1` one collection later).
         # The creator is the collector, so it cannot be here and in a stop at
         # once, which closes the window rather than narrowing it.
-        Gcry::Platform.name_own_thread(tid)
+        Gcry::Platform.name_own_thread(tid, "gcry-mark")
         @mark_pthreads[@mark_pthread_count] = tid
         @mark_pthread_count += 1
       end

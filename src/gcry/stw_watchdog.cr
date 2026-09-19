@@ -189,6 +189,12 @@ module Gcry
         write_str("gcry: STW watchdog could not start (pthread_create failed)\n")
         return
       end
+      # Named for the thread census, and it is not cosmetic: this is a raw
+      # pthread, so it is outside Crystal's list by construction, and the
+      # census reported it as "at least one is unrecorded" on every collection
+      # of every binary on `test (aarch64 native)` — the job that arms this
+      # watchdog for its whole step. Named, it is subtracted instead.
+      Gcry::Platform.name_own_thread(tid, "gcry-watch")
       Gcry::OS.pthread_detach(tid)
     end
 

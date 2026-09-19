@@ -918,8 +918,36 @@ kept finding the rest.
       the second resolves. `pc_mapping` takes the lowest mapping of the same
       pathname now, checked against the harness's own independent parse of
       `/proc/self/maps`. Seven breaks, seven reds.
-      Naming, placing and walking it is still not showing that anything is
-      reachable only from it — that half of this item is untouched.
+      **Identified, and the aarch64 evidence for this item is retracted
+      (2026-09-19, run `35460211152`).** Symbolizing resolved the unlisted
+      task's frames to `watch_loop` at `src/gcry/stw_watchdog.cr:223` —
+      **gcry's own STW watchdog**, which that file's first lines already
+      describe as "a raw `Gcry::OS.pthread_create` thread, not a
+      `Crystal::Thread`". Outside Crystal's list by construction, exactly like
+      the parallel-mark helpers, and counted as an unscanned mutator for the
+      same reason. `SYSMON` resolved to `sleep` at a different offset in the
+      same runs, which is what said they were not the same thing.
+      The arch asymmetry is in the workflow, not the collector: `ci.yml:1470`
+      sets `GCRY_STW_WATCHDOG_MS` as **step-level** env for the whole aarch64
+      step, so every binary there runs with a watchdog; x86_64 sets the same
+      knob on eight individual steps and on none of the census ones. That is
+      the entire difference between "one thread outside Crystal's list in 40
+      of 40 runs" and "none".
+      **So the number this item has been quoting from CI measured gcry.** The
+      eleven gaps a run on that runner were the watchdog;
+      `thread_census_unexplained` reads **0** there now. The watchdog is named
+      `gcry-watch`, the matcher takes any `gcry-` prefix so the next raw
+      thread gcry adds is covered by naming it rather than by editing the
+      census, and the probe was renamed `census-probe` because a stand-in for
+      a mutator must not wear the prefix that means "mine". Two arms run under
+      `GCRY_STW_WATCHDOG_MS=10000` and require the credit to be exactly one
+      with the knob and zero without; removing the name is red.
+      **What survives**: the window argued from Crystal's source and measured
+      at about one collection in a thousand on a churn workload at 16 workers.
+      That is this item, and it is untouched. What is retired is the aarch64
+      CI evidence, which was never it.
+      Naming, placing and walking a thread is also still not showing that
+      anything is reachable only from it.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,

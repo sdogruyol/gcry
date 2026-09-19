@@ -428,15 +428,61 @@ nothing is the exact rot this gate family exists to catch. Locally it reads:
 
     0x1e69ab -> sleep crystal/system/unix/pthread.cr:111
 
+## Identified: it is gcry's own STW watchdog
+
+`make thread-census-symbolize` on `test (aarch64 native)` (run
+`35460211152`) resolved the unlisted task's frames:
+
+    task 7218 returns through: libc.so.6+0xc60bc libc.so.6+0x854b0
+                               bin/thread_census_names+0x1da884 …+0xab860
+
+    0x1da884 -> watch_loop  src/gcry/stw_watchdog.cr:223
+    0x1d7d78 -> sleep       crystal/system/unix/pthread.cr:111   ← SYSMON, for contrast
+    0x1c476c -> sleep       crystal/system/thread.cr:197         ← SYSMON
+
+**`watch_loop` is gcry's STW watchdog**, and `stw_watchdog.cr:11` says what
+it is in its own first lines: "a raw `Gcry::OS.pthread_create` thread, not a
+`Crystal::Thread`". Outside Crystal's list by construction, exactly like the
+parallel-mark helpers, and counted as an unscanned mutator for the same
+reason.
+
+And the arch asymmetry falls out of the workflow rather than the collector:
+`ci.yml:1470` sets `GCRY_STW_WATCHDOG_MS` as **step-level** env for the whole
+aarch64 step, so every binary it runs has a watchdog. x86_64 sets the same
+knob on eight individual steps and on none of the census ones. That is the
+entire difference between "one thread outside Crystal's list in 40 of 40
+runs" and "zero".
+
+So the answer to the question this note opened with: **the gap on aarch64 is
+gcry's own watchdog thread, not a mutator, and not the birth window.** It is
+named `gcry-watch` now, the matcher takes any `gcry-` prefix so the next such
+thread is covered by naming it rather than by editing the census, and the
+probe was renamed `census-probe` so a stand-in for a mutator cannot wear the
+prefix that means "mine".
+
+Reproduced locally by arming the watchdog, which is the aarch64 shape:
+
+    OS tasks: 493744:thread_census_n 493746:SYSMON 493747:gcry-watch
+              — 1 is gcry's own, leaving 0 unexplained
+
+Two arms gate it (`--control` and the plant arm, both under
+`GCRY_STW_WATCHDOG_MS=10000`), and they require the credit to be exactly one
+with the knob and exactly zero without. Removing the watchdog's name:
+
+    FAIL: 0 task(s) were attributed to gcry with no mark helper running and the
+          watchdog armed, where 1 is right
+
 ## What is still open
 
-**What creates the aarch64 task.** It is now named, placed, and its callers
-are printed with load-base offsets. The next aarch64 run carries the frames;
-`addr2line` against the job's own binary turns them into source lines.
+**Nothing about the aarch64 census gap.** It was gcry's own thread. The
+`thread_census_gaps` number that item quoted for that runner measured gcry's
+watchdog; `thread_census_unexplained` is the one to read from here.
 
-**Whether the gap matters.** Naming, placing and walking a thread is still
-not showing that anything is reachable only from it. That half of the item is
-untouched.
+**Whether the real window exists at all.** The unscanned-thread item is still
+open on its own terms — a birth window argued from Crystal's source and
+measured at "about one collection in a thousand" on a churn workload. What
+this note retires is the *aarch64 CI evidence* for it, which was never that
+window.
 
 ## A locale bug in a gate, found by running it
 
