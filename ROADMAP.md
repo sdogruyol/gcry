@@ -865,8 +865,37 @@ kept finding the rest.
       this whole item — **three of those four defects were in the gate, not
       the instrument**, none of them reproduced on x86_64, and the counters
       were right in every one of the runs that went red.
-      Naming it is also not showing that anything is reachable only from it —
-      that half of this item is untouched.
+      **From naming to placing (2026-09-19, later).** A `comm` says *that* a
+      raw pthread is there and cannot say what made it — aarch64's extra task
+      wears the process's own name, which is exactly what a raw pthread
+      inherits, so the name is the end of that trail. Both halves of the next
+      step already existed: `linux_proc_sp.cr` has read
+      `/proc/self/task/<tid>/syscall` since the parked-fiber audit and its
+      parser was stepping **over** the pc to reach the sp, and
+      `each_map_region` has named mappings since the SEGV region report.
+      Joined, the census now prints the syscall a task is parked in, the pc it
+      returns to and the mapping holding it — `task 373993:SYSMON is parked in
+      syscall 230, returning to 0x728a4a4ac802 in …/libc.so.6+0x84802`.
+      Allocation-free, and only for a gap shape the process has not reported
+      before, to a ceiling of 4. The collector excludes itself by tid: reading
+      its own syscall file happens *inside* `read`, so it reported itself as
+      `parked in syscall 0`, which was the report describing its own question.
+      Three more arms (a named mapping, the collector identifying itself, the
+      twin placing nothing) and four breaks, all red.
+      **A fifth defect, and the same shape as the first.** Break-testing threw
+      `did not widen the gap (1 -> 1)` on a change that touched only a
+      reporting path. The arms compared `thread_census_gap_max` across the two
+      phases, and a maximum is set by anything that was *ever* there: a thread
+      alive during the baseline and gone by the planted phase leaves both
+      maxima equal, so the plant reads as having changed nothing. Asserting on
+      a maximum across phases is the same error as asserting an absolute about
+      the host, one level down. `thread_census_gap_now` / `_unexplained_now` —
+      the last sample, updated on every check including the ones with no gap —
+      replaced the maxima everywhere, and `attributed` is now
+      `gap_now - unexplained_now`. 12/12 and 15/15 stable on the two arms that
+      flaked.
+      Naming and placing it is still not showing that anything is reachable
+      only from it — that half of this item is untouched.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
 - [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,

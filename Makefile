@@ -1058,6 +1058,17 @@ thread-census-names: $(BIN)
 	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
 	echo "$$out" | grep -q "OS tasks:.*gcry-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
 	echo "ok — the thread Crystal never listed is named in the census line"
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	echo "$$out" | grep -qE "task [0-9]+:.* is parked in syscall [0-9]+, returning to 0x[0-9a-f]+ in /.*\+0x[0-9a-f]+" \
+	  || { echo "FAIL: no task was located — the syscall site or the mapping lookup produced nothing"; echo "$$out" | grep "task " | head -4; exit 1; }; \
+	echo "ok — a task outside Crystal's list is placed in a named mapping, not just named"
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	echo "$$out" | grep -q "is the collector, stopped here to ask" \
+	  || { echo "FAIL: the collector did not exclude itself, so it is reporting the read it is making"; exit 1; }; \
+	echo "ok — the collector names itself instead of reporting its own /proc read"
+	@out=$$(GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname 2>&1); \
+	echo "$$out" | grep -q "gcry: thread census — task " && { echo "FAIL: the twin located tasks with the walk off"; exit 1; }; \
+	echo "ok — with the walk off nothing is located either"
 	@out=$$(GCRY_THREAD_CENSUS=1 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --noname 2>&1); \
 	echo "$$out" | grep -q "OS tasks:" && { echo "FAIL: the twin still printed names, so the arm above proves nothing"; exit 1; }; \
 	echo "ok — with the walk off the same gap is counted and unnamed"

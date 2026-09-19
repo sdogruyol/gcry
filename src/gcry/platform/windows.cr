@@ -132,6 +132,20 @@ module Gcry::Platform
   def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
   end
 
+  # Same contract as the Linux pair; `os_thread_count` answers `nil` here, so
+  # the census never reaches the walk that would call them.
+  def self.current_tid : Int32
+    0
+  end
+
+  def self.thread_syscall_site(tid : Int32) : {Int64, UInt64}?
+    nil
+  end
+
+  def self.pc_mapping(pc : UInt64, & : UInt8*, Int32, UInt64 ->) : Bool
+    false
+  end
+
   def self.each_map_region(& : UInt64, UInt64, UInt8*, UInt8*, Int32 ->) : Bool
     false
   end

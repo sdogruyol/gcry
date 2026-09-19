@@ -117,6 +117,73 @@ module Gcry
       parse_syscall_sp(buf.to_unsafe, n.to_i32)
     end
 
+    # The syscall a thread is parked in and the user pc it will return to —
+    # the **first** and **last** fields of the same file. `nil` for a thread
+    # that is on-CPU ("running"), which has neither.
+    #
+    # This is the other half of the thread census's question. A task's `comm`
+    # says a raw pthread is there; the pc says *where* it is sitting, and the
+    # address-space walk turns that into a library and an offset. The census
+    # named a thread on aarch64 that nothing in gcry or Crystal creates, and a
+    # name alone cannot go further.
+    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64}?
+      path = uninitialized UInt8[64]
+      len = build_syscall_path(path.to_unsafe, tid)
+      return nil if len == 0
+
+      fd = LibC.open(path.to_unsafe.as(LibC::Char*), 0) # O_RDONLY
+      return nil if fd < 0
+      buf = uninitialized UInt8[256]
+      n = LibC.read(fd, buf.to_unsafe.as(Void*), 255.to_u64)
+      LibC.close(fd)
+      return nil if n <= 0
+
+      nr = parse_syscall_nr(buf.to_unsafe, n.to_i32)
+      return nil unless nr
+      pc = parse_syscall_pc(buf.to_unsafe, n.to_i32)
+      return nil unless pc
+      {nr, pc}
+    end
+
+    # Leading decimal field. `-1` is a thread in the kernel but not in a
+    # syscall, which is a real answer; "running" has no digits and is nil.
+    private def self.parse_syscall_nr(buf : UInt8*, len : Int32) : Int64?
+      i = 0
+      while i < len && buf[i] == ' '.ord
+        i += 1
+      end
+      negative = false
+      if i < len && buf[i] == '-'.ord
+        negative = true
+        i += 1
+      end
+      digits = 0
+      value = 0_i64
+      while i < len && buf[i] >= '0'.ord && buf[i] <= '9'.ord
+        value = value * 10 + (buf[i] - '0'.ord).to_i64
+        digits += 1
+        i += 1
+      end
+      return nil if digits == 0
+      negative ? -value : value
+    end
+
+    # Final whitespace-separated field, parsed as 0x-prefixed hex.
+    private def self.parse_syscall_pc(buf : UInt8*, len : Int32) : UInt64?
+      last = len - 1
+      while last >= 0 && (buf[last] == '\n'.ord || buf[last] == ' '.ord)
+        last -= 1
+      end
+      return nil if last < 0
+      start = last
+      while start >= 0 && buf[start] != ' '.ord
+        start -= 1
+      end
+      start += 1
+      return nil if start > last
+      parse_hex(buf, start, last + 1)
+    end
+
     # "/proc/self/task/<tid>/syscall\0" without String#% or interpolation.
     private def self.build_syscall_path(dst : UInt8*, tid : Int32) : Int32
       prefix = "/proc/self/task/"

@@ -1540,16 +1540,32 @@ module Gcry
     # Measured while breaking this gate on purpose — the plant arm went green
     # with the walk stubbed out until this counter existed.
     getter thread_census_unwalked : UInt64 = 0_u64
-    # Printing budget, and the last gap printed. A flat "first N gaps" cap is
-    # wrong on a host that gaps on *every* collection: aarch64 has one thread
-    # outside Crystal's list from the start, so the budget was spent on that
-    # before anything interesting happened and a planted thread was never
-    # printed at all (run `35449252433`, "the census did not name the planted
-    # raw pthread", with the counters correct in the same run). A changed gap
-    # is news; a repeat of the same one is noise.
+    # Printing budget. A flat "first N gaps" cap is wrong on a host that gaps
+    # on *every* collection: aarch64 has one thread outside Crystal's list
+    # from the start, so the budget was spent on that before anything
+    # interesting happened and a planted thread was never printed at all
+    # (run `35449252433`, "the census did not name the planted raw pthread",
+    # with the counters correct in the same run). A changed gap is news; a
+    # repeat of the same one is noise.
     CENSUS_REPORT_LIMIT = 32
-    @thread_census_last_gap : Int32 = -1
     @thread_census_reports : Int32 = 0
+    # Locating is the expensive half — one `/proc/self/task/<tid>/syscall` read
+    # per task plus a `/proc/self/maps` walk to name the pc — so it runs only
+    # when the gap is a shape this process has not reported yet, a few times.
+    # Naming a task said *that* an unlisted thread exists; this says where it
+    # is sitting, which is the question a name leaves open.
+    CENSUS_LOCATE_LIMIT = 4
+    @thread_census_locates : Int32 = 0
+    # The **last** gap observed, and the last unexplained one, rather than the
+    # largest. A gate that plants a thread and compares maxima across two
+    # phases can be fooled by a transient: a thread that exists during the
+    # baseline and is gone by the planted phase leaves both maxima at 1, and
+    # the plant reads as having changed nothing. Seen once while break-testing
+    # this gate, `did not widen the gap (1 -> 1)` on a tree whose only change
+    # was in a reporting path. A last sample cannot be inflated by something
+    # that has already gone.
+    getter thread_census_gap_now : Int32 = 0
+    getter thread_census_unexplained_now : Int32 = 0
 
     private def census_threads(listed : Int32) : Nil
       @thread_census_checks &+= 1
@@ -1559,9 +1575,18 @@ module Gcry
         return
       end
       gap = os - listed
+      gap = 0 if gap < 0
       staged = Platform.staged_count
       @thread_census_staged_covered &+= 1 if gap > 0 && staged >= gap
-      return if gap <= 0
+      # Updated on every check, including the ones with no gap: a host that
+      # stops gapping has said something, and a reader that only sees the
+      # maxima cannot tell that from a host that never did.
+      shape_changed = gap != @thread_census_gap_now
+      @thread_census_gap_now = gap
+      if gap == 0
+        @thread_census_unexplained_now = 0
+        return
+      end
       @thread_census_gaps &+= 1
       @thread_census_gap_max = gap if gap > @thread_census_gap_max
       # The first few unconditionally — so a short run says something even if
@@ -1569,15 +1594,16 @@ module Gcry
       # bounded by `CENSUS_REPORT_LIMIT`. The walk itself keeps running: the
       # counters below are what a gate reads, and capping them would make a
       # long run look cleaner than a short one.
-      shape_changed = gap != @thread_census_last_gap
-      @thread_census_last_gap = gap
       report = (@thread_census_gaps <= 4 || shape_changed) &&
                @thread_census_reports < CENSUS_REPORT_LIMIT
       @thread_census_reports &+= 1 if report
+      name_them = @thread_census_names
+      locate = report && name_them && shape_changed &&
+               @thread_census_locates < CENSUS_LOCATE_LIMIT
+      @thread_census_locates &+= 1 if locate
 
       names = uninitialized UInt8[RawOut::LIMIT]
       nlen = 0
-      name_them = @thread_census_names
       nlen = RawOut.append(names.to_unsafe, nlen, "gcry: thread census — OS tasks:") if report && name_them
       own = 0
       walked = false
@@ -1592,13 +1618,16 @@ module Gcry
             nlen = RawOut.append(names.to_unsafe, nlen, ":")
             nlen = RawOut.append_bytes(names.to_unsafe, nlen, comm, comm_len)
           end
+          report_task_site(tid, comm, comm_len) if locate
         end
       end
       @thread_census_own &+= own.to_u64
       @thread_census_unwalked &+= 1 if name_them && !walked
       unexplained = gap - own
+      unexplained = 0 if unexplained < 0
       @thread_census_unexplained &+= 1 if unexplained > 0
       @thread_census_unexplained_max = unexplained if unexplained > @thread_census_unexplained_max
+      @thread_census_unexplained_now = unexplained
       return unless report
 
       buf = uninitialized UInt8[512]
@@ -1639,6 +1668,66 @@ module Gcry
           "gcry: thread census — /proc/self/task could not be walked, so the gap is unnamed\n")
       end
       RawOut.flush(names.to_unsafe, nlen)
+    end
+
+    # Where one task is sitting: the syscall it is parked in and the user pc
+    # it will return to, with that pc resolved against `/proc/self/maps`.
+    #
+    # The census can say a task exists and what it calls itself. On aarch64
+    # that produced a thread wearing the process's own `comm` — which is what
+    # a raw pthread inherits — and a name is where the trail stopped. A pc in
+    # a named mapping is the next fact: it says which library created the
+    # frame the thread is parked in, and gcry creates raw threads in exactly
+    # one place.
+    private def report_task_site(tid : Int32, comm : UInt8*, comm_len : Int32) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      p = buf.to_unsafe
+      len = RawOut.append(p, 0, "gcry: thread census — task ")
+      len = RawOut.append_u64(p, len, tid.to_u64)
+      len = RawOut.append(p, len, ":")
+      len = RawOut.append_bytes(p, len, comm, comm_len)
+
+      # The collector is the thread doing the asking, and asking means it is
+      # inside `read` on the very file it is reading — it came out as "parked
+      # in syscall 0", which is this report describing itself. Say so instead.
+      if tid == Platform.current_tid
+        len = RawOut.append(p, len, " is the collector, stopped here to ask\n")
+        RawOut.flush(p, len)
+        return
+      end
+
+      site = Platform.thread_syscall_site(tid)
+      unless site
+        # On-CPU: a spinning thread has no syscall frame. Not an error.
+        len = RawOut.append(p, len, " is on-CPU, so it has no syscall frame to report\n")
+        RawOut.flush(p, len)
+        return
+      end
+
+      nr, pc = site
+      if nr < 0
+        len = RawOut.append(p, len, " is in the kernel outside a syscall")
+      else
+        len = RawOut.append(p, len, " is parked in syscall ")
+        len = RawOut.append_u64(p, len, nr.to_u64)
+      end
+      len = RawOut.append(p, len, ", returning to 0x")
+      len = RawOut.append_hex(p, len, pc)
+      held = Platform.pc_mapping(pc) do |name, name_len, offset|
+        if name_len > 0
+          len = RawOut.append(p, len, " in ")
+          len = RawOut.append_bytes(p, len, name, name_len)
+        else
+          len = RawOut.append(p, len, " in an anonymous mapping")
+        end
+        len = RawOut.append(p, len, "+0x")
+        len = RawOut.append_hex(p, len, offset)
+      end
+      # "No mapping holds it" and "an anonymous one holds it" are different
+      # answers, and the second is not the absence of the first.
+      len = RawOut.append(p, len, " — no mapping holds that pc") unless held
+      len = RawOut.append(p, len, "\n")
+      RawOut.flush(p, len)
     end
 
     # Opt-in on top of `@poison_freed`: it makes every freed block's payload

@@ -130,6 +130,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   different gap is news. Three of the four were in the gate rather than
   the instrument; the counters were right in every one of those runs.
 
+- **And it places them, not only names them.** A `comm` says a raw
+  pthread is there; on aarch64 the extra task wears the process's own
+  name, which is what a raw pthread inherits, so the name is where that
+  trail ends. The census now also reports the syscall each task is
+  parked in, the user pc it returns to, and the mapping that holds that
+  pc — `task 373993:SYSMON is parked in syscall 230, returning to
+  0x728a4a4ac802 in /usr/lib/x86_64-linux-gnu/libc.so.6+0x84802`. Both
+  halves already existed: `linux_proc_sp.cr` has read
+  `/proc/self/task/<tid>/syscall` since the parked-fiber audit and its
+  parser was stepping *over* the pc to reach the sp, and
+  `each_map_region` has named mappings since the SEGV region report.
+  Allocation-free, and only when the gap is a shape the process has not
+  reported before, to a ceiling of 4.
+  The collector excludes itself: reading its own syscall file happens
+  *inside* `read`, so it reported itself as `parked in syscall 0` — the
+  report describing its own question.
+  Three more gate arms (a task must land in a **named** mapping, the
+  collector must identify itself, the twin must place nothing) and four
+  breaks, all red. A fifth defect fell out of break-testing: the arms
+  compared `gap_max` across the two phases, and a maximum is set by
+  anything that was *ever* there — a thread alive during the baseline
+  and gone afterwards leaves both maxima equal and the plant reads as
+  having changed nothing (`did not widen the gap (1 -> 1)`, on a change
+  that touched only a reporting path). `thread_census_gap_now` /
+  `_unexplained_now`, the last sample rather than the largest, replaced
+  the maxima in every assertion.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

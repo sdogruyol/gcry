@@ -131,6 +131,21 @@ module Gcry
     def self.name_own_thread(handle : Gcry::OS::PthreadT) : Nil
     end
 
+    # No `/proc` here either. `thread_info` could answer the first and
+    # `dladdr` the second; `os_thread_count` returns `nil`, so the census
+    # never reaches them and an unmeasured implementation would be a claim.
+    def self.current_tid : Int32
+      0
+    end
+
+    def self.thread_syscall_site(tid : Int32) : {Int64, UInt64}?
+      nil
+    end
+
+    def self.pc_mapping(pc : UInt64, & : UInt8*, Int32, UInt64 ->) : Bool
+      false
+    end
+
     # Same contract as `linux_address_space.cr`: false means "could not look",
     # which is not the same answer as "walked everything and found nothing".
     # `mach_vm_region` could enumerate this, but nothing has needed it yet and

@@ -290,14 +290,68 @@ been found here, and all three were in the *gate*, not the instrument: an
 absolute assertion about the host, a self-naming race, and a print budget.
 The instrument's own numbers were right in every one of those runs.
 
+## From naming to placing: where the task is sitting
+
+A `comm` says *that* a raw pthread is there. It cannot say what made it — on
+aarch64 the extra task wears the process's own name, which is exactly what a
+raw pthread inherits, so the name is the end of that trail.
+
+Two things the collector already owns close the next step. `linux_proc_sp.cr`
+has read `/proc/self/task/<tid>/syscall` since the parked-fiber audit, and its
+parser walks *back over the pc* to reach the sp — the field was being stepped
+over, not missing. `each_map_region` has named mappings since the SEGV region
+report. Joined: the syscall a task is parked in, the user pc it returns to,
+and the mapping that holds that pc.
+
+    task 373993:SYSMON is parked in syscall 230, returning to 0x728a4a4ac802
+      in /usr/lib/x86_64-linux-gnu/libc.so.6+0x84802
+    task 373994:gcry-probe is on-CPU, so it has no syscall frame to report
+    task 373992:thread_census_n is the collector, stopped here to ask
+
+That third line is a correction the first draft needed. The collector reads
+`/proc/self/task/<own tid>/syscall` **while inside `read`**, so it reported
+itself as `parked in syscall 0` — the report describing its own question.
+`Platform.current_tid` now excludes it by name rather than by accident.
+
+Cost: one `/proc/self/task/<tid>/syscall` read per task plus one
+`/proc/self/maps` walk, and only when the gap is a shape this process has not
+reported before, to a ceiling of 4. Allocation-free; the maps walk is the same
+one the SEGV reporter makes with the world stopped.
+
+Gated by three more arms: a task must be placed in a **named** mapping (not
+merely named), the collector must identify itself, and the twin with
+`GCRY_THREAD_CENSUS_NAMES=0` must place nothing. Four breaks, four reds:
+
+    helper naming removed  → the walk found no gcry-mark helper …
+    task walk dead         → /proc/self/task could not be walked on 6 of 6 gaps
+    mapping lookup dead    → no task was located …
+    syscall site dead      → no task was located …
+
+## A fifth: comparing maxima across two phases is not a delta
+
+Break-testing the above produced `did not widen the gap (1 -> 1)` on a change
+that touched only a reporting path — a false red. The arms compared
+`thread_census_gap_max` before and after planting, and a maximum is set by
+anything that has *ever* been there: a thread alive during the baseline and
+gone by the planted phase leaves both maxima at 1, so the plant reads as
+having changed nothing. It is the same class of error as asserting `gaps == 0`
+about a host, one level down.
+
+`thread_census_gap_now` / `_unexplained_now` — the **last** sample, updated on
+every check including the ones with no gap — replaced the maxima in every
+assertion, and `attributed` is now `gap_now - unexplained_now`. A transient
+cannot inflate a last sample. The maxima are still printed; nothing asserts on
+them. 12 of 12 stable on the plant arm, 15 of 15 on its twin, and the
+simulated-baseline table above reproduces unchanged.
+
 ## What is still open
 
-**What the aarch64 task is.** Named, not identified. The tid is in the log and
-the `comm` is the program's own, so the next step is what created it — nothing
-in gcry did, and nothing in the harness did.
+**What creates the aarch64 task.** It is now named and placeable; the next
+run prints its syscall and the mapping its pc lands in, which is the first
+fact about it that is not a count or a name.
 
-**Whether the gap matters.** Naming a thread is not showing that anything is
-reachable only from it. That half of the item is untouched.
+**Whether the gap matters.** Naming and placing a thread is not showing that
+anything is reachable only from it. That half of the item is untouched.
 
 ## A locale bug in a gate, found by running it
 

@@ -93,6 +93,32 @@ module Gcry
       matches?(name, OWN_THREAD_COMM, len)
     end
 
+    # This thread's kernel id. Used to keep the report honest about itself:
+    # a thread reading `/proc/self/task/<own tid>/syscall` is inside `read`
+    # while it reads, so it reports itself parked in the very call that is
+    # asking. Measured — the collector came out as "parked in syscall 0".
+    def self.current_tid : Int32
+      LibC.gettid
+    end
+
+    # The mapping a program counter lands in, as `name, name_len, offset` from
+    # that mapping's base. Returns false when no mapping holds it, which is a
+    # different answer from an anonymous one (`name_len == 0`) and is reported
+    # as such — the rule `segv_region_report` already follows.
+    #
+    # The same `/proc/self/maps` walk the SEGV reporter uses, so a pc here is
+    # named the way a faulting address is.
+    def self.pc_mapping(pc : UInt64, & : UInt8*, Int32, UInt64 ->) : Bool
+      found = false
+      each_map_region do |lo, hi, _perms, name, name_len|
+        if !found && pc >= lo && pc < hi
+          found = true
+          yield name, name_len, pc - lo
+        end
+      end
+      found
+    end
+
     # Yields `tid, comm, comm_len` for every task in this process. `comm` points
     # into a buffer this method reuses, so it is valid only inside the block.
     #
