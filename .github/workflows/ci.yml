@@ -619,6 +619,14 @@ jobs:
         run: |
           make ivar-layout-roots
 
+      # The orphan-knob census found `GCRY_DISABLE_AUTO_LAYOUTS` in no spec,
+      # recipe or CI step. `ivar-layout-roots` already runs under AUTO_LAYOUTS=1
+      # and cannot see it: those arms also register their probes explicitly.
+      # Counters, not survival: AUTO_LAYOUTS must grow the table and register a
+      # type builtins do not name; the disable must put both back.
+      - name: Auto layouts disable
+        run: make auto-layouts
+
       # And the consumer side: the run queues the scheduler dequeues from. The
       # 2026-08-10 soak SEGV'd on a slot whose pointer had been partly
       # overwritten, an hour after whatever wrote it. `GCRY_EC_QUEUE_AUDIT=1`
@@ -1528,6 +1536,7 @@ jobs:
           timeout 300 make greg-roots
           timeout 300 make scheduler-roots
           timeout 300 make ivar-layout-roots
+          timeout 300 make auto-layouts
           timeout 300 make ec-queue-audit
           timeout 300 make thread-block-audit
           timeout 300 make thread-birth-root
@@ -1690,6 +1699,7 @@ jobs:
           make greg-roots
           make scheduler-roots
           make ivar-layout-roots
+          make auto-layouts
           make ec-queue-audit
           make perf-baseline
 

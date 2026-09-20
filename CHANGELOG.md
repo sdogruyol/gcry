@@ -287,6 +287,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a bounds check on the exact expression the CI stack trace named,
   with the passing path re-verified.
 
+- **`make auto-layouts`: `GCRY_DISABLE_AUTO_LAYOUTS` was an orphan.**
+  `src/` reads it and `ivar-layout-roots` already runs under
+  `GCRY_AUTO_LAYOUTS=1`, which looks like coverage and is not: those
+  arms also call `register_layout` on their probes, so the disable
+  leaves them registered either way, and a survival assertion would not
+  discriminate — the conservative body scan reaches the same words. The
+  orphan-knob census found it in no spec, recipe or CI step. Three child
+  arms, counters not objects: builtins **51** and a type this file
+  declares unregistered; `GCRY_AUTO_LAYOUTS=1` **159** and that type
+  registered; both knobs put both back. Dropping the disable reddens it
+  (159, still registered). x86_64, aarch64, Darwin.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

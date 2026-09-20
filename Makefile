@@ -354,6 +354,20 @@ ivar-layout-roots: $(BIN)
 	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --proc
 	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --control
 
+# Does `GCRY_DISABLE_AUTO_LAYOUTS` still disable the whole-program walk
+# `GCRY_AUTO_LAYOUTS` opted into? `ivar-layout-roots` already runs under the
+# opt-in and cannot see this knob: it also registers its probes explicitly, so
+# the disable leaves them registered either way, and a survival assertion would
+# not discriminate. Three child arms, counters not objects: builtins must not
+# name a type this file declares, AUTO_LAYOUTS must grow the table *and*
+# register that type, both knobs must put both counters back. Measured here:
+# 51 → 159 → 51, probe false/true/false. Dropping the disable reddens it
+# (159 and probe still registered). ~1 s.
+.PHONY: auto-layouts
+auto-layouts: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/auto_layouts.cr -o $(BIN)/auto_layouts --error-trace
+	$(BIN)/auto_layouts
+
 # The 2026-08-10 soak died in `quick_dequeue?` on a run-queue slot whose pointer
 # had been partly overwritten — an unknown time after the write that did it, and
 # at one crash per five hours that gap cannot be bisected. `GCRY_EC_QUEUE_AUDIT=1`

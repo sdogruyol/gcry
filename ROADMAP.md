@@ -1158,6 +1158,22 @@ kept finding the rest.
       breaking it on purpose or by CI, and **six of the seven were in the
       gate**, not in the collector.
       `bench/log/linux/2026-09-16-dead-stack-gate/FINDINGS.md`
+      **2026-09-20: `GCRY_DISABLE_AUTO_LAYOUTS` is no longer an orphan.**
+      Of the five that remained after `dead-stack-root` and
+      `stack-bounds-growth`, this is the one whose rot is not a research
+      arm: `GCRY_AUTO_LAYOUTS=1` is a shipping opt-in, `ivar-layout-roots`
+      already runs under it, and that gate cannot see the disable — it
+      also registers its probes explicitly, so the knob leaves them
+      registered either way. `make auto-layouts` is three child arms on
+      two counters (`layout_entries`, and whether a type this file
+      declares has an entry): builtins 51 / unregistered, AUTO_LAYOUTS
+      159 / registered, both knobs 51 / unregistered. Dropping the
+      disable is red. The first three remaining orphans
+      (`POOLED_STACK_NOROOT`, `MAPS_INFLIGHT_NOROOT`,
+      `BIRTH_GRACE_NOROOT`) are default-off research paths whose rot is
+      not production soundness — not called root loss here. Census
+      **98 / 33 / 65.** The number moved by building an arm.
+      `bench/log/linux/2026-09-20-auto-layouts-knob/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
