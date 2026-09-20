@@ -332,6 +332,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still emits `[8, 16]` and survives either way. Census
   **99 / 35 / 64 → 99 / 36 / 63.** x86_64, aarch64, Darwin.
 
+- **The gate-arm census missed `BoundedChild.run`, which is how this
+  repo forks.** The detector looked for `Process.run`. Harnesses fork
+  through `BoundedChild.run` (a `Process.new` with a deadline) and
+  through `Process.new` directly, so twenty-one gates that already
+  construct a red arm every run were counted "by hand, once" —
+  `stack-bounds-growth`, `explicit-collect-barrier`, `stw-epoch`,
+  `thread-staging`, `darwin-static-root-init` among them. Type-check
+  targets stay by-hand: they compile those files and never run them.
+  `thread-startup-cost` moved with the `--child` heuristic and is a
+  probe. Census **99 / 36 / 63 → 99 / 57 / 42.** Nothing in a recipe,
+  a harness, or CI was added. The leftover 42 is mostly property
+  tests, fuzz, soak, and type-check.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

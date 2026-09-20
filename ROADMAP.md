@@ -1219,6 +1219,26 @@ kept finding the rest.
       direction lived in a ROADMAP sentence. Census **99 / 36 / 63.**
       The number moved by building an arm on an existing gate.
       `bench/log/linux/2026-09-20-ivar-layout-drop-arm/FINDINGS.md`
+      **2026-09-20, later: the census missed `BoundedChild.run`.** The
+      number this item quotes is re-derived from
+      `bench/gate_arm_census.py`, and the fork detector looked for
+      `Process.run`. This repo forks through `BoundedChild.run` (a
+      `Process.new` with a deadline) and through `Process.new` directly
+      (`make stw-epoch`). Twenty-one gates that already construct a red
+      arm every run were counted "by hand, once" — including
+      `stack-bounds-growth`, `explicit-collect-barrier`,
+      `stw-capture-coverage`, `stw-epoch`, `thread-staging`,
+      `darwin-static-root-init`. Type-check targets stay by-hand: they
+      compile those files and never run them. `thread-startup-cost`
+      moved with the `--child` heuristic and is a probe, named as the
+      over-count. Census **99 / 36 / 63 → 99 / 57 / 42.** The number
+      moved by seeing the fork it already was, not by building an arm.
+      The leftover 42 is mostly property tests, fuzz, soak, type-check,
+      and probes. Still a real gap in CI: `mark-clear-index`,
+      `nested-spawn-uaf`, `occupied-release` (recipe prefixes both
+      arms with `-`). The three remaining orphan knobs are still
+      default-off research paths.
+      `bench/log/linux/2026-09-20-census-bounded-child/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
