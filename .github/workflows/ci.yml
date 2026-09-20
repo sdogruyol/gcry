@@ -694,17 +694,6 @@ jobs:
         run: |
           make mark-clear-index
 
-      # And what that divergence costs, since its marks are now cleared anyway:
-      # a stranded chunk is never swept and can never rejoin the list, so the
-      # leak is permanent but rides mappings rather than uptime. The shipped
-      # tree must strand under 5 per 1000 chunks mapped; restoring the pre-fix
-      # mutator-count reads must exceed it, which is also how this measured
-      # that the latch fix closed a near-total leak (97-99% of the heap) and
-      # not only the rare use-after-free it was landed for.
-      - name: Chunk-list divergence stays rare
-        run: |
-          make chunk-list-drift
-
       # The process heap's counters, which every collection-timing decision
       # reads. Plain `set(get + 1)` and the atomic path must both agree with a
       # walk of the heap, and an increment dropped on purpose must be caught —
@@ -783,27 +772,6 @@ jobs:
         run: |
           make thread-birth-root
 
-      # The live-object release, open from 2026-08-23 and fixed 2026-09-13: the
-      # sweep's relink and munmap decisions re-evaluated `multi_mutator_threads?`
-      # after `start_world`, and a thread born in that window flipped the answer
-      # — so a dropped chunk's `next` was pointed into the unmap queue while the
-      # chunk was still on `@chunks`, and the list's real tail became
-      # unreachable. Off the list means never swept and never mark-cleared, so
-      # those objects read permanently marked and nothing follows their edges.
-      # Both layouts, each with a control that restores the re-evaluation and
-      # must still fault — a reproducer that quietly stops reproducing is how
-      # the previous one was lost. Before the fix: 5 of 18 guarded, 14 of 18
-      # poisoned; after: 0 of 24 on every arm. It took two fixes, and the
-      # control arm restores both — measured over 12 attempts each: shipped 0,
-      # the mutator-count trigger alone 2, the list-based mark clear alone 0,
-      # both 7. The control runs eight attempts rather than the full count
-      # because its children crash, and a crashing child walks the heap and
-      # every stack before Crystal's backtrace printer runs; 186 s locally for
-      # the whole target.
-      - name: Live-object release under thread churn
-        run: |
-          timeout 1200 make thread-churn-uaf
-
       # The other half of the birth window: the record the pre-stop wait uses.
       # A full staging table used to refuse the birth being handed in — the
       # newest one, i.e. the thread actually inside the window — so that thread
@@ -861,26 +829,6 @@ jobs:
         run: |
           make chunk-search-race
           make large-cache-race
-
-      # A mutator inside `find_block` while collections run. It used to crash on
-      # a chunk pointer the last-chunk cache handed back after reading its index
-      # twice; the arm that restores that read must still crash, or the green
-      # one says nothing.
-      - name: find_block race
-        env:
-          FIND_BLOCK_RACE_RUNS: "3"
-        run: |
-          make find-block-race
-
-      # The suspend wait is where six aarch64 jobs died at the 20-minute job
-      # timeout, reported as *cancelled*. It can now re-send the signal, and
-      # the stop epoch is what makes that safe — three of this gate's six arms
-      # are red on purpose, including the duplicate-signal hazard that kept the
-      # resend out twice.
-      - name: STW stop epoch
-        run: |
-          make stw-epoch
-          make stw-ack-window
 
       # And the counters those threads share: four of them allocate a known
       # number of objects and every one must be accounted for, while the old
@@ -954,6 +902,84 @@ jobs:
           # Fully conservative: sound roots + no layout tables.
           GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/json_churn 800
           GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./bin/pattern_fuzz --seed=2 --phases=20 --objects-per-phase=1000
+
+  # Gates that cost minutes because they **sample**: each drives a rare window
+  # many times over, so the cost is the sample size and not the assertion. They
+  # were steps of `test (x86_64)` until 2026-09-20, when that job was measured
+  # at **33.0 minutes against its 45-minute cap** — grown from 16.0 on
+  # 2026-09-08 by **31 new steps worth 17.1 minutes**, with not one existing
+  # step any slower. The growth is purely additive, which is the shape that
+  # walks into a cap: this repo has already lost green runs to this exact one
+  # ("29m44s passing, then 30m05s killed on the last step with 17 s of work
+  # left"). Splitting is the structural answer rather than raising the cap —
+  # same work, same runner minutes, half the wall clock, and no cliff to grow
+  # into. Every step here is a bare `make` target that builds what it runs, so
+  # none of them depended on anything the other job had done.
+  test-sampling-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    name: sampling gates (x86_64)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Create output dir
+        run: mkdir -p bin
+
+      # And what that divergence costs, since its marks are now cleared anyway:
+      # a stranded chunk is never swept and can never rejoin the list, so the
+      # leak is permanent but rides mappings rather than uptime. The shipped
+      # tree must strand under 5 per 1000 chunks mapped; restoring the pre-fix
+      # mutator-count reads must exceed it, which is also how this measured
+      # that the latch fix closed a near-total leak (97-99% of the heap) and
+      # not only the rare use-after-free it was landed for.
+      - name: Chunk-list divergence stays rare
+        run: |
+          make chunk-list-drift
+
+      # The live-object release, open from 2026-08-23 and fixed 2026-09-13: the
+      # sweep's relink and munmap decisions re-evaluated `multi_mutator_threads?`
+      # after `start_world`, and a thread born in that window flipped the answer
+      # — so a dropped chunk's `next` was pointed into the unmap queue while the
+      # chunk was still on `@chunks`, and the list's real tail became
+      # unreachable. Off the list means never swept and never mark-cleared, so
+      # those objects read permanently marked and nothing follows their edges.
+      # Both layouts, each with a control that restores the re-evaluation and
+      # must still fault — a reproducer that quietly stops reproducing is how
+      # the previous one was lost. Before the fix: 5 of 18 guarded, 14 of 18
+      # poisoned; after: 0 of 24 on every arm. It took two fixes, and the
+      # control arm restores both — measured over 12 attempts each: shipped 0,
+      # the mutator-count trigger alone 2, the list-based mark clear alone 0,
+      # both 7. The control runs eight attempts rather than the full count
+      # because its children crash, and a crashing child walks the heap and
+      # every stack before Crystal's backtrace printer runs; 186 s locally for
+      # the whole target.
+      - name: Live-object release under thread churn
+        run: |
+          timeout 1200 make thread-churn-uaf
+
+      # A mutator inside `find_block` while collections run. It used to crash on
+      # a chunk pointer the last-chunk cache handed back after reading its index
+      # twice; the arm that restores that read must still crash, or the green
+      # one says nothing.
+      - name: find_block race
+        env:
+          FIND_BLOCK_RACE_RUNS: "3"
+        run: |
+          make find-block-race
+
+      # The suspend wait is where six aarch64 jobs died at the 20-minute job
+      # timeout, reported as *cancelled*. It can now re-send the signal, and
+      # the stop epoch is what makes that safe — three of this gate's six arms
+      # are red on purpose, including the duplicate-signal hazard that kept the
+      # resend out twice.
+      - name: STW stop epoch
+        run: |
+          make stw-epoch
+          make stw-ack-window
 
   coverage:
     runs-on: ubuntu-latest

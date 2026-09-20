@@ -255,6 +255,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against 5 in 2 990. Its headline is "0 of 2 856 deaths, none with a
   holder, across 16 windows" instead of "0 of 0".
 
+- **The x86_64 CI job had doubled in twelve days and was walking into
+  its cap again.** Measured over the 199 jobs of the last 200 runs:
+  15.1–16.1 min on 2026-09-08 against **32.0–33.1 min on 2026-09-20**,
+  p90 31.6, cap 45 — about +1.4 min a day, which reaches the cap in
+  another nine. Diffed step by step, the growth is **purely additive**:
+  31 steps that did not exist then, worth 17.1 min, and **not one
+  existing step any slower**. That is the shape that walks into a cap
+  unnoticed, because every addition is cheap on its own and the sum is
+  invisible from any one pull request — and this repo has already lost
+  green runs to this exact cap ("29m44s passing, then 30m05s killed on
+  the last step with 17 s of work left").
+  The four heaviest **sampling** gates — `thread-churn-uaf`,
+  `find-block-race`, `stw-epoch` + `stw-ack-window`, `chunk-list-drift`
+  — moved to a new `sampling gates (x86_64)` job. A real category, not
+  an arbitrary cut: each drives a rare window many times, so its cost is
+  the sample size rather than the assertion. `test (x86_64)` goes 33.0 →
+  ~20.7 min and the new job is ~13.5, for the same runner minutes.
+  Raising the cap was the other option and is the wrong one: it buys
+  days, and the property the cap exists for — a hang failing in minutes
+  instead of at GitHub's 6 h ceiling — weakens every time it moves.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19
