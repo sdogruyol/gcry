@@ -32,7 +32,7 @@ require "../src/gcry"
 alias HeaderValue = String | Array(String)
 alias HeaderHash = Hash(HTTP::Headers::Key, HeaderValue)
 
-HEAP = Gcry.default_heap.not_nil!
+HEAP     = Gcry.default_heap.not_nil!
 DISABLED = ARGV.includes?("--disabled")
 
 def install_broken_hash_layout : Nil
