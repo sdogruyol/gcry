@@ -62,15 +62,26 @@ mt-property-test-short: $(BIN)
 	$(CRYSTAL) build bench/mt_property_test.cr -o $(BIN)/mt_property_test
 	$(BIN)/mt_property_test --seed=1 --iterations=50 --workers=2,4
 
+# Until 2026-09-20 the TLAB/nursery arms built headerless, where
+# nursery_enabled= is a no-op and tlab_enabled= is refused (bitmap
+# allocator forced). Green `--tlab` / `--tlab --nursery` requires
+# `-Dgcry_block_headers` and `GCRY_BITMAP_ALLOC=0`. `--disabled` is
+# the headerless binary: those flags must not enable. Dropping the
+# flag, the allocator knob, or `--disabled` reddens the gate.
 stw-mt-property-test: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test
-	$(BIN)/stw_mt_property_test --seed=$${STW_MT_SEED:-1} --iterations=$${STW_MT_ITERATIONS:-200} --workers=$${STW_MT_WORKERS:-2,4} $${STW_MT_TLAB:+--tlab}
+	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test --error-trace
+	$(BIN)/stw_mt_property_test --seed=$${STW_MT_SEED:-1} --iterations=$${STW_MT_ITERATIONS:-200} --workers=$${STW_MT_WORKERS:-2,4}
+	$(BIN)/stw_mt_property_test --tlab --nursery --disabled
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test_hdr --error-trace
+	GCRY_BITMAP_ALLOC=0 $(BIN)/stw_mt_property_test_hdr --tlab --seed=$${STW_MT_SEED:-1} --iterations=$${STW_MT_ITERATIONS:-200} --workers=$${STW_MT_WORKERS:-2,4} $${STW_MT_NURSERY:+--nursery}
 
 stw-mt-property-test-short: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test
+	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test --error-trace
 	$(BIN)/stw_mt_property_test --seed=1 --iterations=50 --workers=2,4
-	$(BIN)/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
-	$(BIN)/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+	$(BIN)/stw_mt_property_test --tlab --nursery --disabled
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test_hdr --error-trace
+	GCRY_BITMAP_ALLOC=0 $(BIN)/stw_mt_property_test_hdr --tlab --seed=1 --iterations=50 --workers=2,4
+	GCRY_BITMAP_ALLOC=0 $(BIN)/stw_mt_property_test_hdr --tlab --nursery --seed=1 --iterations=50 --workers=2,4
 
 pattern-fuzz: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/pattern_fuzz.cr -o $(BIN)/pattern_fuzz

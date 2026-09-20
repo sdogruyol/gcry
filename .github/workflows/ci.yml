@@ -349,8 +349,15 @@ jobs:
           GCRY_THREAD_CENSUS: "1"
           GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
+          # Until 2026-09-20 this built headerless, where tlab_enabled= is
+          # refused (bitmap allocator forced). Green requires
+          # -Dgcry_block_headers and GCRY_BITMAP_ALLOC=0; `--disabled` is
+          # the headerless binary, which must not enable TLAB. Dropping
+          # either reddens the gate.
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
-          ./bin/stw_mt_property_test --tlab --seed=1 --iterations=50 --workers=2,4
+          ./bin/stw_mt_property_test --tlab --disabled
+          crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr
+          GCRY_BITMAP_ALLOC=0 ./bin/stw_mt_property_test_hdr --tlab --seed=1 --iterations=50 --workers=2,4
 
       - name: Process-GC STW MT property test with TLAB+nursery (50 iterations, 2+4 workers)
         env:
@@ -364,8 +371,15 @@ jobs:
           GCRY_THREAD_CENSUS: "1"
           GCRY_THREAD_BLOCK_AUDIT: "1"
         run: |
+          # Until 2026-09-20 this built headerless, where nursery_enabled=
+          # is a no-op and tlab_enabled= is refused, so minor_collect
+          # returned immediately. Green requires -Dgcry_block_headers and
+          # GCRY_BITMAP_ALLOC=0; `--disabled` is the headerless binary.
+          # Dropping either reddens the gate.
           crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
-          ./bin/stw_mt_property_test --tlab --nursery --seed=1 --iterations=50 --workers=2,4
+          ./bin/stw_mt_property_test --tlab --nursery --disabled
+          crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr
+          GCRY_BITMAP_ALLOC=0 ./bin/stw_mt_property_test_hdr --tlab --nursery --seed=1 --iterations=50 --workers=2,4
 
       - name: Process-GC nursery+TLAB minor smoke (single-thread)
         run: |
@@ -1872,6 +1886,9 @@ jobs:
           # faulting on `0xffffffff00000012` — is the TLAB+nursery one. It
           # printed a Crystal backtrace and nothing from gcry, because none of
           # these were set. Same set as the x86_64 job's arms.
+          # Until 2026-09-20 the TLAB/nursery arms built headerless; the
+          # Makefile now builds those two with -Dgcry_block_headers and
+          # GCRY_BITMAP_ALLOC=0, and `--disabled` is the headerless no-op.
           GCRY_POISON_HOLDERS: "1"
           GCRY_THREAD_CENSUS: "1"
           GCRY_THREAD_BLOCK_AUDIT: "1"

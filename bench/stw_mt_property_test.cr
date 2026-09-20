@@ -16,10 +16,24 @@
 # Pass `--nursery` to enable young-gen + mix minor/major collects (Parallel
 # worker STW scan: hardware SP + greg; TLAB forces full fiber-stack scan).
 #
-# Build: crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
-# Run:   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2] [--tlab] [--nursery]
+# Until 2026-09-20 CI built the TLAB/nursery arms headerless.
+# `nursery_enabled=` is a no-op there, `tlab_enabled=` is refused (the
+# bitmap allocator is forced, and TLAB is freelist-shaped), and
+# `minor_collect` returns immediately — the same no-op `make
+# nursery-tlab-smoke` used to certify. Green `--tlab` / `--nursery`
+# requires `-Dgcry_block_headers` and `GCRY_BITMAP_ALLOC=0` at start.
+# `--disabled` is the headerless binary: those flags must not enable.
 #
-# On failure the seed is printed for deterministic local replay.
+#   crystal build -Dgc_none bench/stw_mt_property_test.cr -o bin/stw_mt_property_test
+#   ./bin/stw_mt_property_test [--seed=1] [--iterations=200] [--workers=2]
+#   ./bin/stw_mt_property_test --tlab --nursery --disabled
+#   crystal build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o bin/stw_mt_property_test_hdr
+#   GCRY_BITMAP_ALLOC=0 ./bin/stw_mt_property_test_hdr --tlab [--nursery] ...
+#
+# Dropping `-Dgcry_block_headers` or `GCRY_BITMAP_ALLOC=0` on a green
+# TLAB/nursery arm: exit 64. Dropping `--disabled` from the recipe
+# leaves the headerless no-op untested. On failure the seed is printed
+# for deterministic local replay.
 # CI gates `--workers=2,4`, `--tlab --workers=2,4`, and `--tlab --nursery --workers=2,4`.
 
 require "../src/gcry"
@@ -34,6 +48,7 @@ iterations = 200
 worker_counts = [2]
 enable_tlab = false
 enable_nursery = false
+disabled = false
 
 ARGV.each do |arg|
   case arg
@@ -51,6 +66,8 @@ ARGV.each do |arg|
     enable_nursery = true
   when "--no-nursery"
     enable_nursery = false
+  when "--disabled"
+    disabled = true
   end
 end
 
@@ -278,15 +295,50 @@ end
 puts "Process-GC STW + concurrent mutation property test"
 puts "  seed=#{seed} iterations=#{iterations} workers=#{worker_counts}"
 puts "  stop_the_world=#{Gcry.default_heap.stop_the_world}"
+puts "  bitmap_alloc=#{Gcry.default_heap.bitmap_alloc?} headers=#{{{ flag?(:gcry_block_headers) }}}"
+puts disabled ? "  mode: disabled (headerless / bitmap no-op must hold)" : "  mode: shipped"
+
+if disabled && !enable_tlab && !enable_nursery
+  STDERR.puts "--disabled needs --tlab and/or --nursery: without a flag the headerless default no-ops, this arm would have nothing to refuse."
+  exit 64
+end
 
 Gcry.default_heap.tlab_enabled = enable_tlab
 if enable_nursery
   Gcry.default_heap.nursery_enabled = true
   Gcry.default_heap.nursery_threshold = UInt64::MAX
 end
-puts "  tlab_enabled=#{Gcry.default_heap.tlab_enabled?}"
-puts "  nursery_enabled=#{Gcry.default_heap.nursery_enabled}"
+tlab_on = Gcry.default_heap.tlab_enabled?
+nursery_on = Gcry.default_heap.nursery_enabled
+puts "  tlab_enabled=#{tlab_on} (requested=#{enable_tlab})"
+puts "  nursery_enabled=#{nursery_on} (requested=#{enable_nursery})"
 puts ""
+
+if disabled
+  failures = 0
+  if enable_tlab && tlab_on
+    STDERR.puts "FAIL: --disabled still enabled TLAB — this arm is the headerless/bitmap no-op"
+    failures += 1
+  end
+  if enable_nursery && nursery_on
+    STDERR.puts "FAIL: --disabled still enabled nursery — this arm is the headerless no-op"
+    failures += 1
+  end
+  if failures > 0
+    exit 1
+  end
+  puts "ok — requested flags did not enable (headerless compile default and/or bitmap allocator)"
+  exit 0
+end
+
+if enable_tlab && !tlab_on
+  STDERR.puts "--tlab did not enable. Need -Dgcry_block_headers and GCRY_BITMAP_ALLOC=0 (TLAB is refused under the bitmap allocator, which the headerless default forces)."
+  exit 64
+end
+if enable_nursery && !nursery_on
+  STDERR.puts "--nursery did not enable. Need -Dgcry_block_headers (headerless nursery_enabled= is a no-op)."
+  exit 64
+end
 
 if !Gcry.default_heap.stop_the_world
   STDERR.puts "FAIL: process heap stop_the_world is false"
@@ -304,8 +356,12 @@ worker_counts.each_with_index do |wc, idx|
 end
 
 puts "=== Summary ==="
+if enable_tlab && Gcry.default_heap.tlab_hits == 0 && Gcry.default_heap.tlab_refills == 0
+  STDERR.puts "FAIL: --tlab set but TLAB allocated nothing (hits=0 refills=0)"
+  exit 1
+end
 if all_ok && test.error_count == 0
-  puts "RESULT: PASS"
+  puts "RESULT: PASS tlab_hits=#{Gcry.default_heap.tlab_hits} tlab_refills=#{Gcry.default_heap.tlab_refills}"
   exit 0
 else
   puts "RESULT: FAIL — seed=#{seed} (re-run with --seed=#{seed})"

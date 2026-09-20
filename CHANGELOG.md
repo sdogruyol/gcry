@@ -460,7 +460,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dropping the assignment: still_free=true, FAIL. Census
   **99 / 66 / 33 → 100 / 67 / 33.** x86_64.
 
-## [Unreleased]
+- **`make stw-mt-property-test-short` constructs its red direction per
+  run.** The x86_64 TLAB and TLAB+nursery CI steps, and Darwin's
+  `make stw-mt-property-test-short`, built headerless, where
+  `Heap#nursery_enabled=` is a no-op and `tlab_enabled=` is refused
+  (bitmap allocator forced), so `minor_collect` returned immediately
+  and `--tlab` allocated through the global freelist — both arms
+  would have stayed green through a TLAB STW regression. Green now
+  requires `-Dgcry_block_headers` and `GCRY_BITMAP_ALLOC=0`, TLAB
+  actually on, and TLAB hits. `--disabled` is the headerless binary:
+  `--tlab --nursery` must not enable. Dropping the flag or the
+  allocator knob: exit 64. Pointing `--disabled` at the green
+  config: TLAB on, FAIL. Census
+  **100 / 67 / 33 → 100 / 69 / 31.** x86_64 + Darwin.
 
 ## [0.26.2] - 2026-09-19
 

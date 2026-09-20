@@ -1382,6 +1382,22 @@ kept finding the rest.
       headerless, so both flags are no-ops and the step still
       passes).
       `bench/log/linux/2026-09-20-nursery-tlab-smoke-disable/FINDINGS.md`
+      **2026-09-20, later: `make stw-mt-property-test-short`
+      constructs its red direction per run.** The x86_64 TLAB and
+      TLAB+nursery steps, and Darwin's Makefile short target, built
+      headerless — `nursery_enabled=` no-op, `tlab_enabled=`
+      refused, `minor_collect` a no-op, `--tlab` the global
+      freelist. Green now requires `-Dgcry_block_headers` and
+      `GCRY_BITMAP_ALLOC=0`; `--disabled` is the headerless binary
+      and those flags must not enable. Dropping either: exit 64.
+      Pointing `--disabled` at the green config: TLAB on, FAIL.
+      Local CI parameters: TLAB 1302 hits / 469 refills, TLAB+nursery
+      1302 / 211, both PASS. Census
+      **100 / 67 / 33 → 100 / 69 / 31.** x86_64 + Darwin. Still a
+      real gap in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-stw-mt-tlab-headerless/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
@@ -2458,6 +2474,14 @@ kept finding the rest.
       **Not reproduced locally**: 15 runs of the failing command at the CI
       parameters, plus the three arms under the full diagnostics, all clean on
       x86_64 Linux. The next sighting is the one that will say something.
+      **2026-09-20: the CI arm was a no-op after the headerless default.**
+      From 0.26.0 the TLAB+nursery step compiled without
+      `-Dgcry_block_headers`, so `tlab_enabled=` refused and
+      `nursery_enabled=` was a no-op — absence of the crash on those
+      runs is not evidence it is gone. The step now builds the header
+      layout with `GCRY_BITMAP_ALLOC=0` and requires TLAB hits; local
+      CI parameters PASS (1302 hits). Still open until CI runs the
+      real arm and stays quiet.
 
 - [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
       The record the pre-stop wait runs on was kept in a 64-slot table drained
