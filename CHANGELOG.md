@@ -240,6 +240,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a death **or** a give-up rather than for any precondition. The
   sampler itself is not rotted: pointed at `bin/thread_storm`, where a
   dying `Thread` is routine, one run reports 17 with their details.
+  And a report turned out to be a **trigger, not a verdict** — the
+  second miscount and the worse one. The audit fires on any watched
+  block the mark did not reach, so on a workload where threads *exit* it
+  fires constantly: six `thread_churn_uaf --child` runs give **5 712
+  dying-`Thread` reports with 0 holders** — none on Crystal's list, none
+  linked from a live list node, none in a suspended thread's registers,
+  none offered by the stack scan. A `Thread` object dying after its
+  thread exits is the collector working. The counter sums reports and
+  `of which N with a holder` apart now, and keeps a run's logs for a
+  holder or a give-up plus one death-only exemplar, at most four in all.
+  With that in place the sampler gained the churn arm, which also builds
+  the give-up window it was not added for: **16 give-ups in 3 runs**
+  against 5 in 2 990. Its headline is "0 of 2 856 deaths, none with a
+  holder, across 16 windows" instead of "0 of 0".
 
 ## [Unreleased]
 

@@ -101,10 +101,60 @@ that harness since 2026-09-07. Those are different claims and the summary line
 was making the stronger one.
 
 **Does not**: say the defect is still live. 0 of 5 is weak in both directions.
-The honest position is that the sampler needs an arm that *builds* the window
-rather than waiting for it — `GCRY_THREAD_UNSTAGE_ON_DEATH=1` is the knob
-already in the tree that removes the accidental mask, and it is documented as
-a reproducer that crashes 7 of 40 runs of 960 short-lived threads. Pointing
-the sampler at that arm is the next step, and it is a change to what the
-sampler runs rather than to what it counts, so it is kept separate from this
-one.
+The sampler needs an arm that *builds* the window rather than waiting for it.
+
+## Correction, same day: a report is a trigger, not a verdict
+
+The paragraph above originally ended "pointing the sampler at
+`GCRY_THREAD_UNSTAGE_ON_DEATH=1` is the next step". Doing it exposed a second
+miscount, and this one would have been worse than the first.
+
+`bench/thread_churn_uaf.cr` already exists, already carries that knob as its
+amplified arm, already asserts that the arm still reproduces, and already runs
+in CI (`ci.yml:805`). Pointed at one of its children with the dying-type audit
+on, the sampler's hit counter goes from 0 to thousands — and every one of them
+is ordinary garbage:
+
+    six `thread_churn_uaf --child` runs, audit + poison + unstage
+      dying-Thread reports                        5 712
+      still on Crystal's list                         0
+      still linked from a live thread's list node     0
+      in a suspended thread's registers               0
+      offered by the collecting thread's stack scan   0
+      SIGSEGV                                         0
+
+A `Thread` object dying after its thread has exited is the collector working.
+The audit fires on any watched block the mark did not reach, so on a workload
+where threads exit it fires constantly; the four holder lines underneath it
+are the verdict. `ec_queue_audit` reports 0 only because no thread exits in
+it — 0 of 0, not 0 of 5 712.
+
+So the counter had to learn the difference before the arm could be added:
+`make thread-uaf-sample` now sums `dying-Thread report(s)` and `of which …
+with a holder` apart, and keeps a run's logs for a holder or a give-up, plus
+one death-only log per batch as an exemplar and at most four in all.
+
+## And the churn arm builds the window too
+
+The unexpected part. The arm was added for the death side; it also produces
+the give-up the whole note is about, at a rate the old sampler never came near:
+
+| | runs | give-ups | deaths examined |
+|---|---|---|---|
+| `ec_queue_audit` only, CI history | 2 990 | **5** | 0 |
+| with the churn arm, this host | 3 | **16** | 2 856 |
+
+That is ~5 give-ups per run against ~0.0017, about three thousand times the
+rate, and it turns the sampler's headline from "0 of 0" into "0 of 2 856
+deaths, none with a holder, across 16 windows". Still no defect — but for the
+first time that zero has a denominator.
+
+## One thing measured and dropped
+
+An early batch showed 6 of 8 churn children exceeding a 90 s timeout, which
+looked like a hang worth reporting. It does not survive: with the knobs
+isolated, `none` runs in ≤1 s, `audit` 8 s, `unstage` 2–3 s, `poison` ≤1 s and
+all three together 10–11 s, three for three, and nine further runs produced no
+timeout. Output volume was 865 KB a run against 4.5 GB free on the tmpfs, so
+that is not it either. Unattributable, most likely host load on a shared
+12-vCPU guest, and recorded here only so the number is not quietly reused.

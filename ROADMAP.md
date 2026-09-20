@@ -1871,12 +1871,27 @@ kept finding the rest.
       the wait works. `make thread-uaf-sample` now counts and reports the two
       apart and says so out loud when a batch built no window, and keeps a run's
       logs for a death **or** a give-up rather than for any precondition.
-      **Next** is therefore not more runs: it is an arm that *builds* the
-      window instead of waiting for it. `GCRY_THREAD_UNSTAGE_ON_DEATH=1` is
-      already in the tree for exactly that — it removes the accidental mask
-      and is documented at 7 of 40 runs of 960 short-lived threads — so
-      pointing the sampler at it is the change to make, and it is a change to
-      what the sampler runs rather than to what it counts.
+      **And a report turned out to be a trigger, not a verdict — the second
+      miscount, and the worse one.** The arm that builds the window already
+      existed: `bench/thread_churn_uaf.cr` carries
+      `GCRY_THREAD_UNSTAGE_ON_DEATH=1` as its amplified arm, asserts that the
+      arm still reproduces, and runs in CI at `ci.yml:805`. Pointed at one of
+      its children with the dying-type audit on, the sampler's hit count goes
+      from 0 to thousands — and all of it is ordinary garbage. Six children:
+      **5 712 dying-`Thread` reports, 0 still on Crystal's list, 0 linked
+      from a live list node, 0 in a suspended thread's registers, 0 offered
+      by the collecting thread's stack scan, 0 SIGSEGV.** A `Thread` object
+      dying after its thread exits is the collector working; the audit fires
+      on any watched block the mark missed, and the four holder lines under
+      it are the verdict. So the counter learned the difference first —
+      `dying-Thread report(s)` and `of which N with a holder` are summed
+      apart, and a run's logs are kept for a holder or a give-up, plus one
+      death-only exemplar per batch and at most four in all.
+      **And the churn arm builds the give-up window as well**, which was not
+      why it was added: 3 runs produced **16** give-ups against 5 in 2 990,
+      roughly three thousand times the rate. The sampler's headline is now
+      "0 of 2 856 deaths, none with a holder, across 16 windows" instead of
+      "0 of 0".
       `bench/log/linux/2026-09-20-uaf-sampler-denominator/FINDINGS.md`
       **What the stop epoch (2026-09-12, item below) changes here**: nothing
       about the window itself — an unpublished thread is still neither

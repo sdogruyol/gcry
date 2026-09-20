@@ -1256,14 +1256,32 @@ nursery-bitmap-marks: $(BIN)
 # 2026-08-25 and 2026-09-07. "11 965 preconditions and no death" reads as
 # enormous evidence; "5 windows and no death" is what was actually measured.
 #
+# **And a report is a trigger, not a verdict.** The audit fires on any watched
+# block the mark did not reach, and on a workload where threads *exit* that is
+# ordinary garbage: a dead thread's `Thread` object should be collected.
+# Measured 2026-09-20 over six `thread_churn_uaf --child` runs — **5 712
+# reports, 0 of them with a holder**: none still on Crystal's list, none
+# linked from a live list node, none in a suspended thread's registers, none
+# offered by the collecting thread's stack scan. So the count is summed apart
+# from the reports that carry holder evidence, which is the defect's shape.
+# Logs are kept for a holder or a give-up, plus **one** death-only log per
+# batch as an exemplar, and at most four in all — that exemplar is what keeps
+# the reporting path demonstrable without carrying eight megabytes of
+# ordinary garbage per CI run.
+#
+# The churn arm is here because of that number. `ec_queue_audit` alone reports
+# 0 deaths over 2 990 runs, which is 0 of 0 — no thread exits in it. The churn
+# arm exercises the death side and turns that into 0 of thousands.
+#
 # **Not a gate.** It exits 0 whether or not the defect fires, because an open
 # defect must not turn every pull request red — and a step that is expected to
 # fail teaches everyone to ignore it. What it produces is evidence: the logs of
 # the runs that said something, and nothing from the ones that did not.
 thread-uaf-sample: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
+	$(CRYSTAL) build -Dgc_none bench/thread_churn_uaf.cr -o $(BIN)/thread_churn_uaf --error-trace
 	@mkdir -p $(SAMPLE_DIR)
-	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; caught=0; gaveup=0; crashes=0; \
+	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; held=0; caught=0; gaveup=0; crashes=0; exemplar=0; kept=0; \
 	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
 	: $${THREAD_UAF_CONTROL_ARGS:=--control}; \
 	for i in $$(seq 1 $$runs); do \
@@ -1271,17 +1289,27 @@ thread-uaf-sample: $(BIN)
 	    $$harness $$THREAD_UAF_ARGS > $(SAMPLE_DIR)/run-$$i-hold.log 2>&1 || crashes=$$((crashes+1)); \
 	  GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
 	    $$harness $$THREAD_UAF_ARGS $$THREAD_UAF_CONTROL_ARGS > $(SAMPLE_DIR)/run-$$i-control.log 2>&1 || crashes=$$((crashes+1)); \
-	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log; do \
+	  churn=""; \
+	  if [ -z "$$THREAD_UAF_BIN" ]; then \
+	    churn=$(SAMPLE_DIR)/run-$$i-churn.log; \
+	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	      $(BIN)/thread_churn_uaf --child > $$churn 2>&1 || crashes=$$((crashes+1)); \
+	  fi; \
+	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log $$churn; do \
 	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
 	    g=$$(grep -c "GAVE UP" $$f || true); \
 	    c=$$(grep -c "and the wait caught it" $$f || true); \
-	    hits=$$((hits+d)); gaveup=$$((gaveup+g)); caught=$$((caught+c)); \
-	    if [ "$$d" = "0" ] && [ "$$g" = "0" ]; then rm -f $$f; fi; \
+	    h=$$(grep -oE "registers: yes|stack scan: yes|thread list: YES|list node: YES" $$f | wc -l); \
+	    hits=$$((hits+d)); gaveup=$$((gaveup+g)); caught=$$((caught+c)); held=$$((held+h)); \
+	    if [ "$$h" != "0" ] || [ "$$g" != "0" ]; then \
+	      if [ "$$kept" -lt 4 ]; then kept=$$((kept+1)); else rm -f $$f; fi; \
+	    elif [ "$$d" != "0" ] && [ "$$exemplar" = "0" ]; then exemplar=1; \
+	    else rm -f $$f; fi; \
 	  done; \
 	done; \
-	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s); staged-thread window $$gaveup gave-up / $$caught caught in $(SAMPLE_DIR)"; \
-	if [ "$$gaveup" = "0" ] && [ "$$hits" = "0" ]; then \
-	  echo "thread-uaf-sample: this batch never built the window — the wait caught every staged thread, so a silent batch is an absence of the window and not an absence of the defect"; \
+	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s) of which $$held with a holder; staged-thread window $$gaveup gave-up / $$caught caught in $(SAMPLE_DIR)"; \
+	if [ "$$gaveup" = "0" ] && [ "$$held" = "0" ] && [ "$$hits" = "0" ]; then \
+	  echo "thread-uaf-sample: this batch neither built the window nor saw a Thread die, so its silence is an absence of both and not an absence of the defect"; \
 	fi; \
 	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
 
