@@ -1851,8 +1851,33 @@ kept finding the rest.
       the 3/10 control is p ≈ 0.2. The evidence that does not depend on the rate
       is the local gate, where the window is held open on purpose and the block
       dies without the root and survives with it, 20 of 20.
-      **Next**: leave the sampler running and revisit the rate once more pushes
-      have accumulated; the item stays open until CI has enough runs to say so.
+      **The revisit, and the sampler's number does not mean what it says
+      (2026-09-20).** 299 sampler jobs, 2026-08-25 → 2026-09-20: **2 990
+      harness runs, 0 crashes, 0 dying-`Thread` reports, 11 965
+      "precondition" sightings.** The sampler is not rotted — pointed at
+      `bin/thread_storm`, where a dying `Thread` is routine, one run reports
+      17 with their logs kept — so the zero is a real absence. But 11 965 is
+      the wrong denominator. The audit prints **two** preconditions under one
+      label, and only one of them is this window: `the wait caught it` is the
+      safe path, `the wait GAVE UP — the world stopped with it unpublished`
+      is the defect's. Split: **11 960 caught, 5 gave up.** The measured
+      statement is **0 deaths in 5 windows**, not 0 in 11 965 — the sum
+      overstated coverage ~2 400×, and the summary line was printing the sum.
+      **And the five are all old**: 2026-08-25 (two), 08-27, 09-05, 09-07, and
+      none since — about 150 jobs and 1 500 runs with the window never built
+      once, which is consistent with the pre-stop wait's drain fix taking its
+      timeout rate from 398-of-400 to nil. So the sampler as configured can no
+      longer observe this defect: it spends its whole budget on the path where
+      the wait works. `make thread-uaf-sample` now counts and reports the two
+      apart and says so out loud when a batch built no window, and keeps a run's
+      logs for a death **or** a give-up rather than for any precondition.
+      **Next** is therefore not more runs: it is an arm that *builds* the
+      window instead of waiting for it. `GCRY_THREAD_UNSTAGE_ON_DEATH=1` is
+      already in the tree for exactly that — it removes the accidental mask
+      and is documented at 7 of 40 runs of 960 short-lived threads — so
+      pointing the sampler at it is the change to make, and it is a change to
+      what the sampler runs rather than to what it counts.
+      `bench/log/linux/2026-09-20-uaf-sampler-denominator/FINDINGS.md`
       **What the stop epoch (2026-09-12, item below) changes here**: nothing
       about the window itself — an unpublished thread is still neither
       suspended nor scanned — but it supplies the mechanism a fix needs. A

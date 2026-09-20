@@ -222,6 +222,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside the watchdog, "1 of them is not gcry's and it has staged 0,
   fewer — at least one is unrecorded".
 
+- **The `Thread` use-after-free sampler was counting the wrong
+  denominator.** Over the 299 sampler jobs of 2026-08-25 → 2026-09-20 —
+  2 990 harness runs — it reported 0 crashes, 0 dying-`Thread` reports
+  and **11 965 "precondition" sightings**, which reads as overwhelming
+  evidence that the birth root holds. The audit prints *two*
+  preconditions under one label and only one of them is the window this
+  defect needs: `the wait caught it` is the safe path, `the wait GAVE UP
+  — the world stopped with it unpublished` is the defect's. Split, it is
+  **11 960 caught and 5 gave up** — so the measurement is 0 deaths in 5
+  windows, not 0 in 11 965, and the summary line was printing the sum.
+  All five are 2026-08-25 to 2026-09-07 with none since, so the sampler
+  as configured can no longer observe this defect at all.
+  `make thread-uaf-sample` counts and reports the two apart, says so
+  when a batch built no window ("a silent batch is an absence of the
+  window and not an absence of the defect"), and keeps a run's logs for
+  a death **or** a give-up rather than for any precondition. The
+  sampler itself is not rotted: pointed at `bin/thread_storm`, where a
+  dying `Thread` is routine, one run reports 17 with their details.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

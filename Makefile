@@ -1241,6 +1241,21 @@ nursery-bitmap-marks: $(BIN)
 # reporting the *precondition* in green runs that number would have said the
 # defect had fired when nothing had died.
 #
+# And the preconditions are counted apart from each other, for the same reason
+# one level down. There are two, and only one of them is the window this defect
+# needs:
+#
+#   caught   the wait for a staged thread found it — the safe path, and what
+#            almost every collection does
+#   gave up  the world stopped with the thread unpublished — neither suspended
+#            nor scanned, which is the window
+#
+# Summing them was a 2 000-fold overstatement of coverage. Measured over the
+# 299 sampler jobs from 2026-08-25 to 2026-09-20 — 2 990 harness runs — there
+# were **11 965** preconditions and **5** of them were the give-up, all between
+# 2026-08-25 and 2026-09-07. "11 965 preconditions and no death" reads as
+# enormous evidence; "5 windows and no death" is what was actually measured.
+#
 # **Not a gate.** It exits 0 whether or not the defect fires, because an open
 # defect must not turn every pull request red — and a step that is expected to
 # fail teaches everyone to ignore it. What it produces is evidence: the logs of
@@ -1248,7 +1263,7 @@ nursery-bitmap-marks: $(BIN)
 thread-uaf-sample: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
 	@mkdir -p $(SAMPLE_DIR)
-	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; pre=0; crashes=0; \
+	@runs=$${THREAD_UAF_RUNS:-10}; hits=0; caught=0; gaveup=0; crashes=0; \
 	harness=$${THREAD_UAF_BIN:-$(BIN)/ec_queue_audit}; \
 	: $${THREAD_UAF_CONTROL_ARGS:=--control}; \
 	for i in $$(seq 1 $$runs); do \
@@ -1258,12 +1273,16 @@ thread-uaf-sample: $(BIN)
 	    $$harness $$THREAD_UAF_ARGS $$THREAD_UAF_CONTROL_ARGS > $(SAMPLE_DIR)/run-$$i-control.log 2>&1 || crashes=$$((crashes+1)); \
 	  for f in $(SAMPLE_DIR)/run-$$i-hold.log $(SAMPLE_DIR)/run-$$i-control.log; do \
 	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
-	    p=$$(grep -c "precondition:" $$f || true); \
-	    hits=$$((hits+d)); pre=$$((pre+p)); \
-	    if [ "$$d" = "0" ] && [ "$$p" = "0" ]; then rm -f $$f; fi; \
+	    g=$$(grep -c "GAVE UP" $$f || true); \
+	    c=$$(grep -c "and the wait caught it" $$f || true); \
+	    hits=$$((hits+d)); gaveup=$$((gaveup+g)); caught=$$((caught+c)); \
+	    if [ "$$d" = "0" ] && [ "$$g" = "0" ]; then rm -f $$f; fi; \
 	  done; \
 	done; \
-	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s), $$pre precondition sighting(s) in $(SAMPLE_DIR)"; \
+	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s); staged-thread window $$gaveup gave-up / $$caught caught in $(SAMPLE_DIR)"; \
+	if [ "$$gaveup" = "0" ] && [ "$$hits" = "0" ]; then \
+	  echo "thread-uaf-sample: this batch never built the window — the wait caught every staged thread, so a silent batch is an absence of the window and not an absence of the defect"; \
+	fi; \
 	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
 
 thread-block-audit: $(BIN)
