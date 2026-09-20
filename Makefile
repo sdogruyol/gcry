@@ -360,6 +360,15 @@ ivar-layout-roots: $(BIN)
 	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots
 	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --proc
 	GCRY_AUTO_LAYOUTS=1 $(BIN)/ivar_layout_roots --control
+	# The red direction, which until 2026-09-20 existed only as a hand
+	# edit of layout.cr ("has_inner_pointers? dropped"). The knob keeps
+	# the precise is_ptr offsets and skips the conservative fallback, so
+	# a module-typed / Proc ivar is simply never scanned. --control still
+	# passes: that ivar is a Reference and its offset is emitted either
+	# way. The counter is the gate; a survival assertion can still pass
+	# if a stale stack word roots the leaf.
+	! GCRY_LAYOUT_DROP_UNCLASSIFIED=1 $(BIN)/ivar_layout_roots
+	! GCRY_LAYOUT_DROP_UNCLASSIFIED=1 $(BIN)/ivar_layout_roots --proc
 
 # Does `GCRY_DISABLE_AUTO_LAYOUTS` still disable the whole-program walk
 # `GCRY_AUTO_LAYOUTS` opted into? `ivar-layout-roots` already runs under the

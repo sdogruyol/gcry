@@ -1202,6 +1202,23 @@ kept finding the rest.
       red direction lived in a ROADMAP sentence. Census **99 / 35 /
       64.** The number moved by building an arm on an existing gate.
       `bench/log/linux/2026-09-20-ec-pins-disable/FINDINGS.md`
+      **2026-09-20, later: `make ivar-layout-roots` constructs its red
+      direction per run.** It already ran on all three CI platforms and
+      asserted coverage of a module-typed / Proc ivar; what it could
+      not do without a hand edit of `layout.cr` was come out red
+      ("`has_inner_pointers?` dropped"). `GCRY_LAYOUT_DROP_UNCLASSIFIED=1`
+      skips the conservative `scan_cap` fallback and keeps the precise
+      is_ptr offsets — `@name` at byte 8, the unclassified word at 16
+      simply missing. Shipped module/proc: `precise?=false`, leaf live;
+      with the knob: `precise?=true scan=[8]`, leaf **swept**.
+      `--control` still emits `[8, 16]` and survives either way, so the
+      harness still roots the holder. Applied after `register_builtins`,
+      because Fiber#proc is one of the holes and dropping it at init
+      would take the process down before the probes ran. This is not a
+      new harness and not an orphan knob: it is one of the 64 whose red
+      direction lived in a ROADMAP sentence. Census **99 / 36 / 63.**
+      The number moved by building an arm on an existing gate.
+      `bench/log/linux/2026-09-20-ivar-layout-drop-arm/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

@@ -320,6 +320,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way — a survival assertion would have stayed green. Census
   **99 / 34 / 65 → 99 / 35 / 64.** x86_64, aarch64, Darwin.
 
+- **`make ivar-layout-roots` constructs its red direction per run.** The
+  gate already ran on all three CI platforms and asserted that a
+  module-typed / Proc ivar is covered — by a precise offset, or by
+  falling back to a conservative body scan. Its ability to fail lived
+  only in a ROADMAP sentence ("`has_inner_pointers?` dropped").
+  `GCRY_LAYOUT_DROP_UNCLASSIFIED=1` skips that fallback and keeps the
+  precise is_ptr offsets, so `@payload` / `@job` at byte 16 is simply
+  never scanned. Shipped module/proc: `precise?=false`, leaf live;
+  with the knob: `precise?=true scan=[8]`, leaf swept. `--control`
+  still emits `[8, 16]` and survives either way. Census
+  **99 / 35 / 64 → 99 / 36 / 63.** x86_64, aarch64, Darwin.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

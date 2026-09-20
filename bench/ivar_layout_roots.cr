@@ -53,6 +53,12 @@
 # Run each a second time with GCRY_AUTO_LAYOUTS=1: that is the shipping route
 # into the same macro (`register_all_from_reference_subclasses` → `register`),
 # and it registers these probe types on its own, without the explicit call below.
+#
+# The red direction is `GCRY_LAYOUT_DROP_UNCLASSIFIED=1`: skip the conservative
+# fallback, keep the precise is_ptr offsets, and the unclassified ivar is
+# simply never scanned. `make ivar-layout-roots` requires that arm to fail
+# for the module and proc shapes. `--control` still passes — that ivar is a
+# Reference and its offset is emitted either way.
 
 require "../src/gcry"
 

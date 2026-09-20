@@ -1175,6 +1175,10 @@ module GC
     heap.dying_greg_dump = true if env_flag_one?("GCRY_DYING_GREG_DUMP")
     heap.disable_greg_roots = true if env_flag_one?("GCRY_DISABLE_GREG_ROOTS")
     heap.disable_ec_pins = true if env_flag_one?("GCRY_DISABLE_EC_PINS")
+    # After `register_builtins` on purpose: Fiber#proc is one of the holes
+    # this restores, and dropping it at init would take the process down
+    # before `make ivar-layout-roots` could measure its own probes.
+    Gcry::Layout.drop_unclassified = true if env_flag_one?("GCRY_LAYOUT_DROP_UNCLASSIFIED")
     heap.full_suspended_stack = true if env_flag_one?("GCRY_FULL_SUSPENDED_STACK")
     if sl = env_u64("GCRY_SUSPENDED_SP_SLACK")
       heap.suspended_sp_slack = sl

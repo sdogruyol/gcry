@@ -242,6 +242,20 @@ module Gcry
     @@dump_checked = false
     @@dump = false
 
+    # `GCRY_LAYOUT_DROP_UNCLASSIFIED=1`: research arm, never a product
+    # setting. Applied in `apply_env_config`, *after* `register_builtins`,
+    # so Fiber#proc and the other stdlib holes stay covered. The harness
+    # then re-registers its probes and sees the drop.
+    @@drop_unclassified = false
+
+    def self.drop_unclassified? : Bool
+      @@drop_unclassified
+    end
+
+    def self.drop_unclassified=(value : Bool) : Bool
+      @@drop_unclassified = value
+    end
+
     private def self.dump? : Bool
       unless @@dump_checked
         @@dump_checked = true
@@ -449,7 +463,66 @@ module Gcry
         scan_cap = bytes.to_u32
 
         {% if force_scan_cap %}
-          install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap, {{T.stringify}})
+          # Shipped: unclassified ivars force a conservative body scan.
+          # `GCRY_LAYOUT_DROP_UNCLASSIFIED=1` restores the hole — keep the
+          # precise is_ptr offsets, skip the fallback, and the unclassified
+          # word is never marked. Offset materialisation stays inside this
+          # branch: AUTO_LAYOUTS walks types whose pointer ivars sit past
+          # UInt16 (a StaticArray payload after a huge embed), and
+          # `UInt16.new(offsetof)` overflowed GC.init when the loop ran
+          # unconditionally. Research only; never a product setting.
+          if drop_unclassified?
+            {% if scan_count + noscan_count > 0 %}
+          scan = StaticArray(UInt16, {{scan_count == 0 ? 1 : scan_count}}).new(0)
+          noscan = StaticArray(UInt16, {{noscan_count == 0 ? 1 : noscan_count}}).new(0)
+          si = 0
+          ni = 0
+          {% for ivar in T.instance_vars %}
+            {% t = ivar.type %}
+            {% is_ptr = t <= Pointer || t < Reference %}
+            {% is_noscan = false %}
+            {% if t <= Pointer %}
+              {% elem = t.type_vars[0] %}
+              {% unless elem.has_inner_pointers? %}
+                {% is_noscan = true %}
+              {% end %}
+            {% elsif !is_ptr && t.union? %}
+              {% union_safe = true %}
+              {% for ut in t.union_types %}
+                {% unless ut == Nil || ut < Reference || ut <= Pointer %}
+                  {% union_safe = false %}
+                {% end %}
+              {% end %}
+              {% if union_safe %}
+                {% for ut in t.union_types %}
+                  {% if ut <= Pointer || ut < Reference %}
+                    {% is_ptr = true %}
+                  {% end %}
+                {% end %}
+              {% end %}
+            {% end %}
+            {% if is_ptr %}
+              {% if is_noscan %}
+                noscan[ni] = UInt16.new(offsetof({{T}}, @{{ivar.name}}))
+                ni += 1
+              {% else %}
+                scan[si] = UInt16.new(offsetof({{T}}, @{{ivar.name}}))
+                si += 1
+              {% end %}
+            {% end %}
+          {% end %}
+          install_full({{T}}.crystal_instance_type_id,
+            scan.to_unsafe, {{scan_count}},
+            noscan.to_unsafe, {{noscan_count}},
+            rounded.to_u32, scan_cap, KIND_PLAIN,
+            0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, VALUE_MODE_NONE, 0_u16,
+            0_u16, 0_u16, 0_u16, 0_u16, {{T.stringify}})
+            {% else %}
+              install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap, {{T.stringify}})
+            {% end %}
+          else
+            install_scan_cap({{T}}.crystal_instance_type_id, rounded.to_u32, scan_cap, {{T.stringify}})
+          end
         {% elsif scan_count + noscan_count > 0 %}
           scan = StaticArray(UInt16, {{scan_count == 0 ? 1 : scan_count}}).new(0)
           noscan = StaticArray(UInt16, {{noscan_count == 0 ? 1 : noscan_count}}).new(0)
