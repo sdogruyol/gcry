@@ -911,10 +911,11 @@ module GC
     # about still hold a set mark bit?
     heap.mark_clear_audit = true if env_flag_one?("GCRY_MARK_CLEAR_AUDIT")
     # Control arm: clear marks over the chunk list rather than the index.
+    # `make mark-clear-index --control` and `make thread-churn-uaf --control`.
     heap.mark_clear_list = true if env_flag_one?("GCRY_MARK_CLEAR_LIST")
     # Research only: go back to re-evaluating the mutator count per decision
-    # instead of latching it in the stop. The red arm of `make
-    # thread-churn-uaf`.
+    # instead of latching it in the stop. The trigger half of
+    # `make mark-clear-index` and `make thread-churn-uaf`.
     heap.sweep_mutator_latch = false if env_flag_zero?("GCRY_SWEEP_MUTATOR_LATCH")
     # Research only: run the holders search at every large release, so a live
     # block being let go names its holder then instead of a hundred

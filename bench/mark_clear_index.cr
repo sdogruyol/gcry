@@ -7,8 +7,8 @@
 # about one run in fourteen under thread churn, produced by the prepend race
 # between the sweep's walk and `map_chunk`.
 #
-# A chunk the clear misses keeps its marks, and this is what that costs, in the
-# words of the nursery case that hit it first (`clear_all_marks`):
+# A chunk the clear misses keeps its marks, and this is what that costs, in
+# the words of the nursery case that hit it first (`clear_all_marks`):
 #
 #   > the block then read marked forever, `mark_impl` returned early without
 #   > scanning it, and anything reachable only through it was reclaimed
@@ -22,12 +22,18 @@
 # So the clear walks the index, and this gate is the pair that says so:
 #
 #   bin/mark_clear_index            # shipped: no chunk keeps a mark
-#   bin/mark_clear_index --control  # the list walk back: some chunk does
+#   bin/mark_clear_index --control  # children under the two restoring knobs
 #
-# The control sets both halves, because the residue needs a chunk off the list
-# to exist in the first place. Measured: 11 of 14 runs produce residue with the
-# list walk and the pre-fix mutator-count reads, 0 of 20 with the shipped
-# clear.
+# `--control` is the parent. It forks `--child` under
+# `GCRY_MARK_CLEAR_LIST=1` and `GCRY_SWEEP_MUTATOR_LATCH=0` — the same pair
+# `thread-churn-uaf --control` uses, split out so this gate can fail when the
+# clear no longer depends on which set it walks. The census excludes
+# `--control` on purpose (a control has to pass); the knobs and `--child` are
+# the red direction. Dropping them leaves every child clean, which is FAIL.
+#
+# Both halves, because the residue needs a chunk off the list to exist in the
+# first place. Measured: 11 of 14 runs produce residue with the list walk and
+# the pre-fix mutator-count reads, 0 of 20 with the shipped clear.
 
 require "../src/gcry"
 
@@ -37,47 +43,59 @@ require "../src/gcry"
 
 ROUNDS  = (ENV["MARK_CLEAR_ROUNDS"]?.try(&.to_i?) || 240)
 THREADS = 8
-# The control runs in child processes, and that is not incidental: restoring
-# the pre-fix shape restores the defect, so a control child can *crash* instead
-# of finishing its report. Both outcomes prove the same thing — the shape is
-# broken — and only a child that finishes cleanly with no residue means the
-# harness has stopped driving it. Run in-process, the crash exited non-zero and
-# read as a gate failure, 1 run in 12.
+# The broken arm runs in child processes, and that is not incidental:
+# restoring the pre-fix shape restores the defect, so a child can *crash*
+# instead of finishing its report. Both outcomes prove the same thing — the
+# shape is broken — and only a child that finishes cleanly with no residue
+# means the harness has stopped driving it. Run in-process, the crash exited
+# non-zero and read as a gate failure, 1 run in 12.
 CONTROL_ATTEMPTS   = 6
 CONTROL_MAX_ROUNDS = ROUNDS * 8
-# What the control actually needs, learned the hard way on 2026-09-13: mark
+# What the broken arm actually needs, learned the hard way on 2026-09-13: mark
 # residue requires a chunk off the `@chunks` list, a chunk leaves the list only
 # through a prepend that races the sweep's walk, and a prepend happens in
 # `map_chunk`. Thread churn alone maps about thirty chunks per child, so the
-# control was running on a denominator of thirty and passing on luck — it found
+# arm was running on a denominator of thirty and passing on luck — it found
 # residue 6 of 6 times locally and **0 of 6** on the two-core CI runner, which
 # is the gate's own inconclusive arm firing correctly.
-# So the workload grows a live set and drops it whole, which releases chunks and
-# maps them again: ~60 mappings a round instead of ~0.03. Measured in
+# So the workload grows a live set and drops it whole, which releases chunks
+# and maps them again: ~60 mappings a round instead of ~0.03. Measured in
 # `bench/log/linux/2026-09-13-chunk-list-drift/FINDINGS.md`.
 MAIN_PER_ROUND = 64
 ALLOC_BYTES    = 8 * 1024
 SAWTOOTH       = 20
-# And the born threads have to allocate, not just exist. Threads that start and
-# stop are usually gone by the time the after-world sweep walks the list, so the
-# prepend that strands a chunk never comes from a mutator racing that walk —
-# measured as a bimodal control, 82 stranded chunks in one child and zero in the
-# next two. With this it is every child.
+# And the born threads have to allocate, not just exist. Threads that start
+# and stop are usually gone by the time the after-world sweep walks the list,
+# so the prepend that strands a chunk never comes from a mutator racing that
+# walk — measured as a bimodal control, 82 stranded chunks in one child and
+# zero in the next two. With this it is every child.
 ALLOC_PER_THREAD = 12
-# The control leaks what it strands — 97% of its heap on the drift harness — so
-# it stops at a ceiling rather than growing until the runner kills it.
+# The broken arm leaks what it strands — 97% of its heap on the drift harness
+# — so it stops at a ceiling rather than growing until the runner kills it.
 HEAP_CAP = 512_u64 << 20
 
-heap = Gcry.default_heap.not_nil!
-control_child = ARGV.includes?("--control-child")
-control = ARGV.includes?("--control") || control_child
+# Both halves of the pre-fix shape, plus the two audits the parent reads.
+# Either restoring knob alone leaves nothing to find — the list walk has no
+# off-list chunks to miss, the unlatched mutator count has nothing that
+# misses them. The audits are how residue and offlist become numbers rather
+# than a silent pass; a child without them reports 0/0 on a heap that is
+# broken.
+BROKEN = {
+  "GCRY_MARK_CLEAR_LIST"     => "1",
+  "GCRY_SWEEP_MUTATOR_LATCH" => "0",
+  "GCRY_MARK_CLEAR_AUDIT"    => "1",
+  "GCRY_CHUNK_LIST_AUDIT"    => "1",
+}
 
-# The control parent spawns children and reads their verdicts; everything
-# below this runs in a child or in the shipped arm.
+heap = Gcry.default_heap.not_nil!
+child = ARGV.includes?("--child")
+
+# The parent spawns children and reads their verdicts; everything below this
+# runs in a child or in the shipped arm.
 if ARGV.includes?("--control")
   self_path = Process.executable_path || "bin/mark_clear_index"
   puts "=== does the mark clear cover the set the marker marks? ==="
-  puts "control: the @chunks list walk and the pre-fix mutator-count reads, #{CONTROL_ATTEMPTS} children"
+  puts "broken: GCRY_MARK_CLEAR_LIST=1 GCRY_SWEEP_MUTATOR_LATCH=0, #{CONTROL_ATTEMPTS} children"
   puts ""
   residue_seen = 0
   offlist_seen = 0
@@ -85,8 +103,8 @@ if ARGV.includes?("--control")
   clean = 0
   CONTROL_ATTEMPTS.times do
     sink = IO::Memory.new
-    status = Process.run(self_path, ["--control-child"],
-      output: sink, error: Process::Redirect::Close)
+    status = Process.run(self_path, ["--child"],
+      env: BROKEN, output: sink, error: Process::Redirect::Close)
     out = sink.to_s
     residue = out.lines.find(&.starts_with?("residue=")).try(&.split('=').last.to_u64?) || 0_u64
     offlist = out.lines.find(&.starts_with?("offlist=")).try(&.split('=').last.to_u64?) || 0_u64
@@ -97,12 +115,13 @@ if ARGV.includes?("--control")
     elsif residue > 0
       residue_seen += 1
     elsif offlist > 0
-      # Residue is the stronger event and needs two things: a chunk stranded off
-      # the list *and* something marking into it afterwards. Under a workload
-      # that maps, the pre-fix shape strands chunks by the hundred but most of
-      # them are garbage nothing marks into — measured 2 of 6 children with
-      # residue and 6 of 6 with strands. The strand is the situation the shipped
-      # clear is what protects against, so it is what this arm has to show.
+      # Residue is the stronger event and needs two things: a chunk stranded
+      # off the list *and* something marking into it afterwards. Under a
+      # workload that maps, the pre-fix shape strands chunks by the hundred
+      # but most of them are garbage nothing marks into — measured 2 of 6
+      # children with residue and 6 of 6 with strands. The strand is the
+      # situation the shipped clear is what protects against, so it is what
+      # this arm has to show.
       offlist_seen += 1
     else
       clean += 1
@@ -114,10 +133,11 @@ if ARGV.includes?("--control")
   puts "children clean:                   #{clean}"
   puts ""
   if residue_seen + offlist_seen + crashed == 0
-    puts "FAIL every one of #{CONTROL_ATTEMPTS} children walked the list, stranded no chunk off it,"
-    puts "found no mark residue and did not crash. Either the prepend race that puts a chunk in"
-    puts "the index and off the list has stopped happening, or the clear no longer depends on"
-    puts "which set it walks. Both make the shipped run prove nothing."
+    puts "FAIL every one of #{CONTROL_ATTEMPTS} children ran under GCRY_MARK_CLEAR_LIST=1"
+    puts "and GCRY_SWEEP_MUTATOR_LATCH=0, stranded no chunk off the list, found no mark"
+    puts "residue and did not crash. Either the prepend race that puts a chunk in the"
+    puts "index and off the list has stopped happening, or the knobs no longer restore"
+    puts "the list walk. Both make the shipped run prove nothing."
     exit 1
   end
   puts "ok — the pre-fix shape still breaks (#{residue_seen} with residue, #{offlist_seen} with a"
@@ -130,27 +150,23 @@ heap.mark_clear_audit = true
 # Also count what the divergence itself retains: a chunk off the list is never
 # swept, so the residual is an RSS number and this is where it comes from.
 heap.chunk_list_audit = true
-if control
-  # Both halves of the pre-fix shape: the clear walks the list again, and the
-  # mutator count is read per decision so chunks leave the list at their old
-  # rate. Either alone leaves nothing to find — the first has no off-list
-  # chunks to miss, the second has nothing that misses them.
-  heap.mark_clear_list = true
-  heap.sweep_mutator_latch = false
-end
+# The list-walk / unlatched-mutator-count pair is applied only through
+# `apply_env_config` in the child. Setting the properties here would hide a
+# knob that no longer restores the pre-fix shape: the parent would still see
+# residue and the census would still see a fork.
 
-unless control_child
+unless child
   puts "=== does the mark clear cover the set the marker marks? ==="
   puts "clear walks: the chunk index (shipped)"
   puts "mutator count: latched in the stop"
   puts ""
 end
 
-limit = control ? CONTROL_MAX_ROUNDS : ROUNDS
+limit = child ? CONTROL_MAX_ROUNDS : ROUNDS
 rounds = 0
 live = [] of Array(UInt8)
 while rounds < limit
-  break if control && heap.mark_clear_residue > 0
+  break if child && heap.mark_clear_residue > 0
   break if heap.heap_size > HEAP_CAP
   rounds += 1
   born = [] of Thread
@@ -170,7 +186,7 @@ while rounds < limit
   live.clear if rounds % SAWTOOTH == 0
 end
 
-unless control_child
+unless child
   puts "rounds run:              #{rounds}"
   puts "mark_clear_residue:      #{heap.mark_clear_residue}"
   puts "chunk_index_only:        #{heap.chunk_index_only}"
@@ -178,7 +194,7 @@ unless control_child
   puts ""
 end
 
-if control_child
+if child
   # The two lines the parent reads: the residue, and the strand it needs to
   # exist first. Nothing else here is load-bearing.
   puts "residue=#{heap.mark_clear_residue}"

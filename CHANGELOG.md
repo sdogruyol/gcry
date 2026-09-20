@@ -345,6 +345,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a harness, or CI was added. The leftover 42 is mostly property
   tests, fuzz, soak, and type-check.
 
+- **`make mark-clear-index` constructs its red direction per run.** The
+  gate already ran on x86_64 CI and asserted that the shipped clear
+  leaves no indexed chunk holding a mark, with `--control` restoring
+  the list walk in-process. The census excludes `--control` on purpose
+  (a control has to pass), so the ability to fail lived only in a
+  ROADMAP sentence. The parent now forks `--child` under
+  `GCRY_MARK_CLEAR_LIST=1` and `GCRY_SWEEP_MUTATOR_LATCH=0` — the same
+  pair `thread-churn-uaf --control` already used. Shipped: residue 0
+  of 240. Broken: **6/6** children with residue (one child: residue=4,
+  offlist=56 at collection 34). Dropping the knobs reddens it (6/6
+  clean). Census **99 / 57 / 42 → 99 / 58 / 41.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

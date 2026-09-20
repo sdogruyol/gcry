@@ -1388,8 +1388,10 @@ poison-holders: $(BIN)
 # reads marked forever, `mark_impl` returns early on it, and nothing follows
 # its edges; that is one half of the 2026-08-23 live-object release. Two arms:
 # the shipped clear must leave no indexed chunk holding a mark, and `--control`
+# forks `--child` under `GCRY_MARK_CLEAR_LIST=1` and `GCRY_SWEEP_MUTATOR_LATCH=0`
 # — the list walk plus the pre-fix mutator-count reads, because the residue
-# needs an off-list chunk to exist — must leave some. The control drives
+# needs an off-list chunk to exist — which must leave some. Dropping the knobs
+# is red (every child clean). The control drives
 # *mappings*, and that is the whole difference between a gate and a coin toss:
 # a chunk leaves the list only through a prepend racing the sweep's walk, a
 # prepend happens in `map_chunk`, and the born threads have to be alive and

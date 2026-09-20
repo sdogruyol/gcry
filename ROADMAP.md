@@ -1239,6 +1239,25 @@ kept finding the rest.
       arms with `-`). The three remaining orphan knobs are still
       default-off research paths.
       `bench/log/linux/2026-09-20-census-bounded-child/FINDINGS.md`
+      **2026-09-20, later: `make mark-clear-index` constructs its red
+      direction per run.** It already ran on x86_64 CI: shipped clear
+      must leave no indexed chunk holding a mark, `--control` must
+      leave some. The census excludes `--control` on purpose — a
+      control has to pass — so that second arm did not count, and the
+      leftover-42 note named this gate as a real CI gap. The parent
+      now forks `--child` under `GCRY_MARK_CLEAR_LIST=1` and
+      `GCRY_SWEEP_MUTATOR_LATCH=0`, the pair `thread-churn-uaf
+      --control` already used; the properties are no longer set in
+      process, so a knob that stops restoring the list walk is red
+      rather than hidden. Shipped residue **0** of 240. Broken **6/6**
+      children with residue (one child: residue=4, offlist=56 at
+      collection 34). Dropping the knobs: 6/6 clean, FAIL. Census
+      **99 / 57 / 42 → 99 / 58 / 41.** The number moved by building
+      an arm on an existing gate. Still a real gap in CI:
+      `nested-spawn-uaf` (the original repro; `dead-stack-root` is
+      the gate), `occupied-release` (recipe prefixes both arms with
+      `-`).
+      `bench/log/linux/2026-09-20-mark-clear-knobs/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
