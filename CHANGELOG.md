@@ -400,6 +400,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--disabled` requires that. Dropping the skip reddens the gate (2.0,
   FAIL). Census **99 / 61 / 38 → 99 / 62 / 37.** x86_64.
 
+- **`make stw-lag-pause` constructs its red direction per run.** The
+  gate already ran on x86_64 CI and asserted that the default path
+  skips on shallow fibers (`--dirty-kb=16`, 34 skips). Its ability
+  to fail the *disable* lived only in a hand edit of
+  `fiber_stack_scan_top`. `GCRY_STACK_LOW_WATER=0` turns the skip
+  off, so every config records 0 skips and lag 0 goes from 14.47 ms
+  to **329 ms (14.63×)** — the skip's own number. `--disabled`
+  requires that. Dropping the assignment reddens the gate (exit 64).
+  Census **99 / 62 / 37 → 99 / 63 / 36.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

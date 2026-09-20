@@ -33,6 +33,14 @@
 # Build: crystal build -Dgc_none bench/stw_lag_pause.cr -o bin/stw_lag_pause
 # Run:   ./bin/stw_lag_pause [--fibers=32] [--rounds=5] [--max-ratio=30]
 #        GCRY_SOUND=1 ./bin/stw_lag_pause   # asserts the profile *does* set 0/0
+#        GCRY_STACK_LOW_WATER=0 ./bin/stw_lag_pause --dirty-kb=16 --disabled
+#                                     # skip off; default path must record 0 skips
+#
+# Until 2026-09-20 the skip's red direction was a hand edit of
+# `fiber_stack_scan_top` (gated on lag == 0). `--dirty-kb=16` already
+# requires the default path to skip; `--disabled` is the other direction,
+# so a knob that stops turning the skip off reddens the gate rather than
+# hiding it.
 #
 # Two assertions, both host-independent:
 #   1. The lags the process booted with match GCRY_SOUND — non-zero without it,
@@ -49,6 +57,12 @@ require "../src/gcry"
 {% end %}
 
 HEAP = Gcry.default_heap.not_nil!
+
+disabled = ARGV.includes?("--disabled")
+if disabled && HEAP.stack_low_water_scan
+  STDERR.puts "--disabled needs GCRY_STACK_LOW_WATER=0: without the skip this arm would require the default path not to skip while the skip is still running."
+  exit 64
+end
 
 # Read before anything mutates them — locals, not constants, because Crystal
 # initialises a constant at its first *use*, which here is after the A/B has
@@ -121,7 +135,8 @@ def dirty_stack(remaining_kb : Int32) : Int32
 end
 
 puts "=== STW lag pause guard ==="
-puts "fibers=#{fibers} threads=#{threads_n} dirty=#{dirty_kb}KiB live=#{live_mb}MiB rounds=#{rounds}"
+puts "fibers=#{fibers} threads=#{threads_n} dirty=#{dirty_kb}KiB live=#{live_mb}MiB rounds=#{rounds}" \
+     "#{disabled ? " skip=off (GCRY_STACK_LOW_WATER=0)" : ""}"
 puts ""
 
 # ── Park OS threads so multi_mutator_threads? (>2) holds ─────────────────
@@ -322,6 +337,22 @@ if lw_on && dirty_kb < 256 && !want_sound
     puts "  FAIL default-path skip: 0 skips across #{rounds} rounds"
   else
     puts "  PASS default-path skip: tuned skipped in #{skips["tuned"].count(&.>(0))}/#{rounds} rounds"
+  end
+end
+
+# Inverse of 1b. The knob is what turns the skip off; without this arm a
+# GCRY_STACK_LOW_WATER=0 that stopped reaching `stack_low_water_scan`
+# would still pass every other assertion — the skip would keep firing
+# and the ratio bound would stay tight. Require every config at 0 skips.
+if disabled
+  CONFIGS.each do |cfg|
+    n = skips[cfg.key].sum
+    if n != 0
+      failures << "GCRY_STACK_LOW_WATER=0 but #{cfg.key} still skipped (#{n})"
+      puts "  FAIL disabled skip: #{cfg.key} skipped #{n} times"
+    else
+      puts "  PASS disabled skip: #{cfg.key} skipped 0 times across #{rounds} rounds"
+    end
   end
 end
 

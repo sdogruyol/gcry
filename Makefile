@@ -174,6 +174,11 @@ pause-budget: $(BIN)
 # a local `make stw-lag-pause` that passes where CI fails is not a gate. The
 # relaxed --max-ratio-nolw applies only when pagemap is unreadable and the
 # low-water skip cannot run — see ci.yml and bench/stw_lag_pause.cr.
+#
+# Until 2026-09-20 the skip's red direction was a hand edit of
+# `fiber_stack_scan_top` (gated on lag == 0). `--dirty-kb=16` already
+# requires the default path to skip; `GCRY_STACK_LOW_WATER=0 --disabled`
+# requires it not to. Dropping the knob reddens the gate.
 stw-lag-pause: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_lag_pause.cr -o $(BIN)/stw_lag_pause
 	$(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} \
@@ -185,6 +190,8 @@ stw-lag-pause: $(BIN)
 	# path regress: at --dirty-kb=256 the window is fully written either way.
 	$(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} --dirty-kb=16 \
 		--max-ratio=$${STW_LAG_MAX_RATIO:-4} --max-ratio-nolw=$${STW_LAG_MAX_RATIO_NOLW:-30}
+	GCRY_STACK_LOW_WATER=0 $(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} --dirty-kb=16 \
+		--disabled --max-ratio=$${STW_LAG_MAX_RATIO:-4} --max-ratio-nolw=$${STW_LAG_MAX_RATIO_NOLW:-30}
 
 rss-leak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak

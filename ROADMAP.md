@@ -1311,6 +1311,19 @@ kept finding the rest.
       `dead-stack-root` is the gate), `occupied-release` (recipe
       prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-pool-index-disable/FINDINGS.md`
+      **2026-09-20, later: `make stw-lag-pause` constructs its red
+      direction per run.** It already ran on x86_64 CI and asserted
+      the default path skips on shallow fibers; what it could not do
+      without a hand edit of `fiber_stack_scan_top` (gated on lag ==
+      0) was come out red for the disable. `GCRY_STACK_LOW_WATER=0`
+      turns the skip off, so `--dirty-kb=16` records 0 skips instead
+      of 34 and lag 0 goes from 14.47 ms to **329 ms (14.63×)**.
+      `--disabled` requires every config at 0. Dropping the
+      assignment: exit 64. Census **99 / 62 / 37 → 99 / 63 / 36.**
+      x86_64. Still a real gap in CI: `nested-spawn-uaf` (the
+      original repro; `dead-stack-root` is the gate),
+      `occupied-release` (recipe prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-stw-lag-low-water-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

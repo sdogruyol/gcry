@@ -732,9 +732,10 @@ module GC
     if lag = env_u64("GCRY_STW_STACK_LAG")
       heap.stw_multi_stack_lag = lag
     end
-    # Escape hatch for the low-water skip on the lag-0 path. It preserves
-    # semantics (untouched pages are zero), so this exists to A/B its cost and
-    # to disable it on a kernel whose pagemap misbehaves.
+    # Escape hatch for the low-water skip. It preserves semantics (untouched
+    # pages are zero), so this exists to A/B its cost and to disable it on a
+    # kernel whose pagemap misbehaves. `make stw-lag-pause --disabled` is the
+    # red arm — default-path skips stay 0. Dropping the assignment reddens it.
     if env_flag_zero?("GCRY_STACK_LOW_WATER")
       heap.stack_low_water_scan = false
     end

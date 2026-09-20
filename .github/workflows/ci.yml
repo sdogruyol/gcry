@@ -455,6 +455,12 @@ jobs:
           # Shallow fibers give the default path something to skip, and the tool
           # then requires that it does.
           ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --max-ratio=4 --max-ratio-nolw=30
+          # The other direction, which until 2026-09-20 existed only as a hand
+          # edit of `fiber_stack_scan_top` (gated on lag == 0). The knob turns
+          # the skip off so the default path records 0 skips on the same
+          # shallow fibers. Dropping the knob reddens the gate rather than
+          # hiding it.
+          GCRY_STACK_LOW_WATER=0 ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --disabled --max-ratio=4 --max-ratio-nolw=30
 
       # A collector that asks glibc about a thread it has just suspended waits
       # forever, silently. Nothing else in CI can see it: the correctness suite
