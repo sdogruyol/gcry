@@ -122,11 +122,24 @@ def report(label : String, buckets : Array(Bucket), ok : Bool) : {Float64, UInt6
     # Per *mapping*, not per collection: the last two buckets say which axis
     # this rides. A run whose heap stopped growing and whose loss stopped with
     # it is a bounded leak; one that keeps losing while mapping nothing is not.
-    a, b = buckets[-2], buckets[-1]
-    dm = b.mapped - a.mapped
-    dc = b.chunks - a.chunks
-    puts "  last bucket: #{dm} mapping(s), #{dc} stranded — " +
-         (dm == 0 && dc == 0 ? "the heap stopped growing and the loss stopped with it" : dc == 0 ? "mapping without losing" : "still losing while it maps")
+    #
+    # Two buckets are not guaranteed. The pre-fix arm is *expected* to crash —
+    # that crash is its evidence — and if it goes down before the second
+    # bucket there is no slope to read. `buckets.empty?` was handled above and
+    # this case was not, so the reporter died with `Index out of bounds` on
+    # the arm whose whole purpose is to die (2026-09-20, the first run after
+    # this gate moved to its own job, where the child happened to crash after
+    # the first bucket). A reporter that falls over on its own evidence turns
+    # a working gate into a red one.
+    if buckets.size >= 2
+      a, b = buckets[-2], buckets[-1]
+      dm = b.mapped - a.mapped
+      dc = b.chunks - a.chunks
+      puts "  last bucket: #{dm} mapping(s), #{dc} stranded — " +
+           (dm == 0 && dc == 0 ? "the heap stopped growing and the loss stopped with it" : dc == 0 ? "mapping without losing" : "still losing while it maps")
+    else
+      puts "  one bucket only#{ok ? "" : " — the child crashed before a second"}, so there is no slope to read"
+    end
   end
   puts ""
   {last.chunks * 1000.0 / last.mapped, last.mapped}

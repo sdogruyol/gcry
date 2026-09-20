@@ -275,6 +275,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Raising the cap was the other option and is the wrong one: it buys
   days, and the property the cap exists for — a hang failing in minutes
   instead of at GitHub's 6 h ceiling — weakens every time it moves.
+  Moving it surfaced a latent bug in one of the moved gates, on the
+  first run: `chunk_list_drift`'s reporter read `buckets[-2]` to print
+  the last bucket's slope, and the **pre-fix arm is expected to crash**
+  — that crash is its evidence. When it went down after the *first*
+  bucket the reporter died with `Index out of bounds` and took a
+  working gate red with it. The empty case was already handled and the
+  one-bucket case was not. Guarded, and it is the only `[-2]` of that
+  shape in `bench/`. Not reproducible here — the pre-fix child survives
+  every rounds setting tried on this host, up to 6 000 — so the fix is
+  a bounds check on the exact expression the CI stack trace named,
+  with the passing path re-verified.
 
 ## [Unreleased]
 
