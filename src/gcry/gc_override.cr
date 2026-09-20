@@ -802,7 +802,13 @@ module GC
     # (src/gcry/segv_report.cr). Costs nothing until something faults; default
     # off because it installs a signal handler, and a collector should not do
     # that to a process that did not ask.
-    {% if flag?(:unix) %} Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT") {% end %}
+    {% if flag?(:unix) %}
+      Gcry::SegvReport.request if env_flag_one?("GCRY_SEGV_REPORT")
+      # Twin of the mapping line `make segv-region-report` asserts: skip it,
+      # so a fault outside the span is back to "never a gcry allocation"
+      # and nothing about the mapping. Research only.
+      Gcry::SegvReport.skip_region if env_flag_one?("GCRY_DISABLE_REGION_REPORT")
+    {% end %}
     # After mark, before sweep: does any marked object point at a block the
     # sweep is about to free? (src/gcry/mark_audit.cr). Off by default —
     # O(live heap) inside the pause.

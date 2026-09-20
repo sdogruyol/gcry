@@ -1258,6 +1258,21 @@ kept finding the rest.
       the gate), `occupied-release` (recipe prefixes both arms with
       `-`).
       `bench/log/linux/2026-09-20-mark-clear-knobs/FINDINGS.md`
+      **2026-09-20, later: `make segv-region-report` constructs its
+      red direction per run.** It already ran on x86_64 CI and
+      asserted a fault outside the span names its mapping; what it
+      could not do without a hand edit of `report_faulting_region`
+      was come out red ("drop the report line").
+      `GCRY_DISABLE_REGION_REPORT=1` skips that line, so the same
+      three faults print "never a gcry allocation" and nothing about
+      the mapping — the 2026-09-19 churn sighting. The parent forks
+      those children under the knob and requires each *not* to name
+      the mapping. Dropping the knob: all three still named, FAIL.
+      Census **99 / 58 / 41 → 99 / 59 / 40.** Linux. Still a real
+      gap in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-segv-region-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

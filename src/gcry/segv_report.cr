@@ -43,6 +43,16 @@ module Gcry
       @@stack_probe = true
     end
 
+    # Research only (`GCRY_DISABLE_REGION_REPORT=1`): skip the mapping line.
+    # A literal, same reason as `@@stack_probe` — this is read from the
+    # signal handler. The gate's red arm is this skip, not a hand edit of
+    # `report_faulting_region`.
+    @@skip_region = false
+
+    def self.skip_region : Nil
+      @@skip_region = true
+    end
+
     # Where this frame sits inside the alternate signal stack, so the report's
     # own depth is measurable rather than argued about. Signal-safe: one
     # `sigaltstack` query, static buffer, no allocation.
@@ -335,6 +345,7 @@ module Gcry
     # Its own line and its own buffer: `RawOut::LIMIT` is 480 bytes and the
     # readings above already run close to it.
     private def self.report_faulting_region(addr : UInt64) : Nil
+      return if @@skip_region
       buf = uninitialized UInt8[RawOut::LIMIT]
       len = 0
       lo = 0_u64

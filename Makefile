@@ -1451,7 +1451,10 @@ counter-loss: $(BIN)
 # arms, and the numbers are checked rather than the words: an anonymous
 # PROT_NONE mapping, a file-backed one that must be named by path, and an
 # address in no mapping, which must be reported as wild rather than attributed
-# to the nearest region. Drop the report line and all three fail.
+# to the nearest region. The red direction, which until 2026-09-20 existed
+# only as a hand edit of `report_faulting_region`: the parent forks the same
+# three faults under `GCRY_DISABLE_REGION_REPORT=1` and requires the mapping
+# line to be absent. Dropping that knob reddens the gate. Linux only.
 .PHONY: segv-region-report
 segv-region-report: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/segv_region_report.cr -o $(BIN)/segv_region_report --error-trace

@@ -357,6 +357,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offlist=56 at collection 34). Dropping the knobs reddens it (6/6
   clean). Census **99 / 57 / 42 → 99 / 58 / 41.** x86_64.
 
+- **`make segv-region-report` constructs its red direction per run.** The
+  gate already ran on x86_64 CI and asserted that a fault outside the
+  span names its mapping — range, permissions, size, distance below the
+  top, pathname — with a wild address reported as such rather than
+  attributed to the nearest region. Its ability to fail lived only in a
+  hand edit of `report_faulting_region` ("drop the report line and all
+  three fail"). `GCRY_DISABLE_REGION_REPORT=1` skips that line, so the
+  same three faults print "never a gcry allocation" and nothing about
+  the mapping, which is the 2026-09-19 churn sighting. The parent forks
+  those children under the knob and requires each *not* to name the
+  mapping. Dropping the knob reddens the gate. Census
+  **99 / 58 / 41 → 99 / 59 / 40.** Linux.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

@@ -16,7 +16,7 @@ require "../src/gcry"
 # and how far below its top it sits, which is how a region "gcry can name as
 # nothing" was recognised as a stack in 2026-08-27.
 #
-# Three arms, and the numbers are checked rather than the words:
+# Three shipped arms, and the numbers are checked rather than the words:
 #
 #   * **mapped** — fault inside an anonymous `PROT_NONE` mapping, placed well
 #     away from the heap. The report must name a range that actually contains
@@ -28,8 +28,13 @@ require "../src/gcry"
 #     than name the nearest region, because "stale pointer into a live mapping"
 #     and "wild pointer" are different defects.
 #
-# Delete `report_faulting_region` and all three fail: each arm requires a line
-# that only it prints.
+# A fourth arm constructs the red direction per run. Until 2026-09-20 the only
+# way this gate came out red was a hand edit of `report_faulting_region`.
+# `GCRY_DISABLE_REGION_REPORT=1` skips that line, so the same three faults
+# print "never a gcry allocation" and nothing about the mapping — which is
+# what the 2026-09-19 churn sighting carried. The parent forks those children
+# under the knob and requires each *not* to name the mapping; dropping the
+# knob reddens the gate rather than hiding it.
 module SegvRegionReport
   HINT      = 0x2a00_0000_0000_u64
   FILE_HINT = 0x2b00_0000_0000_u64
@@ -88,10 +93,10 @@ module SegvRegionReport
       size: m[4].to_u64, below_top: m[5].to_u64(16), name: m[6].strip)
   end
 
-  def self.run(exe : String, arm : String) : Tuple(String, String)
+  def self.run(exe : String, arm : String, env : Hash(String, String) = {} of String => String) : Tuple(String, String)
     sink = IO::Memory.new
     errors = IO::Memory.new
-    Process.run(exe, [arm], output: sink, error: errors)
+    Process.run(exe, [arm], env: env, output: sink, error: errors)
     {sink.to_s, errors.to_s}
   end
 
@@ -178,11 +183,48 @@ module SegvRegionReport
     end
     puts ""
 
+    # The red direction. The shipped arms above require the mapping line; this
+    # arm requires its absence under the knob that skips it. A child that still
+    # names the mapping means the skip is gone and a hand edit is the only way
+    # this gate can fail again.
+    disabled = {"GCRY_DISABLE_REGION_REPORT" => "1"}
+    puts "  under GCRY_DISABLE_REGION_REPORT=1 (the pre-fix report):"
+    {"mapped", "file"}.each do |arm|
+      stdout, stderr = run(exe, arm, disabled)
+      probe = probe_address(stdout)
+      unless probe
+        puts "    #{arm}: FAIL — the child never reached its fault"
+        failures += 1
+        next
+      end
+      sighting = parse(probe[0], stderr)
+      if sighting
+        puts "    #{arm}: FAIL — still named [0x#{sighting.lo.to_s(16)}, 0x#{sighting.hi.to_s(16)}) #{sighting.name} — the knob no longer drops the mapping line"
+        failures += 1
+      else
+        puts "    #{arm}: unnamed (0x#{probe[0].to_s(16)})"
+      end
+    end
+    stdout, stderr = run(exe, "wild", disabled)
+    probe = probe_address(stdout)
+    if probe.nil?
+      puts "    wild:   FAIL — the child never reached its fault"
+      failures += 1
+    elsif stderr.lines.any?(&.includes?("no mapping holds that address"))
+      puts "    wild:   FAIL — still reported as wild — the knob no longer drops the mapping line"
+      failures += 1
+    else
+      puts "    wild:   unnamed (0x#{probe[0].to_s(16)})"
+    end
+    puts ""
+
     if failures == 0
       puts "ok — a fault outside the span names the mapping that holds it, with a range that"
       puts "     contains the address, the mapping's own size, the distance below its top and"
       puts "     the pathname when it has one; an address in no mapping is reported as wild"
-      puts "     rather than attributed to the nearest region (src/gcry/segv_report.cr)."
+      puts "     rather than attributed to the nearest region. GCRY_DISABLE_REGION_REPORT=1"
+      puts "     drops that line on the same three faults, which is the pre-fix report"
+      puts "     (src/gcry/segv_report.cr)."
       0
     else
       puts "FAIL: #{failures} arm(s). Without this the only thing a sighting outside the span"
