@@ -24,6 +24,13 @@
 #   bin/pool_refill_cost              # live set grows across phases
 #   bin/pool_refill_cost --churn      # and is dropped every round, which is
 #                                     # what invalidates the index
+#   GCRY_DISABLE_POOL_INDEX=1 bin/pool_refill_cost --disabled
+#                                     # every refill walks; rebuilds exceed
+#                                     # the per-version floor
+#
+# Until 2026-09-20 the only way this gate came out red was a hand edit of
+# that floor. `--disabled` requires the walk to be paid per refill.
+# Dropping the knob reddens the gate rather than hiding it.
 
 require "../src/gcry"
 
@@ -38,10 +45,16 @@ ALLOC_BYTES = 256
 
 heap = Gcry.default_heap.not_nil!
 churn = ARGV.includes?("--churn")
+disabled = ARGV.includes?("--disabled")
+if disabled && !heap.pool_index_disabled
+  STDERR.puts "--disabled needs GCRY_DISABLE_POOL_INDEX=1: without the skip this arm would require rebuilds above the per-version floor while the index is still valid."
+  exit 64
+end
 
 puts "=== how does the refill walk scale with the chunk count? ==="
 puts "#{PHASES.size} phases, #{ROUNDS} rounds x #{PER_ROUND} allocations of #{ALLOC_BYTES} B each, " \
-     "#{churn ? "live set dropped every round (churn)" : "live set kept per phase"}"
+     "#{churn ? "live set dropped every round (churn)" : "live set kept per phase"}" \
+     "#{disabled ? ", index skipped (GCRY_DISABLE_POOL_INDEX=1)" : ""}"
 puts ""
 puts "  live rounds   chunks   allocations   rebuilds   per 1k allocs   chunk visits / alloc"
 
@@ -77,6 +90,12 @@ end
 puts ""
 first, last = results.first, results.last
 if last.rebuilds == 0 && first.rebuilds == 0
+  if disabled
+    puts "FAIL not one rebuild with the index skipped — GCRY_DISABLE_POOL_INDEX no longer"
+    puts "invalidates the pool index, so the only way this gate can fail is a hand edit of"
+    puts "the rebuild floor again."
+    exit 1
+  end
   puts "ok — not one rebuild in #{results.sum(&.allocs)} allocations at any size: the walk is not"
   puts "on the refill path on this workload, so O(chunks) per refill does not describe it."
   exit 0
@@ -107,6 +126,18 @@ puts ""
 
 # Two active slots on this workload — the size class, and the atomic variant of
 # it — so anything up to a handful is the floor rather than a finding.
+if disabled
+  if rebuilds_per_collection <= 8.0
+    puts "FAIL #{rebuilds_per_collection.round(2)} rebuilds per collection is still the per-version"
+    puts "floor — GCRY_DISABLE_POOL_INDEX no longer forces a walk per refill, so the only way"
+    puts "this gate can fail is a hand edit of that floor again."
+    exit 1
+  end
+  puts "ok — the index was skipped, so the walk is paid per refill:"
+  puts "#{rebuilds_per_collection.round(2)} rebuilds per collection, which is the O(chunks) shape"
+  puts "the note described and the floor a hand edit of bitmap_take_pool_chunk used to restore."
+  exit 0
+end
 if rebuilds_per_collection <= 8.0
   puts "ok — the walk is paid once per capacity version, which each sweep bumps, not once per"
   puts "refill: #{rebuilds_per_collection.round(2)} rebuilds per collection however many chunks there are. The cost per"

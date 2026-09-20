@@ -1299,6 +1299,18 @@ kept finding the rest.
       is the gate), `occupied-release` (recipe prefixes both arms
       with `-`).
       `bench/log/linux/2026-09-20-parallel-mark-disable/FINDINGS.md`
+      **2026-09-20, later: `make pool-refill-cost` constructs its red
+      direction per run.** It already ran on x86_64 CI and asserted
+      one walk per active class slot per collection; what it could
+      not do without a hand edit of that floor was come out red.
+      `GCRY_DISABLE_POOL_INDEX=1` invalidates the index on every
+      take, so rebuilds go from 2.0 to 12.25 per collection.
+      `--disabled` requires that. Dropping the skip: 2.0, FAIL.
+      Census **99 / 61 / 38 → 99 / 62 / 37.** x86_64. Still a real
+      gap in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-pool-index-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

@@ -390,6 +390,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured, not marking. `--disabled` requires that. Dropping the
   knob reddens the gate. Census **99 / 60 / 39 → 99 / 61 / 38.** x86_64.
 
+- **`make pool-refill-cost` constructs its red direction per run.** The
+  gate already ran on x86_64 CI and asserted that refill indexing stays
+  at one walk per active class slot per collection (2.0 on this
+  workload). Its ability to fail lived only in a hand edit of that
+  floor. `GCRY_DISABLE_POOL_INDEX=1` treats the available-chunk index as
+  invalid on every take, so each refill walks the class again — 12.25
+  rebuilds per collection, the O(chunks) shape the note described.
+  `--disabled` requires that. Dropping the skip reddens the gate (2.0,
+  FAIL). Census **99 / 61 / 38 → 99 / 62 / 37.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

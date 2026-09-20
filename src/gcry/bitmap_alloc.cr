@@ -211,6 +211,11 @@ module Gcry
       @bitmap_search_skip_counts.sum
     end
 
+    # Research only — `GCRY_DISABLE_POOL_INDEX=1`: treat the available-chunk
+    # index as invalid on every take, so each refill walks the class again.
+    # `make pool-refill-cost --disabled` is the red arm. Never a product setting.
+    property pool_index_disabled : Bool = false
+
     private def bitmap_capacity_changed(chunk : ChunkHeader*) : Nil
       slot = chunk.value.size_class.to_i32
       slot += SIZE_CLASS_COUNT if ChunkHeader.atomic?(chunk)
@@ -808,6 +813,7 @@ module Gcry
       version = Atomic::Ops.load(@bitmap_capacity_versions.to_unsafe + slot,
         LLVM::AtomicOrdering::Acquire, false)
       pool = @bitmap_pool_indexes.to_unsafe + slot
+      pool.value.valid = false if @pool_index_disabled
       # Adding blacklist bits only removes capacity; each pop rechecks them.
       # Disabling the blacklist can restore capacity, so a mode change rebuilds.
       if pool.value.blacklist_enabled != @blacklist_enabled

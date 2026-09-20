@@ -233,6 +233,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
 | `GCRY_DISABLE_PARALLEL_MARK=1` | Research arm, never a product setting: pin mark workers at 1 even if a later assignment asks for more, so `parallel_mark_stolen` stays 0. `--disabled` on `make parallel-mark-process` requires that. Dropping the skip reddens the gate. |
+| `GCRY_DISABLE_POOL_INDEX=1` | Research arm, never a product setting: treat the available-chunk index as invalid on every refill, so `bitmap_take_pool_chunk` walks the class again. `--disabled` on `make pool-refill-cost` requires rebuilds per collection above the per-version floor. Dropping the skip reddens the gate. |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
 | `GCRY_DEBUG_INVARIANTS=1` | Runtime heap invariant checks |

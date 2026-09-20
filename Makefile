@@ -1509,11 +1509,14 @@ kept-release-report: $(BIN)
 # rate, and it is 0.391% of what the sweep walks in the same collection (512
 # blocks per chunk at 256 B). Fails if rebuilds per collection exceed one per
 # active slot, i.e. if the index starts being invalidated mid-collection, which
-# is the only way this becomes the per-refill walk. Two arms, ~13 s.
+# is the only way this becomes the per-refill walk. Until 2026-09-20 the
+# only way it came out red was a hand edit of that floor. Three arms, ~13 s
+# plus the disable arm.
 pool-refill-cost: $(BIN)
 	$(CRYSTAL) build --release -Dgc_none bench/pool_refill_cost.cr -o $(BIN)/pool_refill_cost --error-trace
 	$(BIN)/pool_refill_cost
 	$(BIN)/pool_refill_cost --churn
+	GCRY_DISABLE_POOL_INDEX=1 $(BIN)/pool_refill_cost --disabled
 
 # The wedge ROADMAP has carried without a reproducer: `chunk_containing` holds
 # `@index_lock` for the length of a lookup, a suspend signal arrives wherever it
