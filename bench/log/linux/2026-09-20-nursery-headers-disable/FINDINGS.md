@@ -36,6 +36,10 @@ rather than hiding it.
 `HTTP.keep_alive?` after `--disabled` hangs (Request construction walks
 the dangling entry). The red arm only checks the name is gone.
 
+CI x86_64 (`a61e2d6`) lost the `--disabled` arm: the young name survived
+on the stack (`X-Nurs-670371`). The pin is a static root and the minor
+skips the stack, so the Hash walk is the only path.
+
 ## Census
 
 ```

@@ -11,8 +11,9 @@
 # `minor_collect` returned immediately and the keys were string literals
 # sitting on the stack. Both arms would have stayed green through a broken
 # walk. The green arm now requires a live nursery, a hash layout that walks
-# keys, and a nursery-allocated name that has left the stack. `--disabled`
-# installs the noscan-without-walk layout and requires that name to vanish.
+# keys, and a nursery-allocated name reachable only through the Hash
+# (class-var pin, minor without a stack scan). `--disabled` installs the
+# noscan-without-walk layout and requires that name to vanish.
 #
 # Build: crystal build -Dgc_none -Dgcry_block_headers bench/nursery_headers.cr -o bin/nursery_headers
 # Run:   ./bin/nursery_headers
@@ -34,6 +35,13 @@ alias HeaderHash = Hash(HTTP::Headers::Key, HeaderValue)
 
 HEAP     = Gcry.default_heap.not_nil!
 DISABLED = ARGV.includes?("--disabled")
+
+# Stack residue kept the young name alive on CI (`X-Nurs-*` survived
+# `--disabled`). A class var is a static root, so the minor can skip the
+# stack and the Hash walk is the only path to the nursery key.
+class Pin
+  class_property headers : HTTP::Headers?
+end
 
 def install_broken_hash_layout : Nil
   scan = StaticArray(UInt16, 1).new(0)
@@ -115,11 +123,14 @@ begin
   end
 
   headers = HTTP::Headers.new
+  Pin.headers = headers
   headers["Connection"] = "keep-alive"
   GC.collect
   plant_young_header(headers)
   HEAP.clear_stack(1_u64 << 20)
-  HEAP.minor_collect(scan_stack: true)
+  # Stack off: the pin is a static root, the Hash is old, the young name
+  # lives only in @entries. A leftover word on this frame is not a root.
+  HEAP.minor_collect(scan_stack: false)
   GC.collect
 
   begin
