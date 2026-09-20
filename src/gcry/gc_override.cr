@@ -716,6 +716,10 @@ module GC
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
+    # Research only: pin mark workers at 1 even if a later assignment asks
+    # for more. `make parallel-mark-process --disabled` is the red arm —
+    # stolen stays 0. Dropping the skip reddens it.
+    heap.force_serial_mark = true if env_flag_one?("GCRY_DISABLE_PARALLEL_MARK")
     # Research only: the pre-2026-09-04 pop/busy protocol, which lets the
     # master end a mark cycle while a worker still holds a batch.
     heap.mark_busy_unlocked = true if env_flag_one?("GCRY_MARK_BUSY_UNLOCKED")

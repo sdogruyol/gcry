@@ -1287,6 +1287,18 @@ kept finding the rest.
       `dead-stack-root` is the gate), `occupied-release` (recipe
       prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-holders-find-disable/FINDINGS.md`
+      **2026-09-20, later: `make parallel-mark-process` constructs
+      its red direction per run.** It already ran on x86_64 CI and
+      asserted four workers steal; what it could not do without a
+      hand edit of the steal counter was come out red.
+      `GCRY_DISABLE_PARALLEL_MARK=1` pins workers at 1 even if the
+      harness assigns 4, so stolen stays 0. `--disabled` requires
+      that. Dropping the skip: workers become 4, FAIL. Census
+      **99 / 60 / 39 → 99 / 61 / 38.** x86_64. Still a real gap in
+      CI: `nested-spawn-uaf` (the original repro; `dead-stack-root`
+      is the gate), `occupied-release` (recipe prefixes both arms
+      with `-`).
+      `bench/log/linux/2026-09-20-parallel-mark-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

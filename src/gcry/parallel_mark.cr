@@ -33,7 +33,20 @@ module Gcry
     end
 
     def parallel_mark_workers=(value : Int32) : Int32
-      @parallel_mark_workers = value.clamp(1, 16)
+      @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
+    end
+
+    # Research only — `GCRY_DISABLE_PARALLEL_MARK=1`: pin workers at 1 even
+    # if a later assignment asks for more. `make parallel-mark-process`
+    # `--disabled` is the red arm — stolen stays 0. Never a product setting.
+    def force_serial_mark? : Bool
+      @force_serial_mark
+    end
+
+    def force_serial_mark=(value : Bool) : Bool
+      @force_serial_mark = value
+      @parallel_mark_workers = 1 if value
+      value
     end
 
     # Research only — `GCRY_MARK_BUSY_UNLOCKED=1`: count a mark worker busy

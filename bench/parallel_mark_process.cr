@@ -21,8 +21,14 @@
 # first from the roots: each node is discovered only by scanning its parent,
 # which is what keeps the shared stack populated for the whole phase.
 #
+# Until 2026-09-20 the only way this gate came out red was a hand edit of
+# the steal counter. `--disabled` pins workers at 1 through
+# `GCRY_DISABLE_PARALLEL_MARK=1` and requires stolen stay 0. Dropping the
+# knob reddens the gate rather than hiding it.
+#
 # Build: crystal build -Dgc_none bench/parallel_mark_process.cr -o bin/parallel_mark_process
 # Run:   ./bin/parallel_mark_process
+#        GCRY_DISABLE_PARALLEL_MARK=1 ./bin/parallel_mark_process --disabled
 
 {% unless flag?(:gc_none) %}
   raise "parallel_mark_process requires -Dgc_none (gcry as process GC)"
@@ -41,12 +47,37 @@ class Node
 end
 
 h = Gcry.default_heap
-raise "no heap" unless h
-raise "expected stop_the_world" unless h.stop_the_world
+unless h
+  STDERR.puts "FAIL no heap"
+  exit 1
+end
+unless h.stop_the_world
+  STDERR.puts "FAIL expected stop_the_world"
+  exit 1
+end
+
+disabled = ARGV.includes?("--disabled")
+if disabled && !h.force_serial_mark?
+  STDERR.puts "--disabled needs GCRY_DISABLE_PARALLEL_MARK=1: without the skip this arm would require stolen to stay 0 while four workers are marking."
+  exit 64
+end
 
 old = h.parallel_mark_workers
 begin
   h.parallel_mark_workers = 4
+  workers = h.parallel_mark_workers
+  if disabled
+    unless workers == 1
+      STDERR.puts "FAIL GCRY_DISABLE_PARALLEL_MARK=1 did not pin workers at 1 (got #{workers})"
+      exit 1
+    end
+  else
+    unless workers == 4
+      STDERR.puts "FAIL expected 4 workers, got #{workers}"
+      exit 1
+    end
+  end
+
   before_runs = h.parallel_mark_runs
   before_stolen = h.parallel_mark_stolen
 
@@ -61,8 +92,27 @@ begin
   GC.collect
   GC.collect
 
-  raise "parallel_mark_runs did not increase (#{before_runs} -> #{h.parallel_mark_runs})" unless h.parallel_mark_runs > before_runs
-  raise "parallel_mark_stolen did not increase (#{before_stolen} -> #{h.parallel_mark_stolen})" unless h.parallel_mark_stolen > before_stolen
+  runs = h.parallel_mark_runs
+  stolen = h.parallel_mark_stolen
+  if disabled
+    if stolen > before_stolen
+      STDERR.puts "FAIL parallel_mark_stolen increased under disable (#{before_stolen} -> #{stolen}) — GCRY_DISABLE_PARALLEL_MARK no longer pins workers at 1, so the only way this gate can fail is a hand edit of the steal counter again."
+      exit 1
+    end
+    if runs > before_runs
+      STDERR.puts "FAIL parallel_mark_runs increased under disable (#{before_runs} -> #{runs})"
+      exit 1
+    end
+  else
+    unless runs > before_runs
+      STDERR.puts "FAIL parallel_mark_runs did not increase (#{before_runs} -> #{runs})"
+      exit 1
+    end
+    unless stolen > before_stolen
+      STDERR.puts "FAIL parallel_mark_stolen did not increase (#{before_stolen} -> #{stolen})"
+      exit 1
+    end
+  end
 
   # The graph has to still be whole: a marker that loses an edge is the defect
   # `make parallel-mark-termination` exists for, and this walk is the cheap
@@ -70,13 +120,22 @@ begin
   walked = 0
   node = head.as(Node?)
   while n = node
-    raise "chain damaged at #{walked}: #{n.tag.inspect}" unless n.tag == "pm-#{walked}"
+    unless n.tag == "pm-#{walked}"
+      STDERR.puts "FAIL chain damaged at #{walked}: #{n.tag.inspect}"
+      exit 1
+    end
     walked += 1
     node = n.succ
   end
-  raise "chain truncated at #{walked} of #{LIVE}" unless walked == LIVE
-ensure
-  h.parallel_mark_workers = old
-end
+  unless walked == LIVE
+    STDERR.puts "FAIL chain truncated at #{walked} of #{LIVE}"
+    exit 1
+  end
 
-puts "parallel_mark_process ok"
+  puts "arm: #{disabled ? "--disabled (workers pinned at 1, stolen must stay 0)" : "shipped (4 workers, stolen must rise)"}"
+  puts "workers=#{workers} runs #{before_runs}->#{runs} stolen #{before_stolen}->#{stolen} chain=#{walked}"
+  puts disabled ? "ok — serial mark kept the chain and stole nothing" : "parallel_mark_process ok"
+ensure
+  h.parallel_mark_workers = old if h
+end
+exit 0

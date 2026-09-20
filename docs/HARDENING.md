@@ -232,6 +232,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_SCRUB_FIBERS=1` | When parked-fiber scrub opted in: turn it back off. **Control arm** for `make scrub-fibers`: `GCRY_SCRUB_FIBERS=1` must set `scrub_fibers_enabled` and move `fiber_scrub_runs` on a collection; with this set both stay at the default (measured false/0 → true/1 → false/0). `samples/sound_profile.cr` already asserts the flag and cannot see this knob — disable agrees with the default |
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
+| `GCRY_DISABLE_PARALLEL_MARK=1` | Research arm, never a product setting: pin mark workers at 1 even if a later assignment asks for more, so `parallel_mark_stolen` stays 0. `--disabled` on `make parallel-mark-process` requires that. Dropping the skip reddens the gate. |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
 | `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
 | `GCRY_DEBUG_INVARIANTS=1` | Runtime heap invariant checks |

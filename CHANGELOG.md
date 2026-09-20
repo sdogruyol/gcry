@@ -381,6 +381,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--disabled` requires each planted target at 0. Dropping the knob
   reddens the gate. Census **99 / 59 / 40 → 99 / 60 / 39.** x86_64.
 
+- **`make parallel-mark-process` constructs its red direction per run.**
+  The gate already ran on x86_64 CI and asserted that four configured
+  workers actually steal — `parallel_mark_stolen` rises, which is what
+  separates "workers were set" from "workers marked". Its ability to
+  fail lived only in a hand edit of that counter. `GCRY_DISABLE_PARALLEL_MARK=1`
+  pins workers at 1 even if the harness assigns 4, so stolen stays 0 —
+  configured, not marking. `--disabled` requires that. Dropping the
+  knob reddens the gate. Census **99 / 60 / 39 → 99 / 61 / 38.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

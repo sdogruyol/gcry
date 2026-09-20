@@ -236,6 +236,7 @@ module Gcry
     @alloc_batch_hits = Atomic(UInt64).new(0_u64)
     @alloc_batch_refills = 0_u64
     @parallel_mark_workers = 1
+    @force_serial_mark = false
     @parallel_mark_runs = 0_u64
     @parallel_mark_stolen = 0_u64
     @mark_lock = Crystal::SpinLock.new
@@ -327,6 +328,7 @@ module Gcry
       @chunk_list_lock = Crystal::SpinLock.new
       init_post_stw_mutex
       @parallel_mark_workers = 1
+      @force_serial_mark = false
       @parallel_mark_runs = 0_u64
       @parallel_mark_stolen = 0_u64
       @mark_lock = Crystal::SpinLock.new

@@ -150,9 +150,14 @@ bitmap-marks-freelist: $(BIN)
 	GCRY_BITMAP=1 GCRY_BITMAP_ALLOC=0 $(BIN)/pattern_fuzz_marks --seed=1 --phases=40 --objects-per-phase=2000
 	@echo "ok — marks in the chunk with the freelist allocator: specs, property, MT, STW+TLAB+nursery, pattern fuzz"
 
+# Four workers must steal, not merely be configured. Until 2026-09-20 the
+# only way this came out red was a hand edit of the steal counter.
+# `GCRY_DISABLE_PARALLEL_MARK=1` pins workers at 1; `--disabled` requires
+# stolen stay 0. Dropping the skip reddens the gate.
 parallel-mark-process: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/parallel_mark_process.cr -o $(BIN)/parallel_mark_process
 	$(BIN)/parallel_mark_process
+	GCRY_DISABLE_PARALLEL_MARK=1 $(BIN)/parallel_mark_process --disabled
 
 microbench: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/micro/run_all.cr -o $(BIN)/microbench
