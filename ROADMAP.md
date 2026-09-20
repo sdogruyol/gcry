@@ -1324,6 +1324,17 @@ kept finding the rest.
       original repro; `dead-stack-root` is the gate),
       `occupied-release` (recipe prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-stw-lag-low-water-disable/FINDINGS.md`
+      **2026-09-20, later: `make nursery-headers` constructs its red
+      direction per run.** The CI step was hollow on the headerless
+      compile default: nursery never enabled, names were literals on
+      the stack. Green now requires `-Dgcry_block_headers` and a
+      nursery-allocated name off the stack; `--disabled` is
+      noscan-without-walk and the name must vanish. Dropping either
+      assignment: exit 64. Census **99 / 63 / 36 → 99 / 64 / 35.**
+      x86_64. Still a real gap in CI: `nested-spawn-uaf` (the
+      original repro; `dead-stack-root` is the gate),
+      `occupied-release` (recipe prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-nursery-headers-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

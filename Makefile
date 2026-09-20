@@ -104,9 +104,16 @@ finalizer-complex: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex
 	$(BIN)/finalizer_complex
 
+# Nursery HTTP::Headers Hash keys. The compile default is headerless, where
+# `Heap#nursery_enabled=` is a no-op, so the CI step that built this without
+# `-Dgcry_block_headers` and asserted the keys survived was testing a major.
+# Auto-layouts skip `Hash(HTTP::Headers::Key, …)`; the green arm requires the
+# explicit walk, `--disabled` installs noscan-without-walk (the pre-fix
+# shape). Dropping the flag or the zeroed walk reddens rather than hides.
 nursery-headers: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/nursery_headers.cr -o $(BIN)/nursery_headers
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/nursery_headers.cr -o $(BIN)/nursery_headers
 	$(BIN)/nursery_headers
+	$(BIN)/nursery_headers --disabled
 
 # The third mark representation, run: marks in the chunk's bitmap while blocks
 # keep their 16-byte headers and the *freelist* allocator keeps handing them

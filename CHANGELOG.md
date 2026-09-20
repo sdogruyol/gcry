@@ -410,6 +410,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires that. Dropping the assignment reddens the gate (exit 64).
   Census **99 / 62 / 37 → 99 / 63 / 36.** x86_64.
 
+- **`make nursery-headers` constructs its red direction per run.** The
+  CI step already ran on x86_64 and asserted HTTP::Headers keys
+  survived a minor — on the headerless compile default, where
+  `Heap#nursery_enabled=` is a no-op, so `minor_collect` returned
+  immediately and the names were string literals on the stack. Both
+  arms would have stayed green through a broken Hash walk. The green
+  arm now requires `-Dgcry_block_headers`, a live nursery, a KIND_HASH
+  layout that walks keys, and a nursery-allocated name that has left
+  the stack. `--disabled` installs the pre-fix shape (noscan @entries,
+  no key/value walk) and requires that name to vanish. Dropping the
+  flag: exit 64. Dropping the zeroed walk: exit 64. Census
+  **99 / 63 / 36 → 99 / 64 / 35.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

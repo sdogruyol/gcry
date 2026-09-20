@@ -404,8 +404,14 @@ jobs:
 
       - name: Nursery HTTP::Headers regression
         run: |
-          crystal build -Dgc_none bench/nursery_headers.cr -o bin/nursery_headers
+          crystal build -Dgc_none -Dgcry_block_headers bench/nursery_headers.cr -o bin/nursery_headers
           ./bin/nursery_headers
+          # KIND_HASH that noscans @entries and does not walk keys: the pre-fix
+          # shape. Dropping the zeroed walk reddens the gate rather than hiding
+          # it. Headerless (the compile default) cannot enable the nursery and
+          # exits 64 — that was how this step stayed green without testing the
+          # Hash walk at all.
+          ./bin/nursery_headers --disabled
 
       - name: Process parallel mark
         env:

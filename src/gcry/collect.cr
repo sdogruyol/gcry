@@ -362,6 +362,9 @@ module Gcry
         # freelist-era allocator under objects with no header — the
         # thread_block_audit `lives-minor` arm hung inside its address-space
         # audit for exactly this reason. Silently off, never on.
+        # `make nursery-headers` builds `-Dgcry_block_headers` and refuses
+        # this no-op (exit 64): the CI step used to compile headerless, set
+        # this, and pass.
         @nursery_enabled = false
       {% else %}
         @nursery_enabled = value

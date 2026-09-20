@@ -740,6 +740,7 @@ module Gcry
           # Hash(HTTP::Headers::Key, …) — those stay conservative. Precise
           # Hash registration for nested key types was unsound with soft-dirty
           # minors under release Kemal (nursery keys in old @entries).
+          # `make nursery-headers` is the walk; `--disabled` is that miss.
           {% skip = t.abstract? || t.private? || (t.stringify.includes?("::") && t.stringify.includes?("(")) %}
           {% name = t.stringify %}
           {% for prefix in UNSAFE_PREFIXES %}

@@ -839,6 +839,9 @@ module Gcry
       # those nursery keys were swept → Hash UAF (OverflowError / SEGV in
       # HTTP::Headers keep-alive). Precise walk marks nursery targets only
       # (mark_candidate / mark_noscan already no-op on old objects during minor).
+      # `make nursery-headers --disabled` installs KIND_HASH with noscan
+      # @entries and no key/value walk — this return then skips the
+      # conservative one-level chase. Dropping that install reddens the gate.
       if @layout_precise && size >= 4
         tid = user.as(Int32*).value
         if (entry = Layout.entry_for(tid))
