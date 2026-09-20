@@ -1563,9 +1563,15 @@ occupied-release: $(BIN)
 	-$(BIN)/occupied_release
 	-$(BIN)/occupied_release --control
 
+# The control the holders search never had: three planted words in live
+# marked objects, plus a masked address the walk must not invent. Until
+# 2026-09-20 the only way it came out red was a hand edit of
+# `count_heap_holders`. `GCRY_DISABLE_HOLDERS_FIND=1` skips that walk, so
+# the planted holders come back empty. Dropping the knob reddens the gate.
 holders-find: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/holders_find.cr -o $(BIN)/holders_find --error-trace
 	$(BIN)/holders_find
+	GCRY_DISABLE_HOLDERS_FIND=1 $(BIN)/holders_find --disabled
 
 darwin-page-query: $(BIN)
 	$(CRYSTAL) build bench/darwin_page_query.cr -o $(BIN)/darwin_page_query --error-trace

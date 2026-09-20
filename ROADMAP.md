@@ -1273,6 +1273,20 @@ kept finding the rest.
       `dead-stack-root` is the gate), `occupied-release` (recipe
       prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-segv-region-disable/FINDINGS.md`
+      **2026-09-20, later: `make holders-find` constructs its red
+      direction per run.** It already ran on x86_64 CI and asserted
+      a planted word in a live marked ivar is found; what it could
+      not do without a hand edit of `count_heap_holders` was come out
+      red. `GCRY_DISABLE_HOLDERS_FIND=1` skips that walk, so the three
+      planted holders come back empty — a silent search, which is how
+      a 2026-09-12 report could print "holders — none" next to a live
+      marked array that held the address. `--disabled` requires each
+      planted target at 0. Dropping the knob: 3/3 still found, FAIL.
+      Census **99 / 59 / 40 → 99 / 60 / 39.** x86_64. Still a real
+      gap in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-holders-find-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

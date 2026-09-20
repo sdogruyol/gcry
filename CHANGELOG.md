@@ -370,6 +370,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mapping. Dropping the knob reddens the gate. Census
   **99 / 58 / 41 → 99 / 59 / 40.** Linux.
 
+- **`make holders-find` constructs its red direction per run.** The
+  gate already ran on x86_64 CI and asserted that a planted word in a
+  live marked object's ivar is found, and that a masked address is
+  not invented. Its ability to fail lived only in a hand edit of
+  `count_heap_holders`. `GCRY_DISABLE_HOLDERS_FIND=1` skips that walk,
+  so the three planted holders come back empty — which is what a
+  search that has gone silent looks like, and why a contradictory
+  "holders — none" on 2026-09-12 could not be told from a clean heap.
+  `--disabled` requires each planted target at 0. Dropping the knob
+  reddens the gate. Census **99 / 59 / 40 → 99 / 60 / 39.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

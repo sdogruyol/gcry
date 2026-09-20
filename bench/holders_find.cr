@@ -14,9 +14,14 @@
 #
 #   crystal build -Dgc_none bench/holders_find.cr -o bin/holders_find
 #   bin/holders_find
+#   GCRY_DISABLE_HOLDERS_FIND=1 bin/holders_find --disabled
 #
 # The gate is the count, not the text: the heap walk must report at least the
-# one word that is certainly there.
+# one word that is certainly there. Until 2026-09-20 the only way this gate
+# came out red was a hand edit of `count_heap_holders`. `--disabled` skips
+# that walk through `GCRY_DISABLE_HOLDERS_FIND=1` and requires each planted
+# holder to come back empty. Dropping the knob reddens the gate rather than
+# hiding it.
 
 require "../src/gcry"
 
@@ -49,6 +54,11 @@ class Holder
 end
 
 heap = Gcry.default_heap.not_nil!
+disabled = ARGV.includes?("--disabled")
+if disabled && !Gcry::PoisonHolders.skip_heap_count?
+  STDERR.puts "--disabled needs GCRY_DISABLE_HOLDERS_FIND=1: without the skip this arm would require the planted holders to be missing while the walk that finds them is running."
+  exit 64
+end
 
 # Kept in a class variable so the holder objects are roots in their own right:
 # the question is whether the walk finds the *word*, not whether the holder
@@ -86,22 +96,30 @@ GC.collect
 
 puts "=== does the holders search find a word that is certainly there? ==="
 puts "#{Kept.size} holder(s), each holding one target address in its @slot ivar"
+puts disabled ? "arm: --disabled (GCRY_DISABLE_HOLDERS_FIND=1; planted holders must come back empty)" : "arm: shipped (each planted holder must be found)"
 puts ""
 
 failures = 0
 cases.each do |c|
   target = c.masked ^ KEY
   found = Gcry::PoisonHolders.heap_holders_count(heap, target, c.size)
-  ok = found > 0
+  ok = disabled ? found == 0 : found > 0
   failures += 1 unless ok
-  puts "#{ok ? "ok  " : "FAIL"} #{c.name.ljust(7)} target 0x#{target.to_s(16)} #{c.size} bytes — heap holders found: #{found}"
+  verdict = ok ? "ok  " : "FAIL"
+  puts "#{verdict} #{c.name.ljust(7)} target 0x#{target.to_s(16)} #{c.size} bytes — heap holders found: #{found}"
 end
 
 puts ""
 if failures > 0
-  puts "FAIL #{failures} of #{cases.size} targets were held by a live, marked object in a"
-  puts "known ivar and the search reported nothing. Every \"holders — none\" this"
-  puts "search has ever printed is unreliable by that much."
+  if disabled
+    puts "FAIL #{failures} of #{cases.size} planted holders still visible with the walk skipped —"
+    puts "GCRY_DISABLE_HOLDERS_FIND no longer drops heap_holders_count, so the only way this"
+    puts "gate can fail is a hand edit of count_heap_holders again."
+  else
+    puts "FAIL #{failures} of #{cases.size} targets were held by a live, marked object in a"
+    puts "known ivar and the search reported nothing. Every \"holders — none\" this"
+    puts "search has ever printed is unreliable by that much."
+  end
   exit 1
 end
 
@@ -119,5 +137,11 @@ if control_found > 0
 end
 
 puts ""
-puts "ok — every constructed holder was found, and a block with none reports none"
+if disabled
+  puts "ok — GCRY_DISABLE_HOLDERS_FIND=1 left every planted holder unfound, and a block"
+  puts "     with none still reports none. That is the pre-fix walk (nothing), which is"
+  puts "     how a hand edit of count_heap_holders used to redden this gate."
+else
+  puts "ok — every constructed holder was found, and a block with none reports none"
+end
 exit 0

@@ -1123,6 +1123,12 @@ module GC
       {% if flag?(:unix) %} Gcry::SegvReport.request {% end %}
       {% if flag?(:unix) %} Gcry::PoisonHolders.request {% end %}
     end
+    # Twin of the heap walk `make holders-find` asserts: skip it, so a
+    # planted holder in a live marked object comes back as none. Research
+    # only — the crash-time search is unchanged.
+    {% if flag?(:unix) || flag?(:win32) %}
+      Gcry::PoisonHolders.skip_heap_count if env_flag_one?("GCRY_DISABLE_HOLDERS_FIND")
+    {% end %}
     # Research only: the window that released a chunk with a live block in it.
     # `GCRY_EMPTY_FLUSH_DELAY_MS` holds the post-STW empty-chunk flush with the
     # world already running, so a mutator has time to take a block out of a

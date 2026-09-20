@@ -150,12 +150,26 @@ module Gcry
       @@live_frame_hits = 0_u64
     end
 
+    # Research only (`GCRY_DISABLE_HOLDERS_FIND=1`): skip the heap walk
+    # `heap_holders_count` uses. A literal, same reason as `@@fault_stage` —
+    # written from `GC.init`. The gate's red arm is this skip, not a hand
+    # edit of `count_heap_holders`.
+    @@skip_heap_count = false
+
+    def self.skip_heap_count : Nil
+      @@skip_heap_count = true
+    end
+
+    def self.skip_heap_count? : Bool
+      @@skip_heap_count
+    end
+
     # The heap walk alone. `holders_count` sums roots, live blocks and stacks,
     # and for a question about *the heap walk* that is the wrong total: a
     # caller's own locals put the address on a stack, so every target looks
     # held. `bench/holders_find.cr` is the control that needs this.
     def self.heap_holders_count(heap : Heap, user : UInt64, size : UInt64) : UInt64
-      return 0_u64 if user == 0 || size == 0
+      return 0_u64 if @@skip_heap_count || user == 0 || size == 0
       count_heap_holders(heap, user, user &+ size)
     end
 
