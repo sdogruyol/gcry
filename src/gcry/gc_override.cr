@@ -220,6 +220,9 @@ module GC
     apply_env_config(heap)
 
     # Fork: reinit locks/STW in the child (opt out with GCRY_DISABLE_ATFORK=1).
+    # `make fork-test` requires the handler installed; `--disabled` needs the
+    # knob so it is not, then `note_fork_child` + malloc must `_exit(69)`
+    # without allocating. Dropping the skip reddens the gate (exit 64).
     unless env_flag_one?("GCRY_DISABLE_ATFORK")
       @@handle_fork = true
       Gcry::Platform.set_atfork_handlers(
@@ -264,9 +267,16 @@ module GC
     end
   end
 
+  # Child status `make fork-test --disabled` requires. Must not allocate:
+  # `raise` re-enters `malloc` and overflows the stack (measured).
+  FORK_POISON_EXIT = 69
+
   private def self.check_fork_poison! : Nil
     if @@after_fork_child
-      raise "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md"
+      buf = uninitialized UInt8[Gcry::RawOut::LIMIT]
+      n = Gcry::RawOut.append(buf.to_unsafe, 0, "gcry: GC after fork is unsupported without atfork reinit (unset GCRY_DISABLE_ATFORK); see docs/POLICY.md\n")
+      Gcry::RawOut.flush(buf.to_unsafe, n)
+      LibC._exit(FORK_POISON_EXIT)
     end
   end
 

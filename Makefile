@@ -96,9 +96,16 @@ oom-test-short: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/oom_test.cr -o $(BIN)/oom_test
 	$(BIN)/oom_test --phases=1,2
 
+# Until 2026-09-20 this called `after_fork_child_reinit` itself, ignored the
+# child's status, and only checked malloc was non-null — it would have stayed
+# green with atfork uninstalled. Green requires pthread_atfork and a child
+# that mallocs+collects without a manual reinit. `--disabled` is
+# `GCRY_DISABLE_ATFORK=1` and the poison `_exit(69)` (must not allocate:
+# `raise` re-enters malloc). Dropping the knob reddens the gate.
 fork-test: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/fork_reinit.cr -o $(BIN)/fork_reinit
+	$(CRYSTAL) build -Dgc_none -Dwithout_mt bench/fork_reinit.cr -o $(BIN)/fork_reinit
 	$(BIN)/fork_reinit
+	GCRY_DISABLE_ATFORK=1 $(BIN)/fork_reinit --disabled
 
 finalizer-complex: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex

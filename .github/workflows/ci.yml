@@ -394,8 +394,13 @@ jobs:
 
       - name: Fork reinit test
         run: |
-          crystal build -Dgc_none bench/fork_reinit.cr -o bin/fork_reinit
+          # Until 2026-09-20 this built without `-Dwithout_mt`, called reinit
+          # itself, and ignored the child's status. Green requires the
+          # pthread_atfork handler; `--disabled` is GCRY_DISABLE_ATFORK=1 and
+          # the poison `_exit`. Dropping the knob reddens the gate.
+          crystal build -Dgc_none -Dwithout_mt bench/fork_reinit.cr -o bin/fork_reinit
           ./bin/fork_reinit
+          GCRY_DISABLE_ATFORK=1 ./bin/fork_reinit --disabled
 
       - name: Finalizer complex scenarios
         run: |
@@ -1551,8 +1556,7 @@ jobs:
           # never got its acknowledgements. Linux-only: Darwin reports hits=0 by
           # design, so the sample asserts this half there and the arm would invert.
           ! GCRY_DISABLE_SP_CLAMP=1 ./bin/stw_sp_clamp
-          crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
-          ./bin/fork_reinit
+          timeout 300 make fork-test
           timeout 300 make greg-roots
           timeout 300 make scheduler-roots
           timeout 300 make ivar-layout-roots
@@ -1715,8 +1719,7 @@ jobs:
           ./bin/json_churn 800
           crystal build -Dgc_none samples/stw_sp_clamp.cr -o bin/stw_sp_clamp
           ./bin/stw_sp_clamp
-          crystal build -Dgc_none -Dwithout_mt samples/fork_reinit.cr -o bin/fork_reinit
-          ./bin/fork_reinit
+          make fork-test
           make greg-roots
           make scheduler-roots
           make ivar-layout-roots

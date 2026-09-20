@@ -1335,6 +1335,19 @@ kept finding the rest.
       original repro; `dead-stack-root` is the gate),
       `occupied-release` (recipe prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-nursery-headers-disable/FINDINGS.md`
+      **2026-09-20, later: `make fork-test` constructs its red
+      direction per run.** The x86_64 CI harness called reinit
+      itself, ignored the child's status, and only checked malloc
+      was non-null. `GCRY_DISABLE_ATFORK` was documented and unused.
+      Green now requires the pthread_atfork handler; `--disabled`
+      is the knob plus `note_fork_child` + malloc `_exit(69)`
+      without allocating (`raise` overflowed the stack). Dropping
+      the knob: exit 64. Dropping the `_exit`: malloc succeeds,
+      FAIL. Census **99 / 64 / 35 → 99 / 65 / 34.** Linux + Darwin.
+      Still a real gap in CI: `nested-spawn-uaf` (the original
+      repro; `dead-stack-root` is the gate), `occupied-release`
+      (recipe prefixes both arms with `-`).
+      `bench/log/linux/2026-09-20-fork-atfork-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

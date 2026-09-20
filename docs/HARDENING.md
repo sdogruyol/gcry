@@ -235,7 +235,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_PARALLEL_MARK=1` | Research arm, never a product setting: pin mark workers at 1 even if a later assignment asks for more, so `parallel_mark_stolen` stays 0. `--disabled` on `make parallel-mark-process` requires that. Dropping the skip reddens the gate. |
 | `GCRY_DISABLE_POOL_INDEX=1` | Research arm, never a product setting: treat the available-chunk index as invalid on every refill, so `bitmap_take_pool_chunk` walks the class again. `--disabled` on `make pool-refill-cost` requires rebuilds per collection above the per-version floor. Dropping the skip reddens the gate. |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
-| `GCRY_DISABLE_ATFORK=1` | No atfork; post-fork GC raises |
+| `GCRY_DISABLE_ATFORK=1` | No atfork. Post-fork GC writes to stderr and `_exit(69)` without allocating — `raise` re-enters `malloc` and overflows the stack. `--disabled` on `make fork-test` requires that. Dropping the skip reddens the gate |
 | `GCRY_DEBUG_INVARIANTS=1` | Runtime heap invariant checks |
 | `GCRY_TRACE=1` | NDJSON GC event log (stderr or `GCRY_TRACE_FILE`) |
 | `GCRY_TRACE_FILE` | Trace output path |

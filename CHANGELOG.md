@@ -423,6 +423,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flag: exit 64. Dropping the zeroed walk: exit 64. Census
   **99 / 63 / 36 → 99 / 64 / 35.** x86_64.
 
+- **`make fork-test` constructs its red direction per run.** The x86_64
+  CI step called `after_fork_child_reinit` itself, ignored the child's
+  exit status, and only checked that malloc was non-null — it would
+  have stayed green with atfork uninstalled. `GCRY_DISABLE_ATFORK` was
+  documented and unused. Green now requires `-Dwithout_mt`, the
+  pthread_atfork handler, and a child that mallocs+collects without a
+  manual reinit. `--disabled` requires the handler off and
+  `note_fork_child` + malloc to `_exit(69)` without allocating —
+  `raise` re-entered malloc and overflowed the stack. Dropping the
+  knob: exit 64. Dropping the `_exit`: malloc succeeds, FAIL. Census
+  **99 / 64 / 35 → 99 / 65 / 34.** Linux + Darwin.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

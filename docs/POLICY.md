@@ -19,7 +19,7 @@ Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`; Linux process de
 | | |
 |--|--|
 | Default | `pthread_atfork` registered — child resets locks, STW table, maps cache, barriers |
-| `GCRY_DISABLE_ATFORK=1` | No registration; post-fork GC raises |
+| `GCRY_DISABLE_ATFORK=1` | No registration; post-fork GC writes to stderr and `_exit(69)` without allocating (`raise` re-enters malloc) |
 | Crystal | `Process.fork` under ExecutionContext is forbidden — use `LibC.fork` + `-Dwithout_mt`, or fork+exec |
 
 Prefer fork+exec. Single-threaded children can keep allocating after reinit.
