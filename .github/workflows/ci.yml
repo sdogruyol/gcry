@@ -369,8 +369,12 @@ jobs:
 
       - name: Process-GC nursery+TLAB minor smoke (single-thread)
         run: |
-          crystal build -Dgc_none bench/nursery_tlab_smoke.cr -o bin/nursery_tlab_smoke
-          ./bin/nursery_tlab_smoke
+          # Until 2026-09-20 this built headerless, where nursery_enabled=
+          # is a no-op and tlab_enabled= is refused, so minor_collect
+          # returned immediately. Green requires -Dgcry_block_headers and
+          # GCRY_BITMAP_ALLOC=0; `--disabled` is GCRY_TLAB_MINOR_FREE_OLD=1,
+          # the pre-fix old FREE-claim. Dropping either reddens the gate.
+          make nursery-tlab-smoke
 
       - name: Alloc pattern fuzz (20 phases, 1000 objects)
         run: |

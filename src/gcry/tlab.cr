@@ -64,6 +64,12 @@ module Gcry
       @tlab_enabled = value
     end
 
+    # Research only — `GCRY_TLAB_MINOR_FREE_OLD=1`: restore the pre-fix
+    # FREE-claim during minor on an *old* node. Clearing FREE then skipping
+    # mark leaves USED-unmarked on the old freelist for scrub to drop.
+    # `make nursery-tlab-smoke --disabled` is the red arm.
+    property tlab_minor_free_old : Bool = false
+
     def tlab_refills : UInt64
       @tlab_refills
     end

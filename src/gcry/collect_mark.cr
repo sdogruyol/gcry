@@ -216,6 +216,14 @@ module Gcry
           return
         end
         if @minor_only && !BlockHeader.nursery?(header)
+          # Pre-fix: clear FREE before this filter, then skip mark.
+          # `make nursery-tlab-smoke --disabled` requires the USED-unmarked
+          # node. Dropping the assignment reddens it.
+          if @tlab_minor_free_old
+            h = header.value
+            h.flags = h.flags & ~BlockHeader::Flags::FREE
+            header.value = h
+          end
           return
         end
         # Freelist surgery (clear FREE, walk next_free) mutates shared list

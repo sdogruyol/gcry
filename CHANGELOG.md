@@ -447,6 +447,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it. Dropping the flag: exit 64. Dropping the knob: exit 64. Census
   **99 / 65 / 34 → 99 / 66 / 33.** x86_64.
 
+- **`make nursery-tlab-smoke` constructs its red direction per run.**
+  The x86_64 CI step built headerless, where `Heap#nursery_enabled=`
+  is a no-op and `tlab_enabled=` is refused (bitmap allocator forced),
+  so `minor_collect` returned immediately — twenty rooted objects
+  surviving a no-op. Green now requires `-Dgcry_block_headers` and
+  `GCRY_BITMAP_ALLOC=0` (TLAB cannot be enabled once bitmap chunks
+  are mapped). `--disabled` is `GCRY_TLAB_MINOR_FREE_OLD=1`: the
+  pre-fix old FREE-claim, so an old FREE node on the stack becomes
+  USED-unmarked. A major does not clear NURSERY; the plant survives
+  a minor first. Dropping the flag or the allocator knob: exit 64.
+  Dropping the assignment: still_free=true, FAIL. Census
+  **99 / 66 / 33 → 100 / 67 / 33.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

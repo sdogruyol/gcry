@@ -1362,6 +1362,26 @@ kept finding the rest.
       prefixes both arms with `-`), and `nursery_tlab_smoke` (CI
       still builds it headerless).
       `bench/log/linux/2026-09-20-nursery-bitmap-marks-disable/FINDINGS.md`
+      **2026-09-20, later: `make nursery-tlab-smoke` constructs its
+      red direction per run.** CI built it headerless, where
+      `nursery_enabled=` is a no-op and `tlab_enabled=` is refused,
+      so `minor_collect` returned immediately and twenty rooted
+      objects surviving a no-op was the whole assertion. Green now
+      requires `-Dgcry_block_headers` and `GCRY_BITMAP_ALLOC=0`
+      (TLAB cannot be enabled once bitmap chunks are mapped);
+      `--disabled` is `GCRY_TLAB_MINOR_FREE_OLD=1`, the pre-fix
+      old FREE-claim — an old FREE node on the stack becomes
+      USED-unmarked. A major does not clear NURSERY; the plant
+      survives a minor first. Dropping either: exit 64. Dropping
+      the assignment: still_free=true, FAIL. Census
+      **99 / 66 / 33 → 100 / 67 / 33.** x86_64. Still a real gap
+      in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`), and
+      `stw_mt_property_test --tlab --nursery` (CI still builds it
+      headerless, so both flags are no-ops and the step still
+      passes).
+      `bench/log/linux/2026-09-20-nursery-tlab-smoke-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
