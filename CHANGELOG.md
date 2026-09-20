@@ -299,6 +299,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registered; both knobs put both back. Dropping the disable reddens it
   (159, still registered). x86_64, aarch64, Darwin.
 
+- **`make scrub-fibers`: `GCRY_DISABLE_SCRUB_FIBERS` was an orphan.**
+  `src/` reads it and `samples/sound_profile.cr` already asserts the
+  flag — default off, `GCRY_SCRUB_FIBERS=1` overrides `GCRY_SOUND` —
+  which looks like coverage and is not: disable agrees with the default,
+  so the sample never asks whether it still turns the opt-in back off,
+  and the spec sets the property without reading either env var. The
+  orphan-knob census found it in no spec, recipe or CI step. Three child
+  arms, counters not objects: default **false / 0**; `GCRY_SCRUB_FIBERS=1`
+  **true / 1**; both knobs put both back. Dropping the disable reddens it
+  (true, runs=1). x86_64, aarch64, Darwin.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

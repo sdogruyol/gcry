@@ -369,6 +369,21 @@ auto-layouts: $(BIN)
 	$(BIN)/auto_layouts
 
 # The 2026-08-10 soak died in `quick_dequeue?` on a run-queue slot whose pointer
+
+# Does `GCRY_DISABLE_SCRUB_FIBERS` still disable the parked-fiber wipe
+# `GCRY_SCRUB_FIBERS` opted into? `samples/sound_profile.cr` already asserts
+# the flag (default off, opt-in overrides SOUND) and cannot see this knob:
+# disable agrees with the default, so the sample never asks whether it still
+# turns the opt-in back off. The spec sets the property and never reads either
+# env var. Three child arms, counters not objects: default flag off and
+# fiber_scrub_runs 0; SCRUB_FIBERS=1 flag on and runs move; both knobs put
+# both back. Measured here: false/0 → true/1 → false/0. Dropping the disable
+# reddens it (true and runs=1). ~1 s.
+.PHONY: scrub-fibers
+scrub-fibers: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/scrub_fibers.cr -o $(BIN)/scrub_fibers --error-trace
+	$(BIN)/scrub_fibers
+
 # had been partly overwritten — an unknown time after the write that did it, and
 # at one crash per five hours that gap cannot be bisected. `GCRY_EC_QUEUE_AUDIT=1`
 # walks the ring and the global list inside STW and names the first *collection*

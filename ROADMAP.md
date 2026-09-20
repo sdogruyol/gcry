@@ -1174,6 +1174,19 @@ kept finding the rest.
       not production soundness — not called root loss here. Census
       **98 / 33 / 65.** The number moved by building an arm.
       `bench/log/linux/2026-09-20-auto-layouts-knob/FINDINGS.md`
+      **2026-09-20, later: `GCRY_DISABLE_SCRUB_FIBERS` is no longer an
+      orphan.** The other production-ish leftover: `GCRY_SCRUB_FIBERS`
+      is a shipping opt-in, `sound_profile` already asserts the flag,
+      and that sample cannot see the disable — it agrees with the
+      default, so the sample never asks whether the opt-in still turns
+      back off. `make scrub-fibers` is three child arms on two counters
+      (`scrub_fibers_enabled`, `fiber_scrub_runs` after a collection
+      that parks fibers): default false / 0, SCRUB_FIBERS true / 1,
+      both knobs false / 0. Dropping the disable is red. The first
+      three remaining orphans (`POOLED_STACK_NOROOT`,
+      `MAPS_INFLIGHT_NOROOT`, `BIRTH_GRACE_NOROOT`) are still
+      default-off research paths. Census **99 / 34 / 65.**
+      `bench/log/linux/2026-09-20-scrub-fibers-knob/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

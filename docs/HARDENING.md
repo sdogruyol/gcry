@@ -225,7 +225,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_THRESHOLD_FACTOR` | Percent (10–1000, default **100**) of the live bytes the sweep measured that the next collection threshold is set to, clamped to 8–64 MiB (Darwin floor 16 MiB), when no fixed `GCRY_THRESHOLD` is given under the bitmap allocator. The warm-retention budget follows the same live × factor after every major, fixed threshold or not, capped by the threshold |
 | `GCRY_COLLECT_SCRUB` | Dead-stack bytes zeroed at every collection entry and exit so last cycle's mark frames are not scanned as roots (default **16384**; 0 disables). On a fiber stack the wipe uses the fiber's bounds, so a fiber that triggers a collection may fault in up to this many bytes below its SP once |
 | `GCRY_SCRUB_FIBERS=1` | Parked-fiber scrub on (**opt-in** on tip; was the process default) |
-| `GCRY_DISABLE_SCRUB_FIBERS=1` | Disable parked-fiber scrub |
+| `GCRY_DISABLE_SCRUB_FIBERS=1` | When parked-fiber scrub opted in: turn it back off. **Control arm** for `make scrub-fibers`: `GCRY_SCRUB_FIBERS=1` must set `scrub_fibers_enabled` and move `fiber_scrub_runs` on a collection; with this set both stay at the default (measured false/0 → true/1 → false/0). `samples/sound_profile.cr` already asserts the flag and cannot see this knob — disable agrees with the default |
 | `GCRY_FIBER_SCRUB_BYTES` | Parallel parked-fiber wipe below SP (default **512**; 64..8192) |
 | `GCRY_PARALLEL_MARK=N` | **Experimental** mark workers — HTTP thr often **regresses** |
 | `GCRY_DISABLE_MADVISE=1` | Skip free-page physical release helpers |
