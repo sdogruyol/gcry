@@ -376,6 +376,12 @@ module Gcry
       end
 
       {% if Thread.instance_vars.any? { |v| v.name == "execution_context" } %}
+        # `GCRY_DISABLE_EC_PINS=1` skips this derived walk so
+        # `make scheduler-roots` has a red direction that is not a hand
+        # edit of this file. Thread-level slots above still run: those
+        # are not this block, and the gate measures a *delta*. Research
+        # arm, never a product setting.
+        unless @disable_ec_pins
         # Global EC list (not thread-local) — keeps contexts that temporarily have
         # no worker with them pinned via Thread.@execution_context.
         Fiber::ExecutionContext.unsafe_each do |ec|
@@ -419,6 +425,7 @@ module Gcry
             {% end %}
           {% end %}
           end
+        end
         end
       {% end %}
 
@@ -1364,6 +1371,9 @@ module Gcry
 
     # `GCRY_DISABLE_GREG_ROOTS=1`: research arm, never a product setting.
     property disable_greg_roots : Bool = false
+
+    # `GCRY_DISABLE_EC_PINS=1`: research arm, never a product setting.
+    property disable_ec_pins : Bool = false
 
     # Register words the mark has been offered over the life of the process.
     getter thread_greg_words_total : UInt64 = 0_u64

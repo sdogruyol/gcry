@@ -334,6 +334,13 @@ scheduler-roots: $(BIN)
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --control
 	GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots --resize
+	# The red direction, which until 2026-09-20 existed only as a hand
+	# edit of collect_scan.cr ("stub → 7 of 16 named"). The knob skips
+	# the derived pin block and leaves Thread-level slots running, so
+	# the gate measures a *delta*. Red at delta 6–8 against 45 expected;
+	# parked fibers still live 16/16 — the conservative body scan
+	# reaches them. The counter is the gate.
+	! GCRY_DISABLE_EC_PINS=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 $(BIN)/scheduler_roots
 
 # A precise layout is a claim that every pointer in the object is at one of the
 # offsets it lists. `Layout.register` had a third outcome it never named: an ivar

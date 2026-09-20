@@ -310,6 +310,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **true / 1**; both knobs put both back. Dropping the disable reddens it
   (true, runs=1). x86_64, aarch64, Darwin.
 
+- **`make scheduler-roots` constructs its red direction per run.** The
+  gate already asserted pin *deltas* derived from `instance_vars`, on
+  all three CI platforms, and its ability to fail lived only in a
+  ROADMAP sentence ("stub → 7 of 16 named"). `GCRY_DISABLE_EC_PINS=1`
+  skips the derived walk and leaves Thread-level slots running. Shipped
+  delta **53** against 45 expected; with the knob **6–8** against 45,
+  Isolated **2** against 15. Parked fibers still live **16/16** either
+  way — a survival assertion would have stayed green. Census
+  **99 / 34 / 65 → 99 / 35 / 64.** x86_64, aarch64, Darwin.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

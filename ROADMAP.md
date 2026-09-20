@@ -1187,6 +1187,21 @@ kept finding the rest.
       `MAPS_INFLIGHT_NOROOT`, `BIRTH_GRACE_NOROOT`) are still
       default-off research paths. Census **99 / 34 / 65.**
       `bench/log/linux/2026-09-20-scrub-fibers-knob/FINDINGS.md`
+      **2026-09-20, later: `make scheduler-roots` constructs its red
+      direction per run.** It already ran on all three CI platforms and
+      asserted pin deltas derived from `instance_vars`; what it could
+      not do without a hand edit of `collect_scan.cr` was come out red
+      ("stub → 7 of 16 named"). `GCRY_DISABLE_EC_PINS=1` skips the
+      derived walk and leaves Thread-level slots running, so the gate
+      still measures a *delta*: shipped **53** against 45 expected,
+      disabled **6–8** against 45, Isolated **2** against 15. Parked
+      fibers still live **16/16** either way — the conservative body
+      scan reaches them, which is the coverage the pin block exists
+      because it does not trust. The counter is the gate. This is not
+      a new harness and not an orphan knob: it is one of the 65 whose
+      red direction lived in a ROADMAP sentence. Census **99 / 35 /
+      64.** The number moved by building an arm on an existing gate.
+      `bench/log/linux/2026-09-20-ec-pins-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
