@@ -734,6 +734,10 @@ module GC
     # refill walks the class again. `make pool-refill-cost --disabled` is the
     # red arm — rebuilds per collection exceed the per-version floor.
     heap.pool_index_disabled = true if env_flag_one?("GCRY_DISABLE_POOL_INDEX")
+    # Research only: gate nursery mark clear on the global `@bitmap_marks`
+    # flag. `make nursery-bitmap-marks --disabled` is the red arm — a
+    # child reachable only through a marked nursery parent is swept.
+    heap.nursery_marks_global = true if env_flag_one?("GCRY_NURSERY_MARKS_GLOBAL")
     # Research only: the pre-2026-09-04 pop/busy protocol, which lets the
     # master end a mark cycle while a worker still holds a batch.
     heap.mark_busy_unlocked = true if env_flag_one?("GCRY_MARK_BUSY_UNLOCKED")

@@ -1056,10 +1056,13 @@ module Gcry
     # live**. Reproduced with `GCRY_BITMAP=1` and a nursery: parent rooted,
     # major, child allocated and stored into the parent, one minor — the child
     # was freed and its address handed out again.
+    # `GCRY_NURSERY_MARKS_GLOBAL=1` restores that global gate;
+    # `make nursery-bitmap-marks --disabled` requires the child to vanish.
     private def clear_nursery_marks : Nil
       each_chunk do |chunk|
         next unless ChunkHeader.nursery?(chunk)
-        if bitmap_chunk?(chunk)
+        use_bitmap = @nursery_marks_global ? @bitmap_marks : bitmap_chunk?(chunk)
+        if use_bitmap
           chunk_clear_marks(chunk)
         else
           each_block(chunk) do |header|

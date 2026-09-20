@@ -435,6 +435,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   knob: exit 64. Dropping the `_exit`: malloc succeeds, FAIL. Census
   **99 / 64 / 35 → 99 / 65 / 34.** Linux + Darwin.
 
+- **`make nursery-bitmap-marks` constructs its red direction per run.**
+  The recipe built headerless, where `Heap#nursery_enabled=` and
+  `bitmap_marks=` are no-ops, so `minor_collect` returned immediately
+  and the child survived as an uncollected object — both arms would
+  have stayed green through the pre-fix global `@bitmap_marks` clear.
+  Green now requires `-Dgcry_block_headers` and a per-chunk clear on
+  three representations. `--disabled` is `GCRY_NURSERY_MARKS_GLOBAL=1`:
+  bitmap arms must lose a child reachable only through a marked
+  nursery parent; the header-marks arm is the control and must keep
+  it. Dropping the flag: exit 64. Dropping the knob: exit 64. Census
+  **99 / 65 / 34 → 99 / 66 / 33.** x86_64.
+
 ## [Unreleased]
 
 ## [0.26.2] - 2026-09-19

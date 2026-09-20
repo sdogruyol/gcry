@@ -373,6 +373,13 @@ module Gcry
       @nursery_enabled
     end
 
+    # Research only — `GCRY_NURSERY_MARKS_GLOBAL=1`: gate nursery mark
+    # clear on the global `@bitmap_marks` flag instead of per-chunk
+    # `bitmap_chunk?`. A nursery chunk keeps the header representation,
+    # so that zeros a bitmap nothing writes and leaves the header mark
+    # set. `make nursery-bitmap-marks --disabled` is the red arm.
+    property nursery_marks_global : Bool = false
+
     # Adaptive nursery threshold: adjusted after each minor based on the
     # survival rate of the last N minors. When survival is below the target
     # (50%), the threshold shrinks to collect earlier; above, it grows to

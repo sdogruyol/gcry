@@ -14,15 +14,23 @@
 # `mark_impl` returns early on a marked block without scanning it, so anything
 # reachable **only** through it was never traced and was reclaimed while live.
 #
+# Until 2026-09-20 this was a hollow gate on the compile default:
+# `Heap#nursery_enabled=` is a no-op without `-Dgcry_block_headers`, so
+# `minor_collect` returned immediately and the child survived as an ordinary
+# uncollected object. `bitmap_marks=` is the same no-op there. Both arms
+# would have stayed green through the global-flag clear.
+#
 # One minor is enough to show it. The order matters: the parent must carry a
 # mark out of a major, and the child must be allocated after that major so it
 # is unmarked and reachable only through the parent.
 #
-#   crystal build -Dgc_none bench/nursery_bitmap_marks.cr -o bin/nursery_bitmap_marks
+#   crystal build -Dgc_none -Dgcry_block_headers bench/nursery_bitmap_marks.cr -o bin/nursery_bitmap_marks
 #   bin/nursery_bitmap_marks
+#   GCRY_NURSERY_MARKS_GLOBAL=1 bin/nursery_bitmap_marks --disabled
 #
-# The header arm is the control: it always passed, and if it ever fails the
-# harness is wrong rather than the collector.
+# Dropping `-Dgcry_block_headers`: exit 64 (nursery never on). Dropping the
+# knob from `--disabled`: exit 64. Either way the gate goes red rather than
+# hiding.
 
 require "../src/gcry"
 
@@ -33,14 +41,24 @@ require "../src/gcry"
 CANARY           = 0x00C0_FFEE_C0FF_EE00_u64
 REISSUE_ATTEMPTS =                       400
 
-record Arm, label : String, marks : Bool, alloc : Bool
+DISABLED = ARGV.includes?("--disabled")
+GLOBAL   = ENV["GCRY_NURSERY_MARKS_GLOBAL"]? == "1"
 
-# Returns a failure string, or nil.
-def run(arm : Arm) : String?
+if DISABLED && !GLOBAL
+  STDERR.puts "--disabled needs GCRY_NURSERY_MARKS_GLOBAL=1: without the global clear this arm would require a live child to vanish while the per-chunk clear is still scanning it."
+  exit 64
+end
+
+record Arm, label : String, marks : Bool, alloc : Bool
+record Outcome, live : Bool, reissued : Int32, intact : Bool
+
+# Returns an Outcome, or a failure string from the setup.
+def run(arm : Arm) : Outcome | String
   heap = Gcry::Heap.new
   heap.nursery_enabled = true
   heap.nursery_threshold = UInt64::MAX
   heap.adaptive_nursery = false
+  heap.nursery_marks_global = GLOBAL
   if arm.alloc
     heap.bitmap_alloc = true
   else
@@ -48,6 +66,13 @@ def run(arm : Arm) : String?
   end
 
   begin
+    unless heap.nursery_enabled
+      return "nursery did not enable (headerless compile default, or GCRY_DISABLE_NURSERY). Build with -Dgcry_block_headers."
+    end
+    if DISABLED && !heap.nursery_marks_global
+      return "--disabled needs GCRY_NURSERY_MARKS_GLOBAL=1: the property is off, so the per-chunk clear is still running."
+    end
+
     parent = heap.malloc(64)
     heap.add_root(parent)
 
@@ -72,39 +97,61 @@ def run(arm : Arm) : String?
     intact = Pointer(UInt64).new(child_addr)[1] == CANARY
 
     puts "  #{arm.label}: child_live=#{live} reissued=#{reissued} canary_intact=#{intact}"
-
-    unless live
-      return "#{arm.label}: the child was reclaimed after one minor, and the parent " \
-             "holding it was rooted — the minor did not clear the parent's mark, so " \
-             "the parent was never scanned"
-    end
-    if reissued > 0
-      return "#{arm.label}: the child's address was handed out again #{reissued} times " \
-             "while it was still reachable"
-    end
-    unless intact
-      return "#{arm.label}: the child's payload was overwritten while it was still reachable"
-    end
-    nil
+    Outcome.new(live, reissued, intact)
   ensure
     heap.destroy
   end
 end
 
 puts "=== nursery marks under the bitmap representation ==="
+puts DISABLED ? "mode: disabled (GCRY_NURSERY_MARKS_GLOBAL=1, the pre-fix global clear)" : "mode: shipped (per-chunk clear)"
+puts ""
 
 failures = [] of String
-[Arm.new("header marks     ", false, false),
- Arm.new("bitmap marks     ", true, false),
- Arm.new("bitmap allocator ", true, true)].each do |arm|
-  if failure = run(arm)
-    failures << failure
+arms = [
+  Arm.new("header marks     ", false, false),
+  Arm.new("bitmap marks     ", true, false),
+  Arm.new("bitmap allocator ", true, true),
+]
+arms.each do |arm|
+  result = run(arm)
+  if result.is_a?(String)
+    STDERR.puts "FAIL: #{arm.label.strip}: #{result}"
+    exit 64 if result.includes?("did not enable") || result.includes?("GCRY_NURSERY_MARKS_GLOBAL")
+    failures << "#{arm.label.strip}: #{result}"
+    next
+  end
+
+  bitmap_arm = arm.marks || arm.alloc
+  if DISABLED && bitmap_arm
+    if result.live
+      failures << "#{arm.label.strip}: the child survived a global-flag clear — GCRY_NURSERY_MARKS_GLOBAL no longer leaves the header mark set, so the only way this gate can fail is a hand edit of clear_nursery_marks again"
+    end
+  elsif DISABLED && !bitmap_arm
+    unless result.live && result.reissued == 0 && result.intact
+      failures << "#{arm.label.strip}: the header-marks control died under the knob — the break has to be the global @bitmap_marks gate, not 'every minor loses the child'"
+    end
+  else
+    unless result.live
+      failures << "#{arm.label.strip}: the child was reclaimed after one minor, and the parent holding it was rooted — the minor did not clear the parent's mark, so the parent was never scanned"
+    end
+    if result.reissued > 0
+      failures << "#{arm.label.strip}: the child's address was handed out again #{result.reissued} times while it was still reachable"
+    end
+    unless result.intact
+      failures << "#{arm.label.strip}: the child's payload was overwritten while it was still reachable"
+    end
   end
 end
 
 if failures.empty?
   puts
-  puts "ok — a minor clears the mark the next read consults, in both representations"
+  if DISABLED
+    puts "ok — the global-flag clear reclaims a child reachable only through a marked nursery parent"
+    puts "on the bitmap arms, and the header-marks control still keeps it"
+  else
+    puts "ok — a minor clears the mark the next read consults, in both representations"
+  end
   exit 0
 else
   puts

@@ -418,6 +418,18 @@ jobs:
           # Hash walk at all.
           ./bin/nursery_headers --disabled
 
+      - name: Nursery mark clear is per chunk
+        run: |
+          # Until 2026-09-20 this built headerless, where nursery_enabled=
+          # and bitmap_marks= are no-ops, so minor_collect returned
+          # immediately and the child survived as an uncollected object.
+          # Green requires -Dgcry_block_headers and a per-chunk clear;
+          # `--disabled` is GCRY_NURSERY_MARKS_GLOBAL=1, the pre-fix
+          # global @bitmap_marks gate. Dropping either reddens the gate.
+          crystal build -Dgc_none -Dgcry_block_headers bench/nursery_bitmap_marks.cr -o bin/nursery_bitmap_marks
+          ./bin/nursery_bitmap_marks
+          GCRY_NURSERY_MARKS_GLOBAL=1 ./bin/nursery_bitmap_marks --disabled
+
       - name: Process parallel mark
         env:
           GCRY_STW_WATCHDOG_MS: "10000"

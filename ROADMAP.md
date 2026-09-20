@@ -1348,6 +1348,20 @@ kept finding the rest.
       repro; `dead-stack-root` is the gate), `occupied-release`
       (recipe prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-fork-atfork-disable/FINDINGS.md`
+      **2026-09-20, later: `make nursery-bitmap-marks` constructs its
+      red direction per run.** The recipe built headerless, where
+      `nursery_enabled=` and `bitmap_marks=` are no-ops, so
+      `minor_collect` returned immediately and the child survived as
+      an uncollected object. Green now requires `-Dgcry_block_headers`
+      and a per-chunk clear; `--disabled` is
+      `GCRY_NURSERY_MARKS_GLOBAL=1`, the pre-fix global flag, and the
+      bitmap arms must lose the child. Dropping either: exit 64.
+      Census **99 / 65 / 34 → 99 / 66 / 33.** x86_64. Still a real
+      gap in CI: `nested-spawn-uaf` (the original repro;
+      `dead-stack-root` is the gate), `occupied-release` (recipe
+      prefixes both arms with `-`), and `nursery_tlab_smoke` (CI
+      still builds it headerless).
+      `bench/log/linux/2026-09-20-nursery-bitmap-marks-disable/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

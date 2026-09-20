@@ -1101,9 +1101,16 @@ module Gcry
     # clear because some other chunk is a bitmap chunk leaves a mark nothing
     # will ever clear — `clear_nursery_marks` carried the same confusion and
     # the pair reclaimed live objects on the minor path.
+    # `GCRY_NURSERY_MARKS_GLOBAL=1` restores the global gate on nursery
+    # chunks; old-generation chunks stay per-chunk either way.
     @[AlwaysInline]
     private def clear_block_mark(chunk : ChunkHeader*, header : BlockHeader*) : Nil
-      BlockHeader.clear_mark(header) unless bitmap_chunk?(chunk)
+      skip = if @nursery_marks_global && ChunkHeader.nursery?(chunk)
+               @bitmap_marks
+             else
+               bitmap_chunk?(chunk)
+             end
+      BlockHeader.clear_mark(header) unless skip
     end
 
     # The bitmap arm of the size-class sweep.
