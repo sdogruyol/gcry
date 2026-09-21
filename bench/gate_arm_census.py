@@ -30,7 +30,11 @@ The fork detector originally looked for `Process.run`. This repo forks through
 took a CI job down) and through `Process.new` directly; both are that second
 criterion. A harness named only in a `--cross-compile` recipe is compiled, not
 run, so it does not count. The restoring-knob regex is the names
-`docs/HARDENING.md` already calls red arms, not a new class of arm.
+`docs/HARDENING.md` already calls red arms, not a new class of arm. A child
+arm named by `--mode=` is the same second criterion as `--child`: `scrub_midswap`
+forks itself as `--mode=stale-off`, sets the guard off on the heap rather than
+through an env knob, and requires that child to corrupt (2026-09-21; it had been
+counted "by hand" for want of a `GCRY_*` string).
 
 Otherwise the red direction was established once, by hand, by whoever wrote the
 gate — and that fact lives in `ROADMAP.md` prose ("broken on purpose and
@@ -110,7 +114,7 @@ def harness_constructs_red(stem: str) -> bool:
     judges = (
         re.search(r"failures <<|failures \+=|exit 1|exit\(1\)", src) is not None
     )
-    breaks = re.search(r'"GCRY_\w+"\s*=>|--child|--overshoot', src) is not None
+    breaks = re.search(r'"GCRY_\w+"\s*=>|--child|--overshoot|--mode=', src) is not None
     return forks and judges and breaks
 
 
