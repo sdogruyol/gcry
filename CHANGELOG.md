@@ -63,6 +63,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make occupied-release` constructs its red direction per run, and
+  gates.** The harness tried to *reach* the window that released a chunk
+  with a live block in it (CI `34787711949`) with thread churn and a held
+  flush, reached it 0 of 48 on a developer host, and the recipe ran both
+  arms under `-` — the refusal it protects had no gate. The window has a
+  single-thread shape: the settle bumps the pool version inside the stop,
+  the lazy sweep leaves `@chunks` intact after `start_world`, and a chunk
+  empty since last cycle is queued without a bump. `Heap#post_stw_hook`
+  (research only, library heaps) puts a mutator on the collector's own
+  thread at `:after_start_world` and `:before_flush`; one allocation at
+  the first builds the pool and takes a block, exhausting that chunk at
+  the second pops a queued chunk through the index it still has. Both
+  arms require exactly one refusal and no `map_chunk` in the window;
+  shipped writes the block and requires it to survive a rooted collect,
+  `--broken` restores the pre-fix release and requires the chunk gone.
+  Dropping the refusal, the knob, or the hook call each reddens it.
+  `GCRY_EMPTY_FLUSH_DELAY_MS` and `Heap#empty_flush_delay_ms` are gone —
+  no remaining user. In CI on x86_64 and Darwin, ~2 s. Census
+  **100 / 69 / 31 → 100 / 70 / 30.**
+
 - **A fault outside gcry's span now names the mapping it happened in.**
   The crash report's three out-of-span readings say what the address is
   *not* — not a gcry allocation, and whether a swept object is excluded —

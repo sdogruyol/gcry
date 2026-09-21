@@ -515,19 +515,15 @@ module Gcry
 
       @pending_empty_chunks = Pointer(ChunkHeader).null
 
-      # Research only (`GCRY_EMPTY_FLUSH_DELAY_MS`): hold the queued chunks here
-      # with the world already running. The window this widens is the one that
-      # released a chunk with a live block in it — the sweep unlinks a chunk
-      # inside the stop and its index entry survives until the `index_remove`
-      # below, so a mutator can take a block out of it in between. On CI that
-      # happens about once in twenty-four children; with a delay it happens
-      # every time, which is what a control arm needs.
-      if (delay = @empty_flush_delay_ms) > 0
-        req = uninitialized Gcry::OS::Timespec
-        req.tv_sec = typeof(req.tv_sec).new(delay // 1000)
-        req.tv_nsec = typeof(req.tv_nsec).new((delay % 1000) * 1_000_000)
-        rem = uninitialized Gcry::OS::Timespec
-        Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+      # The window that released a chunk with a live block in it is open
+      # here: the sweep unlinked these chunks, their index entries survive
+      # until the `index_remove` below, and the world is running. Research
+      # only (`Heap#post_stw_hook`): a mutator placed here on the collector's
+      # thread reaches it every run — `make occupied-release`. The
+      # `GCRY_EMPTY_FLUSH_DELAY_MS` sleep that used to widen it for thread
+      # churn reached it 0 of 48 on a developer host and is gone.
+      if hook = @post_stw_hook
+        hook.call(:before_flush)
       end
 
       # Under `@alloc_lock`, because the teardown races readers that do hold it.

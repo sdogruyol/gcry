@@ -789,6 +789,15 @@ jobs:
         run: |
           make kept-release-report
 
+      # The window that ledger exists for, walked rather than waited for: a
+      # mutator on the collector's thread takes a block out of a chunk the
+      # sweep queued as empty, through the index entry it still has, before
+      # the flush. Shipped refuses once and keeps the block; the pre-fix
+      # release must lose its chunk. Deterministic on a library heap, ~2 s.
+      - name: An occupied chunk is refused, not released
+        run: |
+          make occupied-release
+
       # Refill indexing: one chunk-list walk per active class slot per
       # collection, and the gate is that it stays one. Anything more means the
       # index is invalidated inside a collection and its walk paid repeatedly,
@@ -1757,6 +1766,7 @@ jobs:
           make scrub-fibers
           make ec-queue-audit
           make perf-baseline
+          make occupied-release
 
       # Same question the Linux job asks: is a pointer held only in a
       # main-thread `@[ThreadLocal]` a root? Darwin TLV is a libc malloc,

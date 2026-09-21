@@ -1604,23 +1604,23 @@ fiber-lag-cost: $(BIN)
 	$(BIN)/fiber_lag_cost
 
 # The window that released a chunk with a live block in it (CI `34787711949`,
-# 2026-09-14): the sweep queues an empty chunk inside the stop, its index entry
-# survives until the post-STW flush, and the allocator resolves pooled chunk
-# addresses through that index — so a mutator can take a block out of a chunk
-# already queued for unmapping. The flush now refuses such a chunk and keeps it
-# mapped.
+# 2026-09-14): the sweep queues an empty chunk, its index entry survives until
+# the post-STW flush, and the allocator resolves pooled chunk addresses through
+# that index — so a mutator can take a block out of a chunk already queued for
+# unmapping. The flush now refuses such a chunk and keeps it mapped.
 #
-# **Research, not a gate, and the `-` is deliberate**: reaching the window needs
-# the sweep's single-mutator path *and* a mutator running at flush time, which
-# this host has not produced in 48 attempts — with several mutators alive the
-# sweep queues no empties at all (0 chunks considered in 120 collections; 37 in
-# 30 single-threaded ones). The harness says INCONCLUSIVE and exits non-zero
-# rather than passing on a window it never reached, which is right, and makes
-# it unfit to gate anywhere it cannot reproduce.
+# Walked on purpose, on a library heap, through `Heap#post_stw_hook`: one
+# allocation after `start_world` builds the pool from the still-intact list,
+# the after-world sweep queues the idle chunks behind it, and exhausting the
+# taken chunk before the flush pops a queued one through the index. Until
+# 2026-09-21 the recipe tried to reach that with thread churn (0 of 48 here)
+# and ran both arms under `-`. Both arms now require the window to be hit:
+# shipped must refuse once and keep the block; `--broken` restores the pre-fix
+# release and must lose the block's chunk. ~2 s.
 occupied-release: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/occupied_release.cr -o $(BIN)/occupied_release --error-trace
-	-$(BIN)/occupied_release
-	-$(BIN)/occupied_release --control
+	$(CRYSTAL) build bench/occupied_release.cr -o $(BIN)/occupied_release --error-trace
+	$(BIN)/occupied_release
+	$(BIN)/occupied_release --broken
 
 # The control the holders search never had: three planted words in live
 # marked objects, plus a masked address the walk must not invent. Until

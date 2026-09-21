@@ -1398,6 +1398,29 @@ kept finding the rest.
       `dead-stack-root` is the gate), `occupied-release` (recipe
       prefixes both arms with `-`).
       `bench/log/linux/2026-09-20-stw-mt-tlab-headerless/FINDINGS.md`
+      **2026-09-21: `make occupied-release` constructs its red
+      direction per run.** It was the one harness that existed and
+      could not fail: it tried to *reach* the window that released a
+      chunk with a live block in it with thread churn and a held
+      flush, reached it 0 of 48 here, and the recipe ran both arms
+      under `-`. The window has a single-thread shape — the settle
+      bumps the pool version inside the stop, the lazy sweep leaves
+      `@chunks` intact after `start_world`, and a chunk empty since
+      last cycle is queued without a bump — so a mutator on the
+      collector's own thread walks it: `Heap#post_stw_hook` at
+      `:after_start_world` builds the pool and takes one block,
+      `:before_flush` exhausts that chunk and pops a queued one
+      through the index. Library heap, deterministic, ~2 s. Both arms
+      require exactly one refusal and no `map_chunk` in the window;
+      shipped writes the block and requires it live, `--broken`
+      restores the pre-fix release and requires the chunk gone.
+      Dropping the refusal: FAIL. Dropping the knob: FAIL. Dropping
+      the hook call: both FAIL. `GCRY_EMPTY_FLUSH_DELAY_MS` had no
+      remaining user and is gone. x86_64 + Darwin CI. Census
+      **100 / 69 / 31 → 100 / 70 / 30.** Still a real gap in CI:
+      `nested-spawn-uaf` (the original repro; `dead-stack-root` is
+      the gate).
+      `bench/log/linux/2026-09-21-occupied-release-walked/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

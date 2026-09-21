@@ -1156,15 +1156,10 @@ module GC
     {% if flag?(:unix) || flag?(:win32) %}
       Gcry::PoisonHolders.skip_heap_count if env_flag_one?("GCRY_DISABLE_HOLDERS_FIND")
     {% end %}
-    # Research only: the window that released a chunk with a live block in it.
-    # `GCRY_EMPTY_FLUSH_DELAY_MS` holds the post-STW empty-chunk flush with the
-    # world already running, so a mutator has time to take a block out of a
-    # chunk the sweep queued as empty; `GCRY_RELEASE_OCCUPIED=1` then releases
-    # it anyway, which is what this code did before 2026-09-14 and is the
-    # control arm for the refusal.
-    if ms = env_u64("GCRY_EMPTY_FLUSH_DELAY_MS")
-      heap.empty_flush_delay_ms = ms
-    end
+    # Research only: release a chunk the flush found occupied anyway, which
+    # is what this code did before 2026-09-14. `make occupied-release` walks
+    # that window on a library heap through `Heap#post_stw_hook`; this is the
+    # same control for a process heap.
     heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says. The positive control for the kept-chunk ledger and the

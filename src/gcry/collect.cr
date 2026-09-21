@@ -616,10 +616,20 @@ module Gcry
     getter release_flush_chunks : UInt64 = 0_u64
     getter release_refused_occupied : UInt64 = 0_u64
     # Research only: release an occupied chunk anyway (the pre-2026-09-14
-    # behaviour), and hold the post-STW flush so the window is reached on
-    # purpose. `GCRY_RELEASE_OCCUPIED=1`, `GCRY_EMPTY_FLUSH_DELAY_MS`.
+    # behaviour). `GCRY_RELEASE_OCCUPIED=1` on a process heap; the `--broken`
+    # arm of `make occupied-release` on a library one.
     property release_occupied_anyway : Bool = false
-    property empty_flush_delay_ms : UInt64 = 0_u64
+    # Research only, library heaps: a mutator on the collector's own thread
+    # at the two points the window that released an occupied chunk runs
+    # between. `:after_start_world` — world running, `@chunks` intact, the
+    # after-world sweep not yet run (lazy config); a pool built here is
+    # built from a list the sweep is about to unlink from, at a version the
+    # sweep will not bump for a chunk it frees nothing in. `:before_flush` —
+    # chunks queued, off `@chunks`, index entries still alive, no lock held;
+    # a cursor exhausted here refills from that pool through the index. That
+    # is the whole window, deterministically, which is what makes
+    # `make occupied-release` a gate rather than a sighting.
+    property post_stw_hook : Proc(Symbol, Nil)? = nil
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says, so the kept-chunk ledger and its crash-report line are
     # reachable on a host where the window never opens.
@@ -2564,6 +2574,9 @@ module Gcry
             @block_other_heap = true
           end
           begin
+            if hook = @post_stw_hook
+              hook.call(:after_start_world)
+            end
             if @lazy_sweep_pending
               t0 = monotonic_ns
               # The lazy sweep walks `@chunks` with the mutators running, same
