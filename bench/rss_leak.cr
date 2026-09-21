@@ -10,6 +10,15 @@
 # Usage:
 #   crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak
 #   ./bin/rss_leak [--warmup=15] [--cycles=20] [--objects=5000] [--limit=10] [--rss-limit=25]
+#   ./bin/rss_leak --leaking      # must FAIL: the harness itself retains one object in five per cycle
+#
+# `--leaking` is the red direction, constructed per run: every cycle keeps one
+# object in five rooted in a global, so the late-half heap median has to sit
+# well above the early-half one (measured +38% at the defaults against a 10%
+# limit; one in ten gave +17%, too close to the ceiling to be a control).
+# A gate whose primary check can only be shown to fail by a hand edit is the
+# rot `bench/gate_arm_census.py` counts; the recipe requires this arm to exit
+# non-zero.
 #
 # Writes bench/trend.json (gitignored) for local/CI artifact trending.
 
@@ -24,6 +33,7 @@ cycles = 20
 objects = 5000
 limit_pct = 10.0
 rss_limit_pct = 25.0
+leaking = ARGV.includes?("--leaking")
 ARGV.each do |arg|
   if arg.starts_with?("--warmup=")
     warmup = arg.lchop("--warmup=").to_i
@@ -50,13 +60,20 @@ def read_rss_kb : UInt64
   BenchRss.read_kb
 end
 
+# The leak the `--leaking` arm plants: a global, so it is a root, and it is
+# never cleared.
+LEAKED = [] of Void*
+
 # One alloc/free/collect cycle. Returns {rss_kb, heap_size}.
-def run_cycle(objects : Int32) : {UInt64, UInt64}
+def run_cycle(objects : Int32, leaking : Bool) : {UInt64, UInt64}
   live = [] of Void*
   objects.times { |i| live << HEAP.malloc(64 + (i % 256)) }
 
   # Free half — leave fragmentation pressure
   live.each_with_index { |p, i| HEAP.free(p) if i.even? }
+  if leaking
+    live.each_with_index { |p, i| LEAKED << p if i % 5 == 1 }
+  end
   live.clear
   GC.collect
   GC.collect
@@ -69,7 +86,7 @@ ratios = [] of Float64
 rss_samples = [] of UInt64
 heap_samples = [] of UInt64
 
-puts "=== RSS leak detection (warmup=#{warmup}, cycles=#{cycles}, objects=#{objects}, heap_limit=#{limit_pct}%, rss_limit=#{rss_limit_pct}%) ==="
+puts "=== RSS leak detection (warmup=#{warmup}, cycles=#{cycles}, objects=#{objects}, heap_limit=#{limit_pct}%, rss_limit=#{rss_limit_pct}%#{leaking ? ", LEAKING one object in five per cycle" : ""}) ==="
 
 # Tiny priming alloc so the process GC heap exists before warm-up.
 primed = [] of Void*
@@ -79,7 +96,7 @@ GC.collect
 GC.collect
 
 # Warm-up: same pressure as measured cycles; not sampled for the gate.
-warmup.times { run_cycle(objects) }
+warmup.times { run_cycle(objects, false) }
 GC.collect
 
 rss_start = read_rss_kb
@@ -87,7 +104,7 @@ heap_start = HEAP.heap_size
 puts "  post-warmup RSS=#{rss_start} kB heap_size=#{heap_start}"
 
 cycles.times do |c|
-  rss, hs = run_cycle(objects)
+  rss, hs = run_cycle(objects, leaking)
   ratio = hs > 0 ? (rss.to_f * 1024.0) / hs.to_f : 0.0
   ratios << ratio
   rss_samples << rss
@@ -152,10 +169,10 @@ puts "  wrote #{trend_path}"
 puts ""
 puts "=== Result ==="
 if failures.empty?
-  puts "PASS"
+  puts leaking ? "PASS — but this arm leaks on purpose and the gate did not notice; the ceiling has stopped discriminating" : "PASS"
   exit 0
 else
-  puts "FAIL — #{failures.size} failure(s)"
+  puts "FAIL — #{failures.size} failure(s)#{leaking ? " (expected: this arm leaks on purpose)" : ""}"
   failures.each { |f| puts "  #{f}" }
   exit 1
 end

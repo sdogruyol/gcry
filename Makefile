@@ -224,9 +224,15 @@ stw-lag-pause: $(BIN)
 	GCRY_STACK_LOW_WATER=0 $(BIN)/stw_lag_pause --rounds=$${STW_LAG_ROUNDS:-5} --dirty-kb=16 \
 		--disabled --max-ratio=$${STW_LAG_MAX_RATIO:-4} --max-ratio-nolw=$${STW_LAG_MAX_RATIO_NOLW:-30}
 
+# Heap-size growth late vs early after warm-up (RSS secondary, looser). The red
+# direction is the harness's own: `--leaking` roots one object in five per
+# cycle, +38% against the 10% ceiling here, and the arm must exit non-zero.
 rss-leak: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak
-	$(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000}
+	$(CRYSTAL) build -Dgc_none bench/rss_leak.cr -o $(BIN)/rss_leak --error-trace
+	$(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000} \
+		--limit=$${RSS_LIMIT:-10} --rss-limit=$${RSS_RSS_LIMIT:-25}
+	! $(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000} \
+		--limit=$${RSS_LIMIT:-10} --rss-limit=$${RSS_RSS_LIMIT:-25} --leaking
 
 compiler-gc-contract: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/compiler_gc_contract.cr -o $(BIN)/compiler_gc_contract

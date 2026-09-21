@@ -931,12 +931,12 @@ jobs:
         run: |
           make perf-baseline
 
+      # Primary gate: heap_size late vs early. RSS secondary with looser ceil
+      # (DONTNEED re-fault is noisy on shared GHA hosts). The recipe's second
+      # arm leaks on purpose and must fail, so the ceiling is shown to bite.
       - name: RSS leak detection
         run: |
-          crystal build -Dgc_none bench/rss_leak.cr -o bin/rss_leak --error-trace
-          # Primary gate: heap_size late vs early. RSS secondary with looser ceil
-          # (DONTNEED re-fault is noisy on shared GHA hosts).
-          ./bin/rss_leak --warmup=20 --cycles=20 --objects=5000 --limit=15 --rss-limit=30
+          RSS_WARMUP=20 RSS_LIMIT=15 RSS_RSS_LIMIT=30 make rss-leak
 
       - name: Compiler GC contract + crystal tools
         run: |
