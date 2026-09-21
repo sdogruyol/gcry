@@ -1470,6 +1470,16 @@ kept finding the rest.
       `finalizer-complex`, `oom-test`, `thread-storm`, `trace-smoke`,
       `soak`, `soak-smoke`, `compiler-gc-contract`, with their shorts.
       `bench/log/linux/2026-09-21-pause-rss-scrub-arms/FINDINGS.md`
+      **2026-09-21, later: `make trace-smoke` constructs its red
+      direction per run.** It asserts alloc, free, collect and
+      finalizer events in the NDJSON and the dump against the live
+      set, by `raise`; nothing showed those `raise`s reachable.
+      `--unsampled` enables the trace with `alloc_sample: 0` —
+      documented as off — so alloc/free never appear, and the recipe
+      requires that arm to exit non-zero; it also pins what
+      `GCRY_TRACE_ALLOC_SAMPLE=0` means. CI goes through the recipe.
+      Census **100 / 74 / 26 → 100 / 75 / 25.**
+      `bench/log/linux/2026-09-21-trace-smoke-unsampled/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

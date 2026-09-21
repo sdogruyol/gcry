@@ -241,7 +241,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DEBUG_INVARIANTS=1` | Runtime heap invariant checks |
 | `GCRY_TRACE=1` | NDJSON GC event log (stderr or `GCRY_TRACE_FILE`) |
 | `GCRY_TRACE_FILE` | Trace output path |
-| `GCRY_TRACE_ALLOC_SAMPLE` | Log 1/N alloc/free lines (default **1000**; `0` = off) |
+| `GCRY_TRACE_ALLOC_SAMPLE` | Log 1/N alloc/free lines (default **1000**; `0` = off — pinned by `make trace-smoke --unsampled`, which traces at 0 and must fail on the missing alloc/free) |
 
 OOM / fork / signals: [POLICY.md](POLICY.md). Trace / heap dump: [API.md](API.md), `make trace-smoke`. Mutation scoring: [MUTATION.md](MUTATION.md).
 

@@ -945,10 +945,11 @@ jobs:
           crystal tool hierarchy src/gcry.cr >/dev/null
           crystal tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
 
+      # Trace events and heap dump against the live set; the recipe's second
+      # arm traces with sampling off and must fail on the missing alloc/free.
       - name: Trace + heap dump smoke
         run: |
-          crystal build bench/trace_smoke.cr -o bin/trace_smoke --error-trace
-          ./bin/trace_smoke
+          make trace-smoke
 
       - name: Debug invariants
         run: |

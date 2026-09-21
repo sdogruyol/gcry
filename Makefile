@@ -263,9 +263,13 @@ stackmap-smoke: $(BIN)
 		-o $(BIN)/stackmap_exclusive_fiber_smoke bench/stackmap_exclusive_fiber_smoke.cr
 	GCRY_PRECISE_STACK=2 GCRY_PRECISE_FIBERS=1 $(BIN)/stackmap_exclusive_fiber_smoke
 
+# NDJSON trace events and the heap dump against the live set. The red arm:
+# `--unsampled` enables the trace with `alloc_sample: 0` — documented as off —
+# so alloc/free never appear and the event assertions must fail.
 trace-smoke: $(BIN)
-	$(CRYSTAL) build bench/trace_smoke.cr -o $(BIN)/trace_smoke
+	$(CRYSTAL) build bench/trace_smoke.cr -o $(BIN)/trace_smoke --error-trace
 	$(BIN)/trace_smoke
+	! $(BIN)/trace_smoke --unsampled
 
 # Where does the parked-fiber wipe start destroying live data? Sweeps
 # GCRY_SCRUB_OVERSHOOT in child processes — most of the ladder is *expected* to

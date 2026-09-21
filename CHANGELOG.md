@@ -77,7 +77,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--mode=` is now the same criterion as `--child`. Census
   **100 / 71 / 29 → 100 / 74 / 26**, and the 26 are classified: 12
   defect-finders whose red is a defect, 2 compile-only typechecks, 4
-  research targets, 8 gates still owed an arm.
+  research targets, 8 gates still owed an arm. `make trace-smoke` then
+  took one: `--unsampled` traces with `alloc_sample: 0` — documented as
+  off — and the recipe requires the missing alloc/free to fail it, which
+  also pins what `GCRY_TRACE_ALLOC_SAMPLE=0` means. **→ 100 / 75 / 25.**
 
 - **`make nested-spawn-uaf` is a gate, on the stock compiler.** The
   original fiber-creation use-after-free repro (2026-08-15, three CI

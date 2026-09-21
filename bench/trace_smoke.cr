@@ -2,8 +2,14 @@
 #
 # Build: crystal build bench/trace_smoke.cr -o bin/trace_smoke
 # Run:   ./bin/trace_smoke
+#        ./bin/trace_smoke --unsampled    # must fail: alloc_sample 0 emits no alloc/free
 #
 # Or: make trace-smoke
+#
+# `--unsampled` is the red direction, constructed per run: `alloc_sample: 0`
+# is documented as "off" (`GCRY_TRACE_ALLOC_SAMPLE=0`), so the trace carries
+# collect and finalizer events and no alloc or free — and the assertions
+# below have to notice. The recipe requires that arm to exit non-zero.
 
 require "json"
 require "../src/gcry"
@@ -11,9 +17,11 @@ require "../src/gcry"
 trace_path = ENV["GCRY_TRACE_FILE"]? || File.tempname("gcry-trace", ".ndjson")
 File.delete(trace_path) if File.exists?(trace_path)
 
+unsampled = ARGV.includes?("--unsampled")
+
 fd = LibC.open(trace_path, LibC::O_WRONLY | LibC::O_CREAT | LibC::O_TRUNC, 0o644)
 raise "open trace file failed" if fd < 0
-Gcry::Trace.enable(fd, alloc_sample: 1_u64, owned: true)
+Gcry::Trace.enable(fd, alloc_sample: unsampled ? 0_u64 : 1_u64, owned: true)
 
 heap = Gcry::Heap.new
 keep = [] of Void*
@@ -77,10 +85,11 @@ File.each_line(trace_path) do |line|
   raise "missing ts_ns" unless obj["ts_ns"]?
 end
 
-raise "no alloc events" unless events.any? { |e| e == "alloc" }
-raise "no free events" unless events.any? { |e| e == "free" }
+raise "no alloc events#{unsampled ? " (expected: --unsampled)" : ""}" unless events.any? { |e| e == "alloc" }
+raise "no free events#{unsampled ? " (expected: --unsampled)" : ""}" unless events.any? { |e| e == "free" }
 raise "no collect_start" unless events.any? { |e| e == "collect_start" }
 raise "no collect_end" unless events.any? { |e| e == "collect_end" }
 raise "no finalizer register" unless events.any? { |e| e == "finalizer" }
 
 puts "trace_smoke ok events=#{events.size} dump=#{dump_count} file=#{trace_path}"
+puts "but --unsampled emitted alloc/free events: alloc_sample 0 is no longer off, and the assertions above cannot go red this way" if unsampled
