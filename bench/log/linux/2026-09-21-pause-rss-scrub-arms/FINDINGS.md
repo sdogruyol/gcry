@@ -55,7 +55,7 @@ recipe 1, `scrub-midswap` harness 1.
 
 ## What the 26 are
 
-- **Defect-finders, 12** — `fuzz`, `fuzz-replay`, `pattern-fuzz`,
+- **Defect-finders, 11** — `fuzz`, `fuzz-replay`, `pattern-fuzz`,
   `property-test`, `layout-property-test`, `mt-property-test` and their
   `-short` twins. Their red direction *is* a collector defect; a knob
   that corrupts on purpose would test the knob. The honest check for
@@ -68,7 +68,7 @@ recipe 1, `scrub-midswap` harness 1.
   recipe), `darwin-page-query` (an experiment with an open question),
   `stackmap-smoke` (dormant machinery), `thread-census-symbolize` (a
   tooling check on `addr2line`).
-- **Gates still owed an arm, 8** — `finalizer-complex`, `oom-test`(+short),
+- **Gates still owed an arm, 9** — `finalizer-complex`, `oom-test`(+short),
   `thread-storm`(+short), `trace-smoke`, `soak-smoke`, `soak`,
   `compiler-gc-contract`. (`trace-smoke` judges by `raise`, which the
   census's judge regex does not read — a first draft of this note called

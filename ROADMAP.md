@@ -1462,11 +1462,11 @@ kept finding the rest.
       fork detector wanted a `GCRY_*` string and `--mode=` is now the
       same criterion as `--child` (one harness uses it). Both CI steps
       that ran the binaries directly go through the recipes. Census
-      **100 / 71 / 29 → 100 / 74 / 26.** The 26: **12** defect-finders
+      **100 / 71 / 29 → 100 / 74 / 26.** The 26: **11** defect-finders
       (fuzz / property families; their red *is* a defect, `make mutate`
       is their check and the census does not read it), **2**
       compile-only typechecks (kept in the denominator on purpose),
-      **4** research targets that say so, and **8 still owed an arm** —
+      **4** research targets that say so, and **9 still owed an arm** —
       `finalizer-complex`, `oom-test`, `thread-storm`, `trace-smoke`,
       `soak`, `soak-smoke`, `compiler-gc-contract`, with their shorts.
       `bench/log/linux/2026-09-21-pause-rss-scrub-arms/FINDINGS.md`
