@@ -210,7 +210,7 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_TYPE_ID_GATE=1` | Extend the root `type_id` filter to stack candidates as well, which the default leaves ungated |
 | `GCRY_MOSTLY_EMPTY=1` | `MADV_FREE` the free pages of chunks that are ≤25% live (content preserved, freelist stays valid). `GCRY_MOSTLY_EMPTY_MODE=dontneed` unlinks free-only runs and `MADV_DONTNEED`s them instead (churn risk); `GCRY_MOSTLY_EMPTY_PCT` moves the liveness threshold and `GCRY_MOSTLY_EMPTY_BUDGET` caps the bytes per collection |
 | `GCRY_NO_INCREMENTAL=1` | Alias for `GCRY_DISABLE_INCREMENTAL=1` |
-| `GCRY_STW_TEST_STALL_MS` | **Research only**, default 0. Hold the world stopped inside the thread-stacks phase for this long, so the watchdog above has a run it is expected to fire on (`make stw-watchdog`). Freezes every mutator on purpose — never ship non-zero |
+| `GCRY_STW_TEST_STALL_MS` | **Research only**, default 0. Hold the world stopped inside the thread-stacks phase for this long, so the watchdog above has a run it is expected to fire on (`make stw-watchdog`), and — at 250 ms — the run `make pause-budget` requires to breach its phase-1 p99 ceiling. Freezes every mutator on purpose — never ship non-zero |
 | `GCRY_DISABLE_LAZY_SWEEP` | Force in-STW sweep (default: EC1 and Parallel reclaim-off / TLAB-off sweep after `start_world`) |
 | `GCRY_BLACKLIST=1` | Force page blacklist on (already process default) |
 | `GCRY_DISABLE_BLACKLIST=1` | No page blacklist |

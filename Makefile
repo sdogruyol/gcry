@@ -188,9 +188,15 @@ microbench: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/micro/run_all.cr -o $(BIN)/microbench
 	$(BIN)/microbench
 
+# Pause ceilings, and a run that must breach one. The phase-1 p99 ceiling is
+# 200 ms against a tip p99 of a few ms, so nothing about a green run shows the
+# check can still fail; `GCRY_STW_TEST_STALL_MS=250` — the STW watchdog's own
+# stall, inside the stop — lifts every major past it and the arm is required
+# to exit non-zero. Phase 1 only: 25 majors × 250 ms. ~6 s more.
 pause-budget: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/pause_budget.cr -o $(BIN)/pause_budget
+	$(CRYSTAL) build -Dgc_none bench/pause_budget.cr -o $(BIN)/pause_budget --error-trace
 	$(BIN)/pause_budget --live-mb=$${LIVE_MB:-20}
+	! GCRY_STW_TEST_STALL_MS=250 $(BIN)/pause_budget --live-mb=$${LIVE_MB:-20} --phases=1
 
 # STW root-scan lag pause trap: the whole pause cost of GCRY_SOUND=1.
 # Runs under both env shapes — the boot-lag assertion inverts with GCRY_SOUND.

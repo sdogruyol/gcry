@@ -460,10 +460,14 @@ jobs:
           crystal build -Dgc_none bench/micro/run_all.cr -o bin/microbench --error-trace
           ./bin/microbench
 
+      # Ceilings on major p99 / max, the incremental slice and the minor
+      # ratio. The red arm holds the world stopped 250 ms per collection
+      # (`GCRY_STW_TEST_STALL_MS`, the watchdog's own stall) and requires
+      # phase 1's 200 ms p99 ceiling to fire — the ceilings sit far above tip,
+      # so without it nothing shows they can still come out red.
       - name: Pause budget
         run: |
-          crystal build -Dgc_none bench/pause_budget.cr -o bin/pause_budget --error-trace
-          ./bin/pause_budget --live-mb=20
+          make pause-budget
 
       # The pause trap in the sound profile. `GCRY_SOUND=1` sets both STW
       # root-scan lags to 0, and that pair is the *entire* pause cost of the
