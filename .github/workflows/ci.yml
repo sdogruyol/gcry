@@ -569,6 +569,16 @@ jobs:
       - name: Dying-fiber stack root
         run: make dead-stack-root
 
+      # And the defect that root was written for, as the regression test its
+      # own header asked for: the nested-spawn churn under poison + tag +
+      # census. Six shipped children must survive and each must have walked a
+      # dying stack; the same churn with the dying-stack root and the register
+      # scan both off must still crash — both, because on this codegen either
+      # root alone covers the word (fix off went 0/24 here on 2026-09-21
+      # against 10/24 on 2026-08-17; both off, 7/12). ~15 s.
+      - name: Nested-spawn use-after-free
+        run: make nested-spawn-uaf
+
       # The stack-bounds table past its initial 64 slots. The knob that freezes
       # it back to the pre-fix fixed table was in no spec, recipe or CI step,
       # while ROADMAP.md claimed this was gated in process_spec — so the gate

@@ -1,4 +1,5 @@
-# A use-after-free in fiber creation, in seconds instead of an hour and a half.
+# A use-after-free in fiber creation, in seconds instead of an hour and a half —
+# and, since 2026-09-21, the gate that it did not crash on this tree.
 #
 # The open 2026-08-10 soak SEGV is read as a block freed while the Parallel
 # scheduler still pointed at it. It took 1h24m to arrive, once, which is why
@@ -29,31 +30,123 @@
 #     WORKERS=4  5 crashes in 12 runs
 #
 # One worker is enough, which rules out a race between workers and leaves the
-# collector's view of a fiber being created while a collection runs.
+# collector's view of a fiber being created while a collection runs. The missing
+# root was the stack of a *terminating* fiber (v0.20.0,
+# `log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`): fix off 10/24, fix
+# on 0/24, walked-and-offered-nothing 12/24.
 #
-# **Not wired into CI.** It fails most of the time on purpose — that is the
-# finding — and a gate that is always red gates nothing. Wire it up as the
-# regression test when the defect is fixed.
+# **Wired as a gate on 2026-09-21**, with one correction the wiring measured.
+# On this host and compiler (Linux x86_64, Crystal 1.21.0) the fix's own
+# disable no longer reddens the repro: `GCRY_DEAD_STACK_ROOTS=0` crashed **0 of
+# 24** at the original settings. The word the dying stack holds is also in a
+# suspended thread's registers here, and the v0.19.0 register scan roots it —
+# `GCRY_DEAD_STACK_ROOTS=0 GCRY_DISABLE_GREG_ROOTS=1` crashes **7 of 12**, while
+# either alone is quiet. So two roots cover one word on this codegen; the
+# deterministic gate for the dying-stack root itself is `make dead-stack-root`,
+# and this file gates the *defect*: the shipped configuration must survive, and
+# the configuration with both covers removed must still be able to die, or the
+# survival says nothing about the collector.
 #
 #   crystal build -Dgc_none bench/nested_spawn_uaf.cr -o bin/nested_spawn_uaf
-#   GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 bin/nested_spawn_uaf
+#   bin/nested_spawn_uaf                 # the gate: RUNS shipped children, then the broken arm
+#   GCRY_POISON_HOLDERS=1 bin/nested_spawn_uaf --child   # one run of the churn, as before
 #
-# Knobs: FIBERS (64), ROUNDS (200), WORKERS (4), COLLECTS (8).
+# Child knobs: FIBERS (64), ROUNDS (200; the gate passes 20), WORKERS (4),
+# COLLECTS (8), NEST (1), ROOT (none|pool|deque|buffer). Parent: RUNS (6).
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% unless flag?(:gc_none) %}
   # Deliberately allowed: the Boehm build is the control arm above, and it has to
   # be buildable from this same file for the comparison to mean anything.
 {% end %}
 
-HEAP = Gcry.default_heap.not_nil!
-
 FIBERS   = (ENV["FIBERS"]? || "64").to_i
 ROUNDS   = (ENV["ROUNDS"]? || "200").to_i
 WORKERS  = (ENV["WORKERS"]? || "4").to_i
 COLLECTS = (ENV["COLLECTS"]? || "8").to_i
 NEST     = (ENV["NEST"]? || "1") != "0"
+
+unless ARGV.includes?("--child")
+  {% unless flag?(:gc_none) %}
+    STDERR.puts "the gate needs -Dgc_none; the Boehm build is only the --child control"
+    exit 64
+  {% end %}
+  runs = (ENV["RUNS"]?.try(&.to_i?) || 6)
+  exe = Process.executable_path.not_nil!
+  # The 2026-08-17 settings: poison is what turns the use-after-free into a
+  # fault, the tag is what names the block, the census is what keeps the repro
+  # live. `GCRY_POISON_HOLDERS` implies the first two and the crash report.
+  child_env = {
+    "ROUNDS"              => ENV["ROUNDS"]? || "20",
+    "GCRY_POISON_HOLDERS" => "1",
+    "GCRY_THREAD_CENSUS"  => "1",
+  }
+
+  puts "=== nested-spawn use-after-free ==="
+  puts "fibers=#{FIBERS} rounds=#{child_env["ROUNDS"]} workers=#{WORKERS} collects=#{COLLECTS} nest=#{NEST} runs=#{runs}"
+  puts ""
+
+  failures = [] of String
+
+  # Shipped: every child must finish, and every one must have walked at least one
+  # dying stack — otherwise the churn never built the window and a clean run is
+  # about nothing.
+  crashed = 0
+  hung = 0
+  unwalked = 0
+  runs.times do |i|
+    result = BoundedChild.run(exe, ["--child"], child_env)
+    walked = result.output.match(/dead-fiber stacks: (\d+) walked/).try(&.[1].to_i)
+    if result.ok
+      unwalked += 1 if walked.nil? || walked == 0
+    else
+      crashed += 1
+      hung += 1 if result.timed_out
+      puts "  shipped child #{i + 1} failed:"
+      result.output.each_line { |l| puts "    #{l.rstrip}" unless l.strip.empty? }
+    end
+  end
+  puts "  shipped:                       #{crashed} of #{runs} failed (#{hung} hung), #{unwalked} walked no dying stack"
+  failures << "shipped: #{crashed - hung} of #{runs} children died — the fiber-creation use-after-free is back" if crashed > hung
+  failures << "shipped: #{hung} of #{runs} children hung — raise BENCH_CHILD_TIMEOUT_S or find the hang" if hung > 0
+  failures << "shipped: #{unwalked} of #{runs} children walked no dying fiber stack, so the window was never built and their survival is not evidence" if unwalked > 0
+
+  # Broken: both covers off. It needs one crash to make its point and is the arm
+  # that is supposed to fail, so it gets tries rather than a fixed budget and
+  # stops at the first (`find_block_race` has the same shape and the reason).
+  broken_env = child_env.merge({
+    "GCRY_DEAD_STACK_ROOTS"   => "0",
+    "GCRY_DISABLE_GREG_ROOTS" => "1",
+  })
+  cap = {runs * 4, 8}.max
+  tries = 0
+  died = false
+  broken_hung = 0
+  while tries < cap && !died
+    tries += 1
+    result = BoundedChild.run(exe, ["--child"], broken_env)
+    next if result.ok
+    if result.timed_out
+      broken_hung += 1
+    else
+      died = true
+    end
+  end
+  puts "  dying-stack + register roots off: #{died ? "crashed on try #{tries}" : "survived #{tries} tries"}#{broken_hung > 0 ? ", #{broken_hung} hung" : ""}"
+  failures << "broken: with the dying-stack root and the register scan both off nothing crashed in #{tries} tries, so the shipped arm's survival cannot be credited to the collector" unless died
+
+  puts ""
+  if failures.empty?
+    puts "ok — #{runs} shipped children survived the churn, and the same churn with both covers removed still dies."
+    exit 0
+  end
+  failures.each { |f| STDERR.puts "FAIL: #{f}" }
+  exit 1
+end
+
+HEAP = Gcry.default_heap.not_nil!
 
 # One context for the whole run. A fresh context per round exhausts threads
 # instead, which is a different failure and would hide this one.
@@ -153,4 +246,4 @@ puts "unowned coverage: #{heap.unowned_covered} accounted for, #{heap.unowned_th
 # everything alive is not a fix, and the two look identical from the outside.
 puts "pause: p50 #{heap.pause_percentile_ns(50.0)} ns  p99 #{heap.pause_percentile_ns(99.0)} ns  n #{heap.collections}"
 puts "retention: heap_size #{GC.stats.heap_size} live_objects #{heap.live_objects} collections #{heap.collections}"
-puts "ok — no fault this run (it is intermittent; see the rates in the header)"
+puts "ok — no fault this run"

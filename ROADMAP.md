@@ -403,7 +403,8 @@ kept finding the rest.
       frame, on better evidence than it had.
       `bench/log/linux/2026-08-16-uaf-mark-complete/FINDINGS.md`,
       `bench/log/linux/2026-08-16-birth-grace/FINDINGS.md`
-      Not a CI gate — it fails most runs on purpose; `make nested-spawn-uaf`.
+      A CI gate since 2026-09-21 (`make nested-spawn-uaf`, x86_64): shipped
+      children must survive, both covering roots off must still crash.
       `bench/log/linux/2026-08-15-nested-spawn-uaf/FINDINGS.md`,
       `bench/log/linux/2026-08-16-uaf-holders/FINDINGS.md`
 - [x] **The EC4 pause is the parked-fiber lag scan - priced, and declined
@@ -1421,6 +1422,32 @@ kept finding the rest.
       `nested-spawn-uaf` (the original repro; `dead-stack-root` is
       the gate).
       `bench/log/linux/2026-09-21-occupied-release-walked/FINDINGS.md`
+      **2026-09-21, later: `make nested-spawn-uaf` gates, and the last
+      CI gap in this list closes.** The original repro ran in no CI
+      step; its header asked to be wired as the regression test once
+      the defect was fixed, and it was, in v0.20.0. Measured before
+      wiring, at the 2026-08-17 settings: shipped **0/24**, and the
+      fix's own disable `GCRY_DEAD_STACK_ROOTS=0` also **0/24** — where
+      it was 10/24 then. Six candidate co-roots tried; only
+      `GCRY_DISABLE_GREG_ROOTS=1` brings the crash back, **7/12** with
+      both off. On this codegen the word the dying stack holds is also
+      in a suspended thread's registers, and the v0.19.0 register scan
+      roots it. That is the v0.20.0 announcement's own caveat seen
+      from the other side — *0/23 under 1.21.0; every reproduction
+      needed the 1.22.0-dev probe compiler* — and with the register
+      scan off the stock compiler reproduces it too. Two roots, one
+      word, which is why `dead-stack-root`
+      (a counter and a planted word) is the mechanism's gate and this
+      is the defect's. Parent/child now: six shipped children must
+      survive and each must have walked a dying stack; the churn with
+      both roots off must crash within max(4·RUNS, 8) tries, stopping
+      at the first. 15 s. Parent env with both knobs: 4 of 6 die,
+      FAIL. x86_64 CI only — the broken arm's rate on Darwin and
+      aarch64 is unmeasured, and a red arm that cannot crash there
+      would take the job red for nothing. Census
+      **100 / 70 / 30 → 100 / 71 / 29.** The 29 by hand are the fuzz /
+      property / soak / typecheck family and research targets.
+      `bench/log/linux/2026-09-21-nested-spawn-gate/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

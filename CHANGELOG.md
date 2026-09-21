@@ -63,6 +63,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make nested-spawn-uaf` is a gate, on the stock compiler.** The
+  original fiber-creation use-after-free repro (2026-08-15, three CI
+  platforms) ran in no CI step; its header asked to be wired as the
+  regression test once the defect was fixed, and v0.20.0 fixed it.
+  Measured before wiring, at the 2026-08-17 settings on Crystal 1.21.0:
+  shipped 0/24, and the fix's own disable `GCRY_DEAD_STACK_ROOTS=0`
+  also 0/24 where it was 10/24 then — the v0.20.0 announcement's *0/23
+  under 1.21.0; every reproduction needed 1.22.0-dev* seen from the other
+  side. Of six candidate co-roots only the v0.19.0 register scan matters:
+  `GCRY_DEAD_STACK_ROOTS=0 GCRY_DISABLE_GREG_ROOTS=1` crashes 7/12, the
+  same `Deque(Fiber::Stack)` buffer freed under a live holder. The harness
+  is parent/child now: six shipped children under poison + tag + census
+  must survive and each must have walked a dying stack; the churn with
+  both roots off must crash within max(4·RUNS, 8) tries. `--child` keeps
+  every research knob. ~15 s, x86_64 CI beside `dead-stack-root`; Darwin
+  and aarch64 wait on a measured rate. Census **100 / 70 / 30 → 100 /
+  71 / 29**.
+
 - **`make occupied-release` constructs its red direction per run, and
   gates.** The harness tried to *reach* the window that released a chunk
   with a live block in it (CI `34787711949`) with thread churn and a held

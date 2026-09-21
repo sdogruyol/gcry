@@ -1706,29 +1706,20 @@ darwin-bitmap-page-release: $(BIN)
 perf-baseline:
 	python3 bench/perf_compare.py --selftest
 
-# The two diagnostics travel with this gate because it is one that dies: on
-# 2026-08-15 it took SIGSEGV twice on aarch64 inside `Parallel::Scheduler` →
-# `swapcontext`, and left `Invalid memory access at 0xff851bc00008` and nothing
-# else — one hex number, the exact problem `GCRY_SEGV_REPORT` was written to fix
-# eight commits earlier. A gate that plants corruption on purpose is the last
-# place a crash should be allowed to stay anonymous. Measured: both arms pass
-# with them on, five runs of each, and the poison run says more.
-# `GCRY_POISON_HOLDERS` and not `GCRY_POISON_FREED`, and the difference is the
-# whole point: it implies the poison *and* the address tag *and* the crash
-# report, at the same runtime cost — the tag is written by the same memset that
-# was already happening. The plain poison names no block, and CI proved that
-# expensive on 2026-08-16: this gate caught the open use-after-free and the
-# report could only say "the poison is untagged, so it names no block". With the
-# tag, the same catch names the block, its size, whether the sweep or an explicit
-# free released it, and what still points at it. The local repro is quiet, so CI
-# is currently the only place this defect is observed — it should not waste a
-# sighting.
-#
-# Not a gate: it fails most runs on purpose, and that is the finding. See the
-# file header for the rates and the Boehm control.
+# The fiber-creation use-after-free (2026-08-15, three CI platforms) as a gate.
+# The parent forks the churn with `GCRY_POISON_HOLDERS=1` — poison, tag and
+# crash report, so a catch names the block and what still points at it rather
+# than one hex number — and `GCRY_THREAD_CENSUS=1`, the 2026-08-17 settings.
+# RUNS (6) shipped children must survive and each must have walked a dying
+# fiber's stack; then the same churn with the dying-stack root *and* the
+# suspended-thread register scan off must crash within max(4·RUNS, 8) tries.
+# Both, because on this codegen either root alone covers the word: the fix's
+# own disable went 0 of 24 here on 2026-09-21 where it was 10 of 24 on
+# 2026-08-17, and with both off it is 7 of 12. `make dead-stack-root` gates
+# the dying-stack root itself, deterministically; this gates the defect. ~15 s.
 nested-spawn-uaf: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/nested_spawn_uaf.cr -o $(BIN)/nested_spawn_uaf --error-trace
-	GCRY_POISON_HOLDERS=1 $(BIN)/nested_spawn_uaf
+	$(BIN)/nested_spawn_uaf
 
 ec-queue-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/ec_queue_audit.cr -o $(BIN)/ec_queue_audit --error-trace
