@@ -16,6 +16,15 @@
 # Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit-kb=4096]
 #         ./bin/soak --fiber-churn=512 --rss-limit-kb=131072   # queue-audit arm
 #         ./bin/soak --workers=4 --fiber-churn=512 --rss-limit-kb=131072  # cross-worker arm
+#         ./bin/soak --duration=10 --leak-kb-per-s=1024                   # must FAIL on the ceiling
+#
+# `--leak-kb-per-s` is the RSS ceiling's red direction, constructed per run:
+# a fiber retains that many kB of fresh strings per second in an array that
+# is never shifted, so the end RSS has to breach `--rss-limit-kb` (10 s at
+# 1024 kB/s is +10 MB against +4 MB). Without it the ceiling has only ever
+# been seen to hold; `make soak-smoke` requires the arm to fail *on the
+# ceiling* — the telemetry's `# result: FAIL: RSS grew` line — and not on
+# anything else.
 
 require "../src/gcry"
 require "./bench_rss"
@@ -80,10 +89,15 @@ collect_hz = 1
 # any recorded run stays a comparison.
 workers = 1
 
+# Red arm: kB of strings retained per second, never released. 0 = off.
+leak_kb_per_s = 0
+
 ARGV.each do |arg|
   case arg
   when /--duration=(\d+)/
     duration = $1.to_i
+  when /--leak-kb-per-s=(\d+)/
+    leak_kb_per_s = $1.to_i
   when /--telemetry=(.+)/
     telemetry_path = $1
   when /--rss-limit-kb=(\d+)/
@@ -202,7 +216,7 @@ class SoakTest
   @rss_samples = 0
 
   def initialize(@telemetry_path : String, @rss_limit_kb : Int64 = 4096_i64, @fiber_churn : Int32 = 0,
-                 @collect_hz : Int32 = 1, @workers : Int32 = 1)
+                 @collect_hz : Int32 = 1, @workers : Int32 = 1, @leak_kb_per_s : Int32 = 0)
     @heap = Gcry.default_heap.not_nil!
     @errors = [] of String
     @errors_mutex = Mutex.new(:reentrant)
@@ -217,6 +231,7 @@ class SoakTest
     @queue_slots_total = 0_u64
     @queue_slots_max = 0_u64
     @queue_slots_hits = 0_u64
+    @leaked = [] of String
   end
 
   def add_live(s : String)
@@ -257,7 +272,7 @@ class SoakTest
                    "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
                    "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
                    "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
-                   "os_threads=#{Gcry::Platform.os_thread_count}"
+                   "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s}"
     # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
     # SEGV'd in the dequeue an unknown time after the write that caused it, and a
     # cumulative fault count here says which hour the slot went bad.
@@ -268,7 +283,7 @@ class SoakTest
          "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
          "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
          "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
-         "os_threads=#{Gcry::Platform.os_thread_count}"
+         "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
@@ -333,6 +348,17 @@ class SoakTest
             end
             @total_churn += 1
           end
+        end
+      end
+    end
+
+    # The leak (`--leak-kb-per-s`): retained, never shifted, 100 slices a second.
+    if @leak_kb_per_s > 0
+      per_tick = @leak_kb_per_s * 1024 // 100
+      spawn do
+        loop do
+          sleep(0.01.seconds)
+          @leaked << "l" * per_tick
         end
       end
     end
@@ -473,6 +499,6 @@ class SoakTest
 end
 
 # ---- Entry point ----
-test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn, collect_hz, workers)
+test = SoakTest.new(telemetry_path, rss_limit_kb.to_i64, fiber_churn, collect_hz, workers, leak_kb_per_s)
 success = test.run(duration)
 exit(1) unless success

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`make soak` and `make soak-smoke` construct their red direction per
+  run.** The soak's one gate is an absolute RSS ceiling (+4096 kB over
+  the warm-up plateau) that had only ever been seen to hold. `soak
+  --leak-kb-per-s=N` retains N kB/s of strings in an array it never
+  shifts; both recipes run ten seconds of it at 1 MB/s (+12.4 MB) under
+  `!` and require the telemetry to say `RSS grew`, so the arm must fail
+  on the ceiling and not on anything else. Census
+  **100 / 75 / 25 → 100 / 77 / 23.**
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed

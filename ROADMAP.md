@@ -1480,6 +1480,18 @@ kept finding the rest.
       `GCRY_TRACE_ALLOC_SAMPLE=0` means. CI goes through the recipe.
       Census **100 / 74 / 26 → 100 / 75 / 25.**
       `bench/log/linux/2026-09-21-trace-smoke-unsampled/FINDINGS.md`
+      **2026-09-21, later: `make soak` and `make soak-smoke` construct
+      their red direction per run.** The soak's one gate is an absolute
+      RSS ceiling that had only ever been seen to hold. `soak
+      --leak-kb-per-s=1024` retains 1 MB/s in an array it never shifts —
+      +12.4 MB in 10 s against +4 MB — and both recipes require that arm
+      to fail *on the ceiling* (`!` plus `grep -q "RSS grew"` on its
+      telemetry), so a crash or a refused flag cannot stand in for it.
+      Linux and Darwin CI through the same recipe. Census
+      **100 / 75 / 25 → 100 / 77 / 23.** Owed an arm now:
+      `compiler-gc-contract`, `finalizer-complex`, `oom-test`,
+      `thread-storm`, with their shorts.
+      `bench/log/linux/2026-09-21-soak-leak-arm/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

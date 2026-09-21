@@ -1756,8 +1756,14 @@ stw-startup-hang: $(BIN)
 mutate:
 	./bench/mutations/run.sh
 
+# Both soak targets carry the RSS ceiling's red direction: ten seconds of the
+# same workload retaining 1 MB/s (+12 MB measured against +4 MB) must fail, and
+# must fail *on the ceiling* — the telemetry has to carry `RSS grew` — so a
+# crash or a refused flag cannot pass for the arm. ~11 s.
 soak: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/soak.cr -o $(BIN)/soak
+	! $(BIN)/soak --duration=10 --rss-limit-kb=$${SOAK_RSS_LIMIT_KB:-4096} --leak-kb-per-s=1024 --telemetry=/tmp/gcry-soak-leak.log
+	grep -q "# result: FAIL: RSS grew" /tmp/gcry-soak-leak.log
 	$(BIN)/soak --duration=$${SOAK_DURATION:-86400} --telemetry=/tmp/gcry-soak.log
 
 soak-smoke: $(BIN)
@@ -1767,6 +1773,8 @@ soak-smoke: $(BIN)
 	# signal that scales with duration (4 h measured the same ~960 kB). A smoke
 	# that passes under a looser bound than the real gate is not a smoke test.
 	$(BIN)/soak --duration=10 --rss-limit-kb=$${SOAK_RSS_LIMIT_KB:-4096} --telemetry=/tmp/gcry-soak-smoke.log
+	! $(BIN)/soak --duration=10 --rss-limit-kb=$${SOAK_RSS_LIMIT_KB:-4096} --leak-kb-per-s=1024 --telemetry=/tmp/gcry-soak-leak.log
+	grep -q "# result: FAIL: RSS grew" /tmp/gcry-soak-leak.log
 
 format:
 	$(CRYSTAL) tool format
