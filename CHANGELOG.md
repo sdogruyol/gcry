@@ -63,6 +63,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make pause-budget`, `make rss-leak` and `make scrub-midswap` construct
+  their red direction per run.** The pause gate's 200 ms p99 ceiling had
+  never been seen to fire against a 22 ms tip: `GCRY_STW_TEST_STALL_MS=250`
+  — the watchdog's own stall, inside the stop — puts every major at
+  ~267 ms and the recipe requires phase 1 to fail. The leak gate's growth
+  check has no collector knob that leaks honestly, so the harness does:
+  `rss_leak --leaking` roots one object in five per cycle (+38% against
+  the 10% ceiling, +40% at CI's 15%) and must exit non-zero; the recipe
+  takes `RSS_LIMIT` / `RSS_RSS_LIMIT` so CI's parameters go through it.
+  `scrub-midswap` already forked a `--mode=stale-off` child and required
+  it to corrupt; the census's fork detector wanted a `GCRY_*` string, and
+  `--mode=` is now the same criterion as `--child`. Census
+  **100 / 71 / 29 → 100 / 74 / 26**, and the 26 are classified: 12
+  defect-finders whose red is a defect, 2 compile-only typechecks, 4
+  research targets, 8 gates still owed an arm.
+
 - **`make nested-spawn-uaf` is a gate, on the stock compiler.** The
   original fiber-creation use-after-free repro (2026-08-15, three CI
   platforms) ran in no CI step; its header asked to be wired as the

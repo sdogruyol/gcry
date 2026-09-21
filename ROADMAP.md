@@ -1448,6 +1448,28 @@ kept finding the rest.
       **100 / 70 / 30 → 100 / 71 / 29.** The 29 by hand are the fuzz /
       property / soak / typecheck family and research targets.
       `bench/log/linux/2026-09-21-nested-spawn-gate/FINDINGS.md`
+      **2026-09-21, later: `pause-budget`, `rss-leak` and `scrub-midswap`
+      construct their red direction per run — and the 26 left are
+      named.** `pause-budget`'s 200 ms p99 ceiling had never been seen
+      to fire against a 22 ms tip; `GCRY_STW_TEST_STALL_MS=250` (the
+      watchdog's stall, inside the stop) puts every major at ~267 ms
+      and the recipe requires phase 1 to fail. `rss-leak`'s growth
+      check has no collector knob that leaks honestly, so the harness
+      does: `--leaking` roots one object in five per cycle, +38%
+      against 10% (+40% at CI's 15%), required to fail; one in ten was
+      +17%, too close to be a control. `scrub-midswap` already forked a
+      `--mode=stale-off` child and required it to corrupt; the census's
+      fork detector wanted a `GCRY_*` string and `--mode=` is now the
+      same criterion as `--child` (one harness uses it). Both CI steps
+      that ran the binaries directly go through the recipes. Census
+      **100 / 71 / 29 → 100 / 74 / 26.** The 26: **12** defect-finders
+      (fuzz / property families; their red *is* a defect, `make mutate`
+      is their check and the census does not read it), **2**
+      compile-only typechecks (kept in the denominator on purpose),
+      **4** research targets that say so, and **8 still owed an arm** —
+      `finalizer-complex`, `oom-test`, `thread-storm`, `trace-smoke`,
+      `soak`, `soak-smoke`, `compiler-gc-contract`, with their shorts.
+      `bench/log/linux/2026-09-21-pause-rss-scrub-arms/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
