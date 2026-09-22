@@ -13,9 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run.** The soak's one gate is an absolute RSS ceiling (+4096 kB over
   the warm-up plateau) that had only ever been seen to hold. `soak
   --leak-kb-per-s=N` retains N kB/s of strings in an array it never
-  shifts; both recipes run ten seconds of it at 1 MB/s (+12.4 MB) under
-  `!` and require the telemetry to say `RSS grew`, so the arm must fail
-  on the ceiling and not on anything else. Census
+  shifts, by wall time rather than per timer tick — Darwin's timer
+  delivered ~60 of 100 ticks and its RSS follows the heap at ~0.65×, which
+  put the first version at +4048 kB against a +4096 ceiling; both recipes
+  run ten seconds of it at 2 MB/s (+26 MB on Linux) under `!` and require
+  the telemetry to say `RSS grew`, so the arm must fail on the ceiling and
+  not on anything else. Census
   **100 / 75 / 25 → 100 / 77 / 23.**
 
 - **`make finalizer-complex` asserts what a finalizer runs on.** Its

@@ -16,12 +16,14 @@
 # Run:    ./bin/soak [--duration=3600] [--telemetry=/tmp/soak.log] [--rss-limit-kb=4096]
 #         ./bin/soak --fiber-churn=512 --rss-limit-kb=131072   # queue-audit arm
 #         ./bin/soak --workers=4 --fiber-churn=512 --rss-limit-kb=131072  # cross-worker arm
-#         ./bin/soak --duration=10 --leak-kb-per-s=1024                   # must FAIL on the ceiling
+#         ./bin/soak --duration=10 --leak-kb-per-s=2048                   # must FAIL on the ceiling
 #
 # `--leak-kb-per-s` is the RSS ceiling's red direction, constructed per run:
-# a fiber retains that many kB of fresh strings per second in an array that
-# is never shifted, so the end RSS has to breach `--rss-limit-kb` (10 s at
-# 1024 kB/s is +10 MB against +4 MB). Without it the ceiling has only ever
+# a fiber retains that many kB of fresh strings per second — by wall time,
+# not per tick — in an array that is never shifted, so the end RSS has to
+# breach `--rss-limit-kb` (10 s at 2048 kB/s is +20 MB retained against a
+# +4 MB ceiling; Darwin's RSS follows the heap at ~0.65×, which is why the
+# rate is not 1024). Without it the ceiling has only ever
 # been seen to hold; `make soak-smoke` requires the arm to fail *on the
 # ceiling* — the telemetry's `# result: FAIL: RSS grew` line — and not on
 # anything else.
@@ -352,13 +354,23 @@ class SoakTest
       end
     end
 
-    # The leak (`--leak-kb-per-s`): retained, never shifted, 100 slices a second.
+    # The leak (`--leak-kb-per-s`): retained, never shifted. Topped up to
+    # `elapsed × rate` on every tick rather than a fixed slice per tick, so the
+    # amount retained is a function of wall time and not of the timer: on the
+    # Darwin runner a 10 ms sleep delivered ~60 ticks a second, the per-tick
+    # version retained 6 MB in 10 s instead of 10, and the arm landed at
+    # +4048 kB against a +4096 kB ceiling (run 35696157334).
     if @leak_kb_per_s > 0
-      per_tick = @leak_kb_per_s * 1024 // 100
+      leak_start = Time.instant
+      leaked_bytes = 0_i64
       spawn do
         loop do
           sleep(0.01.seconds)
-          @leaked << "l" * per_tick
+          target = ((Time.instant - leak_start).total_seconds * @leak_kb_per_s * 1024).to_i64
+          while leaked_bytes < target
+            @leaked << "l" * 16_384
+            leaked_bytes += 16_384
+          end
         end
       end
     end
