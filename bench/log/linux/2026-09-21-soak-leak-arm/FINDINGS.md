@@ -38,7 +38,10 @@ things the Linux measurement hid: the leak was a fixed slice per 10 ms
 tick and the Darwin timer delivered ~60 ticks a second (heap +6.2 MB in
 10 s, not 10), and Darwin's RSS followed the heap at ~0.65×. The leak is
 topped up to `elapsed × rate` now, so retained bytes are a function of
-wall time, and the rate is 2 MB/s: **+26.3 MB** here (7440 → 33780 kB).
+wall time, and the rate is 2 MB/s: **+26.3 MB** here (7440 → 33780 kB),
+and on the Darwin runner **+26.8 MB** (4416 → 31216 kB, run
+`35698178414`) — the same magnitude, so the 0.65× was the timer's
+shortfall showing through the RSS and not a Darwin accounting property.
 
 ## Census
 
