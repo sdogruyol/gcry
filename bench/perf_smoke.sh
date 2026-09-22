@@ -149,7 +149,15 @@ median = keep[len(keep) // 2]
 q1 = keep[len(keep) // 4]
 q3 = keep[(3 * len(keep)) // 4]
 iqr = q3 - q1
+# `noise_ratio` is IQR over the median of what survived the min/max discard,
+# and at BENCH_RUNS=3 exactly one sample survives — so it printed **0.0**, the
+# best possible reading, for the noisiest data this script has ever taken: the
+# first Darwin run's three samples were 54839, 75804 and 109267 req/s, a 2x
+# spread reported as no noise at all. A blind instrument must say so rather
+# than read zero, which is this repo's oldest rule about its own gates.
 noise = iqr / median if median > 0 else 0
+blind = len(keep) < 3
+spread = (vals[-1] - vals[0]) / median if median > 0 else 0
 
 print(json.dumps({
     'runs': vals,
@@ -157,7 +165,9 @@ print(json.dumps({
     'p25': round(q1, 2),
     'p75': round(q3, 2),
     'iqr': round(iqr, 2),
-    'noise_ratio': round(noise, 4),
+    'noise_ratio': None if blind else round(noise, 4),
+    'kept': len(keep),
+    'full_spread_ratio': round(spread, 4),
 }))
 " $py_args
 }
@@ -182,22 +192,22 @@ mkdir -p "$RUN_DIR"
 echo ""
 echo "=== Boehm / ==="
 BOEHM_ROOT="$(variance_run "$BIN/kemal-boehm-smoke" /)"
-echo "$BOEHM_ROOT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise={d[\"noise_ratio\"]}')"
+echo "$BOEHM_ROOT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise=' + ('blind, only %d sample survived the discard (full spread %.2fx)' % (d['kept'], 1 + d['full_spread_ratio']) if d['noise_ratio'] is None else str(d['noise_ratio'])))"
 echo "$BOEHM_ROOT" > "$RUN_DIR/boehm-root.json"
 
 echo "=== Boehm /json ==="
 BOEHM_JSON="$(variance_run "$BIN/kemal-boehm-smoke" /json)"
-echo "$BOEHM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise={d[\"noise_ratio\"]}')"
+echo "$BOEHM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise=' + ('blind, only %d sample survived the discard (full spread %.2fx)' % (d['kept'], 1 + d['full_spread_ratio']) if d['noise_ratio'] is None else str(d['noise_ratio'])))"
 echo "$BOEHM_JSON" > "$RUN_DIR/boehm-json.json"
 
 echo "=== gcry / ==="
 GCRY_ROOT="$(variance_run "$BIN/kemal-gcry-smoke" /)"
-echo "$GCRY_ROOT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise={d[\"noise_ratio\"]}')"
+echo "$GCRY_ROOT" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise=' + ('blind, only %d sample survived the discard (full spread %.2fx)' % (d['kept'], 1 + d['full_spread_ratio']) if d['noise_ratio'] is None else str(d['noise_ratio'])))"
 echo "$GCRY_ROOT" > "$RUN_DIR/gcry-root.json"
 
 echo "=== gcry /json ==="
 GCRY_JSON="$(variance_run "$BIN/kemal-gcry-smoke" /json)"
-echo "$GCRY_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise={d[\"noise_ratio\"]}')"
+echo "$GCRY_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  median={d[\"median\"]} runs={d[\"runs\"]} noise=' + ('blind, only %d sample survived the discard (full spread %.2fx)' % (d['kept'], 1 + d['full_spread_ratio']) if d['noise_ratio'] is None else str(d['noise_ratio'])))"
 echo "$GCRY_JSON" > "$RUN_DIR/gcry-json.json"
 
 # ── compute % of Boehm (same-host gate) ──────────────────────────────

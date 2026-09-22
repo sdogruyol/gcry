@@ -50,3 +50,40 @@ Verified locally: selftest green with the three new fixtures; breaking
 the cross-runner rule reddens it (`SELFTEST FAIL: cross-runner baseline
 gated (exit 1)`); a missing baseline path with `--gate` exits 0 and says
 so; `make perf-baseline` green.
+
+## The first Darwin run, and what it measured about the instrument
+
+`perf smoke (darwin)` ran (run `35721407250`) and failed its thr floor:
+
+```
+/      gcry = 92.6% of Boehm  (informational)
+/json  gcry = 65.6% of Boehm  (gate >= 70%)
+RSS x = 1.153 (<= 1.5)   pause_p50 = 0.45 ms (<= 3.0)
+```
+
+The 65.6% is not a number about the collector. Its inputs:
+
+```
+median=75804.96 runs=[54839.73, 75804.96, 109267.95] noise=0.0
+median=46896.15 runs=[42548.59, 46896.15, 78698.68] noise=0.0
+```
+
+At `BENCH_RUNS=3` the script discards min and max and **one sample
+survives**, so the "median" is a single draw from a distribution with a
+2x spread — and `noise_ratio`, the IQR of one value over itself, printed
+**0.0**: the best possible reading on the noisiest data this script has
+taken. The instrumented pass in the same job, seconds later, had gcry
+*ahead* of Boehm (73462 against 70167 req/s).
+
+Three consequences, all applied:
+
+- `noise_ratio` is `null` when fewer than three samples survive the
+  discard, and the line says `noise=blind, only N sample survived the
+  discard (full spread 1.72x)`. A blind instrument says so instead of
+  reading zero — the same rule this repo applies to its gates.
+- The Darwin job takes `BENCH_RUNS=7`, which keeps five.
+- It passes **no floors** (`MIN_PCT=0`, ceilings out of reach). The
+  defaults are Linux numbers; applying them to an unmeasured host is how
+  a first run produces a red that means nothing. The recorded baseline
+  becomes the gate when it exists, and the artifact carries the numbers
+  meanwhile.

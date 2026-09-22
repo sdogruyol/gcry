@@ -1803,10 +1803,23 @@ jobs:
       - name: Install wrk
         run: brew install wrk
 
+      # BENCH_RUNS=7, not the Linux job's 3: the script discards min and max,
+      # so 3 leaves **one** sample as the median — and this runner's first run
+      # took 54839 / 75804 / 109267 req/s for one binary and path, a 2x spread
+      # that a single survivor cannot represent. Seven keeps five.
+      #
+      # No floor is passed. The script's defaults (70% / 1.5x / 3.0 ms) are
+      # Linux numbers, and the first Darwin run came in at 65.6% of Boehm off
+      # that one-sample median while the instrumented pass in the same job had
+      # gcry *ahead* (73462 vs 70167 req/s) — which is what an unmeasured floor
+      # applied to an unmeasured host produces. MIN_PCT=0 and the ceilings out
+      # of reach until the recorded baseline becomes the gate; the numbers are
+      # in the artifact either way, which is what the recording needs.
       - name: Kemal A/B thr+RSS+pause, report-only
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=3 \
+          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=7 \
+            MIN_PCT=0 MAX_RSS_X=99 MAX_PAUSE_P50_MS=999 \
             RUNNER_LABEL=macos-latest \
             ./bench/perf_smoke.sh
 
