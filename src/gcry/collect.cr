@@ -1688,6 +1688,11 @@ module Gcry
       @collecting
     end
 
+    # Explicit collects that returned without running a cycle because the
+    # calling thread appeared to be inside its own. Non-zero outside a
+    # before-collect callback means a caller was told nothing and got nothing.
+    getter collect_reentrant_skips : UInt64 = 0_u64
+
     # Full major collection (resets any in-progress incremental cycle).
     # `coalesce`: if true and a peer collect already cleared the debt while we
     # waited on the post-STW mutex, skip (Parallel EC alloc storms).
@@ -1707,7 +1712,24 @@ module Gcry
       # `run_collection`, which blocks on that mutex and then runs the
       # collection this caller asked for. Returning early there is what made
       # `GC.collect` do nothing under load.
-      return if @collecting && (@collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id)
+      # Read the flag, then the owner, with an acquire fence between them — the
+      # mirror of the release the writer takes. Without it a weakly ordered CPU
+      # may serve `@collector_pthread` from before the writer's store while
+      # serving `@collecting` from after it, which is the same
+      # "collecting, and the owner is the previous cycle's" misread the store
+      # order closes.
+      if @collecting
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+        if @collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id
+          # Counted, because this return is the one that used to make
+          # `GC.collect` do nothing silently: a caller is entitled to a
+          # completed collection and this path does not give one. Legitimate
+          # only for a re-entrant call — a before-collect callback — or with
+          # the research knob on.
+          @collect_reentrant_skips &+= 1
+          return
+        end
+      end
       return if monitor_thread?
       return if thread_not_ready_for_collect?
 
@@ -1765,8 +1787,19 @@ module Gcry
       lock_post_stw
       finished = false
       begin
-        @collecting = true
+        # Owner first, then the flag, with a release fence between them: the
+        # re-entrancy guard in `collect` reads the pair as "a cycle is running
+        # and it is mine". Set the other way round there is a window in which
+        # `@collecting` is true and `@collector_pthread` still names *the
+        # previous cycle's* collector — so a thread that ran the last
+        # collection and asks for one now returns immediately, believing it is
+        # re-entering its own. That is `GC.collect` doing nothing and not
+        # saying so, which is the defect `make explicit-collect-barrier`
+        # exists for; it caught it as 19 of 20 on CI (run `35775763860`) and
+        # never locally in 20 runs.
         @collector_pthread = Gcry::Platform.current_thread_id
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+        @collecting = true
         @incremental_marking = true
         begin
           lock_write
@@ -2323,8 +2356,19 @@ module Gcry
 
         # Pause timer starts after mutex wait so p50/p99 reflect STW work only.
         started = monotonic_ns
-        @collecting = true
+        # Owner first, then the flag, with a release fence between them: the
+        # re-entrancy guard in `collect` reads the pair as "a cycle is running
+        # and it is mine". Set the other way round there is a window in which
+        # `@collecting` is true and `@collector_pthread` still names *the
+        # previous cycle's* collector — so a thread that ran the last
+        # collection and asks for one now returns immediately, believing it is
+        # re-entering its own. That is `GC.collect` doing nothing and not
+        # saying so, which is the defect `make explicit-collect-barrier`
+        # exists for; it caught it as 19 of 20 on CI (run `35775763860`) and
+        # never locally in 20 runs.
         @collector_pthread = Gcry::Platform.current_thread_id
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+        @collecting = true
         # Generational mark skips old objects; old→young edges come from
         # scan_old_for_nursery_pointers (soft-dirty pages when armed, else full
         # old walk). Finalizers/WeakRef must not treat unmarked old as dead
@@ -2825,8 +2869,10 @@ module Gcry
         return
       end
 
-      @collecting = true
+      # Owner before flag; see `run_collection_body` for why.
       @collector_pthread = Gcry::Platform.current_thread_id
+      Atomic::Ops.fence(LLVM::AtomicOrdering::Release, false)
+      @collecting = true
       @incremental_marking = true
       @inc_active = true
       @minor_only = false

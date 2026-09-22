@@ -220,6 +220,7 @@ threads.each(&.join)
 
 puts "landed=#{landed}/#{CALLS} missed=#{missed} " \
      "asked_without_a_cycle_in_flight=#{not_inflight} " \
+     "reentrant_skips=#{HEAP.collect_reentrant_skips} " \
      "pause_p50=#{(HEAP.pause_percentile_ns(50.0) / 1_000_000.0).round(2)}ms"
 
 failures = [] of String
@@ -242,6 +243,18 @@ else
   if missed > 0
     failures << "#{missed} of #{CALLS} explicit collects returned without a collection having " \
                 "completed — that is `GC.collect` doing nothing and not saying so"
+  end
+  # Which return it was. This harness called `GC.collect` from a thread that is
+  # not inside a collection of its own, so the re-entrancy guard must never
+  # fire — and when it did, on CI on 2026-09-22 (19 of 20, run `35775763860`),
+  # the cause was the pair it reads being written in the wrong order:
+  # `@collecting` went true one line before `@collector_pthread` was updated,
+  # so a thread that had run the *previous* cycle read "collecting, and the
+  # owner is me". Naming the return is what separates that from a collection
+  # that ran and moved no counter.
+  if HEAP.collect_reentrant_skips > 0
+    failures << "#{HEAP.collect_reentrant_skips} call(s) took the re-entrancy return with no " \
+                "collection of this thread's own in flight — the guard is reading a stale owner"
   end
 end
 

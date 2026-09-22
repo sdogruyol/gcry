@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`GC.collect` could return having done nothing, one line wide.**
+  `run_collection_body` set `@collecting = true` before it updated
+  `@collector_pthread`, and `Heap#collect`'s re-entrancy guard reads that
+  pair: in between, a thread that ran the *previous* cycle sees
+  "collecting, and the owner is me" and returns silently — the defect the
+  guard was rewritten to remove, in a window one statement wide. `make
+  explicit-collect-barrier` caught it at 19 of 20 (CI run `35775763860`,
+  1 failure in 25 runs; 0 in 20 local). The owner is stored first at all
+  three sites that start a cycle, with a release fence before the flag
+  and an acquire fence between the guard's two reads, and the return is
+  counted as `collect_reentrant_skips` — which the gate now requires to
+  be zero, since a silent return was the thing under test.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per
