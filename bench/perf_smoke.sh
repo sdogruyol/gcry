@@ -320,7 +320,18 @@ cp "$RUN_DIR"/*.json "$PUBLISH_DIR"/ 2>/dev/null || true
 # against a recorded baseline instead. Report-only by default — set
 # PERF_GATE_BASELINE=1 to make a regression fail the run, which is worth doing
 # only once the baseline carries a tolerance measured on this runner class.
-BASELINE="${PERF_BASELINE:-$ROOT/bench/baseline/perf_smoke.json}"
+# Per platform, because a tolerance is a statement about a runner class's
+# spread and not about the collector: `perf_compare.py` refuses to gate across
+# runner classes for the same reason it refuses across a layout flip. The macOS
+# file does not exist yet — the comparator then reports "none recorded yet",
+# which is the honest state until enough green Darwin runs exist to record one.
+if [ -n "${PERF_BASELINE:-}" ]; then
+  BASELINE="$PERF_BASELINE"
+elif [ "$PLATFORM_DIR" = "macos" ]; then
+  BASELINE="$ROOT/bench/baseline/perf_smoke_macos.json"
+else
+  BASELINE="$ROOT/bench/baseline/perf_smoke.json"
+fi
 if [ -f "$BASELINE" ]; then
   echo ""
   GATE_ARG=""

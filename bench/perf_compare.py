@@ -29,6 +29,7 @@ Usage
 
 import argparse
 import json
+import os
 import statistics
 import sys
 
@@ -110,8 +111,11 @@ def compare(baseline, summary, gate, prev=None):
                 prov.get("runs", "?"), prov.get("recorded")))
         if prov.get("runner") and summary.get("runner") and prov["runner"] != summary["runner"]:
             lines.append(
-                "NOTE: this run is on {}, the baseline was recorded on {} — "
-                "absolute numbers do not carry across runner classes".format(
+                "STALE: this run is on {}, the baseline was recorded on {}. "
+                "Ratios are same-host but their spread is not: a macOS runner's "
+                "`rss_x` and a GHA Linux runner's are different distributions, "
+                "so a tolerance measured on one cannot gate the other. Record a "
+                "baseline on this runner class. Reporting only.".format(
                     summary["runner"], prov["runner"]))
     else:
         lines.append("baseline: none recorded yet")
@@ -120,6 +124,8 @@ def compare(baseline, summary, gate, prev=None):
     # 0.26.0 the layout) and both times the file kept comparing and kept
     # reading as authority — the second one would have failed every green run
     # on `rss_x` alone. Report, never gate, until it is re-recorded.
+    stale_runner = bool(prov.get("runner") and summary.get("runner")
+                        and prov["runner"] != summary["runner"])
     stale_layout = (prov.get("layout") and summary.get("layout")
                     and prov["layout"] != summary["layout"])
     if stale_layout:
@@ -176,6 +182,9 @@ def compare(baseline, summary, gate, prev=None):
 
     if not metrics or all(m.get("tolerance") is None for m in metrics.values()):
         lines.append("")
+        if baseline.get("missing_path"):
+            lines.append("There is no baseline file at {} — this platform has not "
+                         "recorded one yet.".format(baseline["missing_path"]))
         lines.append("No baseline with a measured tolerance, so nothing here can gate. Record one "
                      "from N green runs on the same runner class:")
         lines.append("  bench/perf_compare.py --record --out bench/baseline/perf_smoke.json \\")
@@ -186,11 +195,13 @@ def compare(baseline, summary, gate, prev=None):
         lines.append("")
         if stale_layout:
             lines.append("The differences below are across a layout change, not a regression:")
+        elif stale_runner:
+            lines.append("The differences below are across runner classes, not a regression:")
         for name, label, value, delta in regressions:
             entry = metrics[name]
             lines.append("FAIL: {} is {:.2f} against a baseline of {:g} — {:+.2f}, outside ±{:g}".format(
                 label, value, float(entry["value"]), delta, float(entry["tolerance"])))
-        return "\n".join(lines), (1 if gate and not stale_layout else 0)
+        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner else 0)
 
     if streaks:
         lines.append("")
@@ -202,7 +213,7 @@ def compare(baseline, summary, gate, prev=None):
         lines.append("A single excursion past {:g} sd happened once in 72 metric-runs of the "
                      "recording set and never twice in a row, so this is a regression rather "
                      "than a slow hour on the runner pool.".format(STREAK_SD))
-        return "\n".join(lines), (1 if gate and not stale_layout else 0)
+        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner else 0)
 
     lines.append("")
     lines.append("PASS — every gated metric is within tolerance of the baseline"
@@ -325,6 +336,33 @@ def selftest():
     if code != 0 or "STALE" not in text or "across a layout change" not in text:
         failures.append("cross-layout baseline gated (exit {})".format(code))
 
+    # And a regression against a baseline from another runner class is not one
+    # either, for the same reason one collected on another layout is not: the
+    # ratios are same-host but their *spread* is the runner's, and a tolerance
+    # is a statement about spread. Before 2026-09-22 this printed a NOTE and
+    # gated anyway, which is what a macOS perf step would have run into on its
+    # first green run.
+    text, code = compare(base, {"pct_json": 70.0, "rss_x": 0.95, "layout": "headerless",
+                                "runner": "macos-latest"}, gate=True)
+    if code != 0 or "STALE" not in text or "across runner classes" not in text:
+        failures.append("cross-runner baseline gated (exit {})".format(code))
+    # A baseline path that does not exist reports instead of raising: a
+    # platform gets its perf step before it can record one, and the first
+    # Darwin run died on a traceback in the version of this that shipped for
+    # ten minutes on 2026-09-22.
+    missing = {"provenance": {}, "metrics": {}, "missing_path": "/nonexistent/perf.json"}
+    text, code = compare(missing, {"pct_json": 98.0, "layout": "headerless",
+                                   "runner": "macos-latest"}, gate=True)
+    if code != 0 or "no baseline file" not in text.lower():
+        failures.append("missing baseline file did not report (exit {})".format(code))
+
+    # The same runner class still gates, or the rule above would disable the
+    # gate everywhere by accident.
+    text, code = compare(base, {"pct_json": 70.0, "rss_x": 0.95, "layout": "headerless",
+                                "runner": "test"}, gate=True)
+    if code != 1:
+        failures.append("same-runner regression did not gate (exit {})".format(code))
+
     # A baseline with no layout at all predates the field, so it cannot be
     # shown to describe this run either. Same treatment.
     no_layout = {
@@ -433,7 +471,7 @@ def selftest():
         return 1
     print("perf_compare selftest ok — {} comparison fixtures, both gate modes, "
           "tolerance-less, empty, unrecorded and self-denying baselines, a "
-          "cross-layout and a layout-less baseline, mixed-layout recording, and "
+          "cross-layout, a cross-runner, a missing and a layout-less baseline, mixed-layout recording, and "
           "both recording paths".format(len(cases)))
     return 0
 
@@ -473,7 +511,16 @@ def main():
 
     if not args.baseline or not args.summary:
         ap.error("need --baseline and --summary (or --record / --selftest)")
-    baseline = json.load(open(args.baseline))
+    # A baseline path that does not exist is an *unrecorded* baseline, not an
+    # error: a platform gets its perf step before it has enough green runs to
+    # record from, and the first Darwin run would otherwise die on a traceback
+    # rather than print what it measured. Gate mode included — there is nothing
+    # to gate against.
+    if os.path.exists(args.baseline):
+        baseline = json.load(open(args.baseline))
+    else:
+        baseline = {"provenance": {}, "metrics": {},
+                    "missing_path": args.baseline}
     summary = json.load(open(args.summary))
     prev = None
     if args.prev:

@@ -1050,8 +1050,17 @@ kept finding the rest.
       resident`) turn a wrong struct offset into "cannot answer" rather than a
       plausible wrong number. Cross-compiled for `aarch64-apple-darwin` to
       type-check the mach path; not yet *run* on a Darwin host.
-      Still missing: a **perf gate** (needs wrk on the macOS runner, and a
-      baseline recorded there — see the item below). **The Darwin soak smoke now
+      Still missing: a **perf gate** — and as of 2026-09-22 the step
+      exists: `perf smoke (darwin)` installs `wrk`, runs the same
+      `perf_smoke.sh` report-only on its own baseline path, and uploads
+      the summary a recording will be made from. Three defects found in
+      the writing, each of which would have made the first Darwin run
+      lie or die: a cross-runner baseline printed a note and **gated
+      anyway** (now reports only, like a cross-layout one), a missing
+      baseline file **raised** instead of reporting, and one baseline
+      path served both platforms. What is left is the recording itself,
+      which needs N green Darwin runs and cannot be borrowed from Linux.
+      `bench/log/linux/2026-09-22-darwin-perf-step/FINDINGS.md` **The Darwin soak smoke now
       gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
       measured on Linux and Darwin reclaims differently, and inventing a Darwin
       number would be the thing this board refuses. Four green runs on 2026-08-15

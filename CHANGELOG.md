@@ -66,6 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not keep and is a separate item; Darwin still needs `wrk` and a
   baseline of its own.
 
+- **Darwin gets the perf step, and the comparator stops trusting a
+  baseline from another runner.** A cross-runner baseline printed a NOTE
+  and gated anyway — the same mistake the file already refuses across a
+  layout flip, and a macOS run would have been measured against
+  `ubuntu-latest`'s spread. It is `STALE: … Reporting only` now. A
+  baseline path that does not exist reports instead of raising a
+  traceback, which is what the first Darwin run would have hit, and
+  `perf_smoke.sh` picks its baseline per platform. The new `perf smoke
+  (darwin)` job runs the same script report-only on the script's default
+  floors and uploads its summary; no Darwin threshold is invented before
+  it is measured. Three fixtures added to the comparator's selftest.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn
