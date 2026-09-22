@@ -1167,6 +1167,11 @@ thread-census-names: $(BIN)
 	GCRY_THREAD_CENSUS=1 GCRY_PARALLEL_MARK=4 GCRY_THREAD_CENSUS_NAMES=0 $(BIN)/thread_census_names --mark --noname
 	# The aarch64 shape, reproduced on purpose. That job sets
 	# `GCRY_STW_WATCHDOG_MS` for its whole step, and the watchdog is a raw
+	# Both location arms run `--parked`, where the planted probe sleeps instead
+	# of spinning. Without it their subject was whichever peer happened to be
+	# in a syscall — usually Crystal's `SYSMON`, and on 2026-09-22 (run
+	# `35707265944`) neither it nor the probe was, so the gate went red on a
+	# green tree. Locally the plain arm is 20 of 20; the flake is the runner's.
 	# pthread — which is the thread the census reported as unrecorded on every
 	# collection of every binary there, 11 times a run in 40 of 40 green runs,
 	# until it was named. `--control` requires the credit to be exactly one
@@ -1181,7 +1186,7 @@ thread-census-names: $(BIN)
 	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
 	echo "$$out" | grep -q "OS tasks:.*census-probe" || { echo "FAIL: the census did not name the planted raw pthread"; echo "$$out" | tail -4; exit 1; }; \
 	echo "ok — the thread Crystal never listed is named in the census line"
-	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --parked 2>&1); \
 	echo "$$out" | grep -qE "task [0-9]+:.* is parked in syscall [0-9]+, returning to 0x[0-9a-f]+ in /.*\+0x[0-9a-f]+" \
 	  || { echo "FAIL: no task was located — the syscall site or the mapping lookup produced nothing"; echo "$$out" | grep "task " | head -4; exit 1; }; \
 	echo "ok — a task outside Crystal's list is placed in a named mapping, not just named"
@@ -1189,7 +1194,7 @@ thread-census-names: $(BIN)
 	echo "$$out" | grep -q "is the collector, stopped here to ask" \
 	  || { echo "FAIL: the collector did not exclude itself, so it is reporting the read it is making"; exit 1; }; \
 	echo "ok — the collector names itself instead of reporting its own /proc read"
-	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --parked 2>&1); \
 	echo "$$out" | grep -qE "returns through:.*thread_census_names\+0x[0-9a-f]+" \
 	  || { echo "FAIL: the stack walk never reached the program's own code — a pc in libc names the sleep, not the caller"; echo "$$out" | grep "returns through" | head -2; exit 1; }; \
 	echo "ok — a sleeping task's callers reach this binary, at an offset addr2line resolves"

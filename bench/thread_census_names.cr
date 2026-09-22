@@ -41,6 +41,16 @@
 #   mark-noname  RED twin for the arm above: with the naming off the same run
 #                leaves the helpers unexplained, which is what the census did
 #                before and what would be read as a soundness defect.
+#   parked       The planted thread **sleeps** instead of spinning, so a task
+#                parked in a syscall exists by construction. The two arms that
+#                ask where a task is — the `parked in syscall N, returning to`
+#                line and the `returns through:` walk above it — had no parked
+#                task of their own and relied on catching Crystal's `SYSMON`
+#                asleep. It is usually asleep; on 2026-09-22 (run
+#                `35707265944`) it and the probe were both on-CPU at the sample
+#                instant and the gate went red on a green tree. A gate whose
+#                subject is a peer's phase is a flake, so this arm makes the
+#                phase.
 #
 #   crystal build -Dgc_none bench/thread_census_names.cr -o bin/thread_census_names
 #   GCRY_THREAD_CENSUS=1 bin/thread_census_names
@@ -58,6 +68,7 @@ require "../src/gcry"
 lib LibRawThread
   fun pthread_create(thread : LibC::PthreadT*, attr : LibC::PthreadAttrT*,
                      start : Void* -> Void*, arg : Void*) : LibC::Int
+  fun nanosleep(req : LibC::Timespec*, rem : LibC::Timespec*) : LibC::Int
   fun pthread_join(thread : LibC::PthreadT, retval : Void**) : LibC::Int
   fun pthread_setname_np(thread : LibC::PthreadT, name : LibC::Char*) : LibC::Int
   fun pthread_self : LibC::PthreadT
@@ -102,14 +113,31 @@ def expected_load_base : UInt64?
   lowest
 end
 
+# `--parked`: the same raw pthread, sleeping rather than spinning, so the
+# process always has a task parked in a syscall with a return site to resolve.
+# 20 ms at a time, so the join below still takes about that long — a thread
+# parked in one long sleep would have to be signalled to leave it, and a signal
+# is exactly what the census must not need.
+PARKED = Pointer(Int32).malloc(1)
+
 def start_probe_thread : LibC::PthreadT
   tid = uninitialized LibC::PthreadT
   RAW_RUN.value = 1
   body = ->(_arg : Void*) do
     LibRawThread.pthread_setname_np(LibRawThread.pthread_self,
       PROBE_COMM.to_unsafe.as(LibC::Char*))
-    while RAW_RUN.value == 1
-      Intrinsics.pause
+    if PARKED.value == 1
+      req = uninitialized LibC::Timespec
+      rem = uninitialized LibC::Timespec
+      req.tv_sec = typeof(req.tv_sec).new(0)
+      req.tv_nsec = typeof(req.tv_nsec).new(20_000_000)
+      while RAW_RUN.value == 1
+        LibRawThread.nanosleep(pointerof(req), pointerof(rem))
+      end
+    else
+      while RAW_RUN.value == 1
+        Intrinsics.pause
+      end
     end
     Pointer(Void).null
   end
@@ -122,6 +150,7 @@ end
 control = ARGV.includes?("--control")
 noname = ARGV.includes?("--noname")
 mark_arm = ARGV.includes?("--mark")
+PARKED.value = ARGV.includes?("--parked") ? 1 : 0
 
 heap = Gcry.default_heap.not_nil!
 
@@ -162,6 +191,8 @@ mode = if control
          "mark (gcry's own parallel-mark helpers are the whole gap)"
        elsif noname
          "noname (GCRY_THREAD_CENSUS_NAMES=0: the gap is counted and not named)"
+       elsif PARKED.value == 1
+         "parked (the planted #{PROBE_COMM} sleeps, so a task is parked in a syscall by construction)"
        else
          "plant (a raw pthread named #{PROBE_COMM}, which Crystal never lists)"
        end

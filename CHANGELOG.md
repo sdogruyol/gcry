@@ -64,6 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2026-09-13, not the thread family — while `make thread-churn-uaf
   --control` still reproduces 6–7 of 8.
 
+- **`make thread-census-names` constructs the parked task its location
+  arms read.** Two arms ask where a task is — the `parked in syscall N,
+  returning to` line and the `returns through:` walk — and neither
+  planted one: the probe spins on purpose, so the subject was whichever
+  peer happened to be in a syscall, in practice Crystal's `SYSMON`. On
+  2026-09-22 (run `35707265944`) neither was, and a green tree took a red
+  job; locally the arm is 20 of 20, so the rate is the runner's. The
+  probe now sleeps in 20 ms `nanosleep` calls under `--parked`, which
+  both arms use; every other arm is untouched.
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed
