@@ -37,3 +37,13 @@ instrument flatter itself:
 
 `--list` prints the line numbers of the unbacked, so the next one is a
 place in the file rather than a number to argue with.
+
+## Third bug, found by the fix itself
+
+Writing the ROADMAP paragraph about this counter quoted the two phrases
+it matches, so the count went 14 → 15 and the new claim landed in the
+unbacked pile: the instrument counted its own description of itself.
+The paragraph says "claiming a gate had been broken by hand and seen to
+fail" now. Rewording a *description* is fair; rewording a *claim* to
+satisfy the regex would not be, and that distinction is the only thing
+keeping this counter honest.

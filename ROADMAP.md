@@ -1175,8 +1175,8 @@ kept finding the rest.
       not by loosening what counts as one.
       **2026-09-22: the census's own last line was stale.** *"prose
       claims of a hand break: 19 (nothing re-checks these)"* counted
-      every sentence saying "broken on purpose" or "observed red" and
-      called all of them unchecked — true when written, and not after
+      every sentence claiming a gate had been broken by hand and seen
+      to fail, and called all of them unchecked — true when written, and not after
       the arms were built. Classified: **14** claims (19 counted
       occurrences, double-counting lines carrying both phrases), of
       which **6** name a gate that now builds its arm every run, **1** a
