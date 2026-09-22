@@ -57,7 +57,10 @@ root, layout, runner = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 best = None
 # `_run/summary.json` since 2026-09-13; the nested path is what the old
 # whole-tree artifacts carry, and they stay downloadable for 30 days.
-for pattern in ("_run/summary.json", "summary.json", "linux/*/summary.json", "*/*/summary.json"):
+# `_run/summary.json` since 2026-09-13; `<label>/summary.json` is what the
+# macOS job's artifact carries (it uploads `bench/log/macos/`); the rest are
+# the older whole-tree artifacts, downloadable for 30 days.
+for pattern in ("_run/summary.json", "summary.json", "*/summary.json", "linux/*/summary.json", "*/*/summary.json"):
     for f in root.glob(pattern):
         try:
             s = json.loads(f.read_text())
