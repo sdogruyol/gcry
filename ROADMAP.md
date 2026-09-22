@@ -1173,6 +1173,21 @@ kept finding the rest.
       refused claims to appear there.
       Said out loud because this number is meant to shrink by building arms,
       not by loosening what counts as one.
+      **2026-09-22: the census's own last line was stale.** *"prose
+      claims of a hand break: 19 (nothing re-checks these)"* counted
+      every sentence saying "broken on purpose" or "observed red" and
+      called all of them unchecked — true when written, and not after
+      the arms were built. Classified: **14** claims (19 counted
+      occurrences, double-counting lines carrying both phrases), of
+      which **6** name a gate that now builds its arm every run, **1** a
+      script gate the census has no row for (`raw-buf-check`, which
+      still runs and still fails the build), **6** rest on a
+      `process_spec` assertion, and **1** on nothing — the `Current`
+      section's own opening paragraph, narrating v0.19.0. Two
+      classifier bugs on the way, both flattering: a gate name wrapped
+      across ROADMAP's 78-column margin did not match, and script gates
+      had no bucket.
+      `bench/log/linux/2026-09-22-prose-claims/FINDINGS.md`
       **2026-09-19, later: 96 gates, 31 per run / 65 by hand.**
       `make thread-census-names` is the one added, and it is counted per run
       because its twin (`GCRY_THREAD_CENSUS_NAMES=0`) is a recipe arm rather

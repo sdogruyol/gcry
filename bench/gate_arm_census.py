@@ -183,6 +183,39 @@ def census() -> list[tuple[str, bool, bool, list[str]]]:
     return sorted(rows)
 
 
+def classify_prose(per_run_names):
+    """A claim that a gate was broken by hand is worth what re-checks it.
+
+    Counting all of them as unchecked was true when it was written and stopped
+    being true as the arms were built: several name a gate that now constructs
+    its red direction every run, and several rest on a `process_spec`
+    assertion that runs on every push. What is left — a claim with neither — is
+    the number this line was trying to report.
+    """
+    text = (ROOT / "ROADMAP.md").read_text().splitlines()
+    all_targets = set(makefile_targets())
+    backed, script_backed, spec_backed, unbacked = [], [], [], []
+    for i, line in enumerate(text, 1):
+        if "broken on purpose" not in line and "observed red" not in line:
+            continue
+        ctx = " ".join(text[max(0, i - 8):i + 2])
+        # `\s+`, because ROADMAP wraps: a claim naming "`make\n      raw-buf-check`"
+        # went into the unbacked pile for the width of the column it was typed in.
+        gates = set(re.findall(r"make\s+([a-z0-9-]+)", ctx))
+        if gates & per_run_names:
+            backed.append((i, sorted(gates & per_run_names)))
+        elif gates & all_targets:
+            # A gate the census does not judge — `raw-buf-check` and friends are
+            # `ci/*.py` checks with no bench harness, so they have no row above.
+            # They still run on every push and still fail the build.
+            script_backed.append((i, sorted(gates & all_targets)))
+        elif re.search(r"process_spec|[a-z_]+_spec\b", ctx):
+            spec_backed.append((i, None))
+        else:
+            unbacked.append((i, None))
+    return backed, script_backed, spec_backed, unbacked
+
+
 def main() -> int:
     rows = census()
     per_run = [r for r in rows if r[1] or r[2]]
@@ -198,13 +231,16 @@ def main() -> int:
     print(f"harness-driven gates:              {len(rows)}")
     print(f"red direction constructed per run: {len(per_run)}")
     print(f"red direction established by hand: {len(by_hand)}")
-    prose = len(
-        re.findall(
-            r"broken on purpose|observed red",
-            (ROOT / "ROADMAP.md").read_text(),
-        )
-    )
-    print(f"prose claims of a hand break:      {prose} (nothing re-checks these)")
+    per_run_names = {r[0] for r in rows if r[1] or r[2]}
+    backed, script_backed, spec_backed, unbacked = classify_prose(per_run_names)
+    total = len(backed) + len(script_backed) + len(spec_backed) + len(unbacked)
+    print(f"prose claims of a hand break:      {total}"
+          f" — {len(backed)} name a gate that builds its arm per run,"
+          f" {len(script_backed)} a script gate, {len(spec_backed)} rest on a spec,"
+          f" {len(unbacked)} on nothing")
+    if unbacked and "--list" in sys.argv:
+        print("  unbacked, by ROADMAP line: "
+              + ", ".join(str(n) for n, _ in unbacked))
     return 0
 
 
