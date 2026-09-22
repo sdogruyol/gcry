@@ -1492,6 +1492,18 @@ kept finding the rest.
       `compiler-gc-contract`, `finalizer-complex`, `oom-test`,
       `thread-storm`, with their shorts.
       `bench/log/linux/2026-09-21-soak-leak-arm/FINDINGS.md`
+      **2026-09-21, later: `make finalizer-complex` asserts what a
+      finalizer runs on.** Seven phases asserted a callback *ran*; none
+      asserted what it ran on, which is the half with a history — the
+      Boehm rule in `enqueue_unreachable_finalizers` exists because
+      `Socket#finalize` once ran on freed memory. Phase 0 asks
+      `heap.live?(ptr)` inside the callback; `Heap#finalizer_resurrect =
+      false` (`GCRY_FINALIZER_NO_RESURRECT=1`) restores the defect and
+      `--broken` requires the callback to find its object swept. With
+      the resurrection dropped, phase 0 fails and **phases 1–7 all stay
+      green** on a freed block — "ran" does not discriminate, "ran on
+      what" does. Census **100 / 77 / 23 → 100 / 78 / 22.**
+      `bench/log/linux/2026-09-21-finalizer-resurrect-arm/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

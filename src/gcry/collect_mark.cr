@@ -1113,7 +1113,12 @@ module Gcry
         obj = @finalizers.entry_object_at(i)
         if unmarked_live_object?(obj)
           @finalizers.queue_and_remove_entry_at(i)
-          mark_candidate(obj) unless obj.null?
+          # Research only (`finalizer_resurrect = false`,
+          # `GCRY_FINALIZER_NO_RESURRECT=1`): skip the resurrection, so the
+          # sweep reclaims the block and the callback runs on freed memory —
+          # the pre-Boehm-rule behaviour. `make finalizer-complex --broken`
+          # requires the callback to find its object gone.
+          mark_candidate(obj) if @finalizer_resurrect && !obj.null?
         else
           i += 1
         end

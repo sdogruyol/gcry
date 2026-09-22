@@ -118,9 +118,16 @@ fork-test: $(BIN)
 	$(BIN)/fork_reinit
 	GCRY_DISABLE_ATFORK=1 $(BIN)/fork_reinit --disabled
 
+# Seven finalizer scenarios assert a callback *ran*; phase 0 asserts what it
+# ran on — an object the sweep left alone (the Boehm rule; before it,
+# `Socket#finalize` ran on freed memory). `--broken` turns the resurrection
+# off and requires the callback to find its object swept. Dropping the
+# resurrection reddens the shipped arm and only phase 0 notices, which is the
+# gap phase 0 closes.
 finalizer-complex: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex
+	$(CRYSTAL) build -Dgc_none bench/finalizer_complex.cr -o $(BIN)/finalizer_complex --error-trace
 	$(BIN)/finalizer_complex
+	$(BIN)/finalizer_complex --broken
 
 # Nursery HTTP::Headers Hash keys. The compile default is headerless, where
 # `Heap#nursery_enabled=` is a no-op, so the CI step that built this without

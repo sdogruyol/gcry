@@ -630,6 +630,13 @@ module Gcry
     # is the whole window, deterministically, which is what makes
     # `make occupied-release` a gate rather than a sighting.
     property post_stw_hook : Proc(Symbol, Nil)? = nil
+    # Research only, and it restores a defect: an unreachable object with a
+    # finalizer is queued and *not* marked, so the sweep reclaims it and the
+    # callback runs on freed memory — what this code did before the Boehm
+    # rule (`Socket`/`Digest#finalize` on a swept block, the acik wrk SEGV).
+    # `GCRY_FINALIZER_NO_RESURRECT=1` on a process heap; the `--broken` arm
+    # of `make finalizer-complex` on a library one.
+    property finalizer_resurrect : Bool = true
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says, so the kept-chunk ledger and its crash-report line are
     # reachable on a host where the window never opens.

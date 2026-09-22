@@ -1161,6 +1161,9 @@ module GC
     # that window on a library heap through `Heap#post_stw_hook`; this is the
     # same control for a process heap.
     heap.release_occupied_anyway = true if env_flag_one?("GCRY_RELEASE_OCCUPIED")
+    # Research only, restores a defect: queue an unreachable finalizable
+    # object without resurrecting it, so its callback runs on a swept block.
+    heap.finalizer_resurrect = false if env_flag_one?("GCRY_FINALIZER_NO_RESURRECT")
     # Research only: refuse the first n empty-chunk releases whatever the
     # occupancy says. The positive control for the kept-chunk ledger and the
     # crash-report line that names it, on a host where the real window does

@@ -1,6 +1,7 @@
 # Finalizer complex scenarios.
 #
 # Tests advanced finalizer behaviours:
+#   0. Boehm rule — the callback runs on an object the sweep has not reclaimed
 #   1. Finalizer chain — one finalizer triggers another
 #   2. Finalizer that calls GC.collect
 #   3. Finalizer that resurrects objects
@@ -12,11 +13,70 @@
 # Build & run:
 #   crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
 #   ./bin/finalizer_complex
+#   ./bin/finalizer_complex --broken    # resurrection off: the callback must find its object swept
+#
+# Every phase above asserts that a finalizer *ran*; none asserted what it ran
+# on, and that is the half with a history: before the Boehm rule
+# (`enqueue_unreachable_finalizers` marks a queued object so the sweep leaves
+# it) `Socket#finalize` ran on freed memory, the acik wrk SEGV. Phase 0 asks
+# the callback whether its object is still allocated (`Heap#live?`) at the
+# moment it runs. `--broken` sets `finalizer_resurrect = false` — the
+# pre-rule behaviour — runs phase 0 alone, and requires the callback to find
+# the block gone. Dropping the resurrection reddens the shipped arm; dropping
+# the property's effect reddens `--broken`. Until 2026-09-21 the only way this
+# gate came out red was a hand edit.
 
 require "../src/gcry"
 
+broken = ARGV.includes?("--broken")
+
 failures = 0
 ok = 0
+
+# ---------------------------------------------------------------
+# Phase 0: the Boehm rule — the callback sees an allocated object
+# ---------------------------------------------------------------
+puts "=== Phase 0: the finalizer runs on an object the sweep left alone#{broken ? " (--broken: resurrection off, it must not)" : ""} ==="
+begin
+  heap = Gcry::Heap.new
+  heap.finalizer_resurrect = false if broken
+  ran = false
+  alive_in_callback = false
+
+  obj = heap.malloc(48)
+  heap.add_finalizer(obj) do |ptr|
+    ran = true
+    alive_in_callback = heap.live?(ptr)
+  end
+
+  heap.collect(scan_stack: false)
+  heap.collect(scan_stack: false)
+
+  if !ran
+    puts "FAIL: Phase 0 — finalizer did not run"
+    failures += 1
+  elsif broken && alive_in_callback
+    puts "FAIL: Phase 0 — resurrection is off and the callback still found its object allocated; the property no longer restores the defect"
+    failures += 1
+  elsif !broken && !alive_in_callback
+    puts "FAIL: Phase 0 — the callback ran on a block the sweep had already reclaimed"
+    failures += 1
+  else
+    puts "  the callback found its object #{alive_in_callback ? "allocated" : "swept"}"
+    ok += 1
+  end
+
+  heap.destroy
+rescue ex
+  puts "Phase 0 CRASH: #{ex}"
+  failures += 1
+end
+
+if broken
+  puts ""
+  puts "finalizer_complex --broken: #{ok} passed, #{failures} failed"
+  exit(failures > 0 ? 1 : 0)
+end
 
 # ---------------------------------------------------------------
 # Phase 1: Finalizer chain — one finalizer triggers another

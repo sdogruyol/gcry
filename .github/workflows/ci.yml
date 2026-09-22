@@ -420,10 +420,13 @@ jobs:
           ./bin/fork_reinit
           GCRY_DISABLE_ATFORK=1 ./bin/fork_reinit --disabled
 
+      # Phase 0 asserts the callback runs on an object the sweep left alone;
+      # the recipe's `--broken` arm turns that resurrection off and requires
+      # the callback to find its object swept. The sound suite below reuses
+      # the binary the recipe builds.
       - name: Finalizer complex scenarios
         run: |
-          crystal build -Dgc_none bench/finalizer_complex.cr -o bin/finalizer_complex
-          ./bin/finalizer_complex
+          make finalizer-complex
 
       - name: Nursery HTTP::Headers regression
         run: |

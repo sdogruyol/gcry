@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the ceiling and not on anything else. Census
   **100 / 75 / 25 → 100 / 77 / 23.**
 
+- **`make finalizer-complex` asserts what a finalizer runs on.** Its
+  seven phases asserted a callback *ran*; none asserted what it ran on,
+  and that is the half with a history — the Boehm rule in
+  `enqueue_unreachable_finalizers` exists because `Socket#finalize` once
+  ran on freed memory. A new phase 0 asks `heap.live?(ptr)` inside the
+  callback. `Heap#finalizer_resurrect = false`
+  (`GCRY_FINALIZER_NO_RESURRECT=1`, research only) restores the defect,
+  and the recipe's `--broken` arm requires the callback to find its
+  object swept. With the resurrection dropped, phase 0 fails and phases
+  1–7 all stay green on a freed block. Census **→ 100 / 78 / 22.**
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed
