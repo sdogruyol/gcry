@@ -42,3 +42,6 @@ bench/log/**/raw*/
 # `bench/log` tree, which is what the upload used to carry. It is output, and a
 # local perf run should not leave a dirty tree behind.
 bench/log/_run/
+
+# Python bytecode from the bench tooling (`gate_arm_census.py`, `perf_compare.py`).
+__pycache__/
