@@ -126,6 +126,24 @@ def compare(baseline, summary, gate, prev=None):
     # on `rss_x` alone. Report, never gate, until it is re-recorded.
     stale_runner = bool(prov.get("runner") and summary.get("runner")
                         and prov["runner"] != summary["runner"])
+    # The sampling protocol, for the same reason as the two above: a median of
+    # one surviving draw and a median of five are different measurements of the
+    # same collector — the Darwin job read /json at 65.6% of Boehm on the first
+    # and 111.6% on the second, same host and commit — and a tolerance is a
+    # statement about a distribution. Compared only when the baseline records
+    # it; the ones recorded before 2026-09-22 do not.
+    stale_protocol = False
+    protocol_diff = []
+    for key in ("wrk_duration_s", "wrk_connections", "bench_runs"):
+        want, got = prov.get(key), summary.get(key)
+        if want is not None and got is not None and want != got:
+            stale_protocol = True
+            protocol_diff.append("{}={} against the baseline's {}".format(key, got, want))
+    if stale_protocol:
+        lines.append(
+            "STALE: this run was sampled with {} — a median of one surviving "
+            "draw and a median of five are different measurements. Re-record "
+            "under this sampling. Reporting only.".format(", ".join(protocol_diff)))
     stale_layout = (prov.get("layout") and summary.get("layout")
                     and prov["layout"] != summary["layout"])
     if stale_layout:
@@ -201,7 +219,8 @@ def compare(baseline, summary, gate, prev=None):
             entry = metrics[name]
             lines.append("FAIL: {} is {:.2f} against a baseline of {:g} — {:+.2f}, outside ±{:g}".format(
                 label, value, float(entry["value"]), delta, float(entry["tolerance"])))
-        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner else 0)
+        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner
+                     and not stale_protocol else 0)
 
     if streaks:
         lines.append("")
@@ -213,7 +232,8 @@ def compare(baseline, summary, gate, prev=None):
         lines.append("A single excursion past {:g} sd happened once in 72 metric-runs of the "
                      "recording set and never twice in a row, so this is a regression rather "
                      "than a slow hour on the runner pool.".format(STREAK_SD))
-        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner else 0)
+        return "\n".join(lines), (1 if gate and not stale_layout and not stale_runner
+                     and not stale_protocol else 0)
 
     lines.append("")
     lines.append("PASS — every gated metric is within tolerance of the baseline"
@@ -275,6 +295,17 @@ def record(summaries, runner, commit, recorded):
             entry["tolerance"] = None
             entry["note"] = "fewer than 3 runs: no spread measured, so this metric reports only"
         metrics[name] = entry
+    # The sampling the samples were taken under, refused if mixed for the same
+    # reason a mixed layout is: the tolerance below describes one distribution
+    # or it describes nothing. Absent in summaries written before 2026-09-22,
+    # which record as null and compare as "unknown, do not judge".
+    protocol = {}
+    for key in ("wrk_duration_s", "wrk_connections", "bench_runs"):
+        seen = {s[key] for s in summaries if s.get(key) is not None}
+        if len(seen) > 1:
+            raise SystemExit("refusing to record from mixed sampling: {} is {}".format(
+                key, ", ".join(str(v) for v in sorted(seen))))
+        protocol[key] = seen.pop() if seen else None
     return {
         "provenance": {
             "runner": runner,
@@ -282,6 +313,9 @@ def record(summaries, runner, commit, recorded):
             "commit": commit,
             "runs": len(summaries),
             "recorded": recorded,
+            "wrk_duration_s": protocol["wrk_duration_s"],
+            "wrk_connections": protocol["wrk_connections"],
+            "bench_runs": protocol["bench_runs"],
             "note": "Ratios only. Absolute RPS is not comparable across hosts; these are "
                     "same-host, same-run ratios against Boehm.",
         },
@@ -346,6 +380,27 @@ def selftest():
                                 "runner": "macos-latest"}, gate=True)
     if code != 0 or "STALE" not in text or "across runner classes" not in text:
         failures.append("cross-runner baseline gated (exit {})".format(code))
+    # A run sampled differently from the baseline reports rather than gates,
+    # and the matching one still gates.
+    proto_base = dict(base)
+    proto_base["provenance"] = dict(base["provenance"], bench_runs=3, wrk_duration_s=5)
+    text, code = compare(proto_base, {"pct_json": 70.0, "rss_x": 0.95, "layout": "headerless",
+                                      "runner": "test", "bench_runs": 7, "wrk_duration_s": 10}, gate=True)
+    if code != 0 or "different measurements" not in text:
+        failures.append("cross-protocol baseline gated (exit {})".format(code))
+    text, code = compare(proto_base, {"pct_json": 70.0, "rss_x": 0.95, "layout": "headerless",
+                                      "runner": "test", "bench_runs": 3, "wrk_duration_s": 5}, gate=True)
+    if code != 1:
+        failures.append("same-protocol regression did not gate (exit {})".format(code))
+    # And a recording from mixed sampling is refused outright.
+    try:
+        record([{"pct_json": 90.0, "layout": "headerless", "bench_runs": 3},
+                {"pct_json": 91.0, "layout": "headerless", "bench_runs": 7}],
+               "test", "0" * 40, "1970-01-01")
+        failures.append("recording from mixed sampling was allowed")
+    except SystemExit:
+        pass
+
     # A baseline path that does not exist reports instead of raising: a
     # platform gets its perf step before it can record one, and the first
     # Darwin run died on a traceback in the version of this that shipped for
@@ -471,7 +526,7 @@ def selftest():
         return 1
     print("perf_compare selftest ok — {} comparison fixtures, both gate modes, "
           "tolerance-less, empty, unrecorded and self-denying baselines, a "
-          "cross-layout, a cross-runner, a missing and a layout-less baseline, mixed-layout recording, and "
+          "cross-layout, a cross-runner, a cross-protocol, a missing and a layout-less baseline, mixed-layout and mixed-sampling recording, and "
           "both recording paths".format(len(cases)))
     return 0
 

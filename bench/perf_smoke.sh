@@ -285,6 +285,17 @@ summary = {
     # that kept comparing and kept looking authoritative. perf_compare.py
     # refuses to gate across a mismatch.
     'layout': '$LAYOUT',
+    # And how it was sampled. A median of one surviving draw and a median of
+    # five are different measurements of the same collector — the Darwin job
+    # read /json at 65.6% of Boehm on the first and 111.6% on the second, same
+    # host, same commit — so a baseline recorded under one sampling cannot
+    # gate a run taken under another, for exactly the reason `runner` and
+    # `layout` are here. Nine Darwin summaries existed before this line and
+    # not one of them says which protocol produced it, which is how that got
+    # noticed.
+    'wrk_duration_s': int('$DURATION'),
+    'wrk_connections': int('$CONNECTIONS'),
+    'bench_runs': int('$RUNS'),
 }
 open('$RUN_DIR/summary.json', 'w').write(json.dumps(summary) + '\n')
 print(json.dumps(summary, indent=2))

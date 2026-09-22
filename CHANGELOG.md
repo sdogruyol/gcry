@@ -103,6 +103,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slowest, so a run that *fails* still reports the profile of what ran
   before it.
 
+- **A perf summary records how it was sampled.** It carried `runner` and
+  `layout` — the two mismatches the comparator refuses to gate across —
+  and nothing about the sampling, so the nine Darwin samples taken either
+  side of a `WRK_DURATION` change cannot be told apart and a recording
+  from them would average two distributions. `wrk_duration_s`,
+  `wrk_connections` and `bench_runs` are in the summary and in a
+  recorded baseline's provenance now; a run sampled differently reports
+  instead of gating, and a recording from mixed sampling is refused
+  outright. Fixtures for both, each verified to redden the selftest when
+  the rule is removed.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn

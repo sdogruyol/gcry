@@ -186,3 +186,33 @@ throughput.
 starvation. Whether the *cross-run* spread narrows is what the next
 samples answer; the four at 5 s were 111.6 / 111.5 / 148.1 / 103.9 and
 do not mix with these.
+
+## Nine samples, and not one of them says how it was sampled
+
+Collecting what Darwin has produced so far:
+
+```
+111.6  111.5  148.1  103.9  92.5  119.1  96.1  110.4  120.7   (pct_json)
+```
+
+Four of those were taken at `WRK_DURATION=5` and the rest at 10, and
+**the summaries do not record which** — they carry `runner` and `layout`,
+the two mismatches the comparator already refuses to gate across, and
+nothing about the sampling. So the set cannot be split, and a recording
+made from it would average two distributions and call the spread the
+collector's.
+
+That is the same defect as a cross-layout baseline, one axis over. Fixed
+the same way:
+
+- `summary.json` records `wrk_duration_s`, `wrk_connections` and
+  `bench_runs`;
+- `perf_compare.py` reports rather than gates when they differ from the
+  baseline's, and **refuses to record** from summaries that disagree —
+  the mixed-layout rule, extended;
+- both directions have selftest fixtures, and both were verified to
+  redden the selftest when the rule is removed.
+
+The nine above stay unusable for a recording, which is the honest cost of
+having measured before the instrument recorded itself. The samples from
+here on carry their protocol.
