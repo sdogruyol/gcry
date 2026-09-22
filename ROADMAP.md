@@ -2398,8 +2398,9 @@ kept finding the rest.
       `bench/log/linux/2026-08-16-scheduler-roots-aarch64-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-17-dead-fiber-stack-roots/FINDINGS.md`
 
-- [ ] **The aarch64 job hangs in `ec-queue-audit`, about one run in seven, and
-      it has been reading as `cancelled`.** Six of the last forty runs of `test
+- [x] **The aarch64 job hangs in `ec-queue-audit`, about one run in seven, and
+      it has been reading as `cancelled` — retracted 2026-09-19, closed
+      2026-09-22.** Six of the last forty runs of `test
       (aarch64 native)` ended at the 20-minute job timeout — 2026-08-20 (three)
       and 2026-08-22 — and every one checked was killed with `Terminate orphan
       process: … (ec_queue_audit)`. A job timeout is reported as *cancelled*
@@ -2525,6 +2526,25 @@ kept finding the rest.
       Whether the hang is inside `stop_world` at all is the first thing the next
       sighting will settle. Not reproduced locally: 60 runs of the audit-on arm
       on x86_64 Linux, 0 hangs.
+      **Closed 2026-09-22 on the numbers, not on quiet.** Every `test
+      (aarch64 native)` job since the retraction — 45 in the CI runs of
+      2026-09-19 → 2026-09-22 — is **42 success, 3 failure, 0 cancelled,
+      0 at the deadline**, durations min 180 s, p50 406 s, p90 458 s,
+      **max 705 s against the 20-minute bound**. The three failures are
+      one hour on 2026-09-19 (`ed86d2c`, `fe756bf`, `4d0480b`, all the
+      same step) and they are the thread-census work itself going red on
+      the runner it was written for — the census gate finding the
+      watchdog thread, fixed in the same hour — not a hang and not a
+      collector defect. **42 consecutive green since.** The duration is
+      the thing to keep an eye on rather than the hang: the item recorded
+      max 443 s on 2026-09-19 and the job's worst is 705 s now, 41% of
+      headroom left.
+      What this closure does **not** claim: why a thread failed to
+      acknowledge a suspend in the original sightings. That question is
+      instrumented — `SUSPEND STALLED` carries resends unanswered,
+      handler entries and declines split stale/redundant, and
+      `SUSPEND ABANDONED` names an `ESRCH` handle — so the next sighting
+      names it rather than timing the job out. It has not recurred.
 
 - [x] **A mutator could read the chunk index with no lock, and now cannot —
       closed 2026-08-22.** `chunk_containing` skips `@index_lock` while
