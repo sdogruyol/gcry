@@ -1060,6 +1060,20 @@ kept finding the rest.
       baseline file **raised** instead of reporting, and one baseline
       path served both platforms. What is left is the recording itself,
       which needs N green Darwin runs and cannot be borrowed from Linux.
+      **And the first two runs measured the instrument, not the
+      collector.** At `BENCH_RUNS=3` the script's min/max discard leaves
+      **one** sample, so the median is a single draw and `noise_ratio`
+      — the IQR of one value — printed **0.0** on a triple spanning
+      54 839 to 109 267 req/s. That run read `/json` at **65.6%** of
+      Boehm; at `BENCH_RUNS=7` the same host reads **111.6%**. Darwin CI
+      is ahead of Boehm on `/json`, not behind, and a floor fitted to
+      the first number would have been noise with a gate that could
+      never fire. `noise_ratio` is now `null` with the reason printed
+      when fewer than three samples survive, which also retires every
+      `noise=0.0` the Linux job has printed. Per-run spread there is
+      5–23% against the Linux baseline's 4.1% across runs, so the Darwin
+      recording needs more samples or a wider tolerance — a measurement,
+      not a preference.
       `bench/log/linux/2026-09-22-darwin-perf-step/FINDINGS.md` **The Darwin soak smoke now
       gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
       measured on Linux and Darwin reclaims differently, and inventing a Darwin

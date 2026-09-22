@@ -87,3 +87,40 @@ Three consequences, all applied:
   a first run produces a red that means nothing. The recorded baseline
   becomes the gate when it exists, and the artifact carries the numbers
   meanwhile.
+
+## And the number the instrument was hiding
+
+Same host, same commit, same collector — only `BENCH_RUNS` changed:
+
+| samples | kept | `/json` % of Boehm | noise |
+|---|---|---|---|
+| 3 | 1 | **65.6** | reported 0.0, actually blind |
+| 7 | 5 | **111.6** | 0.05 – 0.23 |
+
+A 46-point swing out of the sampling alone, and the direction that
+matters: Darwin CI is **not** below Boehm on `/json`, it is ahead. Had
+the first run's floor been "fixed" to 65% instead of the instrument, the
+repo would have carried a Darwin thr number that was noise, and a gate
+that could never fire.
+
+Per-run spread on this runner is 5–23% against the Linux baseline's
+4.1% *across* runs, so a Darwin recording will need either more samples
+per run or a wider tolerance, and which one is a measurement rather than
+a preference.
+
+## What this says about the Linux job, and what was deliberately not done
+
+`perf smoke (kemal /json vs Boehm)` runs `BENCH_RUNS=3` as well, so every
+`noise=0.0` it has ever printed was the same blind reading, and every
+per-run `pct_json` it recorded is a one-sample median. The 48-run
+baseline is **not** invalidated by that — its tolerance comes from the
+spread *across* runs, which contains this noise rather than ignoring it —
+but the gate is wider than it needs to be because of it: less per-run
+noise would mean a smaller sd and a gate that fires below today's ~14 pp.
+
+Raising it is therefore a real improvement and a real cost: the recorded
+distribution is the n=3 one, so the change requires re-recording from
+~20+ green runs at the new sampling, and adds ~2 min to a job that runs
+on every push. Left at 3 deliberately, with the number written down, so
+the next person weighing it has both halves instead of discovering the
+first one again.

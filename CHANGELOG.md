@@ -78,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   floors and uploads its summary; no Darwin threshold is invented before
   it is measured. Three fixtures added to the comparator's selftest.
 
+- **A noise ratio of zero from one sample is a blind instrument.**
+  `perf_smoke.sh` discards min and max, so at `BENCH_RUNS=3` a single
+  sample survives and `noise_ratio` — its IQR over itself — printed 0.0
+  for a triple spanning 54 839 to 109 267 req/s. It reports `null` with
+  the surviving count and the full spread now. The Darwin job takes
+  seven samples, and the difference is not cosmetic: the same host read
+  `/json` at **65.6%** of Boehm on one sample and **111.6%** on five.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn
