@@ -464,6 +464,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an arbitrary cut: each drives a rare window many times, so its cost is
   the sample size rather than the assertion. `test (x86_64)` goes 33.0 →
   ~20.7 min and the new job is ~13.5, for the same runner minutes.
+  Measured over nine green runs on 2026-09-22, two days after the split:
+  **p50 22.2 min, max 22.8, against the 45-minute cap** — the estimate
+  holds and the job has 49% of its budget left.
   Raising the cap was the other option and is the wrong one: it buys
   days, and the property the cap exists for — a hang failing in minutes
   instead of at GitHub's 6 h ceiling — weakens every time it moves.
