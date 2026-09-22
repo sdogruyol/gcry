@@ -1402,6 +1402,17 @@ nursery-tlab-smoke: $(BIN)
 # 0 deaths over 2 990 runs, which is 0 of 0 — no thread exits in it. The churn
 # arm exercises the death side and turns that into 0 of thousands.
 #
+# **And the budget is spent in windows, not in runs.** The statement this
+# sampler produces is "0 deaths with a holder across N give-up windows", so N
+# is what a batch has to buy — and the two runners buy it at rates that differ
+# a hundredfold: six churn children on an x86_64 developer host built **120**
+# windows (2026-09-22), while the aarch64 job's ten built **2 to 5** in each of
+# its last four batches. A fixed run count therefore means a fixed sample on
+# one platform and almost none on the other. After the fixed runs below, extra
+# churn children run until the batch has `THREAD_UAF_MIN_WINDOWS` (100) of them
+# or `THREAD_UAF_CHURN_BUDGET_S` (300) seconds are gone, and the headline says
+# which bound stopped it.
+#
 # **Not a gate.** It exits 0 whether or not the defect fires, because an open
 # defect must not turn every pull request red — and a step that is expected to
 # fail teaches everyone to ignore it. What it produces is evidence: the logs of
@@ -1436,7 +1447,24 @@ thread-uaf-sample: $(BIN)
 	    else rm -f $$f; fi; \
 	  done; \
 	done; \
-	echo "thread-uaf-sample: $$runs runs, $$crashes crashed, $$hits dying-Thread report(s) of which $$held with a holder; staged-thread window $$gaveup gave-up / $$caught caught in $(SAMPLE_DIR)"; \
+	extra=0; stop=""; \
+	if [ -z "$$THREAD_UAF_BIN" ]; then \
+	  want=$${THREAD_UAF_MIN_WINDOWS:-100}; deadline=$$(($$(date +%s) + $${THREAD_UAF_CHURN_BUDGET_S:-300})); \
+	  while [ "$$gaveup" -lt "$$want" ]; do \
+	    if [ "$$(date +%s)" -ge "$$deadline" ]; then stop="budget"; break; fi; \
+	    extra=$$((extra+1)); f=$(SAMPLE_DIR)/extra-$$extra-churn.log; \
+	    GCRY_THREAD_UNSTAGE_ON_DEATH=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 \
+	      $(BIN)/thread_churn_uaf --child > $$f 2>&1 || crashes=$$((crashes+1)); \
+	    d=$$(grep -c "is unmarked and about to be swept" $$f || true); \
+	    g=$$(grep -c "GAVE UP" $$f || true); \
+	    c=$$(grep -c "and the wait caught it" $$f || true); \
+	    h=$$(grep -oE "registers: yes|stack scan: yes|thread list: YES|list node: YES" $$f | wc -l); \
+	    hits=$$((hits+d)); gaveup=$$((gaveup+g)); caught=$$((caught+c)); held=$$((held+h)); \
+	    if [ "$$h" != "0" ] && [ "$$kept" -lt 4 ]; then kept=$$((kept+1)); else rm -f $$f; fi; \
+	  done; \
+	  [ -n "$$stop" ] || stop="windows"; \
+	fi; \
+	echo "thread-uaf-sample: $$runs runs + $$extra churn ($$stop), $$crashes crashed, $$hits dying-Thread report(s) of which $$held with a holder; staged-thread window $$gaveup gave-up / $$caught caught in $(SAMPLE_DIR)"; \
 	if [ "$$gaveup" = "0" ] && [ "$$held" = "0" ] && [ "$$hits" = "0" ]; then \
 	  echo "thread-uaf-sample: this batch neither built the window nor saw a Thread die, so its silence is an absence of both and not an absence of the defect"; \
 	fi; \
