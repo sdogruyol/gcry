@@ -57,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arm that crashed twice in ~206. P(all quiet | the defect is still
   there) ≈ 0.0002 against the ~308 the item set for 95%.
 
+- **The benchmark regression gate is closed on its own numbers.**
+  `PERF_GATE_BASELINE=1` has compared every `perf smoke` run against the
+  48-run headerless baseline since 2026-09-13, with gates tighter than
+  the fixed floors on all three metrics; **59 jobs since, 0 failures**,
+  against 0.065 false reds expected at the design rate. Confirmation
+  across runs (two consecutive samples outside 2 sd) needs state CI does
+  not keep and is a separate item; Darwin still needs `wrk` and a
+  baseline of its own.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn

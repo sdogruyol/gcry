@@ -1516,7 +1516,7 @@ kept finding the rest.
       **100 / 78 / 22 → 100 / 79 / 21**: 11 defect-finders, 2
       typechecks, 4 research targets, 4 crash-only smokes.
       `bench/log/linux/2026-09-21-contract-layout-arm/FINDINGS.md`
-- [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
+- [x] **Benchmark regression alerts** (Phase 2, pulled forward) — closed 2026-09-22. `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip
       (~85% @ ~0.8× @ ~0.6 ms). Compare a PR against a stored baseline instead, and
@@ -1658,6 +1658,20 @@ kept finding the rest.
       its provenance and then denied it existed. Fixed, with the fixture for the
       converse in `make perf-baseline`.
       `bench/log/linux/2026-09-13-perf-baseline-headerless/FINDINGS.md`
+      **Closed 2026-09-22.** The 2026-09-14 recording on 48 green
+      headerless runs is what the flip was waiting for: 3.3 sd per
+      metric, gates at 86.84 / 1.143 / 0.960 against fixed floors of
+      65 / 1.25 / 2.5 — tighter than the floors on all three, at one
+      false red per ~900 runs. `PERF_GATE_BASELINE=1` has been on since
+      2026-09-13. Measured since the recording: **59 `perf smoke` jobs,
+      0 failures** — no false red (0.065 expected at the design rate)
+      and no regression. What this does not include, and is a separate
+      item rather than a missing half: confirmation *across* runs — two
+      consecutive samples outside 2 sd would catch ~9 pp at a better
+      false-alarm rate, and needs state CI does not keep between runs.
+      The Darwin half is still open under the CI-asymmetry item above:
+      it needs `wrk` on the macOS runner and a baseline recorded there,
+      and a baseline from this runner cannot be reused for it.
 
 - [x] **The process heap's counters lose updates — both halves of the trade
       measured 2026-09-13, and the default stays plain.**
@@ -3385,7 +3399,7 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 - [ ] **Write barrier** — sound concurrent / incremental GC backend
 - [x] **Windows x86_64 + ARM64 process GC** — native backend + unit/process/sample CI
 - [x] **CI for all platforms** — Linux x86_64 + aarch64, macOS arm64, Windows x86_64 + ARM64
-- [ ] **Benchmark regression alerts** — GitHub Action comparing PR vs baseline perf
+- [x] **Benchmark regression alerts** — comparator gating against a measured baseline since 2026-09-13 (Linux; Darwin needs a baseline of its own)
 - [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
       (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)
 - [ ] **Security / fuzzing** — documented fuzz hours, crash-free stress runs
