@@ -51,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   30 samples on Darwin per CI run, `continue-on-error` like the thread
   sampler.
 
+- **The `Thread` UAF sampler buys give-up windows, not runs.** The
+  statement it makes is "0 deaths with a holder across N windows", and
+  the runners buy N at rates that differ a hundredfold: six churn
+  children on x86_64 build 120, while the aarch64 job's ten built 2–5 in
+  each of its last four batches. It now runs extra churn children until
+  the batch has `THREAD_UAF_MIN_WINDOWS` (100) or
+  `THREAD_UAF_CHURN_BUDGET_S` (300 s) is gone, and the headline names
+  which bound stopped it. Measured alongside: the amplified reproducer
+  `GCRY_THREAD_UNSTAGE_ON_DEATH=1` is **0 of 40** bare and poisoned on
+  this tree — its crashes were the large-object defect fixed on
+  2026-09-13, not the thread family — while `make thread-churn-uaf
+  --control` still reproduces 6–7 of 8.
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed

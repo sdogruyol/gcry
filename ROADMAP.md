@@ -2250,6 +2250,15 @@ kept finding the rest.
       roughly three thousand times the rate. The sampler's headline is now
       "0 of 2 856 deaths, none with a holder, across 16 windows" instead of
       "0 of 0".
+      **The budget is now counted in windows, because the runners buy
+      them at rates that differ a hundredfold (2026-09-22).** Six churn
+      children here build 120 windows; the aarch64 job's ten built 2, 3,
+      4 and 5 in its last four batches — so a fixed run count is a real
+      sample on one platform and almost none on the other. The sampler
+      runs extra churn children until the batch has
+      `THREAD_UAF_MIN_WINDOWS` (100) or `THREAD_UAF_CHURN_BUDGET_S`
+      (300 s) is gone, and its headline names the bound that stopped it
+      (`1 runs + 3 churn (windows)` / `1 runs + 2 churn (budget)`).
       `bench/log/linux/2026-09-20-uaf-sampler-denominator/FINDINGS.md`
       **What the stop epoch (2026-09-12, item below) changes here**: nothing
       about the window itself — an unpublished thread is still neither
@@ -2307,6 +2316,14 @@ kept finding the rest.
       `GCRY_THREAD_UNSTAGE_ON_DEATH=1`, off by default and documented as a
       reproducer: this family has not had one that fires in seconds since
       2026-08-16.
+      **And it is not one any more (measured 2026-09-22).** The amplified
+      arm is **0 of 40 bare and 0 of 40 poisoned** on this tree, while
+      `make thread-churn-uaf --control` still reproduces 6–7 of 8 on both
+      layouts: those 7-of-40 crashes were the large-object / mark-clear
+      defect fixed on 2026-09-13, not this family. What the arm still
+      buys is the *window* — 6 churn children built **120** give-ups,
+      5 712 dying-`Thread` reports, **0 with a holder**, 0 crashes.
+      `bench/log/linux/2026-09-22-uaf-sampler-windows/FINDINGS.md`
       **And an unbounded leak, fixed on the way**: a birth root was released
       only when the pre-suspend walk found its thread on Crystal's list, so a
       thread that published and exited between two collections kept its root
