@@ -941,12 +941,11 @@ jobs:
         run: |
           RSS_WARMUP=20 RSS_LIMIT=15 RSS_RSS_LIMIT=30 make rss-leak
 
+      # The recipe's second arm runs the contract with layouts off and
+      # requires the layout-registration check to fail.
       - name: Compiler GC contract + crystal tools
         run: |
-          crystal build -Dgc_none bench/compiler_gc_contract.cr -o bin/compiler_gc_contract --error-trace
-          ./bin/compiler_gc_contract
-          crystal tool hierarchy src/gcry.cr >/dev/null
-          crystal tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
+          make compiler-gc-contract
 
       # Trace events and heap dump against the live set; the recipe's second
       # arm traces with sampling off and must fail on the missing alloc/free.

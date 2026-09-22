@@ -1504,6 +1504,18 @@ kept finding the rest.
       green** on a freed block — "ran" does not discriminate, "ran on
       what" does. Census **100 / 77 / 23 → 100 / 78 / 22.**
       `bench/log/linux/2026-09-21-finalizer-resurrect-arm/FINDINGS.md`
+      **2026-09-21, later: `make compiler-gc-contract` constructs its
+      red direction per run, and the list of gates owed an arm is
+      empty.** `GCRY_DISABLE_LAYOUT=1` registers no layouts, so the
+      contract's "Array type_id is registered for layout" check fails
+      (1 of 12) and the recipe requires it. The last two, `oom-test`
+      and `thread-storm`, are smokes whose only red is a crash, each
+      beside a gate that already owns the defect with a per-run arm
+      (`oom-no-hang`, `thread-churn-uaf`); an arm on them would test
+      the arm. Recorded with the fuzz and property families. Census
+      **100 / 78 / 22 → 100 / 79 / 21**: 11 defect-finders, 2
+      typechecks, 4 research targets, 4 crash-only smokes.
+      `bench/log/linux/2026-09-21-contract-layout-arm/FINDINGS.md`
 - [ ] **Benchmark regression alerts** (Phase 2, pulled forward). `perf-smoke` gates
       on fixed floors — thr ≥65%, RSS ≤1.25×, p50 ≤2.5 ms — so a regression that
       lands inside the floor is invisible, and the floors sit far below tip

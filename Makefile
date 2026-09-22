@@ -241,9 +241,14 @@ rss-leak: $(BIN)
 	! $(BIN)/rss_leak --warmup=$${RSS_WARMUP:-15} --cycles=$${RSS_CYCLES:-20} --objects=$${RSS_OBJECTS:-5000} \
 		--limit=$${RSS_LIMIT:-10} --rss-limit=$${RSS_RSS_LIMIT:-25} --leaking
 
+# The GC API and the compiler's type_id / layout contract. The red arm:
+# `GCRY_DISABLE_LAYOUT=1` registers no layouts, so "Array type_id is
+# registered for layout" must fail and the run must exit non-zero — the one
+# check here whose subject the collector can switch off.
 compiler-gc-contract: $(BIN)
-	$(CRYSTAL) build -Dgc_none bench/compiler_gc_contract.cr -o $(BIN)/compiler_gc_contract
+	$(CRYSTAL) build -Dgc_none bench/compiler_gc_contract.cr -o $(BIN)/compiler_gc_contract --error-trace
 	$(BIN)/compiler_gc_contract
+	! GCRY_DISABLE_LAYOUT=1 $(BIN)/compiler_gc_contract
 	$(CRYSTAL) tool hierarchy src/gcry.cr >/dev/null
 	$(CRYSTAL) tool unreachable bench/compiler_gc_contract.cr -Dgc_none >/dev/null
 

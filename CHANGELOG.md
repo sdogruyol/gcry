@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object swept. With the resurrection dropped, phase 0 fails and phases
   1–7 all stay green on a freed block. Census **→ 100 / 78 / 22.**
 
+- **`make compiler-gc-contract` runs once with layouts off and must
+  fail.** `GCRY_DISABLE_LAYOUT=1` registers no layouts, so the contract's
+  layout-registration check is the one of twelve the collector can be
+  made to fail, and the recipe requires it. With that the census's list
+  of gates owed an arm is empty: `oom-test` and `thread-storm` are
+  crash-only smokes beside gates that already own their defect
+  (`oom-no-hang`, `thread-churn-uaf`), and are recorded as such rather
+  than given an arm that would test the arm. Census **→ 100 / 79 / 21.**
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed
