@@ -188,6 +188,10 @@ module Gcry
       @@tls_roots = value
     end
 
+    def self.tls_roots? : Bool
+      @@tls_roots
+    end
+
     def self.tls_root_range : {UInt64, UInt64}
       {@@tls_lo, @@tls_hi}
     end

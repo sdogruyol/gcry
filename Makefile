@@ -1214,11 +1214,17 @@ thread-census-names: $(BIN)
 #
 # Fails if `addr2line` is absent rather than skipping: a resolution step that
 # quietly does nothing is the rot this gate family exists to prevent.
+#
+# `--parked` for the same reason the two location arms take it: a frame to
+# resolve needs a task parked in a syscall, and without a planted one the
+# subject is whichever peer happens to be asleep. This target went red on
+# 2026-09-22 (run `35709742955`) with `no frame landed in this binary` on a
+# tree that changed nothing it reads.
 .PHONY: thread-census-symbolize
 thread-census-symbolize: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_census_names.cr -o $(BIN)/thread_census_names --error-trace
 	@command -v addr2line >/dev/null 2>&1 || { echo "FAIL: addr2line is missing, so the reported offsets cannot be resolved"; exit 1; }
-	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names 2>&1); \
+	@out=$$(GCRY_THREAD_CENSUS=1 $(BIN)/thread_census_names --parked 2>&1); \
 	echo "$$out" | grep -a "returns through" | sed 's/^/  /' | sort -u; \
 	frames=$$(echo "$$out" | grep -ao "thread_census_names+0x[0-9a-f]*" | sed 's/.*+0x//' | sort -u); \
 	[ -n "$$frames" ] || { echo "FAIL: no frame landed in this binary, so there is nothing to resolve"; exit 1; }; \

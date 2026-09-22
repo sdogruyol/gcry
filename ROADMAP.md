@@ -2324,6 +2324,17 @@ kept finding the rest.
       buys is the *window* — 6 churn children built **120** give-ups,
       5 712 dying-`Thread` reports, **0 with a holder**, 0 crashes.
       `bench/log/linux/2026-09-22-uaf-sampler-windows/FINDINGS.md`
+      **A CI sighting with the amplified arm, 2026-09-22 (run
+      `35709742955`).** `guarded 1 of 24` on the **header** layout:
+      `SIGSEGV at 0x55797df8d — outside gcry's heap span … never a gcry
+      allocation, so a swept object is not the explanation`. Local, same
+      binary and arm: **0 of 40**. A wild address rather than a released
+      chunk, so it is not the shape the 2026-09-13 fix closed; what it
+      is cannot be said, because the harness kept one line of the report
+      and dropped the region line under it that names the mapping. That
+      is fixed — the whole block travels now — so the next one arrives
+      with its mapping instead of as a number.
+      `bench/log/linux/2026-09-22-three-reds/FINDINGS.md`
       **And an unbounded leak, fixed on the way**: a birth root was released
       only when the pre-suspend walk found its thread on Crystal's list, so a
       thread that published and exited between two collections kept its root

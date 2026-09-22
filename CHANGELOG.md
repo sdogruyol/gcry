@@ -74,6 +74,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   probe now sleeps in 20 ms `nanosleep` calls under `--parked`, which
   both arms use; every other arm is untouched.
 
+- **A gate that fails must name the range it asserts about.** `make
+  tls-roots` went red once in 90 Windows jobs (run `35709742955`) and its
+  output could say only that the slot is outside the *stack* — which it
+  always is; that is the gate's premise. It now prints
+  `Platform.tls_root_range`, the range gcry pushed for the TLS block, and
+  which side the slot fell off by how many bytes, so the next red tells
+  an anchor that moved from a window `VirtualQuery`'s clip cut short.
+  `make thread-census-symbolize` took the `--parked` probe as well — it
+  reads the same syscall frames as the two location arms and went red for
+  want of one. And `bench/thread_churn_uaf.cr` keeps the whole `gcry:`
+  report block from a sighting rather than its first line: the 2026-09-22
+  out-of-span fault arrived as one address, with the region report that
+  names the mapping dropped on the floor.
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed

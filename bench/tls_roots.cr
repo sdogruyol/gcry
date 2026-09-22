@@ -114,6 +114,19 @@ if bounds
 else
   puts "main thread: no stack bounds available"
 end
+# The range gcry actually pushed for this thread's TLS, which is the thing
+# under test — and which this harness did not print until 2026-09-22, when
+# the Windows job went red once in 90 and its output could say only that the
+# slot is not in the stack (it never is; that is the point of the gate). A
+# gate that fails without naming the range it asserts about costs a rerun.
+tls_lo, tls_hi = Gcry::Platform.tls_root_range
+if tls_hi > tls_lo
+  puts "  gcry's TLS root range: [0x#{tls_lo.to_s(16)}, 0x#{tls_hi.to_s(16)}) — " \
+       "the slot is #{tls >= tls_lo && tls < tls_hi ? "INSIDE" : "OUTSIDE"} it" \
+       "#{tls < tls_lo ? " by #{tls_lo - tls} bytes below" : (tls >= tls_hi ? " by #{tls - tls_hi + 1} bytes above" : "")}"
+else
+  puts "  gcry pushed NO TLS root range (tls_roots=#{Gcry::Platform.tls_roots?}), so nothing covers the slot"
+end
 puts ""
 
 hidden = make_victim(!control)

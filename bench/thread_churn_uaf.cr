@@ -116,8 +116,23 @@ def run_arm(self_path : String, arm : Arm, attempts : Int32, want : String) : Re
       failed += 1
       next if report
       lines = sink.to_s.lines
-      report = lines.find(&.includes?(want)).try(&.strip) ||
-               lines.find(&.starts_with?("gcry:")).try(&.strip)
+      # The whole `gcry:` block from the first interesting line, not one line
+      # of it. An out-of-span fault's first line says only "never a gcry
+      # allocation"; the line under it is the region report naming the mapping,
+      # which is the half that says what the address *is* — and it was being
+      # dropped. Seen on 2026-09-22 (run `35709742955`), where the sighting
+      # arrived as one address and nothing else.
+      at = lines.index(&.includes?(want)) || lines.index(&.starts_with?("gcry:"))
+      if at
+        block = [] of String
+        while at < lines.size && block.size < 8
+          line = lines[at].strip
+          break unless line.starts_with?("gcry:") || block.empty?
+          block << line
+          at += 1
+        end
+        report = block.join("\n  ")
+      end
     end
   end
   Result.new(arm.name, attempts, failed, report)
