@@ -65,3 +65,16 @@ on this host.
 
 `crystal spec` 288/0, `process_spec` 32/0, five further repeats of the
 gate green.
+
+## The same guard, one method down
+
+`minor_collect` carries a byte-identical guard and was left reading the
+pair unordered when `collect` was fixed — the write side is shared and
+was already corrected, but a weakly ordered CPU can still misread there,
+and a minor that takes that return is as silent as a major that does.
+Same treatment: flag, acquire fence, owner, and the return counted in
+`collect_reentrant_skips`.
+
+Verified after: `crystal spec` 288/0, `process_spec` 32/0,
+`make nursery-bitmap-marks` and `make nursery-tlab-smoke` green (both
+drive `minor_collect`), `make explicit-collect-barrier` 4 of 4 arms ok.

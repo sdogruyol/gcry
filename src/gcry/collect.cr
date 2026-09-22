@@ -1753,7 +1753,15 @@ module Gcry
     # (no compiler write barrier required).
     def minor_collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false) : Nil
       return if @destroyed
-      return if @collecting && (@collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id)
+      # Same pair, same order as `collect` above: flag, acquire fence, owner.
+      # A minor that takes this return is as silent as a major that does.
+      if @collecting
+        Atomic::Ops.fence(LLVM::AtomicOrdering::Acquire, false)
+        if @collect_skip_when_busy || @collector_pthread == Gcry::Platform.current_thread_id
+          @collect_reentrant_skips &+= 1
+          return
+        end
+      end
       return if monitor_thread?
       return if thread_not_ready_for_collect?
       return unless @nursery_enabled

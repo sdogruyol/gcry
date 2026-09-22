@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three sites that start a cycle, with a release fence before the flag
   and an acquire fence between the guard's two reads, and the return is
   counted as `collect_reentrant_skips` — which the gate now requires to
-  be zero, since a silent return was the thing under test.
+  be zero, since a silent return was the thing under test. `minor_collect`
+  carries the same guard and got the same read-side ordering and counter.
 
 ### Changed
 
