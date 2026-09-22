@@ -86,6 +86,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seven samples, and the difference is not cosmetic: the same host read
   `/json` at **65.6%** of Boehm on one sample and **111.6%** on five.
 
+- **`bench/collect_perf_summaries.sh`**: the baseline recording's missing
+  half. Assembling N green summaries from CI artifacts was a hand job —
+  the 48-run Linux baseline was downloaded run by run — and a hand job is
+  one nobody repeats, which is how a baseline outlives two default flips.
+  `ARTIFACT` and `RUNNER` select the job and whose numbers inside it,
+  mismatched summaries are skipped and counted, and it says when it has
+  fewer than twenty. `bench/fetch_prev_perf_summary.sh` takes the same
+  two variables instead of hardcoding the Linux job.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn

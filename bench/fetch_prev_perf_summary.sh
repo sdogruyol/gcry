@@ -16,6 +16,12 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${PERF_PREV_OUT:-/tmp/gcry-prev-perf-summary.json}"
+# Which job's artifact, and whose numbers inside it. Defaults are the Linux
+# perf job because it is the one that gates; the Darwin job uploads
+# `perf-smoke-report-macos` and will want this the day it has a baseline,
+# and a second copy of this script is how the two drift apart.
+ARTIFACT="${PERF_PREV_ARTIFACT:-perf-smoke-report}"
+RUNNER="${PERF_PREV_RUNNER:-ubuntu-latest}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -44,20 +50,20 @@ for id in $RUNS; do
   [ "${id}" = "${GITHUB_RUN_ID:-}" ] && continue
   rm -rf "$WORK/art"
   mkdir -p "$WORK/art"
-  gh run download "$id" -n perf-smoke-report -D "$WORK/art" >/dev/null 2>&1 || continue
-  found="$(python3 - "$WORK/art" "$LAYOUT" <<'PY'
+  gh run download "$id" -n "$ARTIFACT" -D "$WORK/art" >/dev/null 2>&1 || continue
+  found="$(python3 - "$WORK/art" "$LAYOUT" "$RUNNER" <<'PY'
 import json, pathlib, sys
-root, layout = pathlib.Path(sys.argv[1]), sys.argv[2]
+root, layout, runner = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 best = None
 # `_run/summary.json` since 2026-09-13; the nested path is what the old
 # whole-tree artifacts carry, and they stay downloadable for 30 days.
-for pattern in ("_run/summary.json", "summary.json", "linux/*/summary.json"):
+for pattern in ("_run/summary.json", "summary.json", "linux/*/summary.json", "*/*/summary.json"):
     for f in root.glob(pattern):
         try:
             s = json.loads(f.read_text())
         except Exception:
             continue
-        if s.get("runner") != "ubuntu-latest":
+        if s.get("runner") != runner:
             continue
         if layout and s.get("layout") != layout:
             continue

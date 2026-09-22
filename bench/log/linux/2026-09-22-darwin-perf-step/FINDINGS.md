@@ -124,3 +124,28 @@ distribution is the n=3 one, so the change requires re-recording from
 on every push. Left at 3 deliberately, with the number written down, so
 the next person weighing it has both halves instead of discovering the
 first one again.
+
+## The recording tool the baseline never had
+
+The 48-run Linux baseline was assembled by downloading runs one at a
+time. A hand job is one nobody repeats, which is how a baseline survives
+two default flips unnoticed (0.24.0, 0.26.0) — and the Darwin step now
+needs exactly that job done again.
+
+`bench/collect_perf_summaries.sh` does it, parameterised rather than
+copied: `ARTIFACT` and `RUNNER` select the job and whose numbers inside
+it, summaries on another runner or layout are skipped and counted, and
+it says so when it has fewer than the twenty a recording should use.
+`bench/fetch_prev_perf_summary.sh` takes the same two variables, so the
+day Darwin gates it does not need a second copy of that script either.
+
+Run against CI today:
+
+| target | collected |
+|---|---|
+| `perf-smoke-report` / `ubuntu-latest` (last 8 runs) | 5 |
+| `perf-smoke-report-macos` / `macos-latest` (last 12) | 2 |
+
+The two Darwin samples, both at `BENCH_RUNS=7`: `pct_json` **111.6** and
+**111.5**, `rss_x` 1.092 and 1.176. Consistent on the metric that swung
+46 points under the old sampling.
