@@ -2618,8 +2618,8 @@ kept finding the rest.
       mid-`index_insert` leaves the array itself half-updated — and because
       nothing has yet been seen to hit it.
 
-- [ ] **An unattributed crash in the TLAB+nursery arm, twice, on two
-      platforms — very likely the one closed above, pending its absence.**
+- [x] **An unattributed crash in the TLAB+nursery arm, twice, on two
+      platforms — closed 2026-09-22 on 891 quiet samples.**
       The mechanism now fits without any gap: the crash faults in `find_block`
       under `tlab_alloc_small`, TLAB is what puts `find_block` on the allocation
       fast path, and that is the one arm where mutators make millions of chunk
@@ -2663,8 +2663,17 @@ kept finding the rest.
       quiet. First batch (run `35702584536`): **x86_64 100 of 100,
       Darwin 30 of 30 quiet**, every one with TLAB hits — 141 real
       samples since 2026-09-20, P(silence | defect present) ≈ 0.24.
-      Closes when the samples reach ~300 quiet on both, or speaks
-      with poison + holders when it does not.
+      **Closed the same day on the number it named.** Seven x86_64
+      batches of 100 and six Darwin batches of 30 — **880 sampler runs,
+      0 crashed, 0 without TLAB hits** — plus the 11 CI-arm runs, is
+      **891** quiet samples of the arm that crashed twice in ~206. At
+      that rate P(all 891 quiet | the defect is still there) ≈
+      **0.0002**, against the ~308 the item set for 95%. Both platforms
+      it was seen on, with poison, the address tag, the crash report,
+      the thread census and the block audit armed on every one. If it
+      returns, it returns into a sampler that keeps its logs and says
+      so — which is the difference from the year this item spent
+      waiting for one run a week.
 
 - [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
       The record the pre-stop wait runs on was kept in a 64-slot table drained

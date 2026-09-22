@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   30 samples on Darwin per CI run, `continue-on-error` like the thread
   sampler.
 
+- **And it closed the item the same day.** Seven x86_64 batches of 100
+  and six Darwin batches of 30 — 880 sampler runs, 0 crashed, 0 without
+  TLAB hits — plus the 11 CI-arm runs make **891** quiet samples of an
+  arm that crashed twice in ~206. P(all quiet | the defect is still
+  there) ≈ 0.0002 against the ~308 the item set for 95%.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn
