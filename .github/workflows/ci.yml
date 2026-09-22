@@ -1818,7 +1818,14 @@ jobs:
       - name: Kemal A/B thr+RSS+pause, report-only
         run: |
           mkdir -p bin
-          PORT=3011 WRK_DURATION=5 WRK_CONNECTIONS=50 BENCH_RUNS=7 \
+          # WRK_DURATION=10, not the Linux job's 5. The first four samples on
+          # this runner read pct_json 111.6 / 111.5 / 148.1 / 103.9 — a
+          # cross-run sd of 19 pp against the Linux baseline's 4.1 — and a 3.3
+          # sd gate on that would fire at 63 pp below the mean, looser than the
+          # fixed floor it exists to replace. So the sampling goes up before
+          # twenty samples are spent under a protocol that cannot gate; whether
+          # it helps is the measurement, and the number to beat is 4.1.
+          PORT=3011 WRK_DURATION=10 WRK_CONNECTIONS=50 BENCH_RUNS=7 \
             MIN_PCT=0 MAX_RSS_X=99 MAX_PAUSE_P50_MS=999 \
             RUNNER_LABEL=macos-latest \
             ./bench/perf_smoke.sh

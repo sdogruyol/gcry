@@ -149,3 +149,32 @@ Run against CI today:
 The two Darwin samples, both at `BENCH_RUNS=7`: `pct_json` **111.6** and
 **111.5**, `rss_x` 1.092 and 1.176. Consistent on the metric that swung
 46 points under the old sampling.
+
+## The first four samples say the protocol cannot gate yet
+
+| run | `pct_json` | `rss_x` | `pause_p50_ms` |
+|---|---|---|---|
+| 1 | 111.6 | 1.092 | 0.485 |
+| 2 | 111.5 | 1.176 | 0.529 |
+| 3 | **148.1** | 1.121 | 0.463 |
+| 4 | 103.9 | 1.291 | 0.476 |
+
+Cross-run sd: `pct_json` **19.9 pp**, `rss_x` 0.088, `pause_p50_ms`
+0.029. The Linux baseline's are 4.12, 0.059 and 0.098 — so Darwin's
+throughput spread is **4.8x** Linux's, and a 3.3 sd gate built on it
+would fire 65.6 pp below the mean. That is looser than the 70% fixed
+floor it would replace, which makes it not a gate at all. `rss_x` and
+`pause_p50_ms` are in Linux's range already.
+
+So the sampling goes up now rather than after twenty samples are spent
+under a protocol that cannot produce a usable tolerance:
+`WRK_DURATION=10` on the Darwin job (Linux keeps 5). Whether it helps is
+the measurement; the number to beat is the 4.1 pp Linux manages, and the
+four samples above are not comparable with what follows — a different
+protocol is a different distribution, the same rule that makes a
+cross-runner baseline report-only.
+
+What is already worth stating: on `/json` this collector is **ahead of
+Boehm on the macOS runner**, by 4 to 48 points depending on the hour.
+The open question is the runner's variance, not the collector's
+throughput.

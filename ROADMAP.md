@@ -1074,6 +1074,18 @@ kept finding the rest.
       5–23% against the Linux baseline's 4.1% across runs, so the Darwin
       recording needs more samples or a wider tolerance — a measurement,
       not a preference.
+      **Four samples in, and the protocol cannot gate yet.** `pct_json`
+      111.6 / 111.5 / **148.1** / 103.9 — cross-run sd **19.9 pp**
+      against the Linux baseline's 4.12, so a 3.3 sd gate would fire
+      65.6 pp below the mean, looser than the 70% floor it replaces.
+      `rss_x` (sd 0.088) and `pause_p50_ms` (0.029) are already in
+      Linux's range; throughput is the outlier. `WRK_DURATION` goes 5 →
+      10 on that job before twenty samples are spent under a protocol
+      that cannot produce a usable tolerance, and the four above do not
+      mix with what follows. Worth stating either way: on `/json` gcry
+      is **ahead of Boehm on the macOS runner**, by 4 to 48 points
+      depending on the hour — the open question is the runner's
+      variance, not the collector's throughput.
       `bench/log/linux/2026-09-22-darwin-perf-step/FINDINGS.md` **The Darwin soak smoke now
       gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
       measured on Linux and Darwin reclaims differently, and inventing a Darwin
