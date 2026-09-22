@@ -2598,7 +2598,13 @@ kept finding the rest.
       collector defect. **42 consecutive green since.** The duration is
       the thing to keep an eye on rather than the hang: the item recorded
       max 443 s on 2026-09-19 and the job's worst is 705 s now, 41% of
-      headroom left.
+      headroom left. **And that growth is now attributable**: all of it
+      sits inside one step (384 s of a 399 s job), which is the finest
+      granularity GitHub reports, so unlike the x86_64 job's doubling it
+      could not be diffed. Each of that step's 28 commands is timed now,
+      and an `EXIT` trap prints the slowest — including on the run that
+      fails, which is the one whose profile is worth having.
+      `bench/log/linux/2026-09-22-aarch64-step-timing/FINDINGS.md`
       What this closure does **not** claim: why a thread failed to
       acknowledge a suspend in the original sightings. That question is
       instrumented — `SUSPEND STALLED` carries resends unanswered,
