@@ -3,7 +3,7 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
@@ -1441,6 +1441,33 @@ thread-uaf-sample: $(BIN)
 	  echo "thread-uaf-sample: this batch neither built the window nor saw a Thread die, so its silence is an absence of both and not an absence of the defect"; \
 	fi; \
 	grep -h "dying-type audit\|threads at that moment\|held at\|address-space audit" $(SAMPLE_DIR)/*.log 2>/dev/null || true
+
+# Sampling, not gating: the TLAB+nursery arm of `stw_mt_property_test` died
+# twice on CI (x86_64 2026-08-17, Darwin 2026-08-22) and never locally. It ran
+# as a no-op from 0.26.0 to 2026-09-20 (headerless default), and the real arm
+# is back at one run per CI run — at the 2 crashes in ~206 runs it showed
+# before, eleven quiet runs leave a 90% chance of silence with the defect still
+# there, and 95% confidence of its absence needs ~308. One run costs 1.9 s, so
+# this takes the samples in one job instead of months: TLAB_NURSERY_RUNS
+# (100) runs, seeds 1..N, the diagnostics of the CI arm on, and every run must
+# report TLAB hits or the sample is not of the arm. Crashed runs keep their
+# logs in $(SAMPLE_DIR); a quiet batch says how many samples it is.
+tlab-nursery-sample: $(BIN)
+	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test_hdr --error-trace
+	@mkdir -p $(SAMPLE_DIR)
+	@runs=$${TLAB_NURSERY_RUNS:-100}; crashes=0; unengaged=0; \
+	for i in $$(seq 1 $$runs); do \
+	  log=$(SAMPLE_DIR)/tlab-nursery-$$i.log; \
+	  if GCRY_BITMAP_ALLOC=0 GCRY_POISON_HOLDERS=1 GCRY_THREAD_CENSUS=1 GCRY_THREAD_BLOCK_AUDIT=1 GCRY_STW_WATCHDOG_MS=10000 \
+	      $(BIN)/stw_mt_property_test_hdr --tlab --nursery --seed=$$i --iterations=50 --workers=2,4 > $$log 2>&1; then \
+	    if grep -qE "tlab_hits=[1-9]" $$log; then rm -f $$log; else unengaged=$$((unengaged+1)); fi; \
+	  else \
+	    crashes=$$((crashes+1)); \
+	  fi; \
+	done; \
+	echo "tlab-nursery-sample: $$runs runs, $$crashes crashed, $$unengaged without TLAB hits; logs of the crashed runs in $(SAMPLE_DIR)"; \
+	if [ "$$unengaged" != "0" ]; then echo "tlab-nursery-sample: $$unengaged run(s) passed without a TLAB hit, so they were not samples of the arm"; exit 1; fi; \
+	if [ "$$crashes" != "0" ]; then grep -h "gcry: SIGSEGV\|holders —\|dying-type audit" $(SAMPLE_DIR)/tlab-nursery-*.log 2>/dev/null | head -40; exit 1; fi
 
 thread-block-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_block_audit.cr -o $(BIN)/thread_block_audit --error-trace

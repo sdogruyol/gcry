@@ -2600,6 +2600,20 @@ kept finding the rest.
       layout with `GCRY_BITMAP_ALLOC=0` and requires TLAB hits; local
       CI parameters PASS (1302 hits). Still open until CI runs the
       real arm and stays quiet.
+      **2026-09-22: quiet is not evidence yet, and the sampler that
+      makes it so.** Eleven CI runs of the real arm since 2026-09-20,
+      all green. Priced against the rate it showed when it was real —
+      2 crashes in the 206 runs between 2026-08-17 and 0.26.0, ~1% per
+      run — eleven quiet runs leave a **90%** chance of silence with
+      the defect still there; 95% confidence of absence needs **~308**.
+      One run costs 1.9 s, so `make tlab-nursery-sample` takes
+      `TLAB_NURSERY_RUNS` (100) samples with seeds 1..N, the CI arm's
+      diagnostics on, requires each to report TLAB hits (or it was not
+      a sample of the arm), and keeps the logs of any that crash. A job
+      on x86_64 (100) and a step on Darwin (30) per CI run,
+      `continue-on-error` like the thread sampler; local 20 of 20
+      quiet. Closes when the samples reach ~300 quiet on both, or
+      speaks with poison + holders when it does not.
 
 - [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
       The record the pre-stop wait runs on was kept in a 64-slot table drained

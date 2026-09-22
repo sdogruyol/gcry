@@ -41,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`oom-no-hang`, `thread-churn-uaf`), and are recorded as such rather
   than given an arm that would test the arm. Census **→ 100 / 79 / 21.**
 
+- **A sampler for the TLAB+nursery arm.** The arm that crashed twice on
+  CI ran as a no-op for a month behind the headerless default; eleven
+  real runs since are all quiet, and at its 2-in-206 rate that is a 90%
+  chance of silence with the defect still there — 95% confidence of
+  absence needs ~308. `make tlab-nursery-sample` takes 100 samples at
+  1.9 s each with fresh seeds and the CI arm's diagnostics, requires TLAB
+  hits in every one, and keeps the logs of any crash: a job on x86_64 and
+  30 samples on Darwin per CI run, `continue-on-error` like the thread
+  sampler.
+
 ## [0.26.3] - 2026-09-21
 
 ### Fixed

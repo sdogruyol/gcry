@@ -1684,6 +1684,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Sampling, not gating: the TLAB+nursery arm crashed twice on CI (x86_64
+  # 2026-08-17, Darwin 2026-08-22) and never locally, then ran as a no-op for
+  # a month behind the headerless default. At the 2-in-206 rate it showed, the
+  # one run per CI run above would need ~308 quiet runs for 95% confidence of
+  # absence; a run costs 1.9 s, so this job takes 100 samples with fresh seeds
+  # and the same diagnostics, and keeps the logs of any that crash.
+  # `continue-on-error` for the same reason as the thread sampler: the item is
+  # open, and a red that everyone learns to ignore gates nothing.
+  tlab-nursery-sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    name: TLAB+nursery sampler (x86_64)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Run the arm that crashed a hundred times
+        run: make tlab-nursery-sample
+
+      - name: Upload what it caught
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlab-nursery-samples
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30
+
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -1958,6 +1990,23 @@ jobs:
       - name: Soak smoke
         run: |
           make soak-smoke
+
+      # The other platform the TLAB+nursery arm died on (run 32564282704,
+      # `find_block` under `tlab_alloc_small`, `0xffffffff00000012`). Thirty
+      # samples here beside the hundred on x86_64; sampling, so a crash keeps
+      # its log and does not take the job with it.
+      - name: TLAB+nursery sampler
+        continue-on-error: true
+        run: TLAB_NURSERY_RUNS=30 make tlab-nursery-sample
+
+      - name: Upload TLAB+nursery samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tlab-nursery-samples-darwin
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30
 
       # First run of the debug invariant checker on Darwin. It failed on Linux
       # and Darwin alike until 2026-08-15 (the walk counted every block of a
