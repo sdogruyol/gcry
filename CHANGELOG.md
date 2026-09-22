@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fewer than twenty. `bench/fetch_prev_perf_summary.sh` takes the same
   two variables instead of hardcoding the Linux job.
 
+- **The aarch64 CI step times its own commands.** That job grew from a
+  443 s max to 705 s against a 1200 s bound in three days, and all of it
+  is inside a single step — the finest granularity GitHub reports — so
+  unlike the x86_64 job's growth it could not be diffed. Each of the
+  step's 28 commands is timed now, with an `EXIT` trap printing the
+  slowest, so a run that *fails* still reports the profile of what ran
+  before it.
+
 - **The `Thread` UAF sampler buys give-up windows, not runs.** The
   statement it makes is "0 deaths with a holder across N windows", and
   the runners buy N at rates that differ a hundredfold: six churn
