@@ -2612,8 +2612,11 @@ kept finding the rest.
       a sample of the arm), and keeps the logs of any that crash. A job
       on x86_64 (100) and a step on Darwin (30) per CI run,
       `continue-on-error` like the thread sampler; local 20 of 20
-      quiet. Closes when the samples reach ~300 quiet on both, or
-      speaks with poison + holders when it does not.
+      quiet. First batch (run `35702584536`): **x86_64 100 of 100,
+      Darwin 30 of 30 quiet**, every one with TLAB hits — 141 real
+      samples since 2026-09-20, P(silence | defect present) ≈ 0.24.
+      Closes when the samples reach ~300 quiet on both, or speaks
+      with poison + holders when it does not.
 
 - [x] **A full staging table threw away the newest birth — closed 2026-08-22.**
       The record the pre-stop wait runs on was kept in a 64-slot table drained
