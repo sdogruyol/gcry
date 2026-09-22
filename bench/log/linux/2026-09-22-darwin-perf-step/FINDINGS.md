@@ -178,3 +178,11 @@ What is already worth stating: on `/json` this collector is **ahead of
 Boehm on the macOS runner**, by 4 to 48 points depending on the hour.
 The open question is the runner's variance, not the collector's
 throughput.
+
+## First sample at `WRK_DURATION=10`
+
+`pct_json` **96.1** (`/` 139.7), `rss_x` 1.146. Per-run noise 0.09 and
+0.24 — no better than at 5 s, so the within-run spread is not duration
+starvation. Whether the *cross-run* spread narrows is what the next
+samples answer; the four at 5 s were 111.6 / 111.5 / 148.1 / 103.9 and
+do not mix with these.

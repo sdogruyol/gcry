@@ -37,3 +37,35 @@ for. Two details that are the whole value:
   `t VAR=1 cmd` would exec `VAR=1` as a program.
 
 Costs one `date` per command. The next growth arrives attributed.
+
+## The first profile, and the accounting gap it exposed
+
+Run `35739434001`, `test (aarch64 native)`:
+
+```
+ 66  timeout 600 make stw-epoch
+ 21  timeout 300 make stw-ack-window
+ 18  crystal spec --release spec/kernels_spec.cr
+ 18  crystal build --release spec/kernels_spec.cr
+ 13  crystal spec
+ 12  env GCRY_SEGV_REPORT=1 timeout 600 make large-cache-race
+  9  crystal spec -Dgc_none -Dgcry_block_headers process_spec
+  8  timeout 300 make ec-queue-audit
+  7  timeout 300 make thread-census-names
+28 commands, 239 s accounted for
+```
+
+`stw-epoch` is the single largest item at 66 s, and no gate is anywhere
+near its `timeout 300` / `600` bound.
+
+But the step runs ~384 s, so **145 s was unaccounted** — the wrapper
+covered every line that starts with a command and missed exactly the
+ones that do not: `sudo apt-get update` / `install -y qemu-user`, the
+`for trial in 1 2 3; do crystal spec -Dgc_none process_spec; done` loop
+(three full process-spec runs, likely the biggest single cost in the
+job), and the `! GCRY_DISABLE_SP_CLAMP=1 ./bin/stw_sp_clamp` red arm.
+
+All four are timed now — `t` inside the loop body, and `! t env …` for
+the negated one, both verified not to kill the shell under `set -e`. A
+profile that accounts for 62% of its step is a profile that can hide the
+growth it exists to find.

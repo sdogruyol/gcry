@@ -2604,6 +2604,13 @@ kept finding the rest.
       could not be diffed. Each of that step's 28 commands is timed now,
       and an `EXIT` trap prints the slowest — including on the run that
       fails, which is the one whose profile is worth having.
+      First profile (run `35739434001`): `stw-epoch` 66 s is the
+      largest single item, then `stw-ack-window` 21 s and the two
+      release builds at 18 s each — and **145 s of the step was
+      unaccounted**, because the wrapper covered every line starting
+      with a command and missed the `for trial in 1 2 3` process-spec
+      loop, the two `apt-get` lines and the `!`-prefixed red arm. All
+      four are timed now.
       `bench/log/linux/2026-09-22-aarch64-step-timing/FINDINGS.md`
       What this closure does **not** claim: why a thread failed to
       acknowledge a suspend in the original sightings. That question is
