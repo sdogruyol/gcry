@@ -2610,7 +2610,15 @@ kept finding the rest.
       unaccounted**, because the wrapper covered every line starting
       with a command and missed the `for trial in 1 2 3` process-spec
       loop, the two `apt-get` lines and the `!`-prefixed red arm. All
-      four are timed now.
+      four are timed now. Second profile (`35772773739`): 34 commands,
+      **297 s of a 437 s step**, top `stw-ack-window` 22 s, the two
+      `--release` kernel builds 39 s together and the three
+      `process_spec` trials 25 s — compilation and one race gate, not
+      the collector's gates. The remaining 140 s was one more unwrapped
+      line (`FIND_BLOCK_RACE_RUNS=3 … make find-block-race`, missed
+      because the wrapper allowed only a `GCRY_*` env prefix); the step
+      now has no unwrapped command, checked by parsing the workflow
+      rather than by eye.
       `bench/log/linux/2026-09-22-aarch64-step-timing/FINDINGS.md`
       What this closure does **not** claim: why a thread failed to
       acknowledge a suspend in the original sightings. That question is

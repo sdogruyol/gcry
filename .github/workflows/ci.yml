@@ -1652,7 +1652,7 @@ jobs:
           # binary, and this is what turns its callers into source lines.
           t timeout 300 make thread-census-symbolize
           # This arch is where the crash was first seen, so it gates here too.
-          FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
+          t env FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race
           # The runner the suspend hang lives on. The signal path is the
           # thing under test, so this gate belongs here more than anywhere.
           t timeout 600 make stw-epoch

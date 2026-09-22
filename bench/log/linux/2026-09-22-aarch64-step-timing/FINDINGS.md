@@ -69,3 +69,34 @@ All four are timed now — `t` inside the loop body, and `! t env …` for
 the negated one, both verified not to kill the shell under `set -e`. A
 profile that accounts for 62% of its step is a profile that can hide the
 growth it exists to find.
+
+## Second profile: 34 commands, 297 s of a 437 s step
+
+Run `35772773739`, with the loop body, the apt-get pair and the negated
+arm now timed:
+
+```
+ 22  timeout 300 make stw-ack-window
+ 20  crystal build --release spec/kernels_spec.cr
+ 19  crystal spec --release spec/kernels_spec.cr
+ 15  env GCRY_SEGV_REPORT=1 timeout 600 make large-cache-race
+ 15  crystal spec
+ 12  sudo apt-get update
+ 11  crystal spec -Dgc_none process_spec      (trial 1 of 3)
+ 10  crystal spec -Dgc_none -Dgcry_block_headers process_spec
+  9  timeout 300 make ec-queue-audit
+34 commands, 297 s accounted for
+```
+
+Still 140 s short of the step, and the reason is one line:
+`FIND_BLOCK_RACE_RUNS=3 timeout 600 make find-block-race` — a race gate
+with three children and a 600 s bound, untimed because the wrapper's
+regex allowed a `GCRY_*` environment prefix and this one is
+`FIND_BLOCK_RACE_RUNS`. Wrapped now, and the step's body has no
+unwrapped command left (checked by parsing the workflow rather than by
+eye, which is how the first two escaped).
+
+Worth noting for the next time this job is trimmed: the three `crystal
+spec -Dgc_none process_spec` trials cost 11 + 7 + 7 = 25 s together, and
+the two `--release` kernel builds 39 s — the profile's top is
+compilation and one race gate, not the collector's gates.
