@@ -854,6 +854,19 @@ ignored-knob-warnings: $(BIN)
 	[ $$fail -eq 0 ] || exit 1
 	@echo "ok — every knob the compile default ignores says so, and only there"
 
+# A process that goes idle after a burst keeps what the last major graced:
+# emptied chunks past the warm budget stay mapped "for one cycle", and idle has
+# no next cycle. Uncapped, a 200 MB burst idled at 78.7 MB RSS against 6.3 MB
+# after `GC.collect`; grace is capped at one threshold since 2026-09-23. The
+# shipped arm must fit the bound and `GCRY_UNMAP_GRACE_UNBOUNDED=1` must not,
+# in the same run, so the gate cannot rot into passing both. ~15 s.
+.PHONY: idle-rss-after-burst
+idle-rss-after-burst: $(BIN)
+	@$(CRYSTAL) build -Dgc_none bench/idle_rss_after_burst.cr -o $(BIN)/idle_rss_after_burst --error-trace
+	@$(BIN)/idle_rss_after_burst
+	! GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst
+	@echo "ok — the capped arm fits and the uncapped red arm does not"
+
 # gcry vs Boehm on the fat app, paired and order-rotated.
 #
 # Needs ../acikturkiye with a reachable Postgres and `wrk`. Reports the median

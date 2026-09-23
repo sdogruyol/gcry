@@ -158,6 +158,9 @@ jobs:
       - name: Knobs the default ignores warn about it
         run: make ignored-knob-warnings
 
+      - name: Idle RSS after a burst (unmap grace capped)
+        run: make idle-rss-after-burst
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 

@@ -784,6 +784,15 @@ re-sampled profile; peak RSS × Boehm must not move.
 - [ ] Optional, RSS only: post-GC RSS is 27 MB (Boehm 26, master 15) because
       warm chunks stay resident; a time-decay release from the monitor thread
       would lower idle RSS without touching the loaded number.
+      **Re-measured 2026-09-23, and split in two.** (1) After a *burst*, the
+      unmap grace held every emptied chunk past the warm budget with no bound:
+      200 MB burst then idle, **78.7 MB** RSS against 6.3 MB after
+      `GC.collect`. Grace is capped at one threshold now (22.4 MB; Kemal
+      steady state null, +0.31% t=+0.43), gated by `make
+      idle-rss-after-burst`. (2) At *steady-state* idle the warm budget is
+      what is left: Kemal `/json` idles at 19.9 MB against a 13.3 MB floor
+      and Boehm's 13.4 MB. That part still needs the clock this item names.
+      `bench/log/linux/2026-09-23-idle-rss-grace/FINDINGS.md`
 - [x] Items 3–5 together: 113.3% [88.5, 138.0] of item 2 at n = 3, CPU 224 → 199 ms/10k, RSS 1.01×.
       Log: `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Branch `perf-stage2` on the PR head, unpushed.
 
