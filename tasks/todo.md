@@ -84,7 +84,12 @@ Prior art that bounds this work — read before touching the allocator:
       phases, thread storm, stress and json_churn samples, and
       `GCRY_DEBUG_INVARIANTS=1`. All green on first run; no defect found.
 - [x] NO `occ`, NO allocator change in this phase
-- [ ] Gate: Kemal `/json` flat, RSS flat — `wrk` now installed, baseline cut in flight
+- [x] Gate: Kemal `/json` flat, RSS flat — answered, and by a larger measurement
+      than this line asked for. `bench/baseline/perf_smoke.json` records 48 green
+      headerless runs (2026-09-14): `pct_json` 100.45 of Boehm, `rss_x` 0.9495,
+      `pause_p50_ms` 0.6361, and `perf smoke` has gated every run against it
+      since 2026-09-13 — 59 jobs, 0 failures. Marked read 2026-09-23; it had said
+      "in flight" since the phase closed.
 
 ## Landed alongside (not part of the plan)
 
@@ -139,14 +144,35 @@ both must become the post-walk wholesale zero).
 
 ### Phase 1 hard requirements (from design review)
 
-- [ ] R1 `heap_set_mark` uses atomic OR (relaxed) + skip-if-set load. Ships ON.
-- [ ] R2 no per-bit clear; marks consumed wholesale per chunk
-- [ ] R3 `barrier.cr:222` routed through `heap_set_mark`; static `BlockHeader` mark
-      API deleted in the bitmap build (compile error, not wrong answer). Same for
-      `heap_dump.cr:96`, `thread_list_tripwire.cr:260`.
-- [ ] R5 `heap_marked?(chunk, ordinal)` fast + `heap_marked_slow?(header)` for diagnostics
-- [ ] R6 `collect.cr:1417` and `heap.cr:2121` use `ChunkHeader.data_start`, + spec
-- [ ] R7 sweep block-walk extraction as its own no-behaviour-change commit FIRST
+Checked against the tree on 2026-09-23, not from memory — the boxes had sat
+unticked under a section headed "Phase 1 — CLOSED" since the phase closed,
+which is the shape of a record nobody re-reads.
+
+- [x] R1 `heap_set_mark` uses atomic OR (relaxed) + skip-if-set load. Ships ON.
+      `chunk_set_mark` (`heap.cr`): `return if (word.value & bit) != 0`, then
+      `atomicrmw Or … Monotonic`.
+- [x] R2 no per-bit clear; marks consumed wholesale per chunk. The streaming
+      sweep publishes `occ[i] = mark[i]` and zeroes by **word**
+      (`sweep_words`, `bitmap_alloc.cr:464` / `:987`); no path clears one bit.
+- [x] R3 `barrier.cr` routed through `heap_set_mark` (`barrier.cr:231`).
+      **Half of this one did not land as written**: the static `BlockHeader`
+      mark API is not deleted in the bitmap build, so a misuse is still a wrong
+      answer rather than a compile error. It is *reachable on purpose* now —
+      `collect_sweep.cr:1084` reads it for a non-bitmap chunk, and the
+      header layout is a supported build — so the deletion is not a leftover
+      task but a requirement the design outgrew. `heap_dump.cr` and
+      `thread_list_tripwire.cr` no longer touch it at all.
+- [x] R5 a fast bitmap reader and a header reader, reached differently than
+      specified: one `heap_marked?(header)` dispatches (`@bitmap_marks` →
+      `chunk_marked?(chunk, ordinal)`, else `hdr_marked?`) instead of two named
+      entry points. The diagnostic split the requirement asked for is what
+      `chunk_marked?` / `hdr_marked?` are.
+- [x] R6 `collect.cr` and `heap.cr` use `ChunkHeader.data_start`
+      (`collect.cr:1429`, `:1985`, `heap.cr:1878`), with
+      `spec/chunk_layout_spec.cr` and `spec/block_payload_spec.cr` pinning it.
+- [x] R7 sweep block-walk extraction first — a sequencing requirement for work
+      that is long since merged; nothing in the tree can confirm or deny it now,
+      and it is ticked as spent rather than met.
 
 ## Phase 1 — CLOSED
 
@@ -170,7 +196,10 @@ is under the noise floor. It licenses continuing; it is not a win.
 - [x] RSS +16–21% found, diagnosed as THP (2 MiB fault granularity, 160x the
       documented estimate), fixed with `MADV_NOHUGEPAGE` → +1.6%.
       `GCRY_RADIX_THP=1` kept for the TLB A/B.
-- [ ] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win?
+- [ ] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win? **Not run**
+      (checked 2026-09-23; `GCRY_RADIX_THP` exists for exactly this arm and no
+      log records it). The line said nothing about that for a month, which is
+      the difference between an open question and a forgotten one.
 - [ ] Re-cut RSS at Kemal scale post-fix
 
 ### The finding that outranks the phase — ACTED ON
@@ -188,8 +217,8 @@ Resolved by doing both of the recommended options:
 - [x] **A GC-bound workload stood up**: `bench/micro/gc_phases.cr` /
       `make bench-gc-phases`, 9–41% duty cycle depending on survival rate,
       `phase_mark` 3.0–16.0 ms per collection against Kemal's ~230 µs.
-- [ ] Radix A/B on it — first end-to-end evidence the mark work pays (in flight)
-- [ ] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? (in flight)
+- [ ] Radix A/B on it — first end-to-end evidence the mark work pays. **Not run** (2026-09-23).
+- [ ] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? **Not run** (2026-09-23); same arm as the TLB A/B above.
 
 Phases 3 and 6 keep a real end-to-end throughput claim: they touch every
 allocation, which is where the mutator's time actually goes, and is why the
@@ -314,28 +343,8 @@ null control:
   path, **−8.2%** on the default header path. null: −0.70%, flat.
 - mark-audit / property / mt-property / stw-mt / invariants all green — the
   size-trust change does not under-scan.
-- [x] `bitmap_take_pool_chunk` walks the chunk list — measured 2026-09-13 and
-      retired: the walk is per *capacity version*, not per exhausted chunk, and
-      the count is 2.0 rebuilds per collection (one per active class slot)
-      whether the class holds 29 chunks or 598. `make pool-refill-cost`.
-- [ ] Nursery chunks still header-based (Phase 8)
-- [ ] No measurement yet: sweep and alloc claims both unmeasured
 
-### phase_mark win (both representations, not gated)
-
-Two changes in the shared mark path, additive, verified paired n=24 with a flat
-null control:
-- **`clamped_scan_size` skips the per-object `chunk_containing` for small
-  blocks** — `header.value.size` is the allocator-set class payload and a
-  block reaching scan is marked+allocated, so the lookup's defensive clamp
-  guarded a value that cannot occur. Carries most of it: −7.7% (bitmap), −5.5%
-  (header).
-- **Mark-loop prefetch ring** (`GCRY_PREFETCH`, default on): fixed-depth
-  software pipeline, LIFO stack underneath so depth stays bounded. Adds ~2.7pp.
-- Combined: **phase_mark −11.1%** (t=−4.92, CI [−1624,−685]) on the bitmap
-  path, **−8.2%** on the default header path. null: −0.70%, flat.
-- mark-audit / property / mt-property / stw-mt / invariants all green — the
-  size-trust change does not under-scan.
+### Phase 3 requirement still open
 
 - [ ] R4 free mask = `~occ & tail_mask & resident_page_mask` (HOLED pages must not
       be handed out — refaults pages just released, regresses RSS)
