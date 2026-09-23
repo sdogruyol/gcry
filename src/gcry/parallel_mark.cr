@@ -235,6 +235,45 @@ module Gcry
       @mark_pushbuf_n[slot] = 0
     end
 
+    # Scan a batch with the serial drain's prefetch: header line and first
+    # payload line of the object `MARK_PREFETCH_DEPTH` ahead, while this one
+    # scans. The batch scan had none, and mark is latency-bound — on 64-byte
+    # objects the serial drain is **27.6% slower** without its ring
+    # (`GCRY_PREFETCH=0`, t=+12.9), which is about the whole gap between two
+    # parallel workers and one serial one at that size
+    # (`bench/log/linux/2026-09-23-parallel-mark-scaling/`). `GCRY_PREFETCH=0`
+    # turns this off too, so the A/B is one knob.
+    @[AlwaysInline]
+    private def scan_batch_prefetched(batch : Pointer(Void*), m : Int32) : Nil
+      unless @mark_prefetch
+        i = 0
+        while i < m
+          scan_object(batch[i].as(BlockHeader*))
+          i += 1
+        end
+        return
+      end
+      ahead = m < MARK_PREFETCH_DEPTH ? m : MARK_PREFETCH_DEPTH
+      j = 0
+      while j < ahead
+        h = batch[j]
+        Kernels.prefetch_read(h)
+        Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+        j += 1
+      end
+      i = 0
+      while i < m
+        k = i + MARK_PREFETCH_DEPTH
+        if k < m
+          h = batch[k]
+          Kernels.prefetch_read(h)
+          Kernels.prefetch_read((h.as(UInt8*) + BlockHeader::SIZE).as(Void*))
+        end
+        scan_object(batch[i].as(BlockHeader*))
+        i += 1
+      end
+    end
+
     # Take up to `cap` headers from the shared stack under one lock, and count
     # the taker busy **inside that same critical section**.
     #
@@ -335,11 +374,7 @@ module Gcry
           # still push — which is the invariant the master's check rests on.
           begin
             @parallel_mark_stolen &+= m.to_u64
-            i = 0
-            while i < m
-              scan_object(batch.to_unsafe[i].as(BlockHeader*))
-              i += 1
-            end
+            scan_batch_prefetched(batch.to_unsafe, m)
             flush_pushbuf(slot)
           ensure
             @mark_workers_busy.add(-1)
@@ -380,11 +415,7 @@ module Gcry
             # below — that branch is only reached when the pop came back
             # empty and nothing was counted.
             begin
-              i = 0
-              while i < m
-                scan_object(batch.to_unsafe[i].as(BlockHeader*))
-                i += 1
-              end
+              scan_batch_prefetched(batch.to_unsafe, m)
               flush_pushbuf(0)
             ensure
               @mark_workers_busy.add(-1)

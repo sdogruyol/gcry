@@ -92,3 +92,50 @@ object crosses the lock when there is someone idle to take it rather
 than every time. The termination argument survives it (a worker stays
 busy while it holds unflushed children, which is already the invariant).
 The curve above is the measurement that would say whether it worked.
+
+## Two candidates tried, one kept
+
+**Local-first drain — built, measured, rejected.** Workers took their own
+newest children back from the push buffer and published only to an idle
+peer, so an object crossed the shared stack when someone could take it.
+Termination-safe (the worker stays counted busy until its buffer is
+empty) and green on every parallel-mark gate. It did not pay:
+
+| object size | 2w flush | 2w local drain | 4w flush | 4w local drain |
+|---|---|---|---|---|
+| 64 B | +31.3% | +27.5% | +43.8% | +39.6% |
+| 128 B | +3.1% | +1.0% | +0.7% | +6.3% |
+| 256 B | −18.7% | −20.5% | −22.4% | −25.5% |
+| 512 B | −29.4% | −29.3% | −46.4% | −46.1% |
+
+About four points at 64 B, with ±7% per run at n=5: t ≈ 0.9. Not a
+measurable win, so it is not in the tree — the loop's shape suggested
+the hand-off, and the hand-off is not where the per-object cost is.
+
+**Batch prefetch — kept.** The serial drain has a 16-deep prefetch ring;
+the parallel batch scan had nothing. How much that ring is worth where
+the regression lives: serial at 64 B objects, `GCRY_PREFETCH=0` is
+**+27.6%** (t=+12.9). The batch now prefetches the header and first
+payload line of `batch[i+16]` while scanning `batch[i]`, under the same
+knob:
+
+| | 64 B, 2 workers | 512 B, 2 workers | 512 B, 4 workers |
+|---|---|---|---|
+| before | +32.1% | −28.9% | −46.4% |
+| batch prefetch | +30.8% | **−33.6%** | **−52.5%** |
+| final tree, re-measured (n=6) | — | −32.8% | −49.2% |
+
+A real gain where parallel mark already wins; none where it loses.
+
+## What that leaves
+
+On 64-byte objects two workers with prefetch are still ~30% slower than
+one worker with prefetch, and neither the hand-off nor the prefetch
+explains it. What is left is the one candidate that scales exactly like
+this curve and cannot be tested without a representation change: the
+mark bitmap. One 64-bit mark word covers 64 blocks — 4 KB of 64-byte
+objects, 32 KB of 512-byte ones — and every mark is an atomic `OR` on
+it, so on a shuffled graph two workers marking small neighbours are
+bouncing the same cache lines. Separating it needs an arm that spreads
+marks across lines (or a per-worker mark buffer merged at the end), and
+that is a design change rather than a knob.

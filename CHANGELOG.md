@@ -65,7 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at 64 B to −27.7% at 512 B, and 4 workers reach **−50.5%** at 512 B —
   the cost is paid per object (every object crosses the shared stack's
   lock twice, with no prefetch), so parallel mark wins on large objects
-  and loses on the small ones a Crystal heap is made of.
+  and loses on the small ones a Crystal heap is made of. The batch scan
+  now prefetches the way the serial drain does (header and first payload
+  line 16 objects ahead, `GCRY_PREFETCH` controls both): 512 B objects go
+  from −28.9% to **−33.6%** at 2 workers and −46.4% to **−52.5%** at 4.
+  A local-first drain was built, gated and measured alongside and did not
+  pay (t≈0.9 at 64 B), so it is not in the tree.
 
 ### Changed
 

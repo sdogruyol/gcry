@@ -427,8 +427,11 @@ null control:
       +30.5% / +8.8% / −19.1% / −27.7%, 4 workers +30.0% / −0.3% / −26.7% /
       **−50.5%**. The cost is per object and loses to small ones — every object
       crosses the shared stack's lock twice (flush, pop) and the batch scan has
-      no prefetch. Next: drain locally first and spill above a threshold; the
-      size curve is the measurement that would say it worked.
+      no prefetch. **Both tried**: local-first drain (−4 pts at 64 B, t≈0.9 —
+      rejected, not in the tree); batch prefetch (512 B 2w −28.9% → −33.6%,
+      4w −46.4% → −52.5%; neutral at 64 B — kept). The 64 B gap (~+30%) is
+      what remains, and the candidate that fits it is true sharing on the
+      mark bitmap's words, which needs a representation arm, not a knob.
       `bench/log/linux/2026-09-23-parallel-mark-scaling/FINDINGS.md`
 - [ ] Helpers still busy-spin between collections (separate, pre-existing).
 
