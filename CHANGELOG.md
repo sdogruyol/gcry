@@ -123,6 +123,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The Darwin perf job gates.** `bench/baseline/perf_smoke_macos.json`,
+  recorded from 21 green macOS runs, gates post-GC RSS (≤ 1.28x Boehm) and
+  pause p50 (≤ 0.68 ms); `/json` throughput is warn-only in that baseline
+  (sd 18 pp, against Linux's 4.1) with a `MIN_PCT=45` collapse floor. The
+  job also runs the two-runs-in-a-row check, and
+  `fetch_prev_perf_summary.sh` takes `PERF_PREV_BASELINE` so it reads the
+  layout from the platform's own baseline, and picks the newest summary by
+  its `timestamp` rather than extraction mtime.
+
 - **`make soak` and `make soak-smoke` construct their red direction per
   run.** The soak's one gate is an absolute RSS ceiling (+4096 kB over
   the warm-up plateau) that had only ever been seen to hold. `soak

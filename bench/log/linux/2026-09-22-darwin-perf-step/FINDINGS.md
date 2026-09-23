@@ -251,3 +251,23 @@ and reports `pct_json`.
   The job uploads `bench/log/_run/` now, as the Linux job does, and the
   collector takes the newest *matching* summary in an artifact rather than
   the first one found. 4 collected → 26.
+
+## Recorded at 21 (2026-09-23)
+
+`ARTIFACT=perf-smoke-report-macos RUNNER=macos-latest bench/collect_perf_summaries.sh`
+kept 21 at `wrk_duration_s=10 wrk_connections=50 bench_runs=7`, dropped 10
+from the 5 s protocol. `perf_compare.py --record --warn-only pct_json`:
+
+| metric | median | sd | tolerance | gate | range |
+|---|---|---|---|---|---|
+| `pct_json` | 105.2 | 18.03 | ±59.5 (warn-only) | floor `MIN_PCT=45` | 75.2 – 145.2 |
+| `pct_root` | 105.2 | 56.28 | ±185.7 (warn-only, global) | — | 62.5 – 278.1 |
+| `rss_x` | 1.123 | 0.048 | ±0.157 | **≤ 1.28** | 1.018 – 1.253 |
+| `pause_p50_ms` | 0.477 | 0.039 | ±0.2 (floor) | **≤ 0.68 ms** | 0.389 – 0.543 |
+
+Checked before the job was flipped to `PERF_GATE_BASELINE=1`: each of the
+21 recording summaries replayed through `--gate` passes (0/21 red); one with
+`rss_x` 1.35 exits 1, one with `pause_p50_ms` 0.9 exits 1, one with
+`pct_json` 40 exits 0 with a WARN line. `MIN_PCT=45` is mean − 3.3 sd of
+`pct_json`, the rule the baseline uses, applied as a fixed floor to the one
+metric the baseline does not gate, so a halving of throughput still fails.

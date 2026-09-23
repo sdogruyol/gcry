@@ -344,8 +344,8 @@ cp "$RUN_DIR"/*.json "$PUBLISH_DIR"/ 2>/dev/null || true
 # Per platform, because a tolerance is a statement about a runner class's
 # spread and not about the collector: `perf_compare.py` refuses to gate across
 # runner classes for the same reason it refuses across a layout flip. The macOS
-# file does not exist yet — the comparator then reports "none recorded yet",
-# which is the honest state until enough green Darwin runs exist to record one.
+# file was recorded 2026-09-23 from 21 green runs; a platform without one gets
+# "none recorded yet" from the comparator, which is the honest state.
 if [ -n "${PERF_BASELINE:-}" ]; then
   BASELINE="$PERF_BASELINE"
 elif [ "$PLATFORM_DIR" = "macos" ]; then

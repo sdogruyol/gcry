@@ -1,0 +1,60 @@
+{
+  "provenance": {
+    "runner": "macos-latest",
+    "layout": "headerless",
+    "commit": "98b744a60e176f9395b39a477c908670966f267b",
+    "runs": 21,
+    "recorded": "2026-09-23T11:55:37Z",
+    "wrk_duration_s": 10,
+    "wrk_connections": 50,
+    "bench_runs": 7,
+    "note": "Ratios only. Absolute RPS is not comparable across hosts; these are same-host, same-run ratios against Boehm."
+  },
+  "metrics": {
+    "pct_json": {
+      "value": 105.2,
+      "runs": 21,
+      "observed_range": [
+        75.2,
+        145.2
+      ],
+      "sd": 18.0267,
+      "tolerance": 59.488,
+      "sd_out": 3.3,
+      "warn_only": true
+    },
+    "pct_root": {
+      "value": 105.2,
+      "runs": 21,
+      "observed_range": [
+        62.5,
+        278.1
+      ],
+      "sd": 56.2791,
+      "tolerance": 185.7212,
+      "sd_out": 3.3
+    },
+    "rss_x": {
+      "value": 1.123,
+      "runs": 21,
+      "observed_range": [
+        1.018,
+        1.253
+      ],
+      "sd": 0.0476,
+      "tolerance": 0.1571,
+      "sd_out": 3.3
+    },
+    "pause_p50_ms": {
+      "value": 0.477,
+      "runs": 21,
+      "observed_range": [
+        0.389,
+        0.543
+      ],
+      "sd": 0.0388,
+      "tolerance": 0.2,
+      "sd_out": 5.16
+    }
+  }
+}

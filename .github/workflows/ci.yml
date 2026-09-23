@@ -1796,17 +1796,15 @@ jobs:
         run: ./ci/windows.ps1 -Architecture aarch64 -Variant '${{ matrix.variant }}' -Suite samples
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
-  # The Darwin half of the perf gate. The Linux job has compared every run
-  # against a measured baseline since 2026-09-13; Darwin had no perf step at
-  # all, which is the last piece of the CI-asymmetry item — and the one that
-  # cannot be borrowed, because a tolerance describes a runner class's spread.
-  # So this runs the same script, on its own baseline path, and **reports**:
-  # `bench/baseline/perf_smoke_macos.json` does not exist yet, and the
-  # comparator says so rather than comparing against the Linux file (which it
-  # now refuses to gate on across runner classes). The floors are the script's
-  # loose defaults, deliberately: inventing a Darwin number is what the Darwin
-  # soak ceiling was measured rather than assumed to avoid. Each run uploads
-  # its summary, which is what a recording will be made from.
+  # The Darwin half of the perf gate. It ran report-only from 2026-09-22 until
+  # it had its own baseline — a tolerance describes a runner class's spread,
+  # so the Linux file could not be borrowed — and gates since 2026-09-23 on
+  # `bench/baseline/perf_smoke_macos.json`, recorded from 21 green runs at
+  # 10 s x 7. It gates what this runner measures tightly: `rss_x` (sd 0.048,
+  # gate 1.28) and `pause_p50_ms` (sd 0.039, gate 0.68 ms at the 0.2 floor).
+  # `/json` throughput is warn-only in that baseline, because its sd is 18 pp
+  # (Linux: 4.1) and a 3.3 sd band on it is ±59 pp; the one throughput check
+  # left is the collapse floor below.
   perf-smoke-macos:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -1821,31 +1819,40 @@ jobs:
       - name: Install wrk
         run: brew install wrk
 
+      # The two-runs-in-a-row check, as on Linux, against this job's own
+      # artifact and baseline. Failure to fetch costs that check only.
+      - name: Previous run's perf summary
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PERF_PREV_ARTIFACT: perf-smoke-report-macos
+          PERF_PREV_RUNNER: macos-latest
+          PERF_PREV_BASELINE: bench/baseline/perf_smoke_macos.json
+        run: ./bench/fetch_prev_perf_summary.sh
+
       # BENCH_RUNS=7, not the Linux job's 3: the script discards min and max,
       # so 3 leaves **one** sample as the median — and this runner's first run
       # took 54839 / 75804 / 109267 req/s for one binary and path, a 2x spread
       # that a single survivor cannot represent. Seven keeps five.
       #
-      # No floor is passed. The script's defaults (70% / 1.5x / 3.0 ms) are
-      # Linux numbers, and the first Darwin run came in at 65.6% of Boehm off
-      # that one-sample median while the instrumented pass in the same job had
-      # gcry *ahead* (73462 vs 70167 req/s) — which is what an unmeasured floor
-      # applied to an unmeasured host produces. MIN_PCT=0 and the ceilings out
-      # of reach until the recorded baseline becomes the gate; the numbers are
-      # in the artifact either way, which is what the recording needs.
-      - name: Kemal A/B thr+RSS+pause, report-only
+      # Floors: MIN_PCT=45 is the recording's own rule applied to the metric it
+      # does not gate — mean 105.2 - 3.3 x sd 18.0 = 45.7 — so it catches a
+      # collapse (throughput halved) and nothing the runner does by itself;
+      # the lowest of the 21 samples was 75.2. The first Darwin run came in at
+      # 65.6% off a one-sample median, which is why the Linux 70% could not be
+      # used. The RSS and pause ceilings stay out of reach: the baseline gates
+      # those, far tighter than any fixed ceiling would.
+      - name: Kemal A/B thr+RSS+pause gate
         run: |
           mkdir -p bin
           # WRK_DURATION=10, not the Linux job's 5. The first four samples on
-          # this runner read pct_json 111.6 / 111.5 / 148.1 / 103.9 — a
-          # cross-run sd of 19 pp against the Linux baseline's 4.1 — and a 3.3
-          # sd gate on that would fire at 63 pp below the mean, looser than the
-          # fixed floor it exists to replace. So the sampling goes up before
-          # twenty samples are spent under a protocol that cannot gate; whether
-          # it helps is the measurement, and the number to beat is 4.1.
+          # this runner read pct_json 111.6 / 111.5 / 148.1 / 103.9, and the
+          # longer run was tried to narrow that; at n=21 the sd is 18 pp, so it
+          # did not, but it is the protocol the baseline was recorded under and
+          # changing it makes the comparator report instead of gate.
           PORT=3011 WRK_DURATION=10 WRK_CONNECTIONS=50 BENCH_RUNS=7 \
-            MIN_PCT=0 MAX_RSS_X=99 MAX_PAUSE_P50_MS=999 \
-            RUNNER_LABEL=macos-latest \
+            MIN_PCT=45 MAX_RSS_X=99 MAX_PAUSE_P50_MS=999 \
+            RUNNER_LABEL=macos-latest PERF_GATE_BASELINE=1 \
             ./bench/perf_smoke.sh
 
       - name: Upload perf report

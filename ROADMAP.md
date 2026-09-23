@@ -1029,7 +1029,8 @@ kept finding the rest.
       Writer frames follow the same pointer, and Darwin records `__TEXT`
       plus the dyld slide so `exe+offset` is printable. `make segv-report`
       is the gate; the Darwin job runs it.
-- [ ] **Close the Darwin CI asymmetry.** It is why the items above were open.
+- [x] **Close the Darwin CI asymmetry — closed 2026-09-23: Darwin perf gates
+      on its own baseline.** It is why the items above were open.
       `test-macos` runs `spec`, `process_spec`, the samples, `make
       chunk-search-race`, `make greg-roots`, `make scheduler-roots`, `make
       ivar-layout-roots`, `make ec-queue-audit`, `make perf-baseline`, both
@@ -1096,6 +1097,18 @@ kept finding the rest.
       quota'd `/tmp`) were reported as `collected 0`, and the macOS
       artifact carried checked-in laptop summaries that vetoed 22 of 26
       runs.
+      **Recorded and gating** (2026-09-23): `bench/baseline/perf_smoke_macos.json`
+      from **21** green runs at 10 s x 7. `rss_x` 1.123, gate 1.28 (sd
+      0.048); `pause_p50_ms` 0.477, gate 0.68 ms (sd 0.039, the 0.2 floor);
+      `pct_json` 105.2 with sd **18.0** and marked `warn_only` in the file
+      (`--record --warn-only`), with `MIN_PCT=45` — the same 3.3 sd rule,
+      105.2 − 59.5 — as the collapse floor. All 21 recording samples pass
+      the gate; `rss_x` 1.35 and `pause_p50_ms` 0.9 fail it, `pct_json` 40
+      warns. The previous-run streak check runs on Darwin too
+      (`fetch_prev_perf_summary.sh` takes the artifact, runner and baseline).
+      Every Linux gate this item listed now has a Darwin run; what stays
+      asymmetric is deliberate and says so where it lives — throughput's
+      tolerance, and soft-dirty, which Darwin does not have.
       `bench/log/linux/2026-09-22-darwin-perf-step/FINDINGS.md` **The Darwin soak smoke now
       gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
       measured on Linux and Darwin reclaims differently, and inventing a Darwin
