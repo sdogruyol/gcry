@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`GCRY_IDLE_RELEASE_MS=N`: give memory back when the process goes idle.**
-  Opt-in. Once the process has allocated nothing for N ms, a `gc-idle`
+- **An idle process gives its memory back: `GCRY_IDLE_RELEASE_MS`, on by
+  default at two minutes.** Once the process has allocated nothing for that
+  long (`=0` turns it off, any other value moves it), a `gc-idle`
   thread runs one collection that releases as `GC.collect` does — the warm
   budget, the unmap grace and the garbage no sweep has seen yet — the idea
   behind Go's forced GC and G1's periodic collection. Kemal `/json` idles at
@@ -20,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux suspend signal like the Monitor, and leaves finalizers to the next
   slow-path allocation on a mutator. It honours `GC.disable`, re-checked
   under the collector's lock. `make idle-release` gates it. It starts at the
-  first collection. Linux and Darwin; ignored with a warning on Windows and
-  under `-Dwithout_mt`.
+  first collection. Two minutes is Go's forced-GC period: a short delay
+  would release chunks the next burst faults straight back in. Linux and
+  Darwin; off on Windows and under `-Dwithout_mt`.
 
 ### Fixed
 

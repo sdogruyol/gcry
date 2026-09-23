@@ -1,5 +1,6 @@
-# Give memory back when the process goes idle. Opt-in:
-# `GCRY_IDLE_RELEASE_MS=<ms>`.
+# Give memory back when the process goes idle. On by default after two minutes
+# without an allocation (Linux, Darwin); `GCRY_IDLE_RELEASE_MS=<ms>` moves it,
+# `=0` turns it off.
 #
 # Nothing in gcry runs without an allocation to drive it, so a process that
 # stops allocating keeps what its last cycle left: the warm budget the sweep
@@ -41,6 +42,10 @@ require "./clock"
 
 module Gcry
   module IdleRelease
+    # Go forces a collection after two minutes without one; the same period,
+    # measured from the last allocation rather than the last collection.
+    DEFAULT_MS = 120_000_u64
+
     @@idle_ns = 0_u64
     @@started = false
     @@thread : Thread? = nil

@@ -20,12 +20,14 @@
 #   * finalizers ran as promptly as without it, and none on the idle thread;
 #   * nothing collects at idle while `GC.disable` is in force.
 #
-# The red arm is the same binary without the knob: nothing collects at idle,
-# the empty chunks stay mapped, and the run must fail.
+# The red arm is the same binary with the collector off
+# (`GCRY_IDLE_RELEASE_MS=0`; it is on by default at two minutes, far longer
+# than this run): nothing collects at idle, the empty chunks stay mapped, and
+# the run must fail.
 #
 #   crystal build -Dgc_none bench/idle_release.cr -o bin/idle_release
 #   GCRY_IDLE_RELEASE_MS=50 bin/idle_release     # PASS
-#   bin/idle_release                             # FAIL
+#   GCRY_IDLE_RELEASE_MS=0 bin/idle_release      # FAIL
 
 require "../src/gcry"
 
@@ -79,7 +81,10 @@ class Finalized
   end
 end
 
+# The gaps are sized from the idle time the run asked for; the red arm sets
+# `GCRY_IDLE_RELEASE_MS=0`, and its gaps stay those of a 50 ms run.
 idle_ms = (ENV["GCRY_IDLE_RELEASE_MS"]? || "50").to_i
+idle_ms = 50 if idle_ms <= 0
 rounds = (ENV["ROUNDS"]? || "40").to_i
 live_n = 20_000
 heap = Gcry.default_heap

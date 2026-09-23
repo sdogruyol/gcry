@@ -848,20 +848,28 @@ module GC
       Gcry::StwWatchdog.threshold_ms = wd if wd > 0
     end
     # One releasing collection once the process has not allocated for N ms
-    # (src/gcry/idle_release.cr). Opt-in. Linux and Darwin: the gate that
-    # holds it (`make idle-release`) has no Windows runner. And never under
-    # `-Dwithout_mt`, where `Crystal::SpinLock` compiles to nothing and a
-    # collection from a second thread would take none of the locks it needs.
-    if (idle = env_u64("GCRY_IDLE_RELEASE_MS")) && idle > 0
-      {% if flag?(:win32) %}
+    # (src/gcry/idle_release.cr). **On by default at two minutes** — Go's
+    # forced-GC period — on Linux and Darwin; `GCRY_IDLE_RELEASE_MS=0` turns it
+    # off. Two minutes, not seconds: a shorter delay releases chunks the next
+    # burst faults straight back in, which is the churn the warm budget and the
+    # unmap grace exist to prevent. Not Windows: the gate that holds it
+    # (`make idle-release`) has no Windows runner. Never under `-Dwithout_mt`,
+    # where `Crystal::SpinLock` compiles to nothing and a collection from a
+    # second thread would take none of the locks it needs. Both warn only when
+    # the knob is set, since off is simply their default.
+    idle_env = env_u64("GCRY_IDLE_RELEASE_MS")
+    {% if flag?(:win32) %}
+      if idle_env && idle_env > 0
         warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is not supported on Windows; ignored\n")
-      {% elsif flag?(:without_mt) %}
+      end
+    {% elsif flag?(:without_mt) %}
+      if idle_env && idle_env > 0
         warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is ignored under -Dwithout_mt: " \
                              "the locks a collection from another thread needs compile to nothing there\n")
-      {% else %}
-        Gcry::IdleRelease.idle_ms = idle
-      {% end %}
-    end
+      end
+    {% else %}
+      Gcry::IdleRelease.idle_ms = idle_env || Gcry::IdleRelease::DEFAULT_MS
+    {% end %}
     # Walk the Parallel EC run queues inside STW and check every slot is still a
     # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from

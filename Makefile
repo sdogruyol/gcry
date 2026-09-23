@@ -873,13 +873,13 @@ idle-rss-after-burst: $(BIN)
 # without delaying them. The harness keeps a checksummed live set across bursts
 # separated by idle gaps, and requires idle collections that released every
 # empty chunk, intact objects, and finalizers run as promptly as without it and
-# never on the idle thread. The same binary without the knob must fail. ~15 s.
+# never on the idle thread. The same binary with it off (=0) must fail. ~15 s.
 .PHONY: idle-release
 idle-release: $(BIN)
 	@$(CRYSTAL) build -Dgc_none bench/idle_release.cr -o $(BIN)/idle_release --error-trace
 	GCRY_IDLE_RELEASE_MS=50 $(BIN)/idle_release
-	! $(BIN)/idle_release
-	@echo "ok — idle collections release memory safely, and without the knob nothing does"
+	! GCRY_IDLE_RELEASE_MS=0 $(BIN)/idle_release
+	@echo "ok — idle collections release memory safely, and with the collector off nothing does"
 
 # gcry vs Boehm on the fat app, paired and order-rotated.
 #

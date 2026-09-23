@@ -188,3 +188,22 @@ Limitation, stated: the thread starts at the end of the first collection,
 because `Thread.new` before the runtime is up is a known crash
 (`gc_override.cr`). A process that has never collected has no idle
 collector — and less than one threshold (8 MiB minimum) to give back.
+
+## 4. On by default at two minutes
+
+Decided 2026-09-23: `GCRY_IDLE_RELEASE_MS` defaults to 120 000 on Linux and
+Darwin (Go's forced-GC period; ZGC uncommits after 5 min, G1 leaves periodic
+GC off), `=0` turns it off. Every process-GC program now has a `gc-idle`
+thread after its first collection, so every Linux CI target was re-run with
+it on — and the one that counts per-thread scan work found a cost the Kemal
+numbers could not show:
+
+**`make stw-slot-precision` failed**: 16 fiber stacks scanned from the guard
+page in 8 collections, where the collector's own fiber accounts for 8. On the
+multi-mutator path every *running* fiber is scanned from its thread's recorded
+SP, and the idle thread — signal-exempt on Linux — has none, so its fiber fell
+back to a full 8 MiB guard-to-bottom scan every collection. Kemal never takes
+that path (single mutator), which is why its pause p50 did not move. The idle
+fiber is skipped now (no GC references on it; the fiber object itself is still
+marked): 8 guard scans in 8, and the harness's per-collection time went from
+40.75 ms to 23.12 ms at 96 threads.

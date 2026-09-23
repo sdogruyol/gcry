@@ -781,7 +781,7 @@ re-sampled profile; peak RSS × Boehm must not move.
       static-root cache needs its own red arm.
 - [x] Not in scope: the 64% of main-thread time in socket syscalls and the
       20% in JSON/HTTP are Crystal's, identical in both arms.
-- [ ] Optional, RSS only: post-GC RSS is 27 MB (Boehm 26, master 15) because
+- [x] Optional, RSS only: post-GC RSS is 27 MB (Boehm 26, master 15) because
       warm chunks stay resident; a time-decay release from the monitor thread
       would lower idle RSS without touching the loaded number.
       **Re-measured 2026-09-23, and split in two.** (1) After a *burst*, the
@@ -796,8 +796,8 @@ re-sampled profile; peak RSS × Boehm must not move.
       *collection*, as Go and G1 do, after a page-release-only first version
       returned only ~2 of the ~7 MB. Kemal idles at 14.2 MB (-30%, t=-52.6)
       against the 13.4 MB floor, with throughput and pause p50 unchanged.
-      Open: whether to make it the default, and at what delay (Go 2 min,
-      ZGC 5 min).
+      **Default on at two minutes since 2026-09-23** (Go's period; ZGC uses
+      5 min, G1 leaves it off).
       `bench/log/linux/2026-09-23-idle-rss-grace/FINDINGS.md`
 - [x] Items 3–5 together: 113.3% [88.5, 138.0] of item 2 at n = 3, CPU 224 → 199 ms/10k, RSS 1.01×.
       Log: `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Branch `perf-stage2` on the PR head, unpushed.
