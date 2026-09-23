@@ -72,6 +72,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A local-first drain was built, gated and measured alongside and did not
   pay (t≈0.9 at 64 B), so it is not in the tree.
 
+- **Parallel-mark helpers no longer burn a core each between
+  collections.** They spun on the epoch word for the life of the process:
+  an idle program with `GCRY_PARALLEL_MARK=2/4/8` used 101% / 301% / 703%
+  of a core. They spin briefly and then sleep in 200 µs steps: 4.3% /
+  11.9% / 26.9%, with no measurable change to mark time where parallel
+  mark pays (512 B objects, 2 and 4 workers, |t| < 1.5).
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per

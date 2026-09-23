@@ -186,7 +186,12 @@ module Gcry
     # to once per few hundred objects instead of once per object, which is what
     # made parallel mark 60x slower than serial.
     MARK_PUSHBUF_CAP = 512
-    MARK_POP_BATCH   = 256
+
+    # Idle helper backoff: this many `pause` polls (~tens of µs) before it
+    # starts sleeping, then sleeps of this many ns. See `mark_worker_loop`.
+    MARK_IDLE_SPINS    =  20_000
+    MARK_IDLE_SLEEP_NS = 200_000
+    MARK_POP_BATCH     =     256
     # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
     # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
     # before Fiber is up during GC.init (see size_classes.cr).
@@ -347,12 +352,36 @@ module Gcry
 
       local_epoch = 0_u64
       batch = uninitialized StaticArray(Void*, MARK_POP_BATCH)
+      # Between collections a helper has nothing to do, and it used to spin on
+      # `@mark_epoch` with `Intrinsics.pause` for as long as the program ran:
+      # **a full core per helper, forever** — measured on an idle process,
+      # `GCRY_PARALLEL_MARK=2/4/8` burned 100% / 301% / 703% of one core
+      # while the mutator slept (2026-09-23). So it spins for
+      # `MARK_IDLE_SPINS` polls — long enough to catch the back-to-back
+      # epoch bumps of one collection without a syscall — and then sleeps in
+      # `MARK_IDLE_SLEEP_NS` steps. The cost is at most one sleep of lateness
+      # joining a collection that starts after an idle stretch; the master
+      # starts marking alone and a late helper picks up from the shared stack,
+      # so lateness costs parallelism, never correctness. Polling rather than a
+      # condition variable because there is no lost wake-up to reason about,
+      # and Windows maps this layer's mutex to an SRWLOCK with no condvar.
+      idle = 0
       while @mark_shutdown.get == 0
         epoch = @mark_epoch.get
         if epoch == local_epoch
-          Intrinsics.pause
+          if idle < MARK_IDLE_SPINS
+            idle += 1
+            Intrinsics.pause
+          else
+            req = uninitialized Gcry::OS::Timespec
+            req.tv_sec = typeof(req.tv_sec).new(0)
+            req.tv_nsec = typeof(req.tv_nsec).new(MARK_IDLE_SLEEP_NS)
+            rem = uninitialized Gcry::OS::Timespec
+            Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+          end
           next
         end
+        idle = 0
         local_epoch = epoch
         next if @mark_shutdown.get != 0
         ensure_pushbuf(slot)

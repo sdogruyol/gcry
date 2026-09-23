@@ -433,7 +433,11 @@ null control:
       what remains, and the candidate that fits it is true sharing on the
       mark bitmap's words, which needs a representation arm, not a knob.
       `bench/log/linux/2026-09-23-parallel-mark-scaling/FINDINGS.md`
-- [ ] Helpers still busy-spin between collections (separate, pre-existing).
+- [x] Helpers still busy-spin between collections — **a full core each, for the
+      life of the process** (idle: 2/4/8 workers burned 101% / 301% / 703% of a
+      core). Spin briefly, then 200 µs sleeps: 4.3% / 11.9% / 26.9%, and no
+      measurable cost to mark where parallel mark pays (|t| < 1.5).
+      `bench/log/linux/2026-09-23-mark-helper-idle/FINDINGS.md`
 
 ## Decision point for the next step
 
