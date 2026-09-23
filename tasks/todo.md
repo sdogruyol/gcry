@@ -627,10 +627,13 @@ away:
       PR #34 updated; `soak-smoke` and `soft-soak-ec4-smoke` green.
 - [x] (superseded, stopped for the evidence run) 24 h `make soak` started 2026-09-05 ~20:00 local; output in the
       session scratchpad `soak_full.out`, telemetry `/tmp/gcry-soak.log`.
-- [ ] Execution-context throughput: the stop-the-world pause is 14–27 ms per
+- [x] Execution-context throughput: the stop-the-world pause is 14–27 ms per
       collection at 4 threads with mark and sweep in microseconds — whole
       thread-stack scans. Measure `scan_other_thread_stacks` and the SP
-      snapshot on this box; low-water skip.
+      snapshot on this box; low-water skip. **Answered in ROADMAP, 2026-09-14**
+      ("The EC4 pause is the parked-fiber lag scan — priced, and declined"),
+      and the low-water skip it names shipped on Linux; this line was not
+      told. Marked 2026-09-23.
 - [x] `bitmap_take_pool_chunk` walks every chunk of the class per refill —
       **not what it does, measured 2026-09-13.** The walk builds a sorted index
       of candidate addresses once per capacity version, and each sweep bumps
@@ -704,8 +707,12 @@ All work stays in PR #34; preserve the reviewed head as the cumulative baseline.
       clearing; restore the process stress in header mode.
 - [x] Fix the stage-2 cursor-cache lifetime defect; replace the ineffective
       ASan flag with actual instrumentation and a failing control.
-- [ ] Header default decision: independent exclusive-host confirmation,
-      burst/drop/recovery and native platform gates still required.
+- [x] Header default decision — **made**: headerless became the compile
+      default on 2026-09-10 and shipped in 0.26.0, with the header layout kept
+      as `-Dgcry_block_headers`. The confirmation it asked for came as CI
+      rather than an exclusive host: 48 green headerless `perf smoke` runs
+      recorded as the baseline (2026-09-14) and every run gated against it
+      since, plus the native platform jobs. Marked 2026-09-23.
 - [ ] Conditional root/controller/mark-stack work: deferred until workload gates open.
 
 ## Throughput at flat RSS: stage 2 plan (2026-09-06)
