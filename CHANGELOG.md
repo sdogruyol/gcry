@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A TLAB refill no longer raises `OutOfMemoryError` because some other
+  thread is collecting.** After one miss, `tlab_refill` gave up whenever a
+  collection was in flight — heap-wide, including the post-STW phase in
+  which every other thread runs — so a transient miss there surfaced as an
+  OOM with memory to spare. It now gives up only on the collecting thread
+  itself; any other thread waits out the cycle and retries. Header layout
+  with `GCRY_TLAB=1` only; found by running `stw_mt_property_test --tlab`
+  beside the new idle collector (3 of 3 failed, now 5 of 5 pass).
+
+
 - **A process that goes idle after a burst gives the burst back.** An emptied
   chunk past the warm budget is kept mapped for one cycle so a class running
   a chunk short does not unmap and re-map every collection — but the grace
