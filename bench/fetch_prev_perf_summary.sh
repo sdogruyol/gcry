@@ -17,11 +17,12 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${PERF_PREV_OUT:-/tmp/gcry-prev-perf-summary.json}"
 # Which job's artifact, and whose numbers inside it. Defaults are the Linux
-# perf job because it is the one that gates; the Darwin job uploads
-# `perf-smoke-report-macos` and will want this the day it has a baseline,
-# and a second copy of this script is how the two drift apart.
+# perf job; the Darwin job passes `perf-smoke-report-macos`, `macos-latest`
+# and its own baseline, because a second copy of this script is how the two
+# drift apart.
 ARTIFACT="${PERF_PREV_ARTIFACT:-perf-smoke-report}"
 RUNNER="${PERF_PREV_RUNNER:-ubuntu-latest}"
+BASELINE="${PERF_PREV_BASELINE:-$ROOT/bench/baseline/perf_smoke.json}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -34,7 +35,7 @@ command -v python3 >/dev/null || { echo "no python3: skipping"; exit 0; }
 LAYOUT="$(python3 -c "
 import json
 try:
-    print(json.load(open('$ROOT/bench/baseline/perf_smoke.json'))['provenance'].get('layout') or '')
+    print(json.load(open('$BASELINE'))['provenance'].get('layout') or '')
 except Exception:
     print('')
 " 2>/dev/null)"
@@ -54,26 +55,23 @@ for id in $RUNS; do
   found="$(python3 - "$WORK/art" "$LAYOUT" "$RUNNER" <<'PY'
 import json, pathlib, sys
 root, layout, runner = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-best = None
-# `_run/summary.json` since 2026-09-13; the nested path is what the old
-# whole-tree artifacts carry, and they stay downloadable for 30 days.
-# `_run/summary.json` since 2026-09-13; `<label>/summary.json` is what the
-# macOS job's artifact carries (it uploads `bench/log/macos/`); the rest are
-# the older whole-tree artifacts, downloadable for 30 days.
-for pattern in ("_run/summary.json", "summary.json", "*/summary.json", "linux/*/summary.json", "*/*/summary.json"):
-    for f in root.glob(pattern):
-        try:
-            s = json.loads(f.read_text())
-        except Exception:
-            continue
-        if s.get("runner") != runner:
-            continue
-        if layout and s.get("layout") != layout:
-            continue
-        if best is None or f.stat().st_mtime > best.stat().st_mtime:
-            best = f
-    if best:
-        break
+# Every summary in the artifact, newest matching one by its own `timestamp`
+# (not the extraction mtime). Both jobs upload `bench/log/_run/` now; older
+# artifacts carry whole trees, including the macOS job's checked-in laptop
+# summaries, which the runner filter drops. Same rule as
+# `collect_perf_summaries.sh`.
+best, best_ts = None, ""
+for f in root.rglob("summary.json"):
+    try:
+        s = json.loads(f.read_text())
+    except Exception:
+        continue
+    if s.get("runner") != runner:
+        continue
+    if layout and s.get("layout") != layout:
+        continue
+    if best is None or s.get("timestamp", "") > best_ts:
+        best, best_ts = f, s.get("timestamp", "")
 print(best or "")
 PY
 )"
