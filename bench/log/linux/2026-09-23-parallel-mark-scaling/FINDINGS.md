@@ -139,3 +139,12 @@ it, so on a shuffled graph two workers marking small neighbours are
 bouncing the same cache lines. Separating it needs an arm that spreads
 marks across lines (or a per-worker mark buffer merged at the end), and
 that is a design change rather than a knob.
+
+**Why it is not measured here**: the instrument that would settle it is
+`perf c2c`, which counts loads that hit a line modified by another core
+(HITM) and names the lines. This VM exposes no `cpu` PMU
+(`/sys/bus/event_source/devices`: breakpoint, kprobe, msr, software,
+tracepoint, uprobe), so hardware cache events are unavailable. On bare
+metal: `perf c2c record -- env GCRY_PARALLEL_MARK=2 bin/gc_phases
+--fanout=6 --shuffle --size=8`, and the mark bitmap's lines at the top of
+the report would be the answer.
