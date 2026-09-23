@@ -73,7 +73,12 @@ module Gcry
     # actually touched. `GCRY_RADIX_THP=1` opts back in, because the huge page
     # also gives the whole table one TLB entry and some of the mark win may be
     # paid for by exactly the pages this gives up — that A/B is the knob's
-    # reason to exist.
+    # reason to exist. **Answered 2026-09-23**, on a workload that is 78% GC
+    # (`gc_phases --survival=0.5 --fanout=6 --shuffle`, 237 M radix lookups in
+    # 3 s, n=12 interleaved): pause per collection −1.40% with huge pages
+    # (t=−1.30, inside the noise), post-run RSS +3.27% (t=+12.45). The TLB entry
+    # buys nothing this benchmark can see; the page costs 2 MiB it always can.
+    # `bench/log/linux/2026-09-23-radix-thp-ab/FINDINGS.md`
     #
     # ## Lifetime, which is the whole safety argument
     #
@@ -262,10 +267,18 @@ module Gcry
       return Pointer(Void).null if Gcry.mmap_failed?(ptr)
       # See the cost note above: one touched entry otherwise faults a whole
       # 2 MiB huge page and the table's RSS stops tracking the live heap.
+      #
+      # The arm has to *ask* for huge pages, not merely stop forbidding them.
+      # Until 2026-09-23 `GCRY_RADIX_THP=1` only skipped `MADV_NOHUGEPAGE`,
+      # which is enough under THP `always` (where the RSS cost was found) and
+      # does nothing under `madvise` — Ubuntu's default and the GitHub runners',
+      # where only an explicit `MADV_HUGEPAGE` region gets one. Measured on a
+      # `madvise` host with the radix live (16 163 fast hits): **0 kB** of
+      # `AnonHugePages` with the knob off and **0 kB** with it on, so the A/B
+      # this knob exists for could not be taken on either host that runs it.
       {% if flag?(:linux) %}
-        unless @radix_thp
-          LibC.madvise(ptr, LibC::SizeT.new(bytes), Platform::MADV_NOHUGEPAGE)
-        end
+        LibC.madvise(ptr, LibC::SizeT.new(bytes),
+          @radix_thp ? Platform::MADV_HUGEPAGE : Platform::MADV_NOHUGEPAGE)
       {% end %}
       ptr
     end

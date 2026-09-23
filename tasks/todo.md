@@ -196,10 +196,12 @@ is under the noise floor. It licenses continuing; it is not a win.
 - [x] RSS +16–21% found, diagnosed as THP (2 MiB fault granularity, 160x the
       documented estimate), fixed with `MADV_NOHUGEPAGE` → +1.6%.
       `GCRY_RADIX_THP=1` kept for the TLB A/B.
-- [ ] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win? **Not run**
-      (checked 2026-09-23; `GCRY_RADIX_THP` exists for exactly this arm and no
-      log records it). The line said nothing about that for a month, which is
-      the difference between an open question and a forgotten one.
+- [x] TLB A/B: does `MADV_NOHUGEPAGE` cost any of the mark win? **No** —
+      pause per collection −1.40% with huge pages (t=−1.30, noise), RSS +3.27%
+      (t=+12.45), on a 78%-GC workload, n=12 interleaved (2026-09-23). It could
+      not be run before that day: the knob only skipped `MADV_NOHUGEPAGE`, which
+      under THP `madvise` gives 0 kB of huge pages either way.
+      `bench/log/linux/2026-09-23-radix-thp-ab/FINDINGS.md`
 - [ ] Re-cut RSS at Kemal scale post-fix
 
 ### The finding that outranks the phase — ACTED ON
@@ -218,7 +220,7 @@ Resolved by doing both of the recommended options:
       `make bench-gc-phases`, 9–41% duty cycle depending on survival rate,
       `phase_mark` 3.0–16.0 ms per collection against Kemal's ~230 µs.
 - [ ] Radix A/B on it — first end-to-end evidence the mark work pays. **Not run** (2026-09-23).
-- [ ] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? **Not run** (2026-09-23); same arm as the TLB A/B above.
+- [x] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? Same arm as the TLB A/B above — answered there: no.
 
 Phases 3 and 6 keep a real end-to-end throughput claim: they touch every
 allocation, which is where the mutator's time actually goes, and is why the
