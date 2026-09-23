@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A process that goes idle after a burst gives the burst back.** An emptied
+  chunk past the warm budget is kept mapped for one cycle so a class running
+  a chunk short does not unmap and re-map every collection — but the grace
+  had no bound, and an idle process has no next cycle. A 200 MB burst
+  followed by idle held 78.7 MB RSS against 6.3 MB after `GC.collect`. Grace
+  is capped at one threshold of chunks now, which is all a cycle can reuse
+  before the next major: 22.4 MB. Kemal `/json` steady state is unchanged
+  (+0.31%, t=+0.43, n=10; grace never engages there). `make
+  idle-rss-after-burst` gates it, with `GCRY_UNMAP_GRACE_UNBOUNDED=1` as the
+  arm that must fail.
+
 - **`GC.collect` could return having done nothing, one line wide.**
   `run_collection_body` set `@collecting = true` before it updated
   `@collector_pthread`, and `Heap#collect`'s re-entrancy guard reads that

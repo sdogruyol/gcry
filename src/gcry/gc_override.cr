@@ -1065,6 +1065,9 @@ module GC
     # chunks, which is the stand-down in `flush_pending_page_release_chunks`
     # turned off. `make darwin-bitmap-page-release` is the gate.
     heap.page_release_bitmap_walk = true if env_flag_one?("GCRY_PAGE_RELEASE_BITMAP_WALK")
+    # Research only: grace every emptied chunk past the warm budget, as before
+    # the threshold cap. `make idle-rss-after-burst` is the gate.
+    heap.unmap_grace_unbounded = true if env_flag_one?("GCRY_UNMAP_GRACE_UNBOUNDED")
     # Research only: restore the last-chunk cache read that crashed
     # `find_block` (src/gcry/heap.cr `chunk_containing_unlocked`).
     heap.index_cache_unchecked = true if env_flag_one?("GCRY_INDEX_CACHE_UNCHECKED")

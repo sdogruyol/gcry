@@ -38,6 +38,7 @@ module Gcry
       # Bytes of empty chunks kept warm / dormant this major (retain budgets).
       warm_budget_used = 0_u64
       dormant_budget_used = 0_u64
+      grace_budget_used = 0_u64
 
       # Read once, not at each of the three sites below.
       #
@@ -147,9 +148,20 @@ module Gcry
                     # the resident set settles at what the cycle needs rather
                     # than churning around it. Bitmap chunks only: the header
                     # allocator has no hook that clears the flag on reuse.
+                    #
+                    # Bounded at the threshold (2026-09-23). A cycle allocates
+                    # about one threshold before the next major, so it cannot
+                    # take more than that from the graced chunks; the rest were
+                    # always going to be unmapped at the next major — unless
+                    # there is no next major. A 200 MB burst whose live set then
+                    # dropped left ~74 MB of graced chunks mapped at an 8 MiB
+                    # threshold, and a process that went idle kept them for
+                    # good: 78.7 MB RSS against 6.3 MB after `GC.collect`. The
+                    # knife edge above is a chunk or two, far inside this cap.
                     grace = !within_warm && !can_dormant && munmap_empty_chunks_this_collect? &&
                             bitmap_alloc_chunk?(chunk) && !ChunkHeader.idle?(chunk) &&
-                            !@release_warm_this_collect
+                            !@release_warm_this_collect &&
+                            (@unmap_grace_unbounded || grace_budget_used + mapped <= @gc_threshold)
                     # Drop freelist nodes via one rebuild_size_class_freelist per
                     # class at end of sweep (rebuild skips DORMANT / dropped
                     # chunks). Per-empty unlink_freelist_range was O(freelist ×
@@ -169,6 +181,7 @@ module Gcry
                       # it unless a cursor takes it first.
                       ChunkHeader.set_idle(chunk, true)
                       @empty_chunk_grace_kept &+= 1
+                      grace_budget_used += mapped
                     elsif can_dormant
                       # Count dormant capacity once, just like bitmap chunks.
                       # The header discover pass only retired live objects;

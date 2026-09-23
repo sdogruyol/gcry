@@ -707,6 +707,10 @@ module Gcry
     # Fully free chunks past the warm budget kept mapped for one more cycle
     # (`ChunkHeader::Flags::IDLE`).
     getter empty_chunk_grace_kept : UInt64 = 0_u64
+    # Research only — `GCRY_UNMAP_GRACE_UNBOUNDED=1`: grace every fully free
+    # chunk past the warm budget, as before 2026-09-23, instead of at most one
+    # threshold's worth. The red arm of `make idle-rss-after-burst`.
+    property unmap_grace_unbounded : Bool = false
     getter size_class_live_bytes : UInt64 = 0_u64
     # Kept size-class chunk fill histogram (live_payload / usable_payload).
     getter chunk_fill_lt25 : UInt64 = 0_u64
