@@ -18,20 +18,28 @@ function Invoke-Checked {
 }
 
 # `crystal spec` compiles to `<cache>/crystal-run-spec.tmp.exe`, runs it, and
-# deletes it. Two invocations in one job share that path, and on the ARM64
-# runner the delete raced a lingering handle on the just-exited image often
-# enough to fail two of four master runs on 2026-09-10 — after the specs
-# themselves had reported `0 failures`, and reported as "you've found a bug in
-# the Crystal compiler". One cache directory per invocation removes the shared
-# path; the exit code is still checked, so a real failure fails. Named rather
-# than randomised so a re-run reuses the same compile cache.
+# deletes it, and on these runners the delete races a handle on the image that
+# outlives the process: two of four master runs on 2026-09-10, and again on
+# 2026-09-23 (run 35846099330, windows arm64 freelist) *after* the per-label
+# cache directory made that path private to one invocation — so the race is the
+# lingering lock, not the sharing. Each time the specs had already reported
+# `0 failures` and the step failed as "you've found a bug in the Crystal
+# compiler". So the specs are built under a name of their own and run, which is
+# what `crystal spec` does minus the delete: the same files (`<Dir>/**/*_spec.cr`),
+# the same compile flags, the runner options passed to the binary.
 function Invoke-CrystalSpec {
-    param([string] $Label, [string[]] $Arguments)
+    param([string] $Label, [string] $Dir, [string[]] $Flags)
     $previous = $env:CRYSTAL_CACHE_DIR
     $root = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
     $env:CRYSTAL_CACHE_DIR = Join-Path $root "gcry-cache-$Architecture-$Variant-$Label"
     try {
-        Invoke-Checked $crystal $Arguments
+        $Flags = @($Flags | Where-Object { $_ })
+        $files = @(Get-ChildItem -Path $Dir -Recurse -Filter '*_spec.cr' | Sort-Object FullName | ForEach-Object { $_.FullName })
+        if ($files.Count -eq 0) { throw "no *_spec.cr under $Dir" }
+        New-Item -ItemType Directory -Force bin | Out-Null
+        $binary = Join-Path $PWD "bin/spec_$Architecture-$Variant-$Label.exe"
+        Invoke-Checked $crystal (@('build') + $Flags + $files + @('-o', $binary, '--error-trace'))
+        Invoke-Checked $binary @('--fail-fast')
     }
     finally {
         $env:CRYSTAL_CACHE_DIR = $previous
@@ -67,9 +75,9 @@ try {
 
     if ($Suite -ne 'samples') {
         Write-Host "Windows library specs ($Variant)"
-        Invoke-CrystalSpec 'spec' (@('spec') + $flags + @('--error-trace', '--fail-fast'))
+        Invoke-CrystalSpec 'spec' 'spec' $flags
         Write-Host "Windows process GC specs ($Variant)"
-        Invoke-CrystalSpec 'process' (@('spec', '-Dgc_none') + $flags + @('process_spec', '--error-trace', '--fail-fast'))
+        Invoke-CrystalSpec 'process' 'process_spec' (@('-Dgc_none') + $flags)
         if ($Variant -eq 'default') {
             Write-Host "Windows thread-local storage roots"
             New-Item -ItemType Directory -Force bin | Out-Null

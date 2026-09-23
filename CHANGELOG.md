@@ -107,6 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as one protocol); the collector keeps the newest run's protocol and
   counts what it dropped.
 
+- **Windows CI no longer fails after the specs pass.** `crystal spec`
+  deletes the image it just ran, and on the Windows runners a handle on it
+  can outlive the process: the step failed as "you've found a bug in the
+  Crystal compiler" with `0 failures` already printed — on 2026-09-10, and
+  again on 2026-09-23 after per-invocation cache directories had made the
+  path private, so sharing it was never the cause. `ci/windows.ps1` builds
+  the same `*_spec.cr` files under a name of their own and runs the binary,
+  which leaves nothing to delete.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per
