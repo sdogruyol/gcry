@@ -501,7 +501,7 @@ module Gcry
         if (entry = Layout.entry_for(tid))
           size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
           if size_match && entry.precise_fields?
-            @layout_precise_scans += 1
+            count_layout_precise_scan
             if entry.hash?
               # Trust the map only as far as the object's shape supports it.
               # A collision that reaches here degrades to exactly the
@@ -528,7 +528,7 @@ module Gcry
             # buffers whose first Int32 randomly equals a registered type_id
             # stopped after instance_sizeof bytes and missed the rest → UAF
             # (acikturkiye; fixed by requiring size_match here).
-            @layout_conservative_scans += 1
+            count_layout_conservative_scan
             cap = entry.scan_cap.to_u64
             limit = size < cap ? size : cap
             word = sizeof(Void*).to_u64
@@ -548,7 +548,7 @@ module Gcry
             if size >= 8 && (user.as(UInt64*).value >> 32) != 0
               # fall through to full conservative
             else
-              @layout_precise_scans += 1
+              count_layout_precise_scan
               return
             end
           end
@@ -557,7 +557,7 @@ module Gcry
         end
       end
 
-      @layout_conservative_scans += 1
+      count_layout_conservative_scan
       # Raw buffers (no Crystal type_id): object-base only — cuts interior false
       # hits from JSON/bytes. Typed References keep interiors so Array#shift and
       # layout-miss types with mid-object pointers stay correct.

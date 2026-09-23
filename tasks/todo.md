@@ -414,6 +414,16 @@ null control:
       mark_impl (`@layout_conservative_scans`, `@type_id_*_rejects`), which every
       worker increments on the same Heap fields → false sharing. Needs
       per-worker counters summed at end. That is the ceiling to break next.
+      **2026-09-23: the counters were a third of it, and done.** On the current
+      tree (graph-heavy `gc_phases`, 12 vCPUs) parallel mark is slower than
+      serial at *every* count — +34.4% at 2 workers, +39.4% at 4 — not −14.8%.
+      Per-worker, line-padded counters (summed on read; the shared ones were
+      also *lossy* under concurrent `+=`) take that to **+20.4% / +28.1%**, the
+      same as deleting the counters outright, at no cost to the serial path
+      (−1.0%, t=−0.66). The rest is something else — candidates: atomic `OR`
+      on shared mark words (true sharing on a shuffled graph), the batched
+      steal, the helpers' spin — and nothing has separated them yet.
+      `bench/log/linux/2026-09-23-parallel-mark-scaling/FINDINGS.md`
 - [ ] Helpers still busy-spin between collections (separate, pre-existing).
 
 ## Decision point for the next step

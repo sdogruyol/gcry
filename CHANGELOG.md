@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mark` sweep is **~180x** cheaper than the header walk (7 236 → 41 µs
   per collection) and allocation **46.6%** cheaper end to end.
 
+- **Parallel mark's per-object counters no longer false-share, and the
+  scaling record is corrected.** `layout_precise_scans` /
+  `layout_conservative_scans` were plain `+=` on shared `Heap` fields from
+  every mark worker — slow, and lossy under concurrent writers. They are
+  per worker now, one cache line each, summed on read (exact: 400 050
+  serial, 400 051 at 4 workers), at no cost to the serial path (−1.0%,
+  t=−0.66). That takes 2-worker mark from +34% to +20% against one worker
+  and 4 from +39% to +28% on a graph-heavy workload — which also says
+  parallel mark is **slower than serial at every count** on this tree,
+  not −14.8% at 2 as recorded, and that the counters were a third of the
+  regression rather than its ceiling. `GCRY_PARALLEL_MARK` stays
+  experimental and its row now says to leave it at 1.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per
