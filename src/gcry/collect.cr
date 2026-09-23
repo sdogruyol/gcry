@@ -711,15 +711,9 @@ module Gcry
     # chunk past the warm budget, as before 2026-09-23, instead of at most one
     # threshold's worth. The red arm of `make idle-rss-after-burst`.
     property unmap_grace_unbounded : Bool = false
-    # `GCRY_IDLE_RELEASE_MS` (src/gcry/idle_release.cr): idle checks that ran a
-    # release pass, chunks and bytes it turned dormant.
-    getter idle_releases : UInt64 = 0_u64
-    getter idle_release_chunks : UInt64 = 0_u64
-    getter idle_release_bytes : UInt64 = 0_u64
-    # Research only — `GCRY_IDLE_RELEASE_UNCHECKED=1`: skip the `occ` test, so
-    # chunks holding live objects are released too. The red arm of
-    # `make idle-release`, which must see the zeroed objects.
-    property idle_release_unchecked : Bool = false
+    # `GCRY_IDLE_RELEASE_MS` (src/gcry/idle_release.cr): collections the idle
+    # thread ran because the process had stopped allocating.
+    getter idle_collections : UInt64 = 0_u64
     getter size_class_live_bytes : UInt64 = 0_u64
     # Kept size-class chunk fill histogram (live_payload / usable_payload).
     getter chunk_fill_lt25 : UInt64 = 0_u64
@@ -1759,7 +1753,7 @@ module Gcry
     # post-collect RSS is the live footprint - what `/gc-collect` followed by
     # a read of RSS has always meant. Automatic cycles are untouched.
     def collect(scan_stack : Bool = true, roots : Array(Void*)? = nil, *, coalesce : Bool = false,
-                release_warm : Bool = false) : Nil
+                release_warm : Bool = false, idle : Bool = false) : Nil
       return if @destroyed
       # Only a re-entrant call returns here: a `collect` from inside this
       # thread's own cycle — a before-collect callback — cannot take
@@ -1796,7 +1790,8 @@ module Gcry
       @release_warm_this_collect = release_warm
       @warm_released_collects &+= 1 if release_warm
       begin
-        run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce)
+        run_collection(major: true, scan_stack: scan_stack, roots: roots, coalesce: coalesce,
+          idle: idle)
       ensure
         @release_warm_this_collect = false
       end
@@ -2084,6 +2079,8 @@ module Gcry
       return if @suppress_collect.get > 0
       return if monitor_thread?
       return if thread_not_ready_for_collect?
+      # Before any lock the allocation takes, on a mutator with a scheduler.
+      run_deferred_finalizers if @finalizers_deferred
 
       @alloc_ops &+= 1
       if @stress_every > 0 && (@alloc_ops % @stress_every.to_u64) == 0
@@ -2389,29 +2386,37 @@ module Gcry
     # same address next cycle, and were scanned as mutator stack before this
     # cycle overwrote them. Measured: 40 stale stack seeds retaining a 44k
     # object web on gc_phases on the headerless layout.
-    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false) : Nil
+    private def run_collection(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool = false,
+                               idle : Bool = false) : Nil
       @collect_entry_sp = Roots.hardware_stack_pointer.address
       # Everything below the SP is dead here, and it is last cycle's collector
       # residue. Zero it before this cycle's scan chain overlays and scans it.
       collect_scrub
-      run_collection_body(major, scan_stack, roots, coalesce)
+      run_collection_body(major, scan_stack, roots, coalesce, idle)
       # The frames this cycle just used are dead below the SP again. Zero them
       # so nothing between now and the next entry scans them as live.
       collect_scrub
     end
 
     @[NoInline]
-    private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool) : Nil
+    private def run_collection_body(major : Bool, scan_stack : Bool, roots : Array(Void*)?, coalesce : Bool,
+                                    idle : Bool) : Nil
       cols_before = @collections
       # Hold post-STW mutex through flush so Parallel EC cannot stop_world
       # mid-munmap. Auto-collect: trylock or skip (no waiter pile-up).
       return unless acquire_post_stw(coalesce, cols_before, major)
 
       begin
+        # The idle thread's cycle re-checks `GC.disable` here, holding the
+        # lock, because the check it made before asking can be long stale: it
+        # may have waited on this lock through the program's own collections
+        # and then run inside a window the program had disabled. Measured —
+        # `1_live_objects_dormant_spec` read short in 25 of 30 runs with the
+        # check only before the lock.
+        return if idle && !@enabled
         # World is running here: pthread_create asks libc for a stack, which is
         # exactly what must not happen once threads are frozen.
         StwWatchdog.ensure_started if @stop_the_world
-        IdleRelease.ensure_started if @stop_the_world
         # Auto-collect coalescing: peer finished while we acquired — skip STW.
         if coalesce && @collections > cols_before && debt_under_threshold?(major)
           @collect_coalesced += 1
@@ -2777,6 +2782,66 @@ module Gcry
         unlock_post_stw
       end
 
+      # The idle thread's collections leave finalizers queued: it has no
+      # scheduler or event loop, and a `finalize` such as an
+      # `IO::FileDescriptor` close may need one. The next ordinary collection
+      # runs them on a mutator — no later than they would have been found
+      # without the idle collection at all.
+      unless idle
+        @running_finalizers = true
+        begin
+          @finalizers.run_pending
+        ensure
+          @running_finalizers = false
+        end
+      end
+
+      # After the cycle, the lock and the finalizers: `Thread.new` allocates,
+      # and this is the first point where a mutator may do that without
+      # re-entering a collection it is itself running.
+      IdleRelease.ensure_started if @stop_the_world
+    end
+
+    # The idle thread's collection (src/gcry/idle_release.cr): an explicit
+    # collect in every respect — the warm budget and the unmap grace are
+    # released — except that finalizers stay queued for a mutator.
+    def idle_collect : Nil
+      # `GC.disable` means no collection the program did not ask for, and a
+      # background one is the clearest case of that.
+      return unless @enabled
+      # Signal-exempt, so it can be running while another thread holds the
+      # world stopped: wait that out before touching collector state.
+      wait_if_world_stopped_other_thread
+      before = @collections
+      collect(release_warm: true, idle: true)
+      @idle_collections &+= 1 if @collections != before
+      @finalizers_deferred = true if @finalizers.pending_count > 0
+    end
+
+    # Bytes allocated, read without writing anything — the idle thread's
+    # activity signal. `total_bytes` would credit every cursor set first, and
+    # crediting is a write the idle thread must not make while exempt from
+    # suspension. Credited total plus each set's uncredited remainder is the
+    # same number; a torn read moves idle detection by one poll at most.
+    def allocation_activity : UInt64
+      n = @total_bytes.get
+      each_cursor_set do |set|
+        credited = (set.as(UInt8*) + offsetof(CursorSet, @bytes_credited)).as(UInt64*).value
+        n &+= set.value.bytes_local &- credited
+      end
+      n
+    end
+
+    # Set when an idle collection left finalizers queued. The next slow-path
+    # allocation runs them (`maybe_collect`), on its own mutator. Waiting for
+    # the next ordinary collection instead was measured to be too long: idle
+    # collections reset the allocation debt, so in a burst-and-idle loop only
+    # 3 of 41 collections were ordinary and 2 999 of 8 000 finalizers had run
+    # by the end, against 7 799 with the idle collector off.
+    @finalizers_deferred = false
+
+    private def run_deferred_finalizers : Nil
+      @finalizers_deferred = false
       @running_finalizers = true
       begin
         @finalizers.run_pending

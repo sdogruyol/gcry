@@ -10,18 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`GCRY_IDLE_RELEASE_MS=N`: give memory back when the process goes idle.**
-  Opt-in. After N ms without an allocation, a `gcry-idle` thread turns every
-  empty, cursor-free bitmap chunk dormant and releases its pages — the warm
-  budget the sweep keeps for the next cycle, which is dead weight once there
-  is no next cycle. After a 200 MB burst the process idles at 5.6 MB instead
-  of 21.4 MB (the `GC.collect` floor is 5.4 MB); on Kemal `/json` idle RSS
-  drops 9.5% (t=-4.2), the rest being garbage no sweep has seen yet.
-  Throughput is untouched — under load the thread never acts. Sound by the
-  protocols the sweep's dormant path already uses; `make idle-release` reads
-  back 20 000 checksummed objects after every idle gap, with
-  `GCRY_IDLE_RELEASE_UNCHECKED=1` as the arm that must corrupt. Linux and
-  Darwin; ignored with a warning on Windows, under `-Dwithout_mt` and on
-  `GCRY_BITMAP_ALLOC=0`.
+  Opt-in. Once the process has allocated nothing for N ms, a `gc-idle`
+  thread runs one collection that releases as `GC.collect` does — the warm
+  budget, the unmap grace and the garbage no sweep has seen yet — the idea
+  behind Go's forced GC and G1's periodic collection. Kemal `/json` idles at
+  14.2 MB instead of 20.4 MB (-30%, t=-52.6; the `/gc-collect` floor is
+  13.4 MB, Boehm idles at 13.4 MB); throughput and pause p50 unchanged
+  (+0.9%, +0.5%). The thread is not counted as a mutator, is exempt from the
+  Linux suspend signal like the Monitor, and leaves finalizers to the next
+  slow-path allocation on a mutator. It honours `GC.disable`, re-checked
+  under the collector's lock. `make idle-release` gates it. It starts at the
+  first collection. Linux and Darwin; ignored with a warning on Windows and
+  under `-Dwithout_mt`.
 
 ### Fixed
 
@@ -33,7 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself; any other thread waits out the cycle and retries. Header layout
   with `GCRY_TLAB=1` only; found by running `stw_mt_property_test --tlab`
   beside the new idle collector (3 of 3 failed, now 5 of 5 pass).
-
 
 - **A process that goes idle after a burst gives the burst back.** An emptied
   chunk past the warm budget is kept mapped for one cycle so a class running

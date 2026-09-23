@@ -674,7 +674,15 @@ module Gcry
 
     # ExecutionContext Monitor — signal-exempt; cooperates via @world_stopped.
     # Use `@name` (not `#name`) to avoid getter side effects under `-Dgc_none`.
+    #
+    # The idle collector too (src/gcry/idle_release.cr). Suspending it cost
+    # every stop a signal round trip for a thread that is asleep: Kemal
+    # `/json` pause p50 +19% (t=+6.8) with the knob on. It qualifies for the
+    # same cooperative protocol more strictly than the Monitor does — between
+    # collections it only reads (`Heap#allocation_activity`), and it waits out
+    # a stop before it collects (`Heap#idle_collect`).
     private def stw_signal_exempt?(thread : Thread) : Bool
+      return true if IdleRelease.thread?(thread)
       name = thread.@name
       !name.nil? && name == "SYSMON"
     end

@@ -874,7 +874,11 @@ module Gcry
     # /json thr collapses (~78%→~48% Boehm on CI after always-full-scan).
     private def multi_mutator_threads? : Bool
       n = 0
-      Thread.unsafe_each do
+      Thread.unsafe_each do |thread|
+        # The idle collector (src/gcry/idle_release.cr) sleeps or collects; it
+        # never allocates as a mutator, and counting it would move a
+        # single-threaded program onto the multi-mutator sweep.
+        next if IdleRelease.thread?(thread)
         n += 1
         # The Windows runtime also has an IOCP forwarding thread. It only
         # forwards completions and is suspended/scanned like every peer.
@@ -1388,6 +1392,10 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
+        # The idle collector holds no GC reference on its stack — its Thread
+        # and fiber are reachable through Crystal's lists — and on Linux it is
+        # not suspended, so there are no captured registers to read either.
+        next if IdleRelease.thread?(thread)
         pthread = thread.to_unsafe
         fiber = thread.@current_fiber
 

@@ -258,6 +258,7 @@ module GC
   # :nodoc:
   def self.fork_child : Nil
     return unless @@gcry_ready
+    Gcry::IdleRelease.after_fork_child
     if @@handle_fork
       Gcry.default_heap.after_fork_child_reinit
       @@after_fork_child = false
@@ -846,27 +847,21 @@ module GC
     if wd = env_u64("GCRY_STW_WATCHDOG_MS")
       Gcry::StwWatchdog.threshold_ms = wd if wd > 0
     end
-    # Give the warm budget back once the process has not allocated for N ms
+    # One releasing collection once the process has not allocated for N ms
     # (src/gcry/idle_release.cr). Opt-in. Linux and Darwin: the gate that
     # holds it (`make idle-release`) has no Windows runner. And never under
     # `-Dwithout_mt`, where `Crystal::SpinLock` compiles to nothing and a
-    # second OS thread would take none of the locks its soundness rests on.
+    # collection from a second thread would take none of the locks it needs.
     if (idle = env_u64("GCRY_IDLE_RELEASE_MS")) && idle > 0
       {% if flag?(:win32) %}
         warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is not supported on Windows; ignored\n")
       {% elsif flag?(:without_mt) %}
         warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is ignored under -Dwithout_mt: " \
-                             "the locks it relies on compile to nothing there\n")
+                             "the locks a collection from another thread needs compile to nothing there\n")
       {% else %}
-        if heap.bitmap_alloc?
-          Gcry::IdleRelease.idle_ms = idle
-        else
-          warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is ignored on the freelist allocator " \
-                               "(GCRY_BITMAP_ALLOC=0): it releases bitmap chunks only\n")
-        end
+        Gcry::IdleRelease.idle_ms = idle
       {% end %}
     end
-    heap.idle_release_unchecked = true if env_flag_one?("GCRY_IDLE_RELEASE_UNCHECKED")
     # Walk the Parallel EC run queues inside STW and check every slot is still a
     # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from
