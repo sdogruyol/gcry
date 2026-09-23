@@ -33,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +3.27% (t=+12.45). The `MADV_NOHUGEPAGE` default costs the mark nothing
   measurable.
 
+- **The chunk radix measured end to end, and what it follows.** On a
+  graph-heavy GC-bound workload (`gc_phases --fanout=6 --shuffle`, 2.4 M
+  edges) the default-on table cuts pause per collection **65%** and
+  `ns_per_alloc` **59%** end to end, for +146 kB; on an edge-free one at
+  the *same* 77% GC duty cycle it is worth −2%, inside the noise. The
+  win follows chunk lookups during mark — edges times collections — not
+  GC time, which bounds what an application sees and explains the
+  smaller 2026-09-03 number.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per

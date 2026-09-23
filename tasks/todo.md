@@ -202,7 +202,10 @@ is under the noise floor. It licenses continuing; it is not a win.
       not be run before that day: the knob only skipped `MADV_NOHUGEPAGE`, which
       under THP `madvise` gives 0 kB of huge pages either way.
       `bench/log/linux/2026-09-23-radix-thp-ab/FINDINGS.md`
-- [ ] Re-cut RSS at Kemal scale post-fix
+- [x] Re-cut RSS at Kemal scale post-fix — `perf smoke` does it on every run
+      against Kemal, and the 48-run headerless baseline (2026-09-14, after the
+      `MADV_NOHUGEPAGE` fix) records `rss_x` **0.9495** of Boehm, gated since.
+      Marked read 2026-09-23.
 
 ### The finding that outranks the phase — ACTED ON
 
@@ -219,7 +222,12 @@ Resolved by doing both of the recommended options:
 - [x] **A GC-bound workload stood up**: `bench/micro/gc_phases.cr` /
       `make bench-gc-phases`, 9–41% duty cycle depending on survival rate,
       `phase_mark` 3.0–16.0 ms per collection against Kemal's ~230 µs.
-- [ ] Radix A/B on it — first end-to-end evidence the mark work pays. **Not run** (2026-09-23).
+- [x] Radix A/B on it — first end-to-end evidence the mark work pays. **It
+      does, in proportion to edges** (2026-09-23): graph-heavy (`--fanout=6
+      --shuffle`) pause per collection −65.1%, `ns_per_alloc` −59.2% end to end;
+      edge-free (`--fanout=0`) −2.1%, not significant — at the *same* 77% duty
+      cycle. The win follows chunk lookups during mark, not GC time.
+      `bench/log/linux/2026-09-23-radix-end-to-end/FINDINGS.md`
 - [x] THP A/B: does `MADV_NOHUGEPAGE` cost the mark win? Same arm as the TLB A/B above — answered there: no.
 
 Phases 3 and 6 keep a real end-to-end throughput claim: they touch every
