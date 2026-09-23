@@ -183,3 +183,9 @@ Rules written after corrections, so the same mistake is not made twice.
   local battery; two of the three CI failures were there. Extract every
   `run:` block of every job, and for the platforms not on this box read
   their targets for the same knob pins.
+- **Changing how a suite is invoked: compare the example count, not the
+  colour.** Replacing `crystal spec` with `crystal build <files>` on Windows
+  went green with 57 examples fewer — a `{% skip_file %}` in one main
+  source skips every main source after it, where through `require` it
+  skips only its own file. Green said nothing; `281 → 224` said everything.
+  Read the before/after `N examples` line of every job the change touches.

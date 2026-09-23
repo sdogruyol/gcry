@@ -113,8 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Crystal compiler" with `0 failures` already printed — on 2026-09-10, and
   again on 2026-09-23 after per-invocation cache directories had made the
   path private, so sharing it was never the cause. `ci/windows.ps1` builds
-  the same `*_spec.cr` files under a name of their own and runs the binary,
-  which leaves nothing to delete.
+  the specs under a name of their own and runs the binary, which leaves
+  nothing to delete — through a generated entry of `require`s, as
+  `crystal spec` does. Its first version passed the files to `crystal
+  build` as main sources, and a `{% skip_file %}` in one main source skips
+  every one after it: `spec/segv_report_spec.cr` (unix-only) took the 57
+  examples sorting after it with it, and the run was green (281 → 224).
+  Counts are back to 281/303 + 25.
 
 ### Changed
 
