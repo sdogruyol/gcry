@@ -1101,6 +1101,9 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
+        # Exempt from the suspend signal, so never an SP to record; and its
+        # fiber is skipped above, so it is on no stack this walk asks about.
+        next if IdleRelease.thread?(thread)
         sp = Platform.thread_sp(thread.to_unsafe)
         unless sp
           all_known = false
@@ -1272,6 +1275,12 @@ module Gcry
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
+        # The idle collector's fiber: no GC references on its stack, and on
+        # Linux no recorded SP either (it is signal-exempt), so the multi-
+        # mutator path scanned all 8 MiB of it from the guard page every
+        # collection — `make stw-slot-precision` counted it, 16 guard scans in
+        # 8 collections where the collector's own fiber accounts for 8.
+        next if IdleRelease.fiber?(fiber)
 
         # Without STW we must not touch another thread's live stack.
         # Parallel STW: scan running fibers here too (current_fiber TLS can be

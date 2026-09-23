@@ -66,6 +66,16 @@ module Gcry
       end
     end
 
+    # Is *fiber* the idle collector's? It runs only its thread's main fiber.
+    def self.fiber?(fiber : Fiber) : Bool
+      if t = @@thread
+        if main = t.@main_fiber
+          return main.same?(fiber)
+        end
+      end
+      false
+    end
+
     # A forked child has only the thread that called `fork`; start again at
     # its first collection.
     def self.after_fork_child : Nil
