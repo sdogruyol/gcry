@@ -79,6 +79,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   11.9% / 26.9%, with no measurable change to mark time where parallel
   mark pays (512 B objects, 2 and 4 workers, |t| < 1.5).
 
+- **`make stw-ack-window` asks about the raw thread, not about the
+  list.** Its shipped arm counted Crystal's threads before and after a
+  ~400 ms window and blamed any difference on the signal handler. On
+  2026-09-22 (run `35839647107`, one failure in 30+ runs) it read
+  `acked=true … listed_delta=1` — but a handler that called into the
+  runtime blocks on the `Thread.lock` the harness holds and can never
+  acknowledge, which is what the red arm shows. Another thread had joined
+  the list in the window. Both arms now count listed `Thread`s whose
+  `@system_handle` is the raw thread's own: shipped 0, red arm 1.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per

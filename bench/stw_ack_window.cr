@@ -117,6 +117,16 @@ if arm
     sleep 300.milliseconds
     listed_after = 0
     Thread.unsafe_each { listed_after += 1 }
+    # Whether **this raw thread** was adopted — the thing the gate is about —
+    # and not whether the list grew. The accessor the pre-table path called
+    # creates a `Thread` for the calling thread, so its `@system_handle` is
+    # exactly `tid`. A count cannot tell that from any other thread joining
+    # the list in these 400 ms, and on 2026-09-22 (run `35839647107`) one did:
+    # the shipped arm read `acked=true listed_delta=1`, while a handler that
+    # had called into the runtime would have blocked on the `Thread.lock` held
+    # above and never acknowledged. The count went red on a green handler.
+    adopted = 0
+    Thread.unsafe_each { |t| adopted += 1 if t.@system_handle == tid }
 
     # No join: on the pre-table path the raw thread ends up parked in
     # `sigsuspend` on a `Thread` object nobody is watching, and waiting for
@@ -124,7 +134,7 @@ if arm
     RAW_RUN.value = 0
     puts "slot=#{slot} acked=#{acked} woke=#{woke} " \
          "no_tls_delta=#{heap.stw_suspend_no_tls - before} " \
-         "listed_delta=#{listed_after - listed_before} " \
+         "listed_delta=#{listed_after - listed_before} adopted=#{adopted} " \
          "ack_unavailable=#{heap.stw_suspend_ack_unavailable}"
     exit 0
   when "churn"
@@ -228,16 +238,17 @@ else
     failures << "GCRY_STW_ACK_VIA_THREAD=1 acknowledged a thread with no TLS — the pre-table " \
                 "path is not being exercised, so the shipped one is not attributable"
   end
-  if (field(old_out, "listed_delta") || "0") == "0"
-    failures << "the pre-table arm did not add a `Thread` to Crystal's list — " \
-                "`::Thread.current` did not take its creating branch, so this arm is not " \
-                "the path it claims to restore"
+  if (field(old_out, "adopted") || "0") == "0"
+    failures << "the pre-table arm did not adopt the raw thread (no listed `Thread` carries " \
+                "its handle) — `::Thread.current` did not take its creating branch, so this " \
+                "arm is not the path it claims to restore"
   end
 end
 
-if fresh_ok && (field(fresh_out, "listed_delta") || "0") != "0"
-  failures << "the shipped path added #{field(fresh_out, "listed_delta")} thread(s) to " \
-              "Crystal's list from a signal handler — it is still calling into the runtime"
+if fresh_ok && (field(fresh_out, "adopted") || "0") != "0"
+  failures << "the shipped path adopted the raw thread onto Crystal's list from a " \
+              "signal handler (a listed Thread carries its handle) — it is still calling " \
+              "into the runtime"
 end
 
 unless churn_ok
