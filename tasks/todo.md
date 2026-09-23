@@ -322,10 +322,20 @@ reached nothing - `unlinked 0` in 4 of 4 runs. It builds
 
 ### Also owed
 
-- [ ] Free-page release is **not ported** and explicitly declines on bitmap
-      chunks (`set_holed` / `set_sparse` skipped). Costs RSS on those chunks,
+- [x] Free-page release is **not ported** and explicitly declines on bitmap
+      chunks (`set_holed` / `set_sparse` skipped). ~~Costs RSS on those chunks,
       and since the headerless flip that is *every* chunk on the default
-      layout. `page-release-corruption`'s arms pin `GCRY_BITMAP_ALLOC=0`, and
+      layout.~~ **Closed 2026-09-23 as not worth porting, on a measurement.**
+      The release is opt-in on every platform, so the default loses nothing
+      by the stand-down; and the one arm that releases pages ends *higher*:
+      a sparse heap (1 in 128 of 1.8 M 64 B objects kept) sits at 14.0 MB
+      on the headerless default and 16.5 MB on the header layout's bitmap
+      default, both releasing 0 B, against 48.5 MB on the freelist and
+      **74.0 MB** on the freelist with `GCRY_PAGE_DONTNEED=1` after releasing
+      72 MB (refaults and churn, as recorded when it went opt-in). What *was*
+      wrong is that `GCRY_PAGE_DONTNEED=1` and `GCRY_MOSTLY_EMPTY=1` were
+      silently inert for anyone on the bitmap allocator; they warn now, and
+      `make ignored-knob-warnings` asserts all three cases per knob. `page-release-corruption`'s arms pin `GCRY_BITMAP_ALLOC=0`, and
       as of 2026-09-14 the gate is built `-Dgcry_block_headers` as well —
       without it the knob is ignored, all three arms release nothing, and the
       gate can only report that it never ran (`unlinked 0`, 4 of 4).

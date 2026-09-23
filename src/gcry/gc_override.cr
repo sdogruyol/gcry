@@ -595,6 +595,42 @@ module GC
       end
     {% end %}
 
+    # Both free-page release paths stand down on every bitmap-allocated chunk
+    # (`bitmap_alloc_chunk?` in the sweep and the flush): their machinery is
+    # freelist-shaped end to end, and engaging it on `occ` chunks corrupted
+    # (`collect_sweep.cr`). The bitmap allocator is the only one on the
+    # headerless default and the default on the header layout too, so without
+    # this both knobs are silently inert for nearly everyone who sets them —
+    # measured 2026-09-23: 0 bytes released on either layout's default, where
+    # the header layout with `GCRY_BITMAP_ALLOC=0` released 72 MB and 104 MB.
+    # Nursery chunks are header-based and still reached, so a heap with one
+    # does not warn. `make ignored-knob-warnings` asserts all three cases.
+    # `GCRY_PAGE_RELEASE_BITMAP_WALK=1` (research, read further down) removes
+    # the flush stand-down on purpose and does release bitmap-chunk tail slack
+    # (208 KiB on Darwin), so with it set the knob is not ignored.
+    if (heap.madvise_free_pages || heap.mostly_empty_release) &&
+       heap.bitmap_alloc? && !heap.nursery_enabled &&
+       !(heap.madvise_free_pages && env_flag_one?("GCRY_PAGE_RELEASE_BITMAP_WALK"))
+      # Literals only: this runs inside GC.init, where a concatenation would
+      # allocate from the heap being configured.
+      warn_unsupported_env(heap.madvise_free_pages ? "gcry: GCRY_PAGE_DONTNEED=1" : "gcry: GCRY_MOSTLY_EMPTY=1")
+      {% if flag?(:gcry_block_headers) %}
+        warn_unsupported_env(
+          " is ignored on the bitmap allocator (the default here too): free-page " \
+          "release walks freelist chunks only, and this heap has none. " \
+          "GCRY_BITMAP_ALLOC=0 selects the freelist it needs, at a higher RSS than " \
+          "the bitmap allocator reaches without it (docs/HARDENING.md)\n"
+        )
+      {% else %}
+        warn_unsupported_env(
+          " is ignored on the headerless layout (the compile default): free-page " \
+          "release walks freelist chunks only, and a headerless heap has none. " \
+          "Rebuild with -Dgcry_block_headers and set GCRY_BITMAP_ALLOC=0 to run it, " \
+          "at a higher RSS than this layout reaches without it (docs/HARDENING.md)\n"
+        )
+      {% end %}
+    end
+
     if env_flag_one?("GCRY_DISABLE_INTERIOR")
       heap.allow_interior_pointers = false
     end

@@ -807,6 +807,13 @@ raw-buf-check:
 # both directions — the warning on the layout that ignores the knob, and its
 # absence on the layout that honours it — because a gate that only checks the
 # message would pass a build that warns on every layout. ~20 s.
+#
+# The two free-page release knobs (`GCRY_PAGE_DONTNEED`, `GCRY_MOSTLY_EMPTY`)
+# are ignored by the *allocator*, not the layout: they stand down on every
+# bitmap chunk, and the bitmap allocator is the default on both layouts. So
+# three cases each — warns headerless, warns on the header layout's default,
+# silent on `GCRY_BITMAP_ALLOC=0` where the walk runs (released 72 MB / 104 MB
+# on a sparse heap, 2026-09-23, against 0 on both defaults).
 .PHONY: ignored-knob-warnings
 ignored-knob-warnings: $(BIN)
 	@$(CRYSTAL) build -Dgc_none samples/hello.cr -o $(BIN)/knob_hl --error-trace
@@ -828,6 +835,22 @@ ignored-knob-warnings: $(BIN)
 	if env GCRY_BITMAP_ALLOC=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
 	  echo "  FAIL a knob the layout does honour warned anyway"; fail=1; \
 	else echo "  ok   GCRY_BITMAP_ALLOC=1 is silent on the headerless default"; fi; \
+	for knob in GCRY_PAGE_DONTNEED=1 GCRY_MOSTLY_EMPTY=1; do \
+	  name=$${knob%%=*}; \
+	  if [ "$$name" = GCRY_MOSTLY_EMPTY ] && [ "$$(uname -s)" != Linux ]; then continue; fi; \
+	  if env $$knob $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "$$name=1 is ignored on the headerless layout"; then \
+	    echo "  ok   $$knob warns on the headerless default"; \
+	  else echo "  FAIL $$knob is silently ignored on the headerless default"; fail=1; fi; \
+	  if env $$knob $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "$$name=1 is ignored on the bitmap allocator"; then \
+	    echo "  ok   $$knob warns on the header layout's bitmap default"; \
+	  else echo "  FAIL $$knob is silently ignored on the header layout's bitmap default"; fail=1; fi; \
+	  if env $$knob GCRY_BITMAP_ALLOC=0 $(BIN)/knob_hdr 2>&1 >/dev/null | grep -q "is ignored"; then \
+	    echo "  FAIL $$knob warned on the freelist, which runs its walk"; fail=1; \
+	  else echo "  ok   $$knob is silent on -Dgcry_block_headers GCRY_BITMAP_ALLOC=0"; fi; \
+	done; \
+	if env GCRY_PAGE_DONTNEED=1 GCRY_PAGE_RELEASE_BITMAP_WALK=1 $(BIN)/knob_hl 2>&1 >/dev/null | grep -q "is ignored"; then \
+	  echo "  FAIL GCRY_PAGE_DONTNEED=1 warned beside GCRY_PAGE_RELEASE_BITMAP_WALK=1, which walks bitmap chunks"; fail=1; \
+	else echo "  ok   GCRY_PAGE_DONTNEED=1 is silent beside the research bitmap walk"; fi; \
 	[ $$fail -eq 0 ] || exit 1
 	@echo "ok — every knob the compile default ignores says so, and only there"
 

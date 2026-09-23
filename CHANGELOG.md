@@ -123,6 +123,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`GCRY_PAGE_DONTNEED=1` and `GCRY_MOSTLY_EMPTY=1` say when they do
+  nothing.** Both free-page release paths stand down on every
+  bitmap-allocated chunk, and the bitmap allocator is the only one on the
+  headerless default and the default on `-Dgcry_block_headers` — so both
+  knobs were silently inert for nearly everyone who set them (0 B released
+  on either default, measured). They now print one line naming the way to
+  the freelist they need, as `GCRY_BITMAP_ALLOC=0`, `GCRY_NURSERY` and
+  `GCRY_TLAB=1` already do; `make ignored-knob-warnings` covers them. Not
+  ported to bitmap chunks, on the same measurement: the default reaches
+  14.0 MB on a sparse heap where the releasing freelist arm ends at 74.0 MB.
+
 - **The Darwin perf job gates.** `bench/baseline/perf_smoke_macos.json`,
   recorded from 21 green macOS runs, gates post-GC RSS (≤ 1.28x Boehm) and
   pause p50 (≤ 0.68 ms); `/json` throughput is warn-only in that baseline
