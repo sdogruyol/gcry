@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be zero, since a silent return was the thing under test. `minor_collect`
   carries the same guard and got the same read-side ordering and counter.
 
+- **`GCRY_RADIX_THP=1` never produced a huge page on the hosts that run
+  it.** It only skipped `MADV_NOHUGEPAGE`, which is enough under THP
+  `always` and does nothing under `madvise` — Ubuntu's default and the CI
+  runners' — where a region must ask with `MADV_HUGEPAGE`: 0 kB of
+  `AnonHugePages` with the knob on, as with it off. It requests them now
+  (0 → 2048 kB), and the A/B it exists for is finally answered: on a
+  78%-GC workload, pause per collection −1.40% (t=−1.30, noise) and RSS
+  +3.27% (t=+12.45). The `MADV_NOHUGEPAGE` default costs the mark nothing
+  measurable.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per
