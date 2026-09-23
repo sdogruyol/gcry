@@ -207,3 +207,12 @@ that path (single mutator), which is why its pause p50 did not move. The idle
 fiber is skipped now (no GC references on it; the fiber object itself is still
 marked): 8 guard scans in 8, and the harness's per-collection time went from
 40.75 ms to 23.12 ms at 96 threads.
+
+With the thread present by default and the fiber skip in, Kemal `/json`
+shipped default against `GCRY_IDLE_RELEASE_MS=0`, n=8 each, interleaved:
+req/s +0.66% (t=+0.80), pause p50 +0.21% (t=+0.12). All 68 Linux CI make
+targets were re-run on the final tree with the default on: 67 pass, and the
+68th (`kernels-broken`) refuses on this host because its top SIMD tier is
+scalar, as it does with the collector off. First CI run on the default
+(`35903203895`): Darwin perf pause p50 0.47 ms against its 0.477 baseline,
+Linux 0.68 ms against 0.636 (+0.47 sd), both gates PASS.
