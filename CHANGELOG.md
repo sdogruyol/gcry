@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GC time, which bounds what an application sees and explains the
   smaller 2026-09-03 number.
 
+- **The bitmap allocator's mechanism has its own numbers.** Its Kemal
+  case was made in 2026-09; the two claims its phase gate names — sweep
+  and per-allocation cost — never were. On the header build with the
+  threshold pinned so only the mechanism differs: the streaming `occ &=
+  mark` sweep is **~180x** cheaper than the header walk (7 236 → 41 µs
+  per collection) and allocation **46.6%** cheaper end to end.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per

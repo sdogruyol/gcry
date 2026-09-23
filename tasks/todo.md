@@ -336,7 +336,11 @@ reached nothing - `unlinked 0` in 4 of 4 runs. It builds
       the count is 2.0 rebuilds per collection (one per active class slot)
       whether the class holds 29 chunks or 598. `make pool-refill-cost`.
 - [ ] Nursery chunks still header-based (Phase 8)
-- [ ] No measurement yet: sweep and alloc claims both unmeasured
+- [x] Sweep and alloc claims, measured 2026-09-23 on the axes the gates were
+      restated on (header build, threshold pinned so only the mechanism differs,
+      90% garbage, n=10): `phase_sweep` **−99.4%** (7 236 → 41 µs, ~180x),
+      `ns_per_alloc` **−46.6%** end to end, RSS −1.3%.
+      `bench/log/linux/2026-09-23-bitmap-sweep-alloc/FINDINGS.md`
 
 ### phase_mark win (both representations, not gated)
 
