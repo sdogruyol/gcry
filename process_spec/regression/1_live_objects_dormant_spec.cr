@@ -33,10 +33,20 @@ private def drift_cycle(heap, count : Int32) : Cycle
   # while a second cycle on the same process read -2, because the first cycle
   # had already done the cleaning.
   4.times { GC.collect }
-  baseline = Gcry.metrics(heap).live_objects
-
-  count.times { ptrs << GC.malloc_atomic(32) }
-  Gcry.metrics(heap).live_objects.should be >= baseline + count
+  # No collection between the baseline and the check: the arithmetic below
+  # assumes none. A background one (`GCRY_IDLE_RELEASE_MS`) landing in this
+  # window reclaimed the few objects made just before the baseline and read
+  # 1-22 short of `baseline + count` in 23 of 30 runs at 5 ms, with every
+  # rooted block intact (2026-09-23). `GC.disable` stops it, and allocation-
+  # driven cycles with it.
+  GC.disable
+  begin
+    baseline = Gcry.metrics(heap).live_objects
+    count.times { ptrs << GC.malloc_atomic(32) }
+    Gcry.metrics(heap).live_objects.should be >= baseline + count
+  ensure
+    GC.enable
+  end
 
   ptrs.each { |p| GC.free(p) }
   ptrs.clear

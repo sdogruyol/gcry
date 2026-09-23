@@ -77,43 +77,114 @@ the design the todo item names.
 
 ## 3. The clock: `GCRY_IDLE_RELEASE_MS` (opt-in)
 
-A raw `gcry-idle` pthread polls `Heap#total_bytes` (which credits every cursor
-set, so allocation inside a cursor chunk counts); after N ms without a change it
-turns every empty, cursor-free bitmap chunk dormant under the chunk-list lock
-and runs the existing dormant flush inside `during_live_chunk_walk`, holding
-`@post_stw_mutex` throughout. Chunks come back through the ordinary dormant
-revive. Design: `src/gcry/idle_release.cr`.
+### First version: release pages without a collection — replaced
 
-Burst, then idle (the probe of section 1, capped grace, n=3 each, all equal):
+A raw pthread turned empty, cursor-free bitmap chunks dormant under the
+chunk-list lock and `MADV_DONTNEED`ed them. Sound (checksum gate PASS 3/3,
+unchecked red arm FAIL 3/3), and after a burst it reached the floor
+(21.4 -> 5.6 MB). On Kemal it returned only ~2 of the ~7 MB (-9.5%, t=-4.2):
+the rest is garbage allocated since the last major, whose `occ` bits stay set
+until a sweep. Only a collection reclaims that.
 
-| | idle 1 s | after `GC.collect` | released |
-|---|---|---|---|
-| off | 21.4 MB | 4.9 MB | 0 |
-| `GCRY_IDLE_RELEASE_MS=250` | **5.6 MB** | 5.4 MB | 16 777 216 (warm + grace) |
+### What other collectors do
 
-Kemal `/json`, one binary, knob off/on interleaved, n=8 each (250 ms):
+Boehm has no clock: memory goes back only during collections, once a block has
+been free for `GC_unmap_threshold` (6) collections, and not even on explicit
+`GC_gcollect` unless `GC_FORCE_UNMAP_ON_GCOLLECT` is set
+([bdwgc macros.md](https://github.com/bdwgc/bdwgc/blob/master/docs/macros.md)).
+Go forces a GC after two minutes without one and scavenges in the background
+([golang/go#37116](https://github.com/golang/go/issues/37116)); G1 has a
+periodic collection, off by default
+([JEP 346](https://openjdk.org/jeps/346)); ZGC uncommits after 300 s, on by
+default ([ZGC wiki](https://wiki.openjdk.org/spaces/zgc/pages/34668579/Main)).
+The design that reaches the floor is Go's and G1's: collect when idle.
+
+### The idle collector
+
+Why not from a raw pthread: the collection needs the current Crystal thread in
+~15 places (`stop_world` skips `Thread.current`, root scans read
+`Fiber.current`), and on a raw pthread `Thread.current` *creates* a `Thread` —
+allocating and pushing onto the list the stop walks. So `gc-idle` is a Crystal
+thread (`Thread.new`, `nanosleep` loop) calling `Heap#idle_collect`, i.e.
+`collect(release_warm: true)`, once per idle stretch. Three things kept it from
+being an ordinary thread, each found by measurement:
+
+1. **Not a mutator.** `multi_mutator_threads?` counts `Thread.unsafe_each`
+   past 2; one more thread would move a single-threaded program onto the
+   multi-mutator sweep, which disables empty-chunk release. Excluded.
+2. **Finalizers.** They run on the collecting thread, and this one has no
+   scheduler. Its collections leave them queued; the first version left them
+   for the next *ordinary* collection, and idle collections made those rare:
+   3 of 41, with 2 999 of 8 000 finalizers run against 7 799 off. Now the
+   next slow-path allocation runs them (`maybe_collect`, before any lock):
+   7 796-7 799.
+3. **Suspension.** On Crystal's list it was signalled and waited for at every
+   stop: pause p50 **+19% (t=+6.8)** on Kemal. It is signal-exempt now, like
+   the Monitor, and qualifies more strictly: between collections it only reads
+   (`Heap#allocation_activity`, no crediting), it waits out another thread's
+   stop before collecting, and its stack is not scanned (no GC references;
+   its Thread and fiber are on Crystal's lists). Darwin suspends it with Mach
+   `thread_suspend` like every thread.
+
+Kemal `/json`, one binary, knob off/on interleaved, n=8 each (250 ms), final:
 
 | | on | off | delta | t |
 |---|---|---|---|---|
-| idle 1 s | 18.97 MB | 20.96 MB | -9.5% | -4.16 |
-| idle 5 s | 18.46 MB | 20.38 MB | -9.4% | -4.19 |
-| after load | 20.98 MB | 20.96 MB | +0.1% | +0.20 |
-| req/s | 40 365 | 38 904 | +3.8% | +1.62 |
-| after `/gc-collect` | 13.48 MB | 13.47 MB | | |
+| idle 5 s | **14.2 MB** | 20.4 MB | -30.0% | -52.6 |
+| idle 1 s | 14.5 MB | 20.8 MB | -30.1% | -29.7 |
+| pause p50 | 377 us | 375 us | +0.5% | +0.21 |
+| req/s | 43 673 | 43 306 | +0.9% | +0.77 |
+| after load | 20.93 MB | 20.92 MB | +0.02% | +0.05 |
+| after `/gc-collect` | 13.45 MB | 13.39 MB | | |
 
-It returns ~2 MB of the ~7 MB Kemal gap, not all of it, and the reason is
-structural: what is left is garbage allocated since the last major, whose `occ`
-bits stay set until a sweep, so its chunks read as occupied. Only a collection
-reclaims that, and running one from a raw pthread is a different design — the
-collector path assumes a Crystal thread. Throughput cannot move: under load the
-counter always advances and the thread never acts (the +3.8% is inside two
-standard errors).
+Two changes landed after this table, neither on Kemal's path: the TLAB refill
+fix below (TLAB is off there) and the `GC.disable` re-check (one branch under
+a lock the idle cycle already takes). Not re-measured.
 
-Gate: `make idle-release` (`bench/idle_release.cr`) — 20 000 checksummed live
-objects across 40 bursts separated by 1-2x idle gaps, every word read back after
-each gap, and the run refused if nothing was released. Shipped: PASS 3 of 3,
-534-632 chunks released, 518-616 dormant revives all intact. Red arm
-`GCRY_IDLE_RELEASE_UNCHECKED=1` (skip the `occ` test): FAIL 3 of 3, ~720 000 bad
-reads. Not exercised: a revive refused *during* the flush — 0 in every run, the
-flush takes milliseconds and one mutator rarely lands in it; that protocol is
-the one the sweep's own dormant flush already relies on.
+Idle lands ~0.8 MB above the `/gc-collect` floor and ~0.8 MB above Boehm's
+idle (13.4 MB), from 7 MB above.
+
+Gate: `make idle-release` (`bench/idle_release.cr`) — checksummed live set,
+40 bursts separated by 1-2x idle gaps; requires idle collections, the last of
+which released every empty chunk (`fully_free - released - dormant == 0`),
+intact objects, finalizers at least as prompt as without the knob and none on
+the idle thread. Shipped: PASS (36-39 idle collections of 41). Red arm, the
+same binary without the knob: FAIL ("no collection ran at idle"). By hand:
+removing the deferred-finalizer run fails it (4 599 of 7 600 due), and letting
+the idle collection run finalizers fails it (7 593 on the idle thread).
+
+### Stress with the knob at 5 ms: two defects, one test assumption
+
+Every gate runs with the knob off, where each new line is inert. So the
+multi-threaded suites were re-run with `GCRY_IDLE_RELEASE_MS=5`, which makes
+idle collections overlap everything:
+
+1. **TLAB refill raised `OutOfMemoryError` with memory to spare** — a defect
+   that predates this work. `stw_mt_property_test --tlab` (header layout,
+   freelist) failed 3 of 3. Split: `release_warm` off still failed;
+   suspending the idle thread (no signal exemption) passed 3 of 3. The cause
+   is `tlab_refill`: after one miss it gave up whenever `@collecting` was
+   true, and `@collecting` is heap-wide and stays true through the post-STW
+   phase while every other thread runs — so a miss there (a dormant revive
+   refused mid-walk) became an OOM. The idle thread's background cycles
+   overlap allocation, which is what exposed it. Now it gives up only when
+   the calling thread is the collector; any other thread collects, which
+   waits out the cycle in flight. 5 of 5 seeds with the knob, 3 of 3 without.
+2. **The idle collector ignored `GC.disable`.** Checked only before asking
+   for the post-STW lock, it could wait on that lock through the program's
+   own collections and then run inside a window the program had disabled.
+   Now re-checked under the lock (`run_collection_body`, `idle: true`). The
+   harness disables GC for 4x the idle time and requires no idle collection;
+   removing the checks fails it.
+3. **`process_spec/regression/1_live_objects_dormant_spec.cr`** read 1-22
+   objects short of `baseline + count` in 23 of 30 full-suite runs. A probe
+   with the same window shape: short in 30 of 30 rounds *only* when an idle
+   collection landed in the window, by at most the 40 objects made just
+   before the baseline, and all 300 000 rooted blocks intact; knob off, never.
+   The spec's arithmetic assumes no collection in that window, so it now
+   says so with `GC.disable` around it: 0 of 30 with the knob, after (2).
+
+Limitation, stated: the thread starts at the end of the first collection,
+because `Thread.new` before the runtime is up is a known crash
+(`gc_override.cr`). A process that has never collected has no idle
+collector — and less than one threshold (8 MiB minimum) to give back.

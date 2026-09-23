@@ -792,12 +792,12 @@ re-sampled profile; peak RSS × Boehm must not move.
       idle-rss-after-burst`. (2) At *steady-state* idle the warm budget is
       what is left: Kemal `/json` idles at 19.9 MB against a 13.3 MB floor
       and Boehm's 13.4 MB. That part still needs the clock this item names.
-      **The clock exists now, opt-in: `GCRY_IDLE_RELEASE_MS=N`.** After a
-      burst it reaches the floor (21.4 -> 5.6 MB idle, `GC.collect` 5.4 MB);
-      on Kemal it returns ~2 of the ~7 MB (-9.5%, t=-4.2), because the rest
-      is un-swept garbage only a collection can reclaim. Open: whether to
-      make it the default (it adds a thread to every process), and whether
-      an idle *collection* is worth a design of its own.
+      **The clock exists now, opt-in: `GCRY_IDLE_RELEASE_MS=N`** — an idle
+      *collection*, as Go and G1 do, after a page-release-only first version
+      returned only ~2 of the ~7 MB. Kemal idles at 14.2 MB (-30%, t=-52.6)
+      against the 13.4 MB floor, with throughput and pause p50 unchanged.
+      Open: whether to make it the default, and at what delay (Go 2 min,
+      ZGC 5 min).
       `bench/log/linux/2026-09-23-idle-rss-grace/FINDINGS.md`
 - [x] Items 3–5 together: 113.3% [88.5, 138.0] of item 2 at n = 3, CPU 224 → 199 ms/10k, RSS 1.01×.
       Log: `bench/log/linux/2026-09-06-stage2-throughput/FINDINGS.md`. Branch `perf-stage2` on the PR head, unpushed.

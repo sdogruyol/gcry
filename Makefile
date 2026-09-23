@@ -867,19 +867,19 @@ idle-rss-after-burst: $(BIN)
 	! GCRY_UNMAP_GRACE_UNBOUNDED=1 $(BIN)/idle_rss_after_burst
 	@echo "ok — the capped arm fits and the uncapped red arm does not"
 
-# `GCRY_IDLE_RELEASE_MS`: the idle thread turns empty, cursor-free bitmap
-# chunks dormant and releases their pages while the mutator may wake at any
-# moment. A mistake zeroes live objects rather than crashing, so the harness
-# keeps a checksummed live set across bursts separated by idle gaps and reads
-# every word back after each; it also refuses a run in which nothing was
-# released. `GCRY_IDLE_RELEASE_UNCHECKED=1` skips the emptiness test and must
-# come out corrupt, in the same recipe. ~15 s.
+# `GCRY_IDLE_RELEASE_MS`: a `gc-idle` thread runs one releasing collection once
+# the process stops allocating. It collects from a thread that is not the
+# mutator while the mutator may wake, and must leave finalizers to a mutator
+# without delaying them. The harness keeps a checksummed live set across bursts
+# separated by idle gaps, and requires idle collections that released every
+# empty chunk, intact objects, and finalizers run as promptly as without it and
+# never on the idle thread. The same binary without the knob must fail. ~15 s.
 .PHONY: idle-release
 idle-release: $(BIN)
 	@$(CRYSTAL) build -Dgc_none bench/idle_release.cr -o $(BIN)/idle_release --error-trace
 	GCRY_IDLE_RELEASE_MS=50 $(BIN)/idle_release
-	! GCRY_IDLE_RELEASE_MS=50 GCRY_IDLE_RELEASE_UNCHECKED=1 $(BIN)/idle_release
-	@echo "ok — idle release returns memory intact, and the unchecked red arm corrupts"
+	! $(BIN)/idle_release
+	@echo "ok — idle collections release memory safely, and without the knob nothing does"
 
 # gcry vs Boehm on the fat app, paired and order-rotated.
 #
