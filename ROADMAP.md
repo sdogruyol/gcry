@@ -1094,7 +1094,8 @@ kept finding the rest.
       ceiling turned out to hold: worst +3136 against +4096 is 960 kB of
       headroom, 1.28× the 752 kB spread. Darwin does re-fault ~2.9× what Linux
       does, which is why it needed measuring and not assuming.
-- [ ] **64 of 84 gates cannot be shown to fail without a hand edit.** Every gate
+- [x] **64 of 84 gates cannot be shown to fail without a hand edit — closed
+      2026-09-23 at 80 of 101 per run, with the 21 named.** Every gate
       asserts something; the question that has now bitten three times is whether
       it can still come out **red**. `make page-release-corruption` and
       `make live-graph-audit` had rotted into testing nothing and shipped that
@@ -1188,6 +1189,20 @@ kept finding the rest.
       across ROADMAP's 78-column margin did not match, and script gates
       had no bucket.
       `bench/log/linux/2026-09-22-prose-claims/FINDINGS.md`
+      **Closed 2026-09-23, on the census's own terms.** `python3
+      bench/gate_arm_census.py`: **101 gates, 80 construct their red
+      direction every run, 21 do not** — and each of the 21 has a stated
+      reason rather than a missing arm: 11 fuzz / property defect-finders
+      whose red *is* a defect (`make mutate` is their check), 2
+      compile-only typechecks, 4 research targets that say so in their
+      recipes, and 4 crash-only smokes (`oom-test`, `thread-storm` and
+      their shorts) whose defect has a per-run gate elsewhere
+      (`oom-no-hang`, `thread-churn-uaf`). Of the 14 prose claims of a
+      hand break, 13 are now backed by something that runs on every
+      push; the one that is not is this section's own history of v0.19.0.
+      The census stays: it is the instrument that makes a rotted gate a
+      number instead of a surprise, and a new gate without an arm moves
+      it the day it lands.
       **2026-09-19, later: 96 gates, 31 per run / 65 by hand.**
       `make thread-census-names` is the one added, and it is counted per run
       because its twin (`GCRY_THREAD_CENSUS_NAMES=0`) is a recipe arm rather
