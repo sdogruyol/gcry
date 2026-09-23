@@ -25,8 +25,16 @@ function Invoke-Checked {
 # lingering lock, not the sharing. Each time the specs had already reported
 # `0 failures` and the step failed as "you've found a bug in the Crystal
 # compiler". So the specs are built under a name of their own and run, which is
-# what `crystal spec` does minus the delete: the same files (`<Dir>/**/*_spec.cr`),
-# the same compile flags, the runner options passed to the binary.
+# what `crystal spec` does minus the delete: an entry file that `require`s each
+# `<Dir>/**/*_spec.cr`, the same compile flags, the runner options passed to the
+# binary.
+#
+# The entry file is not a style choice. Handing the spec files to `crystal
+# build` as main sources makes a `{% skip_file %}` in one of them skip every
+# main source *after* it too, and `spec/segv_report_spec.cr` opens with
+# `skip_file unless flag?(:unix)`: the first version of this lost the 57
+# examples that sort after it (281 → 224 on x86_64 default, run 35849478402)
+# and stayed green. Through `require` only that one file is skipped.
 function Invoke-CrystalSpec {
     param([string] $Label, [string] $Dir, [string[]] $Flags)
     $previous = $env:CRYSTAL_CACHE_DIR
@@ -34,11 +42,16 @@ function Invoke-CrystalSpec {
     $env:CRYSTAL_CACHE_DIR = Join-Path $root "gcry-cache-$Architecture-$Variant-$Label"
     try {
         $Flags = @($Flags | Where-Object { $_ })
-        $files = @(Get-ChildItem -Path $Dir -Recurse -Filter '*_spec.cr' | Sort-Object FullName | ForEach-Object { $_.FullName })
-        if ($files.Count -eq 0) { throw "no *_spec.cr under $Dir" }
-        New-Item -ItemType Directory -Force bin | Out-Null
-        $binary = Join-Path $PWD "bin/spec_$Architecture-$Variant-$Label.exe"
-        Invoke-Checked $crystal (@('build') + $Flags + $files + @('-o', $binary, '--error-trace'))
+        $bin = Join-Path $PWD 'bin'
+        New-Item -ItemType Directory -Force $bin | Out-Null
+        $requires = @(Get-ChildItem -Path $Dir -Recurse -Filter '*_spec.cr' | Sort-Object FullName | ForEach-Object {
+            'require "' + ([IO.Path]::GetRelativePath($bin, $_.FullName) -replace '\\', '/') + '"'
+        })
+        if ($requires.Count -eq 0) { throw "no *_spec.cr under $Dir" }
+        $entry = Join-Path $bin "spec_$Architecture-$Variant-$Label.cr"
+        Set-Content -Path $entry -Value $requires -Encoding utf8NoBOM
+        $binary = Join-Path $bin "spec_$Architecture-$Variant-$Label.exe"
+        Invoke-Checked $crystal (@('build') + $Flags + @($entry, '-o', $binary, '--error-trace'))
         Invoke-Checked $binary @('--fail-fast')
     }
     finally {
