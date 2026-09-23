@@ -89,6 +89,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the list in the window. Both arms now count listed `Thread`s whose
   `@system_handle` is the raw thread's own: shipped 0, red arm 1.
 
+- **The perf-summary collector no longer reports zero when it failed.**
+  Downloads that errored — every one of them, on a host whose `/tmp` is a
+  quota'd tmpfs — were swallowed and printed as `collected 0`; it now
+  counts them, prints the first error and exits non-zero, and stages under
+  `~/.cache` instead. And the macOS perf job uploads its own summary
+  (`bench/log/_run/`) rather than the checked-in `bench/log/macos/`
+  history, whose stale laptop files the collector was judging first:
+  4 collected → 26. What the 16 at the current protocol say: Darwin RSS
+  and pause spreads are as tight as Linux's, throughput's is ~4x and does
+  not narrow with longer wrk runs, so the Darwin baseline will gate the
+  first two and report the third.
+
 ### Changed
 
 - **`make soak` and `make soak-smoke` construct their red direction per

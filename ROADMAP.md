@@ -1086,6 +1086,16 @@ kept finding the rest.
       is **ahead of Boehm on the macOS runner**, by 4 to 48 points
       depending on the hour — the open question is the runner's
       variance, not the collector's throughput.
+      **Sixteen samples at 10 s say which** (2026-09-23): `pct_json` sd
+      **15.4 pp** (range 75–135) against Linux's 4.1 — the longer run
+      did not tame it, and a 3.3 sd gate would fire at ~52%, looser than
+      the floor. `rss_x` sd 0.053 and `pause_p50_ms` sd 0.037 are as
+      tight as Linux's or tighter. So the Darwin recording gates RSS and
+      pause and reports throughput; more wrk seconds are not the lever.
+      Getting there found two collector defects: failed downloads (a
+      quota'd `/tmp`) were reported as `collected 0`, and the macOS
+      artifact carried checked-in laptop summaries that vetoed 22 of 26
+      runs.
       `bench/log/linux/2026-09-22-darwin-perf-step/FINDINGS.md` **The Darwin soak smoke now
       gates.** It ran `continue-on-error` because its +4 MB RSS ceiling was
       measured on Linux and Darwin reclaims differently, and inventing a Darwin

@@ -39,7 +39,14 @@ command -v python3 >/dev/null || { echo "need python3"; exit 1; }
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
-WORK="$(mktemp -d)"
+# Staging on the cache directory, not the default temp dir: `gh` writes each
+# artifact's zip to `$TMPDIR`, and on a host whose `/tmp` is a quota'd tmpfs
+# every download failed with "disk quota exceeded" (2026-09-23). The zips are
+# small; the directory holding them is what has to have room.
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/gcry-perf-collect"
+mkdir -p "$CACHE"
+WORK="$(mktemp -d "$CACHE/work.XXXXXX")"
+export TMPDIR="$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
 runs="$(gh run list --branch "$BRANCH" --workflow CI --limit "$LIMIT" \
@@ -47,27 +54,49 @@ runs="$(gh run list --branch "$BRANCH" --workflow CI --limit "$LIMIT" \
 
 kept=0
 skipped=0
+failed=0
+first_error=""
 for id in $runs; do
   rm -rf "$WORK/art"
   mkdir -p "$WORK/art"
-  gh run download "$id" -n "$ARTIFACT" -D "$WORK/art" >/dev/null 2>&1 || continue
+  # A run without this artifact is normal (the job did not exist yet, or was
+  # skipped) and is not a failure. Anything else is — and it used to be
+  # swallowed, so on 2026-09-23 a full /tmp quota ("disk quota exceeded" on
+  # every download) printed "collected 0" as though CI had nothing to give.
+  if ! err="$(gh run download "$id" -n "$ARTIFACT" -D "$WORK/art" 2>&1 >/dev/null)"; then
+    case "$err" in
+      *"no artifact matches"*|*"no valid artifacts"*|*"not found"*) ;;
+      *) failed=$((failed + 1)); [ -z "$first_error" ] && first_error="run $id: $err" ;;
+    esac
+    continue
+  fi
   verdict="$(python3 - "$WORK/art" "$RUNNER" "$LAYOUT" "$OUT_DIR" "$id" <<'PY'
 import json, pathlib, shutil, sys
 root, runner, layout, out, run_id = sys.argv[1:6]
 root, out = pathlib.Path(root), pathlib.Path(out)
-for pattern in ("_run/summary.json", "summary.json", "*/*/summary.json", "*/summary.json"):
-    for f in root.glob(pattern):
-        try:
-            s = json.loads(f.read_text())
-        except Exception:
-            continue
-        if s.get("runner") != runner or (layout and s.get("layout") != layout):
-            print("skip")
-            raise SystemExit
-        shutil.copy(f, out / ("{}.json".format(run_id)))
-        print("keep")
-        raise SystemExit
-print("none")
+# Every summary in the artifact, then the newest that matches — not the first
+# one globbed. An artifact that carried the checked-in history as well as the
+# run's own summary (the macOS job's did, until 2026-09-23) put a stale file
+# first, and judging the first file skipped the run. A run whose artifact has
+# summaries but none matching is still a skip; one with none at all is "none".
+found = [f for f in root.rglob("summary.json")]
+best = None
+for f in found:
+    try:
+        s = json.loads(f.read_text())
+    except Exception:
+        continue
+    if s.get("runner") != runner or (layout and s.get("layout") != layout):
+        continue
+    if best is None or s.get("timestamp", "") > best[1].get("timestamp", ""):
+        best = (f, s)
+if best:
+    shutil.copy(best[0], out / ("{}.json".format(run_id)))
+    print("keep")
+elif found:
+    print("skip")
+else:
+    print("none")
 PY
 )"
   case "$verdict" in
@@ -78,6 +107,11 @@ done
 
 echo "collected $kept summary/summaries into $OUT_DIR (runner=$RUNNER layout=$LAYOUT artifact=$ARTIFACT)"
 [ "$skipped" -gt 0 ] && echo "skipped $skipped on runner or layout mismatch"
+if [ "$failed" -gt 0 ]; then
+  echo "FAILED to download $failed artifact(s), so the count above is not what CI holds"
+  echo "  first: $first_error"
+  exit 1
+fi
 # The recording rule this repo settled on: fewer than three runs writes no
 # tolerance at all, and the tolerance is 3.3 standard deviations, which needs
 # enough samples for a standard deviation to mean something. Twenty is where

@@ -216,3 +216,38 @@ the same way:
 The nine above stay unusable for a recording, which is the honest cost of
 having measured before the instrument recorded itself. The samples from
 here on carry their protocol.
+
+## Sixteen samples at `WRK_DURATION=10`, and the answer
+
+Collected 2026-09-23 with `bench/collect_perf_summaries.sh` — after two
+fixes to the collector itself, below.
+
+| metric | Darwin, n=16 | range | Linux baseline sd |
+|---|---|---|---|
+| `pct_json` | mean 102.6, **sd 15.4 pp** | 75.2 – 134.9 | 4.12 |
+| `rss_x` | mean 1.140, sd 0.053 | 1.018 – 1.253 | 0.059 |
+| `pause_p50_ms` | mean 0.474, sd 0.037 | 0.403 – 0.543 | 0.098 |
+
+The longer run did not tame throughput: 19.9 pp at 5 s (n=4), 15.4 pp at
+10 s (n=16) — still ~4x Linux's. A 3.3 sd gate on it would fire at
+~52% of Boehm, looser than the 70% floor it is meant to replace, so
+**throughput cannot be gated on this runner class** by this method, and
+more wrk seconds are not the lever. RSS and pause are as tight as Linux's
+or tighter and can be. The recording, at twenty samples, gates those two
+and reports `pct_json`.
+
+## Two collector defects found getting there
+
+- **Downloads failed silently.** `gh` stages each artifact zip in
+  `$TMPDIR`, this host's `/tmp` is a quota'd tmpfs, and every download
+  failed with "disk quota exceeded" — which the collector swallowed and
+  reported as `collected 0`. It now counts failed downloads, prints the
+  first error and exits non-zero, and stages under
+  `~/.cache/gcry-perf-collect` instead.
+- **A stale file vetoed each run.** The macOS job uploaded all of
+  `bench/log/macos/`, which carries checked-in laptop summaries from
+  2026-09-06 (`runner=Darwin-arm64`, no layout) beside the run's own; the
+  collector judged the first summary it globbed and skipped 22 of 26 runs.
+  The job uploads `bench/log/_run/` now, as the Linux job does, and the
+  collector takes the newest *matching* summary in an artifact rather than
+  the first one found. 4 collected → 26.

@@ -1853,7 +1853,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: perf-smoke-report-macos
-          path: bench/log/macos/
+          # This run's own JSON, as the Linux job does — not `bench/log/macos/`,
+          # which also carries the checked-in laptop summaries from 2026-09-06
+          # (`runner=Darwin-arm64`, no layout). With those in the artifact the
+          # collector judged a stale file first and skipped 22 of 26 runs.
+          path: bench/log/_run/
           if-no-files-found: ignore
           retention-days: 30
 
