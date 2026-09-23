@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GCRY_IDLE_RELEASE_MS=N`: give memory back when the process goes idle.**
+  Opt-in. After N ms without an allocation, a `gcry-idle` thread turns every
+  empty, cursor-free bitmap chunk dormant and releases its pages — the warm
+  budget the sweep keeps for the next cycle, which is dead weight once there
+  is no next cycle. After a 200 MB burst the process idles at 5.6 MB instead
+  of 21.4 MB (the `GC.collect` floor is 5.4 MB); on Kemal `/json` idle RSS
+  drops 9.5% (t=-4.2), the rest being garbage no sweep has seen yet.
+  Throughput is untouched — under load the thread never acts. Sound by the
+  protocols the sweep's dormant path already uses; `make idle-release` reads
+  back 20 000 checksummed objects after every idle gap, with
+  `GCRY_IDLE_RELEASE_UNCHECKED=1` as the arm that must corrupt. Linux and
+  Darwin; ignored with a warning on Windows, under `-Dwithout_mt` and on
+  `GCRY_BITMAP_ALLOC=0`.
+
 ### Fixed
 
 - **A process that goes idle after a burst gives the burst back.** An emptied

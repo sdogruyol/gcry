@@ -711,6 +711,15 @@ module Gcry
     # chunk past the warm budget, as before 2026-09-23, instead of at most one
     # threshold's worth. The red arm of `make idle-rss-after-burst`.
     property unmap_grace_unbounded : Bool = false
+    # `GCRY_IDLE_RELEASE_MS` (src/gcry/idle_release.cr): idle checks that ran a
+    # release pass, chunks and bytes it turned dormant.
+    getter idle_releases : UInt64 = 0_u64
+    getter idle_release_chunks : UInt64 = 0_u64
+    getter idle_release_bytes : UInt64 = 0_u64
+    # Research only — `GCRY_IDLE_RELEASE_UNCHECKED=1`: skip the `occ` test, so
+    # chunks holding live objects are released too. The red arm of
+    # `make idle-release`, which must see the zeroed objects.
+    property idle_release_unchecked : Bool = false
     getter size_class_live_bytes : UInt64 = 0_u64
     # Kept size-class chunk fill histogram (live_payload / usable_payload).
     getter chunk_fill_lt25 : UInt64 = 0_u64
@@ -2402,6 +2411,7 @@ module Gcry
         # World is running here: pthread_create asks libc for a stack, which is
         # exactly what must not happen once threads are frozen.
         StwWatchdog.ensure_started if @stop_the_world
+        IdleRelease.ensure_started if @stop_the_world
         # Auto-collect coalescing: peer finished while we acquired — skip STW.
         if coalesce && @collections > cols_before && debt_under_threshold?(major)
           @collect_coalesced += 1

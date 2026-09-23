@@ -522,6 +522,55 @@ module Gcry
       end
     end
 
+    # `GCRY_IDLE_RELEASE_MS` (src/gcry/idle_release.cr): turn every empty,
+    # cursor-free bitmap chunk dormant and release its pages, from the idle
+    # thread. Holds `@post_stw_mutex` throughout, so no cycle overlaps it; the
+    # dormant transition is made under the chunk-list lock the cursor take
+    # uses; the page release runs inside `during_live_chunk_walk`, so a revive
+    # waits for it to finish. Everything after the transition is the dormant
+    # path the sweep already uses.
+    def idle_release : Nil
+      return unless @bitmap_alloc
+      return if @destroyed
+      lock_post_stw
+      begin
+        return if @destroyed
+        turned = 0_u64
+        chunks = 0_u64
+        with_chunk_list_for_allocation do
+          each_chunk do |chunk|
+            next unless bitmap_alloc_chunk?(chunk)
+            next if ChunkHeader.dormant?(chunk) || ChunkHeader.cursor?(chunk) || ChunkHeader.pinned?(chunk)
+            next unless @idle_release_unchecked || bitmap_chunk_empty?(chunk)
+            ChunkHeader.set_dormant(chunk, true)
+            turned += chunk.value.mapped_bytes
+            chunks += 1
+          end
+        end
+        @idle_releases &+= 1
+        return if chunks == 0
+        @idle_release_chunks &+= chunks
+        @idle_release_bytes &+= turned
+        @dormant_chunk_bytes += turned
+        during_live_chunk_walk { flush_pending_dormant_chunks }
+      ensure
+        unlock_post_stw
+      end
+    end
+
+    # Every `occ` word zero: no block of the chunk is allocated.
+    private def bitmap_chunk_empty?(chunk : ChunkHeader*) : Bool
+      occ = ChunkHeader.occ_bitmap(chunk)
+      return false if occ.null?
+      words = chunk.value.bitmap_words.to_i32
+      i = 0
+      while i < words
+        return false if Atomic::Ops.load(occ + i, LLVM::AtomicOrdering::Acquire, true) != 0_u64
+        i += 1
+      end
+      true
+    end
+
     private def flush_pending_empty_chunks : Nil
       chunk = @pending_empty_chunks
       return if chunk.null?
