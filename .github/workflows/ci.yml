@@ -161,6 +161,9 @@ jobs:
       - name: Idle RSS after a burst (unmap grace capped)
         run: make idle-rss-after-burst
 
+      - name: Idle release returns memory without losing live data
+        run: make idle-release
+
       - name: Unit specs (library heap under Boehm)
         run: crystal spec --error-trace
 

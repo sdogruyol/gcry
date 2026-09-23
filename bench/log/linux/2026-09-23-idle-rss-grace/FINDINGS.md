@@ -73,4 +73,47 @@ gcry idles 6.6 MB above its own floor and ~1.5x Boehm's idle: that is the warm
 budget (`fully_free_chunk_bytes` 7.6 MB, warm retain 8 MiB), kept on purpose so
 the next cycle does not fault its chunks back in. Releasing it when idle needs
 a clock — nothing in gcry runs without an allocation to drive it — and that is
-the design the todo item names. Not done here.
+the design the todo item names.
+
+## 3. The clock: `GCRY_IDLE_RELEASE_MS` (opt-in)
+
+A raw `gcry-idle` pthread polls `Heap#total_bytes` (which credits every cursor
+set, so allocation inside a cursor chunk counts); after N ms without a change it
+turns every empty, cursor-free bitmap chunk dormant under the chunk-list lock
+and runs the existing dormant flush inside `during_live_chunk_walk`, holding
+`@post_stw_mutex` throughout. Chunks come back through the ordinary dormant
+revive. Design: `src/gcry/idle_release.cr`.
+
+Burst, then idle (the probe of section 1, capped grace, n=3 each, all equal):
+
+| | idle 1 s | after `GC.collect` | released |
+|---|---|---|---|
+| off | 21.4 MB | 4.9 MB | 0 |
+| `GCRY_IDLE_RELEASE_MS=250` | **5.6 MB** | 5.4 MB | 16 777 216 (warm + grace) |
+
+Kemal `/json`, one binary, knob off/on interleaved, n=8 each (250 ms):
+
+| | on | off | delta | t |
+|---|---|---|---|---|
+| idle 1 s | 18.97 MB | 20.96 MB | -9.5% | -4.16 |
+| idle 5 s | 18.46 MB | 20.38 MB | -9.4% | -4.19 |
+| after load | 20.98 MB | 20.96 MB | +0.1% | +0.20 |
+| req/s | 40 365 | 38 904 | +3.8% | +1.62 |
+| after `/gc-collect` | 13.48 MB | 13.47 MB | | |
+
+It returns ~2 MB of the ~7 MB Kemal gap, not all of it, and the reason is
+structural: what is left is garbage allocated since the last major, whose `occ`
+bits stay set until a sweep, so its chunks read as occupied. Only a collection
+reclaims that, and running one from a raw pthread is a different design — the
+collector path assumes a Crystal thread. Throughput cannot move: under load the
+counter always advances and the thread never acts (the +3.8% is inside two
+standard errors).
+
+Gate: `make idle-release` (`bench/idle_release.cr`) — 20 000 checksummed live
+objects across 40 bursts separated by 1-2x idle gaps, every word read back after
+each gap, and the run refused if nothing was released. Shipped: PASS 3 of 3,
+534-632 chunks released, 518-616 dormant revives all intact. Red arm
+`GCRY_IDLE_RELEASE_UNCHECKED=1` (skip the `occ` test): FAIL 3 of 3, ~720 000 bad
+reads. Not exercised: a revive refused *during* the flush — 0 in every run, the
+flush takes milliseconds and one mutator rarely lands in it; that protocol is
+the one the sweep's own dormant flush already relies on.
