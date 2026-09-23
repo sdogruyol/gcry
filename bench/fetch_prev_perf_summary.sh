@@ -57,9 +57,11 @@ import json, pathlib, sys
 root, layout, runner = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 # Every summary in the artifact, newest matching one by its own `timestamp`
 # (not the extraction mtime). Both jobs upload `bench/log/_run/` now; older
-# artifacts carry whole trees, including the macOS job's checked-in laptop
-# summaries, which the runner filter drops. Same rule as
-# `collect_perf_summaries.sh`.
+# artifacts carry whole trees, including checked-in macOS laptop summaries,
+# which the runner filter drops. Same rule as `collect_perf_summaries.sh`.
+# No apostrophes in this block: it is a heredoc inside `$( )`, and the bash
+# 3.2 that macOS ships reads an unpaired one as an open quote -- the first
+# Darwin run of this failed with "unexpected EOF while looking for matching".
 best, best_ts = None, ""
 for f in root.rglob("summary.json"):
     try:

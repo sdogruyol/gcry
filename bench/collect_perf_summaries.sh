@@ -80,7 +80,7 @@ root, runner, layout, out, run_id = sys.argv[1:6]
 root, out = pathlib.Path(root), pathlib.Path(out)
 # Every summary in the artifact, then the newest that matches — not the first
 # one globbed. An artifact that carried the checked-in history as well as the
-# run's own summary (the macOS job's did, until 2026-09-23) put a stale file
+# summary of the run itself (the macOS artifact did, until 2026-09-23) put a stale file
 # first, and judging the first file skipped the run. A run whose artifact has
 # summaries but none matching is still a skip; one with none at all is "none".
 found = [f for f in root.rglob("summary.json")]
