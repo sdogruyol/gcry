@@ -17,7 +17,11 @@
 # Then, with the count it prints:
 #
 #   bench/perf_compare.py --record --out bench/baseline/perf_smoke_macos.json \
-#     --runner macos-latest --commit <sha> /tmp/gcry-perf-summaries/*.json
+#     --runner macos-latest --commit <sha> --warn-only pct_json \
+#     /tmp/gcry-perf-summaries/*.json
+#
+# `--warn-only pct_json` on macOS only: its `/json` throughput spread is ~4x
+# Linux's (sd 15.4 pp, n=16, 2026-09-23), too wide to gate at 3.3 sd.
 #
 # Summaries whose layout or runner does not match are skipped and counted, for
 # the same reason `perf_compare.py` refuses to gate across either: mixing them
@@ -105,8 +109,30 @@ PY
   esac
 done
 
-echo "collected $kept summary/summaries into $OUT_DIR (runner=$RUNNER layout=$LAYOUT artifact=$ARTIFACT)"
+# One sampling protocol, the newest run's. Summaries written before 2026-09-22
+# carry no `wrk_duration_s`/`bench_runs`, and `record` cannot tell them from
+# the current protocol's, so the documented `*.json` recording would have
+# mixed ten 5 s, 3-run summaries into sixteen 10 s, 7-run ones on 2026-09-23.
+# The ones dropped are counted, like the runner and layout skips.
+dropped="$(python3 - "$OUT_DIR" <<'PY'
+import json, pathlib, sys
+files = sorted(pathlib.Path(sys.argv[1]).glob("*.json"))
+rows = [(f, json.loads(f.read_text())) for f in files]
+key = lambda s: tuple(s.get(k) for k in ("wrk_duration_s", "wrk_connections", "bench_runs"))
+if rows:
+    newest = key(max(rows, key=lambda r: r[1].get("timestamp", ""))[1])
+    gone = [f for f, s in rows if key(s) != newest]
+    for f in gone:
+        f.unlink()
+    print("{} {}".format(len(gone), "wrk_duration_s={} wrk_connections={} bench_runs={}".format(*newest)))
+else:
+    print("0 -")
+PY
+)"
+kept=$((kept - ${dropped%% *}))
+echo "collected $kept summary/summaries into $OUT_DIR (runner=$RUNNER layout=$LAYOUT artifact=$ARTIFACT protocol: ${dropped#* })"
 [ "$skipped" -gt 0 ] && echo "skipped $skipped on runner or layout mismatch"
+[ "${dropped%% *}" -gt 0 ] && echo "dropped ${dropped%% *} sampled under an older protocol"
 if [ "$failed" -gt 0 ]; then
   echo "FAILED to download $failed artifact(s), so the count above is not what CI holds"
   echo "  first: $first_error"

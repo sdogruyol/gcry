@@ -42,7 +42,11 @@ METRICS = {
 }
 
 # Metrics that only ever warn, matching perf_smoke.sh: `/` is not the critical
-# path and its number moves for reasons `/json` does not.
+# path and its number moves for reasons `/json` does not. A baseline can add to
+# this with `"warn_only": true` on a metric (`--record --warn-only NAME`): whether
+# a metric can gate is a property of the runner class's spread, and on macOS
+# `pct_json`'s is ~4x Linux's (sd 15.4 pp over 16 runs, 2026-09-23), which puts
+# a 3.3 sd gate below the fixed floor it would replace.
 WARN_ONLY = {"pct_root"}
 
 # Standard deviations from the mean to the gate. 3.3 puts one false red per
@@ -96,6 +100,7 @@ def deviation_sd(name, value, entry):
 
 def compare(baseline, summary, gate, prev=None):
     metrics = baseline.get("metrics", {})
+    warn_only = WARN_ONLY | {n for n, e in metrics.items() if e.get("warn_only")}
     prov = baseline.get("provenance", {})
     lines = []
     regressions = []
@@ -179,7 +184,7 @@ def compare(baseline, summary, gate, prev=None):
         lines.append("  {:<24} {:>8.2f}  base {:>8}  tol {:>7}  delta {:>7} {:>8}  {}".format(
             label, value, base_txt, tol_txt, delta_txt, sd_txt, state))
         if state == REGRESSED:
-            (regressions if name not in WARN_ONLY else ungated).append((name, label, value, delta))
+            (regressions if name not in warn_only else ungated).append((name, label, value, delta))
         elif state == NO_BASELINE:
             ungated.append((name, label, value, delta))
         # The streak: this run and the previous one both on the wrong side of
@@ -187,7 +192,7 @@ def compare(baseline, summary, gate, prev=None):
         # of the recording set — and two in a row is 0.05% per pair, which is
         # how a 9 pp regression becomes visible without narrowing the band that
         # a single run is judged against.
-        if prev and name in prev and name not in WARN_ONLY:
+        if prev and name in prev and name not in warn_only:
             now_sd = deviation_sd(name, value, entry)
             prev_sd = deviation_sd(name, float(prev[name]), entry)
             if now_sd is not None and prev_sd is not None \
@@ -195,7 +200,7 @@ def compare(baseline, summary, gate, prev=None):
                 streaks.append((name, label, now_sd, prev_sd))
 
     for name, label, value, delta in ungated:
-        if name in WARN_ONLY and delta is not None:
+        if name in warn_only and delta is not None:
             lines.append("WARN: {} moved {:+.2f} (warn-only metric)".format(label, delta))
 
     if not metrics or all(m.get("tolerance") is None for m in metrics.values()):
@@ -242,7 +247,7 @@ def compare(baseline, summary, gate, prev=None):
     return "\n".join(lines), 0
 
 
-def record(summaries, runner, commit, recorded):
+def record(summaries, runner, commit, recorded, warn_only=()):
     """Median per metric, with a tolerance of TARGET_SD standard deviations.
 
     Floored per metric, so a freakishly quiet recording session cannot produce a
@@ -278,6 +283,9 @@ def record(summaries, runner, commit, recorded):
     if len(layouts) > 1:
         raise SystemExit("refusing to record a baseline from mixed layouts: "
                          + ", ".join(sorted(layouts)))
+    unknown = set(warn_only) - set(METRICS)
+    if unknown:
+        raise SystemExit("--warn-only names no metric: " + ", ".join(sorted(unknown)))
     floors = {"pct_json": 2.0, "pct_root": 2.0, "rss_x": 0.05, "pause_p50_ms": 0.2}
     metrics = {}
     for name in METRICS:
@@ -294,6 +302,8 @@ def record(summaries, runner, commit, recorded):
         else:
             entry["tolerance"] = None
             entry["note"] = "fewer than 3 runs: no spread measured, so this metric reports only"
+        if name in warn_only:
+            entry["warn_only"] = True
         metrics[name] = entry
     # The sampling the samples were taken under, refused if mixed for the same
     # reason a mixed layout is: the tolerance below describes one distribution
@@ -302,6 +312,14 @@ def record(summaries, runner, commit, recorded):
     protocol = {}
     for key in ("wrk_duration_s", "wrk_connections", "bench_runs"):
         seen = {s[key] for s in summaries if s.get(key) is not None}
+        # Untagged beside tagged is mixed too: an untagged summary predates the
+        # tag, and every one of those on either runner was sampled differently
+        # (5 s, 3 runs). Ignoring them here let a recording of 10 old + 16 new
+        # macOS summaries through as one protocol.
+        if seen and any(s.get(key) is None for s in summaries):
+            raise SystemExit("refusing to record from mixed sampling: {} is {} in some "
+                             "summaries and absent in others".format(
+                                 key, ", ".join(str(v) for v in sorted(seen))))
         if len(seen) > 1:
             raise SystemExit("refusing to record from mixed sampling: {} is {}".format(
                 key, ", ".join(str(v) for v in sorted(seen))))
@@ -398,6 +416,36 @@ def selftest():
                 {"pct_json": 91.0, "layout": "headerless", "bench_runs": 7}],
                "test", "0" * 40, "1970-01-01")
         failures.append("recording from mixed sampling was allowed")
+    except SystemExit:
+        pass
+    try:
+        record([{"pct_json": 90.0, "layout": "headerless"},
+                {"pct_json": 91.0, "layout": "headerless", "bench_runs": 7}],
+               "test", "0" * 40, "1970-01-01")
+        failures.append("recording from untagged beside tagged sampling was allowed")
+    except SystemExit:
+        pass
+
+    # A metric the baseline marks warn-only reports its regression and takes no
+    # part in the verdict, while the others still gate — the macOS baseline's
+    # shape, where `/json` throughput's spread is too wide to gate on. The
+    # recording writes the mark, and refuses a name that is not a metric.
+    warned = record([{"pct_json": v, "rss_x": 0.8, "pause_p50_ms": 0.6, "layout": "headerless"}
+                     for v in (84.0, 85.0, 86.0)], "test", "0" * 40, "1970-01-01",
+                    warn_only=["pct_json"])
+    if not warned["metrics"]["pct_json"].get("warn_only") or warned["metrics"]["rss_x"].get("warn_only"):
+        failures.append("--warn-only did not mark exactly the named metric")
+    text, code = compare(warned, {"pct_json": 50.0, "rss_x": 0.8, "pause_p50_ms": 0.6,
+                                  "layout": "headerless", "runner": "test"}, gate=True)
+    if code != 0 or "warn-only" not in text:
+        failures.append("warn-only metric gated (exit {})".format(code))
+    text, code = compare(warned, {"pct_json": 85.0, "rss_x": 1.2, "pause_p50_ms": 0.6,
+                                  "layout": "headerless", "runner": "test"}, gate=True)
+    if code != 1:
+        failures.append("metric beside a warn-only one did not gate (exit {})".format(code))
+    try:
+        record([{"pct_json": 90.0}], "test", "0" * 40, "1970-01-01", warn_only=["pct_jsn"])
+        failures.append("--warn-only accepted a name that is not a metric")
     except SystemExit:
         pass
 
@@ -526,7 +574,7 @@ def selftest():
         return 1
     print("perf_compare selftest ok — {} comparison fixtures, both gate modes, "
           "tolerance-less, empty, unrecorded and self-denying baselines, a "
-          "cross-layout, a cross-runner, a cross-protocol, a missing and a layout-less baseline, mixed-layout and mixed-sampling recording, and "
+          "cross-layout, a cross-runner, a cross-protocol, a missing and a layout-less baseline, a per-baseline warn-only metric, mixed-layout and mixed-sampling recording, and "
           "both recording paths".format(len(cases)))
     return 0
 
@@ -544,6 +592,9 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--runner", default="unknown")
     ap.add_argument("--commit", default="unknown")
+    ap.add_argument("--warn-only", action="append", default=[], metavar="METRIC",
+                    help="with --record: mark METRIC as reporting only in this baseline "
+                         "(repeatable), for a runner class whose spread on it is too wide to gate")
     ap.add_argument("--recorded", default="unknown",
                     help="timestamp for provenance; passed in rather than read from the clock "
                          "so a re-record is reproducible")
@@ -558,7 +609,7 @@ def main():
         if not args.summaries or not args.out:
             ap.error("--record needs --out and at least one summary.json")
         summaries = [json.load(open(p)) for p in args.summaries]
-        baseline = record(summaries, args.runner, args.commit, args.recorded)
+        baseline = record(summaries, args.runner, args.commit, args.recorded, args.warn_only)
         with open(args.out, "w") as f:
             f.write(json.dumps(baseline, indent=2) + "\n")
         print(json.dumps(baseline, indent=2))

@@ -99,7 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   4 collected → 26. What the 16 at the current protocol say: Darwin RSS
   and pause spreads are as tight as Linux's, throughput's is ~4x and does
   not narrow with longer wrk runs, so the Darwin baseline will gate the
-  first two and report the third.
+  first two and report the third — which a baseline can now say:
+  `perf_compare.py --record --warn-only METRIC` marks a metric as
+  reporting-only in that baseline, beside the global `pct_root`. And a
+  recording refuses untagged summaries beside tagged ones (the collector's
+  26 were 10 at 5 s × 3 runs plus 16 at 10 s × 7, which `record` accepted
+  as one protocol); the collector keeps the newest run's protocol and
+  counts what it dropped.
 
 ### Changed
 
