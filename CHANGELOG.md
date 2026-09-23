@@ -60,7 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parallel mark is **slower than serial at every count** on this tree,
   not −14.8% at 2 as recorded, and that the counters were a third of the
   regression rather than its ceiling. `GCRY_PARALLEL_MARK` stays
-  experimental and its row now says to leave it at 1.
+  experimental and its row now says to leave it at 1. What remains has a
+  shape: swept by object size on the same graph, 2 workers go from +30.5%
+  at 64 B to −27.7% at 512 B, and 4 workers reach **−50.5%** at 512 B —
+  the cost is paid per object (every object crosses the shared stack's
+  lock twice, with no prefetch), so parallel mark wins on large objects
+  and loses on the small ones a Crystal heap is made of.
 
 ### Changed
 

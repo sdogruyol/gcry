@@ -423,6 +423,12 @@ null control:
       (−1.0%, t=−0.66). The rest is something else — candidates: atomic `OR`
       on shared mark words (true sharing on a shuffled graph), the batched
       steal, the helpers' spin — and nothing has separated them yet.
+      **Then separated by object size** (same graph, 64 → 512 B): 2 workers
+      +30.5% / +8.8% / −19.1% / −27.7%, 4 workers +30.0% / −0.3% / −26.7% /
+      **−50.5%**. The cost is per object and loses to small ones — every object
+      crosses the shared stack's lock twice (flush, pop) and the batch scan has
+      no prefetch. Next: drain locally first and spill above a threshold; the
+      size curve is the measurement that would say it worked.
       `bench/log/linux/2026-09-23-parallel-mark-scaling/FINDINGS.md`
 - [ ] Helpers still busy-spin between collections (separate, pre-existing).
 
