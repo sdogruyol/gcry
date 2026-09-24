@@ -247,3 +247,19 @@ fix and the scan itself is the correctness fix.
 Lesson: "this thread's stack holds no GC reference" was an assertion about
 code gcry does not own (Crystal's thread entry). The gate for a skip is a
 construction of the thing skipped holding a reference.
+
+### And what scanning it again brought back
+
+With the stack scanned, `make idle-rss-after-burst`'s uncapped arm passed on CI
+(run `36002274356`): measured two majors after `burst` returned, with the burst
+still live. Reworked to wait for the drop as observed, the gate then refused
+9 of 60 runs outright — the 200 MB list stayed live more than 20 majors.
+Retention by configuration, same binary, 40 runs each: idle thread scanned
+**5**, idle collector off **0**, its scan skipped **0**. A probe walked the
+idle thread's stack for words landing in a burst node and found one, **2 168 B
+below the published SP** — inside the 4 KiB `suspended_sp_slack` every
+thread's scan starts under its SP, a margin measured for threads stopped
+asynchronously. The idle thread parks voluntarily, so that window is residue of
+its own deeper calls. It now zeroes 64 KiB below its SP before each park
+(dedicated, not `clear_stack`, whose re-entrancy flag is a class variable the
+collector's own scrub shares): retention **0 of 40**.

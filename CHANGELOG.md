@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`GCRY_IDLE_SCAN_SKIP=1`) must lose it. Anyone on 0.27.0 can set
   `GCRY_IDLE_RELEASE_MS=0` to remove the thread.
 
+  Scanning that stack again brought back the cost of what lies below its
+  SP: a thread's stack is scanned from 4 KiB under its SP
+  (`suspended_sp_slack`, measured for threads stopped asynchronously), and
+  under the idle thread's that is residue of its own earlier, deeper calls.
+  One stale word 2 168 B below it pinned a dropped 200 MB list at every
+  major in 5 runs of 40. The thread now zeroes 64 KiB of its own dead stack
+  before each park: 0 of 40.
+
 - **`make monitor-gate-deadlock` no longer runs the host out of memory.**
   Its late-close arm restores a deadlock that wedges a collection *before*
   the world stops, so the harness's churn threads ran on while every

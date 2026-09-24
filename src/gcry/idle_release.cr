@@ -135,6 +135,31 @@ module Gcry
       @@thread = Thread.new(name: "gc-idle") { loop_forever }
     end
 
+    # Dead stack zeroed below this thread's SP before every park. A thread's
+    # SP is scanned with `suspended_sp_slack` (4 KiB) below it, a margin for
+    # threads stopped *asynchronously*; this one parks at a point of its own
+    # choosing, so that window is pure residue of its earlier, deeper calls —
+    # a collection it ran while being born, one it ran at idle. One stale word
+    # there, 2 168 B below the published SP, pinned a dropped 200 MB list at
+    # every major in 5 runs of 40 (`make idle-rss-after-burst`); with the
+    # thread's scan skipped, or the thread off, 0 of 40. 64 KiB also covers
+    # most of what the whole-stack scan reads in the moments it is awake.
+    SCRUB_BYTES = 65_536_u64
+    # Below the SP captured here, so the `memset` frame the clear itself pushes
+    # sits in the gap and is not zeroed under it (as `clear_stack_body`).
+    SCRUB_SKIP = 256_u64
+
+    private def self.scrub_dead_stack : Nil
+      stack = Fiber.current.@stack
+      floor = stack.pointer.address + Platform.host_page_size
+      sp = Roots.hardware_stack_pointer.address
+      return if sp <= floor + SCRUB_SKIP
+      high = sp - SCRUB_SKIP
+      low = high > floor + SCRUB_BYTES ? high - SCRUB_BYTES : floor
+      return if low >= high
+      Pointer(UInt8).new(low).clear(high - low)
+    end
+
     def self.loop_forever : Nil
       # Poll at a quarter of the idle time, clamped: the collection lands
       # within ~1.25x the configured delay, and an idle process wakes a few
@@ -164,6 +189,7 @@ module Gcry
         block = Pointer(UInt64).null
       end
       loop do
+        scrub_dead_stack
         @@parked_sp.set(Roots.hardware_stack_pointer.address)
         Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
         @@parked_sp.set(0_u64)
