@@ -37,6 +37,9 @@ require "./bounded_child"
 
 COLLECTS = 400
 WORKERS  =   3
+# Heap size past which the churn workers stop allocating; see the child. A
+# working gate keeps the heap near the adaptive threshold (8-64 MiB).
+CHURN_HEAP_CEILING = 512_u64 * 1024 * 1024
 # Attempts the control arm gets before it gives up; see where it is used.
 #
 # Six was not enough to be a gate. The control reaches the deadlock in some
@@ -55,11 +58,30 @@ if ARGV.includes?("--child")
   # A harness thread cannot stand in for it: `@@busy` is a single shared bit,
   # so the Monitor's next back-off clears whatever hold the harness took.
   stop = Atomic(Int32).new(0)
+  heap = Gcry.default_heap
 
+  # The churn backs off once the heap passes `CHURN_HEAP_CEILING`. With the
+  # gate working it never gets near it — collections keep up — but the
+  # late-close arm hangs a collection *before* the world stops, so the workers
+  # run on, every auto-collect coalesces onto the stuck cycle, and each
+  # `Bytes.new` maps fresh memory: 2.2 GB after 2 s and 3.5 GB after 4 s,
+  # measured 2026-09-24, which on an 11 GB host ended with the kernel
+  # OOM-killing the child at 7.9 GB anon RSS inside the 60 s budget. The arm
+  # needs a hang, not a heap that grows without limit. Sleeping in
+  # `nanosleep`, not Crystal's `sleep`: these are bare threads.
+  nap = uninitialized Gcry::OS::Timespec
+  nap.tv_sec = typeof(nap.tv_sec).new(0)
+  nap.tv_nsec = typeof(nap.tv_nsec).new(1_000_000)
   churn = Array(Thread).new(WORKERS)
   WORKERS.times do
     churn << Thread.new do
+      rem = uninitialized Gcry::OS::Timespec
+      req = nap
       until stop.get == 1
+        if heap.heap_size > CHURN_HEAP_CEILING
+          Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+          next
+        end
         b = Bytes.new(256)
         b[0] = 1_u8
       end

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`make monitor-gate-deadlock` no longer runs the host out of memory.**
+  Its late-close arm restores a deadlock that wedges a collection *before*
+  the world stops, so the harness's churn threads ran on while every
+  auto-collection coalesced onto the stuck cycle: 2.2 GB of RSS after 2 s,
+  3.5 GB after 4 s, and on an 11 GB host the kernel OOM-killed the child at
+  7.9 GB inside its 60 s budget, taking the shell that ran it along. The
+  churn now backs off past 512 MiB of heap, which a working gate never
+  approaches: the arm still hangs on its first try, at a 529 MB peak.
+
 ## [0.27.0] - 2026-09-24
 
 ### Added
