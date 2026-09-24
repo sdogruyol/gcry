@@ -35,6 +35,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   major in 5 runs of 40. The thread now zeroes 64 KiB of its own dead stack
   before each park: 0 of 40.
 
+- **`make idle-rss-after-burst` counts from the drop it observes.** It
+  measured two majors after the burst's function returned, assuming the
+  first reclaims it; when a stale root kept the list one major longer, the
+  measurement landed before the leak window and the uncapped red arm passed
+  (CI run `36002274356`). It now reads the live set after every major until
+  the burst is gone, takes one more, and refuses a run where the burst
+  never dies — which is how the retention above was found. And it bounds
+  the kept chunks by the budgets that sweep ran under, read before it:
+  read after, they were the adapted 8 MiB, and a burst only partly
+  reclaimed at the drop major had left a larger threshold in force — the
+  capped arm kept 43-92 MB within its design and failed 4 runs in 100.
+  Now 100 of 100 shipped, 0 of 100 uncapped.
+
 - **`make monitor-gate-deadlock` no longer runs the host out of memory.**
   Its late-close arm restores a deadlock that wedges a collection *before*
   the world stops, so the harness's churn threads ran on while every
