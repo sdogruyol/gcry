@@ -870,6 +870,10 @@ module GC
     {% else %}
       Gcry::IdleRelease.idle_ms = idle_env || Gcry::IdleRelease::DEFAULT_MS
     {% end %}
+    # Research only, `make idle-thread-roots`: a block held only by the idle
+    # thread's stack, and the pre-0.27.1 skip of that stack as the red arm.
+    Gcry::IdleRelease.test_hold = true if env_flag_one?("GCRY_IDLE_TEST_HOLD")
+    heap.idle_scan_skip = true if env_flag_one?("GCRY_IDLE_SCAN_SKIP")
     # Walk the Parallel EC run queues inside STW and check every slot is still a
     # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from

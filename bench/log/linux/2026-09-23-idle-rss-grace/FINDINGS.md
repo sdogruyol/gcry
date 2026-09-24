@@ -216,3 +216,34 @@ targets were re-run on the final tree with the default on: 67 pass, and the
 scalar, as it does with the collector off. First CI run on the default
 (`35903203895`): Darwin perf pause p50 0.47 ms against its 0.477 baseline,
 Linux 0.68 ms against 0.636 (+0.47 sd), both gates PASS.
+
+## 5. The skip was wrong (found on the 0.27.0 release commit)
+
+Darwin CI on `73d922c` (run `35995083083`): `make scheduler-roots --control`
+SIGSEGV on the freed-block poison at collection 1 — one collection after the
+idle thread was born (census: "3 listed"). The holders report found the freed
+192 B block held by eight slots of a *running* fiber's stack, and the one
+running fiber the collector skipped was the idle thread's: section 4 dropped
+it from both stack scans on the grounds that it "holds no GC reference". Its
+thread-entry frames do. Linux: 0 of 90 on the same harness — the window is
+timing, which is why 68 green Linux targets and the first Darwin run missed it.
+
+Fix: the stack is scanned like any thread's, starting at an SP. Darwin
+suspends the thread with the rest, so the stop records one. On Linux the
+thread publishes its SP before each `nanosleep` and clears it on waking;
+`other_thread_scan_sp` uses it, and the guard page (all of it) while the thread
+is awake or unborn. `make stw-slot-precision`: `fiber_from_sp` 768 -> 776 (the
+idle fiber, from its published SP), `fiber_from_guard` 8, 21.48 ms per
+collection — the cost section 4 removed stays removed.
+
+Gate `make idle-thread-roots`: the idle thread holds one block only in its loop
+frame (`GCRY_IDLE_TEST_HOLD=1`); six collections from main with churn and
+poisoned frees; the block must be live and intact. PASS 3/3; the 0.27.0 skip
+(`GCRY_IDLE_SCAN_SKIP=1`) FAIL 3/3, block swept. By hand: ignoring the
+published SP still passes — the unknown-SP fallback reads a never-switched main
+fiber's `stack_top` as 0 and scans all of it — so the published SP is the cost
+fix and the scan itself is the correctness fix.
+
+Lesson: "this thread's stack holds no GC reference" was an assertion about
+code gcry does not own (Crystal's thread entry). The gate for a skip is a
+construction of the thing skipped holding a reference.

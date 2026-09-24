@@ -881,6 +881,20 @@ idle-release: $(BIN)
 	! GCRY_IDLE_RELEASE_MS=0 $(BIN)/idle_release
 	@echo "ok — idle collections release memory safely, and with the collector off nothing does"
 
+# The idle collector's own stack is a root. 0.27.0 skipped it — "it holds no
+# GC reference" — and its thread-entry frames do: Darwin CI (run 35995083083)
+# freed a block eight of its slots held and faulted on the poison. Linux never
+# reproduced that (0 of 90), so this constructs it: `GCRY_IDLE_TEST_HOLD=1`
+# makes the idle thread hold one block only in its loop frame, and collections
+# from main must keep it live and intact. `GCRY_IDLE_SCAN_SKIP=1`, the 0.27.0
+# skip, must lose it. ~5 s.
+.PHONY: idle-thread-roots
+idle-thread-roots: $(BIN)
+	@$(CRYSTAL) build -Dgc_none bench/idle_thread_roots.cr -o $(BIN)/idle_thread_roots --error-trace
+	GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 $(BIN)/idle_thread_roots
+	! GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 GCRY_IDLE_SCAN_SKIP=1 $(BIN)/idle_thread_roots
+	@echo "ok — the idle thread's stack is scanned, and skipping it loses what it holds"
+
 # gcry vs Boehm on the fat app, paired and order-rotated.
 #
 # Needs ../acikturkiye with a reachable Postgres and `wrk`. Reports the median

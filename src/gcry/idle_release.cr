@@ -33,7 +33,13 @@
 #     does not wait for a thread that is asleep. Between collections it only
 #     reads (`Heap#allocation_activity`), and it waits out another thread's
 #     stop before it collects. Darwin suspends it with the rest (Mach
-#     `thread_suspend`, no signal round trip to save).
+#     `thread_suspend`, no signal round trip to save);
+#   * its stack **is** scanned, like every thread's. 0.27.0 skipped it on the
+#     grounds that it held no GC reference, and that was false: its own
+#     thread-entry frames are on it, and Darwin CI (run `35995083083`) freed a
+#     block that eight slots of it still held, then faulted on the poison. On
+#     Linux, with no SP recorded, the scan starts at the SP it publishes while
+#     parked (`parked_sp`), and covers the whole stack while it is awake.
 #
 # `make idle-release` holds it.
 
@@ -48,6 +54,43 @@ module Gcry
 
     @@idle_ns = 0_u64
     @@started = false
+    # This thread's stack pointer while it sleeps, 0 while it runs. On Linux
+    # it is exempt from the suspend signal, so no stop records its SP; the
+    # scan reads this instead (`Heap#other_thread_scan_sp`). Everything above
+    # it — `loop_forever` and Crystal's thread-entry frames — is unchanged
+    # for as long as it sleeps. 0 means "not parked": scan the whole stack.
+    @@parked_sp = Atomic(UInt64).new(0_u64)
+
+    def self.parked_sp : UInt64
+      @@parked_sp.get
+    end
+
+    # Research only — `GCRY_IDLE_TEST_HOLD=1`, for `make idle-thread-roots`:
+    # the thread allocates one block, fills it, and keeps its address only in
+    # a stack slot of its own loop frame. The harness learns the address as
+    # `address ^ HOLD_KEY`, which roots nothing, and asks whether collections
+    # run from other threads keep the block alive.
+    HOLD_KEY     = 0x5a5a_a5a5_c3c3_3c3c_u64
+    HOLD_PATTERN = 0x1d1e_1d1e_1d1e_1d1e_u64
+    HOLD_WORDS   =                        12
+    class_property? test_hold : Bool = false
+    @@hold_masked = Atomic(UInt64).new(0_u64)
+
+    def self.hold_masked : UInt64
+      @@hold_masked.get
+    end
+
+    # Is *fiber* the idle collector's? It runs only its thread's main fiber.
+    # For the research skip below only.
+    def self.fiber?(fiber : Fiber) : Bool
+      if t = @@thread
+        if main = t.@main_fiber
+          return main.same?(fiber)
+        end
+      end
+      false
+    end
+
     @@thread : Thread? = nil
 
     def self.idle_ms=(ms : UInt64) : Nil
@@ -69,16 +112,6 @@ module Gcry
       else
         false
       end
-    end
-
-    # Is *fiber* the idle collector's? It runs only its thread's main fiber.
-    def self.fiber?(fiber : Fiber) : Bool
-      if t = @@thread
-        if main = t.@main_fiber
-          return main.same?(fiber)
-        end
-      end
-      false
     end
 
     # A forked child has only the thread that called `fork`; start again at
@@ -120,8 +153,20 @@ module Gcry
       last_total = heap.allocation_activity
       last_change = Clock.monotonic_ns
       collected = false
+      # The research hold: one volatile stack slot in this frame, above the SP
+      # published while parked, is the block's only reference.
+      held = 0_u64
+      if @@test_hold
+        block = GC.malloc(HOLD_WORDS * 8).as(UInt64*)
+        HOLD_WORDS.times { |i| block[i] = HOLD_PATTERN }
+        Atomic::Ops.store(pointerof(held), block.address, :monotonic, true)
+        @@hold_masked.set(block.address ^ HOLD_KEY)
+        block = Pointer(UInt64).null
+      end
       loop do
+        @@parked_sp.set(Roots.hardware_stack_pointer.address)
         Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+        @@parked_sp.set(0_u64)
         total = heap.allocation_activity
         now = Clock.monotonic_ns
         if total != last_total

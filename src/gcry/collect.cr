@@ -714,6 +714,10 @@ module Gcry
     # `GCRY_IDLE_RELEASE_MS` (src/gcry/idle_release.cr): collections the idle
     # thread ran because the process had stopped allocating.
     getter idle_collections : UInt64 = 0_u64
+    # Research only — `GCRY_IDLE_SCAN_SKIP=1`: do not scan the idle
+    # collector's stack, which is what 0.27.0 shipped. The red arm of
+    # `make idle-thread-roots`.
+    property idle_scan_skip : Bool = false
     getter size_class_live_bytes : UInt64 = 0_u64
     # Kept size-class chunk fill histogram (live_payload / usable_payload).
     getter chunk_fill_lt25 : UInt64 = 0_u64

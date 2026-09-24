@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **0.27.0's idle collector could free a block its own thread still held.**
+  Both stack scans skipped the `gc-idle` thread on the grounds that its
+  stack held no GC reference; its thread-entry frames do. Darwin CI on the
+  release commit (run `35995083083`, `make scheduler-roots --control`)
+  freed a block eight slots of that stack still pointed at and faulted on
+  the freed-block poison, one collection after the thread was born. Linux
+  never reproduced it (0 of 90). The stack is scanned again, like every
+  thread's; on Linux, where the thread is exempt from the suspend signal
+  and no SP is recorded, the scan starts at the SP the thread publishes
+  while parked, and covers the whole stack while it is awake — which keeps
+  the cost 0.27.0's skip was removing (a full 8 MiB guard-page scan per
+  collection on the multi-mutator path) without the skip.
+  `make idle-thread-roots` constructs the case: the idle thread holds one
+  block only in its own loop frame (`GCRY_IDLE_TEST_HOLD=1`), and
+  collections from main must keep it live and intact; the 0.27.0 skip
+  (`GCRY_IDLE_SCAN_SKIP=1`) must lose it. Anyone on 0.27.0 can set
+  `GCRY_IDLE_RELEASE_MS=0` to remove the thread.
+
 - **`make monitor-gate-deadlock` no longer runs the host out of memory.**
   Its late-close arm restores a deadlock that wedges a collection *before*
   the world stops, so the harness's churn threads ran on while every

@@ -1087,6 +1087,29 @@ module Gcry
     # has its SP in one of them, and that one is scanned from the SP.
     @fiber_sp_all_known = false
 
+    # Where to start scanning another thread's stack: the SP the stop recorded
+    # for it, or — for the idle collector, which Linux does not suspend — the
+    # SP it published while parked, or its guard page, i.e. all of it, while
+    # it is awake or not yet parked. Never its fiber's saved `stack_top`: a
+    # thread's main fiber that has never switched has none worth the name.
+    # The multi-mutator path used to scan the idle fiber from the guard page
+    # every collection for want of an SP (16 guard scans in 8 collections in
+    # `make stw-slot-precision`, ~17 ms per collection at 96 threads), and
+    # 0.27.0 "fixed" that by not scanning it at all — which lost a block its
+    # thread-entry frames held. The published SP is the fix for the cost.
+    private def other_thread_scan_sp(thread : Thread) : Void*?
+      if sp = Platform.thread_sp(thread.to_unsafe)
+        return sp
+      end
+      return nil unless IdleRelease.thread?(thread)
+      parked = IdleRelease.parked_sp
+      return Pointer(Void).new(parked) if parked != 0
+      if fiber = thread.@current_fiber
+        return Pointer(Void).new(fiber.@stack.pointer.address + Roots::PAGE_SIZE)
+      end
+      nil
+    end
+
     private def fiber_stack_sp_scan_low(fiber : Fiber, guard : UInt64) : UInt64?
       @fiber_sp_all_known = false
       return nil if @full_suspended_stack
@@ -1101,10 +1124,7 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        # Exempt from the suspend signal, so never an SP to record; and its
-        # fiber is skipped above, so it is on no stack this walk asks about.
-        next if IdleRelease.thread?(thread)
-        sp = Platform.thread_sp(thread.to_unsafe)
+        sp = other_thread_scan_sp(thread)
         unless sp
           all_known = false
           next
@@ -1275,12 +1295,7 @@ module Gcry
       Fiber.unsafe_each do |fiber|
         mark_root_candidate(Pointer(Void).new(fiber.object_id), source: RootSource::Stack)
         next if fiber == current
-        # The idle collector's fiber: no GC references on its stack, and on
-        # Linux no recorded SP either (it is signal-exempt), so the multi-
-        # mutator path scanned all 8 MiB of it from the guard page every
-        # collection — `make stw-slot-precision` counted it, 16 guard scans in
-        # 8 collections where the collector's own fiber accounts for 8.
-        next if IdleRelease.fiber?(fiber)
+        next if @idle_scan_skip && IdleRelease.fiber?(fiber)
 
         # Without STW we must not touch another thread's live stack.
         # Parallel STW: scan running fibers here too (current_fiber TLS can be
@@ -1401,10 +1416,7 @@ module Gcry
       current = Thread.current
       Thread.unsafe_each do |thread|
         next if thread == current
-        # The idle collector holds no GC reference on its stack — its Thread
-        # and fiber are reachable through Crystal's lists — and on Linux it is
-        # not suspended, so there are no captured registers to read either.
-        next if IdleRelease.thread?(thread)
+        next if @idle_scan_skip && IdleRelease.thread?(thread)
         pthread = thread.to_unsafe
         fiber = thread.@current_fiber
 
@@ -1424,7 +1436,7 @@ module Gcry
           mark_root_candidate(candidate, source: RootSource::Thread)
         end
 
-        sp = Platform.thread_sp(pthread)
+        sp = other_thread_scan_sp(thread)
         # Snapshot taken in stop_world before any thread was suspended. Calling
         # pthread_getattr_np here instead is what hung the collector: it locks the
         # target's descriptor, and a suspended thread can hold its own. See

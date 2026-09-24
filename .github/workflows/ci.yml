@@ -679,6 +679,11 @@ jobs:
         run: |
           make scheduler-roots
 
+      # The idle collector's own stack is a root. 0.27.0 skipped it and Darwin
+      # CI freed a block it held; this constructs the case instead of waiting.
+      - name: Idle collector stack as a root
+        run: make idle-thread-roots
+
       # And one level down: a precise layout is a claim about *every* pointer in
       # the object, and `Layout.register` had a bucket it never named — an ivar it
       # could not classify (module-typed, Proc, Tuple) got no offset and did not
@@ -1639,6 +1644,7 @@ jobs:
           t timeout 300 make fork-test
           t timeout 300 make greg-roots
           t timeout 300 make scheduler-roots
+          t timeout 300 make idle-thread-roots
           t timeout 300 make ivar-layout-roots
           t timeout 300 make auto-layouts
           t timeout 300 make scrub-fibers
@@ -1906,6 +1912,7 @@ jobs:
           make fork-test
           make greg-roots
           make scheduler-roots
+          make idle-thread-roots
           make ivar-layout-roots
           make auto-layouts
           make scrub-fibers
