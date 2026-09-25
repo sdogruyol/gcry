@@ -3970,8 +3970,12 @@ Target: Match Boehm on the workloads Crystal users actually run.
       `spec/invariant_spec.cr` under plain `crystal spec` (no env var), so they
       gate on every platform including Darwin, and
       `GCRY_DEBUG_INVARIANTS=1 crystal spec` is now a step in the macOS job.
-      Open: whether Darwin has a *third* failure behind these two — no Darwin host
-      was available, and that CI run is what will say.
+      Whether Darwin had a *third* failure behind these two: **no** (read
+      2026-09-25). The macOS job's `GCRY_DEBUG_INVARIANTS=1 crystal spec` step
+      passes (305 examples, 0 failures), and none of the Darwin test failures in
+      the 38 runs before that date were in it. The one
+      `GCRY INVARIANT FAILURE … actual=1 reported=2` line in that log is
+      `spec/invariant_spec.cr:211` planting a +1 drift and expecting the raise.
       `bench/log/linux/2026-08-15-invariants-dormant-walk/FINDINGS.md`
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
