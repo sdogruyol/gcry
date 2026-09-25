@@ -1586,6 +1586,32 @@ tlab-nursery-sample: $(BIN)
 	if [ "$$unengaged" != "0" ]; then echo "tlab-nursery-sample: $$unengaged run(s) passed without a TLAB hit, so they were not samples of the arm"; exit 1; fi; \
 	if [ "$$crashes" != "0" ]; then grep -h "gcry: SIGSEGV\|holders —\|dying-type audit\|DEAD\|cookie broken" $(SAMPLE_DIR)/tlab-*.log 2>/dev/null | head -40; exit 1; fi
 
+# Sampling, not gating: the default layout's STW property test, fresh seeds
+# every run. CI gates it on seed 1 only, and seed 1 cannot see a race: the
+# chunk-index growth race lost live objects in 2 of 62 loaded runs of a local
+# campaign and in none of CI's seed-1 runs, for weeks (2026-09-25). This takes
+# STW_MT_SAMPLE_RUNS (40) seeds from STW_MT_SAMPLE_BASE (the clock, or CI's run
+# id so coverage accumulates across runs), with the freed-block poison, the
+# SEGV report and the STW watchdog on, and each run bounded — the same campaign
+# found one 900 s stall on this arm, and a stall must end as a log, not as a
+# cancelled job. Failed and stalled runs keep their logs in $(SAMPLE_DIR).
+.PHONY: stw-mt-sample
+stw-mt-sample: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test --error-trace
+	@mkdir -p $(SAMPLE_DIR)
+	@runs=$${STW_MT_SAMPLE_RUNS:-40}; base=$${STW_MT_SAMPLE_BASE:-$$(date +%s)}; failed=0; stalled=0; \
+	for i in $$(seq 0 $$((runs - 1))); do \
+	  seed=$$((base + i)); log=$(SAMPLE_DIR)/stw-mt-$$seed.log; \
+	  GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=10000 timeout 240 \
+	    $(BIN)/stw_mt_property_test --seed=$$seed --iterations=100 --workers=2,4,8 > $$log 2>&1; rc=$$?; \
+	  if [ $$rc = 0 ]; then rm -f $$log; \
+	  elif [ $$rc = 124 ]; then stalled=$$((stalled+1)); echo "STALLED: killed after 240 s" >> $$log; \
+	  else failed=$$((failed+1)); fi; \
+	done; \
+	echo "stw-mt-sample: $$runs runs from seed $$base, $$failed failed, $$stalled stalled; logs of both in $(SAMPLE_DIR)"; \
+	if [ "$$failed" != "0" ] || [ "$$stalled" != "0" ]; then \
+	  grep -h "ERROR\|DEAD\|cookie broken\|gcry: SIGSEGV\|WATCHDOG\|STALLED" $(SAMPLE_DIR)/stw-mt-*.log 2>/dev/null | head -40; exit 1; fi
+
 thread-block-audit: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/thread_block_audit.cr -o $(BIN)/thread_block_audit --error-trace
 	$(BIN)/thread_block_audit

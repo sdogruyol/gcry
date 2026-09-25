@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`make stw-mt-sample`, and a CI job running it: the default layout's STW
+  property test on fresh seeds.** CI gated that test on seed 1 only, and one
+  seed cannot see a race — the chunk-index growth race fixed in 0.27.2 lost
+  live objects in 2 of 62 loaded runs of a local campaign and never on CI.
+  40 seeds per CI run, based on the run id so no two runs repeat, with the
+  freed-block poison, the SEGV report and the STW watchdog on; every run is
+  bounded, so a stall ends as a log instead of a cancelled job.
+  `continue-on-error`, like the other samplers.
+
 ## [0.27.2] - 2026-09-25
 
 ### Added

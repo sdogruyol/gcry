@@ -1754,6 +1754,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # The default layout's STW property test on fresh seeds: CI gates it on seed
+  # 1, and a race needs seeds (the chunk-index growth race, 2026-09-25, was
+  # found by a local campaign and never by this gate). The run id is the seed
+  # base, so every CI run samples seeds no earlier run did.
+  stw-mt-sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    name: STW property seed sampler (x86_64)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Fresh seeds of the default layout under STW
+        run: STW_MT_SAMPLE_BASE=$(( ${{ github.run_id }} % 100000000 * 100 )) make stw-mt-sample
+
+      - name: Upload what it caught
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stw-mt-samples
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30
+
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 20
