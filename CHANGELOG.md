@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "the workload no longer reaches the race". Such a child is now run again,
   up to three times, and three in a row fails with that finding named.
 
+- **A fault at a freed `malloc` block's mangled link is no longer called a
+  wild pointer.** glibc's safe-linking leaves `block >> 12` in the first
+  word of a freed tcache/fastbin block, and a stale pointer loaded from it
+  faults there — at an address in no mapping, which `GCRY_SEGV_REPORT=1`
+  reported as wild. The churn gate's two out-of-span sightings
+  (`0x55816aff0`, `0x55797df8d`) have exactly that shape. The report now
+  checks whether `addr << 12` is in a writable mapping and names the C-heap
+  use-after-free reading when it is; `make segv-report` has a `tcache` arm
+  that faults on a real freed block's link.
+  `bench/log/linux/2026-09-25-safe-linking-reading/`.
+
 ## [0.27.1] - 2026-09-24
 
 ### Fixed

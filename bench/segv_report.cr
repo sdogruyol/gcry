@@ -25,6 +25,10 @@
 #                cannot be confused.
 #   outside      an address far from the heap → must say outside the span, which
 #                rules a swept object out rather than leaving it open.
+#   tcache       (glibc) the first word of a freed `malloc` block, dereferenced:
+#                safe-linking left `block >> 12` there, which is in no mapping,
+#                and the report must read it as a C-heap use-after-free rather
+#                than a wild pointer.
 #   --control    the same faults with the knob off: no gcry line at all, and
 #                Crystal's own message unchanged. This is what shows the reporter
 #                adds lines and removes none.
@@ -96,6 +100,12 @@ def crash_address(arm : String) : UInt64
     ptr = GC.malloc(256)
     GC.free(ptr)
     ptr.address + 64
+  when "tcache"
+    # Alone in its tcache bin, so glibc's mangled link is `block >> 12 ^ 0`:
+    # the value a stale pointer read out of a freed C-heap block carries.
+    block = LibC.malloc(200)
+    LibC.free(block)
+    Pointer(UInt64).new(block.address).value
   when "used-block"
     # Live, and the address is inside it — the report must not call this free.
     ptr = GC.malloc(256)
@@ -156,6 +166,9 @@ ARMS = {
   "used-block"      => {"in a USED block", false},
   "outside"         => {"outside gcry's heap span", true},
 }
+{% if flag?(:gnu) %}
+  ARMS["tcache"] = {"glibc safe-linking", true}
+{% end %}
 
 ARMS.each do |arm, (expect, needs_signal)|
   env = {"GCRY_SEGV_REPORT" => control ? "0" : "1"}

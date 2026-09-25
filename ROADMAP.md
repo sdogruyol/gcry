@@ -2437,6 +2437,14 @@ kept finding the rest.
       is fixed — the whole block travels now — so the next one arrives
       with its mapping instead of as a number.
       `bench/log/linux/2026-09-22-three-reds/FINDINGS.md`
+      **Read again, 2026-09-25: both out-of-span sightings are glibc
+      safe-linking.** `0x55816aff0` and `0x55797df8d` are PIE-region pages
+      `>> 12` — the first word of a freed tcache/fastbin block with no
+      successor. The likeliest victim is a small C-heap block, freed, then
+      loaded as a pointer; no gcry allocation, which is why no holder search
+      found one. The report now says so (`addr << 12` in a writable
+      mapping); 0 of 600 on this host pinned to two CPUs.
+      `bench/log/linux/2026-09-25-safe-linking-reading/FINDINGS.md`
       **And an unbounded leak, fixed on the way**: a birth root was released
       only when the pre-suspend walk found its thread on Crystal's list, so a
       thread that published and exited between two collections kept its root

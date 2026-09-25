@@ -354,10 +354,21 @@ module Gcry
       name = uninitialized UInt8[96]
       name_len = 0
       found = false
+      # See `report_safe_linking`: where the address would point if it were a
+      # freed malloc block's mangled link. Only a value below 2^36 can be one.
+      linked = addr < (1_u64 << 36) ? addr << 12 : 0_u64
+      linked_lo = 0_u64
+      linked_hi = 0_u64
+      linked_found = false
 
       # The walker's `name` pointer is into a buffer it reuses, so the name is
       # copied here rather than held.
       walked = Platform.each_map_region do |rlo, rhi, rperms, rname, rlen|
+        if linked != 0_u64 && !linked_found && linked >= rlo && linked < rhi && rperms[1] == 'w'.ord.to_u8
+          linked_found = true
+          linked_lo = rlo
+          linked_hi = rhi
+        end
         unless found || addr < rlo || addr >= rhi
           found = true
           lo = rlo
@@ -382,6 +393,10 @@ module Gcry
       end
 
       unless found
+        if linked_found
+          report_safe_linking(addr, linked, linked_lo, linked_hi)
+          return
+        end
         len = RawOut.append(buf.to_unsafe, len,
           "gcry: no mapping holds that address — it is not in this process's address space at " \
           "all, so it is a wild pointer rather than a stale one\n")
@@ -416,6 +431,38 @@ module Gcry
         end
       end
       len = RawOut.append(buf.to_unsafe, len, "\n")
+      RawOut.flush(buf.to_unsafe, len)
+    end
+
+    # An unmapped address that is a writable mapping's address shifted right by
+    # twelve is not wild. glibc (2.32+) stores the link of a freed tcache or
+    # fastbin block as `(block >> 12) ^ next` — safe-linking — so a block freed
+    # with no successor holds exactly `block >> 12` in its first word, and a
+    # stale pointer read out of it faults there. The churn gate faulted at
+    # `0x55816aff0` (2026-09-19) and `0x55797df8d` (2026-09-22), both reported
+    # as wild pointers; shifted back they read as pages beside the executable,
+    # where the brk malloc heap sits — the region line could not say, since
+    # the address itself is in no mapping. What this names is the *kind* of
+    # victim — a small block from `malloc`, freed, then read as a pointer —
+    # which rules out every
+    # gcry-heap reading at once; the offset the reader added is not
+    # recoverable, so the block is "in or near" that page.
+    private def self.report_safe_linking(addr : UInt64, linked : UInt64, lo : UInt64, hi : UInt64) : Nil
+      buf = uninitialized UInt8[RawOut::LIMIT]
+      len = RawOut.append(buf.to_unsafe, 0, "gcry: no mapping holds that address, but 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, addr)
+      len = RawOut.append(buf.to_unsafe, len, " << 12 = 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, linked)
+      len = RawOut.append(buf.to_unsafe, len, " is in the writable mapping [0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, lo)
+      len = RawOut.append(buf.to_unsafe, len, ", 0x")
+      len = RawOut.append_hex(buf.to_unsafe, len, hi)
+      len = RawOut.append(buf.to_unsafe, len, ")\n")
+      RawOut.flush(buf.to_unsafe, len)
+      len = RawOut.append(buf.to_unsafe, 0,
+        "gcry: that is glibc safe-linking — a freed tcache/fastbin block with no successor holds " \
+        "its own address >> 12 — so the likeliest reading is a pointer loaded out of a small " \
+        "malloc block (C heap, not gcry's) that had already been freed, in or near that page\n")
       RawOut.flush(buf.to_unsafe, len)
     end
 
