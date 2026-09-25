@@ -2219,7 +2219,8 @@ kept finding the rest.
       stalled past 60 s showed the thread-group leader as a zombie (main
       thread gone, others running) and ended before it could be read. Next:
       a stall with every thread's backtrace — `hunt_hang.sh` in the
-      campaign's findings does that.
+      campaign's findings does that; 0 stalls in 300 seeds on a quiet host,
+      so it needs the campaign's load around it.
       `bench/log/linux/2026-09-25-stress-campaign/FINDINGS.md`
 - [x] **TLAB-only: 13 pinned live objects lost in one chunk, once
       (2026-09-25).** A local stress campaign ran

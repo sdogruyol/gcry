@@ -71,3 +71,11 @@ its result is appended below.
 1720 runs, 20.08 lane-hours, over two trees. For the ROADMAP's "documented
 fuzz hours": 11.6 h of the library fuzzer and 20 h across the process-GC and
 library harnesses in all.
+
+## The stall hunt (appended)
+
+`hunt_hang.sh 7000 300`: 300 fresh seeds of the same arm and environment,
+alone on the host, each watched for a 60 s stall: **0 stalls**. With the
+campaign's one in 81 under five loaded lanes, the stall — like the index race
+before it — shows up under load and not on a quiet host. It stays open; the
+next run of the hunter belongs under the campaign's load.
