@@ -189,3 +189,9 @@ Rules written after corrections, so the same mistake is not made twice.
   source skips every main source after it, where through `require` it
   skips only its own file. Green said nothing; `281 → 224` said everything.
   Read the before/after `N examples` line of every job the change touches.
+- **`munmap` is not `VirtualFree`.** Carving chunks out of one mapping and
+  releasing them one by one works on Unix; on Windows `MEM_RELEASE` of the
+  mapping's base releases the whole reservation, so the walk that freed
+  the first reserve chunk faulted reading the second one's `next`. All six
+  Windows jobs, run `36109015597`. Anything laid on a shared mapping is
+  released through that mapping, once, on every platform.
