@@ -44,11 +44,13 @@ So it is the scheduler alone.
 
 ## The mechanism, measured
 
-`resume_giveup.cr` is `ping.cr` with `Scheduler#resume` wrapped to record, per
-worker thread, the fiber it is running and the fiber it is resuming, and a
+`resume_giveup.cr` is `ping.cr` with `Scheduler#resume` redefined to record,
+per worker thread, the fiber it is running and the fiber it is resuming, and a
 watchdog thread — raw `nanosleep` and `write(2)`, since anything through the
 event loop can be what is stuck — that prints both when progress stops for 3 s.
-**4 of 4 stalls were the circular wait**:
+Without `FIX=1` it runs 1.21.0's logic unchanged. **Every stall was the
+circular wait**: 4 of 4 in a first batch (a `previous_def` wrapper), 18 of 18
+in the control arm below:
 
     STALL after 2287 round trips
       w-0: running worker-fiber-0, resuming worker-fiber-1 (target resumable at entry: false)
