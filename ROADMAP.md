@@ -3897,7 +3897,9 @@ Target: Match Boehm on the workloads Crystal users actually run.
 - [ ] **Parallel mark** — multi-thread mark without throughput regression
 - [ ] **Nursery + incremental on by default** — process GC defaults to generational
 - [ ] **Production dogfood** — deploy gcry on a real Crystal service in production
-- [ ] **Benchmark leaderboard** — per-release transparent perf tracking in `bench/leaderboard.md`
+- [x] **Benchmark leaderboard** — per-release transparent perf tracking in `bench/leaderboard.md`
+      (2026-09-25: `bench/perf_leaderboard.py`, from CI's perf-smoke summaries, median and
+      IQR over each release's development window; covers v0.26.0 on, older artifacts expired)
 - [ ] **gcry vs Boehm comparison page** — readable feature matrix (readable source,
       Crystal debug, integrated metrics vs C library)
 - [ ] **Release blog posts** — every minor release: what changed, perf numbers,

@@ -178,7 +178,8 @@ the other you can't.
 
 **% of Boehm** is the only score that matters. Same host, same load, same wrk.
 Absolute req/s is host noise; the ratio is truth. Prefer `/json` (alloc-heavy).
-Full methodology: [docs/PERF.md](docs/PERF.md).
+Full methodology: [docs/PERF.md](docs/PERF.md). Release by release, as CI's own
+perf smoke saw it: [bench/leaderboard.md](bench/leaderboard.md).
 
 ### Linux
 
