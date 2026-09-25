@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that faults on a real freed block's link.
   `bench/log/linux/2026-09-25-safe-linking-reading/`.
 
+- **The TLAB sampler now takes the TLAB-only arm too.** A local stress
+  campaign lost 13 pinned live objects in one chunk in one run of
+  `stw_mt_property_test --tlab` (header layout, freelist allocator — opt-in,
+  not the default): about 1 run in 300, no seed reproduces it, and no CI job
+  sampled that arm. `make tlab-nursery-sample` adds `TLAB_ONLY_RUNS` (100)
+  runs of it, and the harness's `DEAD` line now says whether the pointer
+  left the chunk index or its block was reclaimed, so a sighting arrives with
+  evidence instead of addresses.
+
 ## [0.27.1] - 2026-09-24
 
 ### Fixed

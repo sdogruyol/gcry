@@ -137,7 +137,12 @@ class StwMtPropertyTest
     @roots.each_with_index do |ptr, i|
       next if ptr.null?
       unless GC.is_heap_ptr(ptr) && Gcry.default_heap.live?(ptr)
-        record_error("#{label}: root #{i} DEAD (#{ptr})")
+        # Which of the two it was, and what the block says: a chunk gone from
+        # the index and a block reclaimed inside a listed chunk are different
+        # defects, and one sighting (2026-09-25, `--tlab`, 1 run in ~300)
+        # arrived as 13 addresses and nothing else.
+        record_error("#{label}: root #{i} DEAD (#{ptr}) heap_ptr=#{GC.is_heap_ptr(ptr)} " \
+                     "block=#{Gcry.default_heap.debug_block_info(ptr)}")
         ok = false
         next
       end
