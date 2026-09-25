@@ -3546,8 +3546,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ported spec.** `bench/log/macos/2026-09-25-page-query-eviction/FINDINGS.md`
       **Implemented the same day** (`src/gcry/platform/darwin_low_water.cr`,
       `mach_vm_page_range_query` cross-checked against the per-page query);
-      the spec and `stw_lag_pause`'s skip/red arms run in the macOS job. Open:
-      a Darwin EC4 pause re-cut to price it.
+      the spec and `stw_lag_pause`'s skip/red arms run in the macOS job.
+      **Priced the same night**: Kemal EC4 on the macOS runner, 9 reps, pause
+      **9.05 → 3.06 ms** (Linux: 8.06 → 3.60) and post-GC RSS **126.5 →
+      92.9 MB**, which Linux never showed (+0.2% there) — ~23 MB of it outside
+      the heap, `[INFERENCE]` stack pages the scan faulted in.
+      `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.

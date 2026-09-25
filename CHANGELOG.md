@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is cross-checked page by page against the per-page one the arms verify;
   `spec/stack_low_water_spec.cr` and `stw_lag_pause`'s skip and red arms now
   run on Darwin too. `GCRY_STACK_LOW_WATER=0` turns it off, as on Linux.
+  Measured on the `macos-latest` runner, Kemal EC4, 9 reps against that
+  knob: pause **9.05 → 3.06 ms**, and post-GC RSS **126.5 → 92.9 MB**. The
+  RSS saving is Darwin's own; Linux read +0.2% there. Re-cut with the
+  dispatch input `darwin_root_phase_reps`
+  (`bench/log/macos/2026-09-25-205449-root-phase/`).
 
 - **`make stw-mt-sample`, and a CI job running it: the default layout's STW
   property test on fresh seeds.** CI gated that test on seed 1 only, and one
