@@ -986,6 +986,12 @@ dormant-flush-race: $(BIN)
 # re-enters the allocator and spins on that same lock. 3 of 3 children killed
 # on the deadline before the fix, 0 of 3 after, both size paths. Deterministic
 # — the child caps its own RLIMIT_AS — so a red here is a real regression.
+#
+# The parallel arm holds the report itself: three fibers, every small class
+# failed after the first error (`GCRY_OOM_TEST_EXHAUSTED=1`), and each must get
+# its own `OutOfMemoryError` from the reserve. Its red arms, every run: the
+# reserve off (`GCRY_OOM_RESERVE_KB=0`, abort) and the message built by the
+# caller (`GCRY_OOM_EAGER_MESSAGE=1`, stack overflow).
 oom-no-hang: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/oom_no_hang.cr -o $(BIN)/oom_no_hang --error-trace
 	$(BIN)/oom_no_hang

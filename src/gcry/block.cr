@@ -450,6 +450,9 @@ module Gcry
       # unmaps it; a cursor taking it, or a block surviving in it, clears the
       # flag (`sweep_small_bitmap` retention, `bitmap_refill_pool`).
       IDLE = 128_u32
+      # Laid on the out-of-memory reserve (`oom_reserve.cr`): taken only by the
+      # reserve's cursor, never released by a sweep.
+      RESERVE = 256_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -599,6 +602,10 @@ module Gcry
 
     def self.set_idle(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::IDLE, value)
+    end
+
+    def self.reserve?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::RESERVE) != 0
     end
 
     def self.holed?(chunk : ChunkHeader*) : Bool

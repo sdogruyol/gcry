@@ -218,6 +218,10 @@ module GC
     end
     @@gcry_ready = true
     apply_env_config(heap)
+    # After the allocator's shape is final: the reserve serves the bitmap
+    # path only (`src/gcry/oom_reserve.cr`). `GCRY_OOM_RESERVE_KB=0` is the
+    # red arm of `make oom-no-hang`.
+    heap.setup_oom_reserve((env_u64("GCRY_OOM_RESERVE_KB") || Gcry::Heap::OOM_RESERVE_DEFAULT_KB) &* 1024)
 
     # Fork: reinit locks/STW in the child (opt out with GCRY_DISABLE_ATFORK=1).
     # `make fork-test` requires the handler installed; `--disabled` needs the
@@ -874,6 +878,11 @@ module GC
     # thread's stack, and the pre-0.27.1 skip of that stack as the red arm.
     Gcry::IdleRelease.test_hold = true if env_flag_one?("GCRY_IDLE_TEST_HOLD")
     heap.idle_scan_skip = true if env_flag_one?("GCRY_IDLE_SCAN_SKIP")
+    # Research only, `make oom-no-hang`: build an out-of-memory message before
+    # `oom!` is entered, as the call sites did before 2026-09-24; and fail
+    # every small allocation the reserve does not serve once one has failed.
+    heap.oom_eager_message = true if env_flag_one?("GCRY_OOM_EAGER_MESSAGE")
+    heap.oom_test_exhausted = true if env_flag_one?("GCRY_OOM_TEST_EXHAUSTED")
     # Walk the Parallel EC run queues inside STW and check every slot is still a
     # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from

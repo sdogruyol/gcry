@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and built it again until the stack overflowed. Three Parallel fibers
   exhausting a 1.5 GiB `RLIMIT_AS`: 5 of 5 SIGSEGV. `oom!` now takes a
   literal and the number and builds the text itself.
+- **Reporting `OutOfMemoryError` no longer depends on what is left in the
+  heap.** The report — its message, the error, Crystal's `CallStack` and the
+  `LibUnwind::Exception` every `raise` allocates — came from the heap that
+  had just run out, and when that failed the prebuilt fallback's own raise
+  failed too and recursed. A thread inside `oom!` now allocates from a
+  reserve: 4 MiB mapped at boot and untouched until needed (no RSS), laid
+  out as chunks no ordinary allocation takes and no sweep releases
+  (`GCRY_OOM_RESERVE_KB`, `=0` off; bitmap allocator without a nursery, the
+  default). If even the fallback cannot be raised, the process says
+  `gcry: out of memory while reporting out of memory; aborting` and aborts
+  instead of overflowing its stack. `make oom-no-hang` gained a parallel arm
+  that exhausts every small class after the first failure
+  (`GCRY_OOM_TEST_EXHAUSTED=1`): three reports with their own messages every
+  run, and both red arms (reserve off, message built by the caller) fail
+  every run. `bench/log/linux/2026-09-24-oom-report-reserve/`.
 
 ## [0.27.1] - 2026-09-24
 

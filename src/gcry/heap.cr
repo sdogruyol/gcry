@@ -3,6 +3,7 @@ require "./size_classes"
 require "./chunk_layout"
 require "./chunk_radix"
 require "./bitmap_alloc"
+require "./oom_reserve"
 require "crystal/spin_lock"
 require "crystal/rw_lock"
 require "./platform/os"
@@ -388,6 +389,13 @@ module Gcry
         nxt = chunk.value.next
         Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
         chunk = nxt
+      end
+      # Reserve chunks went with the list; the rest of the region goes here.
+      unless @oom_reserve_size == 0
+        Gcry::OS.munmap(Pointer(Void).new(@oom_reserve_base), LibC::SizeT.new(@oom_reserve_size))
+        @oom_reserve_base = 0_u64
+        @oom_reserve_size = 0_u64
+        @oom_reserve_used = 0_u64
       end
 
       @chunks = Pointer(ChunkHeader).null
@@ -860,26 +868,48 @@ module Gcry
       {% end %}
       e
     end
-    @oom_raising = Atomic(Int32).new(0)
+    # Research only — `GCRY_OOM_EAGER_MESSAGE=1`: the red arm of
+    # `make oom-no-hang`'s exhausted arm. See `oom_refill!`.
+    property oom_eager_message : Bool = false
 
-    # *message* must be a literal and *number* is appended inside the guard:
-    # an interpolated argument is built by the *caller*, before the flag is
-    # set, and a message that cannot be allocated then asks the allocator
-    # again, fails again and builds the message again. Measured 2026-09-24:
-    # three Parallel fibers exhausting a 1.5 GB address space —
-    # `alloc_old_small → oom!("… #{payload}") → String::Builder → malloc(80) →
-    # alloc_old_small → …` until the stack overflowed, 5 of 5.
-    private def oom!(message : String, number : UInt64? = nil) : NoReturn
-      if @oom_raising.compare_and_set(0, 1)[1]
-        begin
-          # Building the message is what allocates; a failure in there lands
-          # back here with the flag set and takes the branch below.
-          raise OutOfMemoryError.new(number ? "#{message} #{number}" : message)
-        ensure
-          @oom_raising.set(0)
-        end
+    # The size-class refill failure. The research arm keeps the exact
+    # interpolation every call site used before 2026-09-24, built here, before
+    # `oom!` is entered — which is the defect it restores.
+    private def oom_refill!(payload : UInt32) : NoReturn
+      if @oom_eager_message
+        oom!("failed to refill size class #{payload}")
+      else
+        oom!("failed to refill size class", payload.to_u64)
       end
-      raise @oom_error
+    end
+
+    # *message* must be a literal and *number* is appended inside: an
+    # interpolated argument is built by the *caller*, before `oom!` knows a
+    # report is under way, and a message that cannot be allocated then asks
+    # the allocator again, fails again and builds the message again. Measured
+    # 2026-09-24: three Parallel fibers exhausting a 1.5 GB address space —
+    # `alloc_old_small → oom!("… #{payload}") → String::Builder → malloc(80) →
+    # alloc_old_small → …` until the stack overflowed.
+    #
+    # Depth is per thread (`@@oom_depth`). At 0 this is the report proper,
+    # with its own message and a true backtrace; its allocations come from
+    # the reserve (`oom_reserve.cr`). At 1 one of those failed anyway and the
+    # prebuilt `@oom_error` goes instead. At 2 even that raise could not
+    # allocate its unwind record, and nothing that raises is left.
+    private def oom!(message : String, number : UInt64? = nil) : NoReturn
+      depth = @@oom_depth
+      oom_abort if depth >= 2
+      unless @oom_seen
+        @oom_seen = true
+        @fast_path = false if @oom_test_exhausted
+      end
+      @@oom_depth = depth + 1
+      begin
+        raise OutOfMemoryError.new(number ? "#{message} #{number}" : message) if depth == 0
+        raise @oom_error
+      ensure
+        @@oom_depth = depth
+      end
     end
 
     # How many times an allocation failure asked for a collection and retried.
@@ -1016,7 +1046,8 @@ module Gcry
     private def refresh_fast_path : Nil
       @fast_path = @bitmap_alloc && @fast_path_enabled && !@nursery_enabled && !@destroyed &&
                    !@birth_grace && !@always_clear &&
-                   !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc)
+                   !@clear_stack_enabled && @stress_every == 0 && !(@tight_grow && @tight_grow_gc) &&
+                   !(@oom_test_exhausted && @oom_seen)
     end
 
     private def init_fast_path_tables : Nil
@@ -1277,12 +1308,12 @@ module Gcry
       if user.null?
         # The freelist lock is gone by now, so both the collection and the
         # raise are legal here — neither was inside `map_chunk`.
-        oom!("failed to refill size class", payload.to_u64) unless retry_after_emergency_collect?
+        oom_refill!(payload) unless retry_after_emergency_collect?
         user, clean = with_freelist_lock(index, false) do
           claimed = alloc_old_small_locked(payload, flags, index)
           {claimed, @freelist_clean[index]}
         end
-        oom!("failed to refill size class", payload.to_u64) if user.null?
+        oom_refill!(payload) if user.null?
       end
       # `user` is in this frame now, which the scan accepts, so the pool slot's
       # copy has done its job (see `@pool_in_flight`). Clearing it here rather
@@ -2345,8 +2376,11 @@ module Gcry
     # the collection and the raise to the allocation entry points, where no
     # allocator lock is held. `alloc_old_small` already states the rule at its
     # own tight-grow collect: never collect under the freelist lock.
-    private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32) : ChunkHeader*
-      ptr = mmap_anonymous(bytes)
+    # *at*: memory already mapped for this chunk (the out-of-memory reserve);
+    # null maps a fresh one.
+    private def map_chunk(bytes : UInt64, size_class : UInt32, flags : UInt32 = 0_u32,
+                          at : Void* = Pointer(Void).null) : ChunkHeader*
+      ptr = at.null? ? mmap_anonymous(bytes) : at
       return Pointer(ChunkHeader).null if Gcry.mmap_failed?(ptr)
 
       # The denominator for the chunk-list divergence rate. A chunk is stranded

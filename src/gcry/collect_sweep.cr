@@ -1231,7 +1231,9 @@ module Gcry
         end
       end
 
-      SmallSweepCounts.new(live > 0 || pinned,
+      # A reserve chunk is never released: its address range is part of the
+      # reserve's region, and the next report lays its chunks on it again.
+      SmallSweepCounts.new(live > 0 || pinned || ChunkHeader.reserve?(chunk),
         live * payload,
         nblocks * payload,
         (nblocks - live) * payload)

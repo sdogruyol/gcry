@@ -347,6 +347,7 @@ module Gcry
         i += 1
       end
       yield @fallback_cursor_set unless @fallback_cursor_set.null?
+      yield @oom_reserve_set unless @oom_reserve_set.null?
     end
 
     protected def destroy_cursor_sets : Nil
@@ -370,6 +371,7 @@ module Gcry
       each_cursor_set { |set| LibC.free(set.as(Void*)) }
       @cursor_set_count = 0
       @fallback_cursor_set = Pointer(CursorSet).null
+      @oom_reserve_set = Pointer(CursorSet).null
     end
 
     # Is the set between its sentinel store and its clear — inside `fast_alloc`
@@ -515,7 +517,7 @@ module Gcry
     # null store would erase that peer's root before its frame holds the
     # block. The locked path pays a CAS here, never the hit path.
     protected def clear_bitmap_alloc_in_flight(index : Int32, flags : UInt32, user : Void*) : Nil
-      set = cursor_set_cached
+      set = oom_reserve_active? ? @oom_reserve_set : cursor_set_cached
       return if set.null?
       slot = (flags & BlockHeader::Flags::ATOMIC) != 0 ? index + SIZE_CLASS_COUNT : index
       s = CursorSet.slot(set, slot)
@@ -542,7 +544,8 @@ module Gcry
           CursorSet.slot(set, i).value.in_flight = Pointer(Void).null
           i += 1
         end
-        if set != mine && set != @fallback_cursor_set && set.value.state == CursorSet::STATE_LIVE
+        if set != mine && set != @fallback_cursor_set && set != @oom_reserve_set &&
+           set.value.state == CursorSet::STATE_LIVE
           set.value.state = CursorSet::STATE_EXITING
         end
       end
@@ -637,7 +640,11 @@ module Gcry
       # different chunks now; `@block_bytes` stays class-indexed.
       atomic = (flags & BlockHeader::Flags::ATOMIC) != 0
       slot = atomic ? index + SIZE_CLASS_COUNT : index
-      set = cursor_set
+      return Pointer(Void).null if oom_test_refuse?
+      # A thread reporting an out-of-memory error takes its blocks from the
+      # reserve (`oom_reserve.cr`), not from its own set.
+      reserve = oom_reserve_active?
+      set = reserve ? @oom_reserve_set : cursor_set
       # C-heap metadata can fail before a cursor exists. Let the caller retry
       # collection and raise OOM after releasing the class lock.
       return Pointer(Void).null if set.null?
@@ -654,7 +661,7 @@ module Gcry
 
       mask = s.value.free_mask
       if mask == 0_u64
-        unless bitmap_refill_pool(s, index, payload, atomic)
+        unless bitmap_refill_pool(s, index, payload, atomic, reserve)
           s.value.in_flight = Pointer(Void).null
           return Pointer(Void).null
         end
@@ -716,6 +723,7 @@ module Gcry
       end
 
       @bitmap_locked_allocations &+= 1
+      @oom_reserve_allocations &+= 1 if reserve
       BlockHeader.user_from(header)
     end
 
@@ -762,11 +770,11 @@ module Gcry
     # Advance the cursor to the next word with a free block, taking another
     # chunk from the class's pool list when the current one is exhausted.
     protected def bitmap_refill_pool(s : CursorSlot*, index : Int32, payload : UInt32,
-                                     atomic : Bool) : Bool
+                                     atomic : Bool, reserve : Bool = false) : Bool
       loop do
         chunk = s.value.chunk
         if chunk.null?
-          chunk = bitmap_take_pool_chunk(index, payload, atomic)
+          chunk = reserve ? oom_reserve_take_chunk(index, atomic) : bitmap_take_pool_chunk(index, payload, atomic)
           return false if chunk.null?
           # In use again: a fully free chunk past the warm budget keeps its
           # one cycle of grace only while nothing takes it.
@@ -913,9 +921,13 @@ module Gcry
       nil
     end
 
-    private def bitmap_pool_candidate?(chunk : ChunkHeader*, index : Int32, atomic : Bool) : Bool
+    # *reserve* picks which chunks are candidates at all: the reserve's cursor
+    # takes only reserve chunks and every other cursor never does.
+    private def bitmap_pool_candidate?(chunk : ChunkHeader*, index : Int32, atomic : Bool,
+                                       reserve : Bool = false) : Bool
       return false if ChunkHeader.large?(chunk) || chunk.value.size_class != index.to_u32
       return false unless ChunkHeader.atomic?(chunk) == atomic
+      return false unless ChunkHeader.reserve?(chunk) == reserve
       return false if ChunkHeader.dormant?(chunk) || ChunkHeader.nursery?(chunk) || ChunkHeader.cursor?(chunk)
       nblocks = chunk_block_count(chunk)
       return false if nblocks == 0
