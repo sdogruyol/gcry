@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Scheduler#resume`, no collector frame — is classified and not counted:
   it reproduces under Boehm with no GC calls at all
   (`bench/log/linux/2026-09-25-parallel-scheduler-deadlock/`).
+- `make scheduler-roots` no longer goes red at `--control` `delta: 2` on a
+  loaded runner. Its baseline waited for two equal pin counts, but the gap was
+  `gc-idle` — started by the first collection, listed (and pinned) only once
+  the OS runs it — so two back-to-back readings could both precede it. It now
+  waits for `gc-idle` and `SYSMON` to be listed first. With CPU 0 crowded:
+  old 14/150 red, new 0/150; 2 of the last 38 macOS CI runs had hit it.
 - **Nightly: fresh seeds, and the process GC.** The nightly fuzzer ran seed
   42 every night, replaying largely the same operations; its seed now comes
   from the run id and is printed. And a second nightly job runs ~30 minutes of

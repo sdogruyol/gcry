@@ -131,21 +131,42 @@ end
 # has to be a macro rather than a runtime `if` — on a compiler without execution
 # contexts `Fiber::ExecutionContext::Parallel` does not exist, so a reference to
 # it would fail to compile rather than be skipped.
-# The ambient pin count is not constant at process start — it **settles**. Two
-# pins arrive in the first milliseconds: measured on an idle x86_64 host, the
-# first collection reads 23 where every later one reads 25, in 1 run in 25, with
-# the thread count flat at 2 throughout (so it is not a worker starting late).
-# A 50 ms sleep before the first collection makes it 25 on 10 of 10, which is
-# what says the settling is the runtime's own asynchronous boot and not
-# something the collection does.
+# The ambient pin count is not constant at process start — it **settles**, and
+# the reason is one thread: gcry's `gc-idle`, which the *first collection*
+# starts with `Thread.new` (`IdleRelease.ensure_started`). A thread joins
+# `Thread.unsafe_each` — and so the scan that pins its `@scheduler` and
+# `@execution_context` — only when it first runs its own `Thread#start`. Until
+# the OS schedules it the count reads 2 low: 23 → 25 on an idle x86_64 host in
+# 1 run in 25 (2026-08-15), 25 → 27 on the macOS runner in 2 CI runs of the
+# night of 2026-09-25, whose audit lines show the same `2 listed` → `3 listed`.
 #
-# Reading the baseline off the first collection therefore did two things, and
-# both were wrong in the gate's favour or against it: `--control` went red at
-# `delta: 2` (three CI runs on 2026-08-15, on aarch64 and twice on Darwin), and
-# the hold arm's `delta = after - before` came out **2 too high**, discounting
-# the threshold it is supposed to clear. Settle first, then measure.
+# Reading the baseline too early did two things, and both were wrong in the
+# gate's favour or against it: `--control` went red at `delta: 2`, and the
+# hold arm's `delta = after - before` came out **2 too high**, discounting the
+# threshold it is supposed to clear. The first fix waited for two equal
+# readings, which a loaded runner defeats: back-to-back collections take
+# microseconds, the unscheduled thread takes as long as it takes, so 25 = 25
+# "settled" and 27 came one collection later. So wait for the cause — every
+# helper thread listed — and only then for the count to stop moving.
+HELPER_THREADS = {"gc-idle", "SYSMON"}
+
+def helper_listed?(name : String) : Bool
+  Thread.unsafe_each { |thread| return true if thread.name == name }
+  false
+end
+
 def settled_pins : UInt64
   GC.collect
+  deadline = Time.instant + 10.seconds
+  HELPER_THREADS.each do |name|
+    # `gc-idle` exists only while idle release is armed; SYSMON only on a
+    # runtime with execution contexts, which `run` has already required.
+    next if name == "gc-idle" && !Gcry::IdleRelease.armed?
+    until helper_listed?(name)
+      abort "settled_pins: #{name} was not listed within 10 s" if Time.instant > deadline
+      sleep 1.millisecond
+    end
+  end
   prev = HEAP.ec_root_pins
   8.times do
     GC.collect
