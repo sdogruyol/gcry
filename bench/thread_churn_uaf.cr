@@ -50,6 +50,7 @@
 #   bin/thread_churn_uaf --child
 
 require "../src/gcry"
+require "./bounded_child"
 
 {% if flag?(:linux) %}
   lib LibChurnPtracer
@@ -65,12 +66,12 @@ ROUNDS   = (ENV["CHURN_ROUNDS"]?.try(&.to_i?) || 240)
 BATCH    = 8
 ATTEMPTS = (ENV["CHURN_ATTEMPTS"]?.try(&.to_i?) || 24)
 LANES    = 6
-# A child is killed past this and counted as `hung`. Children take seconds; the
-# deadline exists because the `--control` arm restores a use-after-free, and a
-# child running on a corrupted heap can loop instead of faulting — one did on
-# 2026-09-25 (run 36191260152) and, with an unbounded `wait`, took the gate to
-# the step's 20-minute `timeout` with nothing said about what it was doing.
-CHILD_DEADLINE = (ENV["CHURN_CHILD_DEADLINE_S"]?.try(&.to_i?) || 120).seconds
+# Every child runs under `BoundedChild` (`BENCH_CHILD_TIMEOUT_S`, 120 s by
+# default; children take seconds). The `--control` arm restores a
+# use-after-free, and a child running on that corrupted heap can loop instead
+# of faulting — one did on 2026-09-25 (run 36191260152) and, with an unbounded
+# `wait`, took the gate to the step's 20-minute `timeout` with nothing said
+# about what it was doing.
 
 if ARGV.includes?("--child")
   # Traceable by any process, so `bench/stall_capture.sh` can attach gdb to a
@@ -93,20 +94,14 @@ self_path = Process.executable_path || "bin/thread_churn_uaf"
 record Arm, name : String, env : Hash(String, String)
 record Result, name : String, runs : Int32, failed : Int32, hung : Int32, report : String?
 
-# Past the deadline: say what the child is doing, then kill it. The capture
-# goes to a file beside the binary rather than into the report, which keeps
-# eight lines; the report names the file.
-def kill_hung(process : Process, arm : String) : String
-  path = "#{File.dirname(Process.executable_path || "bin/x")}/thread_churn_uaf-hung-#{arm}-#{process.pid}.txt"
-  capture = "bench/stall_capture.sh"
-  if File.exists?(capture)
-    File.open(path, "w") do |file|
-      Process.run(capture, [process.pid.to_s], output: file, error: file)
-    end
-  end
-  process.signal(Signal::KILL) rescue nil
-  process.wait
-  "HUNG past #{CHILD_DEADLINE.total_seconds.to_i} s, killed#{File.exists?(path) ? "; threads and backtraces in #{path}" : ""}"
+# A hung child's capture goes to a file beside the binary rather than into the
+# report, which keeps eight lines; the report names the file.
+def hung_report(arm : String, lane : Int32, capture : String?) : String
+  why = "HUNG past #{BoundedChild::DEFAULT_TIMEOUT.total_seconds.to_i} s, killed"
+  return why unless capture
+  path = "#{File.dirname(Process.executable_path || "bin/x")}/thread_churn_uaf-hung-#{arm}-#{lane}.txt"
+  File.write(path, capture)
+  "#{why}; threads and backtraces in #{path}"
 end
 
 # The diagnostics travel with the arms rather than being something to
@@ -138,29 +133,23 @@ def run_arm(self_path : String, arm : Arm, attempts : Int32, want : String) : Re
   while remaining > 0
     lanes = remaining < LANES ? remaining : LANES
     remaining -= lanes
-    children = Array(Tuple(Process, IO::Memory)).new(lanes)
+    # One fiber per lane: `BoundedChild.run` waits by polling with `sleep`, so
+    # the lanes' children still run side by side.
+    done = Channel(BoundedChild::Result).new(lanes)
     lanes.times do
-      sink = IO::Memory.new
-      children << {Process.new(self_path, ["--child"], env: arm.env,
-        output: Process::Redirect::Close, error: sink), sink}
+      spawn { done.send(BoundedChild.run(self_path, ["--child"], env: arm.env)) }
     end
-    deadline = Time.instant + CHILD_DEADLINE
-    children.each do |process, sink|
-      until process.terminated? || Time.instant > deadline
-        sleep 50.milliseconds
-      end
-      unless process.terminated?
-        failed += 1
+    lanes.times do |lane|
+      child = done.receive
+      next if child.ok
+      failed += 1
+      if child.timed_out
         hung += 1
-        why = kill_hung(process, arm.name)
-        report ||= why
+        report ||= hung_report(arm.name, lane, child.capture)
         next
       end
-      status = process.wait
-      next if status.success?
-      failed += 1
       next if report
-      lines = sink.to_s.lines
+      lines = child.output.lines
       # The whole `gcry:` block from the first interesting line, not one line
       # of it. An out-of-span fault's first line says only "never a gcry
       # allocation"; the line under it is the region report naming the mapping,

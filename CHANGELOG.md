@@ -46,13 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Scheduler#resume`, no collector frame — is classified and not counted:
   it reproduces under Boehm with no GC calls at all
   (`bench/log/linux/2026-09-25-parallel-scheduler-deadlock/`).
-- `make thread-churn-uaf` bounds each child (120 s, `CHURN_CHILD_DEADLINE_S`).
-  Its `--control` arm restores a use-after-free on purpose, and a child on
-  that corrupted heap hung instead of faulting (run 36191260152). The
-  unbounded `wait` took the gate to its 20-minute step timeout with no
-  diagnosis. A hung child is now killed and counted as a failure (`N of them
-  hung`), after `bench/stall_capture.sh` has written its threads and
-  backtraces beside the binary.
+- `make thread-churn-uaf` bounds each child, through `BoundedChild` like the
+  other race gates (`BENCH_CHILD_TIMEOUT_S`, 120 s). Its `--control` arm
+  restores a use-after-free on purpose, and a child on that corrupted heap hung
+  instead of faulting (run 36191260152). The unbounded `wait` took the gate to
+  its 20-minute step timeout with no diagnosis. A hung child now counts as a
+  failure (`N of them hung`). `BoundedChild` also runs `bench/stall_capture.sh`
+  on any child it is about to kill (Linux), so all 20 of its gates keep threads
+  and backtraces from a hang instead of only its duration.
 - `make scheduler-roots` no longer goes red at `--control` `delta: 2` on a
   loaded runner. Its baseline waited for two equal pin counts, but the gap was
   `gc-idle` — started by the first collection, listed (and pinned) only once
