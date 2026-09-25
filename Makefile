@@ -1756,6 +1756,19 @@ index-lock-wedge: $(BIN)
 	$(BIN)/index_lock_wedge
 	$(BIN)/index_lock_wedge --control
 
+# The chunk index grew with `realloc`, which frees the old array before the
+# growing thread publishes the new one, while a stopped world reads the index
+# unlocked: a mutator frozen in between left the collector on freed memory —
+# roots not found and live objects reclaimed, or a fault at `block >> 12`
+# (glibc safe-linking). Growth now publishes before it frees. Each growth is
+# held 50 ms while main collects back to back; the shipped arm must be clean in
+# every run, and freeing first (`GCRY_INDEX_GROW_FREE_FIRST=1`) must go red in
+# at least one of five (~3 in 4 each). Linux: the corruption is glibc's. ~1 min.
+.PHONY: index-grow-race
+index-grow-race: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/index_grow_race.cr -o $(BIN)/index_grow_race --error-trace
+	$(BIN)/index_grow_race
+
 # What the parked-fiber lag reads, for the largest open pause item: 8.4 ms of a
 # 9.2 ms p50 EC4 pause is `roots_fibers_ns`, because under multi-mutator STW
 # every parked fiber is scanned from 256 KiB below its saved `stack_top`. The

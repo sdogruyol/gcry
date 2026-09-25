@@ -18,6 +18,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A collection could reclaim live objects, or fault, while the chunk index
+  grew.** The index grew with `realloc`, which frees the old array before
+  the growing thread publishes the new pointer, and a stopped world reads
+  the index unlocked. A mutator suspended between the two left the whole
+  collection reading freed memory: glibc had rewritten its first entries, so
+  roots in the lowest-addressed chunks were not found and their live objects
+  were swept, or a lookup dereferenced the garbage and faulted at
+  `block >> 12`. Every layout; rare, because the window is two instructions
+  wide and opens only when the index doubles, and `realloc` frees nothing
+  when it grows in place. It explains a local campaign's 13 pinned objects
+  lost in one chunk (~1 run in 900) and the churn gate's two unexplained
+  out-of-span faults on CI. Growth now allocates, copies, publishes, then
+  frees. `make index-grow-race` holds every growth open while collections
+  land in it: shipped clean every run; freeing first
+  (`GCRY_INDEX_GROW_FREE_FIRST=1`) faults in ~3 runs of 4.
+  `bench/log/linux/2026-09-25-index-grow-realloc/`.
+
 - **Running out of memory could end in SIGSEGV instead of
   `OutOfMemoryError`.** Every interpolated out-of-memory message
   (`"failed to refill size class #{payload}"` and eight more) was built by
@@ -63,11 +80,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The TLAB sampler now takes the TLAB-only arm too.** A local stress
   campaign lost 13 pinned live objects in one chunk in one run of
   `stw_mt_property_test --tlab` (header layout, freelist allocator — opt-in,
-  not the default): about 1 run in 300, no seed reproduces it, and no CI job
-  sampled that arm. `make tlab-nursery-sample` adds `TLAB_ONLY_RUNS` (30)
-  runs of it, and the harness's `DEAD` line now says whether the pointer
-  left the chunk index or its block was reclaimed, so a sighting arrives with
-  evidence instead of addresses.
+  not the default): about 1 run in 900, no seed reproduces it, and no CI job
+  sampled that arm. It was the chunk-index growth above.
+  `make tlab-nursery-sample` adds `TLAB_ONLY_RUNS` (30) runs of it, and the
+  harness's `DEAD` line now says whether the pointer left the chunk index or
+  its block was reclaimed, so a sighting arrives with evidence instead of
+  addresses.
 
 ## [0.27.1] - 2026-09-24
 

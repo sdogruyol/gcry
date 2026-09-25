@@ -844,6 +844,14 @@ jobs:
         run: |
           make index-lock-wedge
 
+      # And the index's other unlocked-reader hazard: growth used `realloc`,
+      # which frees the old array before the new pointer is published, so a
+      # mutator frozen in between left the stopped-world collector reading
+      # freed memory. Growth is held open while collections land in it.
+      - name: Chunk index growth never exposes freed memory
+        run: |
+          make index-grow-race
+
       # And the question the holder search opened: is the mark complete at all?
       # Walks every marked block after mark and before sweep and names any
       # pointer into a block the sweep is about to free. The gate plants one it

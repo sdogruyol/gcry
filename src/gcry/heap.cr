@@ -3205,17 +3205,64 @@ module Gcry
       heap_marked?(header)
     end
 
+    # Research only — `GCRY_INDEX_GROW_FREE_FIRST=1`: free the old array
+    # before publishing the new one, which is what the pre-2026-09-25
+    # `realloc` did whenever it moved the block (in place it frees nothing,
+    # which is why the defect was rare and why the red arm of
+    # `make index-grow-race` does this directly instead of calling `realloc`).
+    property index_grow_free_first : Bool = false
+    # Research only — `GCRY_INDEX_GROW_TEST_STALL_MS=N`: hold each growth for
+    # N ms at the point the old array is no longer the one the index is
+    # about to name, so a collection lands there. Under `@index_lock`.
+    property index_grow_stall_ms : UInt32 = 0_u32
+
+    # Grow by allocate, copy, publish, and only then free the old array.
+    #
+    # It was `realloc`, which frees the old array before this thread stores
+    # the new pointer — and `chunk_containing` reads `@chunk_index` *unlocked*
+    # while the world is stopped, so a mutator suspended between the two left
+    # the collector marking through freed memory for a whole collection. glibc
+    # has rewritten that block's first words by then: its tcache link (`block
+    # >> 12` under safe-linking) and key, or arena pointers for a larger one.
+    # The lowest chunks' entries read as garbage, the roots in them are not
+    # found, and their live objects are reclaimed; a lookup that dereferences
+    # the garbage faults at `block >> 12` plus a field offset. Both were seen
+    # and unexplained: 13 pinned objects lost in one chunk
+    # (`stw_mt_property_test --tlab`, 1 run in ~900), and the churn gate's two
+    # faults at `0x55816aff0` / `0x55797df8d`
+    # (`bench/log/linux/2026-09-25-index-grow-realloc/FINDINGS.md`).
+    #
+    # Now every state a suspended thread can leave names an intact array: the
+    # old one until the release store, the fully copied new one after it.
+    # Growth holds `@index_lock`, so locked readers never see either switch.
     private def index_ensure_cap(need : Int32) : Nil
       return if need <= @chunk_index_cap
       new_cap = @chunk_index_cap == 0 ? 16 : @chunk_index_cap
       while new_cap < need
         new_cap *= 2
       end
-      bytes = (sizeof(ChunkHeader*) * new_cap).to_u64
-      ptr = LibC.realloc(@chunk_index.as(Void*), LibC::SizeT.new(bytes)).as(ChunkHeader**)
-      raise OutOfMemoryError.new("chunk index realloc failed") if ptr.null?
-      @chunk_index = ptr
+      bytes = LibC::SizeT.new(sizeof(ChunkHeader*) * new_cap)
+      old = @chunk_index
+      fresh = LibC.malloc(bytes).as(ChunkHeader**)
+      raise OutOfMemoryError.new("chunk index allocation failed") if fresh.null?
+      fresh.copy_from(old, @chunk_index_count) unless old.null?
+      if @index_grow_free_first && !old.null?
+        LibC.free(old.as(Void*))
+        old = Pointer(ChunkHeader*).null
+      end
+      index_grow_test_stall
+      Atomic::Ops.store(pointerof(@chunk_index), fresh, :release, true)
       @chunk_index_cap = new_cap
+      LibC.free(old.as(Void*)) unless old.null?
+    end
+
+    private def index_grow_test_stall : Nil
+      ms = @index_grow_stall_ms
+      return if ms == 0
+      start = Time.instant
+      until (Time.instant - start).total_milliseconds >= ms
+        Intrinsics.pause
+      end
     end
 
     # First index i where chunk_index[i].address >= addr (or count).

@@ -883,6 +883,12 @@ module GC
     # every small allocation the reserve does not serve once one has failed.
     heap.oom_eager_message = true if env_flag_one?("GCRY_OOM_EAGER_MESSAGE")
     heap.oom_test_exhausted = true if env_flag_one?("GCRY_OOM_TEST_EXHAUSTED")
+    # Research only, `make index-grow-race`: the pre-2026-09-25 order (the old
+    # chunk index freed before the new one is published), and a stall there.
+    heap.index_grow_free_first = true if env_flag_one?("GCRY_INDEX_GROW_FREE_FIRST")
+    if stall = env_u64("GCRY_INDEX_GROW_TEST_STALL_MS")
+      heap.index_grow_stall_ms = stall.clamp(0_u64, 1000_u64).to_u32
+    end
     # Walk the Parallel EC run queues inside STW and check every slot is still a
     # live Fiber (bench/ec_queue_audit.cr). Off by default — bounded, but inside
     # the pause. The soak turns it on: it is what turns the 2026-08-10 SEGV from

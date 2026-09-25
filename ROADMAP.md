@@ -2211,12 +2211,12 @@ kept finding the rest.
 
 ## Next — the thread family, then Darwin performance parity
 
-- [ ] **TLAB-only: 13 pinned live objects lost in one chunk, once
+- [x] **TLAB-only: 13 pinned live objects lost in one chunk, once
       (2026-09-25).** A local stress campaign ran
       `stw_mt_property_test --tlab` (header layout, `GCRY_BITMAP_ALLOC=0` —
       opt-in, not a default) with fresh seeds; seed 1010 reported roots 3–15
       DEAD after collection #71, all within ~28 KiB (one chunk). Roots 3–7
-      had passed the check after #70. Rate about 1 run in 300 on this host;
+      had passed the check after #70. Rate about 1 run in 900 on this host;
       seed 1010 clean 20 of 20 again; 0 of 60 on this tree and 0 of 60 on
       0.27.1 at fresh seeds, so nothing says it is new. **Excluded so far:**
       the after-world sweep (TLAB forces the sweep inside the stop,
@@ -2230,6 +2230,16 @@ kept finding the rest.
       `heap_ptr=` and the block's state per DEAD root, which tells those
       apart, and `make tlab-nursery-sample` takes 30 TLAB-only runs per CI
       run so the next sighting arrives with that line.
+      **Explained and fixed the same day: chunk index growth.**
+      `index_ensure_cap` used `realloc`, which frees the old array before the
+      new pointer is stored, and the stopped world reads the index unlocked:
+      a mutator frozen between the two left the collection on freed memory,
+      the lowest chunks' entries garbage, their roots unfound and their live
+      objects swept. Widening that window took the TLAB harness from ~1 in
+      900 to 1 in 20 with the same signature (`heap_ptr=true`, block FREE,
+      payload intact). Growth now allocates, copies, publishes, then frees;
+      `make index-grow-race` is the gate.
+      `bench/log/linux/2026-09-25-index-grow-realloc/FINDINGS.md`
 - [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
       of a freed block.** It faults inside `pthread_getattr_np` under
       `stop_world`, on a `pthread_t` that is gcry's own tagged poison
@@ -2464,6 +2474,14 @@ kept finding the rest.
       found one. The report now says so (`addr << 12` in a writable
       mapping); 0 of 600 on this host pinned to two CPUs.
       `bench/log/linux/2026-09-25-safe-linking-reading/FINDINGS.md`
+      **And the freed block is named (same day): the chunk index.** Growth
+      used `realloc`, so a stopped-world lookup could dereference the freed
+      old array's first entry — `block >> 12` — and fault there. `make
+      index-grow-race` reproduces the shape on demand (`0x597883efb`,
+      `0x64bce7a55` in the brk heap, the report naming safe-linking) and the
+      fix removes it. Whether it was *every* churn sighting cannot be proved
+      after the fact; it is the one mechanism shown to produce that address.
+      `bench/log/linux/2026-09-25-index-grow-realloc/FINDINGS.md`
       **And an unbounded leak, fixed on the way**: a birth root was released
       only when the pre-suspend walk found its thread on Crystal's list, so a
       thread that published and exited between two collections kept its root
