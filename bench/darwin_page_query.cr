@@ -66,6 +66,14 @@
       ref_count : Int32*,
     ) : KernReturn
 
+    # Dispositions of a whole range in one trap (macOS 10.15+): what the
+    # collector would use, since one `mach_vm_page_query` per page costs a
+    # trap for every untouched page of every parked stack. `dispositions` is
+    # the address of an `Int32` array; `dispositions_count` is its length in,
+    # entries written out.
+    fun mach_vm_page_range_query(target_map : Port, address : UInt64, size : UInt64,
+                                 dispositions : UInt64, dispositions_count : UInt64*) : KernReturn
+
     # Physical memory, for `--pressure=auto`. Bound here rather than in
     # `LibC` so it cannot collide with a binding the stdlib may add.
     fun sysctlbyname(name : UInt8*, oldp : Void*, oldlenp : LibC::SizeT*,
@@ -74,8 +82,12 @@
 
   lib LibC
     # Darwin spells it MAP_ANON; the Linux name is what the rest of the tree
-    # uses, so alias it here the same way `src/gcry/block.cr` does.
-    MAP_ANONYMOUS      = MAP_ANON
+    # uses, so alias it here the same way `src/gcry/block.cr` does — and, like
+    # there, only where the stdlib has not: x86_64-darwin's bindings already
+    # define it, and redefining it is a hard error on that target.
+    {% if !LibC.has_constant?("MAP_ANONYMOUS") %}
+      MAP_ANONYMOUS = MAP_ANON
+    {% end %}
     MADV_FREE_REUSABLE = 7
     MADV_FREE_REUSE    = 8
     fun madvise(addr : Void*, len : SizeT, advice : Int) : Int
@@ -149,6 +161,43 @@ end
     {disposition, kr == KERN_SUCCESS}
   end
 
+  # One call for *pages* pages from *addr*; nil when the kernel refuses.
+  def range_query(addr : UInt64, pages : Int32) : Array(Int32)?
+    buf = Array(Int32).new(pages, -1)
+    count = pages.to_u64
+    kr = LibMachVM.mach_vm_page_range_query(LibMachVM.mach_task_self_, addr,
+      pages.to_u64 * PAGE, buf.to_unsafe.address, pointerof(count))
+    return nil unless kr == KERN_SUCCESS
+    return nil unless count == pages.to_u64
+    buf
+  end
+
+  # The bulk query must agree with the per-page one on the two bits the skip
+  # reads, page for page — the per-page semantics are what the arms verify,
+  # and a bulk call that disagrees cannot inherit that verification.
+  def cross_check(label : String, base : UInt64, pages : Int32, failures : Array(String)) : Nil
+    bulk = range_query(base, pages)
+    unless bulk
+      failures << "#{label}: mach_vm_page_range_query refused the range"
+      puts "#{label} range query: REFUSED"
+      return
+    end
+    mask = DarwinPageQuery::PRESENT | DarwinPageQuery::PAGED_OUT
+    differ = 0
+    exact = 0
+    pages.times do |i|
+      d, ok = query(base + i.to_u64 * PAGE)
+      next unless ok
+      differ += 1 if (d & mask) != (bulk[i] & mask)
+      exact += 1 if d == bulk[i]
+    end
+    puts "#{label} range query: #{pages - differ}/#{pages} agree on PRESENT|PAGED_OUT (#{exact} identical)"
+    if differ > 0
+      failures << "#{label}: mach_vm_page_range_query disagreed with mach_vm_page_query on " \
+                  "PRESENT|PAGED_OUT for #{differ} of #{pages} pages — the bulk call cannot carry the skip"
+    end
+  end
+
   def map_region(pages : Int32) : UInt64
     len = LibC::SizeT.new(pages.to_u64 * PAGE)
     map = LibC.mmap(Pointer(Void).null, len,
@@ -209,6 +258,7 @@ end
                 "skippable — the skip would buy nothing on this platform (harmless, but the " \
                 "implementation would be pointless)"
   end
+  cross_check("untouched", base, PAGES, failures)
 
   # ── Arm 2: written and resident ─────────────────────────────────────────────
   PAGES.times { |i| Pointer(UInt8).new(base + i.to_u64 * PAGE).value = FILL }
@@ -226,6 +276,7 @@ end
                 "(first at page #{written_skippable.first}) — the predicate would skip a page " \
                 "holding live data, which is a dropped root"
   end
+  cross_check("written", base, PAGES, failures)
 
   # ── Arm 3: zero-proof over a sparse pattern ─────────────────────────────────
   # The claim the skip rests on, checked page by page: skippable ⇒ reads zero.
@@ -252,6 +303,7 @@ end
   end
   puts "zero-proof: #{skippable_pages}/#{PAGES} skippable, #{violations} of them non-zero " \
        "(#{touched.size} pages were written)"
+  cross_check("zero-proof", sparse, PAGES, failures)
 
   # ── Arm 4: reclaimed with MADV_FREE_REUSABLE ────────────────────────────────
   # The advice gcry's own Darwin sweep uses. Reporting such a page skippable is
@@ -279,6 +331,7 @@ end
       failures << "#{reclaimed_nonzero} MADV_FREE_REUSABLE pages read as skippable while still " \
                   "holding data — skipping them would lose whatever was written there"
     end
+    cross_check("reclaimed", reclaim, PAGES, failures)
   else
     puts "reclaimed: MADV_FREE_REUSABLE refused (errno #{Errno.value}); arm skipped"
   end
@@ -331,6 +384,7 @@ end
                 "under memory pressure. This is the finding that must block a Darwin low-water " \
                 "implementation."
   end
+  cross_check("paged-out", evict, PAGES, failures) if conclusive_eviction
   ballast.each { |a| LibC.munmap(Pointer(Void).new(a), LibC::SizeT.new(PAGE)) }
 
   puts
