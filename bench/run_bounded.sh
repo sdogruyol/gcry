@@ -5,7 +5,12 @@
 #
 # Exit 0 when the command passed, 1 when it failed, 2 when it was still running
 # at the deadline — in which case `bench/stall_capture.sh` has appended every
-# thread's state and a backtrace to <log> before the kill.
+# thread's state and a backtrace to <log> before the kill — and 3 when that
+# stall is the known Crystal 1.21 Parallel-scheduler deadlock: two or more
+# threads spinning in `Scheduler#resume` (`parallel/scheduler.cr:97`) and no
+# collector frame anywhere. It reproduces under Boehm with no GC calls at all
+# (`bench/log/linux/2026-09-25-parallel-scheduler-deadlock/`), so a sampler
+# reports it without counting it against gcry.
 #
 # "Still running" is read from /proc, not `kill -0`: a child that has exited
 # but not been waited for is a zombie, and `kill -0` succeeds on it. And a
@@ -35,6 +40,11 @@ if running; then
   "$here/stall_capture.sh" "$pid" >> "$log" 2>&1
   kill -9 "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null
+  spinning=$(grep -c "parallel/scheduler.cr:97" "$log")
+  if [ "$spinning" -ge 2 ] && ! grep -q "stop_world\|run_collection\|Gcry::Heap#collect" "$log"; then
+    echo "STALL CLASSIFIED: Crystal Parallel-scheduler resume deadlock (upstream, not gcry)" >> "$log"
+    exit 3
+  fi
   exit 2
 fi
 wait "$pid" && exit 0

@@ -2211,8 +2211,17 @@ kept finding the rest.
 
 ## Next — the thread family, then Darwin performance parity
 
-- [ ] **One 900 s stall of `stw_mt_property_test` on the default layout
-      (2026-09-25).** Seed 1032, `GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1`,
+- [x] **One 900 s stall of `stw_mt_property_test` on the default layout
+      (2026-09-25) — a Crystal scheduler deadlock, not gcry.** Captured with
+      every thread's backtrace the same night: both Parallel worker threads
+      spinning in `Scheduler#resume` (`until fiber.resumable?`), each waiting
+      on the fiber the other is still running, the main thread in
+      `epoll_wait`, no collection in progress. `ping.cr` — the harness's
+      channel traffic and nothing else — deadlocks the same way under Boehm
+      (3 of 152) and with no GC calls at all (3 of 74). Samplers now classify
+      it and do not count it; an upstream report is drafted, not filed.
+      `bench/log/linux/2026-09-25-parallel-scheduler-deadlock/FINDINGS.md`
+      What was open before the capture: Seed 1032, `GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1`,
       2/4/8 workers: the first arm started and nothing more was printed; no
       watchdog was armed, so no phase. 1 of 81 in a loaded campaign on the
       fixed tree; the same seed was clean 12 of 12 after. A probe that

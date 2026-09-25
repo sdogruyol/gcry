@@ -24,6 +24,13 @@ if command -v gdb >/dev/null 2>&1 && [ -n "$live" ]; then
   echo "--- gdb, attached through task $live"
   timeout 120 gdb -q -batch -p "$live" -ex "set pagination off" -ex "info threads" \
     -ex "thread apply all bt 40" 2>&1 | tail -n 3000
+  # And the innermost frames' arguments and locals: a scheduler spinning in
+  # `resume` is waiting on a particular fiber, and which one — another thread's
+  # current fiber, itself mid-switch — is what separates a scheduler deadlock
+  # from anything the collector did (2026-09-25).
+  echo "--- innermost frames with arguments and locals"
+  timeout 120 gdb -q -batch -p "$live" -ex "set pagination off" \
+    -ex "thread apply all bt full 8" 2>&1 | tail -n 3000
 else
   echo "--- no gdb backtrace (gdb missing or no live task)"
 fi

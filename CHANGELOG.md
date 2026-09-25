@@ -33,7 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadline is not just killed: `bench/run_bounded.sh` has
   `bench/stall_capture.sh` record every thread's state and a gdb backtrace of
   all threads first (the harness declares itself traceable, so this works
-  under Ubuntu's default `ptrace_scope`).
+  under Ubuntu's default `ptrace_scope`). A stall that shows the known
+  Crystal 1.21 Parallel-scheduler deadlock — two threads spinning in
+  `Scheduler#resume`, no collector frame — is classified and not counted:
+  it reproduces under Boehm with no GC calls at all
+  (`bench/log/linux/2026-09-25-parallel-scheduler-deadlock/`).
 - **Nightly: fresh seeds, and the process GC.** The nightly fuzzer ran seed
   42 every night, replaying largely the same operations; its seed now comes
   from the run id and is printed. And a second nightly job runs ~30 minutes of

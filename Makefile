@@ -1600,7 +1600,7 @@ tlab-nursery-sample: $(BIN)
 stw-mt-sample: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test --error-trace
 	@mkdir -p $(SAMPLE_DIR)
-	@runs=$${STW_MT_SAMPLE_RUNS:-40}; base=$${STW_MT_SAMPLE_BASE:-$$(date +%s)}; failed=0; stalled=0; \
+	@runs=$${STW_MT_SAMPLE_RUNS:-40}; base=$${STW_MT_SAMPLE_BASE:-$$(date +%s)}; failed=0; stalled=0; upstream=0; \
 	for i in $$(seq 0 $$((runs - 1))); do \
 	  seed=$$((base + i)); log=$(SAMPLE_DIR)/stw-mt-$$seed.log; \
 	  GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=10000 \
@@ -1608,9 +1608,10 @@ stw-mt-sample: $(BIN)
 	    $(BIN)/stw_mt_property_test --seed=$$seed --iterations=100 --workers=2,4,8; rc=$$?; \
 	  if [ $$rc = 0 ]; then rm -f $$log; \
 	  elif [ $$rc = 2 ]; then stalled=$$((stalled+1)); \
+	  elif [ $$rc = 3 ]; then upstream=$$((upstream+1)); \
 	  else failed=$$((failed+1)); fi; \
 	done; \
-	echo "stw-mt-sample: $$runs runs from seed $$base, $$failed failed, $$stalled stalled; logs of both in $(SAMPLE_DIR)"; \
+	echo "stw-mt-sample: $$runs runs from seed $$base, $$failed failed, $$stalled stalled, $$upstream upstream scheduler deadlock(s) (not counted); logs in $(SAMPLE_DIR)"; \
 	if [ "$$failed" != "0" ] || [ "$$stalled" != "0" ]; then \
 	  grep -h "ERROR\|DEAD\|cookie broken\|gcry: SIGSEGV\|WATCHDOG\|STALLED" $(SAMPLE_DIR)/stw-mt-*.log 2>/dev/null | head -40; exit 1; fi
 
