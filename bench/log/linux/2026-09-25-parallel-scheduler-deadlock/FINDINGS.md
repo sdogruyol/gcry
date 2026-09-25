@@ -40,7 +40,43 @@ default GC (Boehm), under the same background load:
 | Boehm, `GC.collect` every 8 round trips | 152 | **3** | identical (`boehm-stall-threads.txt`) |
 | Boehm, no `GC.collect` at all | 74 | **3** | — |
 
-So it is the scheduler alone. A collector's stop-the-world pauses can only
+So it is the scheduler alone.
+
+## The mechanism, measured
+
+`resume_giveup.cr` is `ping.cr` with `Scheduler#resume` wrapped to record, per
+worker thread, the fiber it is running and the fiber it is resuming, and a
+watchdog thread — raw `nanosleep` and `write(2)`, since anything through the
+event loop can be what is stuck — that prints both when progress stops for 3 s.
+**4 of 4 stalls were the circular wait**:
+
+    STALL after 2287 round trips
+      w-0: running worker-fiber-0, resuming worker-fiber-1 (target resumable at entry: false)
+      w-1: running worker-fiber-1, resuming worker-fiber-0 (target resumable at entry: false)
+      circular wait: true
+
+## A fix that breaks the cycle, measured
+
+The `OPTIMIZE` note's own idea: stop spinning after a bound, requeue the target,
+and switch to this scheduler's main loop fiber instead. Switching saves the
+current fiber's context, so the *other* thread's spin ends; the main loop finds
+the requeued fiber once its context is saved. Never from the main loop fiber
+itself — it has nowhere to go — and no cycle can pass through it, because its
+thread runs no fiber while it spins. `FIX=1` toggles it in the same binary
+(the bound counts spins itself: `Thread.delay`'s return value is a backoff that
+wraps to 0 after 7, which the first version compared against 1000 and so never
+gave up — that run measured two identical arms, 14 vs 19 stalls).
+
+| arm, interleaved, 2 500 runs each | stalls | gave up |
+|---|---:|---:|
+| control | **18** (18 circular) | — |
+| give up after 1 000 spins | **0** | 9 times, in 9 runs |
+
+Each give-up is a deadlock broken rather than hung — 9 against the control's
+18 is the right order for the same exposure.
+
+This is Crystal's scheduler to fix, not gcry's to patch around: a shard
+redefining `Scheduler#resume` would change the runtime under every user of it. A collector's stop-the-world pauses can only
 change how often threads are preempted inside the window, and gcry's rate
 (~1%) is if anything *below* Boehm's here (2–4%).
 
@@ -64,7 +100,10 @@ change how often threads are preempted inside the window, and gcry's rate
 > context idles in `epoll_wait`. Each thread appears to have dequeued the
 > fiber the other is still running — both woken by a channel operation while
 > on their way into `suspend` — so each waits for a context switch the other
-> can only perform after its own wait. Reproducer (`ping.cr`, 29 lines, no
-> GC calls needed): about 2–4 runs in 100 on a loaded 12-core host,
-> `./ping 2 4000`. The `OPTIMIZE` note in `resume` (abort and re-enqueue after
-> N attempts) would break the cycle.
+> can only perform after its own wait — instrumented, 4 of 4 stalls show
+> w-0 resuming w-1's current fiber and w-1 resuming w-0's. Reproducer
+> (`ping.cr`, 29 lines, no GC calls needed): 0.5–4 runs in 100 depending on
+> host load, `./ping 2 4000`. Unchanged on master (`resume` is identical).
+> The `OPTIMIZE` note in `resume` is the fix: giving up after 1 000 spins,
+> re-enqueueing the target and switching to the scheduler's main fiber took
+> an interleaved A/B from 18 stalls in 2 500 runs to 0 in 2 500.
