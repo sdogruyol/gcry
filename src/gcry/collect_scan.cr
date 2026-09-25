@@ -1138,6 +1138,28 @@ module Gcry
       nil
     end
 
+    # Where a whole-stack scan of *fiber* has to start: its low-water mark when
+    # pagemap can say, else `guard`. Everything below the mark is a page that
+    # was never faulted, i.e. zero, so starting there sees every word a scan
+    # from `guard` would. Falls back to `guard` whenever the probe cannot
+    # answer, so a failure can only ever widen the scan.
+    private def low_water_or_guard(fiber : Fiber, guard : UInt64) : UInt64
+      {% if flag?(:linux) || flag?(:darwin) %}
+        if @stack_low_water_scan
+          bottom = fiber.@stack.bottom.address
+          if bottom > guard
+            lw = Platform.stack_low_water(guard, bottom)
+            if lw > guard
+              @low_water_skips += 1
+              @low_water_skipped_bytes += lw - guard
+              return lw
+            end
+          end
+        end
+      {% end %}
+      guard
+    end
+
     private def fiber_stack_scan_top(fiber : Fiber, guard : UInt64, stw_multi : Bool) : UInt64
       if low = fiber_stack_sp_scan_low(fiber, guard)
         @fiber_scan_from_sp &+= 1
@@ -1147,9 +1169,20 @@ module Gcry
       if fiber.running?
         # Parallel: full span (mid-swap / stale stack_top). EC1: stack_top only
         # — full guard→bottom on SYSMON crushed Kemal thr (~86%→~80% Boehm).
+        #
+        # "Full span" starts at the low-water mark, not at `guard`, for the
+        # reason the lag-0 path below does: a page never faulted is zero. The
+        # fiber that lands here every collection is SYSMON's main fiber (never
+        # signalled, so no SP), and a scan from `guard` read all 8 MiB of its
+        # stack. On Linux that read maps the zero page under every untouched
+        # page, which pagemap then reports present, so the skip was lost on
+        # that stack for good: SYSMON's pthread stack was scanned 256 KiB deep
+        # per collection at the default lag and 8188 KiB deep under
+        # `GCRY_SOUND=1`. On Darwin the read made the pages resident.
+        # (`bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`)
         if stw_multi
           @fiber_scan_from_guard &+= 1
-          return guard
+          return low_water_or_guard(fiber, guard)
         end
         # A running fiber's `@context.stack_top` is only written on a context
         # switch, so for a fiber that has not switched it describes no frame
@@ -1173,23 +1206,7 @@ module Gcry
       # low-water mark instead of at `guard` sees exactly the same words for a
       # fraction of the faults. Falls back to `guard` whenever pagemap cannot
       # answer, so a failure can only ever widen the scan.
-      if lag == 0
-        {% if flag?(:linux) || flag?(:darwin) %}
-          if @stack_low_water_scan
-            bottom = fiber.@stack.bottom.address
-            if bottom > guard
-              lw = Platform.stack_low_water(guard, bottom)
-              if lw > guard
-                @low_water_skips += 1
-                @low_water_skipped_bytes += lw - guard
-                return lw
-              end
-              return guard
-            end
-          end
-        {% end %}
-        return guard
-      end
+      return low_water_or_guard(fiber, guard) if lag == 0
 
       lagged = t > lag ? t - lag : guard
       lagged = guard if lagged < guard

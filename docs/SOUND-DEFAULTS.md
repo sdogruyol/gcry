@@ -883,6 +883,7 @@ fix that reversal pointed at — has now reversed it back. Current standing:
 |-------|------:|---------------:|
 | Kemal EC1 | 398 µs | 398 µs (+0.1%) |
 | Kemal **EC4** | **3.60 ms** | 16.39 ms (+356%) |
+| Kemal **EC4**, 2026-09-26, another host, SYSMON guard-scan fix | **1.78 ms** | 2.15 ms (+21%) |
 | fat app, ~72 MiB heap | **10.7 ms** | 18.2 ms (+70%) |
 | fat app, ~46 MiB heap | 2.9 ms | 3.0 ms (+6.5%) |
 

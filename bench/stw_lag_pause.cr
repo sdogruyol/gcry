@@ -397,6 +397,48 @@ else
   puts "  WARN tuned median is 0 — skipping ratio checks"
 end
 
+# ── SYSMON's stack must not be read whole ─────────────────────────────────
+# SYSMON is never signalled, so its main fiber has no suspend SP and is scanned
+# as a running fiber "from the guard" every multi-thread collection. Until
+# 2026-09-26 that meant all 8 MiB: on Linux the read maps the zero page under
+# every untouched page, pagemap reports those present, and the low-water skip
+# was lost on that stack for good — Kemal EC4 pause 4.15 → 1.78 ms once the
+# path took the skip too (`bench/log/linux/2026-09-26-sysmon-guard-scan/`).
+# Read after the rounds above, i.e. after dozens of collections, with the
+# collector's own probe. `--disabled` is the red arm: with the skip off the
+# guard path reads the whole stack, and this check has to see it.
+{% if flag?(:linux) || flag?(:darwin) %}
+  sysmon_depth = nil.as(UInt64?)
+  Thread.unsafe_each do |thread|
+    next unless thread.name == "SYSMON"
+    next unless main = thread.@main_fiber
+    guard = main.@stack.pointer.address + 4096_u64
+    bottom = main.@stack.bottom.address
+    next unless bottom > guard
+    sysmon_depth = bottom - Gcry::Platform.stack_low_water(guard, bottom)
+  end
+  puts ""
+  puts "=== SYSMON stack, touched depth after #{rounds * CONFIGS.size + CONFIGS.size} collections ==="
+  if depth = sysmon_depth
+    puts "  #{depth // 1024} KiB (guard-path scans: #{HEAP.fiber_scan_from_guard})"
+    if disabled
+      if depth < 7_u64 * 1024 * 1024
+        failures << "red arm: with the skip off SYSMON's stack reads touched only #{depth // 1024} KiB deep — " \
+                    "the guard path no longer reads it whole, or this check cannot see that it did"
+      else
+        puts "  PASS red arm: skip off, the guard path read SYSMON's stack whole"
+      end
+    elsif depth > 1024_u64 * 1024
+      failures << "SYSMON's stack reads touched #{depth // 1024} KiB deep: a collection read it from the guard, " \
+                  "and on Linux that defeats the low-water skip on that stack for good"
+    else
+      puts "  PASS the guard path took the low-water skip"
+    end
+  else
+    puts "  NOTE no SYSMON thread with a main fiber here — nothing to check"
+  end
+{% end %}
+
 puts ""
 puts "=== Result ==="
 if failures.empty?

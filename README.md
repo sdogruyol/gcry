@@ -263,6 +263,13 @@ with uptime. The fix is scheduler-side: scan a fully parked fiber from its SP
 and reserve the lag for fibers in transit (ROADMAP Phase 2). Fat-app pause (acik, ~72 MiB heap: 10.7 → 18.2
 ms on the freelist cut) was not re-measured.
 
+*2026-09-26: most of that pause was one stack.* SYSMON's was read whole, 8 MiB,
+every collection, and the read defeated the low-water skip on it for good.
+Fixed; on this repo's current QEMU host the EC4 pause went tuned **4.15 →
+1.78 ms** and sound **6.60 → 2.15 ms** (pause only — the throughput column
+above predates it and was not re-measured;
+[findings](bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md)).
+
 Parked-fiber scrub was in the heuristic list through v0.18 and is **opt-in**
 since (`GCRY_SCRUB_FIBERS=1`); the per-collection trace showed it moving
 ~0.013% of wall time for no measured retention.

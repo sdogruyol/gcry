@@ -3555,9 +3555,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
       skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
-- [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
-      tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
-      `low_water_skipped_bytes` is the handle and postdates the question.
+- [x] **Which fibers are deeply used, and why** — answered 2026-09-26: **none
+      are**, and the question was aimed at the wrong stack. Under Kemal EC4 every
+      fiber stack is 16–24 KiB deep (p50 = p99, `bench/fiber_stack_depth.py`);
+      the deepest frames are Crystal's exception unwinder in
+      `HTTP::Server#handle_client`. Sound's residual was **SYSMON**: never
+      signalled, so its main fiber was scanned from the guard, 8 MiB, every
+      collection — and that read mapped the zero page under the whole stack,
+      which pagemap reports present, so the low-water skip was lost on it for
+      good. Fixed: EC4 pause tuned **4.15 → 1.78 ms**, sound **6.60 → 2.15 ms**.
+      `bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`
 - [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
       bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
       on post-GC RSS, at 12 reps.
@@ -3923,11 +3930,14 @@ Target: Match Boehm on the workloads Crystal users actually run.
       grew mostly because the denominator halved, not because `sound` got
       worse — lag 0 already had the skip and did not change. Cite the pair, not
       the percentage.
-      What is genuinely open is the same as before: sound's cost tracks how much
-      stack was actually touched, so its distribution is wide where the old flat
-      scan's was not (9950X: p5 3.4 ms, p95 19.1 ms). **Which fibers are deeply
-      used, and why** — `low_water_skipped_bytes` per collection is now the
-      handle for that, and did not exist when the question was written.
+      What was genuinely open — sound's wide distribution (9950X: p5 3.4 ms,
+      p95 19.1 ms), read as "some fibers are deeply used" — was one stack read
+      whole: SYSMON's, by the running-fiber guard path, which then defeated the
+      skip on it permanently (zero page reads show present in pagemap).
+      **2026-09-26, this host, both fixed:** tuned 1.78 ms, sound 2.15 ms
+      (+21%), against 4.15 and 6.60 on master; roots 1132 against 1494 µs.
+      What is left of sound's residual is ~360 µs of root work. Throughput not
+      re-measured. `bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`
       **Closed:** the fat-app large-heap re-cut (above — the 14.5× was pre-fix
       and the sign has since reversed).
 - [x] **Low-water skip on Darwin.** (Implemented 2026-09-25: `src/gcry/platform/darwin_low_water.cr`.) Linux-only until then, so macOS still faults the

@@ -1,0 +1,11 @@
+{
+  "bin": "kemal-gcry-mt",
+  "build_flags": "-Dpreview_mt -Dexecution_context",
+  "ec_parallelism": "4",
+  "reps": 4,
+  "duration_s": 15,
+  "connections": 100,
+  "cpu_model": "QEMU Virtual CPU version 2.5+",
+  "ncpu": 12,
+  "l3_shared_cpu_list": "0-11"
+}

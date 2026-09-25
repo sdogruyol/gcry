@@ -66,6 +66,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `make stw-mt-sample` (120 fresh seeds) — the process GC, with its
   stop-the-world and threads, had no nightly coverage at all.
 
+### Fixed
+
+- **Kemal EC4 pause 4.15 → 1.78 ms (`GCRY_SOUND=1`: 6.60 → 2.15 ms).** Under
+  multi-thread STW a running fiber with no suspend SP is scanned whole, and one
+  fiber takes that path at every collection: SYSMON's main fiber, which is
+  never signalled. The scan started at the guard and read all 8 MiB of the
+  stack. On Linux that read maps the zero page under every untouched page, and
+  pagemap reports those pages present, so the low-water skip was lost on
+  SYSMON's stack for good. Its pthread stack was then scanned 256 KiB deep at
+  every collection, or 8188 KiB under sound's lag 0. The branch now starts at
+  the low-water mark, like the lag-0 path. That is sound for the same reason
+  (a page never faulted is zero), and a probe failure still falls back to the
+  guard. RSS is unchanged. `stw_lag_pause` now checks SYSMON's touched depth on
+  Linux and macOS, with `GCRY_STACK_LOW_WATER=0` as the red arm
+  (`bench/log/linux/2026-09-26-sysmon-guard-scan/`).
+
 ## [0.27.2] - 2026-09-25
 
 ### Added

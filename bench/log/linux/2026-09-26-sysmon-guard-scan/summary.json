@@ -1,0 +1,142 @@
+{
+  "reps": 4,
+  "skip": 5,
+  "configs": {
+    "tuned": {
+      "n": 944,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "6",
+      "rss_kib": 86480.0,
+      "rss_reps": [
+        85720,
+        86624,
+        86592,
+        86368
+      ],
+      "median": {
+        "roots_ns": 1132133.0,
+        "static_ns": 139951.5,
+        "stacks_ns": 74755.0,
+        "scrub_ns": 40.0,
+        "mark_ns": 269489.0,
+        "sweep_ns": 261158.0,
+        "pause_ns": 1782737.0
+      },
+      "iqr": {
+        "roots_ns": 163671.75,
+        "static_ns": 11479.25,
+        "stacks_ns": 12680.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 37953.25,
+        "sweep_ns": 228554.0,
+        "pause_ns": 234620.0
+      },
+      "work_ns": 1206928.0,
+      "delta_work_pct": 0.0,
+      "delta_pause_pct": 0.0
+    },
+    "sound": {
+      "n": 839,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "6",
+      "rss_kib": 85952.0,
+      "rss_reps": [
+        86300,
+        85160,
+        86288,
+        85616
+      ],
+      "median": {
+        "roots_ns": 1494159,
+        "static_ns": 136372,
+        "stacks_ns": 86010,
+        "scrub_ns": 40,
+        "mark_ns": 271794,
+        "sweep_ns": 186873,
+        "pause_ns": 2149527
+      },
+      "iqr": {
+        "roots_ns": 192171.0,
+        "static_ns": 9650.0,
+        "stacks_ns": 14009.0,
+        "scrub_ns": 10.0,
+        "mark_ns": 33701.0,
+        "sweep_ns": 217414.0,
+        "pause_ns": 229532.0
+      },
+      "work_ns": 1580209,
+      "delta_work_pct": 30.93,
+      "delta_pause_pct": 20.57
+    },
+    "tuned-master": {
+      "n": 1090,
+      "env": "",
+      "soundness": "tuned",
+      "threads": "6",
+      "rss_kib": 85634.0,
+      "rss_reps": [
+        85520,
+        85692,
+        85576,
+        86556
+      ],
+      "median": {
+        "roots_ns": 3433354.0,
+        "static_ns": 134121.5,
+        "stacks_ns": 140781.0,
+        "scrub_ns": 40.0,
+        "mark_ns": 265833.0,
+        "sweep_ns": 300923.5,
+        "pause_ns": 4154833.0
+      },
+      "iqr": {
+        "roots_ns": 249294.0,
+        "static_ns": 10831.75,
+        "stacks_ns": 17342.75,
+        "scrub_ns": 10.0,
+        "mark_ns": 33415.5,
+        "sweep_ns": 180274.75,
+        "pause_ns": 283165.5
+      },
+      "work_ns": 3574175.0,
+      "delta_work_pct": 196.14,
+      "delta_pause_pct": 133.06
+    },
+    "sound-master": {
+      "n": 1076,
+      "env": "GCRY_SOUND=1",
+      "soundness": "sound",
+      "threads": "6",
+      "rss_kib": 85458.0,
+      "rss_reps": [
+        85340,
+        85668,
+        85576,
+        85308
+      ],
+      "median": {
+        "roots_ns": 3768097.0,
+        "static_ns": 133211.5,
+        "stacks_ns": 2252519.0,
+        "scrub_ns": 40.0,
+        "mark_ns": 272059.5,
+        "sweep_ns": 274933.0,
+        "pause_ns": 6600703.0
+      },
+      "iqr": {
+        "roots_ns": 251704.5,
+        "static_ns": 9561.0,
+        "stacks_ns": 121956.75,
+        "scrub_ns": 10.0,
+        "mark_ns": 31165.5,
+        "sweep_ns": 162011.0,
+        "pause_ns": 405015.0
+      },
+      "work_ns": 6020656.0,
+      "delta_work_pct": 398.84,
+      "delta_pause_pct": 270.26
+    }
+  }
+}
