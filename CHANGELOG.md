@@ -23,8 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run on Darwin too. `GCRY_STACK_LOW_WATER=0` turns it off, as on Linux.
   Measured on the `macos-latest` runner, Kemal EC4, 9 reps against that
   knob: pause **9.05 → 3.06 ms**, and post-GC RSS **126.5 → 92.9 MB**. The
-  RSS saving is Darwin's own; Linux read +0.2% there. Re-cut with the
-  dispatch input `darwin_root_phase_reps`
+  RSS saving is Darwin's own; Linux read +0.2% there. On macOS, reading an
+  untouched page makes it resident, so a full-window scan leaves **245.9 KiB
+  per parked fiber** in RSS against 4.5 KiB with the skip (Linux: ~1 either
+  way). `make lag-scan-rss` gates that on Darwin; the skip-off floor is its red
+  arm. Re-cut with the dispatch input `darwin_root_phase_reps`
   (`bench/log/macos/2026-09-25-205449-root-phase/`).
 
 - **`make stw-mt-sample`, and a CI job running it: the default layout's STW

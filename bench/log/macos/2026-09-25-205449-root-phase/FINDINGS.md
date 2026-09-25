@@ -35,11 +35,20 @@ again: 8.06 → 3.60 ms there, 9.05 → 3.06 ms here.
 control is 33.6 MB larger, and the heap accounts for only 10 MB of that:
 `small_mapped_bytes` 99.9 → 109.8 MB with `size_class_live_bytes` equal
 (6.86 MB in both). That leaves about **23 MB outside the heap**.
-`[INFERENCE]` It is fiber-stack pages the scan faulted in. On Linux, reading an
-untouched anonymous page maps the shared zero page and costs no RSS. The
-ROADMAP's Darwin note — "macOS still faults the whole lag window per parked
-fiber" — says that is not true here. This run has no page-level count to prove
-it: no residency reading of the fiber stacks before and after a scan.
+It is fiber-stack pages the scan faulted in, **measured the same night** with
+`bench/lag_scan_rss.cr` (`make lag-scan-rss`): 256 parked fibers that wrote
+16 KiB each, RSS read before the first collection and after four.
+
+| host | skip on | skip off (`GCRY_STACK_LOW_WATER=0`) |
+|---|---:|---:|
+| macOS runner (M1), run `36189547539` | 4.5 KiB / fiber | **245.9 KiB / fiber** |
+| Linux (this host) | 0.9–1.4 KiB / fiber | 0.4–1.2 KiB / fiber |
+
+245.9 is the whole 256 KiB lag window. On Linux a read of a never-written
+anonymous page maps the shared zero page; on macOS it makes the page
+resident, so without the skip every scanned-but-untouched window stays in
+RSS. `make lag-scan-rss` now gates it on Darwin: at most 32 KiB per fiber with
+the skip, and at least 128 without it (the red arm, run every time).
 
 ## What this does not say
 

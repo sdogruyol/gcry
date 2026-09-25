@@ -17,9 +17,22 @@
 #   bin/lag_scan_rss                           # skip on
 #   GCRY_STACK_LOW_WATER=0 bin/lag_scan_rss    # skip off
 #
-# Informational: it prints growth per fiber and gates nothing. Expected: ~0
-# either way on Linux; on Darwin, ~0 with the skip and up to the untouched
-# part of the lag window per fiber without it.
+# Measured 2026-09-25 (run 36189547539, 256 fibers, 16 KiB dirty, 256 KiB lag):
+#
+#                  skip on          skip off
+#   Linux          0.9–1.4 KiB      0.9–1.2 KiB   per parked fiber
+#   Darwin M1      4.5 KiB          245.9 KiB
+#
+# Linux maps the shared zero page on a read of an untouched page; Darwin makes
+# it resident, so without the skip every collection leaves the whole unwritten
+# lag window of every parked fiber in RSS. The bounds make that a gate:
+#
+#   --max-per-fiber=K   fail if growth per fiber exceeds K KiB (the skip arm)
+#   --min-per-fiber=K   fail if it is below K (the red arm under
+#                       GCRY_STACK_LOW_WATER=0: proves the probe can see the
+#                       fault-in at all — without it a ceiling passing says
+#                       nothing). Meaningful on Darwin only; Linux never
+#                       faults these pages in.
 require "../src/gcry"
 
 {% unless flag?(:gc_none) %}
@@ -63,11 +76,15 @@ end
 fibers = 256
 dirty_kb = 16
 collections = 4
+max_per_fiber = nil.as(Float64?)
+min_per_fiber = nil.as(Float64?)
 ARGV.each do |arg|
   case arg
-  when /--fibers=(\d+)/      then fibers = $1.to_i
-  when /--dirty-kb=(\d+)/    then dirty_kb = $1.to_i
-  when /--collections=(\d+)/ then collections = $1.to_i
+  when /--fibers=(\d+)/           then fibers = $1.to_i
+  when /--dirty-kb=(\d+)/         then dirty_kb = $1.to_i
+  when /--collections=(\d+)/      then collections = $1.to_i
+  when /--max-per-fiber=([\d.]+)/ then max_per_fiber = $1.to_f
+  when /--min-per-fiber=([\d.]+)/ then min_per_fiber = $1.to_f
   end
 end
 
@@ -133,3 +150,14 @@ puts "  rss before #{before} KiB, after #{collections} collections #{after} KiB:
      "growth #{growth} KiB = #{(growth / fibers).round(1)} KiB per parked fiber"
 puts "  low_water_skips in the last collection: #{skips}; collections before the baseline: #{early}"
 park.close
+
+per_fiber = growth / fibers
+if (cap = max_per_fiber) && per_fiber > cap
+  puts "FAIL: #{per_fiber.round(1)} KiB per parked fiber > #{cap} — the collection made untouched stack pages resident"
+  exit 1
+end
+if (floor = min_per_fiber) && per_fiber < floor
+  puts "FAIL: #{per_fiber.round(1)} KiB per parked fiber < #{floor} — the full-window scan no longer faults pages in, so the ceiling on the other arm proves nothing"
+  exit 1
+end
+puts "  PASS" if max_per_fiber || min_per_fiber

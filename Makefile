@@ -3,7 +3,7 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
@@ -1849,6 +1849,21 @@ holders-find: $(BIN)
 darwin-page-query: $(BIN)
 	$(CRYSTAL) build bench/darwin_page_query.cr -o $(BIN)/darwin_page_query --error-trace
 	$(BIN)/darwin_page_query $${PAGE_QUERY_PRESSURE:+--pressure=$$PAGE_QUERY_PRESSURE}
+
+# What the low-water skip saves in memory on Darwin, where a read of an
+# untouched page makes it resident (Linux maps the shared zero page and saves
+# nothing, so there the bounds cannot hold and the probe only reports). Skip
+# on: at most 32 KiB of growth per parked fiber (4.5 measured). Skip off is the
+# red arm, constructed every run: the full-window scan must fault in at least
+# 128 KiB per fiber (245.9 measured), or the ceiling proves nothing.
+lag-scan-rss: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/lag_scan_rss.cr -o $(BIN)/lag_scan_rss --error-trace
+	@if [ "$$(uname -s)" = Darwin ]; then \
+	  $(BIN)/lag_scan_rss --max-per-fiber=32 && \
+	  GCRY_STACK_LOW_WATER=0 $(BIN)/lag_scan_rss --min-per-fiber=128; \
+	else \
+	  $(BIN)/lag_scan_rss && GCRY_STACK_LOW_WATER=0 $(BIN)/lag_scan_rss; \
+	fi
 
 # Does `GC.init`'s eager static-root resolve reach a `once`-guarded
 # initialiser? Darwin was excluded from the eager resolve because doing it

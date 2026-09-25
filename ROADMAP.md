@@ -3549,8 +3549,11 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       the spec and `stw_lag_pause`'s skip/red arms run in the macOS job.
       **Priced the same night**: Kemal EC4 on the macOS runner, 9 reps, pause
       **9.05 → 3.06 ms** (Linux: 8.06 → 3.60) and post-GC RSS **126.5 →
-      92.9 MB**, which Linux never showed (+0.2% there) — ~23 MB of it outside
-      the heap, `[INFERENCE]` stack pages the scan faulted in.
+      92.9 MB**, which Linux never showed (+0.2% there). ~23 MB of it is outside
+      the heap, and `make lag-scan-rss` measured why: a full-window scan leaves
+      **245.9 KiB** per parked fiber resident on macOS (4.5 with the skip) and
+      ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
+      skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
