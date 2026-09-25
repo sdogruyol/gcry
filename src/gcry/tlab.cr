@@ -208,7 +208,7 @@ module Gcry
       end
       tlab = @alloc_lock.sync { current_tlab_under_lock(key) }
       if tlab.null?
-        raise OutOfMemoryError.new("TLAB table full (#{MAX_TLABS} threads)")
+        oom!("TLAB table full, threads:", MAX_TLABS.to_u64)
       end
       tlab
     end
@@ -447,7 +447,7 @@ module Gcry
 
         if user.null?
           filled = tlab_refill(class_index, payload, nursery)
-          raise OutOfMemoryError.new("failed to refill TLAB size class #{payload}") if filled.null?
+          oom!("failed to refill TLAB size class", payload.to_u64) if filled.null?
           next if @tlab_epoch.get != epoch
           next # claim the freshly installed batch under the slot lock
         end
@@ -458,7 +458,7 @@ module Gcry
         note_alloc_bytes(rounded)
         return user
       end
-      raise OutOfMemoryError.new("failed to claim TLAB node size class #{payload}")
+      oom!("failed to claim TLAB node size class", payload.to_u64)
     end
 
     # Return a small object to the current thread's TLAB.
@@ -622,7 +622,7 @@ module Gcry
       end
       ab = @alloc_lock.sync { current_alloc_batch_under_lock(key) }
       if ab.null?
-        raise OutOfMemoryError.new("alloc-batch table full (#{MAX_TLABS} threads)")
+        oom!("alloc-batch table full, threads:", MAX_TLABS.to_u64)
       end
       ab
     end
@@ -680,7 +680,7 @@ module Gcry
 
       if user.null?
         user = refill_alloc_batch(index, payload, flags, batch)
-        raise OutOfMemoryError.new("failed to refill alloc-batch size class #{payload}") if user.null?
+        oom!("failed to refill alloc-batch size class", payload.to_u64) if user.null?
       end
 
       note_alloc_bytes(rounded)

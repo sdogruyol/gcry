@@ -862,12 +862,19 @@ module Gcry
     end
     @oom_raising = Atomic(Int32).new(0)
 
-    private def oom!(message : String) : NoReturn
+    # *message* must be a literal and *number* is appended inside the guard:
+    # an interpolated argument is built by the *caller*, before the flag is
+    # set, and a message that cannot be allocated then asks the allocator
+    # again, fails again and builds the message again. Measured 2026-09-24:
+    # three Parallel fibers exhausting a 1.5 GB address space —
+    # `alloc_old_small → oom!("… #{payload}") → String::Builder → malloc(80) →
+    # alloc_old_small → …` until the stack overflowed, 5 of 5.
+    private def oom!(message : String, number : UInt64? = nil) : NoReturn
       if @oom_raising.compare_and_set(0, 1)[1]
         begin
-          # Evaluating the argument is what allocates; a failure in there lands
+          # Building the message is what allocates; a failure in there lands
           # back here with the flag set and takes the branch below.
-          raise OutOfMemoryError.new(message)
+          raise OutOfMemoryError.new(number ? "#{message} #{number}" : message)
         ensure
           @oom_raising.set(0)
         end
@@ -1189,9 +1196,9 @@ module Gcry
     private def alloc_nursery(payload : UInt32, flags : UInt32, index : Int32, rounded : UInt64) : {Void*, Bool}
       user, clean = alloc_nursery_locked(payload, flags, index)
       if user.null?
-        oom!("failed to refill nursery size class #{payload}") unless retry_after_emergency_collect?
+        oom!("failed to refill nursery size class", payload.to_u64) unless retry_after_emergency_collect?
         user, clean = alloc_nursery_locked(payload, flags, index)
-        oom!("failed to refill nursery size class #{payload}") if user.null?
+        oom!("failed to refill nursery size class", payload.to_u64) if user.null?
       end
       free_bytes_sub(payload.to_u64)
       @nursery_alloc_bytes.add(payload.to_u64)
@@ -1270,12 +1277,12 @@ module Gcry
       if user.null?
         # The freelist lock is gone by now, so both the collection and the
         # raise are legal here — neither was inside `map_chunk`.
-        oom!("failed to refill size class #{payload}") unless retry_after_emergency_collect?
+        oom!("failed to refill size class", payload.to_u64) unless retry_after_emergency_collect?
         user, clean = with_freelist_lock(index, false) do
           claimed = alloc_old_small_locked(payload, flags, index)
           {claimed, @freelist_clean[index]}
         end
-        oom!("failed to refill size class #{payload}") if user.null?
+        oom!("failed to refill size class", payload.to_u64) if user.null?
       end
       # `user` is in this frame now, which the scan accepts, so the pool slot's
       # copy has done its job (see `@pool_in_flight`). Clearing it here rather

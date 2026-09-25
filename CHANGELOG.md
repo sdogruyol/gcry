@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Running out of memory could end in SIGSEGV instead of
+  `OutOfMemoryError`.** Every interpolated out-of-memory message
+  (`"failed to refill size class #{payload}"` and eight more) was built by
+  its caller, before `oom!` set its recursion guard; when the message's own
+  size class was dry too, building it failed, asked the allocator, failed
+  and built it again until the stack overflowed. Three Parallel fibers
+  exhausting a 1.5 GiB `RLIMIT_AS`: 5 of 5 SIGSEGV. `oom!` now takes a
+  literal and the number and builds the text itself.
+
 ## [0.27.1] - 2026-09-24
 
 ### Fixed
