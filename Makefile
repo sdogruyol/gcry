@@ -1593,7 +1593,8 @@ tlab-nursery-sample: $(BIN)
 # STW_MT_SAMPLE_RUNS (40) seeds from STW_MT_SAMPLE_BASE (the clock, or CI's run
 # id so coverage accumulates across runs), with the freed-block poison, the
 # SEGV report and the STW watchdog on, and each run bounded — the same campaign
-# found one 900 s stall on this arm, and a stall must end as a log, not as a
+# found one 900 s stall on this arm, and a stall must end as a log with every
+# thread's backtrace (bench/run_bounded.sh, bench/stall_capture.sh), not as a
 # cancelled job. Failed and stalled runs keep their logs in $(SAMPLE_DIR).
 .PHONY: stw-mt-sample
 stw-mt-sample: $(BIN)
@@ -1602,10 +1603,11 @@ stw-mt-sample: $(BIN)
 	@runs=$${STW_MT_SAMPLE_RUNS:-40}; base=$${STW_MT_SAMPLE_BASE:-$$(date +%s)}; failed=0; stalled=0; \
 	for i in $$(seq 0 $$((runs - 1))); do \
 	  seed=$$((base + i)); log=$(SAMPLE_DIR)/stw-mt-$$seed.log; \
-	  GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=10000 timeout 240 \
-	    $(BIN)/stw_mt_property_test --seed=$$seed --iterations=100 --workers=2,4,8 > $$log 2>&1; rc=$$?; \
+	  GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1 GCRY_STW_WATCHDOG_MS=10000 \
+	    bench/run_bounded.sh $${STW_MT_SAMPLE_LIMIT:-240} $$log -- \
+	    $(BIN)/stw_mt_property_test --seed=$$seed --iterations=100 --workers=2,4,8; rc=$$?; \
 	  if [ $$rc = 0 ]; then rm -f $$log; \
-	  elif [ $$rc = 124 ]; then stalled=$$((stalled+1)); echo "STALLED: killed after 240 s" >> $$log; \
+	  elif [ $$rc = 2 ]; then stalled=$$((stalled+1)); \
 	  else failed=$$((failed+1)); fi; \
 	done; \
 	echo "stw-mt-sample: $$runs runs from seed $$base, $$failed failed, $$stalled stalled; logs of both in $(SAMPLE_DIR)"; \

@@ -44,6 +44,9 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      - name: gdb, for a stall's backtraces
+        run: command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq gdb)
+
       - name: STW property test, fresh seeds
         run: STW_MT_SAMPLE_RUNS=120 STW_MT_SAMPLE_BASE=$(( ${{ github.run_id }} % 100000000 * 1000 )) make stw-mt-sample
 

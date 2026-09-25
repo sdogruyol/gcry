@@ -43,6 +43,18 @@ require "wait_group"
   raise "stw_mt_property_test requires -Dgc_none (process GC with STW)"
 {% end %}
 
+# Let `bench/stall_capture.sh` attach if this run stalls. Under
+# `kernel.yama.ptrace_scope=1` (Ubuntu's default) only a declared tracer may,
+# and the capture is a sibling rather than a parent. A 900 s stall of this
+# harness (2026-09-25) left nothing to read because nothing could attach.
+{% if flag?(:linux) %}
+  lib LibPtracer
+    fun prctl(option : Int32, arg2 : UInt64, arg3 : UInt64, arg4 : UInt64, arg5 : UInt64) : Int32
+  end
+
+  LibPtracer.prctl(0x59616d61, UInt64::MAX, 0, 0, 0) # PR_SET_PTRACER, PR_SET_PTRACER_ANY
+{% end %}
+
 seed = 1_i64
 iterations = 200
 worker_counts = [2]

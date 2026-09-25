@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   40 seeds per CI run, based on the run id so no two runs repeat, with the
   freed-block poison, the SEGV report and the STW watchdog on; every run is
   bounded, so a stall ends as a log instead of a cancelled job.
-  `continue-on-error`, like the other samplers.
+  `continue-on-error`, like the other samplers. A run still going at its
+  deadline is not just killed: `bench/run_bounded.sh` has
+  `bench/stall_capture.sh` record every thread's state and a gdb backtrace of
+  all threads first (the harness declares itself traceable, so this works
+  under Ubuntu's default `ptrace_scope`).
 - **Nightly: fresh seeds, and the process GC.** The nightly fuzzer ran seed
   42 every night, replaying largely the same operations; its seed now comes
   from the run id and is printed. And a second nightly job runs ~30 minutes of
