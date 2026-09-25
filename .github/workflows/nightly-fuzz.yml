@@ -16,9 +16,42 @@ jobs:
         with:
           crystal: "1.21.0"
 
+      # A fresh seed every night. It was 42 every night, and the fuzzer is
+      # seeded, so each night largely replayed the same operation sequence: 30
+      # minutes a night of the same 30 minutes. The seed is printed; a failing
+      # night reproduces with `./bin/fuzz --seconds=1800 --seed=<it>`.
       - name: Build and run fuzz
         run: |
           mkdir -p bin
           crystal build --release bench/fuzz.cr -o bin/fuzz
-          # fuzz.cr only accepts --seconds= / --seed= (positional args were a no-op).
-          ./bin/fuzz --seconds=1800 --seed=42
+          seed=$(( ${{ github.run_id }} % 1000000000 ))
+          echo "fuzz seed: $seed"
+          ./bin/fuzz --seconds=1800 --seed=$seed
+
+  # The process GC had no nightly coverage at all: the fuzzer above drives a
+  # library heap, with no stop-the-world and no threads. The chunk-index growth
+  # race (fixed in 0.27.2) lived exactly in what it cannot reach, and a local
+  # campaign found it on fresh seeds of the STW property test. ~30 minutes of
+  # those, seeds based on the run id.
+  process-gc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    name: process GC 30m, fresh seeds
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: STW property test, fresh seeds
+        run: STW_MT_SAMPLE_RUNS=120 STW_MT_SAMPLE_BASE=$(( ${{ github.run_id }} % 100000000 * 1000 )) make stw-mt-sample
+
+      - name: Upload what it caught
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-process-gc-samples
+          path: bench/log/ci-samples/
+          if-no-files-found: ignore
+          retention-days: 30

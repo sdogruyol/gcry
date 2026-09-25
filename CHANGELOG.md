@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freed-block poison, the SEGV report and the STW watchdog on; every run is
   bounded, so a stall ends as a log instead of a cancelled job.
   `continue-on-error`, like the other samplers.
+- **Nightly: fresh seeds, and the process GC.** The nightly fuzzer ran seed
+  42 every night, replaying largely the same operations; its seed now comes
+  from the run id and is printed. And a second nightly job runs ~30 minutes of
+  `make stw-mt-sample` (120 fresh seeds) — the process GC, with its
+  stop-the-world and threads, had no nightly coverage at all.
 
 ## [0.27.2] - 2026-09-25
 
