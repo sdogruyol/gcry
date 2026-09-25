@@ -113,7 +113,10 @@ stop_server() {
 trap stop_server EXIT INT TERM
 
 RUN_LABEL="$(date -u +%Y-%m-%d-%H%M%S)-root-phase"
-RUN_DIR="$LOG/linux/$RUN_LABEL"
+# The log tree is per platform (`bench/log/{linux,macos}`), and the macOS runner
+# is where the Darwin low-water skip gets priced.
+case "$(uname -s)" in Darwin) OS_DIR=macos ;; *) OS_DIR=linux ;; esac
+RUN_DIR="$LOG/$OS_DIR/$RUN_LABEL"
 mkdir -p "$RUN_DIR"
 
 # One config × one rep: run under trace, capture the collector's own label.
@@ -161,14 +164,22 @@ probe() {
   # objects for the second to reclaim.
   curl -sf -o /dev/null ${HDR[@]+"${HDR[@]}"} "$BASE/gc-collect" || true
   curl -sf -o /dev/null ${HDR[@]+"${HDR[@]}"} "$BASE/gc-collect" || true
-  awk '/^VmRSS:/ {print $2}' "/proc/$SERVER_PID/status" \
-    > "$RUN_DIR/$key-rep$rep-rss.txt" 2>/dev/null || true
+  # `/proc` on Linux; `ps` elsewhere, which reports the same KiB.
+  if [ -r "/proc/$SERVER_PID/status" ]; then
+    awk '/^VmRSS:/ {print $2}' "/proc/$SERVER_PID/status"
+  else
+    ps -o rss= -p "$SERVER_PID" | tr -d ' '
+  fi > "$RUN_DIR/$key-rep$rep-rss.txt" 2>/dev/null || true
   curl -sf ${HDR[@]+"${HDR[@]}"} "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
   # Proof of the shape that actually ran: a binary built without -Dpreview_mt
   # resizes the default context to a no-op, so an EC4 run would otherwise be
   # indistinguishable from EC1 in the log.
-  awk '/^Threads:/ {print $2}' "/proc/$SERVER_PID/status" \
-    > "$RUN_DIR/$key-rep$rep-threads.txt" 2>/dev/null || true
+  if [ -r "/proc/$SERVER_PID/status" ]; then
+    awk '/^Threads:/ {print $2}' "/proc/$SERVER_PID/status"
+  else
+    # `ps -M` prints one line per thread under a header.
+    ps -M -p "$SERVER_PID" | tail -n +2 | wc -l | tr -d ' '
+  fi > "$RUN_DIR/$key-rep$rep-threads.txt" 2>/dev/null || true
   stop_server
   sleep 0.4
 }
@@ -191,8 +202,9 @@ echo "bin=$BIN_NAME  build_flags=${BUILD_FLAGS:-none}  EC_PARALLELISM=${EC_PARAL
 # Record the machine. A cut taken on a 4-core i3 was compared against figures
 # from a 16-core 9950X for a whole session before anyone noticed, because
 # nothing in the log said which host produced it.
-CPU_MODEL="$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
-CPU_COUNT="$(nproc 2>/dev/null || echo 0)"
+CPU_MODEL="$(awk -F': ' '/model name/ {print $2; exit}' /proc/cpuinfo 2>/dev/null || true)"
+[ -n "$CPU_MODEL" ] || CPU_MODEL="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+CPU_COUNT="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"
 L3_SHARED="$(cat /sys/devices/system/cpu/cpu0/cache/index3/shared_cpu_list 2>/dev/null || echo unknown)"
 echo "host: $CPU_MODEL  ncpu=$CPU_COUNT  L3 shared by: $L3_SHARED"
 python3 -c "
@@ -223,7 +235,8 @@ while read -r key rest; do
   KEYS+=("$key")
   ENVS+=("$rest")
   printf '%s\n' "$rest" > "$RUN_DIR/$key.env"
-  printf '%s\n' "${BINS[-1]}" > "$RUN_DIR/$key.bin"
+  # Not `${BINS[-1]}`: negative indices need bash 4.3, and macOS ships 3.2.
+  printf '%s\n' "${BINS[${#BINS[@]}-1]}" > "$RUN_DIR/$key.bin"
   # A `key@binary` row is a different build on purpose — usually an older one,
   # since the point is to control against master. The stale-binary check below
   # must not fire on it; it exists for the rows that are supposed to be *this*
