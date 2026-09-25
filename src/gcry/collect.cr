@@ -15,6 +15,7 @@
   require "./platform/darwin_roots"
   require "./platform/darwin_stack"
   require "./platform/darwin_stw"
+  require "./platform/darwin_low_water"
   require "./platform/linux_fork"
 {% end %}
 

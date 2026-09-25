@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The low-water root-scan skip on Darwin.** A parked fiber's stack is 8 MiB
+  of reserved address space, almost none of it ever written, and Linux has
+  skipped the never-faulted head since 0.21 (Kemal EC4 pause 8.06 → 3.60 ms);
+  macOS scanned it all. `src/gcry/platform/darwin_low_water.cr` asks
+  `mach_vm_page_range_query` and skips pages that are neither `PRESENT` nor
+  `PAGED_OUT`. That predicate was blocked for six weeks on one unverified
+  case — a written page that leaves residency must not read skippable — and
+  `make darwin-page-query` now forces it (incompressible ballast at 1.25 × the
+  runner's memory): 256 of 256 evicted pages read `PAGED_OUT`. The bulk query
+  is cross-checked page by page against the per-page one the arms verify;
+  `spec/stack_low_water_spec.cr` and `stw_lag_pause`'s skip and red arms now
+  run on Darwin too. `GCRY_STACK_LOW_WATER=0` turns it off, as on Linux.
+
 - **`make stw-mt-sample`, and a CI job running it: the default layout's STW
   property test on fresh seeds.** CI gated that test on seed 1 only, and one
   seed cannot see a race — the chunk-index growth race fixed in 0.27.2 lost

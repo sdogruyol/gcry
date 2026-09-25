@@ -3479,7 +3479,7 @@ Linux took an 8.06 → 3.60 ms EC4 pause from the low-water skip and macOS takes
 of it. The gap is measured rather than assumed — `low_water_skips = 0` in every
 draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedulable.
 
-- [ ] **Low-water skip on Darwin** — open below. The first blocker is not code: the
+- [x] **Low-water skip on Darwin** — implemented 2026-09-25, see below. The first blocker is not code: the
       `mach_vm_page_query` disposition bits are still unverified, and residency
       alone is the wrong test (a page written then swapped reads absent, and
       skipping it drops a root). **The experiment now exists**:
@@ -3535,6 +3535,10 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (`--pressure=auto`, 8960 MiB) forced the eviction; the predicate held.
       **Unblocked: nothing left in the way but the implementation and the
       ported spec.** `bench/log/macos/2026-09-25-page-query-eviction/FINDINGS.md`
+      **Implemented the same day** (`src/gcry/platform/darwin_low_water.cr`,
+      `mach_vm_page_range_query` cross-checked against the per-page query);
+      the spec and `stw_lag_pause`'s skip/red arms run in the macOS job. Open:
+      a Darwin EC4 pause re-cut to price it.
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.
@@ -3910,7 +3914,7 @@ Target: Match Boehm on the workloads Crystal users actually run.
       handle for that, and did not exist when the question was written.
       **Closed:** the fat-app large-heap re-cut (above — the 14.5× was pre-fix
       and the sign has since reversed).
-- [ ] **Low-water skip on Darwin.** Linux-only today, so macOS still faults the
+- [x] **Low-water skip on Darwin.** (Implemented 2026-09-25: `src/gcry/platform/darwin_low_water.cr`.) Linux-only until then, so macOS still faults the
       whole lag window per parked fiber and gets none of the EC4 win
       (8.06 → 3.60 ms there). The soundness argument needs a primitive that
       separates "never faulted" from "written then evicted" — residency alone is

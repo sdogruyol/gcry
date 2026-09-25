@@ -13,7 +13,7 @@ Same methodology as Linux: `% of Boehm` = `gcry req/s ÷ Boehm req/s`, same host
 | Soft-dirty / nursery barrier | N/A — majors stay full STW |
 | Host page | **16 KiB** on Apple Silicon — large mmap + free-page reclaim use `host_page_size` |
 | CI | `macos-latest` correctness only — **not** a thr gate |
-| Low-water root-scan skip | **Linux-only — Darwin keeps the full scan.** `Platform.stack_low_water` reads `/proc/self/pagemap`; Darwin has no equivalent wired, so the parked-fiber scan still faults its whole lag window. The change that took Kemal EC4 pause 8.06 → 3.60 ms on Linux does **not** apply here |
+| Low-water root-scan skip | **On since 2026-09-25** (`src/gcry/platform/darwin_low_water.cr`, `mach_vm_page_range_query`). Every measurement on this page predates it and ran with the full scan (`low_water_skips = 0` per draw); the change that took Kemal EC4 pause 8.06 → 3.60 ms on Linux has not been re-cut here yet |
 | Parked-fiber scrub | **Opt-in** (`GCRY_SCRUB_FIBERS=1`), on Darwin as well as Linux. Correctness of the flip is verified on a Darwin host — fuzz / property / soak / OOM / finalizer, both settings — see [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) § "The flip on Darwin". Every cut in this file *below the 2026-08-10 section* predates the flip and was taken with scrub **on** |
 | Allocator | **Bitmap, the process default since 0.24.0**; `GCRY_BITMAP_ALLOC=0` is the freelist. Both run at the Darwin threshold floor of **16 MiB** on a heap this size (Linux freelist: 32 MiB), which is why the two arms' RSS reads differently here — see the 2026-09-06 section |
 

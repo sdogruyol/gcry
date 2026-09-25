@@ -2117,6 +2117,17 @@ jobs:
           PAGE_QUERY_PRESSURE: ${{ github.event.inputs.page_query_pressure || '' }}
         run: make darwin-page-query
 
+      # The low-water skip on Darwin (`src/gcry/platform/darwin_low_water.cr`),
+      # which the probe above unblocked: the same three runs the Linux job
+      # makes. The default path must skip on shallow fibers and the lag-0 pause
+      # must stay within 4x of the lagged one; the knob off must record no skip.
+      - name: Low-water skip on Darwin
+        run: |
+          crystal build -Dgc_none bench/stw_lag_pause.cr -o bin/stw_lag_pause --error-trace
+          ./bin/stw_lag_pause --rounds=5 --max-ratio=4 --max-ratio-nolw=30
+          ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --max-ratio=4 --max-ratio-nolw=30
+          GCRY_STACK_LOW_WATER=0 ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --disabled --max-ratio=4 --max-ratio-nolw=30
+
       # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
       # measured on Linux and Darwin reclaims differently (MADV_FREE_REUSABLE
       # keeps pages mapped where MADV_DONTNEED drops them), so nobody knew what

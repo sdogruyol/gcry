@@ -5,8 +5,19 @@ require "./spec_helper"
 # swapped bit has never been faulted and is therefore zero. If that claim is
 # ever wrong, roots go missing silently and nothing else in the suite notices.
 #
-# These pin the claim itself rather than the pause number it buys.
-{% if flag?(:linux) %}
+# These pin the claim itself rather than the pause number it buys — on Darwin
+# too, where the same claim rests on `mach_vm_page_range_query` instead of
+# `/proc/self/pagemap` (`src/gcry/platform/darwin_low_water.cr`): a second
+# implementation has to earn the assertion on its own.
+private def low_water_page : UInt64
+  {% if flag?(:darwin) %}
+    Gcry::Platform.host_page_size
+  {% else %}
+    Gcry::Roots::PAGE_SIZE
+  {% end %}
+end
+
+{% if flag?(:linux) || flag?(:darwin) %}
   describe "Gcry::Platform.stack_low_water" do
     it "reports the first touched page of a freshly mapped region" do
       len = 1024 * 1024
@@ -18,7 +29,7 @@ require "./spec_helper"
       high = low + len
 
       begin
-        page = Gcry::Roots::PAGE_SIZE
+        page = low_water_page
         # Untouched throughout: nothing can hold a pointer, so the whole range
         # may be skipped.
         Gcry::Platform.stack_low_water(low, high).should eq(high)
@@ -49,7 +60,7 @@ require "./spec_helper"
       high = low + len
 
       begin
-        page = Gcry::Roots::PAGE_SIZE
+        page = low_water_page
         # Write a marker on every page, then assert the reported mark is at or
         # below the lowest of them — i.e. the scan that starts there still
         # covers every written word.

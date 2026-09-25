@@ -1042,8 +1042,9 @@ module Gcry
     # and the lag>0 default path (GCRY_STACK_LOW_WATER=0 to disable).
     # Semantics-preserving: pages with neither the present nor the swapped bit
     # set have never been faulted, so they are zero and cannot hold a pointer.
-    # Linux-only; falls back to the unskipped range whenever
-    # /proc/self/pagemap cannot answer, so a failure only ever widens the scan.
+    # Linux (`/proc/self/pagemap`) and Darwin (`mach_vm_page_range_query`,
+    # `darwin_low_water.cr`); both fall back to the unskipped range whenever the
+    # kernel cannot answer, so a failure only ever widens the scan.
     property stack_low_water_scan : Bool = true
 
     # When suspend SP sits on a pool fiber, Parallel still scans the OS pthread
@@ -1173,7 +1174,7 @@ module Gcry
       # fraction of the faults. Falls back to `guard` whenever pagemap cannot
       # answer, so a failure can only ever widen the scan.
       if lag == 0
-        {% if flag?(:linux) %}
+        {% if flag?(:linux) || flag?(:darwin) %}
           if @stack_low_water_scan
             bottom = fiber.@stack.bottom.address
             if bottom > guard
@@ -1216,7 +1217,7 @@ module Gcry
       # here in a way it is not at lag 0 — the live frames begin within `lag`
       # bytes of `lagged`, so the walk stops after ~lag/PAGE_SIZE entries (64
       # for the 256 KiB default), one pread.
-      {% if flag?(:linux) %}
+      {% if flag?(:linux) || flag?(:darwin) %}
         if @stack_low_water_scan
           bottom = fiber.@stack.bottom.address
           # The last precondition, counted because the skip firing once per
@@ -1270,7 +1271,7 @@ module Gcry
     # Gcry::OS.write, not STDERR: this runs inside STW and must not allocate.
     private def warn_stw_lag_zero_once : Nil
       return if @warned_stw_lag_zero
-      {% if flag?(:linux) %}
+      {% if flag?(:linux) || flag?(:darwin) %}
         return if @stack_low_water_scan && Platform.pagemap_available?
       {% end %}
       @warned_stw_lag_zero = true
@@ -1648,7 +1649,7 @@ module Gcry
       # ~8 MiB pthread mapping, nearly all of which was never written. Skipping
       # the untouched head sees identical words — a page with neither the
       # present nor the swapped bit has never been faulted, so it is zero.
-      {% if flag?(:linux) %}
+      {% if flag?(:linux) || flag?(:darwin) %}
         if @stack_low_water_scan && low < high
           lw = Platform.stack_low_water(low, high)
           if lw > low && lw < high
