@@ -1,0 +1,47 @@
+--- a/src/fiber/execution_context/parallel/scheduler.cr	2026-09-26 00:37:07.492702433 +0300
++++ b/src/fiber/execution_context/parallel/scheduler.cr	2026-09-26 00:37:07.527788793 +0300
+@@ -76,6 +76,10 @@
+         end
+       end
+ 
++      # How long `resume` waits for another thread to save a fiber's context
++      # before requeueing it instead (see there).
++      private MAX_RESUME_SPINS = 1000
++
+       protected def resume(fiber : Fiber) : Nil
+         Crystal.trace :sched, "resume", fiber: fiber
+ 
+@@ -85,16 +89,30 @@
+         # the context switch assembly saved all registers on the stack and set
+         # the fiber as resumable.
+         attempts = 0
++        spins = 0
+ 
+         until fiber.resumable?
+           if fiber.dead?
+             raise "BUG: tried to resume dead fiber #{fiber} (#{inspect})"
+           end
+ 
+-          # OPTIMIZE: if the thread saving the fiber context has been preempted,
+-          # this will block the current thread from progressing... shall we
+-          # abort and reenqueue the fiber after MAX attempts?
++          # Two threads can each dequeue the fiber the other is still running
++          # (both enqueued by a wake-up on their way into `suspend`) and then
++          # wait here forever for a context the other can only save after its
++          # own wait ends. Break the cycle: after a bound, requeue the fiber
++          # and switch to the main fiber instead, which saves the current
++          # fiber's context and so releases whoever waits on it. Never from the
++          # main fiber itself: it has nowhere else to go, and no cycle can pass
++          # through it since its thread runs no other fiber while it spins.
++          if spins >= MAX_RESUME_SPINS && !thread.current_fiber.same?(main_fiber)
++            Crystal.trace :sched, "resume_requeue", fiber: fiber
++            enqueue(fiber)
++            swapcontext(main_fiber)
++            return
++          end
++
+           attempts = Thread.delay(attempts)
++          spins &+= 1
+         end
+ 
+         swapcontext(fiber)

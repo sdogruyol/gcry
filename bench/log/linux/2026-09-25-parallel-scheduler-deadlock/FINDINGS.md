@@ -77,6 +77,21 @@ gave up — that run measured two identical arms, 14 vs 19 stalls).
 Each give-up is a deadlock broken rather than hung — 9 against the control's
 18 is the right order for the same exposure.
 
+**And as an upstream patch.** `resume-requeue.patch` is the same change
+against Crystal **master**'s `scheduler.cr` (whose `resume` is identical to
+1.21.0's). Applied to a copy of the 1.21.0 stdlib and used through
+`CRYSTAL_PATH`, it leaves the reproducer itself untouched — `ping.cr` exactly
+as above, no instrumentation, no redefinition — and the A/B is the cleanest
+one here:
+
+| `ping.cr` against, interleaved, 2 500 runs each | stalled (> 20 s) |
+|---|---:|
+| stock 1.21.0 stdlib | **72** |
+| stdlib + `resume-requeue.patch` | **0** |
+
+(The uninstrumented binary stalls more often, 2.9%, than the instrumented one,
+0.7% — instrumentation perturbs the window, as it would.)
+
 This is Crystal's scheduler to fix, not gcry's to patch around: a shard
 redefining `Scheduler#resume` would change the runtime under every user of it. A collector's stop-the-world pauses can only
 change how often threads are preempted inside the window, and gcry's rate
@@ -108,4 +123,6 @@ change how often threads are preempted inside the window, and gcry's rate
 > host load, `./ping 2 4000`. Unchanged on master (`resume` is identical).
 > The `OPTIMIZE` note in `resume` is the fix: giving up after 1 000 spins,
 > re-enqueueing the target and switching to the scheduler's main fiber took
-> an interleaved A/B from 18 stalls in 2 500 runs to 0 in 2 500.
+> an interleaved A/B from 18 stalls in 2 500 runs to 0 in 2 500; as a patch
+> to the stdlib (`resume-requeue.patch`, against master), 72 → 0 in 2 500
+> on the unmodified reproducer.
