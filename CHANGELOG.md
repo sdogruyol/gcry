@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   campaign lost 13 pinned live objects in one chunk in one run of
   `stw_mt_property_test --tlab` (header layout, freelist allocator — opt-in,
   not the default): about 1 run in 300, no seed reproduces it, and no CI job
-  sampled that arm. `make tlab-nursery-sample` adds `TLAB_ONLY_RUNS` (100)
+  sampled that arm. `make tlab-nursery-sample` adds `TLAB_ONLY_RUNS` (30)
   runs of it, and the harness's `DEAD` line now says whether the pointer
   left the chunk index or its block was reclaimed, so a sighting arrives with
   evidence instead of addresses.

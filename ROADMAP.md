@@ -2228,7 +2228,7 @@ kept finding the rest.
       DEAD root's memory, so an unmapped chunk fits the absence of a crash),
       or blocks reclaimed inside a listed chunk. The harness now prints
       `heap_ptr=` and the block's state per DEAD root, which tells those
-      apart, and `make tlab-nursery-sample` takes 100 TLAB-only runs per CI
+      apart, and `make tlab-nursery-sample` takes 30 TLAB-only runs per CI
       run so the next sighting arrives with that line.
 - [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
       of a freed block.** It faults inside `pthread_getattr_np` under

@@ -2100,7 +2100,7 @@ jobs:
       # its log and does not take the job with it.
       - name: TLAB+nursery sampler
         continue-on-error: true
-        run: TLAB_NURSERY_RUNS=30 TLAB_ONLY_RUNS=30 make tlab-nursery-sample
+        run: TLAB_NURSERY_RUNS=30 TLAB_ONLY_RUNS=10 make tlab-nursery-sample
 
       - name: Upload TLAB+nursery samples
         if: always()

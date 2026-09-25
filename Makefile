@@ -1565,11 +1565,12 @@ thread-uaf-sample: $(BIN)
 # The TLAB-only arm (`--tlab`, no nursery, 200 iterations) lost 13 pinned live
 # objects in one chunk at collection #71 in one run of a 2026-09-25 local
 # campaign; ~1 run in 300, no seed reproduces it, and it is not sampled
-# anywhere else. TLAB_ONLY_RUNS (100) takes it alongside.
+# anywhere else. TLAB_ONLY_RUNS (30, ~18 s each on a hosted runner: 6 000
+# collections, more than the nursery arm's 5 000) takes it alongside.
 tlab-nursery-sample: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/stw_mt_property_test.cr -o $(BIN)/stw_mt_property_test_hdr --error-trace
 	@mkdir -p $(SAMPLE_DIR)
-	@runs=$${TLAB_NURSERY_RUNS:-100}; only=$${TLAB_ONLY_RUNS:-100}; crashes=0; unengaged=0; \
+	@runs=$${TLAB_NURSERY_RUNS:-100}; only=$${TLAB_ONLY_RUNS:-30}; crashes=0; unengaged=0; \
 	for i in $$(seq 1 $$((runs + only))); do \
 	  if [ $$i -le $$runs ]; then arm=tlab-nursery; flags="--nursery --iterations=50"; seed=$$i; \
 	  else arm=tlab-only; flags="--iterations=200"; seed=$$((i - runs)); fi; \
