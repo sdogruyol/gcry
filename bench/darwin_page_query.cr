@@ -65,6 +65,11 @@
       disposition : Int32*,
       ref_count : Int32*,
     ) : KernReturn
+
+    # Physical memory, for `--pressure=auto`. Bound here rather than in
+    # `LibC` so it cannot collide with a binding the stdlib may add.
+    fun sysctlbyname(name : UInt8*, oldp : Void*, oldlenp : LibC::SizeT*,
+                     newp : Void*, newlen : LibC::SizeT) : Int32
   end
 
   lib LibC
@@ -163,9 +168,22 @@ end
     true
   end
 
+  # `--pressure=auto`: 1.25x the host's physical memory, so the ballast cannot
+  # fit whatever the runner has. A fixed 2048 MiB never moved a page on a ~7 GB
+  # runner — and that ballast was one byte per page, which the compressor
+  # squeezes to nothing, so it was barely pressure at all (see the fill below).
   pressure_mb = 0
   ARGV.each do |arg|
-    if arg =~ /--pressure=(\d+)/
+    if arg == "--pressure=auto"
+      mem = 0_u64
+      len = LibC::SizeT.new(sizeof(UInt64))
+      if LibMachVM.sysctlbyname("hw.memsize", pointerof(mem).as(Void*), pointerof(len), Pointer(Void).null, LibC::SizeT.new(0)) == 0
+        pressure_mb = (mem // (1024 * 1024) * 5 // 4).to_i
+        puts "pressure auto: #{mem // (1024 * 1024)} MiB physical, #{pressure_mb} MiB of ballast"
+      else
+        puts "pressure auto: hw.memsize unreadable, no pressure"
+      end
+    elsif arg =~ /--pressure=(\d+)/
       pressure_mb = $1.to_i
     end
   end
@@ -273,10 +291,21 @@ end
   PAGES.times { |p| Pointer(UInt8).new(evict + p.to_u64 * PAGE).value = FILL }
   ballast = [] of UInt64
   if pressure_mb > 0
-    pages_per_mb = (1024 * 1024) // PAGE
-    (pressure_mb.to_u64 * pages_per_mb).times do |_|
-      addr = map_region(1)
-      Pointer(UInt8).new(addr).value = FILL
+    # Every word of every page, from a generator: incompressible, so the
+    # compressor cannot absorb it and has to evict something — the written
+    # region above, which holds one byte per page, is the cheapest thing on the
+    # host to compress. One MiB per mapping.
+    x = 0x9E3779B97F4A7C15_u64
+    words_per_mb = (1024 * 1024) // 8
+    pressure_mb.times do |_|
+      addr = map_region(((1024 * 1024) // PAGE).to_i32)
+      w = Pointer(UInt64).new(addr)
+      words_per_mb.times do |i|
+        x ^= x << 13
+        x ^= x >> 7
+        x ^= x << 17
+        w[i] = x
+      end
       ballast << addr
     end
   end

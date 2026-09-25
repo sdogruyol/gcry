@@ -50,7 +50,7 @@ on:
         required: false
         default: "1"
       page_query_pressure:
-        description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm; too much can take the job down with it."
+        description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm (`auto` = 1.25x the runner's physical memory, incompressible); too much can take the job down with it."
         required: false
         default: "0"
 
