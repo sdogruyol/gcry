@@ -2182,6 +2182,12 @@ jobs:
           ./bin/stw_lag_pause --rounds=5 --max-ratio=4 --max-ratio-nolw=30
           ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --max-ratio=4 --max-ratio-nolw=30
           GCRY_STACK_LOW_WATER=0 ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --disabled --max-ratio=4 --max-ratio-nolw=30
+          # What the skip saves in memory here, which Linux never showed:
+          # resident growth across four collections, skip on and off.
+          # Informational until Darwin's numbers are known.
+          crystal build -Dgc_none bench/lag_scan_rss.cr -o bin/lag_scan_rss --error-trace
+          ./bin/lag_scan_rss
+          GCRY_STACK_LOW_WATER=0 ./bin/lag_scan_rss
 
       # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
       # measured on Linux and Darwin reclaims differently (MADV_FREE_REUSABLE
