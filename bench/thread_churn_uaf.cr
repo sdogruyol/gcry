@@ -51,6 +51,12 @@
 
 require "../src/gcry"
 
+{% if flag?(:linux) %}
+  lib LibChurnPtracer
+    fun prctl(option : Int32, arg2 : UInt64, arg3 : UInt64, arg4 : UInt64, arg5 : UInt64) : Int32
+  end
+{% end %}
+
 {% unless flag?(:gc_none) %}
   {% raise "thread_churn_uaf requires -Dgc_none (gcry as process GC)" %}
 {% end %}
@@ -59,8 +65,19 @@ ROUNDS   = (ENV["CHURN_ROUNDS"]?.try(&.to_i?) || 240)
 BATCH    = 8
 ATTEMPTS = (ENV["CHURN_ATTEMPTS"]?.try(&.to_i?) || 24)
 LANES    = 6
+# A child is killed past this and counted as `hung`. Children take seconds; the
+# deadline exists because the `--control` arm restores a use-after-free, and a
+# child running on a corrupted heap can loop instead of faulting — one did on
+# 2026-09-25 (run 36191260152) and, with an unbounded `wait`, took the gate to
+# the step's 20-minute `timeout` with nothing said about what it was doing.
+CHILD_DEADLINE = (ENV["CHURN_CHILD_DEADLINE_S"]?.try(&.to_i?) || 120).seconds
 
 if ARGV.includes?("--child")
+  # Traceable by any process, so `bench/stall_capture.sh` can attach gdb to a
+  # hung child under Ubuntu's default `ptrace_scope=1`.
+  {% if flag?(:linux) %}
+    LibChurnPtracer.prctl(0x59616d61, UInt64::MAX, 0, 0, 0) # PR_SET_PTRACER, ANY
+  {% end %}
   ROUNDS.times do
     born = [] of Thread
     BATCH.times { born << Thread.new { } }
@@ -74,7 +91,23 @@ end
 self_path = Process.executable_path || "bin/thread_churn_uaf"
 
 record Arm, name : String, env : Hash(String, String)
-record Result, name : String, runs : Int32, failed : Int32, report : String?
+record Result, name : String, runs : Int32, failed : Int32, hung : Int32, report : String?
+
+# Past the deadline: say what the child is doing, then kill it. The capture
+# goes to a file beside the binary rather than into the report, which keeps
+# eight lines; the report names the file.
+def kill_hung(process : Process, arm : String) : String
+  path = "#{File.dirname(Process.executable_path || "bin/x")}/thread_churn_uaf-hung-#{arm}-#{process.pid}.txt"
+  capture = "bench/stall_capture.sh"
+  if File.exists?(capture)
+    File.open(path, "w") do |file|
+      Process.run(capture, [process.pid.to_s], output: file, error: file)
+    end
+  end
+  process.signal(Signal::KILL) rescue nil
+  process.wait
+  "HUNG past #{CHILD_DEADLINE.total_seconds.to_i} s, killed#{File.exists?(path) ? "; threads and backtraces in #{path}" : ""}"
+end
 
 # The diagnostics travel with the arms rather than being something to
 # remember: this defect produced one unreadable sighting per week for a
@@ -99,6 +132,7 @@ POISON = GUARD.merge({"GCRY_POISON_HOLDERS" => "1"})
 
 def run_arm(self_path : String, arm : Arm, attempts : Int32, want : String) : Result
   failed = 0
+  hung = 0
   report = nil
   remaining = attempts
   while remaining > 0
@@ -110,7 +144,18 @@ def run_arm(self_path : String, arm : Arm, attempts : Int32, want : String) : Re
       children << {Process.new(self_path, ["--child"], env: arm.env,
         output: Process::Redirect::Close, error: sink), sink}
     end
+    deadline = Time.instant + CHILD_DEADLINE
     children.each do |process, sink|
+      until process.terminated? || Time.instant > deadline
+        sleep 50.milliseconds
+      end
+      unless process.terminated?
+        failed += 1
+        hung += 1
+        why = kill_hung(process, arm.name)
+        report ||= why
+        next
+      end
       status = process.wait
       next if status.success?
       failed += 1
@@ -135,7 +180,7 @@ def run_arm(self_path : String, arm : Arm, attempts : Int32, want : String) : Re
       end
     end
   end
-  Result.new(arm.name, attempts, failed, report)
+  Result.new(arm.name, attempts, failed, hung, report)
 end
 
 puts "=== a live large object released under thread churn ==="
@@ -200,7 +245,8 @@ results = arms.map { |arm, want| run_arm(self_path, arm, ATTEMPTS, want) }
 
 results.each do |r|
   pct = r.runs.zero? ? 0.0 : 100.0 * r.failed / r.runs
-  puts "  %-10s %d of %d failed (%.1f%%)" % [r.name, r.failed, r.runs, pct]
+  puts "  %-10s %d of %d failed (%.1f%%)%s" % [r.name, r.failed, r.runs, pct,
+                                               r.hung > 0 ? ", #{r.hung} of them hung" : ""]
 end
 puts ""
 
@@ -231,7 +277,9 @@ end
 
 total = results.sum(&.failed)
 if total > 0
-  puts "FAIL #{total} run(s) faulted. This was fixed on 2026-09-13 in two places."
+  hung = results.sum(&.hung)
+  puts "FAIL #{total} run(s) failed#{hung > 0 ? ", #{hung} of them by hanging past the deadline" : ""}. This was fixed on"
+  puts "2026-09-13 in two places."
   puts "The trigger: the sweep read `multi_mutator_threads?` at two instants across"
   puts "`start_world` — inside the stop, where the decision it drives is taken, and"
   puts "again during the sweep — and a thread born in between flipped the answer,"
