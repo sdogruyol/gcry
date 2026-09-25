@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run, and both red arms (reserve off, message built by the caller) fail
   every run. `bench/log/linux/2026-09-24-oom-report-reserve/`.
 
+- **`make chunk-list-drift` no longer reads an early crash as a missing
+  race.** Its fast arm restores the pre-fix shape and crashes in a few
+  children in a hundred (4 of 160), at any round; one that died before its
+  first bucket left no rate, and the verdict took that as a rate of zero —
+  "the workload no longer reaches the race". Such a child is now run again,
+  up to three times, and three in a row fails with that finding named.
+
 ## [0.27.1] - 2026-09-24
 
 ### Fixed

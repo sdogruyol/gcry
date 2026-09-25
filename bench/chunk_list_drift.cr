@@ -79,6 +79,14 @@ MAX_PER_1000 = 5.0
 # were a bound. It was a bound on nothing, and this is the guard against
 # publishing another one.
 MIN_MAPPINGS = 5000_u64
+# The fast arm crashes in a few children in a hundred (4 of 160 on 2026-09-25,
+# all four in one burst of 20; rounds 200 to 1000), the pre-fix shape's
+# use-after-free: the pool walk reading a chunk the sweep has unmapped. Now
+# and then that is before the first bucket, and such a child leaves no rate to
+# read — which the verdict read as a rate of zero, "the workload no longer
+# reaches the race", a red with no defect behind it. Such a child is run
+# again; three in a row is a real finding and fails.
+FAST_ATTEMPTS = 3
 
 record Bucket, round : Int32, chunks : UInt64, bytes : UInt64, heap_bytes : UInt64, mapped : UInt64
 
@@ -156,7 +164,15 @@ unless ARGV.includes?("--child")
   puts ""
   shipped, shipped_ok = run_child(self_path, false)
   fast, fast_ok = run_child(self_path, true)
+  fast_attempts = 1
+  while fast.empty? && fast_attempts < FAST_ATTEMPTS
+    fast, fast_ok = run_child(self_path, true)
+    fast_attempts += 1
+  end
   shipped_rate, shipped_mapped = report("shipped — mutator count latched in the stop", shipped, shipped_ok)
+  if fast_attempts > 1
+    puts "fast arm: #{fast_attempts - 1} child(ren) crashed before the first bucket and were run again"
+  end
   fast_rate, fast_mapped = report("fast — `sweep_mutator_latch = false`, the pre-fix reads", fast, fast_ok)
 
   # The third arm is a different regime, not a different tree: short-lived
@@ -191,7 +207,10 @@ unless ARGV.includes?("--child")
   if shipped_mapped < MIN_MAPPINGS
     failures << "the shipped arm mapped only #{shipped_mapped} chunks (want #{MIN_MAPPINGS}): it measured nothing"
   end
-  if fast_rate <= MAX_PER_1000
+  if fast.empty?
+    failures << "the fast arm crashed before its first bucket #{FAST_ATTEMPTS} times in a row: " +
+                "it no longer lives long enough to measure anything"
+  elsif fast_rate <= MAX_PER_1000
     failures << "the fast arm stranded #{fast_rate.round(2)} per 1000 mappings (want above #{MAX_PER_1000}): " +
                 "the workload no longer reaches the race, so the shipped arm's number means nothing"
   end
