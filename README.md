@@ -314,6 +314,15 @@ Windows workload performance has not been benchmarked; see [support details](doc
 | Kemal-class thr/RSS near Boehm | Ultra-dense conservative-live apps may keep more RSS until stack maps |
 | `LibC.fork` + atfork reinit | `Process.fork` under ExecutionContext (Crystal forbids it anyway) |
 
+**A hang in a Parallel context may not be the collector.** Crystal 1.21's
+Parallel scheduler can deadlock two workers, each waiting in `Scheduler#resume`
+for the fiber the other is running. It reproduces under Boehm with no GC calls,
+0.5–3% of runs of a two-worker channel ping-pong. If a stuck process shows two
+threads spinning in `parallel/scheduler.cr` and no collector frame, that is the
+likely cause. Reproducer, measurement and an upstream patch (72 stalls in 2500
+runs → 0):
+[`bench/log/linux/2026-09-25-parallel-scheduler-deadlock/`](bench/log/linux/2026-09-25-parallel-scheduler-deadlock/FINDINGS.md).
+
 ---
 
 ## Roadmap
