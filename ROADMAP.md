@@ -2211,6 +2211,25 @@ kept finding the rest.
 
 ## Next — the thread family, then Darwin performance parity
 
+- [ ] **TLAB-only: 13 pinned live objects lost in one chunk, once
+      (2026-09-25).** A local stress campaign ran
+      `stw_mt_property_test --tlab` (header layout, `GCRY_BITMAP_ALLOC=0` —
+      opt-in, not a default) with fresh seeds; seed 1010 reported roots 3–15
+      DEAD after collection #71, all within ~28 KiB (one chunk). Roots 3–7
+      had passed the check after #70. Rate about 1 run in 300 on this host;
+      seed 1010 clean 20 of 20 again; 0 of 60 on this tree and 0 of 60 on
+      0.27.1 at fresh seeds, so nothing says it is new. **Excluded so far:**
+      the after-world sweep (TLAB forces the sweep inside the stop,
+      `sweep_after_world?`), and the `tlab_alloc_small` hit-path window
+      between reading `next_free` and publishing the head — widened by a
+      ~20 k-pause spin every 64th hit, 0 of 20. **Open readings:** the chunk
+      left the index (explicit roots not found at mark, so its blocks read
+      unmarked and the empty chunk was released — `verify` does not touch a
+      DEAD root's memory, so an unmapped chunk fits the absence of a crash),
+      or blocks reclaimed inside a listed chunk. The harness now prints
+      `heap_ptr=` and the block's state per DEAD root, which tells those
+      apart, and `make tlab-nursery-sample` takes 100 TLAB-only runs per CI
+      run so the next sighting arrives with that line.
 - [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
       of a freed block.** It faults inside `pthread_getattr_np` under
       `stop_world`, on a `pthread_t` that is gcry's own tagged poison

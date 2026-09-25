@@ -477,7 +477,10 @@ module Gcry
             ChunkHeader.set_pinned(chunk, true) unless chunk.null?
             i += 1
           end
-          @cursor_sets_pinned &+= 1
+          # The out-of-memory reserve's set is never on the hit path, so it is
+          # pinned at every stop; counting it would add one per collection to
+          # a number that says a mutator was frozen mid-allocation.
+          @cursor_sets_pinned &+= 1 unless set == @oom_reserve_set
         else
           credit_cursor_set(set)
           i = 0
