@@ -1,0 +1,9 @@
+Process-GC STW + concurrent mutation property test
+  seed=1032 iterations=200 workers=[2, 4, 8]
+  stop_the_world=true
+  bitmap_alloc=true headers=false
+  mode: shipped
+  tlab_enabled=false (requested=false)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=1032

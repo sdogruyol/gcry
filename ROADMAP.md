@@ -2211,6 +2211,16 @@ kept finding the rest.
 
 ## Next — the thread family, then Darwin performance parity
 
+- [ ] **One 900 s stall of `stw_mt_property_test` on the default layout
+      (2026-09-25).** Seed 1032, `GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1`,
+      2/4/8 workers: the first arm started and nothing more was printed; no
+      watchdog was armed, so no phase. 1 of 81 in a loaded campaign on the
+      fixed tree; the same seed was clean 12 of 12 after. A probe that
+      stalled past 60 s showed the thread-group leader as a zombie (main
+      thread gone, others running) and ended before it could be read. Next:
+      a stall with every thread's backtrace — `hunt_hang.sh` in the
+      campaign's findings does that.
+      `bench/log/linux/2026-09-25-stress-campaign/FINDINGS.md`
 - [x] **TLAB-only: 13 pinned live objects lost in one chunk, once
       (2026-09-25).** A local stress campaign ran
       `stw_mt_property_test --tlab` (header layout, `GCRY_BITMAP_ALLOC=0` —
@@ -3557,6 +3567,10 @@ Target: Make gcry easy to adopt, hard to break, and impossible to ignore.
 - [ ] **Crystal compiler PR: `-Dgc_gcry` flag** — opt-in flag recognized by the compiler
       (no-op alias for `-Dgc_none`; ecosystem signal that gcry is real)
 - [ ] **Security / fuzzing** — documented fuzz hours, crash-free stress runs
+      (2026-09-25: first documented run — 1720 varied-seed runs, 20 lane-hours
+      over the process-GC and library harnesses, 11.6 h of them the library
+      fuzzer; it found the chunk-index growth race.
+      `bench/log/linux/2026-09-25-stress-campaign/FINDINGS.md`)
 - [ ] **good-first-issue grooming** — Windows benchmarks, benchmark workloads, specs
 - [ ] **Crystal Discord #gcry channel** — community hub for users and contributors
 

@@ -61,6 +61,22 @@ list are held locked across `stop_world` (`stop_world_quiescing_roots`). A
 ~20 k-pause spin between `realloc` and the publish raised the TLAB harness's
 loss from ~1 in 900 to 1 in 20 with the same signature.
 
+## Anything else of that shape?
+
+The pattern is a table the stopped-world collector reads while a mutator
+may be frozen halfway through replacing it. Checked:
+
+| table | why it cannot do this |
+|---|---|
+| finalizer entries / links / index | `lock_for_stw` holds the registry lock across `stop_world` |
+| explicit root list | `@roots_lock` held across `stop_world` |
+| chunk radix L2 tables | mapped zeroed, never freed while running; a half-inserted chunk is a new, empty one |
+| bitmap pool index (`bitmap_pool_grow`) | every reader and the grower hold the same class lock |
+| STW slot table | never frees its predecessor (`stw_slots.cr`, rule 2) |
+| thread staging, birth roots, birth-grace ring | static or fixed-size |
+
+The chunk index was the one table read without its lock across a stop.
+
 ## The fix
 
 Allocate, copy, publish with a release store, then free the old array. Every
@@ -78,6 +94,6 @@ allocated and carry its stamp.
 
 | arm | result |
 |---|---|
-| shipped (allocate, copy, publish, free) | 3 of 3 clean, 1 400+ collections each |
+| shipped (allocate, copy, publish, free) | 13 of 13 clean (3 in the gate, 10 more), 900–1 600 collections each |
 | `GCRY_INDEX_GROW_FREE_FIRST=1` (free, then publish — `realloc` when it moves) | 6 of 8 faulted; required ≥ 1 of 5 |
 | calling `realloc` itself, 20 ms | 1 of 3 (it grows in place when it can) — why the red arm frees directly |

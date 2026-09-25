@@ -1,0 +1,28 @@
+Process-GC STW + concurrent mutation property test
+  seed=1054 iterations=200 workers=[2, 4]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=false (requested=false)
+
+  STW-MT workers=2 iterations=200 seed=1054
+    allocs=1610 pinned=1608 collects=201 roots=16 ok=true
+
+  STW-MT workers=4 iterations=200 seed=11054
+
+=== Summary ===
+RESULT: FAIL — seed=1054 (re-run with --seed=1054)
+  ERROR: after collect #44: root 3 DEAD (Pointer(Void)@0x77c1d069fed0)
+  ERROR: after collect #44: root 4 DEAD (Pointer(Void)@0x77c1d069fe80)
+  ERROR: after collect #44: root 5 DEAD (Pointer(Void)@0x77c1d069fe30)
+  ERROR: after collect #44: root 6 DEAD (Pointer(Void)@0x77c1d0693220)
+  ERROR: after collect #44: root 7 DEAD (Pointer(Void)@0x77c1d06931d0)
+  ERROR: after collect #44: root 8 DEAD (Pointer(Void)@0x77c1d0693180)
+  ERROR: after collect #44: root 9 DEAD (Pointer(Void)@0x77c1d0693130)
+  ERROR: after collect #44: root 10 DEAD (Pointer(Void)@0x77c1d069fde0)
+  ERROR: after collect #44: root 11 DEAD (Pointer(Void)@0x77c1d0693310)
+  ERROR: after collect #44: root 12 DEAD (Pointer(Void)@0x77c1d06932c0)
+  ERROR: after collect #44: root 13 DEAD (Pointer(Void)@0x77c1d0693270)
+  ERROR: after collect #44: root 14 DEAD (Pointer(Void)@0x77c1d0682650)
+  ERROR: after collect #44: root 15 DEAD (Pointer(Void)@0x77c1d0682600)
