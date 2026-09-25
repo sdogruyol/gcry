@@ -3528,6 +3528,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       qualitative result is unchanged (untouched skippable, written not,
       every skippable page zero, `MADV_FREE_REUSABLE` zero); what changed is how
       much they cover. The eviction arm is still the open one.
+      **The eviction arm, answered (2026-09-25): 256 of 256 written pages left
+      residency and all 256 read `PAGED_OUT`, not skippable.** The earlier
+      ballast wrote one byte per page — the compressor absorbs that — and 2 GiB
+      fit the runner anyway. Incompressible ballast at 1.25 × `hw.memsize`
+      (`--pressure=auto`, 8960 MiB) forced the eviction; the predicate held.
+      **Unblocked: nothing left in the way but the implementation and the
+      ported spec.** `bench/log/macos/2026-09-25-page-query-eviction/FINDINGS.md`
 - [ ] **Which fibers are deeply used, and why** — open below. `GCRY_SOUND=1`'s cost
       tracks touched stack, so its distribution is wide (p5 3.4 ms, p95 19.1 ms);
       `low_water_skipped_bytes` is the handle and postdates the question.
