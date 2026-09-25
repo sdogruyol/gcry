@@ -419,7 +419,12 @@ end
   end
   puts ""
   puts "=== SYSMON stack, touched depth after #{rounds * CONFIGS.size + CONFIGS.size} collections ==="
-  if depth = sysmon_depth
+  if HEAP.fiber_scan_from_guard == 0
+    # macOS suspends SYSMON with the others and has its SP, so the fiber is
+    # scanned from that SP and never from the guard — measured on the runner,
+    # 12 KiB with the skip off. Neither arm can say anything there.
+    puts "  NOTE no running fiber was scanned from the guard here (SYSMON's SP is known) — nothing to check"
+  elsif depth = sysmon_depth
     puts "  #{depth // 1024} KiB (guard-path scans: #{HEAP.fiber_scan_from_guard})"
     if disabled
       if depth < 7_u64 * 1024 * 1024

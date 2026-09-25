@@ -80,12 +80,17 @@ in `MonitorGate` for the whole stop. A probe failure still falls back to
 
 ## Gate
 
-`bench/stw_lag_pause.cr` (all three CI invocations, Linux and macOS) now reads
-SYSMON's touched depth with the collector's own probe after its ~18
-collections: at most 1 MiB with the skip, and under `GCRY_STACK_LOW_WATER=0
---disabled` — the red arm, run every time — at least 7 MiB. Measured: 8 KiB
-and 8188 KiB. With the fix reverted by hand the default arm fails at
-8188 KiB.
+`bench/stw_lag_pause.cr` (all three CI invocations) now reads SYSMON's
+touched depth with the collector's own probe after its ~18 collections: at
+most 1 MiB with the skip, and under `GCRY_STACK_LOW_WATER=0 --disabled` — the
+red arm, run every time — at least 7 MiB. Measured: 8 KiB and 8188 KiB here,
+8 and 16 380 KiB on the CI runner (16 MiB stacks). With the fix reverted by
+hand the default arm fails at 8188 KiB.
+
+**macOS never takes this path**: SYSMON is suspended with the other threads
+there and has an SP, so `fiber_scan_from_guard` reads 0 on the runner and the
+stack read 12 KiB deep even with the skip off. The check says so and asserts
+nothing there; the first push asserted the red arm on macOS and went red.
 
 ## An instrument defect found on the way
 

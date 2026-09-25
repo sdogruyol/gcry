@@ -78,8 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every collection, or 8188 KiB under sound's lag 0. The branch now starts at
   the low-water mark, like the lag-0 path. That is sound for the same reason
   (a page never faulted is zero), and a probe failure still falls back to the
-  guard. RSS is unchanged. `stw_lag_pause` now checks SYSMON's touched depth on
-  Linux and macOS, with `GCRY_STACK_LOW_WATER=0` as the red arm
+  guard. RSS is unchanged. `stw_lag_pause` now checks SYSMON's touched depth,
+  with `GCRY_STACK_LOW_WATER=0` as the red arm. macOS never takes this path
+  (SYSMON is suspended there and has an SP)
   (`bench/log/linux/2026-09-26-sysmon-guard-scan/`).
 
 ## [0.27.2] - 2026-09-25
