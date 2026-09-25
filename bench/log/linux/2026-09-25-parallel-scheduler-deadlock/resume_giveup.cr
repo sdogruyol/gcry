@@ -3,7 +3,8 @@
 # running (the one that suspended) and the fiber `resume` is spinning on.
 # The circular-wait hypothesis predicts w-0's target == w-1's current and
 # w-1's target == w-0's current.
-SLOTS    = 4
+SLOTS = 4
+
 # A class, not `StaticArray(Atomic)`: indexing a StaticArray of structs
 # returns a copy, and the first version of this recorded into copies.
 class Slot
@@ -11,7 +12,8 @@ class Slot
   property target = 0_u64
   property resumable_at_entry = true
 end
-SLOT = Array.new(SLOTS) { Slot.new }
+
+SLOT     = Array.new(SLOTS) { Slot.new }
 PROGRESS = Atomic(UInt64).new(0_u64)
 
 def slot_of_thread : Int32
@@ -23,9 +25,9 @@ def slot_of_thread : Int32
   end
 end
 
-FIX = ENV["FIX"]? == "1"
+FIX       = ENV["FIX"]? == "1"
 MAX_SPINS = 1000
-GAVE_UP = Atomic(Int32).new(0)
+GAVE_UP   = Atomic(Int32).new(0)
 
 class Fiber::ExecutionContext::Parallel::Scheduler
   protected def resume(fiber : Fiber) : Nil
@@ -99,15 +101,15 @@ Thread.new(name: "watch") do
     end
     if still >= 6
       msg = String.build do |io|
-      io << "STALL after " << now << " round trips\n"
-      workers.times do |i|
-        cur = SLOT[i].current
-        tgt = SLOT[i].target
-        io << "  w-" << i << ": running " << (names[cur]? || cur.to_s(16)) << ", resuming " << (tgt == 0 ? "-" : (names[tgt]? || tgt.to_s(16))) \
-          << " (target resumable at entry: " << SLOT[i].resumable_at_entry << ")\n"
-      end
-      circular = workers == 2 && SLOT[0].target == SLOT[1].current && SLOT[1].target == SLOT[0].current && SLOT[0].target != 0
-      io << "  circular wait: " << circular << "\n"
+        io << "STALL after " << now << " round trips\n"
+        workers.times do |i|
+          cur = SLOT[i].current
+          tgt = SLOT[i].target
+          io << "  w-" << i << ": running " << (names[cur]? || cur.to_s(16)) << ", resuming " << (tgt == 0 ? "-" : (names[tgt]? || tgt.to_s(16))) \
+            << " (target resumable at entry: " << SLOT[i].resumable_at_entry << ")\n"
+        end
+        circular = workers == 2 && SLOT[0].target == SLOT[1].current && SLOT[1].target == SLOT[0].current && SLOT[0].target != 0
+        io << "  circular wait: " << circular << "\n"
       end
       LibC.write(2, msg.to_unsafe, msg.bytesize)
       LibC._exit(3)
