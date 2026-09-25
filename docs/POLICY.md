@@ -9,6 +9,9 @@ Product rules for **Linux** (x86_64 + aarch64) and **macOS** (arm64 + x86_64), C
 | Chunk / large `mmap` fails | One emergency `collect` (if idle), retry `mmap` once |
 | Retry fails | `Gcry::OutOfMemoryError` |
 | Bootstrap / mark-stack `mmap` fails | `OutOfMemoryError` (no emergency collect) |
+| Reporting it | The error, its message, its backtrace and Crystal's unwind record are allocated from a 4 MiB reserve mapped at boot and untouched until then (no RSS), so the report does not depend on what the heap has left. Several threads can report at once. `GCRY_OOM_RESERVE_KB` sizes it, `=0` turns it off; bitmap allocator without a nursery (the default) |
+| The report itself cannot be allocated | A prebuilt `OutOfMemoryError` (message says "nested raise"; backtrace is gcry's boot stack) |
+| Not even that can be raised | `gcry: out of memory while reporting out of memory; aborting` on stderr, then `abort()` — never a stack overflow |
 
 No soft heap cap, no null-return malloc. Crystal expects raise / abort.
 

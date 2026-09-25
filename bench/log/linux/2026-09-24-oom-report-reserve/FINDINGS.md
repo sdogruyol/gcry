@@ -92,3 +92,20 @@ Probe `p2.cr` on the reserve build, no knob: 20/20 clean.
 - Raw `Thread.new` crashes on out-of-memory under every gcry version since
   0.26.0 and under Boehm alike, without any limit set; `Thread` is `:nodoc:`
   in Crystal 1.21. Only the supported execution contexts are tested.
+
+## Throughput cost (added 2026-09-25)
+
+The reserve adds two checks to the locked allocation path (`oom_test_refuse?`,
+`oom_reserve_active?`, one thread-local read) and nothing to the hit path.
+Kemal `/json`, release builds, 12 paired trials of 10 s at 50 connections,
+order alternating (`ab.sh` here):
+
+| a | b | b / a | ~95% CI | t |
+|---|---|---|---|---|
+| 0.27.1 | HEAD `4a7c16a` | 1.0279 | [1.0171, 1.0388] | 5.66 |
+| 0.27.1 | byte-identical copy (null) | 1.0143 | [0.9978, 1.0308] | 1.91 |
+
+The null says this harness leans ~1.4% toward its second slot on this host,
+so half of HEAD's lead is that. Read as: **no regression**, and no speedup
+claimed. Peak RSS ratio 1.003 (the reserve is untouched, no RSS). Raw rows:
+`ab-0271-vs-head.jsonl`, `ab-null.jsonl`.
