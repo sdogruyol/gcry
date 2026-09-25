@@ -387,10 +387,15 @@ module Gcry
       chunk = @chunks
       while chunk
         nxt = chunk.value.next
-        Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+        # Reserve chunks go with their region below, not one by one: on
+        # Windows releasing the first of them (the region's base) releases
+        # the whole region, and the next `nxt` read faulted — Windows CI run
+        # `36109015597`, `spec/oom_reserve_spec.cr`.
+        unless ChunkHeader.reserve?(chunk)
+          Gcry::OS.munmap(chunk.as(Void*), LibC::SizeT.new(chunk.value.mapped_bytes))
+        end
         chunk = nxt
       end
-      # Reserve chunks went with the list; the rest of the region goes here.
       unless @oom_reserve_size == 0
         Gcry::OS.munmap(Pointer(Void).new(@oom_reserve_base), LibC::SizeT.new(@oom_reserve_size))
         @oom_reserve_base = 0_u64
