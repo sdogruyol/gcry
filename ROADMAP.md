@@ -464,7 +464,10 @@ kept finding the rest.
       there is wider than the lag window, not narrower.
       `bench/log/linux/2026-09-13-fiber-lag-cost/FINDINGS.md`
       `bench/log/linux/2026-09-14-parked-fiber-lag-ceiling/FINDINGS.md`
-- [ ] **Audit root coverage for the EC Parallel scheduler.** The 2026-08-10 soak
+- [x] **Audit root coverage for the EC Parallel scheduler — closed 2026-09-26.**
+      The one reason it stayed unchecked was that none of the audit's findings
+      explained the 2026-08-10 soak SEGV; that crash has not recurred in 37
+      soak arms (~185 h) and is closed on absence. The entry as it stood: The 2026-08-10 soak
       SEGV is a slot freed and reused while `Parallel::Scheduler` still pointed at
       it (open below), i.e. a missed root — and its only named candidate is now
       excluded by rate, so nothing explains it.
@@ -565,7 +568,10 @@ kept finding the rest.
       single-mutator path.
       `bench/log/linux/2026-09-13-soak-8h/FINDINGS.md`
 
-- [ ] **Make the soak reproducible enough to bisect.** One 5 h arm a week cannot
+- [x] **Make the soak reproducible enough to bisect — closed 2026-09-26.** Both
+      handles are built and in CI; the crash they were built to chase has not
+      recurred in 37 arms (~185 soak-hours), so there is nothing left to bisect
+      (see "What crashed the 2026-08-10 soak"). The entry as it stood: One 5 h arm a week cannot
       chase a crash that took 1h24m to arrive: at that cadence a candidate fix is
       indistinguishable from a quiet run inside a release cycle. Two handles were
       named; **the second is now built.** `GCRY_EC_QUEUE_AUDIT=1` walks the ring
@@ -3870,7 +3876,17 @@ Target: Match Boehm on the workloads Crystal users actually run.
       overwrote a pointer in `Parallel::Scheduler`'s queue is open.
       `bench/log/linux/2026-08-13-soak-segv/FINDINGS.md`,
       `bench/log/linux/2026-08-11-sysmon-runs-during-stw/FINDINGS.md`
-- [ ] **What crashed the 2026-08-10 soak.** *(2026-08-15: three readings closed
+- [x] **What crashed the 2026-08-10 soak — closed 2026-09-26 on absence: 37
+      soak arms, ~185 soak-hours, none crashed.** The "next" below — reproduce
+      with the 5 h CI arm — has been done 37 times: 34 arms 2026-08-15 →
+      2026-09-25 and the three on `82eb9b3` (run `36202533259`), every one
+      PASSED; the only non-passes since are three arms cancelled together on
+      2026-08-25 as orphaned processes, not crashes. The original fault came
+      1 h 24 m in; even at one crash per 24 h, 185 clean hours would have
+      probability ~0.0005. Attributed to the missed-root fixes of 2026-08-11 →
+      2026-08-20 as a set (queue pins, EC pins, the birth root), none of them
+      individually proven to be it. `bench/log/linux/2026-09-26-aarch64-getattr-census/FINDINGS.md` (soak census)
+      The entry as it stood: *(2026-08-15: three readings closed
       by audit, one survives —
       `bench/log/linux/2026-08-15-segv-write-path-audit/FINDINGS.md`.* gcry writes
       outside its own chunks in exactly two places, and **neither was active**:

@@ -51,3 +51,21 @@ not prove the mechanism the birth root was built on (the ROADMAP's own
 "still an inference"), and it says nothing about the theoretical windows the
 unheard-thread item keeps open — a dying thread between `Thread.threads.delete`
 and `detach`, the interval inside `pthread_create`. Those stay open there.
+
+## The same census for the 2026-08-10 soak crash
+
+The CI soak's history since that 24 h arm crashed (1 h 24 m in, in
+`Parallel::Scheduler#quick_dequeue?`): every scheduled or dispatched CI run
+since 2026-08-10 (49), every completed `soak` job in them.
+
+| outcome | arms |
+|---|---:|
+| PASSED, 2026-08-15 → 2026-09-25 | 34 |
+| PASSED, 2026-09-26, on `82eb9b3` (run `36202533259`) | 3 |
+| cancelled together on 2026-08-25 (orphaned-process termination, no crash in the log) | 3 |
+| failed | 0 |
+
+37 × 5 h ≈ 185 soak-hours without a recurrence. At one crash per 24 h —
+a far lower rate than the one arm that showed it — that silence has
+probability ~0.0005. It closes the crash on absence; which of the missed-root
+fixes of 2026-08-11 → 2026-08-20 removed it is not established.
