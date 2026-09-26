@@ -96,7 +96,9 @@ end
   get "/gc-extra" do |env|
     env.response.content_type = "application/json"
     {
-      page_query_errors: {% if flag?(:darwin) %}Gcry::Platform.page_query_errors{% else %}0_u64{% end %},
+      page_query_errors:  {% if flag?(:darwin) %}Gcry::Platform.page_query_errors{% else %}0_u64{% end %},
+      resident_hits:      {% if flag?(:darwin) %}Gcry::Platform.resident_hits{% else %}0_u64{% end %},
+      resident_fallbacks: {% if flag?(:darwin) %}Gcry::Platform.resident_fallbacks{% else %}0_u64{% end %},
       host_page_size:    Gcry::Platform.host_page_size,
     }.to_json
   end

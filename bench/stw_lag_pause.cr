@@ -59,6 +59,14 @@ require "../src/gcry"
 HEAP = Gcry.default_heap.not_nil!
 
 disabled = ARGV.includes?("--disabled")
+# `--resident-off` (Darwin): the red arm of the resident-count check below, run
+# with `GCRY_DARWIN_RESIDENT_LOW_WATER=0`; it requires the path to have run 0
+# times. Refused without the knob, as `--disabled` is without its own.
+resident_off = ARGV.includes?("--resident-off")
+if resident_off && ENV["GCRY_DARWIN_RESIDENT_LOW_WATER"]? != "0"
+  STDERR.puts "--resident-off needs GCRY_DARWIN_RESIDENT_LOW_WATER=0"
+  exit 64
+end
 if disabled && HEAP.stack_low_water_scan
   STDERR.puts "--disabled needs GCRY_STACK_LOW_WATER=0: without the skip this arm would require the default path not to skip while the skip is still running."
   exit 64
@@ -441,6 +449,33 @@ end
     end
   else
     puts "  NOTE no SYSMON thread with a main fiber here — nothing to check"
+  end
+{% end %}
+
+# ── Darwin: the resident-count low-water path engages ─────────────────────
+# The lag-0 configs ask for a parked fiber's low-water mark over its whole
+# stack, which is where Darwin proves the untouched part from the VM object's
+# resident count instead of asking about every page
+# (`src/gcry/platform/darwin_low_water.cr`). The rounds above must have taken
+# that path, or its speed-up is a claim; with the knob off they must not have.
+{% if flag?(:darwin) %}
+  unless disabled
+    puts ""
+    puts "=== Darwin resident-count low-water ==="
+    hits = Gcry::Platform.resident_hits
+    falls = Gcry::Platform.resident_fallbacks
+    puts "  answered #{hits} ranges, fell back on #{falls}"
+    if resident_off
+      if hits > 0
+        failures << "red arm: GCRY_DARWIN_RESIDENT_LOW_WATER=0 and the resident path still answered #{hits} ranges"
+      else
+        puts "  PASS red arm: knob off, the path answered nothing"
+      end
+    elsif hits == 0
+      failures << "the resident-count path answered no range across the lag-0 configs (fell back #{falls} times)"
+    else
+      puts "  PASS the lag-0 configs took the resident-count path"
+    end
   end
 {% end %}
 

@@ -81,5 +81,41 @@ end
       Gcry::Platform.stack_low_water(4096_u64, 4096_u64).should eq(4096_u64)
       Gcry::Platform.stack_low_water(8192_u64, 4096_u64).should eq(8192_u64)
     end
+
+    {% if flag?(:darwin) %}
+      # Past 64 pages Darwin answers from the VM object's resident count, and
+      # falls back to the per-page query whenever it cannot vouch for the
+      # answer. Either way the answer must be the same as the per-page one, so
+      # pin that on a stack-shaped region — 8 MiB, the first 4096 bytes
+      # protected, as Crystal allocates a fiber stack — and require the
+      # resident path to have answered at least once, or this pins nothing.
+      it "answers a whole stack from the resident count, and the same as the per-page query" do
+        page = low_water_page
+        len = 8 * 1024 * 1024
+        map = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(len),
+          Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
+          Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, LibC::OffT.new(0))
+        LibC.mprotect(map, LibC::SizeT.new(4096), LibC::PROT_NONE)
+        low = map.address + 4096
+        high = map.address + len
+        begin
+          hits = Gcry::Platform.resident_hits
+          Gcry::Platform.stack_low_water(low, high).should eq(high)
+
+          3.times { |k| Pointer(UInt8).new(high - (k + 1).to_u64 * page).value = 0x5a_u8 }
+          Gcry::Platform.stack_low_water(low, high).should eq(high - 3 * page)
+
+          # A written page far below an untouched gap: the count must send the
+          # walk all the way down to it rather than stop under the top run.
+          deep = map.address + 6 * page
+          Pointer(UInt8).new(deep).value = 0x5a_u8
+          Gcry::Platform.stack_low_water(low, high).should eq(deep)
+
+          Gcry::Platform.resident_hits.should be > hits
+        ensure
+          Gcry::OS.munmap(map, LibC::SizeT.new(len))
+        end
+      end
+    {% end %}
   end
 {% end %}

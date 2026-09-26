@@ -798,6 +798,13 @@ module GC
     if env_flag_zero?("GCRY_STACK_LOW_WATER")
       heap.stack_low_water_scan = false
     end
+    # Darwin: prove a large range untouched from the VM object's resident count
+    # instead of asking about every page (`platform/darwin_low_water.cr`).
+    # `0` restores the per-page query everywhere — A/B, and the red arm of
+    # `stw_lag_pause --resident-off`.
+    {% if flag?(:darwin) %}
+      Gcry::Platform.resident_low_water = false if env_flag_zero?("GCRY_DARWIN_RESIDENT_LOW_WATER")
+    {% end %}
     # Multi-mutator pthread map when SP is off the OS stack (on a pool fiber).
     # Default 256 KiB from stack high; 0 = full pthread mapping.
     if plag = env_u64("GCRY_STW_PTHREAD_LAG")

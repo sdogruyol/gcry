@@ -3587,10 +3587,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       EC4. All of macOS's gap is roots (2.4 → 19.3 ms), with no query refused.
       `mach_vm_page_range_query` costs ~275 ns per page, so finding a parked
       fiber's low-water mark from its guard (~512 pages of 16 KiB) is 141 µs per
-      fiber per collection. Candidate: prove the untouched region with the VM
-      object's resident count (`VM_REGION_TOP_INFO`), guarded by the task
-      having nothing compressed, and fall back to the full query otherwise.
-      Not yet measured whether that count is O(1) or per-object here.
+      fiber per collection. **Implemented the same day**: prove the untouched
+      region with the VM object's resident count (`VM_REGION_TOP_INFO`, 1.2 µs,
+      exact on the runner), guarded by the task having nothing compressed
+      before and after. It falls back to the full query otherwise. Each
+      Crystal fiber stack had an object of its own, and the fast answer
+      matched the full query page for page, gap case included. 181 → 18 µs
+      per stack. Open: the re-measured pause.
       `bench/log/linux/2026-09-26-sound-matrix/FINDINGS.md`
 - [ ] **One extra thread costs an EC1 program 2.7× pause and +63% RSS.**
       gcry calls a program multi-mutator when Crystal's list has more than two

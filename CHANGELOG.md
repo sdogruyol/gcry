@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **macOS: a parked fiber's low-water mark from the VM object's resident count.**
+  `mach_vm_page_range_query` is charged ~275 ns per page it describes, so
+  proving a parked fiber's untouched 8 MiB took ~141 µs, at every collection,
+  for every parked fiber. `GCRY_SOUND=1` asks that of all of them: 5.8× the
+  tuned pause at Kemal EC4 on the macOS runner. A range over 64 pages now
+  reads the object's resident page count (`VM_REGION_TOP_INFO`) and walks
+  down from the top in 16-page queries until it has found that many touched
+  pages. It is used only when nothing in the task is compressed (read before
+  and after), the object is private, and every resident page is accounted
+  for; otherwise it takes the full query as before. Same answer, verified
+  page for page against the full query on Crystal-shaped stacks, including a
+  written page below an untouched gap. Cost per 8 MiB stack 181 → 18 µs.
+  `GCRY_DARWIN_RESIDENT_LOW_WATER=0` turns it off.
+  (`bench/log/linux/2026-09-26-sound-matrix/`)
+
 ## [0.28.0] - 2026-09-26
 
 ### Added
