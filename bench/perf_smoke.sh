@@ -97,8 +97,17 @@ instrumented_json_run() {
   rps="$(wrk -c "$CONNECTIONS" -d "${DURATION}s" "${BASE}/json" | parse_rps)"
   curl -sf "$BASE/gc-collect" >/dev/null
   sleep 0.3
-  local rss
+  local rss rss_1s rss_3s
   rss="$(rss_kib "$pid")"
+  # Two later samples, reported and not gated. Darwin's post-GC RSS × Boehm
+  # sits at 1.07–1.21 and twice in ~40 runs jumped to 1.35–1.36 (~+4 MB),
+  # which fails the baseline gate. Whether such a reading is memory released
+  # late or a heap that really was bigger decides what the gate should sample;
+  # these say which, without changing what is gated.
+  sleep 1
+  rss_1s="$(rss_kib "$pid")"
+  sleep 2
+  rss_3s="$(rss_kib "$pid")"
   local pause_p50_ms="None"
   if [ "$label" = "gcry" ]; then
     pause_p50_ms="$(curl -sf "$BASE/gc-stats" | python3 -c "
@@ -117,6 +126,8 @@ print(json.dumps({
     'label': '$label',
     'rps': float('$rps'),
     'rss_kib': int('$rss'),
+    'rss_kib_1s': int('$rss_1s'),
+    'rss_kib_3s': int('$rss_3s'),
     'pause_p50_ms': $pause_p50_ms,
 }))
 "
@@ -240,11 +251,11 @@ echo "  /json  gcry = ${PCT_JSON}% of Boehm  (gate >= ${MIN_PCT}%)"
 echo ""
 echo "=== Instrumented /json (post-GC RSS + pause) ==="
 BOEHM_INST="$(instrumented_json_run "$BIN/kemal-boehm-smoke" boehm)"
-echo "$BOEHM_INST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  boehm: rps={d[\"rps\"]} rss_kib={d[\"rss_kib\"]}')"
+echo "$BOEHM_INST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  boehm: rps={d[\"rps\"]} rss_kib={d[\"rss_kib\"]} (+1 s {d[\"rss_kib_1s\"]}, +3 s {d[\"rss_kib_3s\"]})')"
 echo "$BOEHM_INST" > "$RUN_DIR/boehm-json-instrumented.json"
 
 GCRY_INST="$(instrumented_json_run "$BIN/kemal-gcry-smoke" gcry)"
-echo "$GCRY_INST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  gcry:  rps={d[\"rps\"]} rss_kib={d[\"rss_kib\"]} pause_p50_ms={d[\"pause_p50_ms\"]}')"
+echo "$GCRY_INST" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  gcry:  rps={d[\"rps\"]} rss_kib={d[\"rss_kib\"]} (+1 s {d[\"rss_kib_1s\"]}, +3 s {d[\"rss_kib_3s\"]}) pause_p50_ms={d[\"pause_p50_ms\"]}')"
 echo "$GCRY_INST" > "$RUN_DIR/gcry-json-instrumented.json"
 
 RSS_X="$(python3 -c "
