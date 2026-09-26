@@ -113,6 +113,25 @@ FOLL_FORCE, which goes straight through the next stack's `PROT_NONE` guard
 passes: 0 bands; after the reads: 102. The census uses exact unbuffered
 `pread`s now and reads 0.
 
+## Throughput
+
+Measured after the overnight campaign had stopped, on the idle host
+(`throughput_ab.py`, raw in `throughput-ab.json`): Kemal `/json`, EC4,
+`wrk -t4 -c100 -d10s` after a 2 s warm-up, 10 rounds, order rotated.
+
+| arm | median req/s | % of Boehm EC4 |
+|---|---:|---:|
+| fix | 249 863 | 244.5% |
+| master (0.27.2's collector) | 236 440 | 231.3% |
+| Boehm | 102 208 | 100% |
+
+Paired per round, fix / master: **median 1.062**, range 1.000–1.099, 9 of 10
+above 1. **Null control** right after, same script with a byte-identical copy
+of master in the fix's slot (`throughput-null.json`): median **0.980**, range
+0.939–1.006 — the slot is biased slightly *against* its occupant, so +6.2% is
+not inflated by it. That is what the pause predicts: stopped time fell from
+~7.5% of wall-clock to ~2.8%.
+
 ## What is left of the root phase
 
 1.13 ms of roots at EC4 after the fix, for ~110 parked fibers of ~20 KiB touched
@@ -123,7 +142,6 @@ probes would buy nothing; the next lever, if any, is in candidate resolution.
 
 ## What this does not say
 
-- **Throughput** is not measured here; the pause is per collection.
 - **EC1** is untouched: the running-fiber branch only returns early under
   multi-thread STW, and Kemal at EC1 runs two threads.
 - The other side of step 2 — that pagemap cannot tell a zero-page mapping from

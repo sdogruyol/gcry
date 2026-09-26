@@ -3971,8 +3971,8 @@ Target: Match Boehm on the workloads Crystal users actually run.
       skip on it permanently (zero page reads show present in pagemap).
       **2026-09-26, this host, both fixed:** tuned 1.78 ms, sound 2.15 ms
       (+21%), against 4.15 and 6.60 on master; roots 1132 against 1494 µs.
-      What is left of sound's residual is ~360 µs of root work. Throughput not
-      re-measured. `bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`
+      What is left of sound's residual is ~360 µs of root work. Default-mode
+      EC4 throughput +6.2% (null −2.0%). `bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`
       **Closed:** the fat-app large-heap re-cut (above — the 14.5× was pre-fix
       and the sign has since reversed).
 - [x] **Low-water skip on Darwin.** (Implemented 2026-09-25: `src/gcry/platform/darwin_low_water.cr`.) Linux-only until then, so macOS still faults the

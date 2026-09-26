@@ -68,7 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Kemal EC4 pause 4.15 → 1.78 ms (`GCRY_SOUND=1`: 6.60 → 2.15 ms).** Under
+- **Kemal EC4 pause 4.15 → 1.78 ms (`GCRY_SOUND=1`: 6.60 → 2.15 ms), throughput
+  +6.2%** (paired, 10 rounds; an identical-binary null read −2.0%). Under
   multi-thread STW a running fiber with no suspend SP is scanned whole, and one
   fiber takes that path at every collection: SYSMON's main fiber, which is
   never signalled. The scan started at the guard and read all 8 MiB of the

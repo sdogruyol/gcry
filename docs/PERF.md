@@ -283,8 +283,8 @@ collection; the read mapped the zero page under it, which pagemap reports
 present, so the skip was lost on that stack for good. With the branch taking
 the skip too (QEMU x86_64, 12 vCPU, 4 reps against master in one interleaved
 run): tuned **4.15 → 1.78 ms**, sound **6.60 → 2.15 ms**, RSS flat
-(`bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`). Throughput not
-re-measured.
+(`bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md`). Throughput
++6.2% at EC4 (paired, 10 rounds; identical-binary null −2.0%).
 
 `lag = 0` stays the wrong default: the skip makes the *bounded* scan cheap, not
 the complete scan affordable. Kemal EC1 is untouched by construction —
