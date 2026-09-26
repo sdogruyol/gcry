@@ -498,10 +498,15 @@ end
       (d & (DarwinPageQuery::PRESENT | DarwinPageQuery::PAGED_OUT)) != 0
     end
 
+    # `low` is page-aligned down first, as the collector's own
+    # `stack_low_water` does: Crystal protects 4096 bytes and the kernel page
+    # is 16 KiB, so `base + 4096` is mid-page, and the first version of this
+    # arm spun on a zero-page tail and hung the macOS job (run 36248994863).
     def self.full(low : UInt64, high : UInt64) : UInt64
-      addr = low
+      addr = low & ~(PAGE - 1)
       while addr < high
         span = {((high - addr) // PAGE).to_i, 1024}.min
+        break if span <= 0
         d = range_query(addr, span).not_nil!
         span.times { |k| return addr + k.to_u64 * PAGE if touched?(d[k]) }
         addr += span.to_u64 * PAGE
@@ -515,12 +520,13 @@ end
       # SM_PRIVATE (2), or SM_PRIVATE_ALIASED (6): one object under two entries
       # of this map, which is what the guard's `mprotect` split leaves.
       return nil unless t.kr == 0 && t.start + t.size >= high && (t.mode == 2 || t.mode == 6)
-      lo = {low, t.start}.max
+      lo = {low & ~(PAGE - 1), t.start}.max
       found = 0_u64
       lowest = high
       addr = high
       while addr > lo && found < t.resident
         span = {((addr - lo) // PAGE).to_i, 16}.min
+        break if span <= 0
         from = addr - span.to_u64 * PAGE
         d = range_query(from, span).not_nil!
         (span - 1).downto(0) do |k|
@@ -533,7 +539,7 @@ end
       end
       return nil unless found == t.resident && compressed == 0
       # Below this entry (the guard's own entry, if split): asked in full.
-      below = lo > low ? full(low, lo) : lo
+      below = lo > (low & ~(PAGE - 1)) ? full(low, lo) : lo
       below < lo ? below : lowest
     end
   end
