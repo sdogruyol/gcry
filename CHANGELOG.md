@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-09-26
+
 ### Fixed
 
 - **musl: `-Dgc_none` builds link again** (kojix2, #43). musl 1.2.4 dropped
@@ -5545,7 +5547,8 @@ now measured (not estimated).
 - Concurrent mark / compacting / precise GC need compiler cooperation.
 - Optional upstream `-Dgc_gcry` backend remains out of scope (shard override is enough).
 
-[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/sdogruyol/gcry/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/sdogruyol/gcry/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/sdogruyol/gcry/compare/v0.27.2...v0.28.0
 [0.27.2]: https://github.com/sdogruyol/gcry/compare/v0.27.1...v0.27.2
 [0.27.1]: https://github.com/sdogruyol/gcry/compare/v0.27.0...v0.27.1
