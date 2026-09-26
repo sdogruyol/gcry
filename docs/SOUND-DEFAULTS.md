@@ -884,6 +884,16 @@ fix that reversal pointed at — has now reversed it back. Current standing:
 | Kemal EC1 | 398 µs | 398 µs (+0.1%) |
 | Kemal **EC4** | **3.60 ms** | 16.39 ms (+356%) |
 | Kemal **EC4**, 2026-09-26, another host, SYSMON guard-scan fix | **1.78 ms** | 2.15 ms (+21%) |
+| Kemal **EC4**, 2026-09-26, `ubuntu-latest` CI, paired ×10 | **3.07 ms** | 4.55 ms (+46%), req/s −3% (in noise) |
+| Kemal EC1 + one extra thread, same | **2.56 ms** | 3.87 ms (+51%), req/s −2% (in noise) |
+| Kemal **EC4**, 2026-09-26, `macos-latest` CI, paired ×10 | **3.08 ms** | 17.47 ms (**5.8×**), req/s −13%, RSS +37% |
+
+The 2026-09-26 rows are `bench/sound_matrix.py`, dispatch input
+`sound_matrix_rounds` (`bench/log/linux/2026-09-26-sound-matrix/`). On Linux
+the complete scan now costs about half again the pause and nothing
+measurable in throughput or RSS where the scan is large. On macOS it does
+not: `mach_vm_page_range_query` is charged ~275 ns per page, and proving a
+parked fiber's untouched 8 MiB costs 141 µs per fiber per collection.
 | fat app, ~72 MiB heap | **10.7 ms** | 18.2 ms (+70%) |
 | fat app, ~46 MiB heap | 2.9 ms | 3.0 ms (+6.5%) |
 

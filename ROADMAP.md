@@ -3580,6 +3580,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
       skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
+- [ ] **The complete root scan on macOS: 5.8× the pause, from the page query.**
+      `GCRY_SOUND=1` on the CI runners, paired ×10 (`bench/sound_matrix.py`):
+      Linux +46–51% pause and throughput within noise where the scan is large
+      (EC4, EC1 + a thread); macOS 5.8–6.5× pause, −13–28% req/s, +37% RSS at
+      EC4. All of macOS's gap is roots (2.4 → 19.3 ms), with no query refused.
+      `mach_vm_page_range_query` costs ~275 ns per page, so finding a parked
+      fiber's low-water mark from its guard (~512 pages of 16 KiB) is 141 µs per
+      fiber per collection. Candidate: prove the untouched region with the VM
+      object's resident count (`VM_REGION_TOP_INFO`), guarded by the task
+      having nothing compressed, and fall back to the full query otherwise.
+      Not yet measured whether that count is O(1) or per-object here.
+      `bench/log/linux/2026-09-26-sound-matrix/FINDINGS.md`
 - [ ] **One extra thread costs an EC1 program 2.7× pause and +63% RSS.**
       gcry calls a program multi-mutator when Crystal's list has more than two
       threads, so one thread of its own (an `Isolated` context, a driver's
