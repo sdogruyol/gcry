@@ -29,8 +29,11 @@
 require "c/sys/uio"
 
 lib LibC
-  # glibc ≥ 2.30 exports this; musl uses the syscall fallback below.
-  fun getdents64(fd : Int, dirp : Void*, count : UInt) : Int
+  {% if flag?(:musl) %}
+    fun getdents64 = getdents(fd : Int, dirp : Void*, count : UInt) : Int
+  {% else %}
+    fun getdents64(fd : Int, dirp : Void*, count : UInt) : Int
+  {% end %}
   fun gettid : Int
   fun pthread_setname_np(thread : PthreadT, name : Char*) : Int
 
@@ -270,7 +273,7 @@ module Gcry
         dirents = uninitialized UInt8[4096]
         comm = uninitialized UInt8[64]
         loop do
-          n = getdents64(fd, dirents.to_unsafe.as(Void*), 4096_u32)
+          n = LibC.getdents64(fd, dirents.to_unsafe.as(Void*), 4096_u32)
           break if n <= 0
 
           off = 0
@@ -292,15 +295,6 @@ module Gcry
         LibC.close(fd)
       end
       true
-    end
-
-    private def self.getdents64(fd : Int32, dirp : Void*, count : UInt32) : Int32
-      {% if flag?(:musl) %}
-        syscall = {% if flag?(:x86_64) %} 217_i64 {% else %} 61_i64 {% end %}
-        LibC.syscall(syscall, fd, dirp, count).to_i32
-      {% else %}
-        LibC.getdents64(fd, dirp, count)
-      {% end %}
     end
 
     # `/proc/self/task/<tid>/comm` without its trailing newline, or 0 bytes when
