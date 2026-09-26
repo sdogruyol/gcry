@@ -72,11 +72,22 @@ that effect for parked fibers and now also runs with this path fixed.
 ## Fix
 
 The running-fiber branch starts at the low-water mark, like the lag-0 path
-(`low_water_or_guard`, shared by both). Sound by the same argument as every
-other skip site: a page never faulted is zero, so `[low-water, bottom)` holds
-every word `[guard, bottom)` does — including SYSMON's live frames, which sit
-in `MonitorGate` for the whole stop. A probe failure still falls back to
-`guard`.
+(`low_water_or_guard`, shared by both). For a stack that does not change during
+the scan it is sound by the same argument as every other skip site: a page
+never faulted is zero, so `[low-water, bottom)` holds every word
+`[guard, bottom)` does. A probe failure still falls back to `guard`.
+
+**SYSMON's stack can change during the scan**, and that is the one place the
+two differ. `MonitorGate` keeps SYSMON out of its *work* during a stop — stack
+transfers, `StackPool#collect` — and waits for work already in flight, but it
+does not park the thread: SYSMON can still run its loop and `sleep`. Frames
+that exist when the probe runs are on touched pages and are scanned. A frame
+pushed *during* the stop, below every page SYSMON had ever touched, is
+skipped, where the old ascending scan from the guard could have read it if it
+got there after the push. That needs SYSMON to reach a new depth record inside
+a stop, after warm-up, in code outside the gate — and the gated work is what
+touches the heap. Stated as a difference, not assumed away; no observed or
+constructed case has it.
 
 ## Gate
 
