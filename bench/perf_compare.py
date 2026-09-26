@@ -38,6 +38,11 @@ METRICS = {
     "pct_json": ("/json thr, % of Boehm", True),
     "pct_root": ("/ thr, % of Boehm", True),
     "rss_x": ("post-GC RSS, x Boehm", False),
+    # gcry's own post-GC RSS, in KiB. Not portable across runner classes (a
+    # ratio is), but within one class it has no denominator to be noisy: on the
+    # macOS runner `rss_x` went red twice on runs where gcry's RSS was normal
+    # and Boehm's had dropped to its low tail (11.0 and 12.0 MB against 12.7).
+    "gcry_rss_kib": ("post-GC RSS, gcry KiB", False),
     "pause_p50_ms": ("pause p50, ms", False),
 }
 
@@ -286,7 +291,7 @@ def record(summaries, runner, commit, recorded, warn_only=()):
     unknown = set(warn_only) - set(METRICS)
     if unknown:
         raise SystemExit("--warn-only names no metric: " + ", ".join(sorted(unknown)))
-    floors = {"pct_json": 2.0, "pct_root": 2.0, "rss_x": 0.05, "pause_p50_ms": 0.2}
+    floors = {"pct_json": 2.0, "pct_root": 2.0, "rss_x": 0.05, "gcry_rss_kib": 256.0, "pause_p50_ms": 0.2}
     metrics = {}
     for name in METRICS:
         values = [float(s[name]) for s in summaries if name in s]

@@ -43,7 +43,9 @@
       ],
       "sd": 0.0476,
       "tolerance": 0.1571,
-      "sd_out": 3.3
+      "sd_out": 3.3,
+      "warn_only": true,
+      "note": "warn-only since 2026-09-26: its reds on this runner came from Boehm's RSS (12.7 MB in 43 of 56 runs, 11.0-12.6 in the rest), not gcry's; gcry_rss_kib gates instead"
     },
     "pause_p50_ms": {
       "value": 0.477,
@@ -55,6 +57,18 @@
       "sd": 0.0388,
       "tolerance": 0.2,
       "sd_out": 5.16
+    },
+    "gcry_rss_kib": {
+      "value": 15024.0,
+      "runs": 56,
+      "observed_range": [
+        13888.0,
+        15680.0
+      ],
+      "sd": 442.075,
+      "tolerance": 1458.8475,
+      "sd_out": 3.3,
+      "note": "added 2026-09-26 from the job logs of the last 56 macOS perf-smoke runs (same protocol), not by --record: the field is new to the summary"
     }
   }
 }

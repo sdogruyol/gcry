@@ -283,6 +283,12 @@ summary = {
     'min_pct': float('$MIN_PCT'),
     'rss_x': float('$RSS_X'),
     'max_rss_x': float('$MAX_RSS_X'),
+    # The ratio's two halves. On the macOS runner the ratio's reds came from
+    # the denominator: Boehm sits at 12.7 MB in 43 of 56 runs and drops to
+    # 11.0-12.6 in the rest, while gcry's own post-GC RSS stayed flat
+    # (bench/baseline/perf_smoke_macos.json, 'gcry_rss_kib').
+    'gcry_rss_kib': int(json.load(open('$RUN_DIR/gcry-json-instrumented.json'))['rss_kib']),
+    'boehm_rss_kib': int(json.load(open('$RUN_DIR/boehm-json-instrumented.json'))['rss_kib']),
     'pause_p50_ms': float('$PAUSE_P50_MS'),
     'max_pause_p50_ms': float('$MAX_PAUSE_P50_MS'),
     'timestamp': '$(date -u +%Y-%m-%dT%H:%M:%SZ)',

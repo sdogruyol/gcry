@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The macOS perf gate gates gcry's own post-GC RSS, not the ratio to
+  Boehm.** `rss_x` went red twice on this runner, and both times the moving
+  half was Boehm's. It sits at 12.7 MB in 43 of the last 56 runs and dropped
+  to 11.0 and 12.0 MB on the red ones, while gcry's RSS was normal (15.2 MB;
+  median 15.0, flat over the 56). The RSS samples 1 s and 3 s later, added to
+  tell late release from a bigger heap, were identical. `gcry_rss_kib` is now
+  in the summary and gated on macOS (15 024 ± 1 459 KiB, 3.3 sd over the 56
+  runs). `rss_x` there is reported and warns, and still gates on Linux.
+
 - **macOS: a parked fiber's low-water mark from the VM object's resident count.**
   `mach_vm_page_range_query` is charged ~275 ns per page it describes, so
   proving a parked fiber's untouched 8 MiB took ~141 µs, at every collection,
