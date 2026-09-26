@@ -19,6 +19,9 @@ within a round, so host drift cancels.
   bench/sound_matrix.py --ec1 bin/kemal-gcry --mt bin/kemal-gcry-mt --rounds 8 \\
       --json out.json
 
+`--profile NAME:KEY=VAL[,...]` compares another configuration against tuned
+the same way (`dormant:GCRY_PARALLEL_DORMANT=1`); the default is sound.
+
 Linux and macOS (RSS from /proc, else `ps`).
 """
 import argparse, json, os, re, statistics, subprocess, sys, time, urllib.request
@@ -30,6 +33,9 @@ ap.add_argument("--rounds", type=int, default=8)
 ap.add_argument("--port", default="3090")
 ap.add_argument("--wrk", default="wrk")
 ap.add_argument("--json", help="write the raw samples here")
+ap.add_argument("--profile", default="sound:GCRY_SOUND=1",
+                help="the arm compared against tuned, NAME:KEY=VAL[,KEY=VAL] "
+                     "(default sound:GCRY_SOUND=1; e.g. dormant:GCRY_PARALLEL_DORMANT=1)")
 a = ap.parse_args()
 
 SHAPES = {
@@ -37,7 +43,11 @@ SHAPES = {
     "ec1+thread": (a.ec1, {"EXTRA_THREADS": "1"}),
     "ec4": (a.mt, {"EC_PARALLELISM": "4"}),
 }
-PROFILES = {"tuned": {}, "sound": {"GCRY_SOUND": "1"}}
+prof_name, _, prof_env = a.profile.partition(":")
+PROFILES = {"tuned": {}, prof_name: dict(kv.split("=", 1) for kv in prof_env.split(",") if kv)}
+# The collector's own `soundness` label names the root profile only; an arm is
+# checked against it as "sound" when it sets GCRY_SOUND=1 and "tuned" otherwise.
+EXPECT = {name: ("sound" if env.get("GCRY_SOUND") == "1" else "tuned") for name, env in PROFILES.items()}
 URL = f"http://127.0.0.1:{a.port}"
 
 
@@ -85,8 +95,8 @@ for r in range(a.rounds):
     for sh, pr in arms[k:] + arms[:k]:
         binary, env = SHAPES[sh]
         got = one(binary, {**env, **PROFILES[pr]})
-        if got["soundness"] != pr:
-            sys.exit(f"{sh}/{pr} booted as {got['soundness']!r}, not {pr!r}")
+        if got["soundness"] != EXPECT[pr]:
+            sys.exit(f"{sh}/{pr} booted as {got['soundness']!r}, not {EXPECT[pr]!r}")
         res[(sh, pr)].append(got)
     print(f"round {r + 1}/{a.rounds}", file=sys.stderr, flush=True)
 
@@ -99,10 +109,10 @@ for sh in SHAPES:
         print(f"| {sh} | {pr} | {med(x['rps'] for x in v):.0f} | {med(x['pause_ms'] for x in v):.3f} "
               f"| {med(x['rss_kib'] for x in v) / 1024:.1f} |")
 print()
-print("| shape | sound/tuned req/s per round: median (min–max) | pause | RSS |")
+print(f"| shape | {prof_name}/tuned req/s per round: median (min–max) | pause | RSS |")
 print("|---|---|---:|---:|")
 for sh in SHAPES:
-    t, s = res[(sh, "tuned")], res[(sh, "sound")]
+    t, s = res[(sh, "tuned")], res[(sh, prof_name)]
     thr = [y["rps"] / x["rps"] for x, y in zip(t, s)]
     pz = [y["pause_ms"] / x["pause_ms"] for x, y in zip(t, s) if x["pause_ms"] > 0]
     rs = [y["rss_kib"] / x["rss_kib"] for x, y in zip(t, s)]

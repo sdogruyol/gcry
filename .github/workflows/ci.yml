@@ -58,6 +58,10 @@ on:
         type: choice
         options: ["off", "on"]
         default: "off"
+      matrix_profile:
+        description: "The arm bench/sound_matrix.py compares against tuned, NAME:KEY=VAL[,KEY=VAL]."
+        required: false
+        default: "sound:GCRY_SOUND=1"
       sound_matrix_rounds:
         description: "Rounds of bench/sound_matrix.py on ubuntu-latest and macos-latest: tuned against GCRY_SOUND=1 at EC1, EC1 + one extra thread, and EC4 — req/s, pause p50 and post-GC RSS, paired per round (~90 s a round). 0 skips the jobs."
         required: false
@@ -2059,10 +2063,11 @@ jobs:
       - name: Tuned against GCRY_SOUND=1
         env:
           ROUNDS: ${{ inputs.sound_matrix_rounds }}
+          PROFILE: ${{ inputs.matrix_profile }}
         run: |
           mkdir -p bench/log/_run
           python3 bench/sound_matrix.py --ec1 bin/kemal-gcry --mt bin/kemal-gcry-mt \
-            --rounds "$ROUNDS" --json "bench/log/_run/sound-matrix-${{ matrix.os }}.json"
+            --rounds "$ROUNDS" --profile "$PROFILE" --json "bench/log/_run/sound-matrix-${{ matrix.os }}.json"
 
       - name: Upload the samples
         if: always()
