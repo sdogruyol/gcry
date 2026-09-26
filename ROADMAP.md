@@ -3580,6 +3580,20 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
       skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
+- [ ] **macOS page release is `MADV_FREE`, not `MADV_FREE_REUSABLE`.** Every
+      Darwin release path (dormant chunks, the all-chunk free-page walk, the
+      large freelist) goes through `Platform.release_physical_pages`, which
+      passes advice 5, `MADV_FREE`. The tree's comments and docs say
+      `MADV_FREE_REUSABLE` (7) throughout. `MADV_FREE` pages leave `ps` RSS
+      and `phys_footprint` only under memory pressure. `make parallel-dormant`
+      on the runner: 44 MB made dormant, footprint 60 → 51 MB with or without
+      it, where Linux drops to 12 MB. So macOS RSS numbers include released
+      pages, which errs against gcry. Switching to 7 needs `MADV_FREE_REUSE`
+      at every reuse site (dormant revive, a released page's next block, the
+      large freelist); without it `phys_footprint` under-counts and the
+      measurements would err in gcry's favour. `bench/darwin_page_query.cr`
+      also saw a reusable page read zero at once, so content handling needs
+      re-checking on that path. Not changed yet.
 - [x] **The complete root scan on macOS: 5.8× the pause, from the page query —
       fixed 2026-09-26: 1.25×.**
       `GCRY_SOUND=1` on the CI runners, paired ×10 (`bench/sound_matrix.py`):

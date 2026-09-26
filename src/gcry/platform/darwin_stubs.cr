@@ -88,9 +88,16 @@ module Gcry
       end
 
       # Drop physical pages while keeping the VA reserved.
-      # On Darwin uses MADV_FREE_REUSABLE (one madvise syscall) which drops RSS
-      # when the kernel reclaims; next fault zero-fills if reclaimed (content may
-      # linger until pressure — do not rely on immediate zeroing).
+      #
+      # Advice 5 is `MADV_FREE`, **not** `MADV_FREE_REUSABLE` (7), whatever the
+      # comments elsewhere in the tree say: the kernel takes the pages only
+      # under memory pressure, and until then they count in both `ps` RSS and
+      # `phys_footprint`. Measured 2026-09-26 (`make parallel-dormant` on the
+      # macOS runner): 44 MB of empty chunks made dormant and footprint 51 MB
+      # with or without it. Content may linger or read zero — do not rely on
+      # either. Moving to `MADV_FREE_REUSABLE` would drop footprint at once but
+      # needs `MADV_FREE_REUSE` wherever a released page is used again, or the
+      # footprint under-counts (ROADMAP).
       # Ranges must be host-page aligned (16 KiB on Apple Silicon).
       def self.release_physical_pages(addr : UInt64, len : UInt64) : Bool
         return false if len == 0
