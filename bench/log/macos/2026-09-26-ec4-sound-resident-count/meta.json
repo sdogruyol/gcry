@@ -1,0 +1,11 @@
+{
+  "bin": "kemal-gcry-mt",
+  "build_flags": "-Dpreview_mt -Dexecution_context",
+  "ec_parallelism": "4",
+  "reps": 4,
+  "duration_s": 20,
+  "connections": 100,
+  "cpu_model": "Apple M1 (Virtual)",
+  "ncpu": 3,
+  "l3_shared_cpu_list": "unknown"
+}

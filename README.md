@@ -241,15 +241,16 @@ session read the same thing through a noisier harness and called it
 (monotonic timing, rotated order, null arm) are what this cut runs on —
 [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
-**With more threads, sound roots cost some pause on Linux and a lot on macOS.**
-Paired per round on the CI runners (2026-09-26, 0.28.0, 10 rounds,
+**With more threads, sound roots cost about a quarter to a half of a small
+pause, and nothing else measurable.** Paired per round on the CI runners
+(2026-09-26, `6ed9fc9`, 10 rounds,
 [`bench/sound_matrix.py`](bench/sound_matrix.py)); sound ÷ tuned:
 
 | Kemal `/json` | Linux req/s | Linux pause | macOS req/s | macOS pause |
 |---------------|------------:|------------:|------------:|------------:|
-| EC1 | 1.04 | 0.99× | 1.05 | 1.00× |
-| EC1 + one thread of the app's own | 0.98 | 1.51× | 0.72 | 6.5× |
-| EC4 | 0.97 | 1.46× | 0.87 | 5.8× |
+| EC1 | 1.01 | 0.99× | 0.90 (noisy) | 1.01× |
+| EC1 + one thread of the app's own | 0.97 | 1.45× | 1.08 | 1.22× |
+| EC4 | 1.01 | 1.45× | 1.02 | 1.25× |
 
 On Linux the complete scan now costs about half again a small pause (EC4
 3.07 → 4.55 ms) and nothing measurable in throughput or RSS. In August it was
@@ -258,8 +259,9 @@ path and 0.28.0's SYSMON fix took that out: before 0.28.0 the collector read
 the monitor thread's whole 8 MiB stack every multi-threaded collection, which
 also defeated the skip on it
 ([findings](bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md)).
-macOS still pays because its page query costs ~275 ns per page, and proving a
-parked fiber's untouched 8 MiB is 141 µs per fiber per collection
+macOS paid 5.8× until the same day: its page query costs ~275 ns per page,
+and proving a parked fiber's untouched 8 MiB took 141 µs per fiber per
+collection. It now reads the VM object's resident count instead (18 µs)
 ([findings](bench/log/linux/2026-09-26-sound-matrix/FINDINGS.md)).
 The fat app (~72 MiB heap: 10.7 → 18.2 ms on the freelist cut) was not
 re-measured.

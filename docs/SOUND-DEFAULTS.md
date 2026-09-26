@@ -887,13 +887,19 @@ fix that reversal pointed at — has now reversed it back. Current standing:
 | Kemal **EC4**, 2026-09-26, `ubuntu-latest` CI, paired ×10 | **3.07 ms** | 4.55 ms (+46%), req/s −3% (in noise) |
 | Kemal EC1 + one extra thread, same | **2.56 ms** | 3.87 ms (+51%), req/s −2% (in noise) |
 | Kemal **EC4**, 2026-09-26, `macos-latest` CI, paired ×10 | **3.08 ms** | 17.47 ms (**5.8×**), req/s −13%, RSS +37% |
+| same, after the Darwin resident-count low-water (`6ed9fc9`) | **3.33 ms** | 4.06 ms (**+25%**), req/s +2% (in noise), RSS equal |
 
 The 2026-09-26 rows are `bench/sound_matrix.py`, dispatch input
 `sound_matrix_rounds` (`bench/log/linux/2026-09-26-sound-matrix/`). On Linux
 the complete scan now costs about half again the pause and nothing
 measurable in throughput or RSS where the scan is large. On macOS it does
 not: `mach_vm_page_range_query` is charged ~275 ns per page, and proving a
-parked fiber's untouched 8 MiB costs 141 µs per fiber per collection.
+parked fiber's untouched 8 MiB costs 141 µs per fiber per collection. The
+same afternoon it was proven from the VM object's resident count instead
+(181 → 18 µs per stack), and macOS came to +22–25%. **On the shapes
+measured, the condition at the end of this document is met on both
+platforms.** The fat app is the one large-scan shape not re-measured, and
+flipping the default remains a decision this document does not take.
 | fat app, ~72 MiB heap | **10.7 ms** | 18.2 ms (+70%) |
 | fat app, ~46 MiB heap | 2.9 ms | 3.0 ms (+6.5%) |
 

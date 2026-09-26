@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for; otherwise it takes the full query as before. Same answer, verified
   page for page against the full query on Crystal-shaped stacks, including a
   written page below an untouched gap. Cost per 8 MiB stack 181 → 18 µs.
+  `GCRY_SOUND=1` at Kemal EC4 on the macOS runner: pause 5.8× → 1.25× tuned,
+  RSS 1.37× → 1.00×, roots 19.3 → 3.1 ms.
   `GCRY_DARWIN_RESIDENT_LOW_WATER=0` turns it off.
   (`bench/log/linux/2026-09-26-sound-matrix/`)
 

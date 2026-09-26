@@ -3580,7 +3580,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
       skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
-- [ ] **The complete root scan on macOS: 5.8× the pause, from the page query.**
+- [x] **The complete root scan on macOS: 5.8× the pause, from the page query —
+      fixed 2026-09-26: 1.25×.**
       `GCRY_SOUND=1` on the CI runners, paired ×10 (`bench/sound_matrix.py`):
       Linux +46–51% pause and throughput within noise where the scan is large
       (EC4, EC1 + a thread); macOS 5.8–6.5× pause, −13–28% req/s, +37% RSS at
@@ -3593,7 +3594,8 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       before and after. It falls back to the full query otherwise. Each
       Crystal fiber stack had an object of its own, and the fast answer
       matched the full query page for page, gap case included. 181 → 18 µs
-      per stack. Open: the re-measured pause.
+      per stack. Re-measured: macOS sound ÷ tuned at EC4 5.79× → **1.25×**
+      pause, RSS 1.37× → 1.00×; Darwin EC4 sound roots 19.3 → 3.1 ms.
       `bench/log/linux/2026-09-26-sound-matrix/FINDINGS.md`
 - [ ] **One extra thread costs an EC1 program 2.7× pause and +63% RSS.**
       gcry calls a program multi-mutator when Crystal's list has more than two

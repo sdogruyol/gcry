@@ -1,4 +1,4 @@
-# Is the complete root scan affordable now? Linux: nearly. macOS: no.
+# Is the complete root scan affordable now? Yes, on both — after one Darwin fix
 
 **Date:** 2026-09-26 · tree `90753ba` (0.28.0 + bench changes) · CI run
 `36244503011`, dispatch input `sound_matrix_rounds=10`, jobs "sound matrix"
@@ -77,3 +77,35 @@ because a compressed page is not resident and would otherwise go uncounted.
 When either fails, fall back to the full query, which is today's behaviour.
 Unmeasured: whether that count is O(1) here, and whether a fiber stack's
 entry maps a private object of its own.
+
+## After: the resident-count low-water (`6ed9fc9`)
+
+Implemented the same afternoon (`src/gcry/platform/darwin_low_water.cr`) and
+re-measured with the same dispatch (CI run `36253830147`, 10 rounds;
+`*-after-resident-count.json`). Sound ÷ tuned:
+
+| shape | macOS before | macOS after | Linux before | Linux after |
+|---|---|---|---|---|
+| EC1 pause | 1.00× | 1.01× | 0.99× | 0.99× |
+| EC1 + thread pause | 6.52× | **1.22×** | 1.51× | 1.45× |
+| EC4 pause | 5.79× | **1.25×** | 1.46× | 1.45× |
+| EC4 req/s | 0.870 | **1.016** | 0.969 | 1.006 |
+| EC4 RSS | 1.37× | **1.00×** | 1.00× | 1.00× |
+
+macOS EC4 absolute: tuned 3.33 ms, sound 4.06 ms. The +37% RSS was the long
+pause, not the scan: it went with it. Linux is unchanged, as it should be;
+the change is Darwin-only.
+
+The Darwin EC4 root-phase cut in the same run
+(`../../macos/2026-09-26-ec4-sound-resident-count/`): sound roots
+**19 267 → 3 068 µs**, pause **20.8 → 3.86 ms** (tuned 3.10 ms). The resident
+path answered 7 555–8 708 ranges per rep, fell back 0 times, and no page
+query was refused.
+
+**Where that leaves `GCRY_SOUND=1`.** The complete root scan now costs
++22–25% of the pause on macOS and +45% on Linux where the scan is large, and
+nothing measurable in throughput or RSS on either. At EC1, the shape most
+programs run, it costs nothing. That meets the condition
+`docs/SOUND-DEFAULTS.md` set for putting sound defaults back on the table,
+on these shapes. The fat app is still unmeasured. Whether to flip is a
+decision, not a measurement, and it is not taken here.
