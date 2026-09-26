@@ -53,6 +53,11 @@ on:
         description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm (`auto` = 1.25x the runner's physical memory, incompressible); too much can take the job down with it."
         required: false
         default: "0"
+      soak_sound:
+        description: "GCRY_SOUND=1 in every soak arm: the complete root scan. Its cost is measured (bench/log/linux/2026-09-26-sound-matrix/); this is how long it runs clean. 'off' is every earlier soak."
+        type: choice
+        options: ["off", "on"]
+        default: "off"
       sound_matrix_rounds:
         description: "Rounds of bench/sound_matrix.py on ubuntu-latest and macos-latest: tuned against GCRY_SOUND=1 at EC1, EC1 + one extra thread, and EC4 — req/s, pause p50 and post-GC RSS, paired per round (~90 s a round). 0 skips the jobs."
         required: false
@@ -1444,6 +1449,9 @@ jobs:
           # did nothing. Raising it is the only lever on the *creation* rate
           # of the cross-thread corruption this job exists to catch.
           SOAK_WORKERS: ${{ github.event.inputs.soak_workers || '1' }}
+          # Empty unless dispatched with soak_sound=on; the collector reads
+          # only "1" as set.
+          GCRY_SOUND: ${{ github.event.inputs.soak_sound == 'on' && '1' || '' }}
         run: |
           # --fiber-churn=0 is the baseline every earlier soak ran on, and the
           # one the open 2026-08-10 SEGV is measured against; raise it (with the
