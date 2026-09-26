@@ -387,6 +387,30 @@ end
   cross_check("paged-out", evict, PAGES, failures) if conclusive_eviction
   ballast.each { |a| LibC.munmap(Pointer(Void).new(a), LibC::SizeT.new(PAGE)) }
 
+  # ── Cost: per call, or per page? ────────────────────────────────────────────
+  # `GCRY_SOUND=1` scans a parked fiber from its low-water mark, and finding it
+  # asks about every page between the guard and the first written one — the
+  # whole 8 MiB, ~512 pages here. On the macOS runner that profile's root phase
+  # was 19.3 ms against tuned's 2.4 ms at Kemal EC4, with no query refused
+  # (`bench/log/linux/2026-09-26-sound-matrix/`); tuned asks about 16 pages.
+  # Whether the kernel charges per call or per page decides the fix, so time
+  # both on a stack-shaped region: 8 MiB, the top three pages written.
+  stack_pages = (8_u64 * 1024 * 1024 // PAGE).to_i
+  stack = map_region(stack_pages)
+  3.times { |k| Pointer(UInt8).new(stack + (stack_pages - 1 - k).to_u64 * PAGE).value = FILL }
+  puts
+  puts "query cost on an 8 MiB region, top 3 pages written (#{stack_pages} pages of #{PAGE // 1024} KiB):"
+  {16, 64, stack_pages}.each do |span|
+    from = stack + (stack_pages - span).to_u64 * PAGE
+    iters = 200
+    range_query(from, span) # warm
+    t0 = Time.instant
+    iters.times { range_query(from, span) }
+    us = (Time.instant - t0).total_microseconds / iters
+    puts "  #{span.to_s.rjust(4)} pages per call: #{us.round(2)} µs per call, #{(us * 1000 / span).round(1)} ns per page"
+  end
+  LibC.munmap(Pointer(Void).new(stack), LibC::SizeT.new(stack_pages.to_u64 * PAGE))
+
   puts
   if failures.empty?
     if conclusive_eviction
