@@ -39,6 +39,29 @@ if (n = ENV["EC_PARALLELISM"]?.try(&.to_i?)) && n >= 1
   Fiber::ExecutionContext.default.resize(n)
 end
 
+# `EXTRA_THREADS=N` parks N plain threads on a pipe read for the life of the
+# process. It reproduces the shape of an EC1 app with one extra thread of its
+# own (a driver, a logger), which is all it takes to cross gcry's
+# multi-mutator boundary (> 2 threads besides the idle collector): the fat
+# app's cuts sat on it, at 2 or 3 threads from one rebuild to the next
+# (`bench/log/linux/2026-08-09-105503-root-phase/`). The read is retried on
+# EINTR, which the collector's suspend signal causes; a thread that exited
+# would drop the process back under the boundary unnoticed.
+if (extra = ENV["EXTRA_THREADS"]?.try(&.to_i?)) && extra > 0
+  parked_fds = uninitialized Int32[2]
+  raise "pipe() failed" unless LibC.pipe(parked_fds) == 0
+  read_fd = parked_fds[0]
+  extra.times do |i|
+    Thread.new(name: "extra-#{i}") do
+      byte = uninitialized UInt8[1]
+      loop do
+        break if LibC.read(read_fd, byte.to_unsafe, 1) >= 0
+        break unless Errno.value == Errno::EINTR
+      end
+    end
+  end
+end
+
 # Minimal handler — string literal, almost no alloc.
 get "/" do
   "Hello World"

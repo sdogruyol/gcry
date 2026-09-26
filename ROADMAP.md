@@ -3580,6 +3580,18 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       ~1 on Linux, whose zero page absorbs the reads. Gated on Darwin, with the
       skip-off floor as its red arm.
       `bench/log/macos/2026-09-25-205449-root-phase/FINDINGS.md`
+- [ ] **One extra thread costs an EC1 program 2.7× pause and +63% RSS.**
+      gcry calls a program multi-mutator when Crystal's list has more than two
+      threads, so one thread of its own (an `Isolated` context, a driver's
+      `Thread.new`) moves a default-context program onto the multi-mutator root
+      scan and sweep, even if that thread never allocates. Kemal EC1 with one
+      parked thread: pause 0.48 → 1.28 ms, RSS 15.7 → 25.6 MB (empty chunks
+      kept mapped). 0.28.0's SYSMON fix already took that pause from 3.35 ms.
+      Forcing the EC1 sweep regardless of the count **hangs** (main and
+      `gc-idle` spinning), so the gate is load-bearing. The likely shape is
+      counting only threads that allocate, which needs a design that covers a
+      thread suspended inside `allocate` and the idle collector collecting.
+      `bench/log/linux/2026-09-26-ec1-extra-thread/FINDINGS.md`
 - [x] **Which fibers are deeply used, and why** — answered 2026-09-26: **none
       are**, and the question was aimed at the wrong stack. Under Kemal EC4 every
       fiber stack is 16–24 KiB deep (p50 = p99, `bench/fiber_stack_depth.py`);

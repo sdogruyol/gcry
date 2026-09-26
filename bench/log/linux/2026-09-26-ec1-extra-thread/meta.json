@@ -1,0 +1,11 @@
+{
+  "bin": "kemal-gcry-sound",
+  "build_flags": "",
+  "ec_parallelism": "1",
+  "reps": 4,
+  "duration_s": 15,
+  "connections": 100,
+  "cpu_model": "QEMU Virtual CPU version 2.5+",
+  "ncpu": 12,
+  "l3_shared_cpu_list": "0-11"
+}
