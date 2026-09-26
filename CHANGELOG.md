@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`GCRY_PARALLEL_DORMANT=1` works again.** It is the documented RSS opt-in
   for multi-mutator programs, and it releases empty chunks within
-  `empty_chunk_retain`. On 2026-08-03 the Linux process default for that
-  budget became 0, and from then the opt-in, `_ALL` too, did nothing: Kemal
+  `empty_chunk_retain`. On 2026-08-03 (0.18.0) the Linux process default
+  for that budget became 0, and from then the opt-in, `_ALL` too, did nothing: Kemal
   EC4 post-GC RSS 83.4 MB with it against 83.7 without. Either knob now
   brings a 64 MiB budget unless `GCRY_EMPTY_CHUNK_RETAIN` is set: EC4
   83.8 → **19.7 MB**, and an EC1 program with one extra thread 25.1 →
