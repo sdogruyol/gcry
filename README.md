@@ -241,34 +241,28 @@ session read the same thing through a noisier harness and called it
 (monotonic timing, rotated order, null arm) are what this cut runs on —
 [SOUND-DEFAULTS.md](docs/SOUND-DEFAULTS.md).
 
-**With more mutator threads, sound roots cost the pause**, and through it the
-throughput. Same session, `EC_PARALLELISM=4`:
+**With more threads, sound roots cost some pause on Linux and a lot on macOS.**
+Paired per round on the CI runners (2026-09-26, 0.28.0, 10 rounds,
+[`bench/sound_matrix.py`](bench/sound_matrix.py)); sound ÷ tuned:
 
-| Kemal `/json`, EC4 | vs tuned EC4 [95% CI] | pause p50 | root phase | collections / 15 s |
-|--------------------|----------------------:|----------:|-----------:|-------------------:|
-| tuned | 100% | **12.6 ms** | 12.3 ms | 270 |
-| `GCRY_SOUND=1` | **50.2%** [46.7, 53.7] | **97.1 ms** | 112 ms | 151 |
+| Kemal `/json` | Linux req/s | Linux pause | macOS req/s | macOS pause |
+|---------------|------------:|------------:|------------:|------------:|
+| EC1 | 1.04 | 0.99× | 1.05 | 1.00× |
+| EC1 + one thread of the app's own | 0.98 | 1.51× | 0.72 | 6.5× |
+| EC4 | 0.97 | 1.46× | 0.87 | 5.8× |
 
-The whole gap is the root phase — the two STW lag knobs scanning every parked
-fiber's stack from the top instead of from its low-water mark — and each
-collection holds the world eight times longer. The 2026-08-09 reading had the
-same shape at 3.60 → 16.39 ms; the tuned EC4 pause has since grown to 12.6 ms
-with 12.3 ms in roots. Attributed (`…/2026-09-08-ec4-root-phase/`): 98% of
-it is the parked-fiber scan — under multi-mutator STW every parked fiber is
-scanned `GCRY_STW_STACK_LAG` (256 KiB) below its saved SP because a fiber in
-transit between threads may report a stale SP, and the pagemap low-water skip
-cannot see through pages a previous tenant of the pooled stack already
-faulted in. ~8 MB of stack words per collection at ~100 connections, growing
-with uptime. The fix is scheduler-side: scan a fully parked fiber from its SP
-and reserve the lag for fibers in transit (ROADMAP Phase 2). Fat-app pause (acik, ~72 MiB heap: 10.7 → 18.2
-ms on the freelist cut) was not re-measured.
-
-*2026-09-26: most of that pause was one stack.* SYSMON's was read whole, 8 MiB,
-every collection, and the read defeated the low-water skip on it for good.
-Fixed; on this repo's current QEMU host the EC4 pause went tuned **4.15 →
-1.78 ms** and sound **6.60 → 2.15 ms**, and default-mode `/json` throughput rose
-6.2% (paired, 10 rounds; the table above predates both;
-[findings](bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md)).
+On Linux the complete scan now costs about half again a small pause (EC4
+3.07 → 4.55 ms) and nothing measurable in throughput or RSS. In August it was
+8× (12.6 → 97.1 ms, half the throughput). The low-water skip on the default
+path and 0.28.0's SYSMON fix took that out: before 0.28.0 the collector read
+the monitor thread's whole 8 MiB stack every multi-threaded collection, which
+also defeated the skip on it
+([findings](bench/log/linux/2026-09-26-sysmon-guard-scan/FINDINGS.md)).
+macOS still pays because its page query costs ~275 ns per page, and proving a
+parked fiber's untouched 8 MiB is 141 µs per fiber per collection
+([findings](bench/log/linux/2026-09-26-sound-matrix/FINDINGS.md)).
+The fat app (~72 MiB heap: 10.7 → 18.2 ms on the freelist cut) was not
+re-measured.
 
 Parked-fiber scrub was in the heuristic list through v0.18 and is **opt-in**
 since (`GCRY_SCRUB_FIBERS=1`); the per-collection trace showed it moving
