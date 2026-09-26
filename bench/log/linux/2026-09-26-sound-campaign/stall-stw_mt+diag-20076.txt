@@ -1,0 +1,85 @@
+task 1769807 stw_mt state=S wchan=ep_poll
+task 1769808 SYSMON state=S wchan=hrtimer_nanosleep
+task 1769809 stw-mt-2-0 state=R wchan=0
+task 1769810 stw-mt-2-1 state=R wchan=0
+task 1769811 gcry-watch state=S wchan=hrtimer_nanosleep
+task 1769812 gc-idle state=S wchan=hrtimer_nanosleep
+Thread 6 (Thread 0x7d1d457ff6c0 (LWP 1769808) "SYSMON"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007d1d46ea030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x00007d1d46ef5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosle
+#3  0x00007d1d46f03707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x00005f98ee3214ab in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:111
+#5  0x00005f98ee3107bd in sleep () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:197
+#6  0x00005f98ee3e058b in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:55
+#7  0x00005f98ee1d71a9 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/monitor.cr:19
+#8  0x00005f98ee30fec2 in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#9  0x00005f98ee3213c7 in thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#10 0x00005f98ee1d08d6 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#11 0x00007d1d46ea3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#12 0x00007d1d46f375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+Thread 5 (Thread 0x7d1d3e7ff6c0 (LWP 1769809) "stw-mt-2-0"):
+#0  0x00007d1d46f1aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+#1  0x00005f98ee321426 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+#2  0x00005f98ee310386 in yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+#3  0x00005f98ee310342 in delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+#4  0x00005f98ee385f0c in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+#5  0x00005f98ee385aed in reschedule () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:72
+#6  0x00005f98ee37b8ab in reschedule () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context.cr:183
+#7  0x00005f98ee321fc6 in suspend () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:354
+#8  0x00005f98ee3f3570 in send () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:150
+#9  0x00005f98ee3f2a52 in worker_run () at /home/naruto/playground/gcry/bench/stw_mt_property_test.cr:188
+#10 0x00005f98ee1d83dd in -> () at /home/naruto/playground/gcry/bench/stw_mt_property_test.cr:238
+#11 0x00005f98ee322355 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#12 0x00005f98ee1d8426 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:103
+#13 0x0000000000000000 in ?? ()
+Thread 4 (Thread 0x7d1d355ff6c0 (LWP 1769810) "stw-mt-2-1"):
+#0  0x00007d1d46f1aa2b in __GI_sched_yield () at ../sysdeps/unix/syscall-template.S:120
+#1  0x00005f98ee321426 in yield_current () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:56
+#2  0x00005f98ee310386 in yield () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:230
+#3  0x00005f98ee310342 in delay () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:207
+#4  0x00005f98ee385f0c in resume () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:97
+#5  0x00005f98ee385aed in reschedule () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:72
+#6  0x00005f98ee37b8ab in reschedule () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context.cr:183
+#7  0x00005f98ee321fc6 in suspend () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:354
+#8  0x00005f98ee3f52a9 in receive () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/channel.cr:227
+#9  0x00005f98ee3f2a85 in worker_run () at /home/naruto/playground/gcry/bench/stw_mt_property_test.cr:191
+#10 0x00005f98ee1d83dd in -> () at /home/naruto/playground/gcry/bench/stw_mt_property_test.cr:238
+#11 0x00005f98ee322355 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#12 0x00005f98ee1d8426 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:103
+#13 0x0000000000000000 in ?? ()
+Thread 3 (Thread 0x7d1d3d5ff6c0 (LWP 1769811) "gcry-watch"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007d1d46ea030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x00007d1d46ef5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosle
+#3  0x00007d1d46f03707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x00005f98ee32491e in watch_loop () at /home/naruto/playground/gcry/src/gcry/stw_watchdog.cr:227
+#5  0x00005f98ee1d0846 in gcry_stw_watchdog_main () at /home/naruto/playground/gcry/src/gcry/stw_watchdog.cr:35
+#6  0x00005f98ee1d0836 in -> () at /home/naruto/playground/gcry/src/gcry/stw_watchdog.cr:186
+#7  0x00007d1d46ea3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#8  0x00007d1d46f375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+Thread 2 (Thread 0x7d1d3cdfe6c0 (LWP 1769812) "gc-idle"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007d1d46ea030c in __internal_syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=230) at ./nptl/cancellation.c:49
+#2  0x00007d1d46ef5af2 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/clock_nanosle
+#3  0x00007d1d46f03707 in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#4  0x00005f98ee31d5c8 in loop_forever () at /home/naruto/playground/gcry/src/gcry/idle_release.cr:194
+#5  0x00005f98ee1d48e6 in -> () at /home/naruto/playground/gcry/src/gcry/idle_release.cr:135
+#6  0x00005f98ee30feaf in start () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/thread.cr:249
+#7  0x00005f98ee3213c7 in thread_proc () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:47
+#8  0x00005f98ee1d08d6 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/pthread.cr:22
+#9  0x00007d1d46ea3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#10 0x00007d1d46f375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+Thread 1 (Thread 0x7d1d471727c0 (LWP 1769807) "stw_mt"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007d1d46ea039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x00007d1d46f378b5 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x00005f98ee37d8ea in wait () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/system/unix/epoll.cr:49
+#5  0x00005f98ee380e8c in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/crystal/event_loop/epoll.cr:52
+#6  0x00005f98ee3867a2 in find_next_runnable () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:221
+#7  0x00005f98ee3862bf in run_loop () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:159
+#8  0x00005f98ee1d7189 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:44
+#9  0x00005f98ee322355 in run () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:168
+#10 0x00005f98ee1d7196 in -> () at /home/naruto/.local/share/mise/installs/crystal/1.21.0/share/crystal/src/fiber.cr:103
+#11 0x0000000000000000 in ?? ()
