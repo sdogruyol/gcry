@@ -78,6 +78,14 @@
     # `LibC` so it cannot collide with a binding the stdlib may add.
     fun sysctlbyname(name : UInt8*, oldp : Void*, oldlenp : LibC::SizeT*,
                      newp : Void*, newlen : LibC::SizeT) : Int32
+
+    # For the resident-count arm: `VM_REGION_TOP_INFO` (12) reads the VM
+    # object's resident page count for a region, and `TASK_VM_INFO` (22) the
+    # task's compressed bytes. Both transcribed from <mach/vm_region.h> and
+    # <mach/task_info.h>; the arm prints what they return.
+    fun mach_vm_region(target_task : Port, address : UInt64*, size : UInt64*, flavor : Int32,
+                       info : Void*, info_count : UInt32*, object_name : Port*) : KernReturn
+    fun task_info(target_task : Port, flavor : Int32, info : Void*, info_count : UInt32*) : KernReturn
   end
 
   lib LibC
@@ -409,6 +417,48 @@ end
     us = (Time.instant - t0).total_microseconds / iters
     puts "  #{span.to_s.rjust(4)} pages per call: #{us.round(2)} µs per call, #{(us * 1000 / span).round(1)} ns per page"
   end
+
+  # ── Resident count: can the object say how many pages were touched? ─────────
+  # The candidate for the cost above: read the VM object's resident page count
+  # for the stack's region in O(1) and compare it with the touched pages found
+  # in a short top window. Informational: prints what the counts say, and what
+  # each read costs, on the same region.
+  top_info = uninitialized UInt32[8]
+  read_top = ->(where : UInt64) do
+    addr = where
+    size = 0_u64
+    count = 5_u32 # VM_REGION_TOP_INFO_COUNT
+    obj = 0_u32
+    kr = LibMachVM.mach_vm_region(LibMachVM.mach_task_self_, pointerof(addr), pointerof(size), 12,
+      top_info.to_unsafe.as(Void*), pointerof(count), pointerof(obj))
+    {kr, addr, size, top_info[0], top_info[1], top_info[2], top_info[3], top_info[4] & 0xff}
+  end
+  show = ->(label : String) do
+    kr, addr, size, obj_id, refs, priv, shared, mode = read_top.call(stack + (stack_pages - 1).to_u64 * PAGE)
+    puts "  #{label}: kr=#{kr} region 0x#{addr.to_s(16)} +#{size // 1024} KiB, obj #{obj_id}, refs #{refs}, " \
+         "private resident #{priv}, shared resident #{shared}, share mode #{mode}"
+  end
+  puts
+  puts "resident count (VM_REGION_TOP_INFO) on that region:"
+  show.call("top 3 pages written")
+  Pointer(UInt8).new(stack + 5_u64 * PAGE).value = FILL
+  show.call("plus one page 5 pages above the guard end")
+  iters = 2000
+  t0 = Time.instant
+  iters.times { read_top.call(stack + (stack_pages - 1).to_u64 * PAGE) }
+  puts "  cost: #{((Time.instant - t0).total_microseconds / iters).round(2)} µs per call"
+  vm = uninitialized UInt64[128]
+  vm_count = 256_u32
+  kr = LibMachVM.task_info(LibMachVM.mach_task_self_, 22, vm.to_unsafe.as(Void*), pointerof(vm_count))
+  # task_vm_info (pack 4): `compressed` at byte 120.
+  compressed = (vm.to_unsafe.as(UInt8*) + 120).as(UInt64*).value
+  t0 = Time.instant
+  200.times do
+    c = 256_u32
+    LibMachVM.task_info(LibMachVM.mach_task_self_, 22, vm.to_unsafe.as(Void*), pointerof(c))
+  end
+  puts "task compressed (TASK_VM_INFO): kr=#{kr} count #{vm_count}, #{compressed} bytes; " \
+       "#{((Time.instant - t0).total_microseconds / 200).round(2)} µs per call"
   LibC.munmap(Pointer(Void).new(stack), LibC::SizeT.new(stack_pages.to_u64 * PAGE))
 
   puts
