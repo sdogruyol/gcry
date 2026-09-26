@@ -1489,12 +1489,11 @@ jobs:
           test -f bin/min_aarch64.o
           test -f bin/alloc_aarch64.o
 
-  # musl LibC ABI smoke (object emit). Catches PthreadT/Void* and similar typedef
-  # mismatches that glibc hosts do not exercise (Alpine / static musl).
+  # Cross-compile both musl targets, then link and run on native x86_64 Alpine.
   test-musl:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    name: test (musl cross-compile)
+    name: test (musl, ${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
@@ -1518,6 +1517,15 @@ jobs:
           test -f "bin/hello_${suffix}.o"
           test -f "bin/min_${suffix}.o"
           test -f "bin/alloc_${suffix}.o"
+
+      - name: Link and run thread census on native musl
+        if: matrix.target == 'x86_64-linux-musl'
+        run: |
+          docker run --rm \
+            --volume "$PWD:/work:ro" \
+            --workdir /work \
+            crystallang/crystal:1.21.0-alpine \
+            sh -ec 'crystal build -Dgc_none bench/thread_census_names.cr -o /tmp/thread_census_names && GCRY_THREAD_CENSUS=1 /tmp/thread_census_names'
 
   # How often does the *locked* arm of `large-cache-race` fault on aarch64?
   #

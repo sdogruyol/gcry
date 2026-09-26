@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Alpine/musl builds link again.** The thread census now calls the Linux
+  `getdents64` syscall directly, and CI links and runs it on Alpine.
+
 ## [0.28.0] - 2026-09-26
 
 ### Added
