@@ -53,6 +53,10 @@ on:
         description: "MiB of churn for the Darwin mach_vm_page_query probe's eviction arm, the one case the low-water question turns on. The runner will not compress on its own, so that arm returns INCONCLUSIVE at 0 (the default, and what every push runs). Set it to attempt the arm (`auto` = 1.25x the runner's physical memory, incompressible); too much can take the job down with it."
         required: false
         default: "0"
+      sound_matrix_rounds:
+        description: "Rounds of bench/sound_matrix.py on ubuntu-latest and macos-latest: tuned against GCRY_SOUND=1 at EC1, EC1 + one extra thread, and EC4 — req/s, pause p50 and post-GC RSS, paired per round (~90 s a round). 0 skips the jobs."
+        required: false
+        default: "0"
       darwin_root_phase_reps:
         description: "Reps per config of the Darwin EC4 root-phase cut: Kemal /json at 4 workers, the low-water skip (tuned) against GCRY_STACK_LOW_WATER=0, interleaved, ~45 s a rep-pair. 0 skips the job. The Linux cut that priced the skip (2026-08-09) used 9."
         required: false
@@ -1971,6 +1975,55 @@ jobs:
         with:
           name: darwin-ec4-root-phase
           path: bench/log/macos/*-root-phase/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The open question in docs/SOUND-DEFAULTS.md — is the complete root scan
+  # affordable where the scan is large? — answered on hosts other than the
+  # developer's: Kemal /json at three process shapes, tuned against
+  # GCRY_SOUND=1, paired per round. Dispatch-only; the tables are the output.
+  sound-matrix:
+    if: github.event_name == 'workflow_dispatch' && inputs.sound_matrix_rounds != '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    name: sound matrix (${{ matrix.os }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+
+      - name: Install wrk
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install wrk; else sudo apt-get update && sudo apt-get install -y wrk; fi
+
+      - name: Build the Kemal bench server, default and Parallel
+        run: |
+          mkdir -p bin
+          cd bench/kemal
+          shards install
+          crystal build -Dgc_none --release src/server.cr -o ../../bin/kemal-gcry
+          crystal build -Dgc_none -Dpreview_mt -Dexecution_context --release src/server.cr -o ../../bin/kemal-gcry-mt
+
+      - name: Tuned against GCRY_SOUND=1
+        env:
+          ROUNDS: ${{ inputs.sound_matrix_rounds }}
+        run: |
+          mkdir -p bench/log/_run
+          python3 bench/sound_matrix.py --ec1 bin/kemal-gcry --mt bin/kemal-gcry-mt \
+            --rounds "$ROUNDS" --json "bench/log/_run/sound-matrix-${{ matrix.os }}.json"
+
+      - name: Upload the samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sound-matrix-${{ matrix.os }}
+          path: bench/log/_run/sound-matrix-*.json
           if-no-files-found: ignore
           retention-days: 30
 
