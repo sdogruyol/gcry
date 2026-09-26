@@ -88,6 +88,18 @@ end
     env.response.content_type = "text/plain; version=0.0.4"
     Gcry.prometheus_text
   end
+
+  # What `/gc-stats` cannot carry (its field list is full): platform counters a
+  # root-phase cut needs to tell a slow probe from a refused one. Darwin's page
+  # query falls back to scanning a whole range when the kernel refuses it, and
+  # the only trace of that is this count.
+  get "/gc-extra" do |env|
+    env.response.content_type = "application/json"
+    {
+      page_query_errors: {% if flag?(:darwin) %}Gcry::Platform.page_query_errors{% else %}0_u64{% end %},
+      host_page_size:    Gcry::Platform.host_page_size,
+    }.to_json
+  end
 {% end %}
 
 # Alloc-heavy handler — closer to a real JSON API (nested objects, arrays, strings).

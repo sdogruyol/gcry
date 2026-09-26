@@ -171,6 +171,10 @@ probe() {
     ps -o rss= -p "$SERVER_PID" | tr -d ' '
   fi > "$RUN_DIR/$key-rep$rep-rss.txt" 2>/dev/null || true
   curl -sf ${HDR[@]+"${HDR[@]}"} "$BASE/gc-stats" > "$RUN_DIR/$key-rep$rep-stats.json" || true
+  # Platform counters `/gc-stats` has no room for (the bundled Kemal server
+  # only; another server answers 404 and leaves no file).
+  curl -sf ${HDR[@]+"${HDR[@]}"} "$BASE/gc-extra" > "$RUN_DIR/$key-rep$rep-extra.json" 2>/dev/null \
+    || rm -f "$RUN_DIR/$key-rep$rep-extra.json"
   # Proof of the shape that actually ran: a binary built without -Dpreview_mt
   # resizes the default context to a no-op, so an EC4 run would otherwise be
   # indistinguishable from EC1 in the log.

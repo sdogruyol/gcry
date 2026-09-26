@@ -1956,9 +1956,14 @@ jobs:
           EC_PARALLELISM: "4"
           WRK_DURATION: "20"
           WRK_CONNECTIONS: "100"
+          # `sound` since 2026-09-26: the CI sound matrix measured it at 5.8×
+          # the tuned pause at EC4 on this runner against 1.5× on Linux, and
+          # the root sub-phases plus the page-query error count say where.
           BENCH_CONFIGS: |
             tuned
             tuned-nolw GCRY_STACK_LOW_WATER=0
+            sound GCRY_SOUND=1
+          BENCH_SERVER_ENV: GCRY_ROOT_PHASE_TIMING=1
         run: |
           ./bench/root_phase_ab.sh
           # The skip engaged, or the cut compares the same thing twice: the
@@ -1966,7 +1971,8 @@ jobs:
           dir=$(ls -d bench/log/macos/*-root-phase | tail -1)
           for f in "$dir"/*-stats.json; do
             printf '%s: ' "$(basename "$f")"
-            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print({k: s.get(k) for k in ("low_water_skips","low_water_skipped_bytes","collections")})' "$f" || echo unreadable
+            python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print({k: s.get(k) for k in ("low_water_skips","low_water_skipped_bytes","collections","roots_fibers_ns","roots_threads_ns","phase_stacks_ns","fiber_scan_from_sp","fiber_scan_from_guard","fiber_scan_running_stale")})' "$f" || echo unreadable
+            x="${f%-stats.json}-extra.json"; [ -f "$x" ] && echo "  extra: $(cat "$x")"
           done
 
       - name: Upload the cut
