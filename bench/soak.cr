@@ -274,7 +274,8 @@ class SoakTest
                    "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
                    "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
                    "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
-                   "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s}"
+                   "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s} " \
+                   "soundness=#{Gcry.soundness(@heap)}"
     # `queue_faults` is why the audit is worth a column: the 2026-08-10 run
     # SEGV'd in the dequeue an unknown time after the write that caused it, and a
     # cumulative fault count here says which hour the slot went bad.
@@ -285,7 +286,8 @@ class SoakTest
          "ec_queue_audit=#{@heap.ec_queue_audit} fiber_churn=#{@fiber_churn} " \
          "collect_hz=#{@collect_hz} workers_requested=#{@workers} " \
          "ec_parallelism=#{Fiber::ExecutionContext.default.capacity} " \
-         "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s}"
+         "os_threads=#{Gcry::Platform.os_thread_count} leak_kb_per_s=#{@leak_kb_per_s} " \
+         "soundness=#{Gcry.soundness(@heap)}"
 
     # Thread spawn for alloc storm (~1000 objects/s)
     spawn do
