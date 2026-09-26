@@ -1860,12 +1860,19 @@ darwin-page-query: $(BIN)
 # chunks dormant. It did nothing on Linux from 2026-08-03 to 2026-09-26 (its
 # budget defaulted to 0) and no gate noticed. Red arm, run every time: the same
 # knob with GCRY_EMPTY_CHUNK_RETAIN=0, the pre-fix budget, must stay inert.
+# Darwin runs the arms and asserts nothing: its release is `MADV_FREE`, which
+# does not lower RSS without pressure, so the budget stays at its default there
+# (ROADMAP: macOS page release).
 parallel-dormant: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/parallel_dormant.cr -o $(BIN)/parallel_dormant --error-trace
-	$(BIN)/parallel_dormant
-	GCRY_PARALLEL_DORMANT=1 $(BIN)/parallel_dormant --expect-dormant
-	GCRY_PARALLEL_DORMANT_ALL=1 $(BIN)/parallel_dormant --expect-dormant
-	GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=0 $(BIN)/parallel_dormant --expect-inert
+	@if [ "$$(uname -s)" = Darwin ]; then \
+	  $(BIN)/parallel_dormant && GCRY_PARALLEL_DORMANT=1 $(BIN)/parallel_dormant; \
+	else \
+	  $(BIN)/parallel_dormant && \
+	  GCRY_PARALLEL_DORMANT=1 $(BIN)/parallel_dormant --expect-dormant && \
+	  GCRY_PARALLEL_DORMANT_ALL=1 $(BIN)/parallel_dormant --expect-dormant && \
+	  GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=0 $(BIN)/parallel_dormant --expect-inert; \
+	fi
 
 lag-scan-rss: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/lag_scan_rss.cr -o $(BIN)/lag_scan_rss --error-trace
