@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **musl: `-Dgc_none` builds link again** (kojix2, #43). musl 1.2.4 dropped
+  its LFS64 aliases, `getdents64` among them, so every process-GC build on a
+  current Alpine failed at link time from 0.26.3, when the thread census
+  bound it. The binding now takes musl's `getdents`, which is the 64-bit call
+  there. CI's musl job only cross-compiled objects and never linked, so it
+  could not see this; a new job builds, links and runs the samples in the
+  `crystallang/crystal:1.21.0-alpine` container.
+
 ### Changed
 
 - **macOS: a parked fiber's low-water mark from the VM object's resident count.**

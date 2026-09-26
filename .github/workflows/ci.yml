@@ -1523,6 +1523,31 @@ jobs:
           test -f "bin/min_${suffix}.o"
           test -f "bin/alloc_${suffix}.o"
 
+  # The cross-compile above emits objects and never links, so it could not see
+  # the failure kojix2 reported (PR #43): musl ≥ 1.2.4 dropped the LFS64
+  # aliases, `getdents64` among them, and every `-Dgc_none` build on a current
+  # Alpine failed at link time from 0.26.3 (the thread census) until 0.28.1.
+  # This links and runs on a real musl.
+  test-musl-alpine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: test (musl, alpine, linked)
+    container: crystallang/crystal:1.21.0-alpine
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build, link and run the process-GC samples
+        run: |
+          mkdir -p bin
+          cat /etc/alpine-release
+          ldd --version 2>&1 | head -1 || true
+          crystal build -Dgc_none samples/hello.cr -o bin/hello
+          crystal build -Dgc_none samples/alloc.cr -o bin/alloc
+          crystal build -Dgc_none samples/stress.cr -o bin/stress
+          ./bin/hello
+          ./bin/alloc 500
+          ./bin/stress 300
+
   # How often does the *locked* arm of `large-cache-race` fault on aarch64?
   #
   # Run 32862284372 caught it at 1 of 5 on the default configuration, and the
