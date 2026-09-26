@@ -461,6 +461,126 @@ end
        "#{((Time.instant - t0).total_microseconds / 200).round(2)} µs per call"
   LibC.munmap(Pointer(Void).new(stack), LibC::SizeT.new(stack_pages.to_u64 * PAGE))
 
+  # ── The candidate itself, against the full query ────────────────────────────
+  # Low-water by resident count: R = the VM object's resident pages; walk the
+  # stack down from the top in 16-page queries until the touched pages found
+  # equal R, and the lowest one is the mark. Only when nothing in the task is
+  # compressed (read before and after — the compressor may run while the world
+  # is stopped) and the region's object is private (no shadow chain whose pages
+  # the count would miss). Any doubt answers nil: "use the full query".
+  # Compared with the full query on stacks allocated the way Crystal does
+  # (`mmap` 8 MiB, `mprotect` the first 4096 bytes), which decides whether the
+  # kernel gives each stack an object of its own. A module, not procs: the
+  # probe's top level already uses `touched`, `i` and friends.
+  module ResidentLowWater
+    record Top, kr : Int32, start : UInt64, size : UInt64, obj : UInt32, refs : UInt32,
+      resident : UInt64, mode : UInt32
+
+    def self.top(addr : UInt64) : Top
+      info = uninitialized UInt32[8]
+      where = addr
+      size = 0_u64
+      count = 5_u32 # VM_REGION_TOP_INFO_COUNT
+      name = 0_u32
+      kr = LibMachVM.mach_vm_region(LibMachVM.mach_task_self_, pointerof(where), pointerof(size), 12,
+        info.to_unsafe.as(Void*), pointerof(count), pointerof(name))
+      Top.new(kr, where, size, info[0], info[1], info[2].to_u64 + info[3].to_u64, info[4] & 0xff)
+    end
+
+    def self.compressed : UInt64
+      vm = uninitialized UInt64[128]
+      count = 256_u32
+      LibMachVM.task_info(LibMachVM.mach_task_self_, 22, vm.to_unsafe.as(Void*), pointerof(count))
+      (vm.to_unsafe.as(UInt8*) + 120).as(UInt64*).value
+    end
+
+    def self.touched?(d : Int32) : Bool
+      (d & (DarwinPageQuery::PRESENT | DarwinPageQuery::PAGED_OUT)) != 0
+    end
+
+    def self.full(low : UInt64, high : UInt64) : UInt64
+      addr = low
+      while addr < high
+        span = {((high - addr) // PAGE).to_i, 1024}.min
+        d = range_query(addr, span).not_nil!
+        span.times { |k| return addr + k.to_u64 * PAGE if touched?(d[k]) }
+        addr += span.to_u64 * PAGE
+      end
+      high
+    end
+
+    def self.fast(low : UInt64, high : UInt64) : UInt64?
+      return nil unless compressed == 0
+      t = top(high - PAGE)
+      # SM_PRIVATE (2), or SM_PRIVATE_ALIASED (6): one object under two entries
+      # of this map, which is what the guard's `mprotect` split leaves.
+      return nil unless t.kr == 0 && t.start + t.size >= high && (t.mode == 2 || t.mode == 6)
+      lo = {low, t.start}.max
+      found = 0_u64
+      lowest = high
+      addr = high
+      while addr > lo && found < t.resident
+        span = {((addr - lo) // PAGE).to_i, 16}.min
+        from = addr - span.to_u64 * PAGE
+        d = range_query(from, span).not_nil!
+        (span - 1).downto(0) do |k|
+          if touched?(d[k])
+            found += 1
+            lowest = from + k.to_u64 * PAGE
+          end
+        end
+        addr = from
+      end
+      return nil unless found == t.resident && compressed == 0
+      # Below this entry (the guard's own entry, if split): asked in full.
+      below = lo > low ? full(low, lo) : lo
+      below < lo ? below : lowest
+    end
+  end
+
+  crystal_stack_bytes = stack_pages.to_u64 * PAGE
+  make_crystal_stack = -> do
+    b = map_region(stack_pages)
+    LibC.mprotect(Pointer(Void).new(b), LibC::SizeT.new(4096), LibC::PROT_NONE)
+    b
+  end
+  write_top_pages = ->(b : UInt64, n : Int32) do
+    n.times { |j| Pointer(UInt8).new(b + crystal_stack_bytes - (j + 1).to_u64 * PAGE).value = FILL }
+  end
+  compare_low_water = ->(label : String, b : UInt64) do
+    lw_low = b + 4096
+    lw_high = b + crystal_stack_bytes
+    lw_full = ResidentLowWater.full(lw_low, lw_high)
+    lw_fast = ResidentLowWater.fast(lw_low, lw_high)
+    t = ResidentLowWater.top(lw_high - PAGE)
+    verdict = lw_fast.nil? ? "fell back" : (lw_fast == lw_full ? "agrees" : "DISAGREES")
+    fast_text = lw_fast ? "#{(lw_high - lw_fast) // 1024} KiB deep" : "—"
+    puts "  #{label}: full #{(lw_high - lw_full) // 1024} KiB deep, fast #{fast_text} (#{verdict}); " \
+         "obj #{t.obj} refs #{t.refs} mode #{t.mode} resident #{t.resident}, entry +#{t.size // 1024} KiB"
+    if lw_fast && lw_fast != lw_full
+      failures << "resident-count low-water #{label}: #{(lw_high - lw_fast) // 1024} KiB against the full query's #{(lw_high - lw_full) // 1024}"
+    end
+  end
+  puts
+  puts "resident-count low-water against the full query, Crystal-shaped stacks:"
+  first_stack = make_crystal_stack.call
+  write_top_pages.call(first_stack, 3)
+  compare_low_water.call("top 3 written", first_stack)
+  Pointer(UInt8).new(first_stack + 6_u64 * PAGE).value = FILL
+  compare_low_water.call("plus a page 6 above the base (a gap below the top)", first_stack)
+  adjacent = Array.new(3) { make_crystal_stack.call }
+  adjacent.each { |b| write_top_pages.call(b, 2) }
+  adjacent.each_with_index { |b, j| compare_low_water.call("adjacent stack #{j}, top 2 written", b) }
+  timed_stack = adjacent[1]
+  t_full = Time.instant
+  200.times { ResidentLowWater.full(timed_stack + 4096, timed_stack + crystal_stack_bytes) }
+  full_us = (Time.instant - t_full).total_microseconds / 200
+  t_fast = Time.instant
+  200.times { ResidentLowWater.fast(timed_stack + 4096, timed_stack + crystal_stack_bytes) }
+  fast_us = (Time.instant - t_fast).total_microseconds / 200
+  puts "  cost per stack: full #{full_us.round(1)} µs, resident-count #{fast_us.round(1)} µs"
+  ([first_stack] + adjacent).each { |b| LibC.munmap(Pointer(Void).new(b), LibC::SizeT.new(crystal_stack_bytes)) }
+
   puts
   if failures.empty?
     if conclusive_eviction
