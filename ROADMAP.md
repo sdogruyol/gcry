@@ -3604,6 +3604,11 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       scan and sweep, even if that thread never allocates. Kemal EC1 with one
       parked thread: pause 0.48 → 1.28 ms, RSS 15.7 → 25.6 MB (empty chunks
       kept mapped). 0.28.0's SYSMON fix already took that pause from 3.35 ms.
+      The RSS half has a remedy now: `GCRY_PARALLEL_DORMANT=1` gives it back
+      (25.1 → 15.6 MB). That opt-in had been inert on Linux since
+      2026-08-03; it is fixed and gated
+      (`bench/log/linux/2026-09-26-parallel-dormant-inert/`). Whether it
+      should be on by default past the boundary is open.
       Forcing the EC1 sweep regardless of the count **hangs** (main and
       `gc-idle` spinning), so the gate is load-bearing. The likely shape is
       counting only threads that allocate, which needs a design that covers a

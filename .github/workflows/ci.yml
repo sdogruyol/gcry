@@ -529,6 +529,13 @@ jobs:
           # hiding it.
           GCRY_STACK_LOW_WATER=0 ./bin/stw_lag_pause --rounds=5 --dirty-kb=16 --disabled --max-ratio=4 --max-ratio-nolw=30
 
+      # The multi-mutator RSS opt-in was inert on Linux for two months and
+      # nothing noticed (its budget defaulted to 0). Now it must make a
+      # dropped 64 MiB burst's empty chunks dormant, and with the pre-fix
+      # budget it must not.
+      - name: Parallel dormant opt-in
+        run: make parallel-dormant
+
       # A collector that asks glibc about a thread it has just suspended waits
       # forever, silently. Nothing else in CI can see it: the correctness suite
       # would simply never finish, and a job timeout points at nothing. This
@@ -2285,6 +2292,9 @@ jobs:
           # 245.9 without. Ceiling on the skip arm; the floor on the other is
           # the red arm — it proves the probe sees the fault-in at all.
           make lag-scan-rss
+          # Darwin's default budget is 512 KiB, not 0, so the opt-in was
+          # nearly inert here too.
+          make parallel-dormant
 
       # Gated as of 2026-08-15. This ran ungated because the +4 MB ceiling was
       # measured on Linux and Darwin reclaims differently (MADV_FREE_REUSABLE

@@ -83,8 +83,8 @@ Raising `GCRY_THRESHOLD` cuts major count but grows pause p50 — measure on the
 | `GCRY_DISABLE_TIGHT_GROW_GC=1` | Prefer-freelist only (no GC-before-grow) |
 | `GCRY_PRECISE_STACK=1` | Load `.llvm_stackmaps` + hybrid precise walker (additive; see [STACK_MAPS.md](STACK_MAPS.md)) |
 | `GCRY_PRECISE_STACK=2` | **Research:** exclusive precise stacks (no conservative stack word scan; UAF risk) |
-| `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep) |
-| `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓) |
+| `GCRY_PARALLEL_DORMANT=1` | Parallel: DONTNEED empties within retain (keeps post-STW lazy sweep). Without an explicit `GCRY_EMPTY_CHUNK_RETAIN` the budget is one Parallel threshold (64 MiB); before 2026-09-26 it was the process default, 0 on Linux, and the knob did nothing. **Gated** by `make parallel-dormant`, whose red arm sets `GCRY_EMPTY_CHUNK_RETAIN=0` and must stay inert |
+| `GCRY_PARALLEL_DORMANT_ALL=1` | Parallel: DONTNEED every empty (legacy; thr↓). Same default budget and the same gate |
 | `GCRY_PARALLEL_RELEASE=1` | **Unsupported** — Parallel munmap excess (forces in-STW sweep; can hang). stderr warn; prefer `GCRY_PARALLEL_DORMANT=1` |
 | `GCRY_SOUND=1` | **Soundness profile** — turns off every heuristic that can decline to mark a live pointer (interiors on, misaligned interiors on, static roots on, type_id gate off, STW lags 0, fiber scrub off, blacklist off) and pins the barrier axis (nursery/incremental off). Applied before the individual knobs, so any explicit `GCRY_*` still wins — and the `soundness` field on `/gc-stats` demotes to `sound-roots-only` / `tuned` when one does. See [SOUND-DEFAULTS.md](SOUND-DEFAULTS.md) |
 | `GCRY_DISABLE_INTERIOR=1` | Base-pointer-only ambient roots (interiors are **on** by default since 0.22.1: under `--release` LLVM keeps only `buffer + i` alive across a strength-reduced loop and base-only marking frees the live buffer — `make interior-only-buffer`). Measurement escape; crashes real programs |

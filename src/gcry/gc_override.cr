@@ -352,6 +352,10 @@ module GC
     heap.incremental_auto = false
   end
 
+  # The dormant budget `GCRY_PARALLEL_DORMANT(_ALL)=1` gets when no
+  # `GCRY_EMPTY_CHUNK_RETAIN` was given: one Parallel major threshold.
+  PARALLEL_DORMANT_DEFAULT_RETAIN = Gcry::Heap::PROCESS_GC_THRESHOLD_PARALLEL
+
   # Use Gcry::OS.getenv — Crystal's ENV uses `once` + Fiber, unavailable in GC.init.
   private def self.apply_env_config(heap : Gcry::Heap) : Nil
     heap.root_phase_timing = env_flag_one?("GCRY_ROOT_PHASE_TIMING")
@@ -497,6 +501,16 @@ module GC
 
     if retain = env_u64("GCRY_EMPTY_CHUNK_RETAIN")
       heap.empty_chunk_retain = retain
+    elsif heap.parallel_empty_chunk_dormant && heap.empty_chunk_retain < PARALLEL_DORMANT_DEFAULT_RETAIN
+      # The dormant opt-ins release empties *within* this budget, and the
+      # process default is 0 on Linux (512 KiB on Darwin) since 2026-08-03,
+      # which left `GCRY_PARALLEL_DORMANT=1` — the documented Parallel RSS
+      # opt-in — and `_ALL` doing nothing at all for two months: Kemal EC4
+      # post-GC RSS 83.4 MB with it against 83.7 without, 19.3 MB once a
+      # budget was given (`bench/log/linux/2026-09-26-parallel-dormant-inert/`).
+      # One Parallel threshold is what a cycle can reuse; an explicit
+      # `GCRY_EMPTY_CHUNK_RETAIN` still wins.
+      heap.empty_chunk_retain = PARALLEL_DORMANT_DEFAULT_RETAIN
     end
     if warm = env_u64("GCRY_EMPTY_CHUNK_WARM_RETAIN")
       heap.empty_chunk_warm_retain = warm

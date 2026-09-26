@@ -3,7 +3,7 @@ BIN := bin
 # Where `thread-uaf-sample` leaves the runs that said something.
 SAMPLE_DIR := bench/log/ci-samples
 
-.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
+.PHONY: all spec spec-process tlab-nursery-sample fuzz fuzz-short fuzz-replay property-test property-test-short layout-property-test layout-property-test-short mt-property-test mt-property-test-short stw-mt-property-test stw-mt-property-test-short pattern-fuzz pattern-fuzz-short scrub-margin scrub-midswap stw-startup-hang stw-watchdog stw-epoch stw-ack-window stw-monitor-gate greg-roots scheduler-roots ivar-layout-roots ec-queue-audit nested-spawn-uaf mark-audit thread-block-audit thread-birth-root thread-churn-uaf heap-counters thread-uaf-sample poison-holders perf-baseline darwin-page-query lag-scan-rss parallel-dormant darwin-static-root-init darwin-static-root-sections darwin-bitmap-page-release poison-freed interior-only-buffer unaligned-only-buffer kernels-broken kernels-ir bench-kernels bench-gc-phases large-freelist-madvise segv-report thread-storm thread-storm-short oom-test oom-test-short oom-no-hang fork-test finalizer-complex nursery-headers nursery-bitmap-marks nursery-tlab-smoke bitmap-marks-freelist layout-knob-check parallel-mark-process microbench pause-budget stw-lag-pause rss-leak compiler-gc-contract kemal-e2e soft-soak-ec4 soft-soak-ec4-smoke stackmap-smoke trace-smoke sound-profile-smoke mutate soak soak-smoke format format-check lint invariants coverage coverage-kcov coverage-unreachable coverage-macro asan asan-spec valgrind valgrind-samples samples bench-run-all bench-run-kemal bench-run-kemal-debug bench-run-kemal-symbols bench-run-acik bench-perf-smoke bench-sound-profile bench-crystal-metric bench-kemal-record clean help
 
 all: spec samples
 
@@ -1856,6 +1856,17 @@ darwin-page-query: $(BIN)
 # on: at most 32 KiB of growth per parked fiber (4.5 measured). Skip off is the
 # red arm, constructed every run: the full-window scan must fault in at least
 # 128 KiB per fiber (245.9 measured), or the ceiling proves nothing.
+# `GCRY_PARALLEL_DORMANT=1`, the multi-mutator RSS opt-in, must make empty
+# chunks dormant. It did nothing on Linux from 2026-08-03 to 2026-09-26 (its
+# budget defaulted to 0) and no gate noticed. Red arm, run every time: the same
+# knob with GCRY_EMPTY_CHUNK_RETAIN=0, the pre-fix budget, must stay inert.
+parallel-dormant: $(BIN)
+	$(CRYSTAL) build -Dgc_none bench/parallel_dormant.cr -o $(BIN)/parallel_dormant --error-trace
+	$(BIN)/parallel_dormant
+	GCRY_PARALLEL_DORMANT=1 $(BIN)/parallel_dormant --expect-dormant
+	GCRY_PARALLEL_DORMANT_ALL=1 $(BIN)/parallel_dormant --expect-dormant
+	GCRY_PARALLEL_DORMANT=1 GCRY_EMPTY_CHUNK_RETAIN=0 $(BIN)/parallel_dormant --expect-inert
+
 lag-scan-rss: $(BIN)
 	$(CRYSTAL) build -Dgc_none bench/lag_scan_rss.cr -o $(BIN)/lag_scan_rss --error-trace
 	@if [ "$$(uname -s)" = Darwin ]; then \
