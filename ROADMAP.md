@@ -959,7 +959,14 @@ kept finding the rest.
       Naming, placing and walking a thread is also still not showing that
       anything is reachable only from it.
       `bench/log/linux/2026-09-19-thread-census-names/FINDINGS.md`
-- [ ] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice.** Filed as a
+- [x] **An aarch64 SEGV in `pthread_getattr_np`, now seen twice — closed
+      2026-09-26: 0 sightings in the 511 CI runs since the birth root.** A census
+      of every aarch64 job since 2026-08-18 (2 562 jobs, 537 runs) found six
+      sightings, the last at 05:41 UTC on 2026-08-20; `10289b3` (root the
+      `Thread` until it publishes) landed at 06:45. 6 in the 26 runs before it,
+      0 in the 511 after — Fisher p = 7·10⁻⁹.
+      `bench/log/linux/2026-09-26-aarch64-getattr-census/FINDINGS.md`
+      The original entry: Filed as a
       one-off after run `31933855152` (`make scheduler-roots`, commit `e7de946`,
       green on re-run); it recurred four hours later in run `31950823605`
       (`make ec-queue-audit`, commit `4645bf7`), same call chain, address ending
@@ -2260,8 +2267,17 @@ kept finding the rest.
       payload intact). Growth now allocates, copies, publishes, then frees;
       `make index-grow-race` is the gate.
       `bench/log/linux/2026-09-25-index-grow-realloc/FINDINGS.md`
-- [ ] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
-      of a freed block.** It faults inside `pthread_getattr_np` under
+- [x] **The second use-after-free: gcry reads a `Thread`'s `@system_handle` out
+      of a freed block — its CI signature closed 2026-09-26.** Every sighting
+      of the poisoned-handle fault in `pthread_getattr_np` predates the birth
+      root (`10289b3`, 2026-08-20 06:45 UTC): 6 in the 26 CI runs before it, **0
+      in the 511 after** (aarch64, the platform that showed it). That closes the
+      observed defect, not the mechanism's proof, and not the theoretical
+      windows (a dying thread between `Thread.threads.delete` and `detach`; the
+      interval inside `pthread_create`), which stay open under "A thread gcry
+      has not heard of yet".
+      `bench/log/linux/2026-09-26-aarch64-getattr-census/FINDINGS.md`
+      The entry as it stood: It faults inside `pthread_getattr_np` under
       `stop_world`, on a `pthread_t` that is gcry's own tagged poison
       (`0xdeadff…`). Seen on aarch64 CI on 2026-08-16 (twice), on x86_64 in the
       STW × TLAB test on 2026-08-17, and again on aarch64 on 2026-08-17 **with
