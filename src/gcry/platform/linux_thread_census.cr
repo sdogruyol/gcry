@@ -29,10 +29,11 @@
 require "c/sys/uio"
 
 lib LibC
-  # glibc ≥ 2.30 and musl both export this; the alternative is a raw
-  # `syscall(SYS_getdents64, …)` with a per-architecture number, and a wrong
-  # constant there is a silent misread rather than a link error.
-  fun getdents64(fd : Int, dirp : Void*, count : UInt) : Int
+  {% if flag?(:musl) %}
+    fun getdents64 = getdents(fd : Int, dirp : Void*, count : UInt) : Int
+  {% else %}
+    fun getdents64(fd : Int, dirp : Void*, count : UInt) : Int
+  {% end %}
   fun gettid : Int
   fun pthread_setname_np(thread : PthreadT, name : Char*) : Int
 
