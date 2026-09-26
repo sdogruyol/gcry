@@ -30,7 +30,9 @@ module Gcry
     lib LibMachVM
       fun mach_vm_page_range_query(target_map : Port, address : UInt64, size : UInt64,
                                    dispositions : UInt64, dispositions_count : UInt64*) : KernReturn
-      fun task_info(target_task : Port, flavor : Int32, info : Void*, info_count : UInt32*) : KernReturn
+      # The same signature `bench/bench_rss.cr` binds (`UInt32*` info): a C
+      # function bound twice must be bound identically, and the soak links both.
+      fun task_info(target_task : Port, flavor : Int32, info : UInt32*, info_count : UInt32*) : KernReturn
     end
 
     # <mach/vm_region.h>, VM_PAGE_QUERY_PAGE_*.
@@ -180,7 +182,7 @@ module Gcry
     private def self.task_compressed : UInt64
       buf = uninitialized UInt64[128]
       count = 256_u32
-      kr = LibMachVM.task_info(LibMachVM.mach_task_self_, TASK_VM_INFO, buf.to_unsafe.as(Void*), pointerof(count))
+      kr = LibMachVM.task_info(LibMachVM.mach_task_self_, TASK_VM_INFO, buf.to_unsafe.as(UInt32*), pointerof(count))
       return UInt64::MAX unless kr == 0 && count * 4 >= TASK_VM_INFO_COMPRESSED + 8
       (buf.to_unsafe.as(UInt8*) + TASK_VM_INFO_COMPRESSED).as(UInt64*).value
     end

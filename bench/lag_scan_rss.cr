@@ -52,7 +52,8 @@ require "../src/gcry"
     end
 
     $mach_task_self_ : UInt32
-    fun task_info(task : UInt32, flavor : Int32, info : MachTaskBasicInfo*, count : UInt32*) : Int32
+    # Bound as gcry and `bench/bench_rss.cr` bind it: one C function, one signature.
+    fun task_info(task : UInt32, flavor : Int32, info : UInt32*, count : UInt32*) : Int32
   end
 
   MACH_TASK_BASIC_INFO = 20
@@ -64,7 +65,7 @@ def rss_kib : UInt64
   {% if flag?(:darwin) %}
     info = LibLagRss::MachTaskBasicInfo.new
     count = (sizeof(LibLagRss::MachTaskBasicInfo) // 4).to_u32
-    kr = LibLagRss.task_info(LibLagRss.mach_task_self_, MACH_TASK_BASIC_INFO, pointerof(info), pointerof(count))
+    kr = LibLagRss.task_info(LibLagRss.mach_task_self_, MACH_TASK_BASIC_INFO, pointerof(info).as(UInt32*), pointerof(count))
     raise "task_info: #{kr}" unless kr == 0
     info.resident_size // 1024
   {% else %}
