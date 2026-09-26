@@ -33,6 +33,24 @@ def rss_kib : UInt64
   {% end %}
 end
 
+# macOS: dormancy is `MADV_FREE_REUSABLE`, and `ps` keeps counting such pages
+# as resident until the kernel takes them; the footprint the system charges
+# the task (`TASK_VM_INFO.phys_footprint`, byte 144) does not. Printed beside
+# RSS so the two can be told apart. Through gcry's own `task_info` binding: a
+# C function bound twice must be bound identically.
+def footprint_kib : UInt64?
+  {% if flag?(:darwin) %}
+    buf = uninitialized UInt64[128]
+    count = 256_u32
+    kr = Gcry::Platform::LibMachVM.task_info(Gcry::Platform::LibMachVM.mach_task_self_, 22,
+      buf.to_unsafe.as(UInt32*), pointerof(count))
+    return nil unless kr == 0 && count * 4 >= 152
+    (buf.to_unsafe.as(UInt8*) + 144).as(UInt64*).value // 1024
+  {% else %}
+    nil
+  {% end %}
+end
+
 expect_dormant = ARGV.includes?("--expect-dormant")
 expect_inert = ARGV.includes?("--expect-inert")
 
@@ -76,15 +94,20 @@ def scrub_stack(depth : Int32) : Int32
 end
 
 peak = burst_and_drop
+peak_fp = footprint_kib
 scrub_stack(64)
 GC.collect
 GC.collect
 after = rss_kib
+after_fp = footprint_kib
 dormant = HEAP.dormant_chunk_bytes
 empty = HEAP.fully_free_chunk_bytes
 
 puts "parallel_dormant: threads=#{threads} retain=#{HEAP.empty_chunk_retain // 1024}KiB"
 puts "  RSS peak #{peak // 1024} MB, after collect #{after // 1024} MB; empty chunks #{empty >> 20} MB, dormant #{dormant >> 20} MB"
+if (pf = peak_fp) && (af = after_fp)
+  puts "  footprint peak #{pf // 1024} MB, after collect #{af // 1024} MB"
+end
 if expect_dormant && dormant == 0
   puts "FAIL: GCRY_PARALLEL_DORMANT=1 made no empty chunk dormant (#{empty >> 20} MB of them kept mapped) — the opt-in is inert"
   exit 1
