@@ -84,7 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard. RSS is unchanged. `stw_lag_pause` now checks SYSMON's touched depth,
   with `GCRY_STACK_LOW_WATER=0` as the red arm. macOS never takes this path
   (SYSMON is suspended there and has an SP)
-  (`bench/log/linux/2026-09-26-sysmon-guard-scan/`).
+  (`bench/log/linux/2026-09-26-sysmon-guard-scan/`). It also reaches a
+  default-context (EC1) program with one thread of its own, such as an
+  `Isolated` context: Kemal EC1 with one parked thread goes from 3.35 to
+  1.28 ms (`bench/log/linux/2026-09-26-ec1-extra-thread/`).
 
 ## [0.27.2] - 2026-09-25
 
