@@ -113,6 +113,14 @@ FOLL_FORCE, which goes straight through the next stack's `PROT_NONE` guard
 passes: 0 bands; after the reads: 102. The census uses exact unbuffered
 `pread`s now and reads 0.
 
+## What is left of the root phase
+
+1.13 ms of roots at EC4 after the fix, for ~110 parked fibers of ~20 KiB touched
+stack each. Not the probes: 110 pagemap reads of 64 entries take **40 µs** here
+(0.36 µs each), and a bare range check over the same 2.2 MB of words ~114 µs.
+The rest is resolving the non-zero candidates against the heap, so batching the
+probes would buy nothing; the next lever, if any, is in candidate resolution.
+
 ## What this does not say
 
 - **Throughput** is not measured here; the pause is per collection.
