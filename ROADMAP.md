@@ -2234,6 +2234,9 @@ kept finding the rest.
       (3 of 152) and with no GC calls at all (3 of 74). Samplers now classify
       it and do not count it; an upstream report is drafted, not filed.
       `bench/log/linux/2026-09-25-parallel-scheduler-deadlock/FINDINGS.md`
+      The overnight campaign on 0.27.2 (4 448 runs, 50 lane-hours, 0 failures)
+      stalled 3 times, all this deadlock by capture.
+      `bench/log/linux/2026-09-26-overnight-campaign/FINDINGS.md`
       What was open before the capture: Seed 1032, `GCRY_POISON_FREED=1 GCRY_SEGV_REPORT=1`,
       2/4/8 workers: the first arm started and nothing more was printed; no
       watchdog was armed, so no phase. 1 of 81 in a loaded campaign on the
