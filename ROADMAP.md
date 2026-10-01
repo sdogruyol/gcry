@@ -3773,6 +3773,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       sighting may have been this too. The detach walk is now bounded and
       reports through the bucket-cycle report ("while trimming"), so the next
       one names the bucket and the counters. The root cause is still open.
+      Against that reading: each detach step points the entry at the one
+      before it, which reverses the bucket in place. On a cycle that ends in
+      O(n), and every step also lowers `@large_free_bytes` by a chunk. So if
+      the next sighting spins on the same stack *without* a "while trimming"
+      report, the detach loop is ruled out, and the time is inside one
+      `unlink_chunk` call that its own bound does not catch.
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs
