@@ -32,6 +32,7 @@ in the Stride phase, with the main thread in
 sighting (seed 20102). `unlink_chunk`'s walk has been bounded since then and
 did not report, so no single walk ran past twice the index. The same seed
 passed locally at full length. `trim_large_cache`'s detach walk over the
-buckets is now bounded and reports as well. ROADMAP ("The chunk list formed a
-cycle once") has the two readings this leaves, and what the next sighting
-will say about them.
+buckets is now bounded and reports as well. Two later sightings, captured
+with `info locals`, showed it is not a cycle. Freeing a large object costs
+O(live large chunks), and retention had pushed the index to 29 000–50 000
+(`../2026-10-01-large-free-quadratic/`).

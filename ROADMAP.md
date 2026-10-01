@@ -3746,39 +3746,33 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       full load; 0 of 344 in the two campaigns before. The next sighting
       wants `GCRY_TRACE_LARGE=1`.
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
-- [ ] **The chunk list formed a cycle once (`pattern_fuzz` seed 20102,
-      2026-09-29).** Campaign-036 on `cda5dec`: main spun for 900 s in
-      `unlink_chunk`'s predecessor walk, under `GC.free` → `trim_large_cache`,
-      in the Stride phase (array growth up to 128 KiB, so large chunks). Every
-      other thread was asleep. That walk only fails to end if the list has a
-      cycle. 1 in about 1 200 `pattern_fuzz` runs across campaigns 030–036;
-      the same seed passed 3 of 3 locally. The walk is now bounded at twice
-      the index and aborts with the cycle's entry chunk, its length and the
-      entry chunk's flags. So the next sighting names which path linked a
-      chunk in twice instead of spinning.
-      **A second one, in a different structure (campaign-037, seed 20279):**
-      a large-object freelist bucket's `next_free` chain, in
-      `cache_large_chunk`'s tail walk under the lazy sweep, again in the
-      Stride phase. Not reproduced in 4 runs. That walk is now bounded and
-      reported the same way. Both are large-chunk bookkeeping in the same
-      phase; whether they share a cause is open.
-      **A third, campaign-044 (seed 20149, 2026-10-01): the same stack as the
-      first** — `GC.free` → `trim_large_cache` → `unlink_chunk`, Stride phase,
-      900 s, single mutator. But this time `unlink_chunk`'s bounded walk never
-      reported, so no single walk ran long. [INFERENCE] What did not end is
-      `trim_large_cache`'s detach loop around it. That loop stops only when the
-      bytes it detaches bring `@large_free_bytes` down. Each step re-links the
-      entry it takes, so a bucket cycle keeps it going, and the gdb snapshot
-      lands in `unlink_chunk` because that is where the time goes. The first
-      sighting may have been this too. The detach walk is now bounded and
-      reports through the bucket-cycle report ("while trimming"), so the next
-      one names the bucket and the counters. The root cause is still open.
-      Against that reading: each detach step points the entry at the one
-      before it, which reverses the bucket in place. On a cycle that ends in
-      O(n), and every step also lowers `@large_free_bytes` by a chunk. So if
-      the next sighting spins on the same stack *without* a "while trimming"
-      report, the detach loop is ruled out, and the time is inside one
-      `unlink_chunk` call that its own bound does not catch.
+- [ ] **Freeing a large object costs O(live large chunks), so freeing many is
+      quadratic (diagnosed 2026-10-01).** Measured with
+      `bench/log/linux/2026-10-01-large-free-quadratic/largefree_scale.cr`:
+      4.5 µs per free with 2 500 large chunks alive, 19 µs with 10 000 and
+      88 µs with 40 000. That is 3.5 s to free 40 000 64 KiB objects. On Linux
+      every large `GC.free` trims at once (retain 0), and the trim's
+      `unlink_chunk` walks the singly linked chunk list from the head for the
+      predecessor, while `index_remove` shifts the sorted index.
+      This is what the `pattern_fuzz` Stride-phase "spins" were, all four: 900 s
+      under `GC.free` → `trim_large_cache` → `unlink_chunk` in campaign-036
+      (seed 20102), campaign-044 (20149), campaign-045 (20109) and the
+      stride-only reproducer (20012). The last two were captured with
+      `info locals`: `unlink_chunk` at step 13 981 of a 58 262 limit and
+      45 768 of 100 932, and the trim's detach loop at its first step. So no
+      cycle: the index held 29 000–50 000 chunks against about 2 500 normally,
+      kept by conservative retention of several phases' worth of blocks.
+      They were read as cycles at first, and three walks are now bounded and
+      report a cycle if one ever exists: `unlink_chunk`'s,
+      `cache_large_chunk`'s tail walk, and the trim's detach walk.
+      [INFERENCE] The campaign-037 "bucket cycle" (seed 20279,
+      `cache_large_chunk`'s tail walk) is likely the same kind of cost: that
+      walk is O(bucket length) per insert.
+      Open: O(1) removal. A doubly linked list does not fit — `ChunkHeader` is
+      32 bytes and full, and a `prev` field breaks a large payload's 16-byte
+      alignment. Cheaper: remove a trim's detached chunks in one pass over
+      `@chunks` (O(n + k)), plus a small hysteresis on Linux's retain of 0 so
+      trims come in batches (an RSS policy change).
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs
