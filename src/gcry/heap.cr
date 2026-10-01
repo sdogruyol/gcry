@@ -2294,13 +2294,15 @@ module Gcry
       BlockHeader.large_header_from_user(user).value.next_free
     end
 
-    # A large freelist bucket has a cycle (`cache_large_chunk`'s tail walk
-    # passed *limit*). Floyd over `next_free` from the bucket head, then one
-    # line: where the cycle starts, its length, that entry's header, whether
-    # the block being inserted is already on it, and the counters of the three
-    # ways a block can reach a bucket twice. Aborts: the list cannot be
-    # repaired from here, and the alternative is the spin.
-    private def report_large_bucket_cycle(bucket : Int32, inserting : Void*, limit : UInt64) : NoReturn
+    # A large freelist bucket has a cycle: a walk over it passed *limit*,
+    # either `cache_large_chunk`'s tail walk or `trim_large_cache`'s detach
+    # (*doing*). Floyd over `next_free` from the bucket head, then one line:
+    # where the cycle starts, its length, that entry's header, whether the
+    # block in hand is on it, and the counters of the three ways a block can
+    # reach a bucket twice. Aborts: the list cannot be repaired from here, and
+    # the alternative is the spin.
+    private def report_large_bucket_cycle(bucket : Int32, inserting : Void*, limit : UInt64,
+                                          doing : String = "caching") : NoReturn
       head = @large_freelists[bucket]
       slow = head
       fast = head
@@ -2337,7 +2339,9 @@ module Gcry
       buf = uninitialized UInt8[RawOut::LIMIT]
       n = RawOut.append(buf.to_unsafe, 0, "gcry: FATAL large freelist bucket ")
       n = RawOut.append_u64(buf.to_unsafe, n, bucket.to_u64)
-      n = RawOut.append(buf.to_unsafe, n, " has a cycle while caching 0x")
+      n = RawOut.append(buf.to_unsafe, n, " has a cycle while ")
+      n = RawOut.append(buf.to_unsafe, n, doing)
+      n = RawOut.append(buf.to_unsafe, n, " 0x")
       n = RawOut.append_hex(buf.to_unsafe, n, inserting.address)
       if start.null?
         n = RawOut.append(buf.to_unsafe, n, ": none from the head, the chain is just longer than the index")
@@ -2353,7 +2357,7 @@ module Gcry
         n = RawOut.append_u64(buf.to_unsafe, n, h.size.to_u64)
         n = RawOut.append(buf.to_unsafe, n, " flags 0x")
         n = RawOut.append_hex(buf.to_unsafe, n, h.flags.to_u64)
-        n = RawOut.append(buf.to_unsafe, n, on_cycle ? "; the block being cached is on it" : "; the block being cached is not on it")
+        n = RawOut.append(buf.to_unsafe, n, on_cycle ? "; the block in hand is on it" : "; the block in hand is not on it")
       end
       n = RawOut.append(buf.to_unsafe, n, ". cached twice ")
       n = RawOut.append_u64(buf.to_unsafe, n, @large_cached_twice)
@@ -2488,11 +2492,22 @@ module Gcry
       return if @large_free_bytes <= effective
 
       detached = Pointer(Void).null # chain of users, linked by next_free
+      # Bounded like `cache_large_chunk`'s walk, and for the same reason: every
+      # entry is an indexed chunk, so a walk longer than twice the index has
+      # gone round a cycle. It did once here, single-threaded, spinning for
+      # 900 s inside `GC.free` with no report (`pattern_fuzz` seed 20149,
+      # campaign-044, 2026-10-01). The loop ends only when the bytes it
+      # detaches bring `@large_free_bytes` down, and a cycle over entries it
+      # has already re-linked never does.
+      walk_limit = @chunk_index_count.to_u64 &* 2 &+ 64
       detach = -> do
         b = LARGE_FREE_BUCKETS - 1
+        steps = 0_u64
         while b >= 0 && @large_free_bytes > effective
           user = @large_freelists[b]
           while user && @large_free_bytes > effective
+            steps &+= 1
+            report_large_bucket_cycle(b, user, walk_limit, "trimming") if steps > walk_limit
             header = BlockHeader.large_header_from_user(user)
             chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
             nxt = header.value.next_free
