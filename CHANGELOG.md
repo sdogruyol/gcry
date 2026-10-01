@@ -55,14 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A cycle in a large-object freelist bucket aborts with a report instead of
-  spinning.** `cache_large_chunk` walks a bucket to its tail, and it spun
-  for 900 s once in stress (`pattern_fuzz`, 1 in 288 runs). The walk is now
-  bounded like `unlink_chunk`'s. Past the bound it prints where the cycle
-  starts, its length, that block's header, whether the block being cached
-  is already on it, and the counters of the ways a block can reach a bucket
-  twice, then aborts (`bench/log/linux/2026-09-30-campaign-037/`).
-  `trim_large_cache`'s walk over the buckets is bounded the same way.
+- **Walks over a large-object freelist bucket report a cycle instead of
+  spinning.** `cache_large_chunk`'s walk to a bucket's tail and
+  `trim_large_cache`'s walk over the buckets are bounded like
+  `unlink_chunk`'s. Past the bound they print where the cycle starts, its
+  length, that block's header, whether the block in hand is on it, and the
+  counters of the ways a block can reach a bucket twice, then abort. These
+  were written for `pattern_fuzz` runs that stalled for 900 s
+  (`bench/log/linux/2026-09-30-campaign-037/`). Those stalls turned out not
+  to be cycles: freeing a large object costs O(live large chunks), and
+  retention had grown the heap to 30 000+ of them. That cost is still open
+  (`bench/log/linux/2026-10-01-large-free-quadratic/`).
 
 - **`GCRY_PARALLEL_MARK`: a narrow graph no longer stalls the mark.** Every
   scanned object's children went through the shared mark stack under one
