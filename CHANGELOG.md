@@ -62,9 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starts, its length, that block's header, whether the block being cached
   is already on it, and the counters of the ways a block can reach a bucket
   twice, then aborts (`bench/log/linux/2026-09-30-campaign-037/`).
-  `trim_large_cache`'s walk over the buckets is bounded the same way. It
-  spun for 900 s once, single-threaded inside `GC.free`, with no report
-  (`pattern_fuzz`, campaign-044).
+  `trim_large_cache`'s walk over the buckets is bounded the same way.
 
 - **`GCRY_PARALLEL_MARK`: a narrow graph no longer stalls the mark.** Every
   scanned object's children went through the shared mark stack under one

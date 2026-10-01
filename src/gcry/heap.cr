@@ -2492,13 +2492,12 @@ module Gcry
       return if @large_free_bytes <= effective
 
       detached = Pointer(Void).null # chain of users, linked by next_free
-      # Bounded like `cache_large_chunk`'s walk, and for the same reason: every
-      # entry is an indexed chunk, so a walk longer than twice the index has
-      # gone round a cycle. It did once here, single-threaded, spinning for
-      # 900 s inside `GC.free` with no report (`pattern_fuzz` seed 20149,
-      # campaign-044, 2026-10-01). The loop ends only when the bytes it
-      # detaches bring `@large_free_bytes` down, and a cycle over entries it
-      # has already re-linked never does.
+      # Bounded like `cache_large_chunk`'s walk: every entry is an indexed
+      # chunk, so a walk longer than twice the index has gone round a cycle,
+      # and a report says more than a spin. Defensive. The 900 s `pattern_fuzz`
+      # stalls under this call were not a cycle but `unlink_chunk`'s O(n) walk
+      # over a list that retention had grown to 30 000+ chunks
+      # (`bench/log/linux/2026-10-01-large-free-quadratic/`).
       walk_limit = @chunk_index_count.to_u64 &* 2 &+ 64
       detach = -> do
         b = LARGE_FREE_BUCKETS - 1
