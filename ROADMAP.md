@@ -3762,6 +3762,17 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       Stride phase. Not reproduced in 4 runs. That walk is now bounded and
       reported the same way. Both are large-chunk bookkeeping in the same
       phase; whether they share a cause is open.
+      **A third, campaign-044 (seed 20149, 2026-10-01): the same stack as the
+      first** — `GC.free` → `trim_large_cache` → `unlink_chunk`, Stride phase,
+      900 s, single mutator. But this time `unlink_chunk`'s bounded walk never
+      reported, so no single walk ran long. [INFERENCE] What did not end is
+      `trim_large_cache`'s detach loop around it. That loop stops only when the
+      bytes it detaches bring `@large_free_bytes` down. Each step re-links the
+      entry it takes, so a bucket cycle keeps it going, and the gdb snapshot
+      lands in `unlink_chunk` because that is where the time goes. The first
+      sighting may have been this too. The detach walk is now bounded and
+      reports through the bucket-cycle report ("while trimming"), so the next
+      one names the bucket and the counters. The root cause is still open.
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs
