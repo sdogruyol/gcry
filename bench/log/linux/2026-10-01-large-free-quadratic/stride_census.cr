@@ -47,7 +47,6 @@ module Distributions
   end
 end
 
-
 def census_and_exit(heap : Gcry::Heap, phase : Int32) : NoReturn
   on_list = Set(UInt64).new
   list_bytes = 0_u64
