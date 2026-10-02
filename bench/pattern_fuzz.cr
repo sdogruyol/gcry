@@ -128,7 +128,10 @@ end
 
 def run_phase(rng : Random, name : String, sizes : Array(Int32), heap : Gcry::Heap) : PatternPhase
   errors = [] of String
-  live = [] of Pointer(Void)
+  # Full capacity up front: a growing array leaves its old buffers behind,
+  # each with a copy of the pointers it held, and those copies keep pointing
+  # at what is freed below (see the comment there).
+  live = Array(Pointer(Void)).new(sizes.size)
 
   rss_before = read_rss_kb
   heap_before = Gcry.metrics(heap).heap_size
@@ -138,8 +141,9 @@ def run_phase(rng : Random, name : String, sizes : Array(Int32), heap : Gcry::He
     live << ptr
   end
 
-  # Null what was freed. A freed large block is unmapped at once on Linux, and
-  # the next large mapping reuses the range, so a dangling entry here pointed
+  # Null what was freed; with the capacity above there is no other copy. A
+  # freed large block is unmapped at once on Linux, and the next large
+  # mapping reuses the range, so a dangling entry here pointed
   # into a later phase's buffer. When a stale word kept one old `live` buffer,
   # that chained buffers from phase after phase, grew the heap to 30 000+
   # large chunks, and the quadratic large free stalled the run for 900 s
