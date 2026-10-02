@@ -3761,7 +3761,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `info locals`: `unlink_chunk` at step 13 981 of a 58 262 limit and
       45 768 of 100 932, and the trim's detach loop at its first step. So no
       cycle: the index held 29 000–50 000 chunks against about 2 500 normally,
-      kept by conservative retention of several phases' worth of blocks.
+      kept by conservative retention of several phases' worth of blocks. The
+      census and holders search in `stride_census.cr` named the chain:
+      retained `live` buffers held other buffers *through dangling entries*.
+      The harness freed blocks with `GC.free` and kept their pointers; Linux
+      unmapped those chunks at once and the next large `mmap` reused the
+      ranges, so the stale pointers landed inside later phases' buffers.
+      `pattern_fuzz` now nulls what it frees.
       They were read as cycles at first, and three walks are now bounded and
       report a cycle if one ever exists: `unlink_chunk`'s,
       `cache_large_chunk`'s tail walk, and the trim's detach walk.

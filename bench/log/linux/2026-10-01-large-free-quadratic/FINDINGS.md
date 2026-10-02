@@ -47,6 +47,41 @@ alive at once. After a phase's `GC.collect`, about 2 500 of them are still
 `USED` (the census in `stride_repro.cr`), held through a stale word to the old
 `live` array's buffer.
 
+## Why the index grew: dangling pointers into recycled address ranges
+
+`stride_census.cr` (beside this file) is the Stride phase alone. When the
+index passes 8 000 chunks it stops, counts what is in the index, and runs the
+holders search on every retained `live` buffer. A buffer is recognised by its
+first word pointing into the heap; the stride blocks themselves are zero.
+It tripped in the plain lane at phase 4 (campaign-046, seed 20088):
+
+    CENSUS phase=4 index=10061 small=44 large_free_on_list=0 large_free_off_list=0
+           large_used=10017 ... counter=0MiB twice=0 taken_used=0
+
+So nothing was stuck on a freelist. Ten thousand large blocks were alive.
+The holders of the retained buffers:
+
+- one buffer was held by its 32-byte `Array` object, which a stack word held
+  (the usual one-phase retention after `live = [] of Pointer(Void)`);
+- the others were held by **other buffers**. One buffer had 5 holders, each
+  pointing *into* it at `block+4096` or `block+36864`.
+
+[INFERENCE] The harness frees every even entry with `GC.free` and keeps the
+pointer in its `live` array. Linux trims a freed large chunk at once
+(retain 0) and unmaps it, and the next large `mmap` reuses that range. The
+dangling entry now points into whatever was mapped there, often a later
+phase's `live` buffer. The offsets fit: a freed chunk whose base sat 4096
+bytes above a new buffer's base reads as `buffer+4096`. One buffer held by a
+stale stack word then holds, through dangling entries, buffers from later
+phases and every block they point at. The chain grows phase by phase, and
+the quadratic free does the rest.
+
+This is conservative scanning meeting a program that keeps dangling pointers,
+with address reuse quick enough to land them on live objects. `pattern_fuzz`
+now nulls each entry it frees, which is what it meant to measure.
+`GCRY_RELEASE_QUARANTINE=N` holds released ranges `PROT_NONE` for N
+collections, and it would also break the chain; it was not measured here.
+
 ## Not fixed here
 
 O(1) removal needs a doubly linked chunk list, and `ChunkHeader` is 32 bytes

@@ -138,8 +138,16 @@ def run_phase(rng : Random, name : String, sizes : Array(Int32), heap : Gcry::He
     live << ptr
   end
 
+  # Null what was freed. A freed large block is unmapped at once on Linux, and
+  # the next large mapping reuses the range, so a dangling entry here pointed
+  # into a later phase's buffer. When a stale word kept one old `live` buffer,
+  # that chained buffers from phase after phase, grew the heap to 30 000+
+  # large chunks, and the quadratic large free stalled the run for 900 s
+  # (bench/log/linux/2026-10-01-large-free-quadratic/).
   live.each_with_index do |ptr, i|
-    GC.free(ptr) if i.even?
+    next unless i.even?
+    GC.free(ptr)
+    live[i] = Pointer(Void).null
   end
   live = [] of Pointer(Void)
 
