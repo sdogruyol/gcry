@@ -3766,8 +3766,11 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       retained `live` buffers held other buffers *through dangling entries*.
       The harness freed blocks with `GC.free` and kept their pointers; Linux
       unmapped those chunks at once and the next large `mmap` reused the
-      ranges, so the stale pointers landed inside later phases' buffers.
-      `pattern_fuzz` now nulls what it frees.
+      ranges, so the stale pointers landed inside later phases' buffers,
+      directly or through copies in the array's growth buffers.
+      `pattern_fuzz` now preallocates and nulls what it frees, and the
+      stride-only census tripped 0 times in 321 runs against 5 in 251
+      before.
       They were read as cycles at first, and three walks are now bounded and
       report a cycle if one ever exists: `unlink_chunk`'s,
       `cache_large_chunk`'s tail walk, and the trim's detach walk.

@@ -77,8 +77,23 @@ phases and every block they point at. The chain grows phase by phase, and
 the quadratic free does the rest.
 
 This is conservative scanning meeting a program that keeps dangling pointers,
-with address reuse quick enough to land them on live objects. `pattern_fuzz`
-now nulls each entry it frees, which is what it meant to measure.
+with address reuse quick enough to land them on live objects.
+
+Nulling the freed entries was not enough. A run with it still tripped, and
+there the holders were the `live` array's **growth buffers**: 3 072-,
+6 144-, 10 240-, 16 384- and 24 576-byte blocks, each left behind when the
+array doubled, each with a copy of the pointers taken before the nulling.
+Campaign-047 ran the census harness three ways (stride phases only, 200 per
+run, index over 8 000 counted):
+
+| harness | runs | tripped |
+|---|---:|---:|
+| as before: freed entries kept | 251 | 5 (2.0%) |
+| freed entries nulled | 181 | 2 (1.1%) |
+| `live` preallocated, freed entries nulled | 321 | 0 |
+
+At 2%, 0 in 321 has a probability of about 0.15%. `pattern_fuzz` now
+preallocates `live` to the phase's size and nulls what it frees.
 `GCRY_RELEASE_QUARANTINE=N` holds released ranges `PROT_NONE` for N
 collections, and it would also break the chain; it was not measured here.
 
