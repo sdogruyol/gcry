@@ -3877,6 +3877,12 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       −52% / JsonParsePure −44% for +80% on RegexDna. Past the plan's +5%
       limit, so it waits for an explicit budget
       (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+- [ ] **macOS: Binarytrees' mutator is 10–20% slower than Boehm's whole run
+      (2026-10-03).** Not the pauses, not faults, not the allocation fast
+      path (faster than Boehm's in isolation), and not how often it collects:
+      on Linux the same split leaves gcry's mutator level with Boehm. Next is
+      an in-process profile on a macOS runner
+      (`bench/log/macos/2026-10-03-binarytrees-mutator/`).
 - [ ] **Per-collection mark cost is ~2.6× Boehm's on a large pointer heap
       (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms
       against Boehm's 178 ms after the heap-span prefilter. A SIGPROF profile
