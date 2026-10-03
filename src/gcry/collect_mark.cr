@@ -453,6 +453,10 @@ module Gcry
       user = user_of(chunk, header).as(UInt8*)
       size = block_payload(chunk, header).to_u64
       return if size == 0
+      # Serial mark only. Four helpers adding to one field per object is the
+      # shared-line write that already costs parallel mark its scaling; a
+      # parallel cycle leaves the count short, and the cap stays at its floor.
+      @mark_scanned_bytes &+= size unless @mark_parallel
 
       if @layout_precise && size >= 4
         tid = user.as(Int32*).value
@@ -713,6 +717,9 @@ module Gcry
       value_mode = entry.hash_value_mode
       value_bytes = entry.hash_value_bytes.to_u64
       base = entries.as(UInt8*)
+      # The entries blob is marked without being pushed, so `scan_object`
+      # never counts it; the walk below is where the mark reads it.
+      @mark_scanned_bytes &+= used &* stride unless @mark_parallel
 
       i = 0_u64
       while i < used

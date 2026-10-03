@@ -46,14 +46,36 @@ module Gcry
     ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
     property adaptive_threshold : Bool = false
     property adaptive_threshold_pct : UInt64 = 100_u64
-    # The cap on the adaptive threshold (`GCRY_THRESHOLD_MAX`). At the default
-    # 64 MiB the schedule turns linear once live × factor passes it: a live
-    # set growing to 550 MiB is collected every 64 MiB, and its mark work sums
-    # to quadratic in the live set. Raised, with the factor lowered, the
-    # growth stays geometric the way Boehm's free-space divisor keeps it — at
-    # a peak-RSS cost measured in
-    # `bench/log/linux/2026-10-03-threshold-cap-curve/`.
+    # The floor of the cap on the adaptive threshold (`GCRY_THRESHOLD_MAX`).
+    # A flat 64 MiB made the schedule linear once live × factor passed it: a
+    # live set growing to 550 MiB was collected every 64 MiB, nine majors
+    # between 100 and 550 MiB where Boehm's free-space divisor takes five,
+    # and its mark work summed to quadratic in the live set.
     property adaptive_threshold_max : UInt64 = ADAPTIVE_THRESHOLD_MAX
+    # Bytes the last major's mark scanned: every reached object that is not
+    # atomic, small or large, counted by `scan_object` as it reads it. It is
+    # the mark's own measure of its work, so it needs no notion of which
+    # chunks hold what — the freelist allocator mixes kinds in one chunk.
+    # Counted by a serial mark only (`GCRY_PARALLEL_MARK` leaves it short).
+    getter mark_scanned_bytes : UInt64 = 0_u64
+
+    # The cap grows with the bytes the mark has to *read*, a third of them
+    # × factor once that passes the floor, so the schedule stays geometric
+    # where marking is what a major costs. Atomic bytes (strings, buffers)
+    # are marked without being read; a large live set of them gains nothing
+    # from fewer majors and would pay the whole threshold in RSS — RegexDna
+    # +80% peak with the cap simply raised — which is why the cap does not
+    # follow total live bytes. A third, not a half: half put +11% on
+    # JsonGenerate's peak RSS, past the +5% budget; a third left every
+    # crystal-metric benchmark's peak unchanged
+    # (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+    SCAN_LIVE_CAP_DIVISOR = 3_u64
+
+    private def adaptive_threshold_cap : UInt64
+      scaled = @mark_scanned_bytes &* @adaptive_threshold_pct // 100_u64 // SCAN_LIVE_CAP_DIVISOR
+      scaled > @adaptive_threshold_max ? scaled : @adaptive_threshold_max
+    end
+
     # The warm-retention budget follows the live set after every major
     # whether the threshold is fixed or adaptive: what one cycle allocates is
     # what the sweep keeps, capped by the threshold so a fixed 128 MiB never
@@ -76,7 +98,8 @@ module Gcry
       want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
-        @gc_threshold = want < @adaptive_threshold_max ? want : @adaptive_threshold_max
+        cap = adaptive_threshold_cap
+        @gc_threshold = want < cap ? want : cap
       end
       if @warm_retain_follows_live
         @empty_chunk_warm_retain = want < @gc_threshold ? want : @gc_threshold
@@ -2504,6 +2527,7 @@ module Gcry
             # chunks that clear will reach.
             audit_chunk_list
             clear_all_marks
+            @mark_scanned_bytes = 0_u64
           else
             clear_nursery_marks
           end
@@ -3037,6 +3061,7 @@ module Gcry
         note_collection_begin
         @mark_stack.clear
         clear_all_marks
+        @mark_scanned_bytes = 0_u64
         @before_collect_callbacks.each(&.call)
         @roots.each { |ptr| mark_explicit_root(ptr) }
         mark_large_alloc_in_flight

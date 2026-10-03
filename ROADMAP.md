@@ -3867,15 +3867,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
 - [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
       bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
       on post-GC RSS, at 12 reps.
-- [ ] **Decide the adaptive threshold cap for large live sets (2026-10-03).**
-      Past 64 MiB of live × factor the threshold stops growing, so a growing
-      live set is collected every 64 MiB and its mark work sums to quadratic:
-      crystal-metric Primes and JsonParsePure run at 26–33% of Boehm on every
-      CI platform for that reason more than any other. `GCRY_THRESHOLD_MAX`
-      now lifts the cap (Primes −52%, JsonParsePure −44% wall at 4 GiB), but
-      every point on the measured curve costs +20–80% peak RSS on RegexDna,
-      Revcomp or JsonParseSerializable, past the plan's +5% limit. Open: the
-      RSS budget for a default change, which is a product call
+- [ ] **Decide the RSS budget for large live sets (2026-10-03).** The
+      adaptive threshold's cap now follows a third of the bytes the mark
+      scanned (Primes −17%, peak RSS unchanged everywhere). Primes is still
+      2.1× and JsonParsePure 2.3× Boehm's process time, and the rest of that
+      is available only for RSS: a half instead of a third put +11% on
+      JsonGenerate's peak, and `GCRY_THRESHOLD_MAX=4294967296` takes Primes
+      −52% / JsonParsePure −44% for +80% on RegexDna. Past the plan's +5%
+      limit, so it waits for an explicit budget
       (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
 - [ ] **Per-collection mark cost is ~2.6× Boehm's on a large pointer heap
       (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms

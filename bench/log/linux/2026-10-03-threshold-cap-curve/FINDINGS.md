@@ -69,25 +69,69 @@ Wall / peak RSS / Σ pause ms:
 RegexDna and Revcomp hold large *atomic* live sets (strings): their mark is
 ~1 ms in total, so a bigger threshold buys them nothing and costs the full
 threshold in RSS. Primes and JsonParsePure hold large *pointer* live sets
-whose mark is the whole pause. A collection-cost term would tell the two
-apart, but JsonGenerate and JsonParseSerializable are GC-heavy too (Σ pause
-1521 and 375 ms, most of it in the untimed setup), and they pay +11–24% RSS on
-every row above, so such a controller would not get under the limit either.
+whose mark is the whole pause. A duty-cycle term would not separate them
+cleanly: JsonGenerate and JsonParseSerializable are GC-heavy too (Σ pause
+1521 and 375 ms, most of it in the setup crystal-metric does not time), and
+they pay +11–24% RSS on the rows above.
 
 Knuckeotide's −29…−37% is not an effect: its live set never reaches 64 MiB,
 so the cap does not bind, and its peak RSS is bimodal run to run under either
 arm (default: 70.5, 70.6, 48.9, 70.5, 54.6, 57.3 MB; 4 GiB cap: 50.2, 54.7,
 70.8, 49.6, 55.0, 70.5 MB).
 
-## Decision
+## The rule adopted: the cap follows what the mark reads
 
-No point on the curve buys the Primes / JsonParsePure gain within the +5%
-peak-RSS limit, so the default stays at 64 MiB. Changing it is a product call
-on the RSS budget, which the plan asks to be made explicitly; it is open in
-ROADMAP.md.
+The cap's job is to amortise the mark, and the mark's cost is the bytes it
+reads, not the bytes it keeps. So the cap is now
+`max(GCRY_THRESHOLD_MAX, scanned × factor / 3)`, where *scanned* is what the
+last major's mark read: every object `scan_object` scanned past its atomic
+early-out, plus the entries region of each `Hash` it walked (marked without
+being pushed, so `scan_object` never sees it). Atomic bytes do not count. The
+threshold can only rise against the old rule, and only once a major has
+scanned more than 192 MiB, so small heaps (Kemal: ~10 MB live) are untouched.
 
-What changed is that the cap is now a knob, `GCRY_THRESHOLD_MAX`. Before, there
-was no adaptive way past 64 MiB: `GCRY_THRESHOLD_FACTOR` is clamped by it,
-and `GCRY_THRESHOLD` pins a fixed threshold that no longer follows the live
-set. The spec (`spec/adaptive_threshold_spec.cr`) pins that a raised cap lets
-live × factor through and that the default still clamps at 64 MiB.
+First tried with the count taken in the sweep from non-atomic chunks
+(`rows-sweep-scan-live.txt`, 5 reps, cap divisor 2 and 3): divisor 2 put +11%
+on JsonGenerate's peak, divisor 3 kept every benchmark within +1–2% and took
+Primes −19%, JsonParsePure −14% (timed). Two defects in that count moved it
+into the mark: a large object's atomicity is on its block header, not its
+chunk, so large strings counted as scannable (RegexDna +22% peak until it was
+fixed); and the freelist allocator mixes kinds in one chunk, so under
+`-Dgcry_block_headers` a chunk-level count cannot tell them apart at all.
+
+Shipped (mark-based, divisor 3), 5 reps interleaved with Boehm
+(`rows-mark-scanned-final.txt`); "whole" is the process's wall time, setup
+included:
+
+| bench | before: timed / whole / peak | after vs before: timed / whole / peak | after, whole × Boehm | after, peak × Boehm |
+|---|---|---|---:|---:|
+| Primes | 2.50 s / 2.54 s / 585 MiB | −17% / −17% / +1% | 2.14 | 0.90 |
+| JsonParsePure | 1.54 s / 2.83 s / 538 MiB | +1% / +1% / 0% | 2.30 | 0.79 |
+| RegexDna | 2.26 s / 3.12 s / 272 MiB | 0% / 0% / 0% | 1.00 | 0.60 |
+| Revcomp | 0.79 s / 2.69 s / 559 MiB | −7% / −1% / 0% | 1.02 | 0.64 |
+| JsonGenerate | 0.78 s / 3.47 s / 868 MiB | +2% / −7% / 0% | 1.51 | 0.70 |
+| JsonParseSerializable | 0.40 s / 1.51 s / 474 MiB | −1% / −3% / 0% | 1.19 | 0.82 |
+| JsonParsePull | 0.38 s / 1.46 s / 474 MiB | −3% / −1% / 0% | 1.20 | 0.91 |
+| Knuckeotide | 0.84 s / 0.93 s / 53 MiB | +5% / +5% / +29% (bimodal, above) | 1.02 | 1.75 |
+| Binarytrees | 0.84 s / 0.84 s / 22 MiB | +3% / +3% / 0% | 1.11 | 0.43 |
+| Matmul | 0.47 s / 0.48 s / 36 MiB | +1% / 0% / 0% | 1.03 | 1.21 |
+| Brainfuck | 3.40 s / 3.40 s / 13 MiB | −2% / −2% / 0% | 0.99 | 1.00 |
+| Threadring | 0.56 s / 0.56 s / 13 MiB | −1% / −1% / 0% | 0.94 | 1.00 |
+| Brainfuck2 | 1.50 s / 1.51 s / 13 MiB | +2% / +2% / 0% | 0.99 | 1.00 |
+
+Peak RSS is unchanged on every benchmark the rule can reach. JsonParsePure
+gains nothing at divisor 3: its mark reads 240 of its 357 MiB live set, so the
+cap ends at 80 MiB. At the end of their runs the cap reads 114 MiB on
+JsonGenerate (343 MiB scanned) and 64 MiB on JsonParseSerializable.
+
+## Still open
+
+Primes is still 2.1× Boehm's process time and JsonParsePure 2.3×. More of the
+gap is available only by spending RSS — divisor 2, or the raised floor in the
+knob table — and the plan asks for that budget to be decided explicitly. It
+is in ROADMAP.md. The other half is the per-collection mark cost
+(`../2026-10-03-mark-prefilter/`).
+
+`GCRY_THRESHOLD_MAX` stays as the floor of the cap: before it there was no
+adaptive way past 64 MiB at all, since `GCRY_THRESHOLD_FACTOR` was clamped by
+it and `GCRY_THRESHOLD` pins a threshold that no longer follows the live set.

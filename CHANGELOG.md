@@ -21,13 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`GCRY_THRESHOLD_MAX` caps the adaptive threshold** (default 64 MiB, as
-  before). At that cap a live set past 64 MiB is collected every 64 MiB
-  however large it grows, which is most of why crystal-metric's Primes and
-  JsonParsePure run at a third of Boehm's speed; `GCRY_THRESHOLD_MAX=4294967296`
-  takes Primes −52% and JsonParsePure −44% in wall time. It is not the
-  default because the same setting costs +20–80% peak RSS on workloads with
-  a large live set that is cheap to mark, such as RegexDna and Revcomp
+- **A large live set the mark has to read is no longer collected every
+  64 MiB.** The adaptive threshold was capped at 64 MiB, so past that a
+  growing live set was collected every 64 MiB however large it grew, and its
+  mark work summed to quadratic. The cap is now 64 MiB or a third of the bytes
+  the last major's mark scanned, whichever is larger: Primes −17% and
+  JsonGenerate −7% in process wall time on crystal-metric, peak RSS
+  unchanged on every benchmark. Atomic bytes do not count, so a large live
+  set of strings keeps the old schedule: raising the cap for it bought
+  nothing and cost up to +80% peak RSS. Below ~192 MiB scanned nothing
+  changes. `GCRY_THRESHOLD_MAX` sets the 64 MiB floor
   (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
 
 - **Marking is ~20% faster on pointer-dense heaps.** Every scanned word

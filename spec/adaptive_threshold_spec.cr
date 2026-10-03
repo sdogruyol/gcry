@@ -2,7 +2,8 @@ require "./spec_helper"
 
 # The process heap sizes itself from the live set after each major
 # collection (`Heap#adapt_after_sweep`): next threshold = live × factor,
-# clamped to [8 MiB, 64 MiB] (Darwin floor 16 MiB), and the warm-retention
+# floored at 8 MiB (Darwin 16 MiB) and capped at 64 MiB or a third of the
+# bytes the mark scanned × factor, whichever is larger; the warm-retention
 # budget follows the same live × factor, capped by the threshold, fixed or
 # not. A library heap keeps its fixed threshold unless opted in.
 describe "adaptive collection threshold" do
@@ -59,17 +60,27 @@ describe "adaptive collection threshold" do
       half = heap.size_class_live_bytes // 2
       heap.gc_threshold.should eq(half < min ? min : half)
 
-      heap.adaptive_threshold_pct = 100_000_u64
+      # Live × factor past 64 MiB, a third of the scanned live × factor
+      # below it: the floor of the cap holds.
+      heap.adaptive_threshold_pct = 400_u64
       heap.collect(scan_stack: false, roots: roots)
+      (heap.size_class_live_bytes * 4).should be > max
+      (heap.mark_scanned_bytes * 4 // 3).should be < max
       heap.gc_threshold.should eq max
 
-      # A raised cap (`GCRY_THRESHOLD_MAX`) lets live × factor through.
-      heap.adaptive_threshold_max = 1_u64 << 30
+      # Past it, the cap is a third of the scanned live × factor, so the
+      # schedule stays geometric instead of collecting every 64 MiB.
       heap.adaptive_threshold_pct = 1000_u64
       heap.collect(scan_stack: false, roots: roots)
-      want = heap.size_class_live_bytes * 10
-      want.should be > max
-      heap.gc_threshold.should eq want
+      heap.mark_scanned_bytes.should eq heap.size_class_live_bytes
+      cap = heap.mark_scanned_bytes * 10 // 3
+      cap.should be > max
+      heap.gc_threshold.should eq cap
+
+      # A raised floor (`GCRY_THRESHOLD_MAX`) lets live × factor through.
+      heap.adaptive_threshold_max = 1_u64 << 30
+      heap.collect(scan_stack: false, roots: roots)
+      heap.gc_threshold.should eq heap.size_class_live_bytes * 10
       heap.adaptive_threshold_max = max
 
       # Everything dies: back to the floor on the next major.
@@ -77,6 +88,32 @@ describe "adaptive collection threshold" do
       roots.clear
       heap.collect(scan_stack: false)
       heap.gc_threshold.should eq min
+    ensure
+      heap.destroy
+    end
+  end
+
+  it "does not grow the cap with a live set the mark never scans" do
+    heap = Gcry::Heap.new
+    begin
+      heap.adaptive_threshold = true
+      heap.gc_threshold = UInt64::MAX
+      # The same ~20 MiB as above, atomic: marked, never read. Fewer majors
+      # would buy it nothing, so it keeps the 64 MiB cap and its RSS.
+      roots = Array(Void*).new(5120)
+      5120.times { roots << heap.malloc_atomic(4096) }
+      heap.adaptive_threshold_pct = 1000_u64
+      heap.collect(scan_stack: false, roots: roots)
+      heap.size_class_live_bytes.should be >= 20_u64 * 1024 * 1024
+      heap.mark_scanned_bytes.should eq 0
+      heap.gc_threshold.should eq max
+
+      # Nor does a large atomic object.
+      big = heap.malloc_atomic(40 * 1024 * 1024)
+      roots << big
+      heap.collect(scan_stack: false, roots: roots)
+      heap.mark_scanned_bytes.should eq 0
+      heap.gc_threshold.should eq max
     ensure
       heap.destroy
     end
