@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A collection that frees many large objects no longer stalls every
+  allocating thread.** After the sweep, Linux trims the large-object cache
+  to zero, and each dead chunk left the chunk list and the index one at a
+  time: a walk from the list head for its predecessor, then a shift of the
+  sorted index, all under `@alloc_lock`. With 40 000 large objects live and
+  5 000 dying, `GC.collect` took 2.3 s. The trim now removes its chunks in
+  one pass over each structure: 112 ms. Explicit `GC.free` of a large object
+  still pays O(live large chunks) per call
+  (`bench/log/linux/2026-10-01-large-free-quadratic/`).
+
 ## [0.33.0] - 2026-10-02
 
 ### Fixed

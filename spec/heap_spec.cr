@@ -204,6 +204,47 @@ describe Gcry::Heap do
     end
   end
 
+  # A trim of several chunks takes them off the list and out of the index in
+  # one batch pass (`unlink_detached_large`). The freed chunks are interleaved
+  # with live ones on both, so a pass that drops the wrong neighbour, or
+  # leaves list and index disagreeing, shows here.
+  it "trims several interleaved large chunks and keeps their live neighbours" do
+    heap = Gcry::Heap.new
+    begin
+      heap.gc_threshold = UInt64::MAX
+      heap.large_cache_retain = 64_u64 << 20
+      ptrs = Array(Void*).new(12) { heap.malloc(100_000) }
+      ptrs.each_with_index { |p, i| p.as(UInt8*)[99_999] = i.to_u8 }
+      freed = ptrs.each_slice(2).map(&.first).to_a
+      kept = ptrs.each_slice(2).map(&.last).to_a
+      freed.each { |p| heap.free(p) }
+      heap.trim_large_cache(0)
+
+      freed.each { |p| heap.is_heap_ptr(p).should be_false }
+      kept.each_with_index do |p, j|
+        heap.is_heap_ptr(p).should be_true
+        p.as(UInt8*)[99_999].should eq((2 * j + 1).to_u8)
+      end
+      listed = 0
+      heap.each_chunk do |c|
+        heap.chunk_containing_public?(c.address + 64).should be_true
+        listed += 1
+      end
+      listed.should eq(heap.@chunk_index_count)
+      heap.large_free_bytes.should eq(0)
+
+      # The list still takes prepends and single unlinks afterwards.
+      fresh = heap.malloc(100_000)
+      heap.free(kept.first)
+      heap.trim_large_cache(0)
+      heap.is_heap_ptr(kept.first).should be_false
+      heap.is_heap_ptr(fresh).should be_true
+      kept.skip(1).each { |p| heap.is_heap_ptr(p).should be_true }
+    ensure
+      heap.destroy
+    end
+  end
+
   it "trims large cache down to large_cache_retain" do
     heap = Gcry::Heap.new
     begin

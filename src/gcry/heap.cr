@@ -2499,6 +2499,7 @@ module Gcry
       # over a list that retention had grown to 30 000+ chunks
       # (`bench/log/linux/2026-10-01-large-free-quadratic/`).
       walk_limit = @chunk_index_count.to_u64 &* 2 &+ 64
+      detached_count = 0
       detach = -> do
         b = LARGE_FREE_BUCKETS - 1
         steps = 0_u64
@@ -2512,7 +2513,6 @@ module Gcry
             nxt = header.value.next_free
             @large_freelists[b] = nxt
             mapped = chunk.value.mapped_bytes
-            unlink_chunk(chunk)
             @heap_size = sat_sub(@heap_size, mapped)
             free_bytes_sub(mapped)
             @large_free_bytes = sat_sub(@large_free_bytes, mapped)
@@ -2522,10 +2522,12 @@ module Gcry
             hv.next_free = detached
             header.value = hv
             detached = user
+            detached_count += 1
             user = nxt
           end
           b -= 1
         end
+        unlink_detached_large(detached, detached_count)
       end
 
       if @trim_unlocked
@@ -2825,6 +2827,92 @@ module Gcry
             steps &+= 1
             report_chunk_list_cycle(target, limit) if steps > limit
           end
+        end
+      end
+    end
+
+    # Take a trim's detached large chunks (a `next_free` chain of users) off
+    # the chunk list and out of the index.
+    #
+    # One at a time, `unlink_chunk` walks the list from the head for each
+    # chunk's predecessor and shifts the sorted index down by one: O(k·n) for
+    # k chunks among n. A collection whose sweep frees k large objects trims
+    # all k, holding `@alloc_lock`, so every allocating mutator waited on it:
+    # 2.3 s of `GC.collect` with 40 000 large objects live and 5 000 dying
+    # (2026-10-03). Here the k chunks are flagged, then the index is compacted
+    # in one pass and the list in one pass, O(n + k). One chunk keeps
+    # `unlink_chunk`, whose walk stops at the predecessor.
+    #
+    # The lock order is `unlink_chunk`'s: list, then index.
+    private def unlink_detached_large(chain : Void*, count : Int32) : Nil
+      return if chain.null?
+      if count == 1
+        header = BlockHeader.large_header_from_user(chain)
+        unlink_chunk((header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*))
+        return
+      end
+      first = Pointer(ChunkHeader).null
+      user = chain
+      while user
+        header = BlockHeader.large_header_from_user(user)
+        chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+        first = chunk if first.null?
+        ChunkHeader.set_unlinking(chunk)
+        user = header.value.next_free
+      end
+      @chunk_list_lock.sync do
+        note_index_lock_section
+        StwWatchdog.note_index_lock_wait(first.address)
+        @index_lock.sync do
+          invalidate_chunk_cache
+          user = chain
+          while user
+            header = BlockHeader.large_header_from_user(user)
+            chunk = (header.as(UInt8*) - ChunkHeader::SIZE).as(ChunkHeader*)
+            radix_remove(chunk)
+            if ThreadListWatch.check(chunk.address, chunk.value.mapped_bytes, ThreadListWatch::SITE_INDEX_REMOVE) ||
+               (ThreadListWatch.chunk_base != 0 && chunk.address == ThreadListWatch.chunk_base &&
+               ThreadListWatch.check(chunk.address, UInt64::MAX - chunk.address, ThreadListWatch::SITE_INDEX_REMOVE))
+              Gcry::RawOut.print_backtrace
+            end
+            user = header.value.next_free
+          end
+          kept = 0
+          i = 0
+          n = @chunk_index_count
+          while i < n
+            c = (@chunk_index + i).value
+            unless ChunkHeader.unlinking?(c)
+              (@chunk_index + kept).value = c if kept != i
+              kept += 1
+            end
+            i += 1
+          end
+          @chunk_index_count = kept
+          verify_thread_list_indexed("an index_remove")
+        end
+        StwWatchdog.note_index_lock_done
+
+        limit = @chunk_index_count.to_u64 &* 2 &+ count.to_u64 &* 2 &+ 64
+        removed = 0
+        steps = 0_u64
+        prev = Pointer(ChunkHeader).null
+        c = @chunks
+        while c && removed < count
+          nxt = c.value.next
+          if ChunkHeader.unlinking?(c)
+            if prev.null?
+              @chunks = nxt
+            else
+              ChunkHeader.set_next(prev, nxt)
+            end
+            removed += 1
+          else
+            prev = c
+          end
+          c = nxt
+          steps &+= 1
+          report_chunk_list_cycle(first, limit) if steps > limit
         end
       end
     end

@@ -97,6 +97,34 @@ preallocates `live` to the phase's size and nulls what it frees.
 `GCRY_RELEASE_QUARANTINE=N` holds released ranges `PROT_NONE` for N
 collections, and it would also break the chain; it was not measured here.
 
+## The collector's trim: batched (2026-10-03)
+
+The same cost hit the collector harder. A sweep that finds k large objects
+dead caches them all, and the trim after it (Linux retain 0) removed them
+one `unlink_chunk` at a time, holding `@alloc_lock`, so every allocating
+mutator waited. `large_trim.cr` (beside this file) keeps n 64 KiB objects
+live and lets k die per collection. It reports the median `GC.collect` time
+of 8 rounds, release build:
+
+| live n | dying k | before | after |
+|---:|---:|---:|---:|
+| 2 000 | 2 000 | 39.2 ms | 18.4 ms |
+| 10 000 | 2 000 | 93.0 ms | 14.5 ms |
+| 20 000 | 5 000 | 909.4 ms | 76.4 ms |
+| 40 000 | 5 000 | 2 286.5 ms | 111.9 ms |
+
+`unlink_detached_large` flags the k chunks (`ChunkHeader::Flags::UNLINKING`),
+compacts the index in one pass and the list in one pass: O(n + k) instead of
+O(k·n). A trim of one chunk keeps `unlink_chunk`, whose walk stops at the
+predecessor. `spec/heap_spec.cr` ("trims several interleaved large chunks")
+pins it. It went red both ways it was broken: with the list pass skipped
+(`each_chunk` then walked into an unmapped chunk) and with the index
+compaction skipped.
+
+The explicit `GC.free` path still trims one chunk per call, so
+`largefree_scale.cr` is unchanged: 13.6 µs per free at 10 000 and 81.6 µs at
+40 000.
+
 ## Not fixed here
 
 O(1) removal needs a doubly linked chunk list, and `ChunkHeader` is 32 bytes

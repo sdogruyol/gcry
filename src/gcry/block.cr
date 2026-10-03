@@ -453,6 +453,11 @@ module Gcry
       # Laid on the out-of-memory reserve (`oom_reserve.cr`): taken only by the
       # reserve's cursor, never released by a sweep.
       RESERVE = 256_u32
+      # Detached by a trim and about to leave the list and the index in one
+      # batch pass (`Heap#unlink_detached_large`). Set under `@alloc_lock` on a
+      # chunk no allocator can reach any more, never cleared: the chunk is
+      # unmapped, quarantined or queued for release next, never relinked.
+      UNLINKING = 512_u32
     end
 
     def initialize(@next : ChunkHeader*, @mapped_bytes : UInt64, @size_class : UInt32,
@@ -594,6 +599,14 @@ module Gcry
 
     def self.set_pinned(chunk : ChunkHeader*, value : Bool) : Nil
       update_flag(chunk, Flags::PINNED, value)
+    end
+
+    def self.unlinking?(chunk : ChunkHeader*) : Bool
+      (chunk.value.flags & Flags::UNLINKING) != 0
+    end
+
+    def self.set_unlinking(chunk : ChunkHeader*) : Nil
+      update_flag(chunk, Flags::UNLINKING, true)
     end
 
     def self.idle?(chunk : ChunkHeader*) : Bool
