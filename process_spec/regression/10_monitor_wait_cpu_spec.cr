@@ -47,7 +47,9 @@ describe "the Monitor's wait for a stopped world" do
     cpu0 = Process.times
     t0 = Time.instant
     collections = 0
-    while (Time.instant - t0).total_milliseconds < 1_500
+    # At least four pauses however slow the runner: a CI macOS or Windows
+    # runner managed two of this graph in 1.5 s.
+    while collections < 4 || (Time.instant - t0).total_milliseconds < 1_500
       GC.collect
       collections += 1
     end
