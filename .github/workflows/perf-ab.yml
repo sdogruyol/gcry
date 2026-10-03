@@ -1,0 +1,41 @@
+name: Perf A/B
+
+# Manual only. Builds crystal-metric against the dispatched ref and against
+# `base`, runs both interleaved on quiet runners, and prints `AB` lines:
+#   gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Revision to compare against"
+        default: "origin/master"
+      reps:
+        description: "Interleaved repetitions per benchmark"
+        default: "10"
+      benches:
+        description: "crystal-metric benchmarks, space-separated"
+        default: "Primes JsonParsePure Binarytrees JsonGenerate"
+
+jobs:
+  ab:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - timeout-minutes: 5
+        continue-on-error: true
+        run: timeout 240 sudo apt-get update -qq -o Acquire::http::Timeout=30 -o Acquire::Retries=2
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.21.0"
+      - env:
+          AB_BASE: ${{ inputs.base }}
+          AB_REPS: ${{ inputs.reps }}
+          AB_BENCHES: ${{ inputs.benches }}
+        run: bench/runner_ab/ab.sh

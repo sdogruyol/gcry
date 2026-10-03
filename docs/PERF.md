@@ -458,6 +458,25 @@ Session: `bench/log/linux/2026-08-03-crystal-metric-fresh/` (WSL2 i3-12100F, Cry
 
 Peak RSS × (median of per-bench peaks): **~0.63×**. Checksum `err` on Crystal ≥1.21 is OK for timing. Do **not** cite the upstream award total as a gcry score.
 
+## A/B on quiet runners
+
+A shared development host makes small mark changes unreadable: identical
+product code measured +85% Σ mark against itself in one rep on a host running
+a 5-lane campaign. `Perf A/B` (`.github/workflows/perf-ab.yml`, manual only)
+builds crystal-metric against the dispatched ref and against a base revision
+on GitHub's x86-64 and aarch64 runners and runs both interleaved:
+
+```sh
+gh workflow run perf-ab.yml --ref my-branch -f base=origin/master
+# optional: -f reps=10 -f benches="Primes JsonParsePure Binarytrees JsonGenerate"
+```
+
+Each job prints `AB <bench>: mark … ms (±%); time … s (±%)`. Mark is Σ
+`mark_ns` from `GCRY_TRACE`; time is the benchmark's own timed section, which
+leaves out crystal-metric's setup. The same script runs anywhere:
+`AB_BASE=HEAD~1 bench/runner_ab/ab.sh`. Results it produced on 2026-10-03 are
+in `bench/log/linux/2026-10-03-mark-prefilter/`.
+
 ## How to record (Linux)
 
 Same-day gcry + Boehm, both paths → update **this** file and the README Linux table. Do **not** overwrite these tables with macOS wrk — use [PERF-macos.md](PERF-macos.md).
