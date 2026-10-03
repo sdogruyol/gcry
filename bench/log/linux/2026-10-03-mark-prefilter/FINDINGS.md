@@ -193,6 +193,22 @@ Worse everywhere. The slots are shared by every object in a 4 KiB page of the
 heap, so they are mostly cached already, and the pass costs a second read of
 every word plus the prefetches.
 
+## Kept: the per-candidate block lookup inlined
+
+`find_block_with_chunk` (which returns a tuple) and `block_allocated?` were
+calls on every candidate (the disassembly of `mark_impl_unlocked` shows both).
+`@[AlwaysInline]` on the two, A/B on quiet runners (`runner-ab.sh`, 10
+interleaved reps), Σ mark:
+
+| bench | x86-64 | aarch64 |
+|---|---:|---:|
+| Primes | −4.3% | −2.3% |
+| JsonParsePure | −0.8% | −3.5% |
+| Binarytrees | −4.2% | −4.4% |
+| JsonGenerate | −6.5% | −6.0% |
+
+Small, and the same sign in all eight cells.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of

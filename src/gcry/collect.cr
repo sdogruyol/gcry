@@ -2055,6 +2055,7 @@ module Gcry
     # re-deriving it with a second `chunk_containing` per candidate is the cost
     # that took a 2026-08-01 experiment to 56.3% of Boehm. `find_block` is a
     # thin wrapper so every existing caller is unaffected.
+    @[AlwaysInline]
     def find_block_with_chunk(pointer : Void*) : {BlockHeader*, ChunkHeader*}?
       return nil if pointer.null?
       addr = pointer.address

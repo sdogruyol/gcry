@@ -3590,6 +3590,7 @@ module Gcry
       block_payload(chunk, header)
     end
 
+    @[AlwaysInline]
     protected def block_allocated?(chunk : ChunkHeader*, header : BlockHeader*) : Bool
       return !BlockHeader.free_large?(header) unless bitmap_alloc_chunk?(chunk)
       occ = ChunkHeader.occ_bitmap(chunk)

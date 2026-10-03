@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   went through a call into the candidate resolver, whose first test threw
   most of them out (nulls, integers, hashes). The test now runs in the scan
   loops, so only words inside the heap's address span make the call. On
-  crystal-metric, Primes −18% wall time, Binarytrees −10%, JsonParsePure −8%
+  crystal-metric, Primes −18% wall time, Binarytrees −10%, JsonParsePure −8%.
+  The type-layout lookup and the per-candidate block lookup are inlined as
+  well, for another 2–9% of mark time
   (`bench/log/linux/2026-10-03-mark-prefilter/`).
 
 - **Windows: the idle collector is on by default, as on Linux and macOS.**
