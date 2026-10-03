@@ -74,6 +74,7 @@ module Gcry
     # time (no crash; just less precise).
     @@unsafe_skips = uninitialized UInt64
 
+    @[AlwaysInline]
     private def self.ensure_booted : Nil
       return if @@booted
       alloc_tables
@@ -236,11 +237,13 @@ module Gcry
       @@count
     end
 
+    @[AlwaysInline]
     private def self.index_slot(type_id : Int32) : Int32
       # Multiplicative hash → open-address slot (wrapping; avoid Int32 overflow).
       ((type_id.to_i64! * -1640531527_i64) & INDEX_MASK).to_i32
     end
 
+    @[AlwaysInline]
     private def self.find_entry_index(type_id : Int32) : Int32
       i = index_slot(type_id)
       probes = 0
@@ -270,6 +273,7 @@ module Gcry
       raise "Gcry::Layout index full"
     end
 
+    @[AlwaysInline]
     def self.entry_for(type_id : Int32) : Entry?
       ensure_booted
       return nil unless @@enabled
@@ -278,6 +282,7 @@ module Gcry
       entry_at(ei)
     end
 
+    @[AlwaysInline]
     private def self.entry_at(i : Int32) : Entry
       n_scan = @@n_scan[i].to_i32
       n_noscan = @@n_noscan[i].to_i32

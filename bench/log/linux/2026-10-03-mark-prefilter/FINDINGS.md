@@ -118,6 +118,21 @@ size-aligned small chunks, whose header is `addr & ~(chunk_bytes - 1)`
 without a table walk. That is a mapping-policy change with its own RSS and
 fragmentation questions, not a mark-loop tweak.
 
+## Follow-up kept: `Layout.entry_for` inlined
+
+`entry_for` was a call per scanned object that built the whole `Entry` — 17
+loads from 17 parallel arrays — though `scan_object` reads only `alloc_size`,
+`kind` and the offset slices on the common paths. `@[AlwaysInline]` on
+`entry_for`, `entry_at`, `find_entry_index`, `index_slot` and `ensure_booted`
+lets LLVM drop the unused loads.
+
+- Instructions (callgrind, `markprof 100000 4`, deterministic): mark loop
+  484.0 M → 464.8 M, **−4.0%**; ~29 per scanned object.
+- Σ mark, 10 interleaved reps against the Monitor-fix build: Primes −6.6%,
+  Binarytrees −6.7%, JsonParsePure +2.3% (its wall −1.1%). JsonParsePure has
+  moved the wrong way on every mark change tried on this host, including ones
+  with identical marked sets; see above.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
