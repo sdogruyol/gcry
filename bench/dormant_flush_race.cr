@@ -73,7 +73,9 @@ class Gcry::Heap
     chunk = chunk_for(pointer).not_nil!
     expected = chunk.value.mapped_bytes
     during_live_chunk_walk do
-      Thread.new { free(pointer) }.join
+      # `free` alone no longer trims under `LARGE_FREE_TRIM_SLACK`, so the
+      # peer runs the mutator's trim itself, the path this arm is about.
+      Thread.new { free(pointer); trim_large_cache }.join
       STDOUT.puts "scheduled: peer free returned; reading held chunk"
       STDOUT.flush
       observed = Atomic::Ops.load((chunk.as(UInt8*) + offsetof(ChunkHeader, @mapped_bytes)).as(UInt64*), :monotonic, true)

@@ -121,9 +121,23 @@ pins it. It went red both ways it was broken: with the list pass skipped
 (`each_chunk` then walked into an unmapped chunk) and with the index
 compaction skipped.
 
-The explicit `GC.free` path still trims one chunk per call, so
-`largefree_scale.cr` is unchanged: 13.6 µs per free at 10 000 and 81.6 µs at
-40 000.
+The explicit `GC.free` path trimmed one chunk per call, so batching alone
+left `largefree_scale.cr` unchanged: 13.6 µs per free at 10 000 and 81.6 µs at
+40 000. `free` now trims only once the cache holds
+`LARGE_FREE_TRIM_SLACK` (2 MiB) past the retain, and then trims all of it:
+
+| live large chunks | per free, trim each | per free, 2 MiB slack |
+|---:|---:|---:|
+| 2 500 | 4.5 µs | 2.4 µs |
+| 10 000 | 13.6 µs | 3.1 µs |
+| 40 000 | 81.6 µs | 10.9 µs |
+
+The collector still trims to the retain after every collection, so the
+post-collection footprint is the same; between collections at most 2 MiB
+more stays mapped. `make idle-rss-after-burst`, `rss-leak`, `oom-no-hang`
+and `parallel-dormant` pass. `dormant_flush_race`'s scheduled control had a
+peer's `free` trim the chunk it holds. That peer now calls the trim itself,
+which is the mutator path the arm is about.
 
 ## Not fixed here
 

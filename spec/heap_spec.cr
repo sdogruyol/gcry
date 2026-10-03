@@ -245,7 +245,10 @@ describe Gcry::Heap do
     end
   end
 
-  it "trims large cache down to large_cache_retain" do
+  # `free` lets the cache run up to `LARGE_FREE_TRIM_SLACK` past the retain,
+  # then trims all of it in one batch. The collector trims to the retain
+  # itself at the end of every collection.
+  it "trims large cache down to large_cache_retain once frees pass the slack" do
     heap = Gcry::Heap.new
     begin
       heap.gc_threshold = UInt64::MAX
@@ -253,9 +256,20 @@ describe Gcry::Heap do
       ptrs = [] of Void*
       4.times { ptrs << heap.malloc(100_000) }
       ptrs.each { |p| heap.free(p) }
-      # free() already trims to retain; with retain 0 cache should be empty.
+      # Under the slack: still cached, and reusable.
+      heap.large_free_bytes.should eq(heap.large_mapped_bytes)
+      heap.large_free_bytes.should be <= Gcry::Heap::LARGE_FREE_TRIM_SLACK
+      heap.trim_large_cache
       heap.large_free_bytes.should eq(0)
       heap.large_mapped_bytes.should eq(0)
+
+      # Past the slack: the free that crosses it trims everything.
+      big = [] of Void*
+      30.times { big << heap.malloc(100_000) }
+      big.each { |p| heap.free(p) }
+      heap.large_free_bytes.should be <= Gcry::Heap::LARGE_FREE_TRIM_SLACK
+      heap.large_mapped_bytes.should eq(heap.large_free_bytes)
+      big.count { |p| heap.is_heap_ptr(p) }.should be < 30
     ensure
       heap.destroy
     end

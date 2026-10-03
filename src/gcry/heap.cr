@@ -23,6 +23,13 @@ module Gcry
     # Bytes of free large mappings to keep after trim (library default 4 MiB;
     # Darwin process GC starts at 1 MiB — see gc_override. Override via GCRY_LARGE_CACHE).
     DEFAULT_LARGE_CACHE_RETAIN = 4_u64 * 1024 * 1024
+    # An explicit large free trims only once the cache holds this much past the
+    # retain, and then trims all of it, so its chunks leave the list in one
+    # batch (`unlink_detached_large`) instead of one O(n) walk per free. The
+    # collector still trims to the retain at the end of every collection, so
+    # post-collection RSS is unchanged; between collections at most this much
+    # more stays mapped, where the next allocation of the same size reuses it.
+    LARGE_FREE_TRIM_SLACK = 2_u64 * 1024 * 1024
     # Keep up to this many bytes of fully-free size-class chunks as dormant
     # (MADV_DONTNEED) for fast reuse; excess is munmap'd when release is on.
     # 0 means "munmap everything immediately" — that path fragmented VMA
@@ -740,7 +747,7 @@ module Gcry
         @finalizers.notice_reclaim(pointer)
         @large_cached_by_free &+= 1
         with_alloc_lock { cache_large_chunk(chunk, header) }
-        trim_large_cache
+        trim_large_cache if @large_free_bytes > @large_cache_retain &+ LARGE_FREE_TRIM_SLACK
         Invariant.after_free(self, pointer)
         Trace.after_free(pointer)
         return true

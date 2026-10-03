@@ -15,8 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time: a walk from the list head for its predecessor, then a shift of the
   sorted index, all under `@alloc_lock`. With 40 000 large objects live and
   5 000 dying, `GC.collect` took 2.3 s. The trim now removes its chunks in
-  one pass over each structure: 112 ms. Explicit `GC.free` of a large object
-  still pays O(live large chunks) per call
+  one pass over each structure: 112 ms.
+
+- **Explicit `GC.free` of a large object trims in batches.** It trimmed the
+  cache back to the retain on every call, one chunk at a time, so freeing
+  40 000 64 KiB objects took 3.3 s. It now lets the cache run 2 MiB past the
+  retain, where an allocation of the same size reuses it, and then trims all
+  of it in one batch: 0.44 s. The collector still trims to the retain after
+  every collection, so post-collection RSS is unchanged
   (`bench/log/linux/2026-10-01-large-free-quadratic/`).
 
 ## [0.33.0] - 2026-10-02

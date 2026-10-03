@@ -15,7 +15,7 @@ Product rules for **Linux** (x86_64 + aarch64) and **macOS** (arm64 + x86_64), C
 
 No soft heap cap, no null-return malloc. Crystal expects raise / abort.
 
-Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`; Linux process default **0** / Darwin **1 MiB**). Empty size-class chunks: **munmap outside STW** by default (Linux dormant retain **0**; Darwin **512 KiB**; `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` to retain).
+Large objects: freelist + outside-STW trim (`GCRY_LARGE_CACHE`; Linux process default **0** / Darwin **1 MiB**, reached after every collection; between collections explicit frees may leave up to 2 MiB more cached). Empty size-class chunks: **munmap outside STW** by default (Linux dormant retain **0**; Darwin **512 KiB**; `GCRY_KEEP_CHUNKS=1` / `GCRY_EMPTY_CHUNK_RETAIN` to retain).
 
 ## Fork
 
