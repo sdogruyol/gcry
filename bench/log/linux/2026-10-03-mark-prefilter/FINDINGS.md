@@ -85,9 +85,38 @@ stw-mt-sample`, `ci/sound-suite.sh`: all green.
 
 ## Still open
 
-Primes and JsonParsePure are still ~3× Boehm. The rest of the per-object cost
-is the candidate resolution itself (`find_block_with_chunk` → radix → block
-ordinal → bitmap) and its cache misses; see the next findings in this series.
+Primes and JsonParsePure are still ~3× Boehm. Library-mode callgrind after
+the change (`markprof`, 100 000 nodes, 4 collections, no `--debug`: a
+`--release --debug` build ran 3× the instructions and is not a usable proxy):
+
+| per call | instructions (inclusive) |
+|---|---:|
+| `scan_object` | ~675 |
+| `mark_impl_unlocked` (one pointer word) | ~355 |
+| `find_block_with_chunk` | ~166 |
+| `chunk_containing` (library mode, with `@index_lock`) | ~83 |
+| `Layout.entry_for` | ~55 |
+
+Two follow-ups were tried and **dropped**, both measured against this commit
+with 10 interleaved reps:
+
+- `mark_noscan_unlocked` resolving the chunk once (`find_object_with_chunk`
+  then `block_marked_in?` / `set_block_mark_in`, as `mark_impl_unlocked`
+  does, instead of `heap_marked?` / `heap_set_mark` resolving it again
+  each). Same marked set (per-collection `live_objects` equal to ±1), fewer
+  instructions on paper, and **+11.6% Σ mark on JsonParsePure**, −2% Primes,
+  −5% Binarytrees.
+- Dropping `scan_hash_object`'s field loops in the major mark, where
+  `scan_hash_body` marks the same words: +5.8% JsonParsePure, ±0 elsewhere.
+
+Neither result has a mechanism behind it that the counts explain, and the host
+is a QEMU guest without perf counters, so changes of this size here are
+binary-layout noise as much as anything. The gap left is the per-candidate
+chain (radix L1 → L2 at 4 KiB granules → chunk header → occupancy bitmap →
+mark bitmap), which a structural change would have to shorten — e.g.
+size-aligned small chunks, whose header is `addr & ~(chunk_bytes - 1)`
+without a table walk. That is a mapping-policy change with its own RSS and
+fragmentation questions, not a mark-loop tweak.
 
 ## Reproduce
 
