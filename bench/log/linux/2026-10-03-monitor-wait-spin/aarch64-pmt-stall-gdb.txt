@@ -1,0 +1,89 @@
+=== run 1 still running at 241s; dumping
+--- pid 3141: bin/pmt  state: S cpu: 11
+Thread 2 (Thread 0xff532b7ff140 (LWP 3143) "SYSMON"):
+#0  0x0000ff532d06bd90 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=0xff532b7fe5d0, rem=0xff532b7fe5b0) at ../sysdeps/unix/sysv/linux/clock_nanosleep
+#1  0x0000ff532d0760bc in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x0000ab1f69bd9a20 in sleep () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:111
+#3  0x0000ab1f69bc58a8 in sleep () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/thread.cr:197
+#4  0x0000ab1f69c7f920 in run_loop () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/monitor.cr:55
+#5  0x0000ab1f69aa5f4c in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/monitor.cr:19
+#6  0x0000ab1f69bc4f84 in start () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/thread.cr:249
+#7  0x0000ab1f69bd993c in thread_proc () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:47
+#8  0x0000ab1f69a9e32c in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:22
+#9  0x0000ff532d03582c in start_thread (arg=0xff532d1ce760) at ./nptl/pthread_create.c:447
+#10 0x0000ff532d09bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 1 (Thread 0xff532d1ce020 (LWP 3141) "pmt"):
+#0  0x0000ff532d09be74 in __GI_epoll_pwait (epfd=3, events=0xff532bfff490, maxevents=128, timeout=-1, set=0x0) at ../sysdeps/unix/sysv/linux/epoll_pwait.c:40
+#1  0x0000ab1f69c1a3a8 in wait () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/epoll.cr:49
+#2  0x0000ab1f69c1d324 in run () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/event_loop/epoll.cr:52
+#3  0x0000ab1f69c2379c in find_next_runnable () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:221
+#4  0x0000ab1f69c23384 in run_loop () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:159
+#5  0x0000ab1f69aa5f28 in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/parallel/scheduler.cr:44
+#6  0x0000ab1f69bda5a4 in run () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber.cr:168
+#7  0x0000ab1f69aa5f38 in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber.cr:103
+#8  0x0000000000000000 in ?? ()
+--- pid 3144: /home/runner/work/gcry/gcry/bin/pmt --child  state: R cpu: 95907
+Thread 6 (Thread 0xff4cdcbff140 (LWP 3145) "SYSMON"):
+#0  0x0000ff4cde50bd90 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=0xff4cdcbfe4b8, rem=0xff4cdcbfe4a8) at ../sysdeps/unix/sysv/linux/clock_nanosleep
+#1  0x0000ff4cde5160bc in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x0000ab5eb5495fc8 in wait_for_open () at /home/runner/work/gcry/gcry/src/gcry/monitor_gate.cr:197
+#3  0x0000ab5eb5495f44 in enter () at /home/runner/work/gcry/gcry/src/gcry/monitor_gate.cr:167
+#4  0x0000ab5eb550fb14 in transfer_schedulers_blocked_on_syscall () at /home/runner/work/gcry/gcry/src/gcry/monitor_gate.cr:230
+#5  0x0000ab5eb550f978 in run_loop () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/monitor.cr:42
+#6  0x0000ab5eb5335f4c in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/fiber/execution_context/monitor.cr:19
+#7  0x0000ab5eb5454f84 in start () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/thread.cr:249
+#8  0x0000ab5eb546993c in thread_proc () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:47
+#9  0x0000ab5eb532e32c in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:22
+#10 0x0000ff4cde4d582c in start_thread (arg=0xff4cde676760) at ./nptl/pthread_create.c:447
+#11 0x0000ff4cde53bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 5 (Thread 0xff4cdad1f140 (LWP 3146) "gcry-mark"):
+#0  0x0000ab5eb53d5ffc in cast_from () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/atomic.cr:439
+#1  0x0000ab5eb53d6034 in get () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/atomic.cr:332
+#2  0x0000ab5eb537ad90 in count_layout_precise_scan () at /home/runner/work/gcry/gcry/src/gcry/collect.cr:261
+#3  0x0000ab5eb537a864 in scan_object () at /home/runner/work/gcry/gcry/src/gcry/collect_mark.cr:479
+#4  0x0000ab5eb537a0ac in scan_batch_prefetched () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:277
+#5  0x0000ab5eb5379df0 in scan_batch_local_first () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:309
+#6  0x0000ab5eb5379988 in mark_worker_loop () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:472
+#7  0x0000ab5eb53d4a98 in run_mark_worker () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:84
+#8  0x0000ab5eb532e2bc in gcry_mark_worker_main () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:23
+#9  0x0000ab5eb532e2ac in -> () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:117
+#10 0x0000ff4cde4d582c in start_thread (arg=0xff4cde676760) at ./nptl/pthread_create.c:447
+#11 0x0000ff4cde53bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 4 (Thread 0xff4cd9d0f140 (LWP 3147) "gcry-mark"):
+#0  0x0000ab5eb5379b58 in pop_mark_batch () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:349
+#1  0x0000ab5eb5379868 in mark_worker_loop () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:461
+#2  0x0000ab5eb53d4a98 in run_mark_worker () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:84
+#3  0x0000ab5eb532e2bc in gcry_mark_worker_main () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:23
+#4  0x0000ab5eb532e2ac in -> () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:117
+#5  0x0000ff4cde4d582c in start_thread (arg=0xff4cde676760) at ./nptl/pthread_create.c:447
+#6  0x0000ff4cde53bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 3 (Thread 0xff4cd3fff140 (LWP 3148) "gcry-mark"):
+#0  0x0000ab5eb5379840 in mark_worker_loop () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:460
+#1  0x0000ab5eb53d4a98 in run_mark_worker () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:84
+#2  0x0000ab5eb532e2bc in gcry_mark_worker_main () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:23
+#3  0x0000ab5eb532e2ac in -> () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:117
+#4  0x0000ff4cde4d582c in start_thread (arg=0xff4cde676760) at ./nptl/pthread_create.c:447
+#5  0x0000ff4cde53bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 2 (Thread 0xff4cd2fef140 (LWP 3149) "gc-idle"):
+#0  0x0000ff4cde50bd90 in __GI___clock_nanosleep (clock_id=<optimized out>, clock_id@entry=0, flags=flags@entry=0, req=0xff4cd2fee758, rem=0xff4cd2fee748) at ../sysdeps/unix/sysv/linux/clock_nanosleep
+#1  0x0000ff4cde5160bc in __GI___nanosleep (req=<optimized out>, rem=<optimized out>) at ../sysdeps/unix/sysv/linux/nanosleep.c:25
+#2  0x0000ab5eb5465ea0 in loop_forever () at /home/runner/work/gcry/gcry/src/gcry/idle_release.cr:194
+#3  0x0000ab5eb5333704 in -> () at /home/runner/work/gcry/gcry/src/gcry/idle_release.cr:135
+#4  0x0000ab5eb5454f70 in start () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/thread.cr:249
+#5  0x0000ab5eb546993c in thread_proc () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:47
+#6  0x0000ab5eb532e32c in -> () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/pthread.cr:22
+#7  0x0000ff4cde4d582c in start_thread (arg=0xff4cde676760) at ./nptl/pthread_create.c:447
+#8  0x0000ff4cde53bb4c in thread_start () at ../sysdeps/unix/sysv/linux/aarch64/clone3.S:76
+Thread 1 (Thread 0xff4cde676020 (LWP 3144) "pmt"):
+#0  0x0000ab5eb53d5df0 in swap () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/atomic.cr:285
+#1  0x0000ab5eb53d5c50 in lock () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/spin_lock.cr:11
+#2  0x0000ab5eb53a3cbc in mark_drain_finished? () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:396
+#3  0x0000ab5eb53a3924 in mark_loop () at /home/runner/work/gcry/gcry/src/gcry/parallel_mark.cr:526
+#4  0x0000ab5eb537805c in run_collection_body () at /home/runner/work/gcry/gcry/src/gcry/collect.cr:2588
+#5  0x0000ab5eb5375144 in run_collection () at /home/runner/work/gcry/gcry/src/gcry/collect.cr:2414
+#6  0x0000ab5eb53d2718 in collect:release_warm () at /home/runner/work/gcry/gcry/src/gcry/collect.cr:1812
+#7  0x0000ab5eb53567f4 in collect () at /home/runner/work/gcry/gcry/src/gcry/gc_override.cr:1521
+#8  0x0000ab5eb532c890 in __crystal_main () at /home/runner/work/gcry/gcry/bench/parallel_mark_termination.cr:139
+#9  0x0000ab5eb54b54d8 in main_user_code () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/main.cr:129
+#10 0x0000ab5eb54b542c in main () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/main.cr:115
+#11 0x0000ab5eb5335c70 in main () at /home/runner/work/_temp/crystal-1.21.0-true-undefined/share/crystal/src/crystal/system/unix/main.cr:9

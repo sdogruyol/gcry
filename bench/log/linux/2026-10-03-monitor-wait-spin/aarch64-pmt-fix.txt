@@ -1,0 +1,18 @@
+=== run 1 rc=0 10s
+fixed: exit=0 child runs=60 stolen=1540340 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL
+=== run 2 rc=0 10s
+fixed: exit=0 child runs=60 stolen=2355815 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL
+=== run 3 rc=0 10s
+fixed: exit=0 child runs=60 stolen=1540185 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL
+=== run 4 rc=0 10s
+fixed: exit=0 child runs=60 stolen=1538680 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL
+=== run 5 rc=0 10s
+fixed: exit=0 child runs=60 stolen=3054389 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL
+=== run 6 rc=0 10s
+fixed: exit=0 child runs=60 stolen=3047150 ok
+unlocked: exit=1 child runs=1 stolen=11 damage=chain 0 node 0: fill[0] 38654705665 FAIL

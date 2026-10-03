@@ -83,3 +83,35 @@ example in file order, `1_live_objects_dormant_spec`, which read a drift of
 −73 336 objects and failed 8 of 8 in a single-binary build of the suite. With
 the isolation: 10 of 10 full-suite runs green, 8 single-binary and 2
 `crystal spec`; red arm 1.92.
+
+## What it exposed on aarch64: the master's termination poll
+
+The next master run timed out `make parallel-mark-termination` on native
+aarch64 (ubuntu-24.04-arm, 4 vCPU) twice in a row, at 600 s; the gate had taken
+36–143 s there over the previous ten runs. Bisected on throwaway branches, each
+running the gate's binary six times with a gdb dump at 240 s:
+
+| tree | per-run seconds |
+|---|---|
+| `c24666b` (before this change) | 30, 45, 25, 55, 70, 75 |
+| `a8b1dbb` (this change only) | 412, 291, 251, 160, 140, 366 |
+| `20e9060` (+ the layout inline) | 180, 155, 40, 296, 146, 210 |
+| `56c609a` + the fix below | **10, 10, 10, 10, 10, 10** |
+
+Not a deadlock (`aarch64-pmt-stall-gdb.txt`): the child had used 959 s of CPU
+in 240 s, the four markers all running, the master in `mark_drain_finished?`
+on `@mark_lock` and the workers in `pop_mark_batch`. With the Monitor spinning,
+one of the four cores was its for every stop; sleeping, it gave that core to
+the markers, and the gate's narrow graph (64 chains × 400 nodes) is all
+contention. The master's termination check took `@mark_lock` on every empty
+poll, even while workers held batches and the answer could only be no — the
+pattern the idle workers' unlocked peek removed on 2026-10-01, still present
+on the master's side. Each take is a write to the lock's line, against workers
+flushing children through the same lock.
+
+The fix is that peek for the master: an unlocked read of `@mark_workers_busy`
+and of the stack's size answers "not yet" without the lock; only a possible
+"done" is decided under it, from one critical section as before. The research
+arm (`--unlocked` in the gate) still loses a live object on its first
+collection (`aarch64-pmt-fix.txt`). Locally, x86-64: the gate, `make
+parallel-mark-stress` and `parallel-mark-process` pass.

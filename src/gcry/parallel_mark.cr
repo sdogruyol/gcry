@@ -393,6 +393,16 @@ module Gcry
       if @mark_busy_unlocked
         return @mark_workers_busy.get == 0 && mark_stack_empty_locked?
       end
+      # The idle workers' peek in `pop_mark_batch`, on the master's side. The
+      # master asks this on every empty poll, and while workers still hold
+      # batches the answer is no: taking the lock to hear it was a write to the
+      # lock's line per poll, against the workers flushing children through
+      # the same lock. Unlocked, a "no" is final for this poll; only a "maybe"
+      # is decided below, under the lock, from one critical section. Measured
+      # on native aarch64 once the Monitor stopped occupying a core during
+      # the stop: `parallel-mark-termination` 140–412 s per run against 25–75 s
+      # (`bench/log/linux/2026-10-03-monitor-wait-spin/`).
+      return false if @mark_workers_busy.get != 0 || !@mark_stack.empty_unlocked?
       @mark_lock.lock
       done = @mark_workers_busy.get == 0 && @mark_stack.empty?
       @mark_lock.unlock

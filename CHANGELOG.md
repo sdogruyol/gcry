@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`GCRY_PARALLEL_MARK`: the master no longer takes the mark lock to learn
+  that workers are still busy.** Its termination check took `@mark_lock` on
+  every empty poll, against workers flushing children through the same lock.
+  On native aarch64 with four markers on four cores, `make
+  parallel-mark-termination` took 140–412 s per run once the Monitor stopped
+  occupying a core; an unlocked peek answers "not yet", and only a possible
+  "done" is decided under the lock: 10 s. Still experimental.
+
 - **A large live set the mark has to read is no longer collected every
   64 MiB.** The adaptive threshold was capped at 64 MiB, so past that a
   growing live set was collected every 64 MiB however large it grew, and its
