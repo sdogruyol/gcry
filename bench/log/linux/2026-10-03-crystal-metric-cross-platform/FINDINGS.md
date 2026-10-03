@@ -45,3 +45,22 @@ The first mark-path fix (heap-span prefilter in the scan loops) landed after
 these runs; on Linux it moved Primes from 30% to 37% of Boehm and JsonParsePure
 from 32% to 35%. The rest of the gap is per-candidate resolution cost; see
 that findings file.
+
+## After the mark and threshold changes (`d78371f`)
+
+Same scripts, same runner types, 5 trials, gcry at `d78371f`: the heap-span
+prefilter, the inlined layout lookup, the Monitor's sleeping wait and the
+threshold cap that follows a third of the scanned bytes
+(`rows-after-*.txt`). Speed as % of Boehm, peak RSS × Boehm:
+
+| platform | Primes | JsonParsePure | suite median speed | suite median peak |
+|---|---|---|---|---|
+| Linux x64 | 27% → **39%** | 27% → 27% | 92.7% → 92.5% | 0.88× → 0.89× |
+| macOS arm64 | 29% → **44%** | 29% → 35% | 98.3% → 98.0% | 0.93× → 0.93× |
+| Windows x64 | 28% → **42%** | 30% → 33% | 97.0% → 96.9% | 0.88× → 0.90× |
+| Windows arm64 | 33% → **45%** | 31% → 34% | 98.9% → 99.1% | 0.85× → 0.85× |
+
+Primes' peak RSS × Boehm moved by at most +0.02 on any platform. The two
+Windows jobs report failure because their final summary step did not find the
+`rows.txt` the PowerShell step had tee'd (`FileNotFoundError`); the rows were
+taken from the job logs instead, 130 each, complete.
