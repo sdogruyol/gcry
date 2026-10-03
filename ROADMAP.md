@@ -3777,11 +3777,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       [INFERENCE] The campaign-037 "bucket cycle" (seed 20279,
       `cache_large_chunk`'s tail walk) is likely the same kind of cost: that
       walk is O(bucket length) per insert.
-      Open: O(1) removal. A doubly linked list does not fit — `ChunkHeader` is
-      32 bytes and full, and a `prev` field breaks a large payload's 16-byte
-      alignment. Cheaper: remove a trim's detached chunks in one pass over
-      `@chunks` (O(n + k)), plus a small hysteresis on Linux's retain of 0 so
-      trims come in batches (an RSS policy change).
+      **2026-10-03: batched.** A trim now removes its k chunks in one pass
+      over the list and one over the index, O(n + k). The collector's trim
+      after a sweep that freed many went from 2.3 s to 0.11 s (40 000 live,
+      5 000 dying). Explicit `GC.free` trims only once the cache is 2 MiB past
+      the retain: 81.6 µs to 10.9 µs per free at 40 000. Post-collection RSS
+      is unchanged, since the collector still trims to the retain.
+      Open: a free of a block bigger than the slack is still one O(n) unlink.
+      O(1) removal needs a doubly linked list, and that does not fit:
+      `ChunkHeader` is 32 bytes and full, and a `prev` field breaks a large
+      payload's 16-byte alignment.
 - [x] **`make parallel-dormant` failed on Linux and macOS CI — diagnosed
       2026-09-30.** Seven sightings, two failure modes, both of the harness
       and neither of the release. (1) Budget timing, macOS 8 of 300 runs
