@@ -147,6 +147,10 @@ lets LLVM drop the unused loads.
   Binarytrees −6.7%, JsonParsePure +2.3% (its wall −1.1%). JsonParsePure has
   moved the wrong way on every mark change tried on this host, including ones
   with identical marked sets; see above.
+- Confirmed on quiet GitHub runners (`runner-ab.sh`, 10 interleaved reps),
+  reading the other way — the inline reverted is the variant: Σ mark +5.2%,
+  +4.0%, +8.7%, +7.3% on x86-64 and +5.9%, +3.0%, +5.5%, +5.4% on aarch64
+  (Primes, JsonParsePure, Binarytrees, JsonGenerate).
 
 ## Candidate resolution, step by step, on quiet runners
 
