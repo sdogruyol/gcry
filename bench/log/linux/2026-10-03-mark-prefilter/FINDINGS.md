@@ -141,6 +141,27 @@ lets LLVM drop the unused loads.
   moved the wrong way on every mark change tried on this host, including ones
   with identical marked sets; see above.
 
+## Candidate resolution, step by step, on quiet runners
+
+`resolve.cr` times each step of resolving 3 M live block pointers in random
+order with the world marked stopped (no index lock), on GitHub runners because
+this host was running a campaign. ns per pointer, median of 3 runs:
+
+| step | x86-64 (ubuntu-latest) | aarch64 (ubuntu-24.04-arm) |
+|---|---:|---:|
+| read the word at the pointer | 8.4 | 9.6 |
+| radix → chunk | 10.3 | 11.2 |
+| + block (`find_block_with_chunk`) | 22.3 | 18.7 |
+| + occupancy bit | 30.9 | 36.8 |
+| + mark bit (its own bitmap) | 43.5 | 79.5 |
+| + a second bit from the occupancy word's line | 38.8 | 59.5 |
+
+The last row models occupancy and mark words interleaved, so one line serves
+both: it would save ~5 ns per candidate on x86-64 and ~20 ns on aarch64. With
+resolution ~24% of Primes' CPU that is a 3–6% mark win, for a change to every
+site that walks either bitmap word by word — the allocator's refill and the
+sweep's `occ = mark` among them. Not taken.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
