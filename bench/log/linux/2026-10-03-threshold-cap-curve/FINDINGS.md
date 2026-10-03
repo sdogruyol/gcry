@@ -77,7 +77,10 @@ they pay +11–24% RSS on the rows above.
 Knuckeotide's −29…−37% is not an effect: its live set never reaches 64 MiB,
 so the cap does not bind, and its peak RSS is bimodal run to run under either
 arm (default: 70.5, 70.6, 48.9, 70.5, 54.6, 57.3 MB; 4 GiB cap: 50.2, 54.7,
-70.8, 49.6, 55.0, 70.5 MB).
+70.8, 49.6, 55.0, 70.5 MB). It stays bimodal with ASLR off (`setarch -R`:
+49.4, 70.6, 70.4, 55.2, 57.0, 70.7 MB), and so is Boehm's (40.3–58.2 MB in
+six runs), so the variance is the program's or the runtime's, not an
+address-dependent false root in either collector.
 
 ## The rule adopted: the cap follows what the mark reads
 
