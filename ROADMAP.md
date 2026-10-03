@@ -3877,6 +3877,14 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       −52% / JsonParsePure −44% for +80% on RegexDna. Past the plan's +5%
       limit, so it waits for an explicit budget
       (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+- [ ] **Large `realloc` growth maps, faults and copies every step
+      (2026-10-04).** Revcomp's buffers double from 64 KiB to 126 MiB three
+      times: 49 fresh mappings, 1.4 GB, +160 000 minor faults over Boehm, 88%
+      of its speed locally and 73% on the CI runner (peak RSS 0.65×). In-place
+      growth needs free address space above the chunk; moving breaks the
+      rule that `realloc` never invalidates the old pointer before the caller
+      stores the new one
+      (`bench/log/linux/2026-10-04-revcomp-large-realloc/`).
 - [ ] **macOS: Binarytrees' mutator is 10–20% slower than Boehm's whole run
       (2026-10-03).** Not the pauses, not faults, not the allocation fast
       path (faster than Boehm's in isolation), and not how often it collects:
