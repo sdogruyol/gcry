@@ -209,6 +209,12 @@ interleaved reps), Σ mark:
 
 Small, and the same sign in all eight cells.
 
+Tried after it and not kept: the three cold diagnostic paths inlined into
+`mark_impl_unlocked` (`report_thread_list_offer`, `note_false_root`,
+`note_first_mark`) marked `@[NoInline]`. The frame drops from 520 bytes to 8,
+the six callee-saved pushes stay, and Σ mark moves −1.2% … +1.5% with mixed
+signs across the eight cells: nothing to keep.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
