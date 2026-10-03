@@ -74,8 +74,10 @@ apart, but JsonGenerate and JsonParseSerializable are GC-heavy too (Σ pause
 1521 and 375 ms, most of it in the untimed setup), and they pay +11–24% RSS on
 every row above, so such a controller would not get under the limit either.
 
-Knuckeotide's RSS falls by a third under every raised cap. It was not
-investigated here.
+Knuckeotide's −29…−37% is not an effect: its live set never reaches 64 MiB,
+so the cap does not bind, and its peak RSS is bimodal run to run under either
+arm (default: 70.5, 70.6, 48.9, 70.5, 54.6, 57.3 MB; 4 GiB cap: 50.2, 54.7,
+70.8, 49.6, 55.0, 70.5 MB).
 
 ## Decision
 
