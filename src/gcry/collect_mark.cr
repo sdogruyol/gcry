@@ -22,7 +22,14 @@ module Gcry
 
     # Heap-scan / explicit roots: follow interiors (Array#shift advances @buffer
     # into its allocation). Never apply type_id_gate (raw buffers OK).
+    #
+    # Inlined, with the heap-span test first: the precise scans (layout
+    # offsets, Hash entries) call this once per slot, and most slots hold no
+    # heap address. See the conservative loop in `scan_object`.
+    @[AlwaysInline]
     private def mark_candidate(pointer : Void*) : Nil
+      addr = pointer.address
+      return if addr < @heap_min || addr >= @heap_max
       mark_impl(pointer, gate_type_id: false, base_only: false, source: RootSource::Heap)
     end
 
@@ -485,8 +492,12 @@ module Gcry
             word = sizeof(Void*).to_u64
             words = limit // word
             cursor = user.as(UInt64*)
+            lo = @heap_min
+            hi = @heap_max
             words.times do |i|
-              mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: false, source: RootSource::Heap)
+              w = cursor[i]
+              next if w < lo || w >= hi
+              mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: false, source: RootSource::Heap)
             end
             return
           elsif size_match
@@ -524,8 +535,18 @@ module Gcry
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
+      # Most words of a scanned body are not heap addresses: nulls, small
+      # integers, hashes, floats. `mark_impl_unlocked` rejects them on its
+      # first range test, but only after a call it does not get inlined into,
+      # about 20 instructions a word. The same test here, against the bounds
+      # loaded once (no chunk is mapped or unmapped during a mark), keeps the
+      # call for words that can be heap pointers.
+      lo = @heap_min
+      hi = @heap_max
       words.times do |i|
-        mark_impl(Pointer(Void).new(cursor[i]), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
+        w = cursor[i]
+        next if w < lo || w >= hi
+        mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
       end
     end
 
@@ -554,9 +575,16 @@ module Gcry
       word = sizeof(Void*).to_u64
       words = size // word
       cursor = user.as(UInt64*)
+      lo = @heap_min
+      hi = @heap_max
       i = 0_u64
       while i < words
-        value = Pointer(Void).new(cursor[i])
+        w = cursor[i]
+        if w < lo || w >= hi
+          i &+= 1
+          next
+        end
+        value = Pointer(Void).new(w)
         # Demoting a word to `mark_noscan` is itself a claim about the type —
         # marked, never traced. Make it only where the shape backs the claim;
         # on a colliding block that word may be an ordinary reference whose
