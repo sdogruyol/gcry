@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Windows: the idle collector is on by default, as on Linux and macOS.**
+  After two minutes without an allocation, a `gc-idle` thread runs one
+  collection that releases memory the way `GC.collect` does
+  (`GCRY_IDLE_RELEASE_MS`, `=0` turns it off). It was left off because no
+  Windows runner ran its gates. `make idle-release` and `idle-thread-roots`
+  now run with their red arms on Windows x86_64 and native arm64.
+
 - **A collection that frees many large objects no longer stalls every
   allocating thread.** After the sweep, Linux trims the large-object cache
   to zero, and each dead chunk left the chunk list and the index one at a
