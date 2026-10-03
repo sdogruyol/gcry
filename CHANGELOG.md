@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`GCRY_THRESHOLD_MAX` caps the adaptive threshold** (default 64 MiB, as
+  before). At that cap a live set past 64 MiB is collected every 64 MiB
+  however large it grows, which is most of why crystal-metric's Primes and
+  JsonParsePure run at a third of Boehm's speed; `GCRY_THRESHOLD_MAX=4294967296`
+  takes Primes −52% and JsonParsePure −44% in wall time. It is not the
+  default because the same setting costs +20–80% peak RSS on workloads with
+  a large live set that is cheap to mark, such as RegexDna and Revcomp
+  (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+
 - **Marking is ~20% faster on pointer-dense heaps.** Every scanned word
   went through a call into the candidate resolver, whose first test threw
   most of them out (nulls, integers, hashes). The test now runs in the scan

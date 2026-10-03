@@ -63,6 +63,15 @@ describe "adaptive collection threshold" do
       heap.collect(scan_stack: false, roots: roots)
       heap.gc_threshold.should eq max
 
+      # A raised cap (`GCRY_THRESHOLD_MAX`) lets live × factor through.
+      heap.adaptive_threshold_max = 1_u64 << 30
+      heap.adaptive_threshold_pct = 1000_u64
+      heap.collect(scan_stack: false, roots: roots)
+      want = heap.size_class_live_bytes * 10
+      want.should be > max
+      heap.gc_threshold.should eq want
+      heap.adaptive_threshold_max = max
+
       # Everything dies: back to the floor on the next major.
       heap.adaptive_threshold_pct = 100_u64
       roots.clear

@@ -3867,6 +3867,23 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
 - [ ] **Attribute the residual per-rep spread** — open below. Until it closes it
       bounds every perf claim either release makes: ±2–3pp on phase timings, ±1pp
       on post-GC RSS, at 12 reps.
+- [ ] **Decide the adaptive threshold cap for large live sets (2026-10-03).**
+      Past 64 MiB of live × factor the threshold stops growing, so a growing
+      live set is collected every 64 MiB and its mark work sums to quadratic:
+      crystal-metric Primes and JsonParsePure run at 26–33% of Boehm on every
+      CI platform for that reason more than any other. `GCRY_THRESHOLD_MAX`
+      now lifts the cap (Primes −52%, JsonParsePure −44% wall at 4 GiB), but
+      every point on the measured curve costs +20–80% peak RSS on RegexDna,
+      Revcomp or JsonParseSerializable, past the plan's +5% limit. Open: the
+      RSS budget for a default change, which is a product call
+      (`bench/log/linux/2026-10-03-threshold-cap-curve/`).
+- [ ] **Per-collection mark cost is ~2.6× Boehm's on a large pointer heap
+      (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms
+      against Boehm's 178 ms after the heap-span prefilter. A SIGPROF profile
+      puts it in candidate resolution (radix → chunk header → occupancy and
+      mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
+      instruction-level trims have stopped paying on this host
+      (`bench/log/linux/2026-10-03-mark-prefilter/`).
 - [x] **Retire the marker's TLAB "on-stack freelist" claim — done 2026-09-28.**
       Removed with `GCRY_TLAB_MINOR_FREE_OLD`. Retention probe: heap 3.9 → 2.1 MB,
       and `free_bytes` no longer exceeds the heap. Stress: 0/120 either side.

@@ -384,6 +384,11 @@ module GC
     if pct = env_u64("GCRY_THRESHOLD_FACTOR")
       heap.adaptive_threshold_pct = pct.clamp(10_u64, 1000_u64)
     end
+    # Below the floor it would undercut the threshold's own minimum, so it is
+    # ignored there rather than clamped.
+    if (max = env_u64("GCRY_THRESHOLD_MAX")) && max >= Gcry::Heap::ADAPTIVE_THRESHOLD_MIN
+      heap.adaptive_threshold_max = max
+    end
 
     if env_flag_one?("GCRY_DISABLE_AUTO")
       heap.gc_threshold = UInt64::MAX

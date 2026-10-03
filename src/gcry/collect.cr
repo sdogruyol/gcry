@@ -46,6 +46,14 @@ module Gcry
     ADAPTIVE_THRESHOLD_MAX = 67108864_u64 # 64 MiB
     property adaptive_threshold : Bool = false
     property adaptive_threshold_pct : UInt64 = 100_u64
+    # The cap on the adaptive threshold (`GCRY_THRESHOLD_MAX`). At the default
+    # 64 MiB the schedule turns linear once live × factor passes it: a live
+    # set growing to 550 MiB is collected every 64 MiB, and its mark work sums
+    # to quadratic in the live set. Raised, with the factor lowered, the
+    # growth stays geometric the way Boehm's free-space divisor keeps it — at
+    # a peak-RSS cost measured in
+    # `bench/log/linux/2026-10-03-threshold-cap-curve/`.
+    property adaptive_threshold_max : UInt64 = ADAPTIVE_THRESHOLD_MAX
     # The warm-retention budget follows the live set after every major
     # whether the threshold is fixed or adaptive: what one cycle allocates is
     # what the sweep keeps, capped by the threshold so a fixed 128 MiB never
@@ -68,7 +76,7 @@ module Gcry
       want = live_bytes_after_sweep &* @adaptive_threshold_pct // 100_u64
       want = ADAPTIVE_THRESHOLD_MIN if want < ADAPTIVE_THRESHOLD_MIN
       if @adaptive_threshold
-        @gc_threshold = want < ADAPTIVE_THRESHOLD_MAX ? want : ADAPTIVE_THRESHOLD_MAX
+        @gc_threshold = want < @adaptive_threshold_max ? want : @adaptive_threshold_max
       end
       if @warm_retain_follows_live
         @empty_chunk_warm_retain = want < @gc_threshold ? want : @gc_threshold
