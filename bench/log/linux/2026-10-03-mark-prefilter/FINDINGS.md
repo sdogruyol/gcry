@@ -118,7 +118,14 @@ CPU). The single-resolution path never reads the blob, and the same miss
 reappears one step later on the entries walk's first read of each slot
 (`hash_word`, 3.3% → 13.2%). Total CPU samples: 2737 → 2631 (−4%). The cost is
 the dependent miss on the blob, which both versions pay; the instructions
-saved are not where the time is. Otherwise, changes of this size on a QEMU
+saved are not where the time is.
+
+Rerun on quiet GitHub runners with `runner-ab.sh` (10 interleaved reps): x86-64
+JsonParsePure Σ mark **+15.8%** (time +12.5%), aarch64 −4.0%, the other three
+benchmarks within ±1.5%. On x86-64 the old path's slowness is useful: its read
+of the blob's first line is issued early, and the size-class loop around it
+gives the core independent work while the miss is outstanding, so the entries
+walk that follows finds the line resident. Kept as it is. Otherwise, changes of this size on a QEMU
 guest without perf counters are binary-layout noise as much as anything. The gap left is the per-candidate
 chain (radix L1 → L2 at 4 KiB granules → chunk header → occupancy bitmap →
 mark bitmap), which a structural change would have to shorten — e.g.
