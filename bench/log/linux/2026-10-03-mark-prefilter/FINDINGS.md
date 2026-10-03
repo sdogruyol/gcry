@@ -162,6 +162,24 @@ resolution ~24% of Primes' CPU that is a 3–6% mark win, for a change to every
 site that walks either bitmap word by word — the allocator's refill and the
 sweep's `occ = mark` among them. Not taken.
 
+## Tried and dropped: prefetching the radix slots of an object's words
+
+A pass over each conservatively scanned object (≥ 4 words) that prefetched the
+radix slot of every in-span word before the marking pass, so the slots' misses
+would overlap. A/B on quiet GitHub runners against `cf2ff20`, both built in the
+same job, 10 interleaved reps (`runner-ab.sh`, `runner-ab.py`):
+
+| bench | Σ mark, x86-64 | Σ mark, aarch64 |
+|---|---:|---:|
+| Primes | +19.4% | +32.0% |
+| JsonParsePure | +7.8% | +12.1% |
+| Binarytrees | +14.1% | +39.8% |
+| JsonGenerate | +41.3% | +54.3% |
+
+Worse everywhere. The slots are shared by every object in a 4 KiB page of the
+heap, so they are mostly cached already, and the pass costs a second read of
+every word plus the prefetches.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
