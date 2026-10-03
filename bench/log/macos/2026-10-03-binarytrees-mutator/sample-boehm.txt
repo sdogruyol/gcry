@@ -1,0 +1,86 @@
+=== boehm run 1: in 1.143s
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        1285
+        __semwait_signal  (in libsystem_kernel.dylib)        645
+        GC_malloc_kind  (in boehm)        125
+        *Binarytrees::TreeNode#check:Int32  (in boehm)        88
+        pthread_getspecific  (in libsystem_pthread.dylib)        75
+        *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm)        65
+        GC_allochblk_nth  (in boehm)        52
+        _platform_memset  (in libsystem_platform.dylib)        48
+        GC_build_fl  (in boehm)        32
+        DYLD-STUB$$pthread_getspecific  (in boehm)        25
+        GC_mark_from  (in boehm)        24
+        GC_freehblk  (in boehm)        14
+        GC_allochblk  (in boehm)        13
+        GC_end_stubborn_change  (in boehm)        9
+        clear_marks_for_block  (in boehm)        9
+        GC_find_header  (in boehm)        8
+        GC_mark_some  (in boehm)        8
+        GC_apply_to_all_blocks  (in boehm)        6
+        DYLD-STUB$$pthread_mutex_unlock  (in boehm)        5
+        GC_reclaim_block  (in boehm)        5
+        mach_msg2_trap  (in libsystem_kernel.dylib)        5
+        pthread_mutex_unlock  (in libsystem_pthread.dylib)        5
+
+--- call graph, nodes >= 15 samples
+    648 Thread_16411   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 648 start  (in dyld) + 6992  [0x18c4ac4e4]
+    +   648 main  (in boehm) + 12  [0x1003e73a0]
+    +     648 __crystal_main  (in boehm) + 17736  [0x1003c0d40]
+    +       286 *Benchmark::run<(String | Nil)>:Nil  (in boehm) + 6360  [0x10042aa20]
+    +       ! 152 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : 74 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | 51 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + 32 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! 24 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! : 22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! : | 22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! : |   22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! : |     22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! : |       22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! : |         22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! : |           21 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! : |           + 21 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! : |           +   21 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + 18 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | 21 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : 69 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | 35 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | 33 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + 20 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! 134 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   67 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   | 41 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | + 24 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   | + 16 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | 24 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   65 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | 42 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | + 24 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | + ! 15 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   | + 18 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   | 23 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       267 *Benchmark::run<(String | Nil)>:Nil  (in boehm) + 6320  [0x10042a9f8]
+    +       ! 139 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : 75 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | 44 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + 28 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + ! 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | + ! : 15 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + 15 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | 31 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : |   21 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : |   ! 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : |   ! : 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : 63 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | 34 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! : | + 19 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : | 29 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       ! : |   15 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       ! 128 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   65 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]
+    +       !   | 37 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 92  [0x1004562a0]
+    +       !   | + 19 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in boehm) + 108  [0x1004562b0]

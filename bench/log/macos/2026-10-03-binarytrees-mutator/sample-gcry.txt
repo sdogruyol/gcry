@@ -1,0 +1,89 @@
+=== gcry run 1: in 1.277s
+Sort by top of stack, same collapsed (when >= 5):
+        __semwait_signal  (in libsystem_kernel.dylib)        746
+        *Gcry::Heap#malloc<UInt64>:Pointer(Void)  (in gcry)        119
+        *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry)        35
+        *Gcry::Heap#scan_object<Pointer(Gcry::BlockHeader)>:Nil  (in gcry)        34
+        *Binarytrees::TreeNode#check:Int32  (in gcry)        29
+        _tlv_get_addr  (in libdyld.dylib)        27
+        __crystal_malloc64  (in gcry)        26
+        *Gcry::Heap#chunk_containing_unlocked<UInt64>:(Pointer(Gcry::ChunkHeader) | Nil)  (in gcry)        24
+        *Gcry::Heap#mark_impl_unlocked<Pointer(Void), Bool, Bool, Gcry::Heap::RootSource>:Nil  (in gcry)        24
+        *Gcry::Heap#find_block_with_chunk<Pointer(Void)>:(Tuple(Pointer(Gcry::BlockHeader), Pointer(Gcry::ChunkHeader)) | Nil)  (in gcry)        14
+        *UInt64@Int#<<<Int64>:UInt64  (in gcry)        8
+        *Gcry::Heap#block_allocated?<Pointer(Gcry::ChunkHeader), Pointer(Gcry::BlockHeader)>:Bool  (in gcry)        6
+
+Binary Images:
+       0x102b94000 -        0x102d9dd87 +gcry (0) <88DDB117-25E1-3753-8260-099F63B37304> /Users/*/gcry
+       0x102e58000 -        0x102eac29b +libgmp.10.dylib (0) <EBD7FFAB-E869-3852-8829-BB901528BE79> /opt/homebrew/*/libgmp.10.dylib
+       0x18c404000 -        0x18c456b4b  libobjc.A.dylib (951.7) <03BD9E32-CF0A-37B0-898A-3CE8DE06D842> /usr/lib/libobjc.A.dylib
+       0x18c457000 -        0x18c48bd58  libdyld.dylib (1387) <957F93B3-8805-39C7-9C51-EDD1715F550E> /usr/lib/system/libdyld.dylib
+       0x18c48c000 -        0x18c53f4ff  dyld (1.0.0 - 1387) <74E52480-C2BD-3C8D-812D-95FE2B74A096> /usr/lib/dyld
+       0x18c540000 -        0x18c543228  libsystem_blocks.dylib (96) <E0AC1231-27AA-3A13-8FAC-41D5802B1F3C> /usr/lib/system/libsystem_blocks.dylib
+       0x18c544000 -        0x18c59855f  libxpc.dylib (3102.160.5) <33E44C2D-D65E-37A6-B85F-1A4CF524A050> /usr/lib/system/libxpc.dylib
+       0x18c599000 -        0x18c5b99ff  libsystem_trace.dylib (1861.160.4) <93F1DD8C-6CD9-32B9-B222-D23DA5D161B4> /usr/lib/system/libsystem_trace.dylib
+       0x18c5ba000 -        0x18c6685f7  libcorecrypto.dylib (1922.160.10) <0642DDAD-4771-3C82-805C-E7C6701C1461> /usr/lib/system/libcorecrypto.dylib
+--- call graph, nodes >= 15 samples
+    374 Thread_16324   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 374 start  (in dyld) + 6992  [0x18c4ac4e4]
+    +   374 main  (in gcry) + 12  [0x102c09b24]  main.cr:9
+    +     374 __crystal_main  (in gcry) + 20104  [0x102b996d0]  metric.cr:11
+    +       205 *Benchmark::run<(String | Nil)>:Nil  (in gcry) + 6360  [0x102c4ef6c]  metric.cr:70
+    +       ! 149 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : 121 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | 111 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + 100 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! 97 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! : 97 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! :   | 96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |   96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |     96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |       96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! :   |         96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! :   |           96 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |             90 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |             + 49 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! :   |             + ! 22 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! :   |             + ! 20 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |             + 35 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! :   |             + ! 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : 28 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! 56 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       !   30 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       !   | 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       !   26 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       134 *Benchmark::run<(String | Nil)>:Nil  (in gcry) + 6400  [0x102c4ef94]  metric.cr:70
+    +       ! 81 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : 52 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | 41 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + 34 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! 32 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! : 30 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! : | 30 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! : |   30 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : | + ! : |     20 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       ! : | + ! : |     + 18 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! : 29 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! :   16 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       ! 53 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       !   27 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       !   | 17 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 92  [0x102c7a540]  metric.cr:196
+    +       !   26 *Binarytrees::TreeNode::new<Int32, Int32>:Binarytrees::TreeNode  (in gcry) + 108  [0x102c7a550]  metric.cr:196
+    +       17 *Benchmark::run<(String | Nil)>:Nil  (in gcry) + 6404  [0x102c4ef98]  metric.cr:70
+    374 Thread_16328: SYSMON
+    + 374 thread_start  (in libsystem_pthread.dylib) + 8  [0x18c872c1c]
+    +   374 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c877c58]
+    +     374 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in gcry) + 152  [0x10
+    +       374 ~procProc(Thread, Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/fiber/execution_context/monitor.cr:19  (in gcry) + 16  [0x102c440e0]  mo
+    +         372 *Fiber::ExecutionContext::Monitor#run_loop:NoReturn  (in gcry) + 124  [0x102c4415c]  monitor.cr:55
+    +         ! 372 nanosleep  (in libsystem_c.dylib) + 220  [0x18c712cc0]
+    +         !   372 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18c837308]
+    374 Thread_16329: gc-idle
+      374 thread_start  (in libsystem_pthread.dylib) + 8  [0x18c872c1c]
+        374 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c877c58]
+          374 ~procProc(Pointer(Void), Pointer(Void))@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/pthread.cr:22  (in gcry) + 164  [0x10
+            374 ~procProc(Thread, Nil)@lib/gcry/src/gcry/idle_release.cr:135  (in gcry) + 12  [0x102bd9b54]  idle_release.cr:135
+              374 *Gcry::IdleRelease::loop_forever:NoReturn  (in gcry) + 856  [0x102bd9eac]  idle_release.cr:194
+                374 nanosleep  (in libsystem_c.dylib) + 220  [0x18c712cc0]
+                  374 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18c837308]

@@ -15,10 +15,12 @@ else is 87–107%.
 | Primes | 15 | 2843 ms | 2839 ms | 4 ms | 42 ms | 10.2 M objects, 546 MiB, mark 514 ms |
 | JsonParsePure | 25 | 2496 ms | 2492 ms | 7 ms | 36 ms | 4.2 M objects, 439 MiB, mark 352 ms |
 
-The pause is the mark phase and nothing else. Boehm (`GC_PRINT_STATS`) marks
-the same Primes heap (545 MiB pointer-containing) in 178 ms at its largest
-collection and ~520 ms over all 15; gcry's is ~5× that, on the same number of
-collections. It is ~50 ns per live object.
+The pause is the mark phase and nothing else. Boehm (`GC_PRINT_STATS`) with a
+single marker (`GC_MARKERS=1`) marks the same Primes heap (545 MiB
+pointer-containing) in 178 ms at its largest collection and ~520 ms over all
+15; gcry's is ~5× that, on the same number of collections. It is ~50 ns per
+live object. Boehm's default runs a marker per CPU: 46 ms for that
+collection on this 12-vCPU host, Primes 1.25 s against 1.35 s single-marker.
 
 ## Where the mark time goes
 

@@ -29,6 +29,24 @@ runners, gcry at `c472941`; scripts in this directory.
   `GCRY_SINGLE_MUTATOR=0` all land within the runner's noise of the default.
   `GCRY_ALLOC_FAST_PATH=0` is 3× slower, so the fast path is in use.
 
+## What `sample` shows
+
+`sample.sh`: macOS's `sample` on the running benchmark (not `--debug`: that
+build turns inlining off and ran gcry's Binarytrees in 27 s). Main-thread
+samples, gcry 374 in a 1.28 s run, Boehm 648 in 1.14 s (`sample-*.txt`):
+
+| | gcry | Boehm |
+|---|---:|---:|
+| allocation (malloc, TLS, refill, block build, memset) | ~48% | ~60% |
+| marking, on the main thread | ~27% | ~8% |
+| `TreeNode#check` | 8% | 14% |
+
+Boehm runs two more threads than gcry here, its parallel markers (mostly in
+`__psynch_cvwait`), so its mark costs the main thread little. gcry marks on
+the main thread alone. That is the shape on Linux too (`GC_MARKERS=1` Boehm
+in `../../linux/2026-10-03-mark-prefilter/`), so it does not explain a gap
+that is larger on macOS; the allocation share is not out of line either.
+
 ## Open
 
 A 10–20% mutator cost on macOS arm64 that none of the above moves, with
