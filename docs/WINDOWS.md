@@ -53,6 +53,9 @@ scrubbing dead stack. Conservative root scans include that red zone.
   Failure is reported without allocating until suspension and collector locks
   are released. Exception creation then suppresses process-GC auto-collection,
   including when suspension is requested directly through `GC.stop_world`.
+- A `gc-idle` thread runs one releasing collection once the process has
+  allocated nothing for two minutes (`GCRY_IDLE_RELEASE_MS`, `=0` turns it
+  off), as on Linux and macOS. The stop suspends it like any other thread.
 - Stopped-world stderr diagnostics use `WriteFile` on the standard error handle,
   bypassing CRT descriptor locks that a suspended mutator might hold.
 - Thread creation publishes its birth root before resuming the new thread, and

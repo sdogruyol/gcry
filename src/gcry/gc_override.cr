@@ -892,20 +892,17 @@ module GC
     end
     # One releasing collection once the process has not allocated for N ms
     # (src/gcry/idle_release.cr). **On by default at two minutes** — Go's
-    # forced-GC period — on Linux and Darwin; `GCRY_IDLE_RELEASE_MS=0` turns it
+    # forced-GC period; `GCRY_IDLE_RELEASE_MS=0` turns it
     # off. Two minutes, not seconds: a shorter delay releases chunks the next
     # burst faults straight back in, which is the churn the warm budget and the
-    # unmap grace exist to prevent. Not Windows: the gate that holds it
-    # (`make idle-release`) has no Windows runner. Never under `-Dwithout_mt`,
-    # where `Crystal::SpinLock` compiles to nothing and a collection from a
-    # second thread would take none of the locks it needs. Both warn only when
-    # the knob is set, since off is simply their default.
+    # unmap grace exist to prevent. Windows too since 2026-10-03, once its
+    # gates job could run `make idle-release` and `idle-thread-roots`; there,
+    # as on Darwin, the stop suspends the idle thread like any other. Never
+    # under `-Dwithout_mt`, where `Crystal::SpinLock` compiles to nothing and a
+    # collection from a second thread would take none of the locks it needs.
+    # It warns only when the knob is set, since off is simply its default.
     idle_env = env_u64("GCRY_IDLE_RELEASE_MS")
-    {% if flag?(:win32) %}
-      if idle_env && idle_env > 0
-        warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is not supported on Windows; ignored\n")
-      end
-    {% elsif flag?(:without_mt) %}
+    {% if flag?(:without_mt) %}
       if idle_env && idle_env > 0
         warn_unsupported_env("gcry: GCRY_IDLE_RELEASE_MS is ignored under -Dwithout_mt: " \
                              "the locks a collection from another thread needs compile to nothing there\n")

@@ -2020,6 +2020,14 @@ jobs:
           bin/unaligned_only_buffer
           if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           ci/sound-suite.sh
+          # The idle collector, on by default here since 2026-10-03. Its red
+          # arms run directly: mingw make does not hand `! cmd` to a shell.
+          crystal build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace
+          GCRY_IDLE_RELEASE_MS=50 bin/idle_release
+          if GCRY_IDLE_RELEASE_MS=0 bin/idle_release; then echo "FAIL: no idle collector and still released"; exit 1; fi
+          crystal build -Dgc_none bench/idle_thread_roots.cr -o bin/idle_thread_roots --error-trace
+          GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 bin/idle_thread_roots
+          if GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 GCRY_IDLE_SCAN_SKIP=1 bin/idle_thread_roots; then echo "FAIL: skipping the idle stack lost nothing"; exit 1; fi
 
   # Crystal's ARM64 Windows distribution currently uses the GNU/MinGW ABI.
   # Pin the upstream archive; MSYS2 supplies its native linker and libraries.
@@ -2112,6 +2120,12 @@ jobs:
           bin/unaligned_only_buffer
           if GCRY_ALIGNED_CANDIDATES=1 bin/unaligned_only_buffer; then echo "FAIL: the aligned-only arm kept the buffer"; exit 1; fi
           CRYSTAL="$cc" ci/sound-suite.sh
+          "$cc" build -Dgc_none bench/idle_release.cr -o bin/idle_release --error-trace
+          GCRY_IDLE_RELEASE_MS=50 bin/idle_release
+          if GCRY_IDLE_RELEASE_MS=0 bin/idle_release; then echo "FAIL: no idle collector and still released"; exit 1; fi
+          "$cc" build -Dgc_none bench/idle_thread_roots.cr -o bin/idle_thread_roots --error-trace
+          GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 bin/idle_thread_roots
+          if GCRY_IDLE_TEST_HOLD=1 GCRY_POISON_FREED=1 GCRY_IDLE_SCAN_SKIP=1 bin/idle_thread_roots; then echo "FAIL: skipping the idle stack lost nothing"; exit 1; fi
 
 
   # Native macOS (Apple Silicon runner). Soft-dirty stays Linux-only.
