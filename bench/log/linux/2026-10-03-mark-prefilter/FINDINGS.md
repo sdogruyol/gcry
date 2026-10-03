@@ -109,9 +109,17 @@ with 10 interleaved reps:
 - Dropping `scan_hash_object`'s field loops in the major mark, where
   `scan_hash_body` marks the same words: +5.8% JsonParsePure, ±0 elsewhere.
 
-Neither result has a mechanism behind it that the counts explain, and the host
-is a QEMU guest without perf counters, so changes of this size here are
-binary-layout noise as much as anything. The gap left is the per-candidate
+The SIGPROF sampler (`../2026-10-03-monitor-wait-spin/sampler.c`) later
+explained the first one. Under headerless, `heap_set_mark` reads
+`header.value.size` for `SizeClasses.index_of?`, and the "header" there is the
+blob's own first line — so the old path took the cache miss on `@entries`
+inside `mark_noscan`, sampled as `size_classes.cr:64` (6.6% of JsonParsePure's
+CPU). The single-resolution path never reads the blob, and the same miss
+reappears one step later on the entries walk's first read of each slot
+(`hash_word`, 3.3% → 13.2%). Total CPU samples: 2737 → 2631 (−4%). The cost is
+the dependent miss on the blob, which both versions pay; the instructions
+saved are not where the time is. Otherwise, changes of this size on a QEMU
+guest without perf counters are binary-layout noise as much as anything. The gap left is the per-candidate
 chain (radix L1 → L2 at 4 KiB granules → chunk header → occupancy bitmap →
 mark bitmap), which a structural change would have to shorten — e.g.
 size-aligned small chunks, whose header is `addr & ~(chunk_bytes - 1)`
