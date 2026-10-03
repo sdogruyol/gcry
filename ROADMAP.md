@@ -3744,8 +3744,9 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       chunk was released, and the release saw the header USED. Not
       reproduced since: 0 of 30 each, old and new binaries side by side under
       full load; 0 of 344 in the two campaigns before. The next sighting
-      wants `GCRY_TRACE_LARGE=1`. Through campaign-048 (2026-10-03) the lane
-      has run about 3 000 more times without this fault. Campaign-036's two
+      wants `GCRY_TRACE_LARGE=1`. Through campaign-048 (2026-10-03, 400 runs
+      with it armed) the lane has run about 3 400 more times without this
+      fault. Campaign-036's two
       stalls were captures of the harness parent only, not release faults.
       `bench/log/linux/2026-09-28-dormant-flush-large-release/FINDINGS.md`
 - [ ] **Freeing a large object costs O(live large chunks), so freeing many is
