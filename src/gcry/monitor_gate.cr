@@ -164,12 +164,38 @@ module Gcry
         regs = uninitialized StaticArray(UInt8, Roots::REGISTER_BUFFER_SIZE)
         Roots.capture_registers(regs.to_unsafe)
         @@reg_spills &+= 1
-        while @@stopped.get != 0
-          Intrinsics.pause
-        end
+        wait_for_open
         # Without a use after the spin the optimiser may drop the frame slot,
         # and a root the compiler deleted is the defect this exists to close.
         Roots.keep_alive(regs.to_unsafe.as(Void*))
+      end
+    end
+
+    # Polls before the wait starts sleeping, and the sleep between polls after.
+    # The wait lasts a whole stop, which is the collection's pause: hundreds of
+    # milliseconds on a large heap. Spinning through all of it kept one core
+    # at 100% for every pause — a third of the process's CPU on crystal-metric's
+    # Primes — and on a machine with no spare core that core is taken from the
+    # collector. The Monitor's own period is ~10 ms, so waking up to 100 µs
+    # late after the world restarts costs it nothing. Polling, not a condition
+    # variable, for the reason `parallel_mark.cr`'s idle wait gives: Windows
+    # maps this layer's mutex to an SRWLOCK with no condvar.
+    WAIT_SPINS    =   1_000
+    WAIT_SLEEP_NS = 100_000
+
+    private def self.wait_for_open : Nil
+      spins = 0
+      while @@stopped.get != 0
+        if spins < WAIT_SPINS
+          spins += 1
+          Intrinsics.pause
+        else
+          req = uninitialized Gcry::OS::Timespec
+          req.tv_sec = typeof(req.tv_sec).new(0)
+          req.tv_nsec = typeof(req.tv_nsec).new(WAIT_SLEEP_NS)
+          rem = uninitialized Gcry::OS::Timespec
+          Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+        end
       end
     end
 

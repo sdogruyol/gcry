@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The runtime's Monitor thread no longer spins through every
+  collection.** It is not signal-suspended in a stop; it waits for the
+  world to restart in `MonitorGate.enter`, and it reaches that wait in
+  nearly every pause longer than its ~10 ms period. The wait spun on
+  `pause`, so each pause kept a second core at 100%: on crystal-metric's
+  Primes, user CPU 4.1 s on 2.7 s of wall time, a third of it the Monitor.
+  It now polls 1 000 times and then sleeps 100 µs between polls: user CPU
+  2.55 s, wall unchanged. On a machine with no spare core that core was the
+  collector's (`bench/log/linux/2026-10-03-monitor-wait-spin/`).
+
 ### Changed
 
 - **Marking is ~20% faster on pointer-dense heaps.** Every scanned word
