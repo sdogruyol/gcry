@@ -3927,14 +3927,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `compiler-gc-contract` layout check and the `layout_*` counters. Either
       remove it all (a public API removal), or find a key a raw buffer cannot
       forge before any map narrows a scan again.
-- [ ] **`make nursery-headers` has no red arm (2026-10-04).** Its old one was a
-      `Hash` layout that skipped keys. With the minor's whole old→young scan
-      (dirty pages and the walk of every old block) switched off by hand, and
-      `GCRY_POISON_FREED=1`, the young key reachable only through an old
-      `@entries` blob still survived a minor without a stack scan. Something
-      else roots it — thread registers or a static word are the first
-      suspects — and until that is known the gate cannot fail for the reason
-      it exists.
+- [x] **`make nursery-headers` tests the old→young scan — fixed 2026-10-04.**
+      It never had: a major does not promote, so the Hash and its `@entries`
+      were still young when the key was planted, and the minor reached the
+      key from the class-var pin (`GCRY_LIVE_ATTR`: the key's first mark came
+      through the young Hash). The old red arm went red only through the major
+      after it, with a `Gcry::Layout` map that skipped keys. A minor now
+      promotes the Hash first, the gate checks the Hash old and the key young,
+      and `--disabled` turns the minor's old→young scan off
+      (`Heap#nursery_old_scan`) and requires the key swept, by address
+      (`bench/log/linux/2026-10-04-layout-union-collision/`).
 - [x] **Retire the marker's TLAB "on-stack freelist" claim — done 2026-09-28.**
       Removed with `GCRY_TLAB_MINOR_FREE_OLD`. Retention probe: heap 3.9 → 2.1 MB,
       and `free_bytes` no longer exceeds the heap. Stress: 0/120 either side.

@@ -137,13 +137,14 @@ finalizer-complex: $(BIN)
 # Nursery HTTP::Headers Hash keys. The compile default is headerless, where
 # `Heap#nursery_enabled=` is a no-op, so the CI step that built this without
 # `-Dgcry_block_headers` and asserted the keys survived was testing a major.
-# Green arm only since 2026-10-04: its red arm was a `Gcry::Layout` Hash map
-# that skipped keys, and the mark no longer reads layouts. With the minor's
-# old→young scan switched off the key still survived, so what roots it is
-# open (ROADMAP).
+# Until 2026-10-04 the Hash was still young when the key was planted (a major
+# does not promote), so neither arm tested the old→young scan. A minor now
+# promotes it first; `--disabled` turns that scan off and requires the key
+# swept, asked of the heap by address.
 nursery-headers: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/nursery_headers.cr -o $(BIN)/nursery_headers
 	$(BIN)/nursery_headers
+	$(BIN)/nursery_headers --disabled
 
 # The third mark representation, run: marks in the chunk's bitmap while blocks
 # keep their 16-byte headers and the *freelist* allocator keeps handing them

@@ -488,6 +488,7 @@ module Gcry
       # Soft-dirty/mprotect can *help* mark from dirty pages, but must not
       # replace the full old→young walk: WSL soft-dirty false-negatives under
       # release HTTP left nursery Hash keys unmarked → SEGV.
+      return unless @nursery_old_scan
       scan_dirty_pages_for_pointers(nursery_only: true)
 
       each_chunk do |chunk|

@@ -364,6 +364,10 @@ module Gcry
     # mark-audit`: the mark reads one word less of every block whose first
     # Int32 is this type id. 0 is off.
     property mark_test_short_tid : Int32 = 0
+    # Research only — the red arm of `make nursery-headers`: a minor skips its
+    # whole old→young scan, dirty pages and the walk of every old block, so a
+    # young key that lives only in an old `@entries` blob must be swept.
+    property nursery_old_scan : Bool = true
     # Hash-kind objects whose own body was word-scanned alongside the entry
     # walk. Silence here would mean the collision guard is not engaged.
     getter layout_hash_bodies : UInt64 = 0_u64

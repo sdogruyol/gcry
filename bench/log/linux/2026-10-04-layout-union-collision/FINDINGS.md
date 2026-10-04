@@ -112,9 +112,15 @@ Tests, red on `ea65d06` and `6f8ff0c`, green after:
   instead of pinning the narrowings.
 
 `make nursery-headers` lost its red arm, which installed a `Hash` layout that
-skipped keys. With the minor's whole old→young scan switched off by hand, and
-freed blocks poisoned, the young key still survived, so something else roots
-it; open in ROADMAP.
+skipped keys — and turned out never to have tested what it was named for. A
+major does not promote, so the Hash and its `@entries` were still young when
+the key was planted; with the minor's whole old→young scan switched off by
+hand the key still survived, because `GCRY_LIVE_ATTR` shows its first mark
+came through the young Hash from the class-var pin. The old red arm went red
+through the major after the minor. The gate now promotes the Hash with a minor
+before planting, checks the Hash old and the key young, and its `--disabled`
+arm turns the old→young scan off (`Heap#nursery_old_scan`) and requires the
+key swept, asked of the heap by address: 3 of 3 each way.
 
 Registration (`Gcry::Layout.register`, `register_hash`, `GCRY_AUTO_LAYOUTS`,
 `GCRY_SCAN_CAPS`, the gates that inspect entries) still exists and no longer
