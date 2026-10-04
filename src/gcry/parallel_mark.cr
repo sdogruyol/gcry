@@ -191,7 +191,12 @@ module Gcry
     # starts sleeping, then sleeps of this many ns. See `mark_worker_loop`.
     MARK_IDLE_SPINS    =  20_000
     MARK_IDLE_SLEEP_NS = 200_000
-    MARK_POP_BATCH     =     256
+    # The sleep doubles while nothing comes, up to this. At a flat 200 µs three
+    # idle helpers woke ~15 000 times a second, and on a 4-vCPU runner serving
+    # Kemal that cost `/` 10–14 points of throughput even with every mark
+    # serial (`GCRY_PARALLEL_MARK_MIN_LIVE` above the live set).
+    MARK_IDLE_SLEEP_MAX_NS = 5_000_000
+    MARK_POP_BATCH         =       256
     # Entries are {header, chunk} pairs, so the flat buffer is twice the count.
     # Literal, not `MARK_POP_BATCH * 2`: a computed constant initializer runs
     # before Fiber is up during GC.init (see size_classes.cr).
@@ -465,6 +470,7 @@ module Gcry
       # condition variable because there is no lost wake-up to reason about,
       # and Windows maps this layer's mutex to an SRWLOCK with no condvar.
       idle = 0
+      nap = MARK_IDLE_SLEEP_NS
       while @mark_shutdown.get == 0
         epoch = @mark_epoch.get
         if epoch == local_epoch
@@ -474,13 +480,15 @@ module Gcry
           else
             req = uninitialized Gcry::OS::Timespec
             req.tv_sec = typeof(req.tv_sec).new(0)
-            req.tv_nsec = typeof(req.tv_nsec).new(MARK_IDLE_SLEEP_NS)
+            req.tv_nsec = typeof(req.tv_nsec).new(nap)
             rem = uninitialized Gcry::OS::Timespec
             Gcry::OS.nanosleep(pointerof(req), pointerof(rem))
+            nap = nap * 2 > MARK_IDLE_SLEEP_MAX_NS ? MARK_IDLE_SLEEP_MAX_NS : nap * 2
           end
           next
         end
         idle = 0
+        nap = MARK_IDLE_SLEEP_NS
         local_epoch = epoch
         next if @mark_shutdown.get != 0
         ensure_pushbuf(slot)
