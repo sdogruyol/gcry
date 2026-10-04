@@ -1,0 +1,10 @@
+### win
+PMX Primes: pm1 mark 1333ms (+0%) time 2.229s  pm4 mark 797ms (-40%) time 1.647s
+PMX JsonParsePure: pm1 mark 1706ms (+0%) time 1.502s  pm4 mark 837ms (-51%) time 0.952s
+PMX Binarytrees: pm1 mark 177ms (+0%) time 1.002s  pm4 mark 163ms (-8%) time 0.978s
+PMX JsonGenerate: pm1 mark 1370ms (+0%) time 0.759s  pm4 mark 1090ms (-20%) time 0.759s
+### unix
+PMX Primes: pm1 mark 1635ms (+0%) time 2.522s  pm4 mark 1178ms (-28%) time 2.289s
+PMX JsonParsePure: pm1 mark 2177ms (+0%) time 1.855s  pm4 mark 1215ms (-44%) time 1.252s
+PMX Binarytrees: pm1 mark 142ms (+0%) time 1.127s  pm4 mark 167ms (+17%) time 1.211s
+PMX JsonGenerate: pm1 mark 1930ms (+0%) time 0.970s  pm4 mark 1921ms (-0%) time 0.988s

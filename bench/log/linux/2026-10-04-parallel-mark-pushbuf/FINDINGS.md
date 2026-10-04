@@ -115,3 +115,20 @@ it, −31% after). `GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=33554432` i
 the setting that leaves a small server where one worker would and still
 halves a large heap's mark.
 
+## macOS and Windows
+
+Same four benchmarks, `c25cae7` (all of the above), 5 interleaved reps on
+macos-latest (arm64, 3 vCPUs) and windows-latest (x64, 4 vCPUs)
+(`scaling-portable.sh`, `scaling-macos-windows.txt`), Σ mark at 4 workers
+against 1:
+
+| bench | Windows x64 | macOS arm64 |
+|---|---:|---:|
+| Primes | −40% | −28% |
+| JsonParsePure | −51% | −44% |
+| Binarytrees | −8% | +17% |
+| JsonGenerate | −20% | 0% |
+
+Four workers on a 3-vCPU runner oversubscribe it; the short Binarytrees marks
+pay for that, the large heaps still gain.
+
