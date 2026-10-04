@@ -1,0 +1,6 @@
+KN boehm: time 0.963s peak 46.7MiB (min 36.9 max 49.7) max_heap 0.0MiB
+KN gcry: time 1.115s peak 85.0MiB (min 85.0 max 85.2) max_heap 80.1MiB
+KN nomadvise: time 1.125s peak 85.0MiB (min 85.0 max 85.0) max_heap 80.1MiB
+KN retain0: time 1.085s peak 82.0MiB (min 82.0 max 82.1) max_heap 77.4MiB
+KN keep: time 1.192s peak 95.9MiB (min 95.9 max 95.9) max_heap 91.9MiB
+KN thr8: time 1.227s peak 44.5MiB (min 44.4 max 44.5) max_heap 52.4MiB

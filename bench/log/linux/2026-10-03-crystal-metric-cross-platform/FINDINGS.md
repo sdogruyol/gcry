@@ -39,7 +39,15 @@ Matmul ~36 vs ~29 MiB) except Knuckeotide on macOS (84.8 vs 40–47 MiB,
 1.8–2.1×). It is not the macOS 256 KiB chunk size, as first guessed here:
 `GCRY_CHUNK_BYTES=131072` leaves it at 85 MiB, and moves no other benchmark's
 peak by more than 3% or its time outside ±7.4% (`macos-chunk128k.txt`, 5
-reps, `5fbf72e`). Cause open.
+reps, `5fbf72e`). Nor is it pages released but still counted: with
+`GCRY_DISABLE_MADVISE=1` the peak is the same 85.0 MiB, and with
+`GCRY_EMPTY_CHUNK_RETAIN=0` 82.0 MiB. It is the heap: the largest heap under
+the adaptive threshold is 80 MiB on macOS against 57 MiB on Linux, and a fixed
+`GCRY_THRESHOLD=8388608` takes the macOS peak to 44.5 MiB — below Boehm's 46.7
+— for +10% time (`macos-knuckeotide-rss.txt`, 6 reps). Darwin's adaptive
+floor is 16 MiB against Linux's 8, a choice measured on a dense-live
+application; why the two platforms' heaps diverge by 23 MiB on this benchmark
+is not established.
 
 ## Follow-up
 
