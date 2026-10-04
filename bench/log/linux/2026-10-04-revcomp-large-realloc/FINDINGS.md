@@ -38,4 +38,21 @@ chunk-list registration under the collector's feet. A reservation of address
 space past each large chunk would make in-place growth succeed; that is a
 mapping-policy change with its own VA and fragmentation questions.
 
+## Why a bigger cache does not help either
+
+With `GCRY_LARGE_CACHE=268435456` the run maps 38 chunks instead of 49 and
+takes the same faults (`trace-large-cache256.txt`). The trace says why: each
+doubling chain runs inside one collection epoch (`coll=8`: 4, 8, 16, 32 MiB
+back to back). The block a step outgrows is garbage at once, but the cache
+only receives it at the next sweep, so no step of a chain can reuse the one
+before it; only a later chain can, and only at a size that matches exactly.
+
+Boehm's `GC_realloc` frees the old object on the spot (`GC_free` after the
+copy, `mallocx.c`), which is what lets its next step reuse the block. gcry
+does not, on purpose: `realloc_owned` documents a Parallel-EC SEGV from
+exactly that — the owner's field still held the old pointer until `realloc`
+returned, and a peer reused the block in between. So the reuse route is
+closed by a safety rule, and growth in place is the route that keeps the old
+pointer valid.
+
 Open in ROADMAP.md.
