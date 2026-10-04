@@ -3895,9 +3895,11 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       (2026-10-03).** Same heap, same collection: Primes' largest mark 470 ms
       against 178 ms for Boehm with one marker (`GC_MARKERS=1`) after the
       heap-span prefilter. Boehm's default is a marker per CPU, which takes
-      that collection to 46 ms on 12 vCPUs; gcry's parallel mark is still
-      experimental and makes these marks slower at every worker count (+4% to
-      +88% at 2 and 4 workers on 4-vCPU runners, 2026-10-04). A SIGPROF profile
+      that collection to 46 ms on 12 vCPUs. gcry's opt-in parallel mark made
+      these marks slower at every worker count until three shared writes were
+      removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
+      4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
+      Default-on still needs the HTTP numbers re-measured and a campaign. A SIGPROF profile
       puts it in candidate resolution (radix → chunk header → occupancy and
       mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
       instruction-level trims have stopped paying on this host

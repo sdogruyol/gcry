@@ -1,0 +1,10 @@
+### pm (ubuntu-latest)
+PM Primes: pm1 mark 1255ms (+0%) time 2.232s  pm2 mark 836ms (-33%) time 1.789s  pm4 mark 686ms (-45%) time 1.700s
+PM JsonParsePure: pm1 mark 1665ms (+0%) time 1.566s  pm2 mark 800ms (-52%) time 1.008s  pm4 mark 776ms (-53%) time 0.999s
+PM Binarytrees: pm1 mark 160ms (+0%) time 0.929s  pm2 mark 91ms (-43%) time 0.858s  pm4 mark 85ms (-47%) time 0.911s
+PM JsonGenerate: pm1 mark 1267ms (+0%) time 0.848s  pm2 mark 786ms (-38%) time 0.849s  pm4 mark 1002ms (-21%) time 0.886s
+### pm (ubuntu-24.04-arm)
+PM Primes: pm1 mark 1575ms (+0%) time 2.975s  pm2 mark 1475ms (-6%) time 2.857s  pm4 mark 891ms (-43%) time 2.298s
+PM JsonParsePure: pm1 mark 2403ms (+0%) time 2.144s  pm2 mark 1437ms (-40%) time 1.588s  pm4 mark 919ms (-62%) time 1.261s
+PM Binarytrees: pm1 mark 285ms (+0%) time 1.546s  pm2 mark 175ms (-38%) time 1.445s  pm4 mark 110ms (-61%) time 1.384s
+PM JsonGenerate: pm1 mark 2111ms (+0%) time 1.082s  pm2 mark 1412ms (-33%) time 1.084s  pm4 mark 1180ms (-44%) time 1.083s

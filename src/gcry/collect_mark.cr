@@ -305,20 +305,15 @@ module Gcry
 
     # Keep allocation alive without scanning its payload (integer / index buffers).
     # Always allow interiors — Array(UInt8)#shift stores an interior @buffer.
+    #
+    # No lock under parallel mark, as in `mark_impl_unlocked`: a bitmap mark is
+    # an atomic OR and a header mark stores the one generation value, so two
+    # workers marking the same blob agree, and nothing is pushed. The lock
+    # dated from when every mark took it; on a Hash-heavy heap it was one
+    # global lock per `@entries` / `@indices` blob, and JsonParsePure ran
+    # +40–54% slower with four workers than with one
+    # (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
     private def mark_noscan(pointer : Void*) : Nil
-      if @mark_parallel
-        @mark_lock.lock
-        begin
-          mark_noscan_unlocked(pointer)
-        ensure
-          @mark_lock.unlock
-        end
-      else
-        mark_noscan_unlocked(pointer)
-      end
-    end
-
-    private def mark_noscan_unlocked(pointer : Void*) : Nil
       addr = pointer.address
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0

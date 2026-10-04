@@ -1,0 +1,37 @@
+samples 4779; outside binary: libc.so.6 84
+
+-- leaf function (inlined frame) --
+ 27.5% null?
+ 13.5% chunk_set_mark
+  6.2% radix_note_fast_hit
+  6.1% scan_object
+  2.6% step1
+  2.6% mark_impl_unlocked
+  2.5% []=
+  2.3% chunk_marked?
+  1.9% chunk_containing_unlocked
+  1.9% radix_lookup
+  1.9% mark_stack_push
+  1.7% contains?
+
+-- outermost real function --
+ 41.1% chunk_containing_unlocked
+ 25.8% mark_impl_unlocked
+  8.3% scan_object
+  6.8% run
+  3.6% malloc
+  3.1% find_entry
+
+-- source line --
+ 27.5% pointer.cr:82
+ 13.4% gcry/heap.cr:3259
+  6.2% gcry/chunk_radix.cr:204
+  3.2% gcry/collect_mark.cr:553
+  2.6% /home/naruto/.cache/cmx/metric.cr:1296
+  2.4% pointer.cr:148
+  2.3% gcry/heap.cr:3236
+  1.9% gcry/chunk_radix.cr:198
+  1.6% gcry/kernels.cr:128
+  1.5% pointer.cr:96
+  1.4% /home/naruto/.cache/cmx/metric.cr:1301
+  1.4% gcry/block.cr:506
