@@ -3926,7 +3926,16 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `make ivar-layout-roots`, `make auto-layouts`, the
       `compiler-gc-contract` layout check and the `layout_*` counters. Either
       remove it all (a public API removal), or find a key a raw buffer cannot
-      forge before any map narrows a scan again.
+      forge before any map narrows a scan again. The removal is ready on the
+      `layout-removal` branch (`b715fa5`, −2 205 lines, not merged): green on
+      CI except one gate. On Darwin x86_64 its build makes
+      `fp-register-root`'s red arm (`GCRY_DISABLE_GREG_ROOTS=1`) keep the
+      victim in 12 of 13 runs, first-marked from a stack root
+      (`GCRY_LIVE_ATTR`), where `c985fcc` drops it 8 of 8, with or without
+      the boot registration. A `-Dgcry_hl_assert` build of the branch drops
+      it 3 of 3, and wiping the stack before each collection or collecting
+      once does not help: a stack word that only that codegen leaves. The
+      gate needs to stop depending on it before the branch can merge.
 - [x] **`make nursery-headers` tests the old→young scan — fixed 2026-10-04.**
       It never had: a major does not promote, so the Hash and its `@entries`
       were still young when the key was planted, and the minor reached the
