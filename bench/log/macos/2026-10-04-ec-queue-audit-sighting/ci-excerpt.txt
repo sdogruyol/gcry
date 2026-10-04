@@ -1,0 +1,29 @@
+crystal build -Dgc_none bench/ec_queue_audit.cr -o bin/ec_queue_audit --error-trace
+GCRY_EC_QUEUE_AUDIT=1 GCRY_POISON_HOLDERS=1 GCRY_THREAD_BLOCK_AUDIT=1 bin/ec_queue_audit
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 1 listed, 1 bounded, 5 staged. collection 0
+=== execution-context queue audit ===
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 1 listed, 1 bounded, 6 staged. collection 1
+mode: hold (audit on; the corrupt slot must be named)
+gcry: dying-type audit — precondition: a thread was staged AFTER the wait ran — the world stopped without it and nothing waited. 2 listed, 2 bounded, 6 staged. collection 2
+audit: on (GCRY_EC_QUEUE_AUDIT=1)
+gcry: dying-type audit — block 0x1008a8a80 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 15 words from 1 of 2 threads). Offered by the collecting thread's own stack scan: no. collection 3
+gcry:   on Crystal's thread list: no — it has either not published yet or exited. Still linked from a live thread's list node: no (2 links read; self-check: the collecting thread was found)
+gcry:   its @system_handle 0x16fe23000; nothing was staged at the stop, so an exit is the reading left
+gcry:   threads at that moment: 2 on Crystal's list, 2 of them with snapshotted stack bounds, 6 staged and unpublished (6 ever staged, 0 overflowed), the kernel says unknown
+gcry: address-space audit (dying watched-type block) — 0x1008a8a80 not searched: /proc/self/maps could not be read. collection 3
+gcry: dying-type audit — block 0x1008a8c00 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 15 words from 1 of 2 threads). Offered by the collecting thread's own stack scan: no. collection 3
+gcry:   on Crystal's thread list: no — it has either not published yet or exited. Still linked from a live thread's list node: no (2 links read; self-check: the collecting thread was found)
+gcry:   its @system_handle 0x16feaf000; nothing was staged at the stop, so an exit is the reading left
+gcry:   threads at that moment: 2 on Crystal's list, 2 of them with snapshotted stack bounds, 6 staged and unpublished (6 ever staged, 0 overflowed), the kernel says unknown
+gcry: dying-type audit — block 0x1008a8d80 size 192 type_id 173 is unmarked and about to be swept. In a suspended thread's registers: no (of 15 words from 1 of 2 threads). Offered by the collecting thread's own stack scan: no. collection 3
+gcry:   on Crystal's thread list: no — it has either not published yet or exited. Still linked from a live thread's list node: no (2 links read; self-check: the collecting thread was found)
+gcry:   its @system_handle 0x16ff3b000; nothing was staged at the stop, so an exit is the reading left
+gcry:   threads at that moment: 2 on Crystal's list, 2 of them with snapshotted stack bounds, 6 staged and unpublished (6 ever staged, 0 overflowed), the kernel says unknown
+gcry: SIGSEGV at 0x0 — the kernel reported address 0. A poisoned pointer can read as 0 here too, so this is a null dereference or a pointer with garbage in its top bits
+Invalid memory access (signal 11) at address 0x0
+[0x10019f328] Unhandled exception: Arithmetic overflow (OverflowError)
+*Exception::CallStack::print_backtrace:Nil +112 in /Users/runner/work/gcry/gcry/bin/ec_queue_audit
+[0x100185fb0] ~procProc(Int32, Pointer(LibC::SiginfoT), Pointer(Void), Nil)@/Users/runner/work/_temp/crystal-1.21.0-true-undefined/src/crystal/system/unix/signal.cr:180 +276 in /Users/runner/work/gcry/gcry/bin/ec_queue_audit
+[0x18b46d744] make: *** [ec-queue-audit] Trace/BPT trap: 5
+##[error]Process completed with exit code 2.
+##[group]Run actions/upload-artifact@v7
