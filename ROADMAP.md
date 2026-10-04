@@ -3883,8 +3883,15 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       of its speed locally and 73% on the CI runner (peak RSS 0.65×). In-place
       growth needs free address space above the chunk; moving breaks the
       rule that `realloc` never invalidates the old pointer before the caller
-      stores the new one
-      (`bench/log/linux/2026-10-04-revcomp-large-realloc/`).
+      stores the new one, and a bigger large cache cannot help because each
+      growth chain runs inside one collection epoch
+      (`bench/log/linux/2026-10-04-revcomp-large-realloc/`). Sketch: reserve
+      address space past a large chunk (PROT_NONE / `MEM_RESERVE`), record
+      the reservation in the large chunk's spare `flags` bits as a power of
+      two, and grow in place by committing pages, updating `mapped_bytes`,
+      the index, the radix and `@heap_max` under the locks `map_chunk` takes.
+      Every large unmap, trim, guard and quarantine path must then release
+      the reservation, not `mapped_bytes`.
 - [ ] **macOS: Binarytrees' mutator is 10–20% slower than Boehm's whole run
       (2026-10-03).** Not the pauses, not faults, not the allocation fast
       path (faster than Boehm's in isolation), and not how often it collects:
