@@ -36,8 +36,10 @@ Memory is the other side of it: peak RSS is below Boehm's on most rows
 everywhere, at 0.42–0.70× on Binarytrees, RegexDna, Revcomp and JsonGenerate.
 The rows above 1.2× are small absolute numbers (Brainfuck 4.4 vs 3.6 MiB,
 Matmul ~36 vs ~29 MiB) except Knuckeotide on macOS (84.8 vs 40–47 MiB,
-1.8–2.1×). [INFERENCE] That one is the macOS 256 KiB chunk size on a heap
-of many small size classes; not measured here.
+1.8–2.1×). It is not the macOS 256 KiB chunk size, as first guessed here:
+`GCRY_CHUNK_BYTES=131072` leaves it at 85 MiB, and moves no other benchmark's
+peak by more than 3% or its time outside ±7.4% (`macos-chunk128k.txt`, 5
+reps, `5fbf72e`). Cause open.
 
 ## Follow-up
 
