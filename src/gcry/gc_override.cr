@@ -973,6 +973,9 @@ module GC
     if v = env_u64("GCRY_DYING_AUDIT_MIN_BYTES")
       heap.dying_audit_min_bytes = v
     end
+    if v = env_u64("GCRY_MARK_TEST_SHORT_TID")
+      heap.mark_test_short_tid = v.to_i32
+    end
     if env_flag_one?("GCRY_DYING_REGISTER_AUDIT")
       heap.mark_audit = true
       heap.dying_register_audit = true

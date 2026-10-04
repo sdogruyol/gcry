@@ -63,42 +63,6 @@ it "a union buffer whose first tag is a registered type keeps every element" do
   end
 end
 
-it "size-class mismatch falls back to conservative scan" do
-  Gcry::Layout.clear
-  Gcry::Layout.enabled = true
-
-  heap = Gcry::Heap.new
-  begin
-    heap.gc_threshold = UInt64::MAX
-    heap.layout_precise = true
-    heap.allow_interior_pointers = false
-
-    tid = 4243
-    # Registered as 32-byte type with scan_cap; object is 64 bytes → must NOT
-    # apply scan_cap (that would truncate the scan). Full conservative instead.
-    Gcry::Layout.install_scan_cap(tid, 32_u32, 16_u32)
-
-    child = heap.malloc(32)
-    kept = heap.malloc(32)
-    obj = heap.malloc(64)
-    user = obj.as(UInt8*)
-    user.as(Int32*).value = tid
-    Pointer(Void*).new(user.address + 8).value = child
-    Pointer(Void*).new(user.address + 16).value = kept
-
-    heap.add_root(obj)
-    heap.collect(scan_stack: false)
-
-    heap.live?(child).should be_true
-    heap.live?(kept).should be_true
-    heap.layout_precise_scans.should eq(0)
-    heap.layout_conservative_scans.should be > 0
-  ensure
-    heap.destroy
-    Gcry::Layout.clear
-  end
-end
-
 it "raw-buffer conservative scans are object-base only" do
   heap = Gcry::Heap.new
   begin
@@ -159,63 +123,6 @@ it "register_hash installs KIND_HASH with noscan entries/indices" do
   entry.scan_offsets.size.should eq(0)
 ensure
   Gcry::Layout.clear
-end
-
-it "hash precise scan walks entries_size not capacity (realloc garbage)" do
-  # Regression: walking entries_capacity after growth retained/crashed on
-  # uninitialized slots past @size+@deleted_count (acikturkiye SEGV).
-  Gcry::Layout.clear
-  Gcry::Layout.enabled = true
-  Gcry::Layout.register_hash(String, String)
-
-  heap = Gcry::Heap.new
-  begin
-    heap.gc_threshold = UInt64::MAX
-    heap.layout_precise = true
-
-    tid = Hash(String, String).crystal_instance_type_id
-    entry = Gcry::Layout.entry_for(tid).not_nil!
-    stride = entry.hash_entry_stride.to_u64
-
-    live_key = heap.malloc(32)
-    live_val = heap.malloc(32)
-    dead_key = heap.malloc(32)
-    dead_val = heap.malloc(32)
-
-    # entries buffer: capacity 4 (pow2=3 → indices 8 → entries 4), only 1 live
-    entries = heap.malloc((stride * 4).to_i32).as(UInt8*)
-    entries.clear((stride * 4).to_i32)
-
-    # slot 0: live entry
-    entries.as(UInt32*).value = 0x12345678_u32
-    Pointer(Void*).new(entries.address + entry.hash_key_off).value = live_key
-    Pointer(Void*).new(entries.address + entry.hash_value_off).value = live_val
-
-    # slot 3 (past entries_size=1): garbage that looks like a live entry
-    junk = entries + (stride * 3)
-    junk.as(UInt32*).value = 0xdeadbeef_u32
-    Pointer(Void*).new(junk.address + entry.hash_key_off).value = dead_key
-    Pointer(Void*).new(junk.address + entry.hash_value_off).value = dead_val
-
-    obj = heap.malloc(instance_sizeof(Hash(String, String)).to_i32).as(UInt8*)
-    obj.clear(instance_sizeof(Hash(String, String)).to_i32)
-    obj.as(Int32*).value = tid
-    Pointer(Void*).new(obj.address + entry.hash_entries_off).value = entries.as(Void*)
-    Pointer(UInt8).new(obj.address + entry.hash_pow2_off).value = 3_u8 # capacity 4
-    Pointer(Int32).new(obj.address + entry.hash_size_off).value = 1
-    Pointer(Int32).new(obj.address + entry.hash_deleted_off).value = 0
-
-    heap.add_root(obj.as(Void*))
-    heap.collect(scan_stack: false)
-
-    heap.live?(live_key).should be_true
-    heap.live?(live_val).should be_true
-    heap.live?(dead_key).should be_false
-    heap.live?(dead_val).should be_false
-  ensure
-    heap.destroy
-    Gcry::Layout.clear
-  end
 end
 
 it "hash precise scan keeps the default block's closure alive" do
@@ -293,42 +200,6 @@ it "register_set installs Hash(T, Nil)" do
   entry.hash?.should be_true
 ensure
   Gcry::Layout.clear
-end
-
-it "size mismatch ignores layout entry (full conservative)" do
-  # Regression: applying scan_cap on size mismatch truncated raw-buffer scans
-  # when the leading Int32 collided with a registered type_id.
-  Gcry::Layout.clear
-  Gcry::Layout.enabled = true
-
-  heap = Gcry::Heap.new
-  begin
-    heap.gc_threshold = UInt64::MAX
-    heap.layout_precise = true
-    heap.allow_interior_pointers = false
-
-    tid = 4246
-    Gcry::Layout.install(tid, [8_u16], 32_u32, 16_u32)
-
-    child = heap.malloc(32)
-    kept = heap.malloc(32)
-    obj = heap.malloc(64)
-    user = obj.as(UInt8*)
-    user.as(Int32*).value = tid
-    Pointer(Void*).new(user.address + 8).value = child
-    Pointer(Void*).new(user.address + 16).value = kept
-
-    heap.add_root(obj)
-    heap.collect(scan_stack: false)
-
-    heap.live?(child).should be_true
-    heap.live?(kept).should be_true
-    heap.layout_precise_scans.should eq(0)
-    heap.layout_conservative_scans.should be > 0
-  ensure
-    heap.destroy
-    Gcry::Layout.clear
-  end
 end
 
 it "register_layouts indexes concrete Reference subclasses" do

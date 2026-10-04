@@ -9,27 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A buffer of union values no longer loses its elements to a layout.**
-  `Gcry::Layout` identifies a block by its first `Int32`, and a mixed
-  union's buffer starts with its first element's type id. With default
-  settings, `[JSON::Any.new(array), JSON::Any.new("x")]` — 32 bytes, the
-  size class of an `Array(JSON::Any)`, which the builtins register — was
-  scanned at the Array's one offset, the pointers in both elements were never
-  read, and what they held was swept: SIGSEGV reading 20 000 such pairs back
-  after three collections, none with `GCRY_DISABLE_LAYOUT=1`. The `scan_cap`
-  and leaf narrowings failed the same way. Only a `Hash` layout, behind its
-  own shape check, narrows a scan now; every other type is scanned
-  conservatively, which cost nothing measurable: a non-atomic block is
-  zeroed to its size class and Crystal allocates pointer-free classes atomic
+- **A buffer of union values no longer loses its elements: the mark reads no
+  type layout.** `Gcry::Layout` identified a block by its first `Int32`, and
+  a mixed union's buffer starts with its first element's type id. With
+  default settings, `[JSON::Any.new(array), JSON::Any.new("x")]` — 32 bytes,
+  the size class of the registered `Array(JSON::Any)` — was scanned at the
+  Array's one offset, and `[hash, nil, 1_i64, nil]` — 64 bytes, a
+  `Hash(String, JSON::Any)` — passed the `Hash` shape check once `Int64`'s
+  type id is 256 or more, as in any HTTP + JSON program. Either way what the
+  elements held was swept: SIGSEGV reading 20 000 of them back after three
+  collections, none with `GCRY_DISABLE_LAYOUT=1`. The class is the one
+  acikturkiye hit in August behind the guards of the day. Every non-atomic
+  block is scanned conservatively now. It keeps nothing more: blocks are
+  zeroed to their size class, Crystal allocates pointer-free classes and
+  buffers atomic, and `Hash` clears the entries it deletes or compacts away.
+  Layout registration still runs and no longer affects marking
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
-
-### Changed
-
-- **Marking a heap of small `Hash`es is 13-15% faster.** Each one's
-  `@entries` walk waited on a cache miss for a block the mark loop had never
-  prefetched; the load now starts before the `Hash`'s own words are scanned.
-  JsonParsePure mark −14.9% on x86-64 and −12.8% on arm64, wall time −12.6%
-  and −9.6% (`bench/log/linux/2026-10-04-hash-entries-prefetch/`).
 
 ## [0.34.0] - 2026-10-04
 

@@ -11,16 +11,18 @@
 # report something. This gate plants a missed edge it knows the shape of.
 #
 #   hold      an object whose `instance_sizeof` is smaller than its size class's
-#             payload has **slack**, and under `GCRY_SCAN_CAPS=1` the mark stops
-#             at `instance_sizeof` and never reads it. Writing a pointer into
-#             that slack makes the child unreachable as far as the mark is
-#             concerned, while the audit — which walks the whole payload — must
-#             name it. This is not a collector defect: Crystal does not write
-#             into slack, which is what makes the cap sound and this a usable
-#             control. The arm sets `GCRY_SCAN_CAPS=1` itself, because the caps
-#             are opt-in — without them the scan is fully conservative, the
-#             slack *is* read, and the planted edge is not missed at all
-#             (measured: 200 of 200 planted children survived).
+#             payload has **slack**, and a pointer written there is the last
+#             word of the block. `GCRY_MARK_TEST_SHORT_TID` makes the mark stop
+#             one word short on blocks of that type, so the child is
+#             unreachable as far as the mark is concerned, while the audit —
+#             which walks the whole payload — must name it. The knob is a
+#             planted miss and nothing else: since 2026-10-04 the mark reads
+#             every word of every non-atomic block. Until then the arm used
+#             `GCRY_SCAN_CAPS=1`, whose cap the mark no longer applies
+#             (`bench/log/linux/2026-10-04-layout-union-collision/`); without a
+#             planted miss the scan is fully conservative, the slack *is* read,
+#             and the planted edge is not missed at all (measured: 200 of 200
+#             planted children survived).
 #   clean     the same workload without the planted pointer: the audit must walk
 #             a non-trivial number of edges and report **zero** misses. The edge
 #             count is the half that matters — an audit that walks nothing also
@@ -42,9 +44,9 @@ require "../src/gcry"
   {% raise "mark_audit requires -Dgc_none (gcry as process GC)" %}
 {% end %}
 
-# 24 bytes of ivars (type_id + two pointers) — one 32-byte size class, so there
-# are 8 bytes of slack past `instance_sizeof` that the mark's `scan_cap` stops
-# before and the audit still walks.
+# 24 bytes of ivars (type_id + two pointers) — one 32-byte size class, so the
+# block's last word is 8 bytes of slack past `instance_sizeof`, which the
+# planted miss stops before and the audit still walks.
 class Slacker
   @a : Pointer(Void) = Pointer(Void).null
   @b : Pointer(Void) = Pointer(Void).null
@@ -100,8 +102,8 @@ failures = [] of String
 
 ["hold", "clean"].each do |arm|
   env = control ? {"GCRY_MARK_AUDIT" => "0"} : {"GCRY_MARK_AUDIT" => "1"}
-  # The cap is what makes the slack unreachable to the mark; see the header.
-  env["GCRY_SCAN_CAPS"] = "1" if arm == "hold"
+  # The planted miss is what makes the slack unreachable to the mark; see the header.
+  env["GCRY_MARK_TEST_SHORT_TID"] = Slacker.crystal_instance_type_id.to_s if arm == "hold"
   captured = IO::Memory.new
   Process.run(exe, ["--child=#{arm}"], env: env, output: captured, error: captured)
   text = captured.to_s
@@ -127,8 +129,8 @@ failures = [] of String
   case arm
   when "hold"
     if misses == 0
-      failures << "hold: a pointer living only in a block's scan_cap slack is an edge the mark " \
-                  "does not follow, and the audit did not name it — it cannot detect a missed edge"
+      failures << "hold: a pointer the mark was made to stop short of is an edge it does not " \
+                  "follow, and the audit did not name it — it cannot detect a missed edge"
     end
   when "clean"
     if misses > 0

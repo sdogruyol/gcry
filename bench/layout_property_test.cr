@@ -1,10 +1,10 @@
 # Layout property test for gcry.
 #
-# A registered plain layout must never cost an edge. The key `Gcry::Layout`
-# reads is a block's first Int32, and a raw buffer of a mixed union starts
-# with exactly such an id, so only a Hash — behind its own shape check — may
-# narrow a scan. Every other registration, whatever it claims, scans like an
-# unregistered block (`bench/log/linux/2026-10-04-layout-union-collision/`).
+# A registered layout must never cost an edge. The key `Gcry::Layout` reads
+# is a block's first Int32, and a raw buffer of a mixed union starts with
+# exactly such an id, so the mark reads no layout at all: every registration,
+# whatever it claims, scans like an unregistered block
+# (`bench/log/linux/2026-10-04-layout-union-collision/`).
 # Each sub-test is self-contained: allocates its own aux_ptrs, runs its own
 # collect, and verifies independently.
 #

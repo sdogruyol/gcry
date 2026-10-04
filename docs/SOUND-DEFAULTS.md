@@ -41,44 +41,35 @@ GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./app   # sound, except scrub is back on
 
 ### The second axis: object-body scan precision
 
-`Gcry::Layout` keys a type's map off the payload's first `Int32`, and since
-2026-10-04 only a `Hash` map narrows a scan: the mark walks its `@entries` to
-`@size + @deleted_count`, keeps `@entries` / `@indices` alive without tracing
-them as pointer arrays, and word-scans the `Hash`'s own body, all behind
-`hash_shape_plausible?`. Every other registration is ignored by the mark.
+Since 2026-10-04 there is nothing on this axis: the mark scans every
+non-atomic block conservatively, word by word, and reads no `Gcry::Layout`
+map.
 
-The key is why. A raw buffer of a mixed union begins with its first element's
-type id, so a two-element `Array(JSON::Any)` buffer whose first element is an
-array reads as an `Array(JSON::Any)` in the right size class. It was scanned at
-that type's one offset — in the buffer, the second element's tag — and what
-both elements held was swept while the buffer still held it
-(`bench/log/linux/2026-10-04-layout-union-collision/`). The `size_match` and
-"leaf + pointer-shaped header" guards earlier crashes had added could not see
-it, and the plain narrowings bought nothing a real instance needed: a
-non-atomic block is zeroed to its whole size class, so `scan_cap` clipped only
-zeros, and Crystal allocates a class with no pointer ivars atomic, so a "leaf"
-that reached the scan was always a collision. The other failure this axis had,
-a plain map missing an ivar (19 of 186 stdlib types until 2026-08-15), cannot
-reach the mark for the same reason.
+The maps were keyed off the payload's first `Int32`, and a raw buffer of a
+mixed union begins with its first element's type id. Two shapes of
+`Array(JSON::Any)` buffer were enough, with default settings, to sweep live
+objects (`bench/log/linux/2026-10-04-layout-union-collision/`):
 
-What remains is the `Hash` check's own residual: a buffer that collides with a
-registered `Hash` *and* passes the shape check has the words at `@entries` and
-`@indices` marked without being traced. That is a *different* risk from root
-completeness — it is about how an object's body is scanned once it is already
-known live.
+- `[array, "x"]`, 32 bytes, read as an `Array(JSON::Any)` and was scanned at
+  that type's one offset — in the buffer, the second element's tag;
+- `[hash, nil, 1_i64, nil]`, 64 bytes, read as a `Hash(String, JSON::Any)`
+  and passed its shape check once `Int64`'s type id is 256 or more, as it is
+  in an HTTP + JSON program, so the first element was marked without being
+  traced.
 
-`GCRY_SOUND` deliberately does **not** touch it, so the two costs stay
-attributable. Measure it separately:
-
-```sh
-GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1 ./app   # fully conservative
-```
+acikturkiye had lost Strings the same way in August behind the guards of the
+day (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`); each guard
+narrowed the next collision rather than closing the class. And the maps bought
+nothing a conservative scan does not: a non-atomic block is zeroed to its
+whole size class, Crystal allocates pointer-free classes and buffers atomic,
+and `Hash` clears the entries it deletes or compacts away, so the slack,
+value fields and capacity tails they skipped hold no stale pointers. On
+JsonParsePure they cost a third of the mark.
 
 Note that under `GCRY_SOUND` the `type_id_plausible?` heuristic no longer
 influences liveness *at all*: the ambient path is ungated (`type_id_gate`) and
 the raw-buffer heap-edge path is ungated (`allow_interior_pointers`). It
-survives only in `Gcry::Layout` entry lookup — the body-scan axis above — and
-in the `type_id_root_false_negatives` diagnostic counter.
+survives only in the `type_id_root_false_negatives` diagnostic counter.
 
 ### The third axis: barriers
 
@@ -105,11 +96,10 @@ say *which* assumption is in play when it is not `sound`.
 
 ### What the label still does not cover
 
-**Body-scan precision** (`Gcry::Layout`) — see the axis above. It is left out
-deliberately so its cost stays attributable, not because it is risk-free. A
-configuration with no caveat on any axis is
-`GCRY_SOUND=1 GCRY_DISABLE_LAYOUT=1` — the "sound + conservative bodies" row
-in the numbers below.
+**Body-scan precision** — nothing since 2026-10-04: bodies are scanned
+conservatively whatever `GCRY_DISABLE_LAYOUT` says, so `GCRY_SOUND=1` alone has
+no caveat on any axis. The "sound + conservative bodies" rows below were
+measured when layouts still narrowed scans.
 
 ---
 

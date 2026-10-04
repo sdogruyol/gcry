@@ -1,5 +1,11 @@
 # Hash entries: prefetch before the walk — JsonParsePure mark −13 to −15%
 
+**Superseded the same day.** The `Hash` walk this sped up is gone: the mark
+reads no layout since a union buffer's first tag was shown to collide with
+both an `Array` and a `Hash` map (`../2026-10-04-layout-union-collision/`).
+What follows is kept for the measurements, which are why removing the walk
+was also the faster choice.
+
 Linux, Crystal 1.21.0, base `ea65d06`. crystal-metric, `-Dgc_none --release`.
 
 ## Why

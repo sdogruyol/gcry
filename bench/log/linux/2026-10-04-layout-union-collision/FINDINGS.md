@@ -61,15 +61,61 @@ both Linux architectures) measured layouts on against `GCRY_DISABLE_LAYOUT=1`:
 neutral on Primes, JsonGenerate, Binarytrees, JsonParseSerializable and
 Knuckeotide, and JsonParsePure 30-32% faster with layouts off.
 
+## First fix, and why it was not enough
+
+`6f8ff0c` kept only `Hash` layouts, behind `hash_shape_plausible?`, and
+scanned everything else conservatively. The shape check is a heuristic about
+the same untrustworthy key. In an HTTP + JSON program `Int64`'s type id is 372
+(`type_ids.cr`: Nil 0, String 1, Array(JSON::Any) 2, Hash(String, JSON::Any)
+57, Int64 372, Float64 378, Bool 381), so the 64-byte buffer of
+`[hash, nil, 1_i64, nil]` — the size class of a `Hash(String, JSON::Any)` —
+passes it:
+
+| Hash field (offset) | buffer word there | check |
+|---|---|---|
+| `@entries` (8) | element 0's payload, the real Hash | heap pointer: passes |
+| `@indices` (16) | element 1's tag, Nil = 0 | null: passes |
+| `@size`, `@deleted_count` (24, 28) | element 1's payload, 0 | 0, 0: passes |
+| `@indices_size_pow2` (33) | byte 1 of element 2's tag, 372 >> 8 = 1 | capacity 1 ≥ 0 used: passes |
+
+The word at +8 was then marked without being traced, as a `@entries` blob
+would be, and the first element's own entries were swept (`hash_e2e.cr`):
+SIGSEGV on `6f8ff0c` with default settings, `bad=0 of 20000` with
+`GCRY_DISABLE_LAYOUT=1`. A `JSON.parse`d three-element array (48 bytes, its
+own size class) does not collide.
+
+acikturkiye had lost Strings to the same class in August — blocks reading
+`type_id 208` scanned to `Hash`'s map, missed edges on 193 of 216 collections
+(`../2026-08-24-acikturkiye-live-string-uaf`). Each guard since narrowed the
+next collision rather than closing the class.
+
 ## Fix
 
-`scan_object` and `scan_object_for_nursery` apply a layout only when it is a
-`Hash`, keep the `Hash`'s own shape check, and scan everything else
-conservatively. `spec/layout_spec.cr` "a union buffer whose first tag is a
-registered type keeps every element" fails on `ea65d06` and passes with the
-fix; `bench/layout_property_test.cr` now checks that no plain registration
-loses an edge instead of pinning the narrowings.
+The mark reads no layout. `scan_object` and `scan_object_for_nursery` scan
+every non-atomic block conservatively, and the `Hash` walk, its shape check
+and `mark_noscan` are gone. Retention does not change for the reasons above,
+and for `Hash` because Crystal clears what it deletes or compacts away
+(`(entries + new_entry_index).clear(entries_to_clear)`, "so the GC can
+collect them", `hash.cr`), while gcry hands every non-atomic block out zeroed
+and `realloc` copies into a zeroed one, so the capacity tail past
+`@size + @deleted_count` holds nothing. `@indices` is a `Pointer(UInt8)`
+buffer, allocated atomic.
 
-Residual, documented in `docs/SOUND-DEFAULTS.md`: a buffer that collides with a
-registered `Hash` and passes `hash_shape_plausible?` has its `@entries` /
-`@indices` words marked without being traced.
+Tests, red on `ea65d06` and `6f8ff0c`, green after:
+
+- `process_spec/regression/11_union_buffer_collision_spec.cr`: both buffer
+  shapes, real `JSON::Any` arrays, read back after three collections with
+  churn (`ea65d06` crashes on the first example, `6f8ff0c` on the second);
+- `spec/layout_spec.cr` "a union buffer whose first tag is a registered type
+  keeps every element", on a `Gcry::Heap`;
+- `bench/layout_property_test.cr` checks that no registration loses an edge
+  instead of pinning the narrowings.
+
+`make nursery-headers` lost its red arm, which installed a `Hash` layout that
+skipped keys. With the minor's whole old→young scan switched off by hand, and
+freed blocks poisoned, the young key still survived, so something else roots
+it; open in ROADMAP.
+
+Registration (`Gcry::Layout.register`, `register_hash`, `GCRY_AUTO_LAYOUTS`,
+`GCRY_SCAN_CAPS`, the gates that inspect entries) still exists and no longer
+affects marking. Removing it is a public API change, left for a decision.

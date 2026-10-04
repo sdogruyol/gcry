@@ -360,6 +360,10 @@ module Gcry
     # `GCRY_DYING_AUDIT_MIN_BYTES` — ignore dying blocks smaller than this, so
     # the once-per-collection address-space walk can be aimed at a size.
     property dying_audit_min_bytes : UInt64 = 0_u64
+    # Research only — `GCRY_MARK_TEST_SHORT_TID`, the planted miss of `make
+    # mark-audit`: the mark reads one word less of every block whose first
+    # Int32 is this type id. 0 is off.
+    property mark_test_short_tid : Int32 = 0
     # Hash-kind objects whose own body was word-scanned alongside the entry
     # walk. Silence here would mean the collision guard is not engaged.
     getter layout_hash_bodies : UInt64 = 0_u64

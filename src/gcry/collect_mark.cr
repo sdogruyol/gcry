@@ -303,39 +303,6 @@ module Gcry
       end
     end
 
-    # Keep allocation alive without scanning its payload (integer / index buffers).
-    # Always allow interiors — Array(UInt8)#shift stores an interior @buffer.
-    #
-    # No lock under parallel mark, as in `mark_impl_unlocked`: a bitmap mark is
-    # an atomic OR and a header mark stores the one generation value, so two
-    # workers marking the same blob agree, and nothing is pushed. The lock
-    # dated from when every mark took it; on a Hash-heavy heap it was one
-    # global lock per `@entries` / `@indices` blob, and JsonParsePure ran
-    # +40–54% slower with four workers than with one
-    # (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-    private def mark_noscan(pointer : Void*) : Nil
-      addr = pointer.address
-      return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
-      return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
-
-      # `find_object_with_chunk` and the chunk-in-hand pair, as in
-      # `mark_impl_unlocked`. This took `find_object`, `heap_marked?` and
-      # `heap_set_mark`, which resolved the same chunk three times, and the
-      # last read the block's size from its header — under headerless the
-      # object's own first word — and walked every size class for it before
-      # falling back to a fourth lookup.
-      found = find_object_with_chunk(pointer)
-      return unless found
-      header, chunk = found
-
-      return if block_marked_in?(chunk, header)
-      if @minor_only && !BlockHeader.nursery?(header)
-        return
-      end
-
-      set_block_mark_in(chunk, header)
-    end
-
     # Crystal Reference payloads start with type_id (Int32). Reject if that
     # 32-bit word looks like the high half of a pointer / absurd id.
     # Diagnostic callers with no chunk in hand. Resolves it, then delegates.
@@ -460,49 +427,19 @@ module Gcry
       # parallel cycle leaves the count short, and the cap stays at its floor.
       @mark_scanned_bytes &+= size unless @mark_parallel
 
-      if @layout_precise && size >= 4
-        tid = user.as(Int32*).value
-        # Only a Hash narrows the scan, and only once its shape agrees.
-        #
-        # The key is the payload's first Int32, and a raw buffer of a mixed
-        # union starts with exactly such an id: Crystal tags every element
-        # with its runtime type id. `[JSON::Any.new(array), JSON::Any.new("x")]`
-        # is a 32-byte buffer whose first word is `Array(JSON::Any)`'s id, in
-        # the size class of an `Array(JSON::Any)`, and it was scanned at that
-        # type's one offset — in the buffer, the second element's tag. Neither
-        # element's pointer was read, and what they held was swept while the
-        # buffer still held it (`bench/log/linux/2026-10-04-layout-union-collision/`).
-        # The scan-cap and leaf narrowings fail the same way: one stops a
-        # buffer at the instance size, the other skips it, a tag's high half
-        # being 0. None of the three bought anything on a real instance: a
-        # non-atomic block is zeroed to its whole size class, so slack holds
-        # nothing, and Crystal allocates a class with no pointer ivars atomic,
-        # so a leaf never gets here. The pointer-free buffers a noscan offset
-        # names are atomic for the same reason. A Hash keeps its own check.
-        if (entry = Layout.entry_for(tid)) && entry.hash? &&
-           (entry.alloc_size == 0 || size == entry.alloc_size.to_u64)
-          count_layout_precise_scan
-          # Trust the map only as far as the object's shape supports it.
-          # A collision that reaches here degrades to exactly the
-          # conservative scan it would have got unregistered.
-          plausible = hash_shape_plausible?(user, size, entry)
-          # `@entries` is a separate block nobody has touched yet, and
-          # walking it straight away waited on a cache miss for every
-          # Hash: on JsonParsePure's millions of small ones, 37% more
-          # mark time than scanning the same heap conservatively, where
-          # the blob goes through the mark loop's prefetch ring. Start
-          # the load, scan the Hash's own words while it lands, then walk.
-          if plausible
-            entries = Pointer(Void*).new(user.address + entry.hash_entries_off.to_u64).value
-            Kernels.prefetch_read(entries) unless entries.null?
-          end
-          scan_hash_body(user, size, entry, demote: plausible)
-          scan_hash_entries(user, size, entry) if plausible
-          return
-        end
-      end
-
-      count_layout_conservative_scan
+      # No type map narrows this scan. `Gcry::Layout` keyed one off the
+      # payload's first Int32, and a raw buffer of a mixed union starts with
+      # exactly such an id: Crystal tags every element with its runtime type
+      # id. `[JSON::Any.new(array), JSON::Any.new("x")]` is a 32-byte buffer
+      # that read as an `Array(JSON::Any)`, `[hash, nil, 1_i64, nil]` a 64-byte
+      # one that passed the `Hash` shape check, and both had live elements
+      # swept (`bench/log/linux/2026-10-04-layout-union-collision/`), as
+      # acikturkiye's had in August behind the guards of the day
+      # (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`). The maps
+      # bought nothing this scan does not: a non-atomic block is zeroed to its
+      # whole size class, Crystal allocates pointer-free classes and buffers
+      # atomic, and `Hash` clears the entries it deletes or compacts away.
+      #
       # Raw buffers (no Crystal type_id): object-base only — cuts interior false
       # hits from JSON/bytes. Typed References keep interiors so Array#shift and
       # layout-miss types with mid-object pointers stay correct.
@@ -517,6 +454,10 @@ module Gcry
       base_only = !@allow_interior_pointers && size >= 4 && !type_id_plausible?(chunk, header)
       word = sizeof(Void*).to_u64
       words = size // word
+      # The planted miss of `make mark-audit` (`mark_test_short_tid`).
+      if (short = @mark_test_short_tid) != 0 && words > 0 && user.as(Int32*).value == short
+        words -= 1
+      end
       cursor = user.as(UInt64*)
       # Most words of a scanned body are not heap addresses: nulls, small
       # integers, hashes, floats. `mark_impl_unlocked` rejects them on its
@@ -530,181 +471,6 @@ module Gcry
         w = cursor[i]
         next if w < lo || w >= hi
         mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: base_only, source: RootSource::Heap)
-      end
-    end
-
-    # The object's own body, every word of it, with `@entries` / `@indices`
-    # demoted to `mark_noscan` so the two blobs stay alive without being walked
-    # as pointer arrays — which is the whole reason the Hash kind exists.
-    #
-    # The entries walk alone was not enough, and the reason generalises past
-    # Hash. A layout is keyed on the payload's **first Int32**, read
-    # conservatively; a raw buffer of union values starts with exactly such an
-    # id, because Crystal stores the union's type id in the first four bytes.
-    # So a 64-byte `Array(JSON::Any)` buffer whose first element is a String is
-    # indistinguishable, by that key, from an instance of whichever class holds
-    # the same id — and when the size class matches too, nothing downstream
-    # notices. Measured on acikturkiye: blocks reading `type_id 208` were
-    # scanned to `Hash`'s map, the pointers they really held at +24 and +56
-    # were never marked, and the mark audit reported missed edges on 193 of 216
-    # collections. The Strings underneath were swept while a request was
-    # serialising them (`bench/log/linux/2026-08-24-acikturkiye-live-string-uaf`).
-    #
-    # Seven words for a 56-byte `Hash`, and it also covers what the map never
-    # modelled: `@block`'s closure pointer, and the size-class slack a previous
-    # occupant left behind.
-    private def scan_hash_body(user : UInt8*, size : UInt64, entry : Layout::Entry,
-                               demote : Bool) : Nil
-      word = sizeof(Void*).to_u64
-      words = size // word
-      cursor = user.as(UInt64*)
-      lo = @heap_min
-      hi = @heap_max
-      i = 0_u64
-      while i < words
-        w = cursor[i]
-        if w < lo || w >= hi
-          i &+= 1
-          next
-        end
-        value = Pointer(Void).new(w)
-        # Demoting a word to `mark_noscan` is itself a claim about the type —
-        # marked, never traced. Make it only where the shape backs the claim;
-        # on a colliding block that word may be an ordinary reference whose
-        # children still need marking.
-        if demote && hash_blob_offset?(entry, i &* word)
-          mark_noscan(value)
-        else
-          mark_impl(value, gate_type_id: false, base_only: false, source: RootSource::Heap)
-        end
-        i &+= 1
-      end
-      @layout_hash_bodies &+= 1
-    end
-
-    # Does this block actually look like the `Hash` its first Int32 claims?
-    #
-    # Cheap structural questions only, all of them things a real `Hash` cannot
-    # get wrong: a sane `@indices_size_pow2`, non-negative `@size` and
-    # `@deleted_count` that fit the capacity that pow2 implies, and `@entries` /
-    # `@indices` that are either null or point into the heap. A raw buffer that
-    # collided on the type_id passes none of these except by accident.
-    private def hash_shape_plausible?(user : UInt8*, size : UInt64, entry : Layout::Entry) : Bool
-      word = sizeof(Void*).to_u64
-      entries_off = entry.hash_entries_off.to_u64
-      indices_off = entry.hash_indices_off.to_u64
-      pow2_off = entry.hash_pow2_off.to_u64
-      size_off = entry.hash_size_off.to_u64
-      deleted_off = entry.hash_deleted_off.to_u64
-      return false if entries_off + word > size || indices_off + word > size
-      return false if pow2_off + 1 > size
-      return false if size_off + 4 > size || deleted_off + 4 > size
-
-      pow2 = Pointer(UInt8).new(user.address + pow2_off).value
-      return false if pow2 >= 63
-
-      live = Pointer(Int32).new(user.address + size_off).value
-      deleted = Pointer(Int32).new(user.address + deleted_off).value
-      return false if live < 0 || deleted < 0
-
-      entries = Pointer(Void*).new(user.address + entries_off).value
-      indices = Pointer(Void*).new(user.address + indices_off).value
-      return false unless entries.null? || is_heap_ptr(entries)
-      return false unless indices.null? || is_heap_ptr(indices)
-
-      # An empty Hash has no tables and no entries; a populated one has both.
-      if entries.null?
-        return live == 0 && deleted == 0
-      end
-      capacity = (1_u64 << pow2) // 2
-      return false if capacity == 0
-      live.to_u64 &+ deleted.to_u64 <= capacity
-    end
-
-    private def hash_blob_offset?(entry : Layout::Entry, offset : UInt64) : Bool
-      entry.noscan_offsets.each do |off|
-        return true if off.to_u64 == offset
-      end
-      false
-    end
-
-    # Precise Hash: walk Entry slots and mark key/value only. The Hash's own
-    # words — `@entries` / `@indices` kept alive unscanned, `@block`, the rest
-    # — are `scan_hash_body`'s, which reads every one of them.
-    # Live range is Crystal `@size + @deleted_count` (entries_size), NOT
-    # entries_capacity from `@indices_size_pow2` — capacity slots after realloc
-    # are uninitialized and must not be treated as Entry records.
-    private def scan_hash_entries(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
-      entries_off = entry.hash_entries_off.to_u64
-      pow2_off = entry.hash_pow2_off.to_u64
-      stride = entry.hash_entry_stride.to_u64
-      return if stride == 0
-      return if entries_off + sizeof(Void*).to_u64 > size
-      return if pow2_off + 1 > size
-
-      entries = Pointer(Void*).new(user.address + entries_off).value
-      return if entries.null?
-      # Stale/corrupted @entries (mark miss → reuse) must not SEGV the collector.
-      return unless is_heap_ptr(entries)
-
-      pow2 = Pointer(UInt8).new(user.address + pow2_off).value
-      # Crystal: indices_size = 1 << pow2; entries_capacity = indices_size // 2
-      return if pow2 >= 63
-      capacity = (1_u64 << pow2) // 2
-      return if capacity == 0 || capacity > 1_000_000_u64
-
-      # Crystal entries_size == @size + @deleted_count (not capacity).
-      used = capacity
-      size_off = entry.hash_size_off.to_u64
-      deleted_off = entry.hash_deleted_off.to_u64
-      if size_off + 4 <= size && deleted_off + 4 <= size
-        live_size = Pointer(Int32).new(user.address + size_off).value
-        deleted = Pointer(Int32).new(user.address + deleted_off).value
-        if live_size >= 0 && deleted >= 0
-          sum = live_size.to_i64 + deleted.to_i64
-          if sum >= 0 && sum.to_u64 <= capacity
-            used = sum.to_u64
-          end
-        end
-      end
-
-      key_off = entry.hash_key_off.to_u64
-      key_bytes = entry.hash_key_bytes.to_u64
-      value_off = entry.hash_value_off.to_u64
-      value_mode = entry.hash_value_mode
-      value_bytes = entry.hash_value_bytes.to_u64
-      base = entries.as(UInt8*)
-      # The entries blob is marked without being pushed, so `scan_object`
-      # never counts it; the walk below is where the mark reads it.
-      @mark_scanned_bytes &+= used &* stride unless @mark_parallel
-
-      i = 0_u64
-      while i < used
-        slot = base + (i * stride)
-        # Entry.@hash == 0 ⇒ deleted (Crystal Hash).
-        hash_word = slot.as(UInt32*).value
-        if hash_word != 0_u32
-          if key_bytes > 0
-            w = 0_u64
-            while w + sizeof(Void*).to_u64 <= key_bytes
-              mark_candidate(Pointer(Void*).new(slot.address + key_off + w).value)
-              w += sizeof(Void*).to_u64
-            end
-          elsif key_off != 0
-            mark_candidate(Pointer(Void*).new(slot.address + key_off).value)
-          end
-          case value_mode
-          when Layout::VALUE_MODE_REF
-            mark_candidate(Pointer(Void*).new(slot.address + value_off).value)
-          when Layout::VALUE_MODE_WORDS
-            w = 0_u64
-            while w + sizeof(Void*).to_u64 <= value_bytes
-              mark_candidate(Pointer(Void*).new(slot.address + value_off + w).value)
-              w += sizeof(Void*).to_u64
-            end
-          end
-        end
-        i += 1
       end
     end
 
@@ -784,28 +550,10 @@ module Gcry
       size = block_payload(chunk, header).to_u64
       return if size == 0
 
-      # Old Hash objects store keys/values in a separate @entries blob. Word-scanning
-      # only the Hash shell sees @entries/@indices pointers — not the String keys
-      # inside the blob. When the blob is old and soft-dirty missed the page,
-      # those nursery keys were swept → Hash UAF (OverflowError / SEGV in
-      # HTTP::Headers keep-alive). Precise walk marks nursery targets only
-      # (mark_candidate / mark_noscan already no-op on old objects during minor).
-      # `make nursery-headers --disabled` installs KIND_HASH with noscan
-      # @entries and no key/value walk — this return then skips the
-      # conservative one-level chase. Dropping that install reddens the gate.
-      #
-      # Hash only, and only a plausible one, for the reason in `scan_object`;
-      # everything else takes the conservative scan and its one-level chase.
-      if @layout_precise && size >= 4
-        tid = user.as(Int32*).value
-        if (entry = Layout.entry_for(tid)) && entry.hash? &&
-           (entry.alloc_size == 0 || size == entry.alloc_size.to_u64) &&
-           hash_shape_plausible?(user, size, entry)
-          scan_hash_body(user, size, entry, demote: true)
-          scan_hash_entries(user, size, entry)
-          return
-        end
-      end
+      # Old Hash objects store keys/values in a separate @entries blob. When the
+      # blob is old and soft-dirty missed its page, the nursery keys inside were
+      # swept → Hash UAF (OverflowError / SEGV in HTTP::Headers keep-alive). The
+      # one-level chase below reads it from the Hash shell.
 
       word = sizeof(Void*).to_u64
       words = size // word

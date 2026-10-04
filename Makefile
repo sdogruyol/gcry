@@ -137,13 +137,13 @@ finalizer-complex: $(BIN)
 # Nursery HTTP::Headers Hash keys. The compile default is headerless, where
 # `Heap#nursery_enabled=` is a no-op, so the CI step that built this without
 # `-Dgcry_block_headers` and asserted the keys survived was testing a major.
-# Auto-layouts skip `Hash(HTTP::Headers::Key, …)`; the green arm requires the
-# explicit walk, `--disabled` installs noscan-without-walk (the pre-fix
-# shape). Dropping the flag or the zeroed walk reddens rather than hides.
+# Green arm only since 2026-10-04: its red arm was a `Gcry::Layout` Hash map
+# that skipped keys, and the mark no longer reads layouts. With the minor's
+# old→young scan switched off the key still survived, so what roots it is
+# open (ROADMAP).
 nursery-headers: $(BIN)
 	$(CRYSTAL) build -Dgc_none -Dgcry_block_headers bench/nursery_headers.cr -o $(BIN)/nursery_headers
 	$(BIN)/nursery_headers
-	$(BIN)/nursery_headers --disabled
 
 # The third mark representation, run: marks in the chunk's bitmap while blocks
 # keep their 16-byte headers and the *freelist* allocator keeps handing them
@@ -689,8 +689,9 @@ poison-freed: $(BIN)
 
 # After mark, before sweep: does any marked object point at a block the sweep is
 # about to free? The `hold` arm plants an edge the mark provably does not follow
-# (a pointer in a block's scan_cap slack, under GCRY_SCAN_CAPS=1) and requires
-# the audit to name it — an audit that only ever reports zero is worth nothing.
+# (a pointer in a block's last word, which `GCRY_MARK_TEST_SHORT_TID` makes the
+# mark stop short of) and requires the audit to name it — an audit that only
+# ever reports zero is worth nothing.
 # `clean` requires a non-trivial edge count with zero misses on the same
 # workload; `--control` shows nothing is walked with the knob off. ~3 s.
 mark-audit: $(BIN)
