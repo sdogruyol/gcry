@@ -14,6 +14,7 @@ runner in the same job. `unreleased` is master since the last tag.
 
 | release | date | runs | `/json` % of Boehm | `/` % of Boehm | peak RSS × Boehm | pause p50 ms | layout |
 |---|---|---|---|---|---|---|---|
+| v0.34.0 | 2026-10-04 | 32 | 104.8 [102.0–108.1] | 100.8 [98.5–103.7] | 0.96 [0.93–0.96] | 0.30 [0.27–0.36] | headerless |
 | v0.33.0 | 2026-10-02 | 58 | 106.0 [102.9–109.2] | 101.7 [99.1–104.9] | 0.95 [0.93–0.96] | 0.41 [0.34–0.44] | headerless |
 | v0.32.0 | 2026-09-30 | 16 | 105.6 [103.6–109.2] | 102.5 [100.1–105.2] | 0.96 [0.96–0.99] | 0.38 [0.35–0.42] | headerless |
 | v0.31.1 | 2026-09-29 | 10 | 105.0 [100.6–108.9] | 99.2 [96.5–101.8] | 0.95 [0.92–0.96] | 0.40 [0.28–0.43] | headerless |
@@ -35,6 +36,7 @@ runner in the same job. `unreleased` is master since the last tag.
 
 | release | date | runs | `/json` % of Boehm | `/` % of Boehm | peak RSS × Boehm | pause p50 ms | layout |
 |---|---|---|---|---|---|---|---|
+| v0.34.0 | 2026-10-04 | 32 | 106.4 [100.0–115.1] | 110.3 [100.0–136.4] | 1.13 [1.09–1.16] | 0.30 [0.28–0.33] | headerless |
 | v0.33.0 | 2026-10-02 | 58 | 108.0 [104.3–120.8] | 108.5 [100.5–130.1] | 1.14 [1.11–1.17] | 0.33 [0.31–0.34] | headerless |
 | v0.32.0 | 2026-09-30 | 18 | 115.4 [108.0–121.9] | 123.3 [109.0–137.6] | 1.13 [1.10–1.15] | 0.34 [0.32–0.35] | headerless |
 | v0.31.1 | 2026-09-29 | 10 | 103.1 [92.2–124.1] | 104.7 [99.2–139.0] | 1.14 [1.07–1.20] | 0.33 [0.31–0.34] | headerless |
@@ -48,4 +50,4 @@ runner in the same job. `unreleased` is master since the last tag.
 | v0.27.1 | 2026-09-24 | 3 | 113.8 | 110.2 | 1.17 | 0.49 | headerless |
 | v0.27.0 | 2026-09-24 | 14 | 107.4 [90.6–141.2] | 138.2 [101.9–172.9] | 1.12 [1.11–1.16] | 0.47 [0.45–0.48] | headerless |
 
-611 runs listed, 5 on commits no longer on master.
+643 runs listed, 5 on commits no longer on master.
