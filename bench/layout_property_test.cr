@@ -1,17 +1,17 @@
 # Layout property test for gcry.
 #
-# Verifies GC layout (precise scan) correctness with random combinations.
+# A registered plain layout must never cost an edge. The key `Gcry::Layout`
+# reads is a block's first Int32, and a raw buffer of a mixed union starts
+# with exactly such an id, so only a Hash — behind its own shape check — may
+# narrow a scan. Every other registration, whatever it claims, scans like an
+# unregistered block (`bench/log/linux/2026-10-04-layout-union-collision/`).
 # Each sub-test is self-contained: allocates its own aux_ptrs, runs its own
 # collect, and verifies independently.
 #
 # Tests:
-#   1. Precise scan follows only registered offsets — non-registered slots
-#      do NOT keep children alive after collection.
-#   2. Conservative fallback (no registered type) keeps all reachable alive.
-#   3. Leaf layout (scan_cap=0) marks nothing — all children die after collect.
-#   4. noscan offsets keep the referenced object alive but do NOT scan its
-#      own children (no transitive marking from noscan slots).
-#   5. scan_cap limits conservative word-scan: slots beyond cap not marked.
+#   1. Every slot of a block keeps its target alive, for each synthetic plain
+#      layout (precise offsets, leaf, noscan, scan cap) and for no layout.
+#   2. The target of a noscan offset is traced: its own children survive.
 #
 # Build:  crystal build bench/layout_property_test.cr -o bin/layout_property_test
 # Run:    ./bin/layout_property_test [--seed=1] [--iterations=10000]
@@ -141,56 +141,22 @@ class LayoutPropertyTest
       0_u16, 0_u16)
   end
 
-  # ---- Test 1: Precise scan follows only registered offsets ----
-  # Create an object with LAYOUT_PRECISE_TID, fill all 8 slots with aux_ptrs.
-  # After collect with only this object as a root, only slots 0 and 2 should
-  # keep their targets alive. Other targets should die (not scanned).
-  def test_precise_offsets : Bool
+  # ---- Test 1: no layout loses a slot ----
+  # Fill all 8 slots of a block carrying *tid* (0: none) with aux_ptrs. After
+  # a collect with only the block as a root, every target must survive.
+  def test_keeps_every_slot(tid : Int32, label : String) : Bool
     pass = true
     aux = make_aux(SLOT_COUNT)
 
     obj = alloc
-    set_type_id(obj, LAYOUT_PRECISE_TID)
-    SLOT_COUNT.times { |s| write_slot(obj, s, aux[s]) }
-
-    @heap.collect(scan_stack: false, roots: [obj])
-
-    # Slots 0 and 2 should keep targets alive
-    [0, 2].each do |s|
-      unless @heap.live?(aux[s])
-        @errors << "PRECISE-OFFSET: slot #{s} target is DEAD (should be alive)"
-        pass = false
-      end
-    end
-
-    # Other slots should NOT keep targets alive
-    (0...SLOT_COUNT).each do |s|
-      next if s == 0 || s == 2
-      if @heap.live?(aux[s])
-        @errors << "PRECISE-OFFSET: slot #{s} target is ALIVE (should be dead with precise layout)"
-        pass = false
-      end
-    end
-
-    pass
-  end
-
-  # ---- Test 2: Conservative fallback keeps all reachable ----
-  # Allocate without setting a type_id (first word = 0), fill all slots.
-  # After collect, all targets should survive (conservative word-scan).
-  def test_conservative_fallback : Bool
-    pass = true
-    aux = make_aux(SLOT_COUNT)
-
-    obj = alloc
-    # No type_id set — first word is 0, falls back to conservative word-scan
+    set_type_id(obj, tid) unless tid == 0
     SLOT_COUNT.times { |s| write_slot(obj, s, aux[s]) }
 
     @heap.collect(scan_stack: false, roots: [obj])
 
     SLOT_COUNT.times do |s|
       unless @heap.live?(aux[s])
-        @errors << "CONSERVATIVE: slot #{s} target is DEAD (should survive conservative)"
+        @errors << "#{label}: slot #{s} target is DEAD (every slot must survive)"
         pass = false
       end
     end
@@ -198,109 +164,32 @@ class LayoutPropertyTest
     pass
   end
 
-  # ---- Test 3: Leaf layout (scan_cap=0) marks nothing ----
-  # Create object with LAYOUT_LEAF_TID (scan_cap=0), fill all slots.
-  # After collect, NO targets should be kept alive.
-  def test_leaf_layout : Bool
-    pass = true
-    aux = make_aux(SLOT_COUNT)
-
-    obj = alloc
-    set_type_id(obj, LAYOUT_LEAF_TID)
-    SLOT_COUNT.times { |s| write_slot(obj, s, aux[s]) }
-
-    @heap.collect(scan_stack: false, roots: [obj])
-
-    SLOT_COUNT.times do |s|
-      if @heap.live?(aux[s])
-        @errors << "LEAF: slot #{s} target is ALIVE (leaf layout should mark nothing)"
-        pass = false
-      end
-    end
-
-    pass
-  end
-
-  # ---- Test 4: noscan offsets keep alive but don't scan ----
-  # Create a container (precise layout) with children at slots 0 and 2.
-  # Create a parent (noscan layout) with slot 0 → container (scan), slot 1 → aux (noscan).
-  # After collect with parent as root:
-  #   - container should be alive (scan offset)
-  #   - container's children (aux[0], aux[1]) should be alive (transitive)
-  #   - aux[2] should be alive (noscan keep-alive)
-  def test_noscan_offset : Bool
+  # ---- Test 2: a noscan offset's target is still traced ----
+  # Parent (noscan layout) slot 1 → container, whose slots hold children.
+  # Under a collision the "blob" a noscan offset names can be an ordinary
+  # object, so its children must survive too.
+  def test_noscan_target_traced : Bool
     pass = true
 
-    # Create aux_ptrs that will be children of the container
-    container_aux = make_aux(3)
-
-    # Container with precise layout — has children at slots 0 and 2
+    children = make_aux(2)
     container = alloc
     set_type_id(container, LAYOUT_PRECISE_TID)
-    write_slot(container, 0, container_aux[0])
-    write_slot(container, 2, container_aux[1])
+    write_slot(container, 1, children[0])
+    write_slot(container, 5, children[1])
 
-    # Noscan aux
-    noscan_aux = make_aux(1)[0]
-
-    # Parent with noscan layout
     parent = alloc
     set_type_id(parent, LAYOUT_NOSCAN_TID)
-    write_slot(parent, 0, container)  # scan: container + children
-    write_slot(parent, 1, noscan_aux) # noscan: keep alive only
+    write_slot(parent, 1, container)
 
     @heap.collect(scan_stack: false, roots: [parent])
 
     unless @heap.live?(container)
-      @errors << "NOSCAN: container (scan offset) is DEAD"
+      @errors << "NOSCAN: container (noscan offset) is DEAD"
       pass = false
     end
-
-    unless @heap.live?(container_aux[0])
-      @errors << "NOSCAN: container_aux[0] (via container slot 0) is DEAD"
-      pass = false
-    end
-
-    unless @heap.live?(container_aux[1])
-      @errors << "NOSCAN: container_aux[1] (via container slot 2) is DEAD"
-      pass = false
-    end
-
-    unless @heap.live?(noscan_aux)
-      @errors << "NOSCAN: noscan_aux is DEAD (should be kept alive by noscan offset)"
-      pass = false
-    end
-
-    pass
-  end
-
-  # ---- Test 5: scan_cap limits conservative scan ----
-  # Create object with LAYOUT_CAP_TID (scan_cap = 32 bytes = first 2 slots).
-  # Fill all 8 slots with aux_ptrs. After collect:
-  #   - Slots 0-1 targets should be alive (within scan_cap)
-  #   - Slots 2+ targets should be dead (beyond scan_cap)
-  def test_scan_cap : Bool
-    pass = true
-    aux = make_aux(SLOT_COUNT)
-
-    obj = alloc
-    set_type_id(obj, LAYOUT_CAP_TID)
-    SLOT_COUNT.times { |s| write_slot(obj, s, aux[s]) }
-
-    @heap.collect(scan_stack: false, roots: [obj])
-
-    # Slots 0-1 targets should be alive (within 32-byte cap)
-    [0, 1].each do |s|
-      unless @heap.live?(aux[s])
-        @errors << "SCAN_CAP: slot #{s} target is DEAD (within cap, should be alive)"
-        pass = false
-      end
-    end
-
-    # Slots 2+ targets should be dead (beyond cap)
-    (2...SLOT_COUNT).each do |s|
-      if @heap.live?(aux[s])
-        @errors << "SCAN_CAP: slot #{s} target is ALIVE (beyond cap, should be dead)"
+    children.each_with_index do |child, i|
+      unless @heap.live?(child)
+        @errors << "NOSCAN: container child #{i} is DEAD (noscan target must be traced)"
         pass = false
       end
     end
@@ -312,11 +201,12 @@ class LayoutPropertyTest
   def run_all_tests : Bool
     pass = true
 
-    pass &= test_precise_offsets
-    pass &= test_conservative_fallback
-    pass &= test_leaf_layout
-    pass &= test_noscan_offset
-    pass &= test_scan_cap
+    pass &= test_keeps_every_slot(LAYOUT_PRECISE_TID, "PRECISE")
+    pass &= test_keeps_every_slot(0, "CONSERVATIVE")
+    pass &= test_keeps_every_slot(LAYOUT_LEAF_TID, "LEAF")
+    pass &= test_keeps_every_slot(LAYOUT_NOSCAN_TID, "NOSCAN")
+    pass &= test_keeps_every_slot(LAYOUT_CAP_TID, "SCAN_CAP")
+    pass &= test_noscan_target_traced
 
     pass
   end

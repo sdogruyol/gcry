@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A buffer of union values no longer loses its elements to a layout.**
+  `Gcry::Layout` identifies a block by its first `Int32`, and a mixed
+  union's buffer starts with its first element's type id. With default
+  settings, `[JSON::Any.new(array), JSON::Any.new("x")]` — 32 bytes, the
+  size class of an `Array(JSON::Any)`, which the builtins register — was
+  scanned at the Array's one offset, the pointers in both elements were never
+  read, and what they held was swept: SIGSEGV reading 20 000 such pairs back
+  after three collections, none with `GCRY_DISABLE_LAYOUT=1`. The `scan_cap`
+  and leaf narrowings failed the same way. Only a `Hash` layout, behind its
+  own shape check, narrows a scan now; every other type is scanned
+  conservatively, which cost nothing measurable: a non-atomic block is
+  zeroed to its size class and Crystal allocates pointer-free classes atomic
+  (`bench/log/linux/2026-10-04-layout-union-collision/`).
+
 ### Changed
 
 - **Marking a heap of small `Hash`es is 13-15% faster.** Each one's

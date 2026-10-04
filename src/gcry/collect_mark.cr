@@ -462,76 +462,43 @@ module Gcry
 
       if @layout_precise && size >= 4
         tid = user.as(Int32*).value
-        if (entry = Layout.entry_for(tid))
-          size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
-          if size_match && entry.precise_fields?
-            count_layout_precise_scan
-            if entry.hash?
-              # Trust the map only as far as the object's shape supports it.
-              # A collision that reaches here degrades to exactly the
-              # conservative scan it would have got unregistered.
-              plausible = hash_shape_plausible?(user, size, entry)
-              # `@entries` is a separate block nobody has touched yet, and
-              # walking it straight away waited on a cache miss for every
-              # Hash: on JsonParsePure's millions of small ones, 37% more
-              # mark time than scanning the same heap conservatively, where
-              # the blob goes through the mark loop's prefetch ring. Start
-              # the load, scan the Hash's own words while it lands, then walk.
-              if plausible
-                entries = Pointer(Void*).new(user.address + entry.hash_entries_off.to_u64).value
-                Kernels.prefetch_read(entries) unless entries.null?
-              end
-              scan_hash_body(user, size, entry, demote: plausible)
-              scan_hash_entries(user, size, entry) if plausible
-            else
-              entry.scan_offsets.each do |off|
-                next if off.to_u64 + sizeof(Void*).to_u64 > size
-                slot = Pointer(Void*).new(user.address + off.to_u64)
-                mark_candidate(slot.value)
-              end
-              entry.noscan_offsets.each do |off|
-                next if off.to_u64 + sizeof(Void*).to_u64 > size
-                slot = Pointer(Void*).new(user.address + off.to_u64)
-                mark_noscan(slot.value)
-              end
-            end
-            return
-          elsif size_match && entry.scan_cap > 0
-            # Size-cap only when this really is the registered type (alloc_size
-            # matches). Applying scan_cap on size mismatch was unsound: raw
-            # buffers whose first Int32 randomly equals a registered type_id
-            # stopped after instance_sizeof bytes and missed the rest → UAF
-            # (acikturkiye; fixed by requiring size_match here).
-            count_layout_conservative_scan
-            cap = entry.scan_cap.to_u64
-            limit = size < cap ? size : cap
-            word = sizeof(Void*).to_u64
-            words = limit // word
-            cursor = user.as(UInt64*)
-            lo = @heap_min
-            hi = @heap_max
-            words.times do |i|
-              w = cursor[i]
-              next if w < lo || w >= hi
-              mark_impl(Pointer(Void).new(w), gate_type_id: false, base_only: false, source: RootSource::Heap)
-            end
-            return
-          elsif size_match
-            # Leaf / value-only type: nothing to mark in the body.
-            # Exception: raw pointer buffers (Array/Deque payloads) have no
-            # Crystal header — first UInt64 is a heap pointer (high half ≠ 0).
-            # Real References put type_id at 0 and usually padding at 4..7.
-            # Colliding with a leaf type_id + alloc_size would skip scanning
-            # every element → UAF (Kemal EC4 …0008 class).
-            if size >= 8 && (user.as(UInt64*).value >> 32) != 0
-              # fall through to full conservative
-            else
-              count_layout_precise_scan
-              return
-            end
+        # Only a Hash narrows the scan, and only once its shape agrees.
+        #
+        # The key is the payload's first Int32, and a raw buffer of a mixed
+        # union starts with exactly such an id: Crystal tags every element
+        # with its runtime type id. `[JSON::Any.new(array), JSON::Any.new("x")]`
+        # is a 32-byte buffer whose first word is `Array(JSON::Any)`'s id, in
+        # the size class of an `Array(JSON::Any)`, and it was scanned at that
+        # type's one offset — in the buffer, the second element's tag. Neither
+        # element's pointer was read, and what they held was swept while the
+        # buffer still held it (`bench/log/linux/2026-10-04-layout-union-collision/`).
+        # The scan-cap and leaf narrowings fail the same way: one stops a
+        # buffer at the instance size, the other skips it, a tag's high half
+        # being 0. None of the three bought anything on a real instance: a
+        # non-atomic block is zeroed to its whole size class, so slack holds
+        # nothing, and Crystal allocates a class with no pointer ivars atomic,
+        # so a leaf never gets here. The pointer-free buffers a noscan offset
+        # names are atomic for the same reason. A Hash keeps its own check.
+        if (entry = Layout.entry_for(tid)) && entry.hash? &&
+           (entry.alloc_size == 0 || size == entry.alloc_size.to_u64)
+          count_layout_precise_scan
+          # Trust the map only as far as the object's shape supports it.
+          # A collision that reaches here degrades to exactly the
+          # conservative scan it would have got unregistered.
+          plausible = hash_shape_plausible?(user, size, entry)
+          # `@entries` is a separate block nobody has touched yet, and
+          # walking it straight away waited on a cache miss for every
+          # Hash: on JsonParsePure's millions of small ones, 37% more
+          # mark time than scanning the same heap conservatively, where
+          # the blob goes through the mark loop's prefetch ring. Start
+          # the load, scan the Hash's own words while it lands, then walk.
+          if plausible
+            entries = Pointer(Void*).new(user.address + entry.hash_entries_off.to_u64).value
+            Kernels.prefetch_read(entries) unless entries.null?
           end
-          # size mismatch (or leaf+pointer-shaped header): ignore the layout
-          # entry → full conservative.
+          scan_hash_body(user, size, entry, demote: plausible)
+          scan_hash_entries(user, size, entry) if plausible
+          return
         end
       end
 
@@ -826,32 +793,17 @@ module Gcry
       # `make nursery-headers --disabled` installs KIND_HASH with noscan
       # @entries and no key/value walk — this return then skips the
       # conservative one-level chase. Dropping that install reddens the gate.
+      #
+      # Hash only, and only a plausible one, for the reason in `scan_object`;
+      # everything else takes the conservative scan and its one-level chase.
       if @layout_precise && size >= 4
         tid = user.as(Int32*).value
-        if (entry = Layout.entry_for(tid))
-          size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
-          if size_match && entry.hash?
-            scan_hash_body(user, size, entry, demote: true)
-            scan_hash_entries(user, size, entry)
-            return
-          end
-          if size_match && entry.precise_fields?
-            entry.scan_offsets.each do |off|
-              next if off.to_u64 + sizeof(Void*).to_u64 > size
-              ptr = Pointer(Void*).new(user.address + off.to_u64).value
-              mark_candidate(ptr)
-              # Old Array(String) @buffer holds nursery element refs.
-              scan_buffer_words_for_nursery(ptr)
-            end
-            # Noscan buffers (Array(UInt8) etc.): usually no refs; still scan
-            # cheaply in case a mixed layout parked pointers here.
-            entry.noscan_offsets.each do |off|
-              next if off.to_u64 + sizeof(Void*).to_u64 > size
-              buf = Pointer(Void*).new(user.address + off.to_u64).value
-              scan_buffer_words_for_nursery(buf)
-            end
-            return
-          end
+        if (entry = Layout.entry_for(tid)) && entry.hash? &&
+           (entry.alloc_size == 0 || size == entry.alloc_size.to_u64) &&
+           hash_shape_plausible?(user, size, entry)
+          scan_hash_body(user, size, entry, demote: true)
+          scan_hash_entries(user, size, entry)
+          return
         end
       end
 

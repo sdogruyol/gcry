@@ -41,23 +41,31 @@ GCRY_SOUND=1 GCRY_SCRUB_FIBERS=1 ./app   # sound, except scrub is back on
 
 ### The second axis: object-body scan precision
 
-`Gcry::Layout` keys precise field offsets off the payload's first `Int32`. A
-raw buffer whose first word happens to collide with a registered type id has
-produced real use-after-frees before (see the `size_match` and
-"leaf + pointer-shaped header" guards in `collect_mark.cr#scan_object`, both
-added after a crash). That is a *different* risk from root completeness — it is
-about how an object's body is scanned once it is already known live.
+`Gcry::Layout` keys a type's map off the payload's first `Int32`, and since
+2026-10-04 only a `Hash` map narrows a scan: the mark walks its `@entries` to
+`@size + @deleted_count`, keeps `@entries` / `@indices` alive without tracing
+them as pointer arrays, and word-scans the `Hash`'s own body, all behind
+`hash_shape_plausible?`. Every other registration is ignored by the mark.
 
-Type-id collision is one way this axis fails; the other is a layout that is
-simply incomplete. `Layout.register` sorts each ivar into a scan offset, a
-noscan offset, or a conservative `scan_cap` for the whole type — and until
-2026-08-15 an ivar that was none of `Reference`, `Pointer`, a pointer-safe
-union, a `Value`-with-ivars or a `StaticArray` reached none of the three: no
-offset, no fallback, and the word was never scanned (module-typed ivars, `Proc`,
-`Tuple` — 19 of them in 186 stdlib types, `Fiber#proc` included). The rule now
-is that anything `has_inner_pointers?` and unclassified forces the fallback, and
-`make ivar-layout-roots` gates it by inspecting the installed entry rather than
-by watching an object survive.
+The key is why. A raw buffer of a mixed union begins with its first element's
+type id, so a two-element `Array(JSON::Any)` buffer whose first element is an
+array reads as an `Array(JSON::Any)` in the right size class. It was scanned at
+that type's one offset — in the buffer, the second element's tag — and what
+both elements held was swept while the buffer still held it
+(`bench/log/linux/2026-10-04-layout-union-collision/`). The `size_match` and
+"leaf + pointer-shaped header" guards earlier crashes had added could not see
+it, and the plain narrowings bought nothing a real instance needed: a
+non-atomic block is zeroed to its whole size class, so `scan_cap` clipped only
+zeros, and Crystal allocates a class with no pointer ivars atomic, so a "leaf"
+that reached the scan was always a collision. The other failure this axis had,
+a plain map missing an ivar (19 of 186 stdlib types until 2026-08-15), cannot
+reach the mark for the same reason.
+
+What remains is the `Hash` check's own residual: a buffer that collides with a
+registered `Hash` *and* passes the shape check has the words at `@entries` and
+`@indices` marked without being traced. That is a *different* risk from root
+completeness — it is about how an object's body is scanned once it is already
+known live.
 
 `GCRY_SOUND` deliberately does **not** touch it, so the two costs stay
 attributable. Measure it separately:

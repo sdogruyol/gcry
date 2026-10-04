@@ -26,34 +26,37 @@ ensure
   Gcry::Layout.clear
 end
 
-it "precise layout scan follows pointer offsets only" do
+it "a union buffer whose first tag is a registered type keeps every element" do
+  # `[JSON::Any.new(array), JSON::Any.new("x")]`: 32 bytes, the size class of
+  # an `Array(JSON::Any)`, starting with that type's id as element 0's tag.
+  # Scanned at the Array's offsets, neither element's pointer was read.
   Gcry::Layout.clear
   Gcry::Layout.enabled = true
+  Gcry::Layout.register(Array(JSON::Any))
 
   heap = Gcry::Heap.new
   begin
     heap.gc_threshold = UInt64::MAX
     heap.layout_precise = true
-    heap.allow_interior_pointers = false
 
-    tid = 4242
-    Gcry::Layout.install(tid, [8_u16], 0_u32)
+    tid = Array(JSON::Any).crystal_instance_type_id
+    size = sizeof(JSON::Any) * 2
+    Gcry::Layout.entry_for(tid).not_nil!.alloc_size.should eq(size)
 
-    child = heap.malloc(32)
-    dead = heap.malloc(32)
-    obj = heap.malloc(64)
-    user = obj.as(UInt8*)
-    user.as(Int32*).value = tid
-    Pointer(Void*).new(user.address + 8).value = child
-    Pointer(UInt64).new(user.address + 16).value = dead.address
+    first = heap.malloc(48)
+    second = heap.malloc(48)
+    buf = heap.malloc(size).as(UInt8*)
+    buf.clear(size)
+    buf.as(Int32*).value = tid
+    Pointer(Void*).new(buf.address + 8).value = first
+    (buf + sizeof(JSON::Any)).as(Int32*).value = String.crystal_instance_type_id
+    Pointer(Void*).new(buf.address + sizeof(JSON::Any) + 8).value = second
 
-    heap.add_root(obj)
+    heap.add_root(buf.as(Void*))
     heap.collect(scan_stack: false)
 
-    heap.live?(obj).should be_true
-    heap.live?(child).should be_true
-    heap.live?(dead).should be_false
-    heap.layout_precise_scans.should be > 0
+    heap.live?(first).should be_true
+    heap.live?(second).should be_true
   ensure
     heap.destroy
     Gcry::Layout.clear
@@ -243,74 +246,6 @@ it "hash precise scan keeps the default block's closure alive" do
 
     heap.live?(closure).should be_true
     heap.live?(dead).should be_false
-  ensure
-    heap.destroy
-    Gcry::Layout.clear
-  end
-end
-
-it "scan_cap clips size-class padding on conservative fallback" do
-  Gcry::Layout.clear
-  Gcry::Layout.enabled = true
-
-  heap = Gcry::Heap.new
-  begin
-    heap.gc_threshold = UInt64::MAX
-    heap.layout_precise = true
-    heap.allow_interior_pointers = false
-
-    tid = 4244
-    # Object fits in 64-byte class; only first 16 bytes are "real".
-    Gcry::Layout.install_scan_cap(tid, 64_u32, 16_u32)
-
-    child = heap.malloc(32)
-    dead = heap.malloc(32)
-    obj = heap.malloc(64)
-    user = obj.as(UInt8*)
-    user.as(Int32*).value = tid
-    # Word at offset 8 is inside scan_cap → kept.
-    Pointer(Void*).new(user.address + 8).value = child
-    # Word at offset 16 is past scan_cap → must not keep.
-    Pointer(Void*).new(user.address + 16).value = dead
-
-    heap.add_root(obj)
-    heap.collect(scan_stack: false)
-
-    heap.live?(child).should be_true
-    heap.live?(dead).should be_false
-  ensure
-    heap.destroy
-    Gcry::Layout.clear
-  end
-end
-
-it "leaf layout entry does not word-scan value fields" do
-  Gcry::Layout.clear
-  Gcry::Layout.enabled = true
-
-  heap = Gcry::Heap.new
-  begin
-    heap.gc_threshold = UInt64::MAX
-    heap.layout_precise = true
-    heap.allow_interior_pointers = false
-
-    tid = 4245
-    Gcry::Layout.install_full(tid, Pointer(UInt16).null, 0, Pointer(UInt16).null, 0,
-      32_u32, 0_u32, Gcry::Layout::KIND_PLAIN,
-      0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, Gcry::Layout::VALUE_MODE_NONE, 0_u16)
-
-    dead = heap.malloc(32)
-    obj = heap.malloc(32)
-    user = obj.as(UInt8*)
-    user.as(Int32*).value = tid
-    Pointer(Void*).new(user.address + 8).value = dead
-
-    heap.add_root(obj)
-    heap.collect(scan_stack: false)
-
-    heap.live?(obj).should be_true
-    heap.live?(dead).should be_false
-    heap.layout_precise_scans.should be > 0
   ensure
     heap.destroy
     Gcry::Layout.clear

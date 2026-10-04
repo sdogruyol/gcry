@@ -106,16 +106,16 @@ Priority labels:
 **What could go wrong:**
 - **Custom property framework takes too long (2.1):** Writing a good random graph generator is harder than it looks. Mitigation: if not working after 2 weeks, simplify — start with random alloc/free sequences only, add pointer graphs later.
 - **Property tests are flaky (2.1-2.4):** Random tests may fail intermittently. Mitigation: all property tests must log the seed on failure. CI reruns with the same seed for deterministic debugging. Treat flakiness as a bug in the test, not the code.
-- **Layout property test design vs GC behavior (2.3):** The test must align with the GC's actual scanning semantics. For example, conservative fallback (first word = 0, no type_id) uses `base_only` — only root-of-object hits survive, not interior pointers. `scan_cap` with `alloc_size` match triggers capped conservative scan, not precise. Leaf layout with `scan_cap=0` truly marks nothing. Mitigation: each sub-test is self-contained (no shared state), verified against the GC source, and runs 10k iterations independently.
+- **Layout property test design vs GC behavior (2.3):** The test must align with the GC's actual scanning semantics. Until 2026-10-04 it pinned the narrowings — precise offsets, leaf, `scan_cap` — that a mixed-union buffer colliding with a registered type id turned into a use-after-free (`bench/log/linux/2026-10-04-layout-union-collision/`). Only `Hash` maps narrow a scan now, so it checks the opposite: no plain registration, whatever it claims, loses an edge. Mitigation: each sub-test is self-contained (no shared state), verified against the GC source, and runs 10k iterations independently.
 - **MT property test deadlocks (2.4):** Fiber + collect + STW can deadlock in unpredictable ways. Mitigation: library heap mode (`stop_the_world=false`) avoids STW entirely. Workers use `Fiber.yield` to cooperate with the collector. Watchdog timer (120s deadline) prevents infinite hangs. Tested with 2, 4, 8 workers.
 
 **Definition of Done:**
 - [x] `bench/property_test.cr` exists and runs in CI
-- [x] `bench/layout_property_test.cr` exists with 5 sub-tests: precise offsets, conservative fallback, leaf layout, noscan offset, scan_cap limiting
+- [x] `bench/layout_property_test.cr` exists with 2 sub-tests: every slot survives under each synthetic plain layout (precise offsets, leaf, noscan, scan cap) and under none, and a noscan offset's target is traced
 - [x] Heap graph fuzzer completes 100k iterations on every CI run (short: 5k in CI, full optional)
 - [x] Every property test failure logs the seed for deterministic replay
 - [x] Random alloc/free/collect sequences verify: `live_objects` counter accuracy, `heap_size` == sum chunk `mapped_bytes`, freelist consistency, no false negatives
-- [x] Layout property test passes 10k iterations in ~2.5s with 5 sub-tests, each self-contained (no shared state)
+- [x] Layout property test passes 10k iterations, each sub-test self-contained (no shared state)
 - [x] `bench/mt_property_test.cr` exists with concurrent workers (2, 4, 8), periodic collect, parallel/serial mark verification
 - [x] MT property tests run with 2, 4, 8 workers, no deadlocks, no lost objects
 - [x] At least one layout property test passes (2.3)
