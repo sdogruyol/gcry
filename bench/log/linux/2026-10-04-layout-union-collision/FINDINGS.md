@@ -125,3 +125,21 @@ key swept, asked of the heap by address: 3 of 3 each way.
 Registration (`Gcry::Layout.register`, `register_hash`, `GCRY_AUTO_LAYOUTS`,
 `GCRY_SCAN_CAPS`, the gates that inspect entries) still exists and no longer
 affects marking. Removing it is a public API change, left for a decision.
+
+## Cost
+
+CI `Perf A/B` run 37220644804, `ea65d06` (0.34.0) against `0671a0c`, 10
+interleaved reps:
+
+| bench | x86_64 mark | arm64 mark | x86_64 time | arm64 time |
+|---|---:|---:|---:|---:|
+| JsonParsePure | 1608 → 1111 ms (−30.9%) | 2427 → 1522 ms (−37.3%) | −23.7% | −30.8% |
+| JsonParseSerializable | −2.2% | −8.0% | +3.8% | +0.0% |
+| JsonGenerate | −4.6% | −8.3% | −5.7% | +0.3% |
+| Primes | −4.6% | −10.8% | −3.1% | −3.8% |
+| Binarytrees | −6.1% | −12.8% | −0.3% | −2.7% |
+| Knuckeotide | 29 → 32 ms (+9.9%) | 43 → 47 ms (+9.4%) | −1.2% | +0.4% |
+
+[INFERENCE] Knuckeotide's +3-4 ms is the `Int32` values and hash words of its
+`Hash(String, Int32)` counts, which the `Hash` walk skipped and the
+conservative scan reads.

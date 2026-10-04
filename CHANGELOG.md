@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Layout registration still runs and no longer affects marking
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
+### Changed
+
+- **Marking is faster without the layouts, a third faster on JSON.** The
+  `Hash` walk waited on a cache miss for every small `Hash`'s entries, and
+  every scanned object paid a layout lookup. Against 0.34.0 on CI runners,
+  10 interleaved reps: JsonParsePure mark −31% on x86-64 and −37% on arm64,
+  wall time −24% and −31%; Primes, JsonGenerate, Binarytrees and
+  JsonParseSerializable mark −2 to −13%. Knuckeotide's 30-45 ms of mark is
+  +9%, its wall time unchanged
+  (`bench/log/linux/2026-10-04-layout-union-collision/`).
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed
