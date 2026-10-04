@@ -1,0 +1,53 @@
+=== round 1 GCRY_PARALLEL_MARK=1
+  "boehm_rss_kib": 13144,
+  "pause_p50_ms": 0.2979,
+  "max_pause_p50_ms": 1000.0,
+  /json thr gate: 104.5% >= 0% ✓
+  /json RSS gate: 0.941x <= 100x ✓
+  pause_p50 gate: 0.2979 ms <= 1000 ms ✓
+STALE: this run is on probe, the baseline was recorded on ubuntu-latest. Ratios are same-host but their spread is not: a macOS runner's `rss_x` and a GHA Linux runner's are different distributions, so a tolerance measured on one cannot gate the other. Record a baseline on this runner class. Reporting only.
+  /json thr, % of Boehm      104.50  base   100.45  tol ±13.607  delta   +4.05  +0.98sd  ok
+  / thr, % of Boehm          105.60  base       99  tol ±12.9058  delta   +6.60  +1.69sd  ok
+  post-GC RSS, x Boehm         0.94  base   0.9495  tol  ±0.194  delta   -0.01  -0.14sd  ok
+  post-GC RSS, gcry KiB    12372.00  base        —  tol       —  delta       —        —  no baseline
+  pause p50, ms                0.30  base   0.6361  tol  ±0.324  delta   -0.34  -3.44sd  improved
+=== round 1 GCRY_PARALLEL_MARK=4
+  "boehm_rss_kib": 13052,
+  "pause_p50_ms": 0.3056,
+  "max_pause_p50_ms": 1000.0,
+  /json thr gate: 93.3% >= 0% ✓
+  /json RSS gate: 0.977x <= 100x ✓
+  pause_p50 gate: 0.3056 ms <= 1000 ms ✓
+STALE: this run is on probe, the baseline was recorded on ubuntu-latest. Ratios are same-host but their spread is not: a macOS runner's `rss_x` and a GHA Linux runner's are different distributions, so a tolerance measured on one cannot gate the other. Record a baseline on this runner class. Reporting only.
+  /json thr, % of Boehm       93.30  base   100.45  tol ±13.607  delta   -7.15  -1.73sd  ok
+  / thr, % of Boehm           90.80  base       99  tol ±12.9058  delta   -8.20  -2.10sd  ok
+  post-GC RSS, x Boehm         0.98  base   0.9495  tol  ±0.194  delta   +0.03  +0.47sd  ok
+  post-GC RSS, gcry KiB    12748.00  base        —  tol       —  delta       —        —  no baseline
+  pause p50, ms                0.31  base   0.6361  tol  ±0.324  delta   -0.33  -3.37sd  improved
+=== round 2 GCRY_PARALLEL_MARK=1
+  "boehm_rss_kib": 13256,
+  "pause_p50_ms": 0.2879,
+  "max_pause_p50_ms": 1000.0,
+  /json thr gate: 97.7% >= 0% ✓
+  /json RSS gate: 0.912x <= 100x ✓
+  pause_p50 gate: 0.2879 ms <= 1000 ms ✓
+STALE: this run is on probe, the baseline was recorded on ubuntu-latest. Ratios are same-host but their spread is not: a macOS runner's `rss_x` and a GHA Linux runner's are different distributions, so a tolerance measured on one cannot gate the other. Record a baseline on this runner class. Reporting only.
+  /json thr, % of Boehm       97.70  base   100.45  tol ±13.607  delta   -2.75  -0.67sd  ok
+  / thr, % of Boehm          107.20  base       99  tol ±12.9058  delta   +8.20  +2.10sd  ok
+  post-GC RSS, x Boehm         0.91  base   0.9495  tol  ±0.194  delta   -0.04  -0.64sd  ok
+  post-GC RSS, gcry KiB    12088.00  base        —  tol       —  delta       —        —  no baseline
+  pause p50, ms                0.29  base   0.6361  tol  ±0.324  delta   -0.35  -3.55sd  improved
+=== round 2 GCRY_PARALLEL_MARK=4
+  "boehm_rss_kib": 13212,
+  "pause_p50_ms": 0.3401,
+  "max_pause_p50_ms": 1000.0,
+  /json thr gate: 96.5% >= 0% ✓
+  /json RSS gate: 0.959x <= 100x ✓
+  pause_p50 gate: 0.3401 ms <= 1000 ms ✓
+STALE: this run is on probe, the baseline was recorded on ubuntu-latest. Ratios are same-host but their spread is not: a macOS runner's `rss_x` and a GHA Linux runner's are different distributions, so a tolerance measured on one cannot gate the other. Record a baseline on this runner class. Reporting only.
+  /json thr, % of Boehm       96.50  base   100.45  tol ±13.607  delta   -3.95  -0.96sd  ok
+  / thr, % of Boehm           89.40  base       99  tol ±12.9058  delta   -9.60  -2.45sd  ok
+  post-GC RSS, x Boehm         0.96  base   0.9495  tol  ±0.194  delta   +0.01  +0.16sd  ok
+  post-GC RSS, gcry KiB    12672.00  base        —  tol       —  delta       —        —  no baseline
+  pause p50, ms                0.34  base   0.6361  tol  ±0.324  delta   -0.30  -3.01sd  ok
+Post job cleanup.

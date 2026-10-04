@@ -3899,7 +3899,9 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       these marks slower at every worker count until three shared writes were
       removed (2026-10-04); with 4 workers it is now −21% to −62% Σ mark on
       4-vCPU runners (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
-      Default-on still needs the HTTP numbers re-measured and a campaign. A SIGPROF profile
+      Not default: on Kemal `/json` (0.3 ms pauses) four workers still cost
+      4–16 points of throughput against one, so a default would have to
+      engage helpers only when there is enough to mark. A SIGPROF profile
       puts it in candidate resolution (radix → chunk header → occupancy and
       mark bitmaps, ~24% of CPU) and in dependent misses on `Hash` blobs;
       instruction-level trims have stopped paying on this host

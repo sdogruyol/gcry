@@ -70,8 +70,17 @@ mark-audit nursery-headers bitmap-marks-freelist`, `ci/sound-suite.sh`,
 `stw_mt` with `GCRY_PARALLEL_MARK=4` 60 runs each layout, `thread_storm` with
 it 60 runs: all green; Darwin and Windows type-check.
 
-## Not changed
+## Not changed: it stays opt-in
 
-Parallel mark stays opt-in. The HTTP picture (`GCRY_PARALLEL_MARK` in
-HARDENING: Kemal throughput regressed with it) was measured before these fixes
-and is not re-measured here, and a default change needs that and a campaign.
+Kemal on a GitHub ubuntu runner, `bench/perf_smoke.sh` with its gates off, two
+rounds alternating 1 and 4 workers (`kemal_pm.sh`, `kemal-pm1-pm4.txt`), each
+run's own same-host % of Boehm:
+
+| | `/json` | `/` | pause p50 |
+|---|---|---|---|
+| 1 worker | 104.5%, 97.7% | 105.6%, 107.2% | 0.30, 0.29 ms |
+| 4 workers | 93.3%, 96.5% | 90.8%, 89.4% | 0.31, 0.34 ms |
+
+A Kemal heap is a few MB and its pause 0.3 ms; four workers have nothing to
+divide and still cost their coordination. A default would have to engage
+helpers only when a mark has enough work for them.
