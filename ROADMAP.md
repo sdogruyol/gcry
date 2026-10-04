@@ -3927,14 +3927,13 @@ draw of `bench/log/macos/2026-08-10-053800/` — which is what makes it schedula
       `compiler-gc-contract` layout check and the `layout_*` counters. Either
       remove it all (a public API removal), or find a key a raw buffer cannot
       forge before any map narrows a scan again. The removal is ready on the
-      `layout-removal` branch (`b715fa5`, −2 205 lines, not merged). Its one
-      CI failure, `fp-register-root`'s red arm on Darwin x86_64 keeping its
+      `layout-removal` branch (`033daf7`, −2 205 lines, rebased onto
+      `d15b0ea`, CI green on every platform, not merged). Its one earlier CI
+      failure, `fp-register-root`'s red arm on Darwin x86_64 keeping its
       victim 12 of 13 runs, was not the branch: the collector left copies of
       suspended threads' registers in dead frames of its own stack and then
-      scanned them, and that build's frame sizes put them in the window.
-      Fixed on master (`bench/log/macos/2026-10-05-dead-register-copies/`);
-      with the fix the branch's build drops the victim 8 of 8. The branch
-      needs a rebase onto it.
+      scanned them, and that build's frame sizes put them in the window
+      (`bench/log/macos/2026-10-05-dead-register-copies/`, fixed on master).
 - [x] **`make nursery-headers` tests the old→young scan — fixed 2026-10-04.**
       It never had: a major does not promote, so the Hash and its `@entries`
       were still young when the key was planted, and the minor reached the
