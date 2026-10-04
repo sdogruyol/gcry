@@ -143,3 +143,9 @@ interleaved reps:
 [INFERENCE] Knuckeotide's +3-4 ms is the `Int32` values and hash words of its
 `Hash(String, Int32)` counts, which the `Hash` walk skipped and the
 conservative scan reads.
+
+## Soak
+
+CI dispatch run 37226315432 on `078bcb2` (the mark with no layout): the
+Kemal soak's three arms, 2 h each, `--workers=4 --collect-hz=20`, queue audit
+and poisoned frees on — PASSED, all three.
