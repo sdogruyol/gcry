@@ -167,19 +167,20 @@ module Gcry
       slot = Heap.mark_worker
       # A thread with no claimed slot (should not happen on a mark worker) falls
       # back to the locked shared push rather than corrupting slot -1.
-      if slot < 0 || @mark_pushbuf[slot] == 0_u64
+      base = slot < 0 ? 0_u64 : pushbuf_base(slot)
+      if base == 0_u64
         @mark_lock.lock
         @mark_stack.push(header)
         @mark_lock.unlock
         return
       end
-      n = @mark_pushbuf_n[slot]
+      n = pushbuf_n(slot)
       if n >= MARK_PUSHBUF_CAP
         flush_pushbuf(slot)
         n = 0
       end
-      Pointer(Void*).new(@mark_pushbuf[slot])[n] = header.as(Void*)
-      @mark_pushbuf_n[slot] = n + 1
+      Pointer(Void*).new(base)[n] = header.as(Void*)
+      set_pushbuf_n(slot, n + 1)
     end
 
     private def mark_impl_unlocked(pointer : Void*, gate_type_id : Bool, base_only : Bool, source : RootSource) : Nil

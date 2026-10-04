@@ -213,23 +213,46 @@ module Gcry
     # Lazily mmap a shard's push buffer. Called by a worker before it drains, and
     # by the master; mmap during a collection is fine (it is what MarkStack#grow
     # does), a managed allocation would not be.
+    # A slot's buffer address and count share its own 128-byte stride of
+    # `@mark_pushbuf_slots`, so no two workers' words ever share a cache line.
+    # They were two `StaticArray`s indexed by slot — all sixteen counts in one
+    # 64-byte line, written by every worker on every push. Sampled with four
+    # workers on Primes, the count's read was 18.8% of all CPU and the
+    # buffer's 18.5% (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
+    MARK_PUSHBUF_STRIDE = 16
+
+    @[AlwaysInline]
+    private def pushbuf_base(slot : Int32) : UInt64
+      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE]
+    end
+
+    @[AlwaysInline]
+    private def pushbuf_n(slot : Int32) : Int32
+      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE + 1].to_i32!
+    end
+
+    @[AlwaysInline]
+    private def set_pushbuf_n(slot : Int32, n : Int32) : Nil
+      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE + 1] = n.to_u64!
+    end
+
     protected def ensure_pushbuf(slot : Int32) : Nil
-      return if @mark_pushbuf[slot] != 0_u64
+      return if pushbuf_base(slot) != 0_u64
       bytes = MARK_PUSHBUF_CAP.to_u64 * sizeof(Void*).to_u64
       ptr = Gcry::OS.mmap(Pointer(Void).null, LibC::SizeT.new(bytes),
         Gcry::OS::PROT_READ | Gcry::OS::PROT_WRITE,
         Gcry::OS::MAP_PRIVATE | Gcry::OS::MAP_ANONYMOUS, -1, 0)
       return if Gcry.mmap_failed?(ptr)
-      @mark_pushbuf[slot] = ptr.address
-      @mark_pushbuf_n[slot] = 0
+      @mark_pushbuf_slots.to_unsafe[slot * MARK_PUSHBUF_STRIDE] = ptr.address
+      set_pushbuf_n(slot, 0)
     end
 
     # Publish one shard's accumulated children to the shared stack under one
     # lock. Single-writer per slot, so the buffer itself needs no lock.
     protected def flush_pushbuf(slot : Int32) : Nil
-      n = @mark_pushbuf_n[slot]
+      n = pushbuf_n(slot)
       return if n == 0
-      buf = Pointer(Void*).new(@mark_pushbuf[slot])
+      buf = Pointer(Void*).new(pushbuf_base(slot))
       @mark_lock.lock
       i = 0
       while i < n
@@ -237,7 +260,7 @@ module Gcry
         i += 1
       end
       @mark_lock.unlock
-      @mark_pushbuf_n[slot] = 0
+      set_pushbuf_n(slot, 0)
     end
 
     # Scan a batch with the serial drain's prefetch: header line and first
@@ -307,13 +330,13 @@ module Gcry
     # not, is covered by that count.
     private def scan_batch_local_first(batch : Pointer(Void*), m : Int32, slot : Int32) : Nil
       scan_batch_prefetched(batch, m)
-      if @mark_pushbuf[slot] != 0_u64
-        buf = Pointer(Void*).new(@mark_pushbuf[slot])
+      if pushbuf_base(slot) != 0_u64
+        buf = Pointer(Void*).new(pushbuf_base(slot))
         loop do
-          n = @mark_pushbuf_n[slot]
+          n = pushbuf_n(slot)
           break if n == 0 || n > MARK_LOCAL_DRAIN_MAX
           batch.copy_from(buf, n)
-          @mark_pushbuf_n[slot] = 0
+          set_pushbuf_n(slot, 0)
           scan_batch_prefetched(batch, n)
         end
       end
