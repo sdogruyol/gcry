@@ -318,16 +318,22 @@ module Gcry
       return if @heap_max == 0 || addr < @heap_min || addr >= @heap_max
       return if !@scan_unaligned_candidates && (addr & (sizeof(Void*).to_u64 - 1)) != 0
 
-      header = find_object(pointer)
-      return unless header
-      return if BlockHeader.free?(header)
+      # `find_object_with_chunk` and the chunk-in-hand pair, as in
+      # `mark_impl_unlocked`. This took `find_object`, `heap_marked?` and
+      # `heap_set_mark`, which resolved the same chunk three times, and the
+      # last read the block's size from its header — under headerless the
+      # object's own first word — and walked every size class for it before
+      # falling back to a fourth lookup.
+      found = find_object_with_chunk(pointer)
+      return unless found
+      header, chunk = found
 
-      return if heap_marked?(header)
+      return if block_marked_in?(chunk, header)
       if @minor_only && !BlockHeader.nursery?(header)
         return
       end
 
-      heap_set_mark(header)
+      set_block_mark_in(chunk, header)
     end
 
     # Crystal Reference payloads start with type_id (Int32). Reject if that
@@ -465,8 +471,18 @@ module Gcry
               # A collision that reaches here degrades to exactly the
               # conservative scan it would have got unregistered.
               plausible = hash_shape_plausible?(user, size, entry)
-              scan_hash_object(user, size, entry) if plausible
+              # `@entries` is a separate block nobody has touched yet, and
+              # walking it straight away waited on a cache miss for every
+              # Hash: on JsonParsePure's millions of small ones, 37% more
+              # mark time than scanning the same heap conservatively, where
+              # the blob goes through the mark loop's prefetch ring. Start
+              # the load, scan the Hash's own words while it lands, then walk.
+              if plausible
+                entries = Pointer(Void*).new(user.address + entry.hash_entries_off.to_u64).value
+                Kernels.prefetch_read(entries) unless entries.null?
+              end
               scan_hash_body(user, size, entry, demote: plausible)
+              scan_hash_entries(user, size, entry) if plausible
             else
               entry.scan_offsets.each do |off|
                 next if off.to_u64 + sizeof(Void*).to_u64 > size
@@ -554,7 +570,7 @@ module Gcry
     # demoted to `mark_noscan` so the two blobs stay alive without being walked
     # as pointer arrays — which is the whole reason the Hash kind exists.
     #
-    # `scan_hash_object` alone was not enough, and the reason generalises past
+    # The entries walk alone was not enough, and the reason generalises past
     # Hash. A layout is keyed on the payload's **first Int32**, read
     # conservatively; a raw buffer of union values starts with exactly such an
     # id, because Crystal stores the union's type id in the first four bytes.
@@ -645,35 +661,13 @@ module Gcry
       false
     end
 
-    # Precise Hash: keep @indices/@entries blobs alive without scanning them as
-    # pointer arrays; walk Entry slots and mark key/value only.
+    # Precise Hash: walk Entry slots and mark key/value only. The Hash's own
+    # words — `@entries` / `@indices` kept alive unscanned, `@block`, the rest
+    # — are `scan_hash_body`'s, which reads every one of them.
     # Live range is Crystal `@size + @deleted_count` (entries_size), NOT
     # entries_capacity from `@indices_size_pow2` — capacity slots after realloc
     # are uninitialized and must not be treated as Entry records.
-    private def scan_hash_object(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
-      entry.scan_offsets.each do |off|
-        next if off.to_u64 + sizeof(Void*).to_u64 > size
-        slot = Pointer(Void*).new(user.address + off.to_u64)
-        mark_candidate(slot.value)
-      end
-
-      entry.noscan_offsets.each do |off|
-        next if off.to_u64 + sizeof(Void*).to_u64 > size
-        slot = Pointer(Void*).new(user.address + off.to_u64)
-        mark_noscan(slot.value)
-      end
-
-      # Proc? @block is multi-word (function pointer + closure data).
-      block_off = entry.hash_block_off.to_u64
-      block_bytes = entry.hash_block_bytes.to_u64
-      if block_bytes > 0 && block_off + block_bytes <= size
-        w = 0_u64
-        while w + sizeof(Void*).to_u64 <= block_bytes
-          mark_candidate(Pointer(Void*).new(user.address + block_off + w).value)
-          w += sizeof(Void*).to_u64
-        end
-      end
-
+    private def scan_hash_entries(user : UInt8*, size : UInt64, entry : Layout::Entry) : Nil
       entries_off = entry.hash_entries_off.to_u64
       pow2_off = entry.hash_pow2_off.to_u64
       stride = entry.hash_entry_stride.to_u64
@@ -837,7 +831,8 @@ module Gcry
         if (entry = Layout.entry_for(tid))
           size_match = entry.alloc_size == 0 || size == entry.alloc_size.to_u64
           if size_match && entry.hash?
-            scan_hash_object(user, size, entry)
+            scan_hash_body(user, size, entry, demote: true)
+            scan_hash_entries(user, size, entry)
             return
           end
           if size_match && entry.precise_fields?

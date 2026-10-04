@@ -152,8 +152,6 @@ it "register_hash installs KIND_HASH with noscan entries/indices" do
   entry.noscan_offsets.includes?(UInt16.new(offsetof(Hash(String, String), @entries))).should be_true
   entry.hash_size_off.should eq(UInt16.new(offsetof(Hash(String, String), @size)))
   entry.hash_deleted_off.should eq(UInt16.new(offsetof(Hash(String, String), @deleted_count)))
-  entry.hash_block_off.should eq(UInt16.new(offsetof(Hash(String, String), @block)))
-  entry.hash_block_bytes.should eq(UInt16.new(sizeof((Hash(String, String), String -> String)?)))
   # @block is Proc? — not a single scan offset
   entry.scan_offsets.size.should eq(0)
 ensure
@@ -211,6 +209,40 @@ it "hash precise scan walks entries_size not capacity (realloc garbage)" do
     heap.live?(live_val).should be_true
     heap.live?(dead_key).should be_false
     heap.live?(dead_val).should be_false
+  ensure
+    heap.destroy
+    Gcry::Layout.clear
+  end
+end
+
+it "hash precise scan keeps the default block's closure alive" do
+  # `Hash.new { |h, k| ... }` holds its block in `@block`, a two-word Proc
+  # whose second word is the closure. Nothing else in the Hash reaches it.
+  Gcry::Layout.clear
+  Gcry::Layout.enabled = true
+  Gcry::Layout.register_hash(String, String)
+
+  heap = Gcry::Heap.new
+  begin
+    heap.gc_threshold = UInt64::MAX
+    heap.layout_precise = true
+
+    tid = Hash(String, String).crystal_instance_type_id
+    closure = heap.malloc(48)
+    dead = heap.malloc(48)
+
+    size = instance_sizeof(Hash(String, String))
+    obj = heap.malloc(size.to_i32).as(UInt8*)
+    obj.clear(size)
+    obj.as(Int32*).value = tid
+    block_off = offsetof(Hash(String, String), @block).to_u64
+    Pointer(Void*).new(obj.address + block_off + sizeof(Void*)).value = closure
+
+    heap.add_root(obj.as(Void*))
+    heap.collect(scan_stack: false)
+
+    heap.live?(closure).should be_true
+    heap.live?(dead).should be_false
   ensure
     heap.destroy
     Gcry::Layout.clear

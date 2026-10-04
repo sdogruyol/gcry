@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Marking a heap of small `Hash`es is 13-15% faster.** Each one's
+  `@entries` walk waited on a cache miss for a block the mark loop had never
+  prefetched; the load now starts before the `Hash`'s own words are scanned.
+  JsonParsePure mark −14.9% on x86-64 and −12.8% on arm64, wall time −12.6%
+  and −9.6% (`bench/log/linux/2026-10-04-hash-entries-prefetch/`).
+
 ## [0.34.0] - 2026-10-04
 
 ### Fixed

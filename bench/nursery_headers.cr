@@ -62,9 +62,7 @@ def install_broken_hash_layout : Nil
     0_u16, 0_u16, # key_off, key_bytes — the pre-fix miss
     0_u16, Gcry::Layout::VALUE_MODE_NONE, 0_u16,
     UInt16.new(offsetof(HeaderHash, @size)),
-    UInt16.new(offsetof(HeaderHash, @deleted_count)),
-    UInt16.new(offsetof(HeaderHash, @block)),
-    UInt16.new(sizeof((HeaderHash, HTTP::Headers::Key -> HeaderValue)?))
+    UInt16.new(offsetof(HeaderHash, @deleted_count))
   )
 end
 

@@ -114,7 +114,7 @@ class LayoutPropertyTest
       Pointer(UInt16).null, 0,
       alloc_size, alloc_size,
       0_u8, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u8, 0_u16,
-      0_u16, 0_u16, 0_u16, 0_u16)
+      0_u16, 0_u16)
 
     # Layout 2: leaf — no offsets, scan_cap = 0 (truly leaf: nothing to scan)
     Gcry::Layout.install_full(LAYOUT_LEAF_TID,
@@ -122,7 +122,7 @@ class LayoutPropertyTest
       Pointer(UInt16).null, 0,
       alloc_size, 0_u32,
       0_u8, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u8, 0_u16,
-      0_u16, 0_u16, 0_u16, 0_u16)
+      0_u16, 0_u16)
 
     # Layout 3: noscan — scan slot 0 (offset 16), noscan slot 1 (offset 24)
     Gcry::Layout.install_full(LAYOUT_NOSCAN_TID,
@@ -130,7 +130,7 @@ class LayoutPropertyTest
       [24_u16].to_unsafe, 1,
       alloc_size, alloc_size,
       0_u8, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u8, 0_u16,
-      0_u16, 0_u16, 0_u16, 0_u16)
+      0_u16, 0_u16)
 
     # Layout 4: cap-only — scan_cap = 32 bytes (slots 0-1), no precise offsets
     Gcry::Layout.install_full(LAYOUT_CAP_TID,
@@ -138,7 +138,7 @@ class LayoutPropertyTest
       Pointer(UInt16).null, 0,
       alloc_size, 32_u32,
       0_u8, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u16, 0_u8, 0_u16,
-      0_u16, 0_u16, 0_u16, 0_u16)
+      0_u16, 0_u16)
   end
 
   # ---- Test 1: Precise scan follows only registered offsets ----
