@@ -351,7 +351,10 @@ module Gcry
           state.to_unsafe,
           pointerof(count),
         )
-        return unless kr == KERN_SUCCESS
+        unless kr == KERN_SUCCESS
+          scrub_register_copy(state.to_unsafe.as(Void*), sizeof(typeof(state)))
+          return
+        end
 
         row = uninitialized StaticArray(UInt64, GREG_WORDS)
         GP_WORDS.times { |j| row[j] = state.to_unsafe.as(UInt64*)[j] }
@@ -374,6 +377,24 @@ module Gcry
           sp = (state.to_unsafe.as(UInt8*) + THREAD_STATE_SP_OFFSET).as(UInt64*).value
           StwSlots.record_sp(slot, sp) if sp != 0
         end
+
+        scrub_register_copy(state.to_unsafe.as(Void*), sizeof(typeof(state)))
+        scrub_register_copy(fp.to_unsafe.as(Void*), sizeof(typeof(fp)))
+        scrub_register_copy(row.to_unsafe.as(Void*), sizeof(typeof(row)))
+      end
+
+      # The three buffers above are copies of another thread's registers in
+      # this frame, and the frame is dead the moment it returns — but the
+      # collector scans its own stack from its SP at the time, deeper in, so a
+      # dead copy can sit inside that window as a root nobody holds. With
+      # register roots off it kept `fp-register-root`'s victim alive in 12 of
+      # 13 runs on one build and 0 of 8 on another, frame sizes deciding
+      # (`bench/log/macos/2026-10-05-dead-register-copies/`). The `asm` is
+      # what keeps the stores: to the optimiser they are writes to a dead local.
+      @[AlwaysInline]
+      private def self.scrub_register_copy(buf : Void*, bytes : Int) : Nil
+        buf.as(UInt8*).clear(bytes)
+        asm("" :: "r"(buf) : "memory")
       end
 
       @@stw_fp_state_failures = uninitialized UInt64

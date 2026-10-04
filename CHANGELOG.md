@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Layout registration still runs and no longer affects marking
   (`bench/log/linux/2026-10-04-layout-union-collision/`).
 
+- **macOS and Windows: the collector no longer keeps objects alive through
+  copies of other threads' registers on its own stack.** A stop reads each
+  suspended thread's registers (FP/SIMD included) into buffers in its frame
+  and copies them to the register-root table. The buffers stayed behind, and
+  the collector scans its own stack from deeper in, so whenever the frame
+  sizes lined up, a stale copy of another thread's registers was a root too —
+  `GCRY_DISABLE_GREG_ROOTS=1` kept a block it should have dropped in 12 of 13
+  runs on one Intel macOS build and none on another. The buffers are cleared
+  once copied (`bench/log/macos/2026-10-05-dead-register-copies/`).
+
 ### Changed
 
 - **Marking is faster without the layouts, a third faster on JSON.** The

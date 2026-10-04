@@ -262,11 +262,16 @@ module Gcry::Platform
       context.clear
       context.value.contextFlags = LibC::CONTEXT_FULL
       if LibC.GetThreadContext(handle, context) == 0
+        scrub_register_copy(buffer.to_unsafe.as(Void*), sizeof(typeof(buffer)))
         note_stop_failure(2_u8, LibC.GetLastError, handle)
         error = true
         break
       end
       record_thread_context_at(slot_for(handle), context)
+      # A copy of another thread's registers, XMM included, in a frame that
+      # is dead once this returns — and the collector scans its own stack
+      # from deeper in. See `Platform.scrub_register_copy` in darwin_stw.cr.
+      scrub_register_copy(buffer.to_unsafe.as(Void*), sizeof(typeof(buffer)))
     end
     if error
       resume_suspended_threads
@@ -275,6 +280,12 @@ module Gcry::Platform
       return false
     end
     true
+  end
+
+  @[AlwaysInline]
+  private def self.scrub_register_copy(buf : Void*, bytes : Int) : Nil
+    buf.as(UInt8*).clear(bytes)
+    asm("" :: "r"(buf) : "memory")
   end
 
   @@stop_failed_call = 0_u8
