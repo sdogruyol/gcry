@@ -1,0 +1,30 @@
+### metric
+ML Primes: pm1 mark 1961ms (+0%) time 3.474s  pm4 mark 1207ms (-38%) time 2.817s  pm4min mark 1207ms (-38%) time 2.804s
+ML JsonParsePure: pm1 mark 3097ms (+0%) time 2.700s  pm4 mark 1522ms (-51%) time 1.720s  pm4min mark 1536ms (-50%) time 1.744s
+ML Binarytrees: pm1 mark 310ms (+0%) time 1.522s  pm4 mark 166ms (-47%) time 1.530s  pm4min mark 323ms (+4%) time 1.607s
+ML JsonGenerate: pm1 mark 2309ms (+0%) time 1.450s  pm4 mark 2035ms (-12%) time 1.538s  pm4min mark 2050ms (-11%) time 1.534s
+### kemal
+=== round 1 pm1
+  /json thr, % of Boehm      108.10  base   100.45  tol ±13.607  delta   +7.65  +1.86sd  ok
+  / thr, % of Boehm          101.00  base       99  tol ±12.9058  delta   +2.00  +0.51sd  ok
+  pause p50, ms                0.28  base   0.6361  tol  ±0.324  delta   -0.36  -3.66sd  improved
+=== round 1 pm4
+  /json thr, % of Boehm       96.90  base   100.45  tol ±13.607  delta   -3.55  -0.86sd  ok
+  / thr, % of Boehm           90.70  base       99  tol ±12.9058  delta   -8.30  -2.12sd  ok
+  pause p50, ms                0.33  base   0.6361  tol  ±0.324  delta   -0.31  -3.14sd  ok
+=== round 1 pm4min
+  /json thr, % of Boehm       99.10  base   100.45  tol ±13.607  delta   -1.35  -0.33sd  ok
+  / thr, % of Boehm           87.50  base       99  tol ±12.9058  delta  -11.50  -2.94sd  ok
+  pause p50, ms                0.30  base   0.6361  tol  ±0.324  delta   -0.33  -3.38sd  improved
+=== round 2 pm1
+  /json thr, % of Boehm      104.80  base   100.45  tol ±13.607  delta   +4.35  +1.05sd  ok
+  / thr, % of Boehm           95.40  base       99  tol ±12.9058  delta   -3.60  -0.92sd  ok
+  pause p50, ms                0.30  base   0.6361  tol  ±0.324  delta   -0.33  -3.40sd  improved
+=== round 2 pm4
+  /json thr, % of Boehm      101.70  base   100.45  tol ±13.607  delta   +1.25  +0.30sd  ok
+  / thr, % of Boehm           88.50  base       99  tol ±12.9058  delta  -10.50  -2.68sd  ok
+  pause p50, ms                0.31  base   0.6361  tol  ±0.324  delta   -0.33  -3.32sd  improved
+=== round 2 pm4min
+  /json thr, % of Boehm       98.20  base   100.45  tol ±13.607  delta   -2.25  -0.55sd  ok
+  / thr, % of Boehm           86.20  base       99  tol ±12.9058  delta  -12.80  -3.27sd  ok
+  pause p50, ms                0.35  base   0.6361  tol  ±0.324  delta   -0.29  -2.93sd  ok

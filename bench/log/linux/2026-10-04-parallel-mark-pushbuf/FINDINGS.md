@@ -84,3 +84,34 @@ run's own same-host % of Boehm:
 A Kemal heap is a few MB and its pause 0.3 ms; four workers have nothing to
 divide and still cost their coordination. A default would have to engage
 helpers only when a mark has enough work for them.
+
+## What it cost was the helpers, not the parallel mark
+
+`GCRY_PARALLEL_MARK_MIN_LIVE` marks serially below a live-set floor (the last
+major's live bytes). With the floor at 32 MiB, Kemal's marks are all serial,
+and Kemal still lost throughput (`min-live-before-backoff.txt`): `/` 87.5% /
+86.2% against 101.0% / 95.4% with one worker. Idle helpers spun 20 000
+`pause`s after every epoch and then woke every 200 µs, three of them ~15 000
+times a second on a 4-vCPU runner shared with `wrk`. They now double the
+sleep while nothing comes, up to 5 ms (`d69f433`). Same probe after it
+(`min-live-and-backoff.txt`, `kemal_min_live.sh`, `metric_min_live.sh`):
+
+| Kemal, % of Boehm | `/json` | `/` |
+|---|---|---|
+| 1 worker | 105.8, 108.4 | 99.9, 101.6 |
+| 4 workers | 94.9, 98.8 | 98.6, 99.6 |
+| 4 workers, 32 MiB floor | 104.4, 105.4 | 99.8, 95.0 |
+
+| Σ mark against 1 worker, x86-64 | 4 workers | 4 workers, 32 MiB floor |
+|---|---:|---:|
+| Primes | −37% | −36% |
+| JsonParsePure | −49% | −48% |
+| Binarytrees | −31% | 0% (its live set is under the floor) |
+| JsonGenerate | −14% | −14% |
+
+The backoff costs some of the short-mark gain: Binarytrees' collections are a
+millisecond apart, and a helper asleep in a long nap joins late (−47% before
+it, −31% after). `GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=33554432` is
+the setting that leaves a small server where one worker would and still
+halves a large heap's mark.
+

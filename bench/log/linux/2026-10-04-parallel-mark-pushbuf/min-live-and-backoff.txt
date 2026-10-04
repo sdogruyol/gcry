@@ -1,0 +1,30 @@
+### kemal
+=== round 1 pm1
+  /json thr, % of Boehm      105.80  base   100.45  tol ±13.607  delta   +5.35  +1.30sd  ok
+  / thr, % of Boehm           99.90  base       99  tol ±12.9058  delta   +0.90  +0.23sd  ok
+  pause p50, ms                0.37  base   0.6361  tol  ±0.324  delta   -0.27  -2.71sd  ok
+=== round 1 pm4
+  /json thr, % of Boehm       94.90  base   100.45  tol ±13.607  delta   -5.55  -1.35sd  ok
+  / thr, % of Boehm           98.60  base       99  tol ±12.9058  delta   -0.40  -0.10sd  ok
+  pause p50, ms                0.35  base   0.6361  tol  ±0.324  delta   -0.29  -2.95sd  ok
+=== round 1 pm4min
+  /json thr, % of Boehm      104.40  base   100.45  tol ±13.607  delta   +3.95  +0.96sd  ok
+  / thr, % of Boehm           99.80  base       99  tol ±12.9058  delta   +0.80  +0.20sd  ok
+  pause p50, ms                0.32  base   0.6361  tol  ±0.324  delta   -0.31  -3.19sd  ok
+=== round 2 pm1
+  /json thr, % of Boehm      108.40  base   100.45  tol ±13.607  delta   +7.95  +1.93sd  ok
+  / thr, % of Boehm          101.60  base       99  tol ±12.9058  delta   +2.60  +0.66sd  ok
+  pause p50, ms                0.36  base   0.6361  tol  ±0.324  delta   -0.28  -2.81sd  ok
+=== round 2 pm4
+  /json thr, % of Boehm       98.80  base   100.45  tol ±13.607  delta   -1.65  -0.40sd  ok
+  / thr, % of Boehm           99.60  base       99  tol ±12.9058  delta   +0.60  +0.15sd  ok
+  pause p50, ms                0.36  base   0.6361  tol  ±0.324  delta   -0.28  -2.86sd  ok
+=== round 2 pm4min
+  /json thr, % of Boehm      105.40  base   100.45  tol ±13.607  delta   +4.95  +1.20sd  ok
+  / thr, % of Boehm           95.00  base       99  tol ±12.9058  delta   -4.00  -1.02sd  ok
+  pause p50, ms                0.36  base   0.6361  tol  ±0.324  delta   -0.27  -2.78sd  ok
+### metric
+ML Primes: pm1 mark 1900ms (+0%) time 3.222s  pm4 mark 1206ms (-37%) time 2.510s  pm4min mark 1207ms (-36%) time 2.511s
+ML JsonParsePure: pm1 mark 2908ms (+0%) time 2.523s  pm4 mark 1477ms (-49%) time 1.629s  pm4min mark 1498ms (-48%) time 1.635s
+ML Binarytrees: pm1 mark 308ms (+0%) time 1.456s  pm4 mark 213ms (-31%) time 1.431s  pm4min mark 307ms (-0%) time 1.448s
+ML JsonGenerate: pm1 mark 2360ms (+0%) time 1.491s  pm4 mark 2024ms (-14%) time 1.483s  pm4min mark 2024ms (-14%) time 1.496s

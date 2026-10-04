@@ -127,6 +127,32 @@ describe "Gcry parallel mark knob" do
       heap.destroy
     end
   end
+
+  it "marks serially below parallel_mark_min_live and in parallel above it" do
+    heap = Gcry::Heap.new
+    begin
+      heap.parallel_mark_workers = 4
+      heap.gc_threshold = UInt64::MAX
+      keep = heap.malloc(4096)
+      heap.add_root(keep)
+      heap.collect(scan_stack: false)
+      runs = heap.parallel_mark_runs
+
+      # The floor is read against the last major's live bytes: one 4 KiB
+      # block is far below 1 GiB, so helpers stay idle.
+      heap.parallel_mark_min_live = 1_u64 << 30
+      heap.collect(scan_stack: false)
+      heap.parallel_mark_runs.should eq(runs)
+      heap.live?(keep).should be_true
+
+      heap.parallel_mark_min_live = 0_u64
+      heap.collect(scan_stack: false)
+      heap.parallel_mark_runs.should eq(runs + 1)
+      heap.live?(keep).should be_true
+    ensure
+      heap.destroy
+    end
+  end
 end
 
 describe "Gcry MT alloc storm (TLAB)" do

@@ -28,8 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mark_noscan` took for each `Hash` blob. With four workers on 4-vCPU
   runners, Σ mark on crystal-metric went from +19…+88% against one worker
   to −21…−62%; JsonParsePure's timed section from 1.57 to 1.00 s on x86-64.
-  Still opt-in: on a small heap (Kemal `/json`, 0.3 ms pauses) four workers
-  still cost 4–16 points of throughput against one
+  Still opt-in. Idle helpers now back off to 5 ms sleeps instead of waking
+  every 200 µs, and `GCRY_PARALLEL_MARK_MIN_LIVE` keeps a heap whose live
+  set is under a floor on the serial path: with
+  `GCRY_PARALLEL_MARK=4 GCRY_PARALLEL_MARK_MIN_LIVE=33554432`, Kemal `/json`
+  measured 104–105% of Boehm (one worker: 106–108%) while large heaps kept
+  their 36–48% faster mark
   (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
 
 - **`GCRY_PARALLEL_MARK`: the master no longer takes the mark lock to learn
