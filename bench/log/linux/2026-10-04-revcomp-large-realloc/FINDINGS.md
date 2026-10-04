@@ -55,4 +55,14 @@ returned, and a peer reused the block in between. So the reuse route is
 closed by a safety rule, and growth in place is the route that keeps the old
 pointer valid.
 
+## Doubling the request on large growth: −3%, not worth it
+
+`realloc` passing `allocate` twice the size for a large block (a local
+experiment, not committed) lets every other doubling step take the
+`new_size <= old_size` return. Three runs each, with a campaign on the
+host: 2.75-2.77 → 2.65-2.68 s, minor faults 388 458 → 339 862 (−12%), peak RSS
+572-586 → 520-650 MB. It closes 48 000 of the ~160 000 extra faults, and it
+does so by recording twice the size in the large header, which every
+live-bytes count and threshold then reads. Not pursued.
+
 Open in ROADMAP.md.
