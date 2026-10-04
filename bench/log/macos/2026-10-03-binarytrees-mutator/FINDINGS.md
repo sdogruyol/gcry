@@ -56,3 +56,19 @@ and then walks what it built; cursor refill and placement on a swept chunk,
 or the cache behaviour of where consecutive objects land, are the next
 suspects. Needs an in-process profile on macOS (`sample`/Instruments on a
 runner) to go further.
+
+## Parallel mark does not close it (2026-10-04)
+
+`sample` put 27% of gcry's main thread in marking against Boehm's 8%, which
+has parallel markers. Probe `probe-bt-macos` on `078bcb2`, 8 interleaved runs
+per arm, whole-run time as % of Boehm (`GCRY_PARALLEL_MARK_MIN_LIVE=0` so the
+workers run on this small heap):
+
+| | macos-latest | ubuntu-latest |
+|---|---:|---:|
+| gcry | 81% | 84% |
+| `GCRY_PARALLEL_MARK=2` | 80% | 88% |
+| `GCRY_PARALLEL_MARK=4` | 67% | 84% |
+
+Two workers move neither platform past its noise, four cost macOS 14 points.
+The gap is not the share of marking that one thread does.
