@@ -234,6 +234,20 @@ Slower at every count on every benchmark, so the half of the gap to Boehm that
 is parallelism is a redesign of the work distribution (every object crosses
 the one shared stack twice today), not a setting.
 
+## Measured, not taken: a plain OR for serial marks
+
+`chunk_set_mark` sets a mark bit with an atomic OR. In a serial mark with the
+world stopped, the collector is the only marker, so a plain OR would do. A/B
+on quiet runners against `1edd62c` (`runner-ab.sh`, 10 reps), Σ mark: aarch64
+Primes −6.9%, JsonParsePure −4.5%, Binarytrees −8.9%, JsonGenerate −10.0%;
+x86-64 −0.0%, +0.4%, −3.2%, −2.1%. Not taken: a plain OR is correct only if
+nothing else writes a mark word during the stop, and the allocation path's
+`heap_set_mark_allocating` writes one whenever `@collecting` is set. A mutator
+that ever slipped into it during a stop — the thread birth and exit races are
+the history here — would lose its bit to the collector's store, and a lost
+mark is a use-after-free. Worth a review of that path, not a default on 4–10%
+of mark on one architecture.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
