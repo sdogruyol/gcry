@@ -24,3 +24,8 @@ two threads spinning at `fiber/execution_context/parallel/scheduler.cr:97`,
 no collector frame — but without a backtrace this one cannot be classified,
 and TLAB with the nursery is an unsupported combination. Recorded so a second
 sighting has something to compare with.
+
+The same evening campaign-053 (`0671a0c`) timed out once in its
+`stw_mt_hdr_tlab_nursery` lane, the same binary and flags (seed 20441), and
+that run's gdb capture has two threads at `scheduler.cr:97` and no collector
+frame: #17486. That is the nearest classified neighbour of this stall.
