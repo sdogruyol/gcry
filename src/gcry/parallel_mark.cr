@@ -36,6 +36,14 @@ module Gcry
       @parallel_mark_workers = @force_serial_mark ? 1 : value.clamp(1, 16)
     end
 
+    # Below this many live bytes at the last major, mark serially even with
+    # helpers configured (`GCRY_PARALLEL_MARK_MIN_LIVE`, default 0: always
+    # parallel). A small heap gives four workers nothing to divide and still
+    # costs their wake-up and termination: Kemal `/json`, 0.3 ms pauses, ran
+    # 4–16 points slower with four than with one, while a 500 MiB heap marks
+    # 2× faster with them (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`).
+    property parallel_mark_min_live : UInt64 = 0_u64
+
     # Research only — `GCRY_DISABLE_PARALLEL_MARK=1`: pin workers at 1 even
     # if a later assignment asks for more. `make parallel-mark-process`
     # `--disabled` is the red arm — stolen stays 0. Never a product setting.
@@ -511,14 +519,13 @@ module Gcry
     end
 
     private def mark_loop : Nil
-      if @parallel_mark_workers > 1
-        @parallel_mark_runs += 1
-      end
-
-      if @parallel_mark_workers <= 1
+      # The live bytes the last major's sweep measured; this cycle's sweep has
+      # not run yet.
+      if @parallel_mark_workers <= 1 || live_bytes_after_sweep < @parallel_mark_min_live
         serial_mark_drain
         return
       end
+      @parallel_mark_runs += 1
 
       ensure_mark_worker_pool
       # No helpers available (pthread_create failed) → serial.

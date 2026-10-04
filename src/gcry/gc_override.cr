@@ -795,6 +795,9 @@ module GC
         heap.alloc_batch = ab.to_i32
       end
     end
+    if min_live = env_u64("GCRY_PARALLEL_MARK_MIN_LIVE")
+      heap.parallel_mark_min_live = min_live
+    end
     if pm = env_u64("GCRY_PARALLEL_MARK")
       heap.parallel_mark_workers = pm.to_i32 if pm >= 1 && pm <= 16
     end
