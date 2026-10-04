@@ -1,0 +1,45 @@
+Process-GC STW + concurrent mutation property test
+  seed=44 iterations=50 workers=[2, 4]
+  stop_the_world=true
+  bitmap_alloc=false headers=true
+  mode: shipped
+  tlab_enabled=true (requested=true)
+  nursery_enabled=true (requested=true)
+
+  STW-MT workers=2 iterations=50 seed=44
+gcry: thread census — task 4147:stw_mt_property is the collector, stopped here to ask
+gcry: thread census — task 4152:SYSMON is parked in syscall 230, returning to 0x7f68dacecbdf in /usr/lib/x86_64-linux-gnu/libc.so.6+0xecbdf
+gcry: thread census — task 4152 returns through: /usr/lib/x86_64-linux-gnu/libc.so.6+0xf9b27 /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x2190fb /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x1f716d /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x294d9b
+gcry: thread census — task 4153:stw-mt-2-0 is parked in syscall 202, returning to 0x7f68dac98e51 in /usr/lib/x86_64-linux-gnu/libc.so.6+0x98e51
+gcry: thread census — task 4153 returns through: /usr/lib/x86_64-linux-gnu/libc.so.6+0x9b8cd /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x2471e6 /usr/lib/x86_64-linux-gnu/libc.so.6+0x9b590 /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x245804
+gcry: thread census — task 4154:stw-mt-2-1 is parked in syscall 232, returning to 0x7f68dad2a2d2 in /usr/lib/x86_64-linux-gnu/libc.so.6+0x12a2d2
+gcry: thread census — task 4154 returns through: /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x239afa /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x26a26e /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x23d09c /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x1e4ea0
+gcry: thread census — task 4155:gcry-watch is parked in syscall 230, returning to 0x7f68dacecbdf in /usr/lib/x86_64-linux-gnu/libc.so.6+0xecbdf
+gcry: thread census — task 4155 returns through: /usr/lib/x86_64-linux-gnu/libc.so.6+0xf9b27 /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0x21c4ce /usr/lib/x86_64-linux-gnu/libc.so.6+0x9c7a1 /home/runner/work/gcry/gcry/bin/stw_mt_property_test_hdr+0xb6916
+gcry: thread census — the OS reports 5 thread(s) and Crystal's list yielded 4, so 1 thread(s) are outside Crystal's list; every one of them is gcry's own, so none is unrecorded. collection 0
+gcry: thread census — OS tasks: 4147:stw_mt_property 4152:SYSMON 4153:stw-mt-2-0 4154:stw-mt-2-1 4155:gcry-watch — 1 is gcry's own, leaving 0 unexplained
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 4 listed, 4 bounded, 3 staged. collection 0
+gcry: thread census — the OS reports 6 thread(s) and Crystal's list yielded 5, so 1 thread(s) are outside Crystal's list; every one of them is gcry's own, so none is unrecorded. collection 1
+gcry: thread census — OS tasks: 4147:stw_mt_property 4152:SYSMON 4153:stw-mt-2-0 4154:stw-mt-2-1 4155:gcry-watch 4156:gc-idle — 1 is gcry's own, leaving 0 unexplained
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 5 listed, 5 bounded, 1 staged. collection 1
+gcry: thread census — the OS reports 6 thread(s) and Crystal's list yielded 5, so 1 thread(s) are outside Crystal's list; every one of them is gcry's own, so none is unrecorded. collection 2
+gcry: thread census — OS tasks: 4147:stw_mt_property 4152:SYSMON 4153:stw-mt-2-0 4154:stw-mt-2-1 4155:gcry-watch 4156:gc-idle — 1 is gcry's own, leaving 0 unexplained
+gcry: thread census — the OS reports 6 thread(s) and Crystal's list yielded 5, so 1 thread(s) are outside Crystal's list; every one of them is gcry's own, so none is unrecorded. collection 3
+gcry: thread census — OS tasks: 4147:stw_mt_property 4152:SYSMON 4153:stw-mt-2-0 4154:stw-mt-2-1 4155:gcry-watch 4156:gc-idle — 1 is gcry's own, leaving 0 unexplained
+    allocs=410 pinned=408 collects=51 roots=16 ok=true
+
+  STW-MT workers=4 iterations=50 seed=10044
+gcry: dying-type audit — precondition: a thread was staged when the world stopped, and the wait caught it. 9 listed, 9 bounded, 4 staged. collection 51
+STALLED: still running after 120 s
+--- stall capture: pid 4147, 10 thread(s)
+task 4147 stw_mt_property state=S wchan=ep_poll
+task 4152 SYSMON state=S wchan=hrtimer_nanosleep
+task 4153 stw-mt-2-0 state=S wchan=ep_poll
+task 4154 stw-mt-2-1 state=S wchan=futex_do_wait
+task 4155 gcry-watch state=S wchan=hrtimer_nanosleep
+task 4156 gc-idle state=S wchan=hrtimer_nanosleep
+task 4157 stw-mt-4-0 state=R wchan=0
+task 4158 stw-mt-4-1 state=S wchan=ep_poll
+task 4159 stw-mt-4-2 state=R wchan=0
+task 4160 stw-mt-4-3 state=S wchan=futex_do_wait
+--- no gdb backtrace (gdb missing or no live task)
