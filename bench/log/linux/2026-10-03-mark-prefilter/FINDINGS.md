@@ -215,6 +215,25 @@ Tried after it and not kept: the three cold diagnostic paths inlined into
 the six callee-saved pushes stay, and Σ mark moves −1.2% … +1.5% with mixed
 signs across the eight cells: nothing to keep.
 
+## Parallel mark on these heaps
+
+Boehm's default marker per CPU takes Primes' largest mark from 178 ms to
+46 ms. gcry's experimental `GCRY_PARALLEL_MARK`, at `a97fa4f` (after the
+master's termination peek), on 4-vCPU GitHub runners, 6 interleaved reps
+(`parallel-mark-scaling.sh`, `parallel-mark-scaling.txt`), Σ mark against one
+marker:
+
+| bench | 2 workers, x86-64 | 4 workers, x86-64 | 2 workers, aarch64 | 4 workers, aarch64 |
+|---|---:|---:|---:|---:|
+| Primes | +31% | +45% | +53% | +61% |
+| JsonParsePure | +21% | +52% | +57% | +88% |
+| Binarytrees | +13% | +26% | +4% | +19% |
+| JsonGenerate | +16% | +39% | +20% | +42% |
+
+Slower at every count on every benchmark, so the half of the gap to Boehm that
+is parallelism is a redesign of the work distribution (every object crosses
+the one shared stack twice today), not a setting.
+
 ## Reproduce
 
 `stats_main.cr` replaces crystal-metric's `main.cr`; build it in a checkout of
