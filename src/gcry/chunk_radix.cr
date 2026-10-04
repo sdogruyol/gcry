@@ -199,14 +199,20 @@ module Gcry
       l2[(addr >> @radix_granule_shift) & @radix_l2_mask]
     end
 
+    # Not while a parallel mark is running. Every worker resolves every
+    # candidate through here, and a plain increment is a write to the line
+    # that also holds `@radix_l1`, which every lookup reads first: sampled
+    # with four workers on Primes, that read was 26% of all CPU
+    # (`bench/log/linux/2026-10-04-parallel-mark-pushbuf/`). The counts are
+    # diagnostics; a parallel cycle leaves them short.
     @[AlwaysInline]
     protected def radix_note_fast_hit : Nil
-      @radix_fast_hits &+= 1
+      @radix_fast_hits &+= 1 unless @mark_parallel
     end
 
     @[AlwaysInline]
     protected def radix_note_slow : Nil
-      @radix_slow_lookups &+= 1
+      @radix_slow_lookups &+= 1 unless @mark_parallel
     end
 
     # Publish a chunk. Caller holds the lock that guards the sorted index.
